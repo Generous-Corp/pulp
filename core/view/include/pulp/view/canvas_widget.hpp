@@ -79,6 +79,13 @@ struct CanvasDrawCmd {
         // the JS shim before the next stroke / drawImage.
         set_miter_limit,           ///< limit in `extra`
         set_image_smoothing,       ///< enabled in `int_val` (0/1), quality in `extra` (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // direction enum (0=ltr, 1=rtl, 2=inherit) in `int_val`; filter
+        // raw CSS <filter-function-list> string in `text`. Pushed by
+        // the JS shim before fillText / strokeText / fill / stroke /
+        // drawImage so the backend can wrap the next paint.
+        set_direction,
+        set_filter,
         // Clear
         clear, clear_rect
     };

@@ -32,6 +32,8 @@
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkDashPathEffect.h"
+#include "include/effects/SkColorMatrix.h"
+#include "include/core/SkColorFilter.h"
 #include "runtime_effect_cache.hpp"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
@@ -347,6 +349,7 @@ SkPaint SkiaCanvas::current_fill_paint() const {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
     apply_shadow_filter(paint);
+    apply_filter(paint);
     return paint;
 }
 
@@ -415,6 +418,312 @@ void SkiaCanvas::set_image_smoothing(bool enabled,
                                      ImageSmoothingQuality quality) {
     image_smoothing_enabled_ = enabled;
     image_smoothing_quality_ = quality;
+}
+
+// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ─────────────────────
+// Direction is stored on the canvas state and read at fill_text() time
+// to choose the SkShaper leftToRight flag. RTL flips the flag, which is
+// the correct first step for proper Arabic / Hebrew shaping; full bidi
+// (mixed-script paragraphs requiring the Unicode Bidi Algorithm) needs
+// SkParagraph plumbing tracked under #1506. inherit currently behaves
+// as ltr until per-View writing-direction lookup lands.
+void SkiaCanvas::set_direction(TextDirection direction) {
+    direction_ = direction;
+}
+
+namespace {
+
+// Skim leading whitespace.
+inline void skip_ws(const std::string& s, size_t& i) {
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
+}
+
+// Parse a single CSS filter <length-or-number-or-percentage> argument.
+// Returns the numeric value coerced into the unit the caller expects:
+//   * `expect_px` → drops a trailing "px" or treats bare numbers as px
+//     (used by blur / drop-shadow).
+//   * `expect_angle` → converts deg/rad/turn into radians (hue-rotate).
+//   * default → unitless multiplier; "%" divides by 100. Used by
+//     brightness / contrast / saturate / opacity / invert / grayscale /
+//     sepia.
+//
+// Returns NaN on parse failure so callers can default to spec-neutral.
+enum class FilterArgKind { multiplier, pixels, angle };
+double parse_filter_arg(const std::string& body, FilterArgKind kind) {
+    // Find numeric prefix.
+    size_t end = 0;
+    while (end < body.size() &&
+           (std::isdigit(static_cast<unsigned char>(body[end])) ||
+            body[end] == '.' || body[end] == '-' || body[end] == '+' ||
+            body[end] == 'e' || body[end] == 'E')) {
+        ++end;
+    }
+    if (end == 0) return std::nan("");
+    double v = 0;
+    try { v = std::stod(body.substr(0, end)); }
+    catch (...) { return std::nan(""); }
+    std::string unit = body.substr(end);
+    // Strip whitespace from unit.
+    while (!unit.empty() && (unit.back() == ' ' || unit.back() == '\t')) unit.pop_back();
+    size_t us = 0;
+    while (us < unit.size() && (unit[us] == ' ' || unit[us] == '\t')) ++us;
+    unit = unit.substr(us);
+
+    switch (kind) {
+        case FilterArgKind::pixels:
+            // Bare numbers are px; "px" suffix is the canonical form.
+            return v;
+        case FilterArgKind::angle:
+            if (unit == "rad") return v;
+            if (unit == "turn") return v * (2.0 * 3.14159265358979323846);
+            // Default deg (or unrecognised → deg per CSS spec).
+            return v * (3.14159265358979323846 / 180.0);
+        case FilterArgKind::multiplier:
+            if (!unit.empty() && unit.back() == '%') return v * 0.01;
+            return v;
+    }
+    return v;
+}
+
+// Build a saturation SkColorMatrix. s=1 is identity, s=0 is grayscale,
+// s>1 boosts saturation. Standard luminance weights match the CSS spec.
+SkColorMatrix make_saturation_matrix(double s) {
+    const float r = 0.213f;
+    const float g = 0.715f;
+    const float b = 0.072f;
+    const float sf = static_cast<float>(s);
+    return SkColorMatrix(
+        r + (1 - r) * sf, g - g * sf,        b - b * sf,        0, 0,
+        r - r * sf,        g + (1 - g) * sf, b - b * sf,        0, 0,
+        r - r * sf,        g - g * sf,        b + (1 - b) * sf, 0, 0,
+        0,                 0,                 0,                 1, 0);
+}
+
+// Sepia per CSS spec. amount=0 identity, amount=1 full sepia.
+SkColorMatrix make_sepia_matrix(double amount) {
+    const float a = static_cast<float>(amount);
+    const float inv = 1.0f - a;
+    return SkColorMatrix(
+        0.393f * a + inv, 0.769f * a,        0.189f * a,        0, 0,
+        0.349f * a,        0.686f * a + inv, 0.168f * a,        0, 0,
+        0.272f * a,        0.534f * a,        0.131f * a + inv, 0, 0,
+        0,                 0,                 0,                 1, 0);
+}
+
+// Hue-rotate matrix (CSS spec). angle in radians.
+SkColorMatrix make_hue_rotate_matrix(double rad) {
+    const float c = static_cast<float>(std::cos(rad));
+    const float s = static_cast<float>(std::sin(rad));
+    return SkColorMatrix(
+        0.213f + c * 0.787f - s * 0.213f,
+        0.715f - c * 0.715f - s * 0.715f,
+        0.072f - c * 0.072f + s * 0.928f, 0, 0,
+        0.213f - c * 0.213f + s * 0.143f,
+        0.715f + c * 0.285f + s * 0.140f,
+        0.072f - c * 0.072f - s * 0.283f, 0, 0,
+        0.213f - c * 0.213f - s * 0.787f,
+        0.715f - c * 0.715f + s * 0.715f,
+        0.072f + c * 0.928f + s * 0.072f, 0, 0,
+        0, 0, 0, 1, 0);
+}
+
+// Linear contrast matrix: out = c * in + (0.5 * (1 - c)).
+SkColorMatrix make_contrast_matrix(double c) {
+    const float f = static_cast<float>(c);
+    const float t = 0.5f * (1.0f - f);
+    return SkColorMatrix(
+        f, 0, 0, 0, t,
+        0, f, 0, 0, t,
+        0, 0, f, 0, t,
+        0, 0, 0, 1, 0);
+}
+
+// Linear brightness matrix: scale RGB by `amount`.
+SkColorMatrix make_brightness_matrix(double amount) {
+    const float f = static_cast<float>(amount);
+    return SkColorMatrix(
+        f, 0, 0, 0, 0,
+        0, f, 0, 0, 0,
+        0, 0, f, 0, 0,
+        0, 0, 0, 1, 0);
+}
+
+// Invert matrix: out = (1 - 2*amount) * in + amount.
+SkColorMatrix make_invert_matrix(double amount) {
+    const float k = static_cast<float>(amount);
+    const float diag = 1.0f - 2.0f * k;
+    return SkColorMatrix(
+        diag, 0,    0,    0, k,
+        0,    diag, 0,    0, k,
+        0,    0,    diag, 0, k,
+        0,    0,    0,    1, 0);
+}
+
+// Grayscale matrix: amount=0 identity, amount=1 full luma. Matches the
+// CSS spec's interpolation of saturation toward 0 weighted by `amount`.
+SkColorMatrix make_grayscale_matrix(double amount) {
+    return make_saturation_matrix(1.0 - amount);
+}
+
+// Opacity = scale alpha. Identity at 1.
+SkColorMatrix make_opacity_matrix(double a) {
+    const float f = static_cast<float>(a);
+    return SkColorMatrix(
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, f, 0);
+}
+
+// Wrap an SkColorMatrix into an SkImageFilter, composing onto the
+// existing chain (inner). Caller passes the existing chain so we can
+// fold multiple color-matrix functions into a single ColorFilter
+// imagefilter where possible — but for simplicity we just compose.
+sk_sp<SkImageFilter> compose(sk_sp<SkImageFilter> outer,
+                              sk_sp<SkImageFilter> inner) {
+    if (!outer) return inner;
+    if (!inner) return outer;
+    return SkImageFilters::Compose(std::move(outer), std::move(inner));
+}
+
+sk_sp<SkImageFilter> color_matrix_filter(const SkColorMatrix& m) {
+    return SkImageFilters::ColorFilter(SkColorFilters::Matrix(m), nullptr, nullptr);
+}
+
+// Parse a CSS <filter-function-list> string into an SkImageFilter chain.
+// Supported functions (per Canvas2D spec subset):
+//   blur(<length>)            — SkImageFilters::Blur
+//   brightness(<num|%>)       — color matrix scale
+//   contrast(<num|%>)         — color matrix scale + bias
+//   grayscale(<num|%>)        — color matrix saturation→0
+//   hue-rotate(<angle>)       — color matrix rotation in YIQ-ish space
+//   invert(<num|%>)           — color matrix invert
+//   opacity(<num|%>)          — alpha scale
+//   saturate(<num|%>)         — color matrix saturation
+//   sepia(<num|%>)            — color matrix sepia interpolation
+// Unknown or malformed functions are silently dropped (per CSS spec for
+// invalid filter-function-list — the entire chain falls back to none).
+sk_sp<SkImageFilter> parse_filter_chain(const std::string& src) {
+    if (src.empty()) return nullptr;
+    // Skip purely "none" / whitespace.
+    size_t first = 0;
+    while (first < src.size() && (src[first] == ' ' || src[first] == '\t')) ++first;
+    if (first >= src.size()) return nullptr;
+    if (src.compare(first, 4, "none") == 0) return nullptr;
+
+    sk_sp<SkImageFilter> chain;
+    size_t i = first;
+    while (i < src.size()) {
+        skip_ws(src, i);
+        if (i >= src.size()) break;
+        // Read function name up to '('.
+        size_t name_start = i;
+        while (i < src.size() && src[i] != '(' && src[i] != ' ' && src[i] != '\t') ++i;
+        std::string name = src.substr(name_start, i - name_start);
+        skip_ws(src, i);
+        if (i >= src.size() || src[i] != '(') {
+            // Malformed token — abort parse, return whatever we built.
+            return chain;
+        }
+        ++i; // past '('
+        size_t body_start = i;
+        int depth = 1;
+        while (i < src.size() && depth > 0) {
+            if (src[i] == '(') ++depth;
+            else if (src[i] == ')') { if (--depth == 0) break; }
+            ++i;
+        }
+        if (i >= src.size()) return chain;
+        std::string body = src.substr(body_start, i - body_start);
+        ++i; // past ')'
+
+        // Trim body whitespace.
+        size_t bs = 0, be = body.size();
+        while (bs < be && (body[bs] == ' ' || body[bs] == '\t')) ++bs;
+        while (be > bs && (body[be - 1] == ' ' || body[be - 1] == '\t')) --be;
+        body = body.substr(bs, be - bs);
+
+        sk_sp<SkImageFilter> step;
+        if (name == "blur") {
+            double radius_px = parse_filter_arg(body, FilterArgKind::pixels);
+            if (std::isfinite(radius_px) && radius_px > 0) {
+                // CSS spec: blur radius is the standard deviation, NOT
+                // the diameter. Skia takes sigma directly.
+                float sigma = static_cast<float>(radius_px);
+                step = SkImageFilters::Blur(sigma, sigma, nullptr);
+            }
+        } else if (name == "brightness") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) step = color_matrix_filter(make_brightness_matrix(amt));
+        } else if (name == "contrast") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) step = color_matrix_filter(make_contrast_matrix(amt));
+        } else if (name == "grayscale") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_grayscale_matrix(amt));
+            }
+        } else if (name == "hue-rotate") {
+            double rad = parse_filter_arg(body, FilterArgKind::angle);
+            if (std::isfinite(rad)) step = color_matrix_filter(make_hue_rotate_matrix(rad));
+        } else if (name == "invert") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_invert_matrix(amt));
+            }
+        } else if (name == "opacity") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_opacity_matrix(amt));
+            }
+        } else if (name == "saturate") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt) && amt >= 0.0) {
+                step = color_matrix_filter(make_saturation_matrix(amt));
+            }
+        } else if (name == "sepia") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_sepia_matrix(amt));
+            }
+        }
+        // drop-shadow could be added here as SkImageFilters::DropShadow
+        // — deferred to a follow-up since the parser would also need to
+        // consume up to four arguments (offset-x offset-y blur-radius color).
+        chain = compose(std::move(step), std::move(chain));
+        // Skip optional comma between functions (spec is whitespace-only,
+        // but tolerate ",").
+        skip_ws(src, i);
+        if (i < src.size() && src[i] == ',') { ++i; }
+    }
+    return chain;
+}
+
+} // namespace
+
+void SkiaCanvas::set_filter(const std::string& filter) {
+    filter_source_ = filter;
+    filter_image_filter_ = parse_filter_chain(filter);
+}
+
+void SkiaCanvas::apply_filter(SkPaint& paint) const {
+    if (!filter_image_filter_) return;
+    // If a shadow filter is already set on this paint, compose the user
+    // filter on top so the chain reads outer = filter(inner = shadow).
+    if (auto existing = paint.refImageFilter()) {
+        paint.setImageFilter(SkImageFilters::Compose(
+            filter_image_filter_, std::move(existing)));
+    } else {
+        paint.setImageFilter(filter_image_filter_);
+    }
 }
 
 // pulp #1434 bridge-thin gap-fill — apply sticky stroke-paint state. The
@@ -508,6 +817,7 @@ void SkiaCanvas::stroke_rect(float x, float y, float w, float h) {
     apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
@@ -524,6 +834,7 @@ void SkiaCanvas::stroke_rounded_rect(float x, float y, float w, float h, float r
     apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawRRect(rrect, paint);
 }
 
@@ -537,6 +848,7 @@ void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
     apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawCircle(cx, cy, radius, paint);
 }
 
@@ -551,6 +863,7 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
         apply_stroke_state(paint);
         apply_line_dash(paint, line_dash_, line_dash_phase_);
         apply_shadow_filter(paint);
+        apply_filter(paint);
         canvas_->drawPath(path, paint);
     }
 }
@@ -561,6 +874,7 @@ void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
     apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawLine(x0, y0, x1, y1, paint);
 }
 
@@ -609,6 +923,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // here so `ctx.shadowBlur = 4; ctx.fillText(...)` produces a blurred
     // text glow on the rasterised output.
     apply_shadow_filter(paint);
+    apply_filter(paint);
 
 #ifdef PULP_HAS_TEXT_SHAPING
     // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
@@ -631,8 +946,14 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // Shape at origin {0,0}, then read the total shaped advance
             // from endPoint() for accurate text alignment.
             SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+            // pulp #1520 — Canvas2D ctx.direction. RTL flips the shaper
+            // direction so HarfBuzz emits glyphs in visual order for
+            // right-to-left scripts. inherit currently maps to the
+            // default ltr until per-View writing-direction lookup
+            // lands (#1506).
+            const bool ltr = (direction_ != TextDirection::rtl);
             shaper->shape(text.c_str(), text.size(), font,
-                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+                          /*leftToRight=*/ltr, SK_ScalarInfinity, &handler);
             float total_w = handler.endPoint().x();
 
             float draw_x = x;
@@ -1150,6 +1471,7 @@ void SkiaCanvas::fill_current_path() {
     }
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 
@@ -1164,6 +1486,7 @@ void SkiaCanvas::stroke_current_path() {
     apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 

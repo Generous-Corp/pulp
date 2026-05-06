@@ -53,7 +53,21 @@ function CanvasRenderingContext2D(canvasEl) {
     this.globalCompositeOperation = "source-over";
     this.imageSmoothingEnabled = true;
     this.imageSmoothingQuality = "low";
+    // pulp #1520 — Canvas2D ctx.direction. Spec values: "ltr" | "rtl" |
+    // "inherit" (we treat "inherit" as the default ltr, matching the
+    // spec's "directionality from the canvas element / document"
+    // resolution path on a host that doesn't expose a writing-direction
+    // computed style yet). Tracked locally so the getter round-trips
+    // and flushed to the bridge by `_syncDirectionState` before the
+    // next fillText / strokeText.
     this.direction = "ltr";
+    // pulp #1520 — Canvas2D ctx.filter. Spec: a CSS <filter-function-list>
+    // string applied to subsequent draw operations (blur, brightness,
+    // contrast, drop-shadow, grayscale, hue-rotate, invert, opacity,
+    // saturate, sepia). The default is "none". Tracked locally and
+    // flushed to the bridge by `_syncFilterState` before the next
+    // fill/stroke/text/image draw — same caching shape as shadow*.
+    this.filter = "none";
     // pulp #1434 batch 7 — Canvas2D drop-shadow state. Each property
     // mirrors the spec defaults: shadow inactive (transparent black,
     // zero blur, zero offset). Tracked locally so getters round-trip
@@ -92,6 +106,9 @@ function CanvasRenderingContext2D(canvasEl) {
     this._sentShadowBlur = null;
     this._sentShadowOffsetX = null;
     this._sentShadowOffsetY = null;
+    // pulp #1520 — sticky direction / filter state caches.
+    this._sentDirection = null;
+    this._sentFilter = null;
 }
 
 CanvasRenderingContext2D.prototype._applyFillStyle = function() {
@@ -427,9 +444,48 @@ CanvasRenderingContext2D.prototype._syncShadowState = function() {
     }
 };
 
+// pulp #1520 — flush ctx.direction to the bridge. Spec values:
+//   "ltr"     → 0 (default; matches SkShaper leftToRight=true)
+//   "rtl"     → 1 (SkShaper leftToRight=false; HarfBuzz buffer dir RTL)
+//   "inherit" → 2 (treated as 0 on backends without a per-View writing
+//                  direction; the Skia backend leaves the default ltr
+//                  in place, so visually identical to "ltr" for now)
+// Unknown strings coerce to "ltr" silently — same shape as
+// imageSmoothingQuality's defensive coercion.
+CanvasRenderingContext2D.prototype._syncDirectionState = function() {
+    var d = String(this.direction || "ltr");
+    if (d !== "ltr" && d !== "rtl" && d !== "inherit") d = "ltr";
+    if (this._sentDirection === d) return;
+    if (typeof canvasSetDirection === "function") {
+        var enumVal = (d === "rtl") ? 1 : (d === "inherit") ? 2 : 0;
+        canvasSetDirection(this._id, enumVal);
+    }
+    this._sentDirection = d;
+};
+
+// pulp #1520 — flush ctx.filter to the bridge. The spec accepts a
+// <filter-function-list> string ("blur(5px) sepia(80%) ...") plus the
+// keyword "none". The bridge stashes the raw string; the Skia backend
+// parses it into an SkImageFilter chain (blur, grayscale, sepia,
+// brightness, contrast, invert, opacity, saturate, hue-rotate) and
+// applies via SkPaint::setImageFilter on subsequent draws. Backends
+// that don't recognise a particular function silently degrade.
+//
+// Unlike the CSS `filter` property on a View (#1503), this filter is
+// per-2D-context state and stacks with save() / restore().
+CanvasRenderingContext2D.prototype._syncFilterState = function() {
+    var f = String(this.filter == null ? "none" : this.filter);
+    if (this._sentFilter === f) return;
+    if (typeof canvasSetFilter === "function") {
+        canvasSetFilter(this._id, f);
+    }
+    this._sentFilter = f;
+};
+
 CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
     this._syncGlobalState();
     this._syncShadowState();
+    this._syncFilterState();
     this._applyFillStyle();
     // pulp #964 — the bridge function is `canvasRect`, NOT `canvasFillRect`.
     // The 5-arg form (no color) honours the active fillStyle / gradient via
@@ -442,6 +498,7 @@ CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
 CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
     this._syncGlobalState();
     this._syncShadowState();
+    this._syncFilterState();
     this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokeRect === "function") canvasStrokeRect(this._id, x, y, w, h);
@@ -470,6 +527,7 @@ CanvasRenderingContext2D.prototype.closePath = function() {
 CanvasRenderingContext2D.prototype.fill = function() {
     this._syncGlobalState();
     this._syncShadowState();
+    this._syncFilterState();
     this._applyFillStyle();
     if (typeof canvasFillPath === "function") canvasFillPath(this._id);
 };
@@ -477,6 +535,7 @@ CanvasRenderingContext2D.prototype.fill = function() {
 CanvasRenderingContext2D.prototype.stroke = function() {
     this._syncGlobalState();
     this._syncShadowState();
+    this._syncFilterState();
     this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokePath === "function") canvasStrokePath(this._id);
@@ -501,6 +560,7 @@ CanvasRenderingContext2D.prototype.save = function() {
     this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
     this._sentShadowColor = this._sentShadowBlur = null;
     this._sentShadowOffsetX = this._sentShadowOffsetY = null;
+    this._sentDirection = this._sentFilter = null;
 };
 
 CanvasRenderingContext2D.prototype.restore = function() {
@@ -510,6 +570,7 @@ CanvasRenderingContext2D.prototype.restore = function() {
     this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
     this._sentShadowColor = this._sentShadowBlur = null;
     this._sentShadowOffsetX = this._sentShadowOffsetY = null;
+    this._sentDirection = this._sentFilter = null;
 };
 
 // ── pulp #964 — Canvas2D transform methods ────────────────────────────────
@@ -668,6 +729,8 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     void maxWidth;
     this._syncGlobalState();
     this._syncShadowState();
+    this._syncFilterState();
+    this._syncDirectionState();
     this._syncTextState();
     this._applyFillStyle();
     // canvasFillText takes (id, text, x, y, size, color, family). When
@@ -806,6 +869,9 @@ CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g
     // pulp #1434 — flush imageSmoothing state so Skia / CG honour the
     // current ctx.imageSmoothingEnabled + Quality on this draw.
     this._syncImageSmoothingState();
+    // pulp #1520 — flush filter state so the chosen image filter
+    // (blur, grayscale, …) wraps this drawImage too.
+    this._syncFilterState();
     var src = "";
     if (typeof img === "string") src = img;
     else if (img && typeof img.src === "string") src = img.src;

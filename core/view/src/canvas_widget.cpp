@@ -87,6 +87,8 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_shadow_offset_y: return "set_shadow_offset_y";
         case CanvasDrawCmd::Type::set_miter_limit: return "set_miter_limit";
         case CanvasDrawCmd::Type::set_image_smoothing: return "set_image_smoothing";
+        case CanvasDrawCmd::Type::set_direction: return "set_direction";
+        case CanvasDrawCmd::Type::set_filter: return "set_filter";
         case CanvasDrawCmd::Type::clear: return "clear";
         case CanvasDrawCmd::Type::clear_rect: return "clear_rect";
     }
@@ -548,6 +550,25 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_image_smoothing(cmd.int_val != 0, q);
             break;
         }
+
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into int_val;
+        // filter raw CSS string in `text`. SkiaCanvas wraps the next
+        // text/image draw with the corresponding shaper flag /
+        // SkImageFilter chain. RecordingCanvas captures a single setter
+        // cmd per change so canvas2d harness tests can assert flush
+        // order. Other backends accept the no-op default.
+        case CanvasDrawCmd::Type::set_direction: {
+            using D = canvas::Canvas::TextDirection;
+            D d = D::ltr;
+            if (cmd.int_val == 1) d = D::rtl;
+            else if (cmd.int_val == 2) d = D::inherit;
+            canvas.set_direction(d);
+            break;
+        }
+        case CanvasDrawCmd::Type::set_filter:
+            canvas.set_filter(cmd.text);
+            break;
 
         // putImageData (issue-916). Pixels packed in cmd.text as
         // raw RGBA bytes; int_val = width; x2 = height (as float, will round).

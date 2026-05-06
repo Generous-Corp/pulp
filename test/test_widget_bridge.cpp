@@ -5536,3 +5536,130 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }
+
+// ── pulp #1520 — canvasSetDirection / canvasSetFilter bridge fns ────────
+//
+// These two register_function entries are the only direct surface
+// between the Canvas2D ctx.direction / ctx.filter setters and the
+// underlying canvas state. The shim's own coverage lives in
+// test_canvas2d_shim.cpp; this test asserts the bridge fn → canvas
+// command record path with no JS-side caching in the way.
+
+TEST_CASE("WidgetBridge canvasSetDirection records direction enum on the canvas command stream",
+          "[view][bridge][canvas][issue-1520]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'dir-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        // Drive the bridge fn directly so the cache in the JS shim
+        // can't suppress the call.
+        canvasSetDirection(c._id, 1);  // rtl
+        canvasSetDirection(c._id, 2);  // inherit
+        canvasSetDirection(c._id, 0);  // ltr
+        canvasSetDirection(c._id, 99); // invalid → coerced to ltr
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "dir-canvas");
+    REQUIRE(canvas != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<int> values;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::set_direction) values.push_back(cmd.int_val);
+    }
+    REQUIRE(values.size() == 4);
+    REQUIRE(values[0] == 1);
+    REQUIRE(values[1] == 2);
+    REQUIRE(values[2] == 0);
+    REQUIRE(values[3] == 0); // out-of-range coerced to ltr
+}
+
+TEST_CASE("WidgetBridge canvasSetFilter records the raw CSS filter string",
+          "[view][bridge][canvas][issue-1520]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'filter-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        // Bypass the JS-side _syncFilterState cache; drive the bridge
+        // fn directly so each call records.
+        canvasSetFilter(c._id, 'blur(5px)');
+        canvasSetFilter(c._id, 'sepia(80%) hue-rotate(45deg)');
+        canvasSetFilter(c._id, 'none');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "filter-canvas");
+    REQUIRE(canvas != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<std::string> sources;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::set_filter) sources.push_back(cmd.text);
+    }
+    REQUIRE(sources.size() == 3);
+    REQUIRE(sources[0] == "blur(5px)");
+    REQUIRE(sources[1] == "sepia(80%) hue-rotate(45deg)");
+    REQUIRE(sources[2] == "none");
+}
+
+TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording canvas",
+          "[view][bridge][canvas][issue-1520]") {
+    // End-to-end: bridge fn → CanvasWidget command → RecordingCanvas
+    // capture. Asserts the dispatch table in canvas_widget.cpp wires
+    // set_filter through to Canvas::set_filter() and that the
+    // RecordingCanvas captures the same string.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'filter-replay-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        canvasSetFilter(c._id, 'blur(3px) sepia(50%)');
+        canvasSetDirection(c._id, 1);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "filter-replay-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DT = pulp::canvas::DrawCommand::Type;
+    bool saw_filter = false, saw_direction = false;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DT::set_filter) {
+            saw_filter = true;
+            REQUIRE(cmd.text == "blur(3px) sepia(50%)");
+        }
+        if (cmd.type == DT::set_direction) {
+            saw_direction = true;
+            // RTL = enum value 1 (TextDirection::rtl).
+            REQUIRE(cmd.f[0] == static_cast<float>(
+                pulp::canvas::Canvas::TextDirection::rtl));
+        }
+    }
+    REQUIRE(saw_filter);
+    REQUIRE(saw_direction);
+}

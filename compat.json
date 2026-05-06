@@ -6444,26 +6444,47 @@
       "issue": "1434"
     },
     "canvas2d/direction": {
-      "status": "missing",
-      "mapsTo": "Tracked locally; not pushed to bridge.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "text rendering direction (ltr/rtl) on Canvas2D"
+      "status": "partial",
+      "mapsTo": "ctx.direction -> canvasSetDirection (web-compat-canvas.js _syncDirectionState, flushed before fillText/strokeText). Skia: SkShaper leftToRight flag flipped per direction (RTL emits glyphs in visual order via HarfBuzz). Stored on the canvas state and consumed by both fill_text() and recording capture. inherit currently maps to ltr until per-View writing-direction lookup lands (#1506).",
+      "supportedValues": [
+        "ltr (default, leftToRight shaping)",
+        "rtl (HarfBuzz buffer direction RTL via SkShaper leftToRight=false)",
+        "inherit (treated as ltr; per-View resolution tracked under #1506)"
       ],
-      "tests": [],
-      "notes": "Silent no-op. Yoga RTL is also unsupported (yoga/direction missing).",
-      "issue": ""
+      "unsupportedValues": [
+        "Full Unicode Bidi Algorithm for mixed-script paragraphs (deferred to SkParagraph plumbing under #1506)"
+      ],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 — JS shim + bridge + SkShaper direction flag. Real bidi (mixed LTR/RTL paragraphs) shares plumbing with #1506.",
+      "issue": "1520"
     },
     "canvas2d/filter": {
-      "status": "missing",
-      "mapsTo": "Not implemented in shim or bridge.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "Canvas2D filter chains (blur, brightness, etc.)"
+      "status": "partial",
+      "mapsTo": "ctx.filter -> canvasSetFilter (web-compat-canvas.js _syncFilterState, flushed before fill/stroke/text/image draws). Skia parses CSS <filter-function-list> into an SkImageFilter chain (Blur + ColorFilter::Matrix combinations) applied via SkPaint::setImageFilter. Distinct from CSS `filter` on the View element (#1503) — this is per-2D-context state and stacks with save()/restore().",
+      "supportedValues": [
+        "blur(<length>)",
+        "brightness(<num|%>)",
+        "contrast(<num|%>)",
+        "grayscale(<num|%>)",
+        "hue-rotate(<angle>)",
+        "invert(<num|%>)",
+        "opacity(<num|%>)",
+        "saturate(<num|%>)",
+        "sepia(<num|%>)",
+        "none (default; clears any active chain)"
       ],
-      "tests": [],
-      "notes": "Distinct from CSS `filter` on the View — this is the per-context Canvas2D filter. Not yet implemented.",
-      "issue": ""
+      "unsupportedValues": [
+        "drop-shadow(...) (deferred — needs offset+blur+color tuple parsing)",
+        "url(#filter-id) (SVG filter references)",
+        "CG backend renders unfiltered (Skia-only today)"
+      ],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 — JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up.",
+      "issue": "1520"
     },
     "canvas2d/shadowColor": {
       "status": "supported",

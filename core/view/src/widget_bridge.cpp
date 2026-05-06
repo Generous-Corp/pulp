@@ -4749,6 +4749,39 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1520 — Canvas2D ctx.direction. Sticky text-shaping state
+    // honoured by the SkShaper / HarfBuzz path on the next fillText
+    // / strokeText. The shim coerces unknown strings to "ltr" before
+    // hitting the bridge, so we accept the resolved enum directly.
+    // Args: (id, enumVal) where enumVal ∈ 0=ltr | 1=rtl | 2=inherit.
+    engine_.register_function("canvasSetDirection", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_direction;
+            int v = static_cast<int>(args.get<double>(1, 0.0));
+            if (v < 0 || v > 2) v = 0;
+            cmd.int_val = v;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1520 — Canvas2D ctx.filter. Sticky CSS <filter-function-list>
+    // string applied to subsequent fill/stroke/text/image draws. Skia
+    // parses into an SkImageFilter chain (blur, grayscale, sepia, …);
+    // RecordingCanvas captures the raw string for harness assertions;
+    // CG / minimal backends store the value but render unfiltered until
+    // a follow-up wires the parser through (#1503 owns the View-side
+    // parser; canvas2d shares it as it lands).
+    // Args: (id, cssFilterString) — "none" disables.
+    engine_.register_function("canvasSetFilter", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_filter;
+            cmd.text = args.get<std::string>(1, "none");
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     // P1: Canvas arc — for pie charts, circular progress, arcs
     engine_.register_function("canvasArc", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {

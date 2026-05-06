@@ -63,9 +63,8 @@ conveniences: `canvasFillCircle`, `canvasFillRoundedRect`,
 
 ## Notable gaps
 
-1. **`filter`** — Canvas2D per-context filter chains are not wired.
-2. **`direction`** — text rendering direction (ltr/rtl) tracked locally
-   but never pushed.
+The two former NOT-IMPL entries (`filter`, `direction`) flipped to
+`partial` in pulp #1520 — see "Recently wired" below for scope.
 
 ## Recently expanded — full CSS `font` shorthand (pulp #1434)
 
@@ -147,6 +146,31 @@ Skia canvas but never applied to the actual paint. `lineCap` and
 
 The Canvas2D `shadowColor` / `shadowBlur` / `shadowOffsetX` /
 `shadowOffsetY` quartet landed in pulp #1434 batch 7 (separate slice).
+
+### Follow-up: `direction` + `filter` (pulp #1520)
+
+The two final NOT-IMPL entries in the canvas2d catalog flipped to
+`partial`:
+
+- **`direction`** — JS shim tracks `ltr` / `rtl` / `inherit` and
+  flushes via `canvasSetDirection`. Skia wires the enum through to the
+  `SkShaper` `leftToRight` flag so HarfBuzz emits glyphs in visual order
+  for right-to-left scripts. `inherit` maps to `ltr` until per-View
+  writing-direction lookup lands (#1506); full Unicode bidi for
+  mixed-script paragraphs requires SkParagraph plumbing tracked there.
+- **`filter`** — JS shim tracks the raw CSS `<filter-function-list>`
+  string and flushes via `canvasSetFilter`. Skia parses the string into
+  an `SkImageFilter` chain and applies via `SkPaint::setImageFilter` on
+  every subsequent fill / stroke / text / image draw. Supported
+  functions: `blur`, `brightness`, `contrast`, `grayscale`,
+  `hue-rotate`, `invert`, `opacity`, `saturate`, `sepia`. The
+  `drop-shadow(...)` form is deferred (needs offset+blur+color tuple
+  parsing) and `url(#filter-id)` SVG references are out-of-scope.
+
+Both setters are sticky and stack with `save()` / `restore()`. The CG
+backend stores the values but renders unfiltered today (Skia-only
+filter chain); a CG follow-up can route through `CGContextSetShadow`
++ `CGImage`-backed colour-matrix passes when needed.
 
 ## Partial / approximated
 
