@@ -140,6 +140,27 @@ struct FlexStyle {
     FlexDirection direction = FlexDirection::column;
     FlexAlign align_items = FlexAlign::stretch;
     FlexAlign align_self = FlexAlign::auto_;  ///< Override parent's align_items for this child
+
+    /// pulp #1434 (sub-agent #12 follow-up) — align-content is the
+    /// CSS / Yoga multi-line flex cross-axis distribution control.
+    /// Yoga supports it natively via YGNodeStyleSetAlignContent; the
+    /// only gap was a missing FlexStyle field + setter wiring. Default
+    /// matches Yoga's default (FlexStart) — note this differs from
+    /// CSS's `normal`/`stretch` defaults but matches Yoga / RN. The
+    /// usual `space-between`/`space-around`/`space-evenly` /
+    /// `flex-start`/`flex-end`/`center`/`stretch` values all map to
+    /// the existing FlexAlign enum + the FlexJustify space-* values
+    /// via `to_yg_align_content` in yoga_layout.cpp.
+    FlexAlign align_content = FlexAlign::start;
+    /// True when align_content was set to one of the space-* values
+    /// (space-between / space-around / space-evenly). FlexAlign has
+    /// no space variants because they are nonsensical for align_items
+    /// / align_self; we encode them on a sibling enum here so the
+    /// dispatcher can route to YGAlignSpaceBetween / SpaceAround /
+    /// SpaceEvenly without overloading FlexAlign across two surfaces.
+    enum class AlignContentSpace { none, space_between, space_around, space_evenly };
+    AlignContentSpace align_content_space = AlignContentSpace::none;
+
     FlexJustify justify_content = FlexJustify::start;
 
     float gap = 0;              ///< Shorthand for both row_gap and column_gap

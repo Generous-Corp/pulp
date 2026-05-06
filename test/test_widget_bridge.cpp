@@ -5089,3 +5089,124 @@ TEST_CASE("border-style: none short-circuits the stroke",
         REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
     }
 }
+
+// pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
+// flex cross-axis distribution. Yoga supports it natively via
+// YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field
+// + setter wiring. Round-trip every value the bridge accepts so a
+// regression in either the parser, the FlexStyle field, or the
+// space-* sibling enum gets caught here rather than silently
+// reverting Yoga to the default FlexStart.
+TEST_CASE("setFlex align_content accepts start / end / center / stretch / space-* aliases",
+          "[view][bridge][css][issue-1434-aligncontent]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','align_content','start');
+        createPanel('b','');  setFlex('b','align_content','flex-start');
+        createPanel('c','');  setFlex('c','align_content','end');
+        createPanel('d','');  setFlex('d','align_content','flex-end');
+        createPanel('e','');  setFlex('e','align_content','center');
+        createPanel('f','');  setFlex('f','align_content','stretch');
+        createPanel('g','');  setFlex('g','align_content','space-between');
+        createPanel('h','');  setFlex('h','align_content','space-around');
+        createPanel('i','');  setFlex('i','align_content','space-evenly');
+    )");
+
+    using AcSpace = FlexStyle::AlignContentSpace;
+    auto ac = [&](const std::string& id) { return bridge.widget(id)->flex().align_content; };
+    auto sp = [&](const std::string& id) { return bridge.widget(id)->flex().align_content_space; };
+
+    REQUIRE(ac("a") == FlexAlign::start);    REQUIRE(sp("a") == AcSpace::none);
+    REQUIRE(ac("b") == FlexAlign::start);    REQUIRE(sp("b") == AcSpace::none);
+    REQUIRE(ac("c") == FlexAlign::end);      REQUIRE(sp("c") == AcSpace::none);
+    REQUIRE(ac("d") == FlexAlign::end);      REQUIRE(sp("d") == AcSpace::none);
+    REQUIRE(ac("e") == FlexAlign::center);   REQUIRE(sp("e") == AcSpace::none);
+    REQUIRE(ac("f") == FlexAlign::stretch);  REQUIRE(sp("f") == AcSpace::none);
+    REQUIRE(sp("g") == AcSpace::space_between);
+    REQUIRE(sp("h") == AcSpace::space_around);
+    REQUIRE(sp("i") == AcSpace::space_evenly);
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — width: 'auto' routes through
+// the bridge's setFlex string path to FlexStyle.dim_width.unit =
+// DimensionUnit::auto_. yoga_layout.cpp dispatches on that to
+// YGNodeStyleSetWidthAuto. The percent path remains intact, and
+// numeric values still flow through the px branch.
+TEST_CASE("setFlex width accepts 'auto' keyword and routes to dim_width.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','width','auto');
+        createPanel('b','');  setFlex('b','width', 120);
+        createPanel('c','');  setFlex('c','width', '50%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_width == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_width, WithinAbs(120.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_width.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_width.value, WithinAbs(50.0f, 0.001f));
+}
+
+TEST_CASE("setFlex height accepts 'auto' keyword and routes to dim_height.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','height','auto');
+        createPanel('b','');  setFlex('b','height', 80);
+        createPanel('c','');  setFlex('c','height', '25%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_height == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_height.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_height, WithinAbs(80.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_height.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_height.value, WithinAbs(25.0f, 0.001f));
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — verify the CSS shim path
+// also forwards 'auto' for width/height. The DOM-lite el.style
+// adapter must produce the same FlexStyle.dim_*.unit = auto_ result
+// as the direct setFlex(id, 'width', 'auto') path.
+TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('width', 'auto');
+        sa._applyProperty('height', 'auto');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit  == DimensionUnit::auto_);
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+}

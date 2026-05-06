@@ -52,6 +52,22 @@ Spec walk:
   skip the stroke entirely. Reclassified missing → supported. RN
   exports / Figma motion borders / v0.dev card outlines now port
   verbatim.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  `rn/*` entries closed in one slice. `rn/alignContent` flipped
+  NOT-IMPL → PASS: `@pulp/react`'s `FlexProps` now exposes
+  `alignContent` (new `FlexAlignContent` type) and the prop-applier
+  forwards verbatim to `setFlex(id, 'align_content', value)`. Bridge
+  routes through `FlexStyle::align_content` /
+  `align_content_space` to Yoga's `YGNodeStyleSetAlignContent`;
+  accepts both bare and prefixed CSS spellings plus the three
+  space-* values. `rn/width` and `rn/height` flipped DIVERGE → PASS
+  for `'auto'` (Yoga "hug contents") — the TS surface already typed
+  these as `number | string` from the percent batch, so the change
+  is bridge-side: `FlexStyle::dim_*.unit == auto_` dispatches to
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`. RN snippets emitting
+  `style={{ flexWrap: 'wrap', alignContent: 'space-between' }}` or
+  `style={{ width: 'auto' }}` (Figma auto-layout exports, v0.dev,
+  Claude Design) now port verbatim.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   on the `@pulp/react` JSX surface now accept `number | string`

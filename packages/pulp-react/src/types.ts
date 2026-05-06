@@ -15,6 +15,18 @@ export type FlexDirection = 'row' | 'col';
 export type FlexAlign = 'start' | 'center' | 'end' | 'stretch';
 export type FlexAlignSelf = 'start' | 'center' | 'end' | 'stretch' | 'auto';
 export type FlexJustify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
+/// pulp #1434 (sub-agent #12 follow-up) — align-content controls
+/// multi-line flex cross-axis distribution. Yoga supports it natively
+/// via YGNodeStyleSetAlignContent. Accepts bare and prefixed CSS / RN
+/// spellings (`flex-start` / `flex-end`) plus the three space-*
+/// distributions (which only make sense on align-content, not
+/// align-items / align-self).
+export type FlexAlignContent =
+    | 'start' | 'flex-start'
+    | 'center'
+    | 'end' | 'flex-end'
+    | 'stretch'
+    | 'space-between' | 'space-around' | 'space-evenly';
 
 export interface FlexProps {
     direction?: FlexDirection;
@@ -75,6 +87,12 @@ export interface FlexProps {
     maxHeight?: number | string;
     alignItems?: FlexAlign;
     alignSelf?: FlexAlignSelf;
+    /// pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-
+    /// axis distribution. Maps to `setFlex(id, 'align_content', ...)`
+    /// → Yoga's `YGNodeStyleSetAlignContent`. Only meaningful on a
+    /// flex container with `flexWrap: true`; on a single-line container
+    /// it has no visible effect.
+    alignContent?: FlexAlignContent;
     justifyContent?: FlexJustify;
     /// pulp #1434 — width/height ratio for the cross axis. RN-compatible.
     /// When set on a View with `width: 100, aspectRatio: 1.5`, the layout
