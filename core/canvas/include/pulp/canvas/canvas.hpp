@@ -344,6 +344,36 @@ public:
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
 
+    /// pulp #1434 bridge-thin gap-fill — Canvas2D `ctx.createPattern`.
+    /// Tile mode per axis: `repeat` mirrors Skia's `SkTileMode::kRepeat`,
+    /// `no_repeat` mirrors `SkTileMode::kDecal`. Spec values map as:
+    ///   "repeat"     → (repeat,    repeat)
+    ///   "repeat-x"   → (repeat,    no_repeat)
+    ///   "repeat-y"   → (no_repeat, repeat)
+    ///   "no-repeat"  → (no_repeat, no_repeat)
+    enum class PatternTileMode { repeat, no_repeat };
+
+    /// Set an image pattern as the fill paint. `image_src` is a file path
+    /// or `data:` URL — same identifier shape `draw_image_from_file`
+    /// consumes, so backends share one decode path. Default is no-op so
+    /// CPU-only / minimal canvases compile; SkiaCanvas overrides with a
+    /// real `SkShader::MakeImage`. Empty `image_src` clears any active
+    /// pattern (mirrors `clear_fill_gradient`'s reset semantics).
+    virtual void set_fill_pattern(const std::string& image_src,
+                                   PatternTileMode tile_x,
+                                   PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
+
+    /// Stroke counterpart. Rare in production code; default no-op.
+    /// SkiaCanvas overrides via the same `SkShader::MakeImage` path
+    /// applied to the stroke paint.
+    virtual void set_stroke_pattern(const std::string& image_src,
+                                     PatternTileMode tile_x,
+                                     PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
+
     // ── Blend modes ─────────────────────────────────────────────────────
     /// Indices 0..15 match the existing W3C "advanced" composite ops and
     /// must stay stable — set_blend_mode in the JS bridge currently
@@ -823,6 +853,11 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // image source path / data URI in `text`, tile modes packed into
+        // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
+        set_fill_pattern,
+        set_stroke_pattern,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── issue-929: real clearRect that replaces pixels ────────────
@@ -941,6 +976,16 @@ public:
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
+
+    // pulp #1434 bridge-thin gap-fill — capture pattern setter intents
+    // so canvas2d harness tests can assert flush order without needing
+    // a real raster surface or decoded image.
+    void set_fill_pattern(const std::string& image_src,
+                          PatternTileMode tile_x,
+                          PatternTileMode tile_y) override;
+    void set_stroke_pattern(const std::string& image_src,
+                            PatternTileMode tile_x,
+                            PatternTileMode tile_y) override;
 
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape

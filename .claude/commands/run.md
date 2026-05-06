@@ -6,7 +6,7 @@ description: Launch the standalone plugin host for quick iteration
 Launch a standalone plugin binary for testing.
 
 ```bash
-./build/tools/cli/pulp run [target]
+./build/pulp run [target]
 ```
 
 If no target is specified, runs the default standalone binary. Use `-- args...` to pass arguments to the launched binary.

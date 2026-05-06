@@ -186,23 +186,34 @@ function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
 // carry state across renders.
 //
 // Bridge gaps (deferred — TODOs + follow-up issue):
-//   • `setSkew` is unregistered (View::set_skew exists but no bridge fn).
-//     skewX/skewY entries are stored on the snapshot but not dispatched.
 //   • setScale is uniform-only — independent scaleX/scaleY axes can't
 //     round-trip. We approximate: scale > scaleX > scaleY in priority,
 //     last-write-wins within the array; if scaleX≠scaleY we emit the
 //     last seen and document the limitation.
-//   • rotateX/rotateY/perspective/matrix — 3D / matrix transforms not
+//   • rotateX/rotateY/perspective/matrix3d — 3D / matrix transforms not
 //     modeled in pulp's 2D View (no perspective; rotation is Z-axis
 //     only). Silently dropped with TODO.
+//   • matrix(a b c d tx ty) — 2D affine; the CSS shim decomposes to
+//     translate + uniform-scale + rotate components. The @pulp/react
+//     RN array surface doesn't have a matrix entry today (RN spec:
+//     only translateX/Y, scale, scaleX/Y, rotate/Z, skewX/Y), so the
+//     walker just silently drops `matrix`/`matrix3d` for parity.
+//
+// Triage #9 fan-out (this PR) — `setSkew` is now a registered bridge
+// function (View::set_skew has existed since the 2D slot was added).
+// The walker dispatches skewX/skewY by accumulating both axes and
+// emitting one consolidated setSkew(id, x_deg, y_deg) call.
 interface _TransformSnapshot {
     tx: number;
     ty: number;
     rotateDeg: number;
     scale: number;
+    skewX: number;
+    skewY: number;
     haveTranslate: boolean;
     haveRotate: boolean;
     haveScale: boolean;
+    haveSkew: boolean;
 }
 
 // Parse `'45deg'` / `'0.785rad'` / `45` (numeric) → degrees.
@@ -219,6 +230,36 @@ function _parseAngleDegrees(v: unknown): number {
     return n;
 }
 
+// pulp #1434 rn bridge-wires bundle — parse a CSS transform-origin
+// string into two fractional coordinates (0..1) the bridge expects.
+// Accepts `'center'`, `'left top'`, `'NN%'` percentages, and `'NNpx'`
+// pixel offsets (the latter assumed to be on a unit-bound View — so
+// values just clamp). Falls back to {0.5, 0.5} on unrecognized input.
+function _parseTransformOrigin(s: string): { x: number; y: number } {
+    const work = s.trim().toLowerCase();
+    if (work === 'center' || work === '') return { x: 0.5, y: 0.5 };
+    const tokens = work.split(/\s+/);
+    const tok2coord = (tok: string, axis: 'x' | 'y'): number => {
+        if (tok === 'center') return 0.5;
+        if (tok === 'left' || tok === 'top')   return 0.0;
+        if (tok === 'right' || tok === 'bottom') return 1.0;
+        if (tok.endsWith('%')) {
+            const n = parseFloat(tok.slice(0, -1));
+            return Number.isFinite(n) ? n / 100 : 0.5;
+        }
+        // Bare number / px — interpret as fractional 0..1 if <=1, else
+        // clamp to 1.0 (better than negative/over-1 garbage on the
+        // bridge side; full pixel resolution would need parent bounds).
+        const n = parseFloat(tok);
+        if (!Number.isFinite(n)) return 0.5;
+        return Math.max(0, Math.min(1, n));
+        void axis;
+    };
+    const x = tok2coord(tokens[0] ?? 'center', 'x');
+    const y = tok2coord(tokens[1] ?? tokens[0] ?? 'center', 'y');
+    return { x, y };
+}
+
 // Walk the RN-style transform array. Returns a snapshot with `have*`
 // flags so the caller can dispatch only the operations the user
 // actually specified (translate dispatch is gated on haveTranslate, etc.).
@@ -227,9 +268,11 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
         tx: 0, ty: 0,
         rotateDeg: 0,
         scale: 1,
+        skewX: 0, skewY: 0,
         haveTranslate: false,
         haveRotate: false,
         haveScale: false,
+        haveSkew: false,
     };
     for (const op of arr) {
         if (op == null || typeof op !== 'object') continue;
@@ -263,11 +306,17 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
                 snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
                 snap.haveScale = true;
                 break;
-            // skewX / skewY — View::set_skew exists in C++ but no bridge
-            // function is registered yet. Silently no-op until the bridge
-            // surface lands. pulp follow-up issue tracks the gap.
+            // pulp #1434 Triage #9 fan-out — skewX / skewY now reach the
+            // bridge via the freshly-registered setSkew(id, x_deg, y_deg).
+            // Both axes accumulate independently; one consolidated call
+            // emits at dispatch time.
             case 'skewX':
+                snap.skewX = _parseAngleDegrees(v);
+                snap.haveSkew = true;
+                break;
             case 'skewY':
+                snap.skewY = _parseAngleDegrees(v);
+                snap.haveSkew = true;
                 break;
             // 3D / matrix ops — not modeled in pulp's 2D View. Silently
             // drop. pulp follow-up tracks if/when 3D transforms are
@@ -444,6 +493,12 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'maxHeight':       return call('setFlex', id, 'max_height', value as number | string);
         case 'alignItems':      return call('setFlex', id, 'align_items', value as string);
         case 'alignSelf':       return call('setFlex', id, 'align_self', value as string);
+        // pulp #1434 (sub-agent #12 follow-up) — multi-line flex
+        // cross-axis distribution. Yoga supports it natively via
+        // YGNodeStyleSetAlignContent; the bridge accepts both bare
+        // (`start`/`end`) and prefixed (`flex-start`/`flex-end`)
+        // spellings plus the space-* values.
+        case 'alignContent':    return call('setFlex', id, 'align_content', value as string);
         case 'justifyContent':  return call('setFlex', id, 'justify_content', value as string);
         // pulp #1434 — aspectRatio routes through setFlex like the other
         // flex props. Accepts a finite positive number (RN-style); strings
@@ -635,6 +690,57 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             return;
         }
 
+        // pulp #1434 Phase A2-2 — CSS Grid surface. Forwards each
+        // property verbatim to setGrid; the C++ bridge handles
+        // template-track parsing, named-area parsing, and the
+        // grid-area shorthand (named token vs `row / col / row / col`
+        // numeric form).
+        case 'gridTemplateColumns': return call('setGrid', id, 'template_columns', value as string);
+        case 'gridTemplateRows':    return call('setGrid', id, 'template_rows',    value as string);
+        case 'gridTemplateAreas':   return call('setGrid', id, 'template_areas',   value as string);
+        case 'gridAutoColumns':     return call('setGrid', id, 'auto_columns',     value as string);
+        case 'gridAutoRows':        return call('setGrid', id, 'auto_rows',        value as string);
+        case 'gridAutoFlow':        return call('setGrid', id, 'auto_flow',        value as string);
+        case 'gridArea':            return call('setGrid', id, 'grid_area',        value as string);
+        case 'gridColumn': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'column_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'column_end', parts[1]);
+            return;
+        }
+        case 'gridRow': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'row_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'row_end', parts[1]);
+            return;
+        }
+        case 'gridColumnStart': return call('setGrid', id, 'column_start', value as number);
+        case 'gridColumnEnd':   return call('setGrid', id, 'column_end',   value as number);
+        case 'gridRowStart':    return call('setGrid', id, 'row_start',    value as number);
+        case 'gridRowEnd':      return call('setGrid', id, 'row_end',      value as number);
+        case 'gridGap':         return call('setGrid', id, 'gap',          value as number);
+        case 'gridColumnGap':   return call('setGrid', id, 'column_gap',   value as number);
+        case 'gridRowGap':      return call('setGrid', id, 'row_gap',      value as number);
+
+        // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
+        // 7 RN-style props that already had C++ bridge fns registered
+        // but no `@pulp/react` prop-applier dispatch. Each forwards
+        // the keyword / string straight through to the matching setter.
+        case 'backfaceVisibility': return call('setBackfaceVisibility', id, value as string);
+        case 'cursor':             return call('setCursor', id, value as string);
+        case 'filter':             return call('setFilter', id, value as string);
+        case 'pointerEvents':      return call('setPointerEvents', id, value as string);
+        case 'textTransform':      return call('setTextTransform', id, value as string);
+        case 'userSelect':         return call('setUserSelect', id, value as string);
+        // transformOrigin accepts CSS strings of the form `'NN% NN%'`,
+        // `'NNpx NNpx'`, `'center'`, or two keyword tokens. The bridge
+        // wants two numeric fractions (0..1). Defaults to 0.5/0.5
+        // (center) when a token is unrecognized — matches CSS default.
+        case 'transformOrigin': {
+            const parsed = _parseTransformOrigin(String(value ?? 'center'));
+            return call('setTransformOrigin', id, parsed.x, parsed.y);
+        }
+
         // pulp #1434 Triage #9 — RN array transform.
         // RN's transform is an array of single-property objects:
         //   transform: [
@@ -658,6 +764,10 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (snap.haveTranslate) call('setTranslate', id, snap.tx, snap.ty);
             if (snap.haveRotate)    call('setRotation', id, snap.rotateDeg);
             if (snap.haveScale)     call('setScale', id, snap.scale);
+            // pulp #1434 Triage #9 fan-out — setSkew is now a registered
+            // bridge fn; emit one consolidated call that captures both
+            // axes accumulated in the walker.
+            if (snap.haveSkew)      call('setSkew', id, snap.skewX, snap.skewY);
             return;
         }
 

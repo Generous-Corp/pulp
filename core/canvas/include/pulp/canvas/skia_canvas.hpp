@@ -119,6 +119,18 @@ public:
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
 
+    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+    // Routes through SkShader::MakeImage with SkTileMode per axis.
+    // Stored on the same gradient_shader_ field used by gradient fills
+    // (the field already represents "active non-solid fill paint"), so
+    // current_fill_paint() picks it up uniformly.
+    void set_fill_pattern(const std::string& image_src,
+                          PatternTileMode tile_x,
+                          PatternTileMode tile_y) override;
+    void set_stroke_pattern(const std::string& image_src,
+                            PatternTileMode tile_x,
+                            PatternTileMode tile_y) override;
+
     // Blend modes
     void set_blend_mode(BlendMode mode) override;
 
@@ -241,6 +253,12 @@ private:
     // Gradient state
     bool has_gradient_ = false;
     sk_sp<SkShader> gradient_shader_;
+
+    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern stroke
+    // shader (rare: most plugins set patterns on fillStyle, not strokeStyle).
+    // Lives separately from gradient_shader_ so stroke paths can opt in
+    // via apply_stroke_state without disturbing fill state.
+    sk_sp<SkShader> stroke_shader_;
 
     // Path building state
     std::unique_ptr<SkPathBuilder> path_builder_;

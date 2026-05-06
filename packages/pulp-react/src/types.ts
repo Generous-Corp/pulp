@@ -15,6 +15,18 @@ export type FlexDirection = 'row' | 'col';
 export type FlexAlign = 'start' | 'center' | 'end' | 'stretch';
 export type FlexAlignSelf = 'start' | 'center' | 'end' | 'stretch' | 'auto';
 export type FlexJustify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
+/// pulp #1434 (sub-agent #12 follow-up) — align-content controls
+/// multi-line flex cross-axis distribution. Yoga supports it natively
+/// via YGNodeStyleSetAlignContent. Accepts bare and prefixed CSS / RN
+/// spellings (`flex-start` / `flex-end`) plus the three space-*
+/// distributions (which only make sense on align-content, not
+/// align-items / align-self).
+export type FlexAlignContent =
+    | 'start' | 'flex-start'
+    | 'center'
+    | 'end' | 'flex-end'
+    | 'stretch'
+    | 'space-between' | 'space-around' | 'space-evenly';
 
 export interface FlexProps {
     direction?: FlexDirection;
@@ -97,6 +109,12 @@ export interface FlexProps {
     maxHeight?: number | string;
     alignItems?: FlexAlign;
     alignSelf?: FlexAlignSelf;
+    /// pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-
+    /// axis distribution. Maps to `setFlex(id, 'align_content', ...)`
+    /// → Yoga's `YGNodeStyleSetAlignContent`. Only meaningful on a
+    /// flex container with `flexWrap: true`; on a single-line container
+    /// it has no visible effect.
+    alignContent?: FlexAlignContent;
     justifyContent?: FlexJustify;
     /// pulp #1434 — width/height ratio for the cross axis. RN-compatible.
     /// When set on a View with `width: 100, aspectRatio: 1.5`, the layout
@@ -141,6 +159,40 @@ export interface StyleProps {
     borderBottomRightRadius?: number;
     opacity?: number;
     visible?: boolean;
+    /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
+    /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
+    /// keyword / string straight through to the matching setter.
+    backfaceVisibility?: 'hidden' | 'visible';
+    cursor?: string;
+    filter?: string;
+    pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
+    textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+    /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
+    /// or two-keyword combos (`'left top'`). Bridge expects fractional
+    /// 0..1 coordinates; the prop-applier parses the string before
+    /// dispatching.
+    transformOrigin?: string;
+    userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
+    /// StyleProps so JSX can express `display: grid` layouts directly.
+    /// Bridge handles template-track parsing, named-area parsing, and
+    /// the grid-area shorthand.
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    gridTemplateAreas?: string;
+    gridAutoColumns?: string;
+    gridAutoRows?: string;
+    gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense' | 'dense';
+    gridArea?: string;
+    gridColumn?: string;
+    gridRow?: string;
+    gridColumnStart?: number;
+    gridColumnEnd?: number;
+    gridRowStart?: number;
+    gridRowEnd?: number;
+    gridGap?: number;
+    gridColumnGap?: number;
+    gridRowGap?: number;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

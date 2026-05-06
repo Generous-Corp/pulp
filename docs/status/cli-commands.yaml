@@ -129,7 +129,7 @@ commands:
 
   - name: pr
     status: usable
-    summary: One-shot push-a-PR orchestrator. Primary path for shipping; delegates to shipyard pr by default and keeps native orchestration for diagnostics.
+    summary: Compatibility wrapper for the Shipyard-managed PR flow. Defaults to `shipyard pr`, with explicit `github` and `manual` workflows for users who opt out of Shipyard tracking.
     args:
       - name: --base
         kind: option
@@ -139,9 +139,13 @@ commands:
         kind: option
         description: PR title override (default tip commit subject)
         required: false
+      - name: --workflow
+        kind: option
+        description: One-shot PR workflow override: shipyard, github, or manual
+        required: false
       - name: --no-ship
         kind: flag
-        description: Create PR but skip shipyard ship
+        description: Diagnostics-only native fallback flag; do not use as the normal PR path
         required: false
       - name: --no-push
         kind: flag
@@ -360,14 +364,14 @@ commands:
 
   - name: config
     status: usable
-    summary: Read or write ~/.pulp/config.toml settings (release-discovery #547 Slice 2 + #550 Slice 5). Supports the `[update]` section (mode, check_interval_hours, channel, bump_projects). `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
+    summary: Read or write ~/.pulp/config.toml settings. Supports `[pr] workflow` plus the `[update]` section (mode, check_interval_hours, channel, bump_projects). `set update.mode` clears ~/.pulp/update-snooze so the new mode takes effect on the next invocation.
     subcommands:
       - name: get
-        summary: Print the value for a dotted key (e.g. `update.mode`). Empty output if unset.
+        summary: Print the value for a dotted key (e.g. `pr.workflow` or `update.mode`). Empty output if unset.
       - name: set
-        summary: Write a value for a dotted key. Validates against the allowed enum (mode, channel, bump_projects) or integer shape (check_interval_hours). Mode changes clear the 24h snooze file.
+        summary: Write a value for a dotted key. Validates PR workflow, update enums, and integer shapes. Mode changes clear the 24h snooze file.
       - name: list
-        summary: Dump current `update.*` settings with defaults filled in.
+        summary: Dump current supported settings with defaults filled in.
     docs: reference/cli.md#config
 
   - name: doctor

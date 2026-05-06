@@ -63,12 +63,8 @@ conveniences: `canvasFillCircle`, `canvasFillRoundedRect`,
 
 ## Notable gaps
 
-1. **`createPattern`** — returns `null`; bridge has no pattern shader.
-   Per spec, null is permissible when source is unavailable. Deferred
-   from pulp #1434 bridge-thin gap-fill — needs real image-resource
-   plumbing, not just a bridge fn.
-2. **`filter`** — Canvas2D per-context filter chains are not wired.
-3. **`direction`** — text rendering direction (ltr/rtl) tracked locally
+1. **`filter`** — Canvas2D per-context filter chains are not wired.
+2. **`direction`** — text rendering direction (ltr/rtl) tracked locally
    but never pushed.
 
 ## Recently wired (pulp #1434 bridge-thin gap-fill)
@@ -87,6 +83,19 @@ exposed the underlying capability:
   Skia: `SkSamplingOptions` (`kLinear`, `+mipmap`, Mitchell cubic).
   CG: `CGContextSetInterpolationQuality` (`Low` / `Medium` / `High`).
   `enabled = false` collapses to nearest-neighbour for pixel-art.
+
+### Follow-up: `createPattern` (sub-agent #24)
+
+The follow-up bridge-thin slice wired `createPattern` — deferred from
+the original #1480 PR because pattern handling needs an image-resource
+identifier shape, not just a bridge fn. Now PASS / partial:
+
+- **`createPattern(image, repetition)`** — Skia routes through
+  `SkShader::MakeImage` with `SkTileMode::kRepeat` / `SkTileMode::kDecal`
+  per axis. All four spec repetition values are supported:
+  `"repeat"`, `"repeat-x"`, `"repeat-y"`, `"no-repeat"`. CG degrades to
+  the active fill colour (no first-class CG pattern shader without a
+  CGPattern callback dance).
 
 Side effect: the same PR plumbed `setStrokeCap` and `setStrokeJoin`
 through `SkPaint` — `line_cap_` and `line_join_` were stored on the

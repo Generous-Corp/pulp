@@ -259,7 +259,9 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: build
         shell: bash
-        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        # Keep one hung ctest entry from burning the full workflow timeout.
+        # Long-running tests that need more time set their own CTest TIMEOUT.
+        run: ctest --output-on-failure -C Release -LE validation -j4 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -278,7 +280,7 @@ jobs:
         shell: cmd
         run: |
           chcp 65001
-          ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+          ctest --output-on-failure -C Release -LE validation -j4 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS'

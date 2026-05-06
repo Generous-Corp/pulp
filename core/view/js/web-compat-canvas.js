@@ -15,6 +15,24 @@ CanvasGradient.prototype.addColorStop = function(offset, color) {
     this._stops.push({ offset: Number(offset) || 0, color: String(color || "") });
 };
 
+// pulp #1434 bridge-thin gap-fill — CanvasPattern, returned by
+// ctx.createPattern(image, repetition) and assignable to ctx.fillStyle /
+// ctx.strokeStyle. Repetition values per Canvas2D spec:
+//   "repeat" (default), "repeat-x", "repeat-y", "no-repeat"
+// Image source is reduced to a path / data URL string the same way
+// drawImage normalises it. Flushed to the bridge via canvasSetFillPattern
+// when assigned to ctx.fillStyle. The Skia backend renders the real
+// tiled pattern via SkShader::MakeImage with SkTileMode::{kRepeat,kDecal};
+// the CG backend degrades to flat fill (CG has no first-class pattern
+// shader without CGPattern dance — same fallback shape that conic took
+// before its real impl landed).
+function CanvasPattern(src, tileX, tileY) {
+    this._kind = "pattern";
+    this._src = String(src || "");
+    this._tileX = String(tileX || "repeat");
+    this._tileY = String(tileY || "repeat");
+}
+
 function CanvasRenderingContext2D(canvasEl) {
     this.canvas = canvasEl;
     this._id = canvasEl._id;
@@ -105,6 +123,17 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         this._activeFillKind = "gradient";
         return;
     }
+    // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia: real
+    // tiled paint via SkShader::MakeImage with SkTileMode per axis. CG
+    // degrades to the active solid colour (no native pattern shader).
+    // We reuse `_activeFillKind = "gradient"` as the "non-color" sentinel
+    // so canvasClearGradient resets correctly when the next fillStyle
+    // assignment is a plain string.
+    if (fs && fs._kind === "pattern" && typeof canvasSetFillPattern === "function") {
+        canvasSetFillPattern(this._id, fs._src, fs._tileX, fs._tileY);
+        this._activeFillKind = "gradient";
+        return;
+    }
     // Solid colour. Clear any active gradient so subsequent fills don't pick
     // up a stale gradient (Canvas2D spec: assigning fillStyle replaces the
     // previous style outright).
@@ -122,9 +151,24 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
     // colours) works exactly per spec.
     var ss = this.strokeStyle;
     var colorStr = "";
-    if (ss && (ss._kind === "linear" || ss._kind === "radial")) {
+    // pulp #1434 — CanvasPattern as strokeStyle. If the bridge exposes
+    // canvasSetStrokePattern (Skia path), flush the pattern; otherwise
+    // fall through to the solid-fallback below (CG path).
+    if (ss && ss._kind === "pattern" && typeof canvasSetStrokePattern === "function") {
+        canvasSetStrokePattern(this._id, ss._src, ss._tileX, ss._tileY);
+        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._activeStrokeKind = "pattern";
+        return;
+    }
+    if (ss && (ss._kind === "linear" || ss._kind === "radial" || ss._kind === "conic")) {
         colorStr = (ss._stops && ss._stops.length > 0) ? ss._stops[0].color : "#fff";
         this._activeStrokeKind = "gradient";
+    } else if (ss && ss._kind === "pattern") {
+        // No stroke-pattern bridge fn — degrade to a neutral fill colour
+        // so strokes still render visibly. Spec: the *pattern* attribute
+        // is technically supported, but visual fidelity falls back.
+        colorStr = "#888";
+        this._activeStrokeKind = "pattern";
     } else {
         colorStr = String(ss == null ? "" : ss);
         this._activeStrokeKind = "color";
@@ -532,11 +576,40 @@ CanvasRenderingContext2D.prototype.createConicGradient = function(startAngle, cx
     });
 };
 
-CanvasRenderingContext2D.prototype.createPattern = function() {
-    // Patterns are rare in audio plugin UIs; per spec, returning null is
-    // permissible when the pattern source is unavailable. Callers must
-    // guard against null.
-    return null;
+CanvasRenderingContext2D.prototype.createPattern = function(image, repetition) {
+    // pulp #1434 bridge-thin gap-fill — real CanvasPattern. Returns a
+    // CanvasPattern handle that ctx.fillStyle / ctx.strokeStyle accept;
+    // _applyFillStyle flushes via canvasSetFillPattern when a pattern is
+    // the active fillStyle. Spec repetition values:
+    //   "repeat" (default), "repeat-x", "repeat-y", "no-repeat"
+    // Per spec, an empty / null `repetition` argument defaults to
+    // "repeat"; an unrecognised value would throw SyntaxError, but we
+    // softly coerce to "repeat" to keep recording plugins from crashing.
+    var rep = repetition;
+    if (rep == null || rep === "") rep = "repeat";
+    rep = String(rep);
+    if (rep !== "repeat" && rep !== "repeat-x"
+        && rep !== "repeat-y" && rep !== "no-repeat") {
+        rep = "repeat";
+    }
+    // Map spec repetition onto a (tile_x, tile_y) pair the bridge consumes.
+    // Skia translates these via SkTileMode (kRepeat for repeat-on-axis,
+    // kDecal for "no repeat on this axis").
+    var tx, ty;
+    if (rep === "repeat")     { tx = "repeat";  ty = "repeat";  }
+    else if (rep === "repeat-x") { tx = "repeat";  ty = "no-repeat"; }
+    else if (rep === "repeat-y") { tx = "no-repeat"; ty = "repeat";  }
+    else /* no-repeat */     { tx = "no-repeat"; ty = "no-repeat"; }
+    // Image source — accept either a string path / data URI, or an
+    // image-like object with .src / ._src (matches drawImage normalisation).
+    var src = "";
+    if (typeof image === "string") src = image;
+    else if (image && typeof image.src === "string") src = image.src;
+    else if (image && typeof image._src === "string") src = image._src;
+    // Spec: returning null is permissible when the source is unavailable.
+    // We require a non-empty src to flush meaningful state to the bridge.
+    if (!src) return null;
+    return new CanvasPattern(src, tx, ty);
 };
 
 // ── Canvas2D API gap closures (issue-916) ────────────────────────────

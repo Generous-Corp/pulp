@@ -57,6 +57,8 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_fill_gradient_linear: return "set_fill_gradient_linear";
         case CanvasDrawCmd::Type::set_fill_gradient_radial: return "set_fill_gradient_radial";
         case CanvasDrawCmd::Type::set_fill_gradient_conic: return "set_fill_gradient_conic";
+        case CanvasDrawCmd::Type::set_fill_pattern: return "set_fill_pattern";
+        case CanvasDrawCmd::Type::set_stroke_pattern: return "set_stroke_pattern";
         case CanvasDrawCmd::Type::clear_fill_gradient: return "clear_fill_gradient";
         case CanvasDrawCmd::Type::begin_path: return "begin_path";
         case CanvasDrawCmd::Type::move_to: return "move_to";
@@ -408,6 +410,24 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::clear_fill_gradient:
             canvas.clear_fill_gradient();
             break;
+        // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia routes
+        // through SkShader::MakeImage with SkTileMode per axis (real tiled
+        // fill); CG degrades to the active fill colour (no native pattern
+        // shader). tile_x = bit 0, tile_y = bit 1: 0 = repeat, 1 = no-repeat.
+        case CanvasDrawCmd::Type::set_fill_pattern: {
+            using Tile = canvas::Canvas::PatternTileMode;
+            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
+            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
+            canvas.set_fill_pattern(cmd.text, tx, ty);
+            break;
+        }
+        case CanvasDrawCmd::Type::set_stroke_pattern: {
+            using Tile = canvas::Canvas::PatternTileMode;
+            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
+            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
+            canvas.set_stroke_pattern(cmd.text, tx, ty);
+            break;
+        }
 
         // Clear rect (pulp #929) — replace pixels with transparent black, do
         // not SrcOver-blend a transparent fill (which is a no-op). The

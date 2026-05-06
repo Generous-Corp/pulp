@@ -433,6 +433,32 @@ void RecordingCanvas::set_image_smoothing(bool enabled,
     commands_.push_back(cmd);
 }
 
+// pulp #1434 bridge-thin gap-fill — capture Canvas2D ctx.createPattern
+// flushes. Image source string lives in `text`; tile modes go in
+// f[0] (x) and f[1] (y) as 0 = repeat, 1 = no_repeat. RecordingCanvas
+// doesn't decode the image — it models intent only, so the canvas2d
+// adapter can assert that the bridge issued the right setter at the
+// right point in the command stream.
+void RecordingCanvas::set_fill_pattern(const std::string& image_src,
+                                        PatternTileMode tile_x,
+                                        PatternTileMode tile_y) {
+    DrawCommand cmd{DrawCommand::Type::set_fill_pattern};
+    cmd.text = image_src;
+    cmd.f[0] = (tile_x == PatternTileMode::no_repeat) ? 1.0f : 0.0f;
+    cmd.f[1] = (tile_y == PatternTileMode::no_repeat) ? 1.0f : 0.0f;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_stroke_pattern(const std::string& image_src,
+                                          PatternTileMode tile_x,
+                                          PatternTileMode tile_y) {
+    DrawCommand cmd{DrawCommand::Type::set_stroke_pattern};
+    cmd.text = image_src;
+    cmd.f[0] = (tile_x == PatternTileMode::no_repeat) ? 1.0f : 0.0f;
+    cmd.f[1] = (tile_y == PatternTileMode::no_repeat) ? 1.0f : 0.0f;
+    commands_.push_back(std::move(cmd));
+}
+
 // ── issue-965: Canvas2D path API recording ──────────────────────────────────
 void RecordingCanvas::begin_path() {
     commands_.push_back({DrawCommand::Type::begin_path});

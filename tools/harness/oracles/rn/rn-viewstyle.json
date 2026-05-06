@@ -282,8 +282,8 @@
       "setCursor", "setFilter", "setFlex", "setFontSize", "setFontStyle",
       "setFontWeight", "setLeft", "setLetterSpacing", "setLineHeight",
       "setOpacity", "setOverflow", "setPointerEvents", "setPosition",
-      "setRight", "setRotation", "setScale", "setSvgFill", "setSvgPath",
-      "setSvgStroke", "setSvgStrokeWidth", "setSvgViewBox", "setText",
+      "setRight", "setRotation", "setScale", "setSkew", "setSvgFill",
+      "setSvgPath", "setSvgStroke", "setSvgStrokeWidth", "setSvgViewBox", "setText",
       "setTextAlign", "setTextColor", "setTextDecoration",
       "setTextTransform", "setTop", "setTransform", "setTransformOrigin",
       "setTranslate", "setUserSelect", "setVisible", "setZIndex"

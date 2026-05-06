@@ -24,6 +24,7 @@
 #include <regex>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 #include <pulp/runtime/system.hpp>
 #include <choc/text/choc_StringUtilities.h>
@@ -1005,6 +1006,90 @@ std::string read_user_config_value(const std::string& section, const std::string
     }
 
     return {};
+}
+
+std::string normalize_pr_workflow(std::string workflow) {
+    workflow = trim(strip_quotes(workflow));
+    std::transform(workflow.begin(), workflow.end(), workflow.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return workflow;
+}
+
+bool is_valid_pr_workflow(const std::string& workflow) {
+    const auto normalized = normalize_pr_workflow(workflow);
+    return normalized == "shipyard" ||
+           normalized == "github" ||
+           normalized == "manual";
+}
+
+PrWorkflowSelection resolve_pr_workflow(const std::string& cli_override) {
+    auto make = [](std::string raw, std::string source) {
+        PrWorkflowSelection out;
+        out.workflow = normalize_pr_workflow(raw);
+        out.source = std::move(source);
+        if (!is_valid_pr_workflow(out.workflow)) {
+            out.error = "pr.workflow must be one of: shipyard, github, manual";
+        }
+        return out;
+    };
+
+    if (!trim(cli_override).empty()) {
+        return make(cli_override, "cli");
+    }
+    if (const char* env = std::getenv("PULP_PR_WORKFLOW"); env && *env) {
+        return make(env, "env:PULP_PR_WORKFLOW");
+    }
+    auto configured = read_user_config_value("pr", "workflow");
+    if (!configured.empty()) {
+        return make(configured, "config:pr.workflow");
+    }
+    return PrWorkflowSelection{"shipyard", "default", {}};
+}
+
+std::string read_pinned_shipyard_version(const fs::path& root) {
+    std::ifstream f(root / "tools" / "shipyard.toml");
+    if (!f) return {};
+    std::string line;
+    while (std::getline(f, line)) {
+        auto t = trim(line);
+        if (t.rfind("version", 0) != 0) continue;
+        auto eq = t.find('=');
+        if (eq == std::string::npos) continue;
+        auto rhs = trim(t.substr(eq + 1));
+        if (rhs.size() >= 2 && rhs.front() == '"' && rhs.back() == '"') {
+            return rhs.substr(1, rhs.size() - 2);
+        }
+        return rhs;
+    }
+    return {};
+}
+
+static std::string parse_shipyard_version_output(std::string out) {
+    for (char& c : out) {
+        if (c == ',' || c == '(' || c == ')') c = ' ';
+    }
+    std::istringstream tokens(out);
+    std::string token;
+    while (tokens >> token) {
+        while (!token.empty() &&
+               (token.back() == ',' || token.back() == ';' || token.back() == ':')) {
+            token.pop_back();
+        }
+        auto check = token;
+        if (!check.empty() && check.front() == 'v') check.erase(check.begin());
+        if (check.empty() || !std::isdigit(static_cast<unsigned char>(check.front()))) {
+            continue;
+        }
+        if (check.find('.') == std::string::npos) continue;
+        return token.front() == 'v' ? token : ("v" + token);
+    }
+    return {};
+}
+
+std::string capture_shipyard_version(const std::string& shipyard_bin) {
+    if (shipyard_bin.empty()) return {};
+    auto out = exec_output(shell_quote(shipyard_bin) + " --version 2>&1");
+    return parse_shipyard_version_output(trim(out));
 }
 
 bool write_user_config_value(const std::string& section,
