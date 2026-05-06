@@ -590,6 +590,75 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
 
+        // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
+        // the full shorthand into a list of TransitionSpecs that the
+        // dispatcher (PR 2 of the ladder) consults when a property
+        // changes. Longhand fields apply uniformly across the parsed
+        // list (CSS spec semantics).
+        case 'transition':                return call('setTransition', id, value as string);
+        case 'transitionProperty':        return call('setTransitionProperty', id, value as string);
+        case 'transitionDuration': {
+            // Accept "200ms" / "0.3s" string OR plain number-of-seconds.
+            if (typeof value === 'number') {
+                return call('setTransitionDuration', id, value);
+            }
+            const s = String(value).trim();
+            const ms = s.endsWith('ms');
+            const n = parseFloat(s);
+            return call('setTransitionDuration', id, ms ? n / 1000 : n);
+        }
+        case 'transitionDelay': {
+            if (typeof value === 'number') {
+                return call('setTransitionDelay', id, value);
+            }
+            const s = String(value).trim();
+            const ms = s.endsWith('ms');
+            const n = parseFloat(s);
+            return call('setTransitionDelay', id, ms ? n / 1000 : n);
+        }
+        case 'transitionTimingFunction':  return call('setTransitionTimingFunction', id, value as string);
+
+        // pulp #1434 Phase A2-1 — CSS animations. animation-name
+        // resolves through the keyframes registry populated by
+        // defineKeyframes; PR 4 wires the playback driver. The
+        // shorthand path takes a single name + duration; longhand
+        // props can be split out by the host as needed.
+        case 'animationName':   return call('setAnimation', id, value as string, 1.0, 1, 'normal');
+        // Codex audit on pulp #1508 (P1): animationDuration was
+        // dispatched to setTransitionDuration here, which mutated
+        // *transition* timing on the same View instead of *animation*
+        // timing. Route through the legacy 2-arg setAnimation control-
+        // token form (`setAnimation(id, 'duration', seconds)`) so the
+        // bridge stages it on the View's pending-animation slot
+        // alongside animationName / animationDelay / etc.
+        case 'animationDuration': {
+            if (typeof value === 'number') {
+                return call('setAnimation', id, 'duration', value);
+            }
+            const s = String(value).trim();
+            const ms = s.endsWith('ms');
+            const n = parseFloat(s);
+            return call('setAnimation', id, 'duration', ms ? n / 1000 : n);
+        }
+        case 'animationDelay': {
+            if (typeof value === 'number') {
+                return call('setAnimation', id, 'delay', value);
+            }
+            const s = String(value).trim();
+            const ms = s.endsWith('ms');
+            const n = parseFloat(s);
+            return call('setAnimation', id, 'delay', ms ? n / 1000 : n);
+        }
+        case 'animationTimingFunction':
+            return call('setAnimation', id, 'easing', value as string);
+        case 'animationIterationCount':
+            return call('setAnimation', id, 'iterations',
+                value === 'infinite' ? -1 : (typeof value === 'number' ? value : parseFloat(String(value)) || 1));
+        case 'animationDirection':
+            return call('setAnimation', id, 'direction', value as string);
+        case 'animationFillMode':
+            return call('setAnimation', id, 'fill', value as string);
+
         // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
         // 7 RN-style props that already had C++ bridge fns registered
         // but no `@pulp/react` prop-applier dispatch. Each forwards

@@ -136,6 +136,16 @@ private:
     };
     std::vector<ShortcutBinding> shortcuts_;
 
+    /// pulp #1434 Phase A2-1 — application-wide @keyframes registry.
+    /// `defineKeyframes(name, stops)` populates this; `setAnimation`
+    /// looks up by name when resolving animation-name. Per-View
+    /// playback state lives on View::active_animations_.
+    CssKeyframesRegistry css_keyframes_registry_;
+public:
+    CssKeyframesRegistry& css_keyframes_registry() { return css_keyframes_registry_; }
+    const CssKeyframesRegistry& css_keyframes_registry() const { return css_keyframes_registry_; }
+private:
+
     // Model-agnostic AI CLI command (default: Claude)
     std::string ai_cli_command_ = "claude --print --model {model}";
 

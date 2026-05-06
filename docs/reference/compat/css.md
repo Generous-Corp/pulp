@@ -33,6 +33,31 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-1 PR 1)** — CSS animations +
+  transitions infrastructure landed. New
+  `core/view/include/pulp/view/css_animation.hpp` ships the type
+  vocabulary (`CssEasing`, `AnimatableProperty`, `TransitionSpec`,
+  `CssAnimation`, `CssKeyframesBlock`, `CssKeyframesRegistry`) plus
+  `parse_transition_shorthand(css)` covering single-property, comma-
+  separated multi-entry, `cubic-bezier(p1x,p1y,p2x,p2y)`,
+  `steps(N, end|start)`, the keyword set
+  (`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`), and
+  `'none'` clear. `setTransition` / `setTransitionProperty` /
+  `setTransitionDuration` / `setTransitionDelay` /
+  `setTransitionTimingFunction` bridge fns wired; per-View
+  `transitions_` storage + `find_transition_for(prop)` resolver.
+  `defineKeyframes(name, JSON-stringified stops)` populates the
+  application-wide `CssKeyframesRegistry` on `WidgetBridge`;
+  `setAnimation` looks up by name and seeds `CssAnimation` entries
+  on `View::active_animations_`. PR 2 of the ladder hooks the
+  playback driver to advance these via the rAF idle pump (#1402);
+  this PR ships the substrate so subsequent PRs land independently.
+  Reclassified 11 entries from `noop` / `missing` / `partial` →
+  `supported` (transition* + animation/animationDelay/Duration/
+  IterationCount/Name/TimingFunction). animationDirection +
+  animationFillMode stay `partial` pending PR 4 (specialized
+  per-property dispatch). animationPlayState stays `missing` per the
+  noop-vocabulary convention from #1475. css drift -11.
 - **2026-05-05 (pulp #1434 Triage #10)** — `css/borderStyle` now
   honors the keyword at paint time. New `View::BorderStyle` enum
   (`solid` / `dashed` / `dotted` / `double` / `groove` / `ridge` /

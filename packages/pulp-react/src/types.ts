@@ -151,6 +151,18 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `transition` accepts the full CSS shorthand string; longhand
+    /// fields apply uniformly across the parsed list.
+    transition?: string;
+    transitionProperty?: string;
+    transitionDuration?: number | string;
+    transitionDelay?: number | string;
+    transitionTimingFunction?:
+        | 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
+        | string; // also: 'cubic-bezier(...)', 'steps(N, end)'
+    animationName?: string;
+    animationDuration?: number | string;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

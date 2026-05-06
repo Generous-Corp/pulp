@@ -117,6 +117,18 @@ declare global {
     const setBorderBottomRightRadius: ((id: string, radius: number) => void) | undefined;
     function setOpacity(id: string, alpha: number): void;
     function setVisible(id: string, visible: boolean): void;
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `setTransition` parses the full shorthand; the longhand setters
+    /// apply uniformly across the parsed list.
+    const setTransition: ((id: string, css: string) => void) | undefined;
+    const setTransitionProperty: ((id: string, props: string) => void) | undefined;
+    const setTransitionDuration: ((id: string, seconds: number) => void) | undefined;
+    const setTransitionDelay: ((id: string, seconds: number) => void) | undefined;
+    const setTransitionTimingFunction: ((id: string, easing: string) => void) | undefined;
+    /// `defineKeyframes` populates the application-wide registry; PR 4
+    /// wires playback. Phase A2-1 PR 1 ships parser + storage.
+    const defineKeyframes: ((name: string, stops_json: string) => void) | undefined;
+    const setAnimation: ((id: string, name: string, duration: number, iterations: number, direction: string) => void) | undefined;
     function setPosition(id: string, top: number, left: number, right?: number, bottom?: number): void;
     // pulp #1434 (Triage #15) — surface the existing C++ setBoxShadow /
     // clearBoxShadow bridge fns at the @pulp/react TS layer so RN-style
@@ -260,6 +272,10 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-1 — transitions + animations.
+        'setTransition', 'setTransitionProperty', 'setTransitionDuration',
+        'setTransitionDelay', 'setTransitionTimingFunction',
+        'defineKeyframes', 'setAnimation',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
