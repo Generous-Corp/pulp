@@ -551,13 +551,14 @@ through font-face-leading styles. The
 refreshed branch remains unpushed and undispatched; #1269 still points
 at the old remote head until Namespace capacity returns.
 Additional #640 audio progress is refreshed locally as
-`feature/phase3-mmap-reader-extra-640` at `c03d86f5`, rebased from the
+`feature/phase3-mmap-reader-extra-640` at `db31e48a`, rebased from the
 paused #1280 remote head `ed2ba7bf` onto current `origin/main`
 `50ff5822`, then onto current `origin/main` `b7ec8f08`, then onto current
 `origin/main` `6c8b9920`, then onto current `origin/main` `24047ba3`,
-then onto current `origin/main` `df01f4f6`, covering
-`MemoryMappedAudioReader` unsupported-file fail-closed and EOF no-copy
-behavior. The refreshed branch remains unpushed and undispatched; #1280
+then onto current `origin/main` `df01f4f6`, then onto current
+`origin/main` `42bacd19`, covering `MemoryMappedAudioReader`
+unsupported-file fail-closed and EOF no-copy behavior. The refreshed
+branch remains unpushed and undispatched; #1280
 still points at the old remote head until Namespace capacity returns.
 Additional #493 view progress is refreshed locally as
 `feature/view-text-editor-coverage-493-next` at `426ffe57`, rebased from
