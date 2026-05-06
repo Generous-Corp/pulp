@@ -1632,6 +1632,289 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
 }
 #endif  // PULP_HAS_SKIA
 
+// ── pulp #1522 — Canvas2D fillRule arg threads through to bridge ────────
+//
+// Promotion target: 2 DIVERGE entries → PASS in compat.json:
+//   - canvas2d/fill (fillRule arg accepted but ignored)
+//   - canvas2d/clip (fillRule arg always uses non-zero winding)
+//
+// The web spec for ctx.fill(rule) and ctx.clip(rule) accepts an optional
+// CanvasFillRule string ('nonzero' (default) | 'evenodd'). Pre-fix the
+// JS shim discarded the arg with `void fillRule;` (clip) or didn't take
+// it at all (fill). The bridge had no overload for it, and the Skia / CG
+// backends always painted with the spec default of non-zero winding.
+//
+// Post-fix:
+//   - JS shim threads the arg as an int (0 = nonzero, 1 = evenodd).
+//   - Bridge canvasFillPath/canvasClip read int_val from the arg list.
+//   - CanvasWidget dispatch picks FillRule::evenodd vs FillRule::nonzero.
+//   - Skia: SkPathBuilder::setFillType before drawPath / clipPath.
+//   - CG: CGContextEOFillPath / CGContextEOClip when rule == evenodd.
+TEST_CASE("Canvas2D ctx.fill('evenodd') threads fillRule int_val=1 to bridge",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(10, 0);
+        ctx.lineTo(10, 10);
+        ctx.lineTo(0, 10);
+        ctx.closePath();
+        ctx.fill('evenodd');
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_fill = -1;
+    int seen_fill = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::fill_path) {
+            ++seen_fill;
+            int_val_for_fill = cmd.int_val;
+        }
+    }
+    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
+    REQUIRE(seen_fill == 1);
+    REQUIRE(int_val_for_fill == 1);
+}
+
+TEST_CASE("Canvas2D ctx.fill('nonzero') threads fillRule int_val=0 to bridge",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 10, 10);
+        ctx.fill('nonzero');
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_fill = -1;
+    int seen_fill = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::fill_path) {
+            ++seen_fill;
+            int_val_for_fill = cmd.int_val;
+        }
+    }
+    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
+    REQUIRE(seen_fill == 1);
+    REQUIRE(int_val_for_fill == 0);
+}
+
+TEST_CASE("Canvas2D ctx.fill() with no arg defaults to nonzero (int_val=0)",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 10, 10);
+        ctx.fill();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_fill = -1;
+    int seen_fill = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::fill_path) {
+            ++seen_fill;
+            int_val_for_fill = cmd.int_val;
+        }
+    }
+    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
+    REQUIRE(seen_fill == 1);
+    REQUIRE(int_val_for_fill == 0);
+}
+
+TEST_CASE("Canvas2D ctx.clip('evenodd') threads fillRule int_val=1 to bridge",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 10, 10);
+        ctx.clip('evenodd');
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_clip = -1;
+    int seen_clip = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::clip) {
+            ++seen_clip;
+            int_val_for_clip = cmd.int_val;
+        }
+    }
+    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
+    REQUIRE(seen_clip == 1);
+    REQUIRE(int_val_for_clip == 1);
+}
+
+TEST_CASE("Canvas2D ctx.clip('nonzero') threads fillRule int_val=0 to bridge",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 10, 10);
+        ctx.clip('nonzero');
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_clip = -1;
+    int seen_clip = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::clip) {
+            ++seen_clip;
+            int_val_for_clip = cmd.int_val;
+        }
+    }
+    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
+    REQUIRE(seen_clip == 1);
+    REQUIRE(int_val_for_clip == 0);
+}
+
+TEST_CASE("Canvas2D ctx.clip() with no arg defaults to nonzero (int_val=0)",
+          "[view][canvas2d][issue-1522]") {
+    using T = CanvasDrawCmd::Type;
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 10, 10);
+        ctx.clip();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int int_val_for_clip = -1;
+    int seen_clip = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::clip) {
+            ++seen_clip;
+            int_val_for_clip = cmd.int_val;
+        }
+    }
+    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
+    REQUIRE(seen_clip == 1);
+    REQUIRE(int_val_for_clip == 0);
+}
+
+#ifdef PULP_HAS_SKIA
+// ── Pixel-level fillRule verification on Skia ────────────────────────────
+//
+// Self-intersecting "rule of two" path: an outer 30x30 square traced
+// clockwise, with an inner 10x10 sub-square also traced clockwise.
+// Under non-zero winding both squares contribute the same direction,
+// so the inner area is filled (winding number = 2 ≠ 0). Under
+// even-odd the inner area cancels (count = 2 mod 2 = 0) and stays
+// hollow.
+//
+// Pre-fix both rules paint the same thing (Skia path always defaults
+// to kWinding because the bridge never sets it). Post-fix evenodd
+// leaves the inner pixel transparent.
+TEST_CASE("Canvas2D fillRule evenodd vs nonzero produce different pixels",
+          "[view][canvas2d][skia][issue-1522]") {
+    auto run_fill = [](const std::string& rule_arg) -> uint32_t {
+        SkImageInfo info = SkImageInfo::Make(40, 40, kRGBA_8888_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface != nullptr);
+        auto* sk_canvas = surface->getCanvas();
+        sk_canvas->clear(SK_ColorTRANSPARENT);
+
+        ScriptedBridge env;
+        std::string js = R"(
+            var c = document.createElement('canvas');
+            globalThis.__test_canvas_el__ = c;
+            document.body.appendChild(c);
+            c.width = 40; c.height = 40;
+            var ctx = c.getContext('2d');
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            // outer 30x30 (CW)
+            ctx.moveTo(5, 5);
+            ctx.lineTo(35, 5);
+            ctx.lineTo(35, 35);
+            ctx.lineTo(5, 35);
+            ctx.closePath();
+            // inner 10x10 (CW — same direction as outer)
+            ctx.moveTo(15, 15);
+            ctx.lineTo(25, 15);
+            ctx.lineTo(25, 25);
+            ctx.lineTo(15, 25);
+            ctx.closePath();
+        )";
+        if (rule_arg.empty()) {
+            js += "\n            ctx.fill();";
+        } else {
+            js += "\n            ctx.fill('" + rule_arg + "');";
+        }
+        env.load(js);
+        auto* cw = env.canvas();
+        REQUIRE(cw != nullptr);
+
+        cw->set_bounds({0, 0, 40, 40});
+        pulp::canvas::SkiaCanvas canvas(sk_canvas);
+        cw->paint(canvas);
+
+        SkPixmap pix;
+        REQUIRE(surface->peekPixels(&pix));
+        // sample at (20, 20) — centre of the inner sub-square
+        auto* row = static_cast<const uint8_t*>(pix.addr(0, 20));
+        return (uint32_t(row[4 * 20 + 0]) << 24) |
+               (uint32_t(row[4 * 20 + 1]) << 16) |
+               (uint32_t(row[4 * 20 + 2]) << 8) |
+               (uint32_t(row[4 * 20 + 3]));
+    };
+
+    uint32_t nonzero_centre = run_fill("nonzero");
+    uint32_t evenodd_centre = run_fill("evenodd");
+    INFO("nonzero centre RGBA=0x" << std::hex << nonzero_centre
+         << " evenodd centre RGBA=0x" << std::hex << evenodd_centre);
+
+    // nonzero: inner pixel is filled (alpha != 0, red component dominant).
+    REQUIRE((nonzero_centre & 0xFF) != 0);                  // alpha set
+    REQUIRE(((nonzero_centre >> 24) & 0xFF) >= 0xC0);       // strong red
+
+    // evenodd: inner pixel is hollow (alpha == 0, transparent clear).
+    REQUIRE((evenodd_centre & 0xFF) == 0);                  // alpha zero
+
+    // The two rules MUST produce different output — that's the whole
+    // point of the fix.
+    REQUIRE(nonzero_centre != evenodd_centre);
+}
+#endif  // PULP_HAS_SKIA
+
 // ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ────────────────────
 //
 // canvas2d/direction and canvas2d/filter were the last two NOT-IMPL

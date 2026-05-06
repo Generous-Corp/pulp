@@ -6051,15 +6051,13 @@
       "issue": "1346"
     },
     "canvas2d/fill": {
-      "status": "partial",
-      "mapsTo": "ctx.fill -> _syncGlobalState + _applyFillStyle + canvasFillPath.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fill rule arg ('evenodd' / 'nonzero') — accepted but ignored"
-      ],
+      "status": "supported",
+      "mapsTo": "ctx.fill(rule?) -> _syncGlobalState + _applyFillStyle + canvasFillPath(id, rule). Rule encoded as int (0=nonzero, 1=evenodd) and threaded through CanvasDrawCmd::int_val.",
+      "supportedValues": ["nonzero (default)", "evenodd"],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
-      "issue": ""
+      "notes": "pulp #1522 wired the fillRule arg end to end. Skia: SkPathBuilder::setFillType(kEvenOdd|kWinding) before drawPath. CG: CGContextEOFillPath / CGContextFillPath.",
+      "issue": "1522"
     },
     "canvas2d/stroke": {
       "status": "supported",
@@ -6071,15 +6069,13 @@
       "issue": ""
     },
     "canvas2d/clip": {
-      "status": "partial",
-      "mapsTo": "ctx.clip(fillRule) -> canvasClip (intersects current clip with current path). Falls back to no-op if canvasClip absent.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fillRule arg — bridge always uses non-zero today"
-      ],
+      "status": "supported",
+      "mapsTo": "ctx.clip(rule?) -> canvasClip(id, rule). Rule encoded as int (0=nonzero, 1=evenodd) and threaded through CanvasDrawCmd::int_val. Falls back to no-op if canvasClip absent.",
+      "supportedValues": ["nonzero (default)", "evenodd"],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
-      "issue": ""
+      "notes": "pulp #1522 wired the fillRule arg end to end. Backed by SkCanvas::clipPath after SkPathBuilder::setFillType (Skia) / CGContextEOClip vs CGContextClip (CG). (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
+      "issue": "1522"
     },
     "canvas2d/isPointInPath": {
       "status": "partial",
