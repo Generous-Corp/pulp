@@ -33,6 +33,24 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1553)** — `calc()` / `min()` / `max()` /
+  `clamp()` are now resolved on every CSS length surface in the
+  DOM-lite translator. The fix is a one-line swap in
+  `core/view/js/web-compat-style-decl.js`: the 45 per-property
+  `parseCSSLength(resolved)` call sites now route through
+  `resolveCSSLength(resolved)` (added in `core/view/js/css-parser.js`),
+  which delegates to the existing `evaluateCalc()` evaluator when the
+  string starts with `calc(` / `min(` / `max(` / `clamp(`, and
+  otherwise falls through to `parseCSSLength` unchanged. Net effect:
+  `style.width = 'calc(100px + 50px)'`, `style.padding = 'min(10px,
+  5px)'`, `style.margin = 'max(10px, 20px)'`,
+  `style.fontSize = 'clamp(10px, 16px, 20px)'` — and every other
+  length-typed CSS property — now produce the resolved px value at
+  the bridge. Catalog: `css/calc`, `css/min`, `css/max`, `css/clamp`
+  registered as `supported`; the per-property "calc() not wired"
+  caveat in `css/margin*` / `css/padding*` `notes` is no longer
+  accurate (cleanup deferred to a follow-up to keep this a true
+  one-liner). Tests: `test_widget_bridge.cpp [issue-1553]`.
 - **2026-05-06 (pulp #1519)** — CSS outline cluster fully bridge-backed.
   `setOutlineColor` / `setOutlineOffset` / `setOutlineStyle` /
   `setOutlineWidth` now register in `widget_bridge.cpp`; the CSS

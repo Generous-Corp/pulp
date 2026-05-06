@@ -464,18 +464,35 @@ function resolveLength(parsed, ctx) {
     }
 }
 
-// Resolve a CSS length string to px in one call
+// Resolve a CSS length string into the same {value, unit} shape that
+// parseCSSLength returns, but with calc()/min()/max()/clamp() support.
+// pulp #1553 — drop-in replacement for parseCSSLength so call sites in
+// web-compat-style-decl.js gain calc-family expression support without
+// each per-property branch having to special-case the function syntax.
+//
+// For a calc-family expression the returned object always has unit "px"
+// (evaluateCalc resolves units inline against ctx). For everything else
+// we delegate to parseCSSLength so existing %, em, auto, etc. handling
+// is preserved verbatim.
 function resolveCSSLength(str, ctx) {
-    if (!str) return 0;
-    str = String(str).trim();
-    // Check for calc/min/max/clamp first
-    if (str.indexOf("calc(") === 0 || str.indexOf("min(") === 0 ||
-        str.indexOf("max(") === 0 || str.indexOf("clamp(") === 0) {
-        return evaluateCalc(str, ctx);
+    if (str === undefined || str === null || str === "") return null;
+    var s = String(str).trim();
+    if (s.indexOf("calc(") === 0 || s.indexOf("min(") === 0 ||
+        s.indexOf("max(") === 0 || s.indexOf("clamp(") === 0) {
+        var px = evaluateCalc(s, ctx);
+        return { value: px, unit: "px" };
     }
-    var parsed = parseCSSLength(str);
-    if (!parsed) return 0;
-    return resolveLength(parsed, ctx);
+    return parseCSSLength(s);
+}
+
+// Resolve a CSS length string to a raw px number. Convenience wrapper
+// over resolveCSSLength for callers that only want the numeric value
+// (currently unused but kept for parity with the original v0.78-era
+// helper signature).
+function resolveCSSLengthPx(str, ctx) {
+    var r = resolveCSSLength(str, ctx);
+    if (!r) return 0;
+    return resolveLength(r, ctx);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

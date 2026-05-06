@@ -5919,3 +5919,127 @@ TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording c
     REQUIRE(saw_filter);
     REQUIRE(saw_direction);
 }
+
+// ── pulp #1553: calc() / min() / max() / clamp() resolve everywhere ─────────
+//
+// `web-compat-style-decl.js` was previously calling the px-only
+// `parseCSSLength` helper at every length-typed property branch, which
+// silently dropped any `calc(...)`, `min(...)`, `max(...)`, or `clamp(...)`
+// expression. The fix is a one-line swap to `resolveCSSLength` (added in
+// `core/view/js/css-parser.js`) which delegates to the existing
+// `evaluateCalc()` evaluator on calc-family inputs and otherwise falls
+// through to `parseCSSLength` unchanged. These tests exercise the four
+// canonical surfaces (width / padding / margin / fontSize) end-to-end via
+// the actual JS shim path so any future regression in the shim or
+// css-parser would be caught.
+
+TEST_CASE("CSS shim: width = calc(100px + 50px) resolves to 150",
+          "[view][bridge][web-compat][css][issue-1553]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('width', 'calc(100px + 50px)');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    const auto& f = child->flex();
+    REQUIRE(f.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(f.preferred_width, WithinAbs(150.0f, 0.001f));
+}
+
+TEST_CASE("CSS shim: paddingTop = min(10px, 5px) resolves to 5",
+          "[view][bridge][web-compat][css][issue-1553]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('paddingTop', 'min(10px, 5px)');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    const auto& f = child->flex();
+    REQUIRE_THAT(f.padding_top, WithinAbs(5.0f, 0.001f));
+}
+
+TEST_CASE("CSS shim: marginLeft = max(10px, 20px) resolves to 20",
+          "[view][bridge][web-compat][css][issue-1553]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('marginLeft', 'max(10px, 20px)');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    const auto& f = child->flex();
+    REQUIRE_THAT(f.margin_left, WithinAbs(20.0f, 0.001f));
+}
+
+TEST_CASE("CSS shim: fontSize = clamp(10px, 16px, 20px) resolves to 16",
+          "[view][bridge][web-compat][css][issue-1553]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lab', 'hello', '');
+        var stub = { _id: 'lab', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('fontSize', 'clamp(10px, 16px, 20px)');
+    )");
+
+    auto* lab = dynamic_cast<Label*>(bridge.widget("lab"));
+    REQUIRE(lab != nullptr);
+    REQUIRE_THAT(lab->font_size(), WithinAbs(16.0f, 0.001f));
+}
+
+// Sanity guard: pre-existing px-only path must keep producing the same
+// numeric values it did before the swap. This is the regression channel
+// for "did we accidentally break parseCSSLength fall-through".
+TEST_CASE("CSS shim: plain px length unchanged after calc swap",
+          "[view][bridge][web-compat][css][issue-1553]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('width', '120px');
+        sd._applyProperty('paddingTop', '8px');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    const auto& f = child->flex();
+    REQUIRE(f.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(f.preferred_width, WithinAbs(120.0f, 0.001f));
+    REQUIRE_THAT(f.padding_top, WithinAbs(8.0f, 0.001f));
+}

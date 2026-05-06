@@ -32,10 +32,11 @@
     "_changelog": {
       "2026-04-30": "Initial population — 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
       "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
-      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199)."
+      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
+      "2026-05-06": "pulp #1553: resolveCSSLength now dispatches calc()/min()/max()/clamp() to evaluateCalc() in css-parser.js. The 45 parseCSSLength call sites in web-compat-style-decl.js were swapped to resolveCSSLength. Added css/calc, css/min, css/max, css/clamp as supported (css count 199 -> 203)."
     },
     "counts": {
-      "css": 199,
+      "css": 203,
       "rn": 120,
       "yoga": 53,
       "react": 0,
@@ -783,6 +784,23 @@
       "notes": "Silent no-op. typeof guard in JS prevents a runtime error but the value is never honored. Yoga's box model is content-box-equivalent.",
       "issue": ""
     },
+    "css/calc": {
+      "status": "supported",
+      "mapsTo": "evaluateCalc() in core/view/js/css-parser.js (called by resolveCSSLength)",
+      "supportedValues": [
+        "calc(<length> +/- <length>)",
+        "calc(<length> * <number>)",
+        "calc(<length> / <number>)",
+        "nested calc / min / max / clamp"
+      ],
+      "unsupportedValues": [
+        "calc-size()",
+        "non-length operands (durations, angles)"
+      ],
+      "tests": [],
+      "notes": "pulp #1553 — every CSS length surface in web-compat-style-decl.js (45 call sites) now resolves calc() via resolveCSSLength → evaluateCalc. Operates on px/em/rem/%/vw/vh/vmin/vmax with units resolved against ctx (parentSize, fontSize, viewport). Returns a px number from evaluateCalc; resolveCSSLength wraps as {value: px, unit: 'px'} so callers get the same shape parseCSSLength returned.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1553"
+    },
     "css/captionSide": {
       "status": "wontfix",
       "mapsTo": "n/a",
@@ -793,6 +811,19 @@
       "tests": [],
       "notes": "See tableLayout.",
       "issue": ""
+    },
+    "css/clamp": {
+      "status": "supported",
+      "mapsTo": "evaluateCalc() in core/view/js/css-parser.js (called by resolveCSSLength)",
+      "supportedValues": [
+        "clamp(<min>, <preferred>, <max>)"
+      ],
+      "unsupportedValues": [
+        "non-length operands"
+      ],
+      "tests": [],
+      "notes": "pulp #1553 — wired via the same resolveCSSLength → evaluateCalc dispatch as css/calc. Returns Math.min(Math.max(preferred, min), max).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1553"
     },
     "css/clear": {
       "status": "wontfix",
@@ -1783,6 +1814,20 @@
       "notes": "Not handled.",
       "issue": ""
     },
+    "css/max": {
+      "status": "supported",
+      "mapsTo": "evaluateCalc() in core/view/js/css-parser.js (called by resolveCSSLength)",
+      "supportedValues": [
+        "max(<length>, <length>, ...)",
+        "any number of comma-separated args"
+      ],
+      "unsupportedValues": [
+        "non-length operands"
+      ],
+      "tests": [],
+      "notes": "pulp #1553 — wired via the same resolveCSSLength → evaluateCalc dispatch as css/calc. Picks the largest evaluated arg.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1553"
+    },
     "css/maxHeight": {
       "status": "partial",
       "mapsTo": "setFlex(id, 'max_height', px)",
@@ -1810,6 +1855,20 @@
       "tests": [],
       "notes": "0 = no maximum (semantic differs from CSS where unspecified = none). pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
       "issue": ""
+    },
+    "css/min": {
+      "status": "supported",
+      "mapsTo": "evaluateCalc() in core/view/js/css-parser.js (called by resolveCSSLength)",
+      "supportedValues": [
+        "min(<length>, <length>, ...)",
+        "any number of comma-separated args"
+      ],
+      "unsupportedValues": [
+        "non-length operands"
+      ],
+      "tests": [],
+      "notes": "pulp #1553 — wired via the same resolveCSSLength → evaluateCalc dispatch as css/calc. Picks the smallest evaluated arg.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1553"
     },
     "css/minHeight": {
       "status": "partial",
