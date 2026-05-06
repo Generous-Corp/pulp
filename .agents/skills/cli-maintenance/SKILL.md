@@ -72,6 +72,16 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Changed behavior not reflected in slash command `.md`
 - Skills calling the old invocation syntax
 
+### Rust CLI cutover path convention
+
+After the v0.78.1 cutover, the user-facing CLI is Rust `pulp`. Release
+archives install `pulp` plus sibling `pulp-cpp`, and source builds stage the
+Rust binary at `./build/pulp`. Slash-command examples should prefer `pulp`
+on PATH for installed users and `./build/pulp` for source-tree examples.
+Do not point new docs at `./build/tools/cli/pulp`; that path was the old
+C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
+debug comparisons.
+
 ### Adding a new value to an enum-like flag (e.g., `--from <source>`)
 
 When extending a flag that takes one of a fixed set of values
@@ -122,10 +132,13 @@ same tests pass on macOS/Linux.
 
 ## `pulp pr` — shim over `shipyard pr`
 
-By default `pulp pr` now delegates to `shipyard pr` (on PATH), forwarding
-argv. Shipyard owns skill-sync, version-bump, PR creation, and cross-host
-validation; `pulp pr` exists so the old invocation, the `/pr` slash command,
-and the natural-language triggers in the `ci` skill all continue to work.
+By default `pulp pr` delegates to `shipyard pr` (on PATH), forwarding argv.
+Shipyard owns skill-sync, version-bump, PR creation, tracking state, and
+cross-host validation; `pulp pr` exists so the old invocation, the `/pr`
+slash command, and natural-language triggers in the `ci` skill all continue
+to work. Users can explicitly opt out per checkout with
+`pulp config set pr.workflow github` or `manual`, or for one command with
+`--workflow` / `PULP_PR_WORKFLOW`.
 
 Invariants:
 
@@ -133,13 +146,19 @@ Invariants:
   with shipyard's status. Do NOT add pre/post-processing in `cmd_pr.cpp` —
   shipyard is the single source of truth.
 - When `shipyard` is NOT on PATH, `pulp pr` prints an install hint pointing
-  at `tools/install-shipyard.sh` and exits non-zero. Update the hint text
-  in `cmd_pr.cpp::print_install_shipyard_hint()` when the install path
-  changes.
-- `--native` keeps the legacy in-process orchestrator (skill-sync →
-  version-bump apply → commit → push → `gh pr create` → `shipyard ship`)
-  for forensic/debugging use. Do not use it as the default path and do not
-  document it as the primary surface — the shim IS the primary surface.
+  at `tools/install-shipyard.sh` and exits non-zero. It must NOT silently
+  fall back to `gh`; that is how Shipyard tracking gaps happen. Update the
+  hint text in `cmd_pr.cpp::print_install_shipyard_hint()` when the install
+  path changes.
+- `pr.workflow=github` is the explicit GitHub CLI path. It requires `gh` on
+  PATH, runs the native gate/bump/PR flow, and leaves Shipyard tracking
+  disabled by design.
+- `pr.workflow=manual` prints the suggested commands and exits before
+  pushing or creating a PR.
+- `pulp status` reports the effective PR workflow and selected tool health.
+- `--native` keeps the legacy in-process orchestrator for forensic/debugging
+  use. Do not use it as the default path and do not document it as the
+  primary surface — Shipyard-managed `shipyard pr` is the primary surface.
 - `pulp pr` (shim or `--native`) still refuses to run on `main`.
 
 Gotchas:

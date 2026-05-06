@@ -3,6 +3,9 @@
 # Shipyard is the cross-platform CI controller Pulp uses for queue,
 # multi-platform validation, and merge gating. Pulp pins a specific
 # Shipyard release here so every checkout uses the same version.
+# This is a source-checkout contributor tool pin, not a public Pulp
+# runtime/build dependency and not something the Pulp CLI installer
+# installs automatically.
 #
 # To install or upgrade:
 #   ./tools/install-shipyard.sh

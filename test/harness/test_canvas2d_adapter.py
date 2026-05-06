@@ -297,7 +297,7 @@ class VerifierEndToEndTest(unittest.TestCase):
                 )
 
     def test_known_unimpl_entries_classified_NOT_IMPL(self):
-        """The filter, pattern, direction entries must always be NOT-IMPL.
+        """The filter and direction entries must remain NOT-IMPL.
 
         issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
         shadowOffsetY are now PASS — see
@@ -308,12 +308,13 @@ class VerifierEndToEndTest(unittest.TestCase):
         imageSmoothingQuality are now PASS — see
         `test_bridge_thin_gap_fill_entries_classified_PASS`.
 
-        createPattern stayed NOT-IMPL — deferred from #1434 because it
-        needs real image-resource plumbing, not just a bridge fn."""
+        Sub-agent #24 follow-up to #1480: createPattern is now
+        DIVERGE — Skia path renders real tiled fills via
+        SkShader::MakeImage; CG degrades. See
+        `test_bridge_thin_pattern_classified_DIVERGE`."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
-            "canvas2d/createPattern",
             "canvas2d/filter",
             "canvas2d/direction",
         ):
@@ -363,6 +364,24 @@ class VerifierEndToEndTest(unittest.TestCase):
             Status.DIVERGE,
             msg=f"{name} must be DIVERGE (CG degraded): {by_name[name].detail}",
         )
+
+    def test_bridge_thin_pattern_classified_DIVERGE(self):
+        """Sub-agent #24 follow-up to #1480 — createPattern moves from
+        NOT-IMPL → DIVERGE. Skia routes through SkShader::MakeImage with
+        SkTileMode per axis (real tiled fill, all four repetition
+        values: repeat / repeat-x / repeat-y / no-repeat). CG degrades
+        to the active solid colour (no native pattern shader without a
+        CGPattern callback dance) — same fallback shape as conic."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        name = "canvas2d/createPattern"
+        self.assertIn(name, by_name)
+        self.assertEqual(
+            by_name[name].status,
+            Status.DIVERGE,
+            msg=f"{name} must be DIVERGE (CG degraded): {by_name[name].detail}",
+        )
+        self.assertIn("cg-pattern-degraded", by_name[name].detail)
 
     def test_shadow_entries_classified_PASS(self):
         """issue-1434 batch 7 — Canvas2D shadow* state setters are

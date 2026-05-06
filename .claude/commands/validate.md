@@ -5,7 +5,7 @@ description: Run plugin format validators (auval, clap-validator, pluginval)
 
 Run plugin format validation on built plugins.
 
-Run: `./build/tools/cli/pulp validate`
+Run: `pulp validate` when the CLI is on PATH, or `./build/pulp validate` from a source build.
 
 This runs available validators:
 - **auval** — Audio Unit validation (macOS, if installed)

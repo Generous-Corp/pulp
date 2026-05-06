@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -78,14 +79,17 @@ fs::path unique_temp_dir(const std::string& prefix) {
 }
 
 
-// The pulp CLI binary lands at <build>/tools/cli/pulp once `pulp-cli`
-// has been built. The test runner's working directory at invocation
-// time is <build>/test, so "../tools/cli/pulp" is the relative path.
-// Fall back to a PULP_CLI_PATH env override for adversarial CI setups.
+// After the Rust CLI cutover, the instrumented C++ delegate lands at
+// <build>/tools/cli/pulp-cpp. Older/pre-cutover builds used
+// <build>/tools/cli/pulp. Prefer pulp-cpp so coverage builds exercise
+// the C++ implementation directly, but keep the old fallback for
+// compatibility. PULP_CLI_PATH can still override either path.
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
+    auto cpp = fs::current_path() / ".." / "tools" / "cli" / "pulp-cpp";
+    if (fs::exists(cpp)) return cpp;
     return fs::current_path() / ".." / "tools" / "cli" / "pulp";
 }
 
@@ -119,6 +123,66 @@ void write_text(const fs::path& path, const std::string& text) {
     f << text;
     REQUIRE(f.good());
 }
+
+char path_separator() {
+#if defined(_WIN32)
+    return ';';
+#else
+    return ':';
+#endif
+}
+
+void prepend_to_path(const fs::path& dir) {
+    const char* old = std::getenv("PATH");
+    auto next = dir.string();
+    if (old && *old) {
+        next += path_separator();
+        next += old;
+    }
+    pulp_setenv("PATH", next.c_str(), 1);
+}
+
+#if !defined(_WIN32)
+std::string pinned_shipyard_version_for_test() {
+    auto toml = read_file(fs::current_path().parent_path().parent_path() /
+                          "tools" / "shipyard.toml");
+    std::istringstream lines(toml);
+    std::string line;
+    while (std::getline(lines, line)) {
+        auto pos = line.find("version");
+        if (pos == std::string::npos) continue;
+        auto eq = line.find('=', pos);
+        if (eq == std::string::npos) continue;
+        auto value = line.substr(eq + 1);
+        auto first = value.find('"');
+        auto last = value.find_last_of('"');
+        if (first != std::string::npos && last != std::string::npos && last > first) {
+            return value.substr(first + 1, last - first - 1);
+        }
+    }
+    return "v0.46.0";
+}
+
+fs::path write_fake_shipyard(const fs::path& dir, const std::string& version) {
+    auto path = dir / "shipyard";
+    write_text(path,
+               "#!/bin/sh\n"
+               "if [ \"$1\" = \"--version\" ]; then\n"
+               "  echo \"shipyard " + version + "\"\n"
+               "  exit 0\n"
+               "fi\n"
+               "if [ \"$1\" = \"pr\" ]; then\n"
+               "  echo \"fake shipyard pr $2\"\n"
+               "  exit 0\n"
+               "fi\n"
+               "echo \"fake shipyard\"\n");
+    fs::permissions(path,
+                    fs::perms::owner_exec | fs::perms::owner_read |
+                    fs::perms::owner_write,
+                    fs::perm_options::add);
+    return path;
+}
+#endif
 
 }  // namespace
 
@@ -196,6 +260,279 @@ TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
     REQUIRE(r.exit_code != 0);
     REQUIRE(r.stderr_output.find("Unknown config subcommand") != std::string::npos);
 }
+
+TEST_CASE("pulp config supports pr.workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-config");
+    fs::create_directories(tmp_home);
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    auto set = run_pulp({"config", "set", "pr.workflow", "github"});
+    auto get = run_pulp({"config", "get", "pr.workflow"});
+    auto list = run_pulp({"config", "list"});
+    auto bad = run_pulp({"config", "set", "pr.workflow", "svn"});
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(set.timed_out);
+    REQUIRE(set.exit_code == 0);
+    REQUIRE_FALSE(get.timed_out);
+    REQUIRE(get.exit_code == 0);
+    REQUIRE(get.stdout_output.find("github") != std::string::npos);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("pr.workflow = github") != std::string::npos);
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE(bad.exit_code != 0);
+    REQUIRE(bad.stderr_output.find("pr.workflow must be one of") != std::string::npos);
+}
+
+TEST_CASE("pulp status reports effective PR workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-status");
+    fs::create_directories(tmp_home);
+    {
+        std::ofstream cfg(tmp_home / "config.toml");
+        cfg << "[pr]\nworkflow = \"manual\"\n"
+            << "[update]\nmode = \"off\"\n";
+    }
+
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"status"});
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("PR workflow: manual (config:pr.workflow)") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Shipyard tracking: disabled by pr.workflow=manual") != std::string::npos);
+}
+
+TEST_CASE("pulp status reports invalid and github PR workflow modes",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    update_disabled.set("1");
+
+    auto invalid_home = unique_temp_dir("pulp-pr-workflow-status-invalid");
+    fs::create_directories(invalid_home);
+    home_env.set(invalid_home.string());
+    workflow_env.set("subversion");
+    auto invalid = run_pulp({"status"});
+    fs::remove_all(invalid_home);
+
+    REQUIRE_FALSE(invalid.timed_out);
+    REQUIRE(invalid.exit_code == 0);
+    REQUIRE(invalid.stdout_output.find("PR workflow: invalid (env:PULP_PR_WORKFLOW)")
+            != std::string::npos);
+    REQUIRE(invalid.stdout_output.find("pr.workflow must be one of")
+            != std::string::npos);
+
+    auto github_home = unique_temp_dir("pulp-pr-workflow-status-github");
+    fs::create_directories(github_home);
+    home_env.set(github_home.string());
+    workflow_env.set("github");
+    auto github = run_pulp({"status"});
+    fs::remove_all(github_home);
+
+    REQUIRE_FALSE(github.timed_out);
+    REQUIRE(github.exit_code == 0);
+    REQUIRE(github.stdout_output.find("PR workflow: github (env:PULP_PR_WORKFLOW)")
+            != std::string::npos);
+    REQUIRE(github.stdout_output.find("GitHub CLI:") != std::string::npos);
+    REQUIRE(github.stdout_output.find("Shipyard tracking: disabled by pr.workflow=github")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp pr validates workflow selection before shipping",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-pr");
+    fs::create_directories(home);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    auto missing_value = run_pulp({"pr", "--workflow"}, 10000);
+    REQUIRE_FALSE(missing_value.timed_out);
+    REQUIRE(missing_value.exit_code == 2);
+    REQUIRE(missing_value.stderr_output.find("--workflow requires a value")
+            != std::string::npos);
+
+    workflow_env.set("svn");
+    auto invalid_env = run_pulp({"pr", "--dry-run"}, 10000);
+    REQUIRE_FALSE(invalid_env.timed_out);
+    REQUIRE(invalid_env.exit_code == 2);
+    REQUIRE(invalid_env.stderr_output.find("invalid PR workflow 'svn' from env:PULP_PR_WORKFLOW")
+            != std::string::npos);
+    REQUIRE(invalid_env.stderr_output.find("pr.workflow must be one of")
+            != std::string::npos);
+
+    workflow_env.set("");
+    auto path_dir = home / "empty-path";
+    fs::create_directories(path_dir);
+    path_env.set(path_dir.string());
+    auto missing_shipyard = run_pulp({"pr", "--workflow", "shipyard"}, 10000);
+    REQUIRE_FALSE(missing_shipyard.timed_out);
+    REQUIRE(missing_shipyard.exit_code == 2);
+    REQUIRE(missing_shipyard.stderr_output.find("shipyard is not on PATH")
+            != std::string::npos);
+    REQUIRE(missing_shipyard.stderr_output.find("pulp config set pr.workflow github")
+            != std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-manual-github");
+    fs::create_directories(home);
+    home_env.set(home.string());
+
+    auto manual = run_pulp({"pr", "--workflow=manual", "--base", "origin/main",
+                            "--title", "Manual PR Plan"}, 10000);
+    REQUIRE_FALSE(manual.timed_out);
+    REQUIRE(manual.exit_code == 0);
+    REQUIRE(manual.stdout_output.find("manual PR workflow selected")
+            != std::string::npos);
+    REQUIRE(manual.stdout_output.find("gh pr create --title")
+            != std::string::npos);
+    REQUIRE(manual.stdout_output.find("Manual and GitHub workflows do not create Shipyard tracking state")
+            != std::string::npos);
+
+    auto github_dry_run = run_pulp({"pr", "--workflow", "github", "--dry-run",
+                                    "--title", "GitHub PR Plan"}, 10000);
+    REQUIRE_FALSE(github_dry_run.timed_out);
+    REQUIRE(github_dry_run.exit_code == 0);
+    REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
+            != std::string::npos);
+    REQUIRE(github_dry_run.stdout_output.find("[dry-run] Plan:")
+            != std::string::npos);
+    REQUIRE(github_dry_run.stdout_output.find("shipyard ship")
+            == std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp pr github workflow requires gh for real PR creation",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-gh-missing");
+    auto path_dir = home / "empty-path";
+    fs::create_directories(path_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+    path_env.set(path_dir.string());
+
+    auto missing_gh = run_pulp({"pr", "--workflow", "github"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(missing_gh.timed_out);
+    REQUIRE(missing_gh.exit_code == 2);
+    REQUIRE(missing_gh.stderr_output.find("PR workflow is `github`, but the GitHub CLI (`gh`) is not on PATH")
+            != std::string::npos);
+    REQUIRE(missing_gh.stderr_output.find("`github` is Pulp's direct GitHub workflow name")
+            != std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-shipyard");
+    auto bin_dir = home / "bin";
+    fs::create_directories(bin_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    const std::string pinned = pinned_shipyard_version_for_test();
+    write_fake_shipyard(bin_dir, pinned);
+    prepend_to_path(bin_dir);
+
+    auto delegated = run_pulp({"pr", "--help"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(delegated.timed_out);
+    REQUIRE(delegated.exit_code == 0);
+    REQUIRE(delegated.stdout_output.find("Usage: pulp pr [--native]")
+            != std::string::npos);
+    REQUIRE(delegated.stdout_output.find("fake shipyard pr --help")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp status reports shipyard version and pin health",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-status-shipyard");
+    auto bin_dir = home / "bin";
+    fs::create_directories(bin_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    const std::string pinned = pinned_shipyard_version_for_test();
+    auto shipyard = write_fake_shipyard(bin_dir, pinned);
+    prepend_to_path(bin_dir);
+
+    auto status = run_pulp({"status"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("PR workflow: shipyard (default)")
+            != std::string::npos);
+    REQUIRE(status.stdout_output.find("Shipyard: " + shipyard.string())
+            != std::string::npos);
+    REQUIRE(status.stdout_output.find("(" + pinned + ") pinned " + pinned)
+            != std::string::npos);
+}
+#endif
 
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
           "[cli][shellout][version]") {
@@ -1085,6 +1422,38 @@ TEST_CASE("pulp pr without shipyard prints install guidance",
     REQUIRE(combined.find("shipyard is not on PATH") != std::string::npos);
     REQUIRE(combined.find("./tools/install-shipyard.sh") != std::string::npos);
     REQUIRE(combined.find("pulp pr --native") != std::string::npos);
+}
+
+TEST_CASE("pulp pr github workflow requires gh instead of falling back from shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    ScopedEnvVar workflow("PULP_PR_WORKFLOW");
+    path.set("");
+    workflow.set("github");
+
+    auto r = run_pulp({"pr"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("GitHub CLI (`gh`) is not on PATH") != std::string::npos);
+    REQUIRE(combined.find("shipyard is not on PATH") == std::string::npos);
+}
+
+TEST_CASE("pulp pr manual workflow does not require shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto r = run_pulp({"pr", "--workflow", "manual", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
+    REQUIRE(r.stderr_output.find("shipyard is not on PATH") == std::string::npos);
 }
 
 TEST_CASE("pulp pr native help stays available without shipyard",

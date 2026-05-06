@@ -7,10 +7,10 @@ Connect to a running plugin's inspector server to query the view tree,
 widget state, layout, and runtime diagnostics.
 
 ```bash
-./build/tools/cli/pulp inspect
-./build/tools/cli/pulp inspect --port 49152
-./build/tools/cli/pulp inspect --command DOM.getDocument
-./build/tools/cli/pulp inspect --command Capture.screenshot --output shot.json
+./build/pulp inspect
+./build/pulp inspect --port 49152
+./build/pulp inspect --command DOM.getDocument
+./build/pulp inspect --command Capture.screenshot --output shot.json
 ```
 
 The inspector exposes:
