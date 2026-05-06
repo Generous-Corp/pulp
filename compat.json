@@ -3925,15 +3925,33 @@
       "issue": ""
     },
     "rn/mixBlendMode": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches mixBlendMode to setMixBlendMode (prop-applier.ts since pulp #1549). Bridge maps the W3C blend-mode keyword set to canvas::Canvas::BlendMode and writes to View::mix_blend_mode_; paint path forces a saveLayer via save_layer_with_blend so the subtree composites back through the requested mode. Tests: packages/pulp-react/test/prop-applier-mix-blend-mode.test.ts (JSX dispatch); test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping (bridge keyword table).",
+      "supportedValues": [
+        "normal",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
+      ],
       "unsupportedValues": [
-        "all"
+        "plus-lighter",
+        "plus-darker"
       ],
       "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "notes": "Wired through @pulp/react JSX (RN 0.76 New Architecture). Skia paint backend honors the keyword at saveLayer compositing time; CG / D2D backends fall through to plain save_layer (no-op blend) until those backends grow the same shim.",
+      "issue": "1549"
     },
     "rn/opacity": {
       "status": "supported",

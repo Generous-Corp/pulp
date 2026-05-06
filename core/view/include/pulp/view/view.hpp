@@ -671,6 +671,20 @@ public:
     void set_white_space_nowrap(bool n) { white_space_nowrap_ = n; }
     bool white_space_nowrap() const { return white_space_nowrap_; }
 
+    /// CSS / RN `mix-blend-mode` (pulp #1549). The blend mode applied when
+    /// this View's compositing layer composites back onto its parent. Stored
+    /// as the canvas BlendMode enum so the paint path can pass it straight
+    /// through to the layer-paint without a string lookup. Default
+    /// `BlendMode::normal` is a paint-time no-op (kSrcOver). Setting any
+    /// non-default mode forces a saveLayer() at paint time so the subtree
+    /// renders into an offscreen buffer that gets composited with the
+    /// requested blend mode — same shape as opacity / filter:blur.
+    void set_mix_blend_mode(canvas::Canvas::BlendMode m) { mix_blend_mode_ = m; }
+    canvas::Canvas::BlendMode mix_blend_mode() const { return mix_blend_mode_; }
+    bool has_non_default_blend_mode() const {
+        return mix_blend_mode_ != canvas::Canvas::BlendMode::normal;
+    }
+
     /// Cursor style hint (CSS cursor property)
     enum class CursorStyle {
         default_, pointer, crosshair, text, grab, grabbing, not_allowed,
@@ -794,6 +808,11 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
+    // pulp #1549 — CSS / RN mix-blend-mode. Default kSrcOver (canvas
+    // BlendMode::normal) is a paint-time no-op; any non-default value
+    // forces a saveLayer() at paint time so the subtree composites back
+    // through the requested blend mode.
+    canvas::Canvas::BlendMode mix_blend_mode_ = canvas::Canvas::BlendMode::normal;
 
     // Pointer capture: pointer_id → this view receives all events for that pointer
     std::vector<int> captured_pointers_;

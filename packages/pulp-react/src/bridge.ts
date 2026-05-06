@@ -266,6 +266,10 @@ export function createMockBridge(): MockBridge {
         // purely on the prop-applier dispatch.
         'setBackfaceVisibility', 'setCursor', 'setFilter',
         'setPointerEvents', 'setTransformOrigin', 'setUserSelect',
+        // pulp #1549 — RN `mixBlendMode` (New Architecture). Bridge fn
+        // wires the View::mix_blend_mode_ slot; paint-time saveLayer
+        // composites back with the requested mode.
+        'setMixBlendMode',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
         'setValue', 'setTheme', 'layout', 'on', 'registerHover',
         // pulp #1381 — registerPointer arms the bridge's on_pointer_event

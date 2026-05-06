@@ -995,6 +995,65 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE(engine.evaluate("missing_preset_type").toString() == "undefined");
 }
 
+// pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture). The bridge
+// fn `setMixBlendMode` maps W3C blend-mode keywords to the canvas
+// BlendMode enum on the View slot; the @pulp/react prop-applier dispatch
+// is exercised by packages/pulp-react/test/prop-applier-mix-blend-mode.test.ts.
+TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
+          "[view][bridge][issue-1549]") {
+    using BM = pulp::canvas::Canvas::BlendMode;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+
+    // Default is normal — paint-time fast path stays a no-op.
+    REQUIRE(p->mix_blend_mode() == BM::normal);
+    REQUIRE_FALSE(p->has_non_default_blend_mode());
+
+    struct KW { const char* keyword; BM mode; };
+    const KW table[] = {
+        {"normal",      BM::normal},
+        {"multiply",    BM::multiply},
+        {"screen",      BM::screen},
+        {"overlay",     BM::overlay},
+        {"darken",      BM::darken},
+        {"lighten",     BM::lighten},
+        {"color-dodge", BM::color_dodge},
+        {"color-burn",  BM::color_burn},
+        {"hard-light",  BM::hard_light},
+        {"soft-light",  BM::soft_light},
+        {"difference",  BM::difference},
+        {"exclusion",   BM::exclusion},
+        {"hue",         BM::hue},
+        {"saturation",  BM::saturation},
+        {"color",       BM::color},
+        {"luminosity",  BM::luminosity},
+    };
+    for (const auto& row : table) {
+        std::string js = std::string("setMixBlendMode('p', '") + row.keyword + "');";
+        bridge.load_script(js);
+        REQUIRE(p->mix_blend_mode() == row.mode);
+    }
+
+    // Non-default keyword sets has_non_default_blend_mode().
+    bridge.load_script("setMixBlendMode('p', 'multiply');");
+    REQUIRE(p->has_non_default_blend_mode());
+
+    // Unknown keyword -> normal (paint-time no-op fallback).
+    bridge.load_script("setMixBlendMode('p', 'plus-lighter');");
+    REQUIRE(p->mix_blend_mode() == BM::normal);
+    REQUIRE_FALSE(p->has_non_default_blend_mode());
+}
+
 // ── Bridge animation API tests ──────────────────────────────────────────────
 
 TEST_CASE("WidgetBridge setMotionToken from JS", "[view][bridge][animation]") {

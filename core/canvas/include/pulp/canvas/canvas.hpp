@@ -512,6 +512,19 @@ public:
         (void)opacity; (void)blur_radius;
     }
 
+    /// pulp #1549 — Save a compositing layer with an explicit blend mode.
+    /// Used by CSS / RN `mix-blend-mode`: the subtree paints into the
+    /// offscreen layer and the layer-paint composites back with the
+    /// requested blend mode. Default `BlendMode::normal` is equivalent to
+    /// the plain `save_layer` overload (kSrcOver). Subclasses that don't
+    /// know how to honor the blend mode fall back to the plain overload.
+    virtual void save_layer_with_blend(float x, float y, float w, float h,
+                                       float opacity, float blur_radius,
+                                       BlendMode mode) {
+        (void)mode;
+        save_layer(x, y, w, h, opacity, blur_radius);
+    }
+
     // ── Text ─────────────────────────────────────────────────────────────
     virtual void set_font(const std::string& family, float size) = 0;
     virtual void set_text_align(TextAlign align) = 0;

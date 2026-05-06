@@ -4079,6 +4079,45 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1549 — setMixBlendMode(id, "multiply") for CSS / RN
+    // `mix-blend-mode`. Maps the W3C blend-mode keyword set to the
+    // canvas BlendMode enum so the View paint path can pass it
+    // straight into `save_layer_with_blend()` at compositing time.
+    // The keyword set mirrors the W3C separable + non-separable blend
+    // modes (the same 16 values RN's New Architecture surface accepts;
+    // see tools/harness/oracles/rn/rn-viewstyle.json::mixBlendMode).
+    // Unknown keywords (including the empty string and "normal") leave
+    // the View at default `BlendMode::normal` so the fast path stays
+    // a paint-time no-op.
+    engine_.register_function("setMixBlendMode",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "normal");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (!v) return choc::value::Value();
+            using BM = pulp::canvas::Canvas::BlendMode;
+            BM mode = BM::normal;
+            if      (kw == "normal")      mode = BM::normal;
+            else if (kw == "multiply")    mode = BM::multiply;
+            else if (kw == "screen")      mode = BM::screen;
+            else if (kw == "overlay")     mode = BM::overlay;
+            else if (kw == "darken")      mode = BM::darken;
+            else if (kw == "lighten")     mode = BM::lighten;
+            else if (kw == "color-dodge") mode = BM::color_dodge;
+            else if (kw == "color-burn")  mode = BM::color_burn;
+            else if (kw == "hard-light")  mode = BM::hard_light;
+            else if (kw == "soft-light")  mode = BM::soft_light;
+            else if (kw == "difference")  mode = BM::difference;
+            else if (kw == "exclusion")   mode = BM::exclusion;
+            else if (kw == "hue")         mode = BM::hue;
+            else if (kw == "saturation")  mode = BM::saturation;
+            else if (kw == "color")       mode = BM::color;
+            else if (kw == "luminosity")  mode = BM::luminosity;
+            // Unknown / "plus-lighter" / "plus-darker" → normal (no-op).
+            v->set_mix_blend_mode(mode);
+            return choc::value::Value();
+        });
+
     // setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)")
     engine_.register_function("setBackgroundGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

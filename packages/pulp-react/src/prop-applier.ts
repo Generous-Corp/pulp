@@ -748,6 +748,11 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'backfaceVisibility': return call('setBackfaceVisibility', id, value as string);
         case 'cursor':             return call('setCursor', id, value as string);
         case 'filter':             return call('setFilter', id, value as string);
+        // pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture).
+        // Forwards the W3C blend-mode keyword string to
+        // `setMixBlendMode`; the bridge keyword→enum table lives at
+        // widget_bridge.cpp::setMixBlendMode.
+        case 'mixBlendMode':       return call('setMixBlendMode', id, value as string);
         case 'pointerEvents':      return call('setPointerEvents', id, value as string);
         case 'textTransform':      return call('setTextTransform', id, value as string);
         case 'userSelect':         return call('setUserSelect', id, value as string);

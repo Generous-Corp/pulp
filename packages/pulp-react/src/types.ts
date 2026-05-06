@@ -184,6 +184,17 @@ export interface StyleProps {
     backfaceVisibility?: 'hidden' | 'visible';
     cursor?: string;
     filter?: string;
+    /// pulp #1549 — RN `mixBlendMode` (New Architecture only).
+    /// Forwards to `setMixBlendMode(id, kw)`; the bridge maps the W3C
+    /// blend-mode keyword set onto the canvas `BlendMode` enum and the
+    /// View paint path uses `save_layer_with_blend()` so the subtree
+    /// composites back through the requested mode. `'normal'` (or
+    /// unknown keywords) is a paint-time no-op.
+    mixBlendMode?:
+        | 'normal' | 'multiply' | 'screen' | 'overlay'
+        | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
+        | 'hard-light' | 'soft-light' | 'difference' | 'exclusion'
+        | 'hue' | 'saturation' | 'color' | 'luminosity';
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
     /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
