@@ -771,6 +771,38 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // pulp #1517 — background sub-props.
+        // - backgroundAttachment: only `scroll` is the conformant default in
+        //   pulp's non-scrolling layout model. `fixed` / `local` need a
+        //   scroll-context coupling we don't model — accept verbatim and
+        //   no-op so consumers don't crash. Catalog is `noop`.
+        // - backgroundClip: `text` is the only interesting form (paint-time
+        //   SkBlendMode::kSrcIn against text glyphs). Others are no-ops on
+        //   our solid-bg surface. The bridge slot stores the keyword so
+        //   future paint logic can honor it; catalog is `partial` because
+        //   `text` isn't fully wired through the paint chain yet.
+        // - backgroundOrigin: positions the bg-paint origin relative to the
+        //   border / padding / content box. Pulp paints bg edge-to-edge,
+        //   so all three keywords no-op for a solid color and matter only
+        //   for repeating gradients (deferred). Catalog is `noop`.
+        case "backgroundAttachment":
+            // Stored on the View's bg-attachment slot via a thin bridge
+            // setter that just records the keyword — no paint impact today.
+            if (typeof setBackgroundAttachment === "function") {
+                setBackgroundAttachment(id, resolved);
+            }
+            break;
+        case "backgroundClip":
+            if (typeof setBackgroundClip === "function") {
+                setBackgroundClip(id, resolved);
+            }
+            break;
+        case "backgroundOrigin":
+            if (typeof setBackgroundOrigin === "function") {
+                setBackgroundOrigin(id, resolved);
+            }
+            break;
+
         // Grid
         case "gridTemplateColumns":
             setGrid(id, "template_columns", resolved);
@@ -1236,6 +1268,9 @@ var __cssProperties__ = [
     "position", "top", "right", "bottom", "left", "zIndex", "inset",
     "boxShadow", "filter", "backdropFilter", "background", "backgroundImage",
     "backgroundSize", "backgroundPosition", "backgroundRepeat",
+    // pulp #1517 — background sub-props (mostly noop / partial in pulp's
+    // layout model; see _applyProperty for the per-prop semantics).
+    "backgroundAttachment", "backgroundClip", "backgroundOrigin",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
     "lineClamp", "webkitLineClamp"
 ];

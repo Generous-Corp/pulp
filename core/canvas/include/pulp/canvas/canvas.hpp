@@ -334,6 +334,20 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+    /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
+    /// is the outer / end circle. Backends with a real two-circle shader
+    /// (Skia `MakeTwoPointConical`, CG `CGContextDrawRadialGradient`)
+    /// override; the default forwards to the single-circle overload using
+    /// the outer circle so older fallbacks still get a usable gradient.
+    virtual void set_fill_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_fill_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
     /// Set a conic (sweep) gradient as the fill paint.
     virtual void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                           const Color* colors, const float* positions,

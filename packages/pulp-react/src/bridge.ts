@@ -85,6 +85,10 @@ declare global {
     // ── Visual style ────────────────────────────────────────────────
     function setBackground(id: string, hexColor: string): void;
     function setBackgroundGradient(id: string, css: string): void;
+    // pulp #1517 — background sub-properties (storage-only, partial paint).
+    const setBackgroundAttachment: ((id: string, kw: string) => void) | undefined;
+    const setBackgroundClip:       ((id: string, kw: string) => void) | undefined;
+    const setBackgroundOrigin:     ((id: string, kw: string) => void) | undefined;
     function setBorder(id: string, hexColor: string, width: number, radius: number): void;
     function setBorderSide(
         id: string,
@@ -221,6 +225,8 @@ export function createMockBridge(): MockBridge {
         'createImage', 'createIcon', 'createProgress', 'createMeter', 'createXYPad',
         'createGrid', 'removeWidget', 'moveWidget', 'insertChild',
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
+        // pulp #1517 — background sub-properties (mostly noop today).
+        'setBackgroundAttachment', 'setBackgroundClip', 'setBackgroundOrigin',
         // pulp #1027 — per-attribute border setters needed for the audit
         // PR #1166 finding-#4 fix (preserve unset siblings).
         'setBorderColor', 'setBorderWidth', 'setBorderRadius', 'setBorderStyle',

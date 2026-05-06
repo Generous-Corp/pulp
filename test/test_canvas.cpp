@@ -18,6 +18,10 @@
 #ifdef __APPLE__
 #include <pulp/canvas/cg_canvas.hpp>
 #include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#include <array>
+#include <cstdio>
+#include <unistd.h>
 #endif
 
 using namespace pulp::canvas;
@@ -1901,6 +1905,273 @@ TEST_CASE("CoreGraphicsCanvas::set_blend_mode every enum value round-trips throu
             REQUIRE((r + g + b + a) > 0);
         }
     }
+}
+
+// ── pulp #1524 — CG-degraded gradient/pattern cluster ────────────────────────
+//
+// Promotes 3 DIVERGE entries → PASS on the CoreGraphics fallback path:
+//   * canvas2d/createConicGradient     — software-rasterised CGImage sweep
+//   * canvas2d/createRadialGradient    — full two-circle CGContextDrawRadialGradient
+//   * canvas2d/createPattern           — CGPatternCreate + image-tile callback
+//
+// Strategy: build a CGBitmapContext, route a draw through CoreGraphicsCanvas,
+// read the pixels back, and assert the output reflects the spec (not the
+// pre-#1524 single-stop / outer-circle-only / solid-fallback degradations).
+
+namespace {
+struct CgPixelGrid {
+    std::vector<uint8_t> pixels;
+    int w = 0, h = 0;
+    // Sample a pixel as straight-RGBA in [0, 255]. Origin convention matches
+    // the CoreGraphicsCanvas constructor: canvas y=0 is the *top* of the
+    // bitmap. The bitmap memory is bottom-up, so flip y here.
+    std::array<int, 4> at(int x, int y) const {
+        const int by = (h - 1) - y;
+        const size_t off = (static_cast<size_t>(by) * w + x) * 4u;
+        return {pixels[off + 0], pixels[off + 1], pixels[off + 2], pixels[off + 3]};
+    }
+};
+
+CGContextRef cg_make_bitmap(int w, int h, std::vector<uint8_t>& pixels) {
+    pixels.assign(static_cast<size_t>(w) * h * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    if (!cs) return nullptr;
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), w, h, 8, w * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    return ctx;
+}
+} // namespace
+
+// pulp #1524 — `createConicGradient` on CG must produce angle-varying colour
+// instead of the pre-#1524 first-stop solid fallback. We fill a 64x64 square
+// with a 4-stop conic spanning red / green / blue / red and sample the four
+// cardinal directions from the centre. Each cardinal must hit a different
+// dominant channel — proving the sweep actually rotated through the stops.
+TEST_CASE("CoreGraphicsCanvas createConicGradient sweeps angle through stops",
+          "[canvas][cg][issue-1524]") {
+    constexpr int W = 64, H = 64;
+    std::vector<uint8_t> pixels;
+    CGContextRef ctx = cg_make_bitmap(W, H, pixels);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        const Color stops[] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),  // 0     (right, +x)  red
+            Color::rgba(0.0f, 1.0f, 0.0f, 1.0f),  // 0.25  (down,  +y)  green
+            Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),  // 0.5   (left,  -x)  blue
+            Color::rgba(0.0f, 1.0f, 0.0f, 1.0f),  // 0.75  (up,    -y)  green
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f)   // 1.0   wrap to red
+        };
+        const float pos[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+        canvas.set_fill_gradient_conic(W * 0.5f, H * 0.5f, 0.0f, stops, pos, 5);
+        canvas.fill_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+
+    CgPixelGrid grid{pixels, W, H};
+    // East cardinal — far right, vertically centred — must be red-dominant.
+    auto east  = grid.at(W - 4, H / 2);
+    auto south = grid.at(W / 2, H - 4);   // canvas y down = +y → green stop
+    auto west  = grid.at(3,     H / 2);
+    INFO("east="  << east[0]  << "," << east[1]  << "," << east[2]);
+    INFO("south=" << south[0] << "," << south[1] << "," << south[2]);
+    INFO("west="  << west[0]  << "," << west[1]  << "," << west[2]);
+    REQUIRE(east[0]  > east[1]);   REQUIRE(east[0]  > east[2]);   // red dominant
+    REQUIRE(south[1] > south[0]);  REQUIRE(south[1] > south[2]);  // green dominant
+    REQUIRE(west[2]  > west[0]);   REQUIRE(west[2]  > west[1]);   // blue dominant
+
+    // Sanity: all sampled pixels must be opaque (alpha 255). Catches a
+    // regression where the rasteriser writes 0-alpha and CG composites
+    // nothing onto the destination.
+    REQUIRE(east[3]  == 255);
+    REQUIRE(south[3] == 255);
+    REQUIRE(west[3]  == 255);
+}
+
+// pulp #1524 — `createRadialGradient` two-circle form must honour the inner
+// circle. Pre-#1524 the JS shim dropped (x0,y0,r0) and forwarded only the
+// outer circle, so a gradient with an *offset* inner circle painted as if
+// inner_centre==outer_centre — visually the same as a single-circle radial.
+//
+// Strategy: build a 64x64 with a two-circle radial whose inner circle sits
+// well to the right of the outer centre and whose stops are red→blue.
+// With both circles wired, the red-dominant region must shift toward the
+// inner-circle centre. With the bug, red lands at the outer centre instead.
+TEST_CASE("CoreGraphicsCanvas radial two-circle form honours inner circle",
+          "[canvas][cg][issue-1524]") {
+    constexpr int W = 64, H = 64;
+    std::vector<uint8_t> pixels;
+    CGContextRef ctx = cg_make_bitmap(W, H, pixels);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        const Color stops[] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),  // red at inner circle (t=0)
+            Color::rgba(0.0f, 0.0f, 1.0f, 1.0f)   // blue at outer circle (t=1)
+        };
+        const float pos[] = {0.0f, 1.0f};
+        // Inner circle: centre (50, 32), radius 0 (point) — far to the right.
+        // Outer circle: centre (32, 32), radius 30 — covers most of the canvas.
+        // Spec semantics: red is concentrated near (50, 32); blue is at the
+        // outer circle's ring. Pre-fix: shim collapsed to (32, 32) and red
+        // would land at the centre instead.
+        canvas.set_fill_gradient_radial_two_circles(
+            50.0f, 32.0f, 0.0f,
+            32.0f, 32.0f, 30.0f,
+            stops, pos, 2);
+        canvas.fill_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+
+    CgPixelGrid grid{pixels, W, H};
+    // Sample near the inner-circle centre (50, 32) — must be red-dominant.
+    auto near_inner = grid.at(50, 32);
+    // Sample near the outer-circle centre (32, 32) — must NOT be red-dominant
+    // (this is what would fail pre-fix where the inner collapsed onto outer).
+    auto at_outer_centre = grid.at(32, 32);
+    INFO("near_inner=" << near_inner[0] << "," << near_inner[1] << "," << near_inner[2]);
+    INFO("at_outer_centre=" << at_outer_centre[0] << "," << at_outer_centre[1] << "," << at_outer_centre[2]);
+    REQUIRE(near_inner[0] > near_inner[2]);             // red > blue near inner
+    REQUIRE(at_outer_centre[0] < near_inner[0]);        // outer-centre is less red than inner
+    // Defensive: gradient must have actually painted (alpha 255 inside the
+    // outer circle).
+    REQUIRE(near_inner[3] == 255);
+}
+
+// pulp #1524 — `createPattern` on CG must install a real CGPattern instead
+// of falling back to the active solid colour. A 1x2 image (red top half,
+// blue bottom half) tiled with `repeat` should produce alternating red/blue
+// horizontal bands when filled across a tall rectangle. Pre-#1524 the
+// canvas painted a single solid colour.
+TEST_CASE("CoreGraphicsCanvas set_fill_pattern installs a real CGPattern",
+          "[canvas][cg][issue-1524]") {
+    constexpr int W = 32, H = 32;
+
+    // Step 1 — write a tiny PNG-shaped tile to a temp file. Using a 4x4
+    // bitmap (red top half, blue bottom half) keeps the disk decode path
+    // exercised end-to-end (ImageIO → CGImageRef → CGPattern callback).
+    // Use only CoreFoundation + ImageIO (no Cocoa) so this stays C++ and
+    // the test file doesn't need to be compiled as Objective-C++.
+    char tmp_template[] = "/tmp/pulp_1524_patternXXXXXX.png";
+    int fd = mkstemps(tmp_template, 4);
+    REQUIRE(fd >= 0);
+    close(fd);
+    std::string tile_path_str = tmp_template;
+    {
+        const int TW = 4, TH = 4;
+        std::vector<uint8_t> tile(static_cast<size_t>(TW) * TH * 4u, 0u);
+        for (int y = 0; y < TH; ++y) {
+            for (int x = 0; x < TW; ++x) {
+                const size_t off = (static_cast<size_t>(y) * TW + x) * 4u;
+                if (y < TH / 2) {
+                    tile[off + 0] = 255; tile[off + 1] = 0;   tile[off + 2] = 0;
+                } else {
+                    tile[off + 0] = 0;   tile[off + 1] = 0;   tile[off + 2] = 255;
+                }
+                tile[off + 3] = 255;
+            }
+        }
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        CGContextRef bmp = CGBitmapContextCreate(
+            tile.data(), TW, TH, 8, TW * 4u, cs,
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+        CGColorSpaceRelease(cs);
+        REQUIRE(bmp != nullptr);
+        CGImageRef img = CGBitmapContextCreateImage(bmp);
+        CGContextRelease(bmp);
+        REQUIRE(img != nullptr);
+        CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+            nullptr,
+            reinterpret_cast<const UInt8*>(tile_path_str.c_str()),
+            static_cast<CFIndex>(tile_path_str.size()),
+            false);
+        REQUIRE(url != nullptr);
+        CFStringRef png_uti = CFSTR("public.png");
+        CGImageDestinationRef dst = CGImageDestinationCreateWithURL(
+            url, png_uti, 1, nullptr);
+        CFRelease(url);
+        REQUIRE(dst != nullptr);
+        CGImageDestinationAddImage(dst, img, nullptr);
+        REQUIRE(CGImageDestinationFinalize(dst));
+        CFRelease(dst);
+        CGImageRelease(img);
+    }
+
+    // Step 2 — fill a 32x32 destination canvas with the pattern (`repeat`
+    // both axes) and verify the image content shows BOTH red and blue
+    // bands. Pre-fix: only the active solid `set_fill_color` painted, so
+    // exactly one colour would appear.
+    std::vector<uint8_t> pixels;
+    CGContextRef ctx = cg_make_bitmap(W, H, pixels);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));  // green sentinel
+        canvas.set_fill_pattern(tile_path_str,
+                                Canvas::PatternTileMode::repeat,
+                                Canvas::PatternTileMode::repeat);
+        canvas.fill_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+    std::remove(tile_path_str.c_str());
+
+    // Verify the pattern actually rendered both colours from the tile —
+    // not the green sentinel (which would mean the pattern fell back to
+    // solid fill_color_) and not a single colour from one half (which
+    // would mean the tile didn't repeat correctly across the canvas).
+    CgPixelGrid grid{pixels, W, H};
+    int red_count = 0, blue_count = 0, green_count = 0;
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            auto p = grid.at(x, y);
+            if (p[0] > 200 && p[1] < 64  && p[2] < 64) ++red_count;
+            if (p[2] > 200 && p[0] < 64  && p[1] < 64) ++blue_count;
+            if (p[1] > 200 && p[0] < 64  && p[2] < 64) ++green_count;
+        }
+    }
+    INFO("red=" << red_count << " blue=" << blue_count << " green=" << green_count);
+    // Pattern fired: both red and blue must be present from the tile.
+    REQUIRE(red_count > 16);
+    REQUIRE(blue_count > 16);
+    // Sentinel green must NOT appear (its colour would survive only if the
+    // pattern silently degraded to set_fill_color, which is the pre-fix bug).
+    REQUIRE(green_count == 0);
+}
+
+// pulp #1524 — `set_fill_pattern("")` clears any active pattern back to the
+// solid fill colour. Mirrors clear_fill_gradient's reset semantics so a JS
+// fillStyle string assignment after a pattern fillStyle reverts cleanly.
+TEST_CASE("CoreGraphicsCanvas set_fill_pattern clears on empty src",
+          "[canvas][cg][issue-1524]") {
+    constexpr int W = 16, H = 16;
+    std::vector<uint8_t> pixels;
+    CGContextRef ctx = cg_make_bitmap(W, H, pixels);
+    REQUIRE(ctx != nullptr);
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));
+        canvas.set_fill_pattern("",
+                                Canvas::PatternTileMode::repeat,
+                                Canvas::PatternTileMode::repeat);
+        canvas.fill_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+    // The first three bytes of any pixel inside the canvas should be the
+    // green solid fill we set before the empty-src pattern call cleared.
+    REQUIRE(pixels.size() >= 4u);
+    REQUIRE(pixels[0] == 0);    // R
+    REQUIRE(pixels[1] == 255);  // G
+    REQUIRE(pixels[2] == 0);    // B
 }
 
 #endif  // __APPLE__

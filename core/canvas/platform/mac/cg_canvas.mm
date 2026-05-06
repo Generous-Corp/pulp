@@ -2,11 +2,16 @@
 
 #ifdef __APPLE__
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 #import <Foundation/Foundation.h>
+#import <ImageIO/ImageIO.h>
 
 namespace pulp::canvas {
 
@@ -19,6 +24,23 @@ CoreGraphicsCanvas::CoreGraphicsCanvas(CGContextRef ctx, float width, float heig
 
 CoreGraphicsCanvas::~CoreGraphicsCanvas() {
     release_path();
+    release_conic_image();
+    release_pattern_image();
+}
+
+void CoreGraphicsCanvas::release_conic_image() {
+    if (conic_image_) {
+        CGImageRelease(conic_image_);
+        conic_image_ = nullptr;
+    }
+}
+
+void CoreGraphicsCanvas::release_pattern_image() {
+    if (pattern_image_) {
+        CGImageRelease(pattern_image_);
+        pattern_image_ = nullptr;
+    }
+    has_pattern_ = false;
 }
 
 void CoreGraphicsCanvas::release_path() {
@@ -637,6 +659,7 @@ void CoreGraphicsCanvas::set_fill_gradient_linear(float x0, float y0,
         return;
     }
     has_gradient_ = true;
+    gradient_kind_ = GradientKind::linear;
     gradient_is_radial_ = false;
     grad_x0_ = x0; grad_y0_ = y0; grad_x1_ = x1; grad_y1_ = y1;
     grad_colors_.assign(colors, colors + count);
@@ -653,69 +676,160 @@ void CoreGraphicsCanvas::set_fill_gradient_radial(float cx, float cy,
         return;
     }
     has_gradient_ = true;
+    gradient_kind_ = GradientKind::radial;
     gradient_is_radial_ = true;
-    grad_x0_ = cx; grad_y0_ = cy; grad_radius_ = radius;
+    // Single-circle form: inner circle collapses to the centre with radius 0,
+    // outer circle is (cx, cy, radius). Matches the JS shim's pre-#1524
+    // contract where createRadialGradient routed only the outer circle.
+    grad_x0_ = cx; grad_y0_ = cy; grad_x1_ = cx; grad_y1_ = cy;
+    grad_radius_inner_ = 0.0f;
+    grad_radius_ = radius;
     grad_colors_.assign(colors, colors + count);
     grad_positions_.assign(positions, positions + count);
 }
 
-// pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createConicGradient.
-// CoreGraphics has no native conic shader (no equivalent of
-// CGContextDrawConicGradient), so degrade to a flat first-stop fill —
-// the same fallback pattern set_fill_gradient_radial took before its
-// real two-circle implementation landed. The Skia backend renders the
-// real conic via SkGradientShader::MakeSweep.
+// pulp #1524 — true two-circle radial gradient. CGContextDrawRadialGradient
+// accepts (start_centre, start_radius, end_centre, end_radius), so we wire
+// both circles through unmodified. The previous bridge dropped (x0,y0,r0)
+// and used only the outer circle, which silently degraded centre-bloom-
+// only fills (Skia rendered the real two-point conical via MakeTwoPointConical;
+// CG produced a visibly different shape).
+void CoreGraphicsCanvas::set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    if (count <= 0) {
+        clear_fill_gradient();
+        return;
+    }
+    has_gradient_ = true;
+    gradient_kind_ = GradientKind::radial_two_circles;
+    gradient_is_radial_ = true;
+    grad_x0_ = x0; grad_y0_ = y0;
+    grad_x1_ = x1; grad_y1_ = y1;
+    grad_radius_inner_ = r0;
+    grad_radius_ = r1;
+    grad_colors_.assign(colors, colors + count);
+    grad_positions_.assign(positions, positions + count);
+}
+
+// pulp #1524 — Canvas2D ctx.createConicGradient on the CG backend.
+// CoreGraphics has no native conic / sweep shader, so we record the conic
+// parameters here and software-rasterise a CGImage at fill time
+// (paint_conic_into_clip), interpolating colour stops by atan2 angle from
+// (cx, cy). The Skia backend uses SkGradientShader::MakeSweep — same
+// visual result, real two-stop+ sweep gradient.
 void CoreGraphicsCanvas::set_fill_gradient_conic(float cx, float cy,
                                                   float start_angle,
                                                   const Color* colors,
                                                   const float* positions,
                                                   int count) {
-    (void)cx; (void)cy; (void)start_angle; (void)positions;
     if (count <= 0) {
         clear_fill_gradient();
         return;
     }
-    // CG can't render the sweep — pick the first stop as the active
-    // solid colour. Drop the gradient flag so subsequent fill_rect /
-    // fill_current_path paints with the new flat colour rather than
-    // re-running the linear/radial Draw call we wouldn't want to invoke.
-    clear_fill_gradient();
-    set_fill_color(colors[0]);
+    has_gradient_ = true;
+    gradient_kind_ = GradientKind::conic_image;
+    gradient_is_radial_ = false;
+    // Repurpose linear x0/y0 as conic centre, x1 as start_angle (radians).
+    grad_x0_ = cx; grad_y0_ = cy;
+    grad_x1_ = start_angle; grad_y1_ = 0;
+    grad_colors_.assign(colors, colors + count);
+    grad_positions_.assign(positions, positions + count);
+    // The bitmap is generated lazily inside fill_with_active_paint() once
+    // we know the destination clip rect. Drop any cached image from a
+    // previous conic that may not match the upcoming clip.
+    release_conic_image();
 }
 
 void CoreGraphicsCanvas::clear_fill_gradient() {
     has_gradient_ = false;
+    gradient_kind_ = GradientKind::none;
+    gradient_is_radial_ = false;
     grad_colors_.clear();
     grad_positions_.clear();
+    release_conic_image();
+    release_pattern_image();
 }
 
-// pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern. CG
-// has no first-class pattern shader without a CGPattern dance (custom
-// callback closure + bbox + tile transform), and supporting that
-// faithfully across the four spec repetition modes is out of scope for
-// the bridge-thin gap-fill PR. Degrade to the active fill / stroke
-// colour — same fallback shape `set_fill_gradient_conic` took before
-// its real impl. Subsequent fill_rect / fill_current_path paints with
-// the existing solid colour rather than rendering garbage.
+// pulp #1524 — Canvas2D ctx.createPattern on the CG backend.
 //
-// The Skia backend renders the real tiled pattern via
-// SkShader::MakeImage; the canvas2d catalog flags this as PASS for
-// Skia paths and DIVERGE-by-platform on macOS only — the harness keeps
-// the CG fallback documented.
+// We decode the source image via ImageIO (CGImageSource) and stash the
+// CGImageRef. fill_with_active_paint() builds a CGPattern via
+// CGPatternCreate at fill time, with a draw callback that emits one tile
+// via CGContextDrawImage. CGPattern's tile-step controls the X/Y
+// repetition: a `no_repeat` axis collapses the step in that axis to a
+// large value so only the seed tile renders within the active clip.
+//
+// The Skia backend mirrors this via SkShader::MakeImage with SkTileMode
+// per axis — same visual result for `repeat`, `repeat-x`, `repeat-y`,
+// `no-repeat`.
+namespace {
+
+CGImageRef cg_decode_image_from_path_or_data(const std::string& src) {
+    if (src.empty()) return nullptr;
+    @autoreleasepool {
+        // Tolerate both filesystem paths and `data:` URLs. ImageIO
+        // accepts CFData (raw bytes) for both — for paths we read the
+        // file off disk first, for `data:` URLs we let ImageIO handle
+        // the base64 decode transparently via CGImageSourceCreateWithURL.
+        if (src.rfind("data:", 0) == 0) {
+            NSString* ns = [NSString stringWithUTF8String:src.c_str()];
+            NSURL* url = [NSURL URLWithString:ns];
+            if (!url) return nullptr;
+            CGImageSourceRef source = CGImageSourceCreateWithURL(
+                (__bridge CFURLRef)url, nullptr);
+            if (!source) return nullptr;
+            CGImageRef img = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
+            CFRelease(source);
+            return img;
+        }
+        NSString* ns_path = [NSString stringWithUTF8String:src.c_str()];
+        NSData* data = [NSData dataWithContentsOfFile:ns_path];
+        if (!data) return nullptr;
+        CGImageSourceRef source = CGImageSourceCreateWithData(
+            (__bridge CFDataRef)data, nullptr);
+        if (!source) return nullptr;
+        CGImageRef img = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
+        CFRelease(source);
+        return img;
+    }
+}
+
+} // namespace
+
 void CoreGraphicsCanvas::set_fill_pattern(const std::string& image_src,
                                            PatternTileMode tile_x,
                                            PatternTileMode tile_y) {
-    (void)image_src; (void)tile_x; (void)tile_y;
-    // Drop any active gradient so the next fill paints with the solid
-    // fill_color_ rather than an out-of-date gradient shader.
+    // Empty src → clear pattern (mirrors clear_fill_gradient reset shape).
+    if (image_src.empty()) {
+        clear_fill_gradient();
+        return;
+    }
+    CGImageRef img = cg_decode_image_from_path_or_data(image_src);
+    if (!img) {
+        // Decode failed — fall back to the existing solid fill rather than
+        // render garbage. Mirrors SkiaCanvas::set_fill_pattern's clear path.
+        clear_fill_gradient();
+        return;
+    }
+    // Drop any prior gradient/pattern; install the new pattern image.
     clear_fill_gradient();
+    pattern_image_ = img;
+    pattern_tile_x_ = tile_x;
+    pattern_tile_y_ = tile_y;
+    has_pattern_ = true;
+    has_gradient_ = true;  // routes fill_with_active_paint into the pattern branch
+    gradient_kind_ = GradientKind::none;  // pattern branch checks has_pattern_ first
 }
 
 void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
                                              PatternTileMode tile_x,
                                              PatternTileMode tile_y) {
     (void)image_src; (void)tile_x; (void)tile_y;
-    // No-op — strokes continue with the existing stroke_color_.
+    // Stroke patterns aren't wired through stroke_with_active_paint yet —
+    // strokes continue with the existing stroke_color_. File a follow-up
+    // if a CG-targeted plugin needs tiled stroke patterns.
 }
 
 // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit.
@@ -756,11 +870,224 @@ void CoreGraphicsCanvas::set_image_smoothing(bool enabled,
     CGContextSetInterpolationQuality(ctx_, cg_q);
 }
 
+// pulp #1524 — sample the active conic colour stops at angle `t` in [0, 1],
+// where t=0 corresponds to start_angle and t=1 wraps back to start_angle + 2π.
+// Returns four CGFloat RGBA components in straight (un-premultiplied) space.
+static void sample_conic_stops(const std::vector<pulp::canvas::Color>& colors,
+                                const std::vector<float>& positions,
+                                double t, CGFloat out_rgba[4]) {
+    const size_t n = colors.size();
+    if (n == 0) {
+        out_rgba[0] = out_rgba[1] = out_rgba[2] = out_rgba[3] = 0;
+        return;
+    }
+    // Wrap t into [0, 1) for spec-correct angular sweep semantics.
+    t = t - std::floor(t);
+    if (n == 1 || t <= positions[0]) {
+        out_rgba[0] = colors[0].r;
+        out_rgba[1] = colors[0].g;
+        out_rgba[2] = colors[0].b;
+        out_rgba[3] = colors[0].a;
+        return;
+    }
+    if (t >= positions[n - 1]) {
+        out_rgba[0] = colors[n - 1].r;
+        out_rgba[1] = colors[n - 1].g;
+        out_rgba[2] = colors[n - 1].b;
+        out_rgba[3] = colors[n - 1].a;
+        return;
+    }
+    // Find the interval [positions[i], positions[i+1]] enclosing t and
+    // linearly interpolate the colour.
+    for (size_t i = 0; i + 1 < n; ++i) {
+        if (t >= positions[i] && t <= positions[i + 1]) {
+            const double span = std::max<double>(positions[i + 1] - positions[i], 1e-9);
+            const double k = (t - positions[i]) / span;
+            const double inv = 1.0 - k;
+            out_rgba[0] = inv * colors[i].r + k * colors[i + 1].r;
+            out_rgba[1] = inv * colors[i].g + k * colors[i + 1].g;
+            out_rgba[2] = inv * colors[i].b + k * colors[i + 1].b;
+            out_rgba[3] = inv * colors[i].a + k * colors[i + 1].a;
+            return;
+        }
+    }
+    // Defensive: last-stop colour.
+    out_rgba[0] = colors[n - 1].r;
+    out_rgba[1] = colors[n - 1].g;
+    out_rgba[2] = colors[n - 1].b;
+    out_rgba[3] = colors[n - 1].a;
+}
+
+// pulp #1524 — software-rasterise a conic (sweep) gradient image covering the
+// supplied bounding rectangle. Each pixel's angle is computed as
+// atan2(y - cy, x - cx) - start_angle (mod 2π) and divided by 2π to give the
+// stop position. Returns nullptr on allocation failure.
+static CGImageRef build_conic_gradient_image(
+        float cx, float cy, float start_angle,
+        const std::vector<pulp::canvas::Color>& colors,
+        const std::vector<float>& positions,
+        CGRect bounds) {
+    const int width = std::max(1, static_cast<int>(std::ceil(bounds.size.width)));
+    const int height = std::max(1, static_cast<int>(std::ceil(bounds.size.height)));
+    const size_t bytes_per_row = static_cast<size_t>(width) * 4u;
+    const size_t total = bytes_per_row * static_cast<size_t>(height);
+    std::vector<uint8_t> pixels(total, 0);
+    constexpr double kTwoPi = 6.283185307179586;
+    for (int py = 0; py < height; ++py) {
+        // Pixel centre in canvas space — bounds.origin is top-left of the
+        // image in canvas coords, so offset by (px+0.5, py+0.5).
+        const double sample_y = bounds.origin.y + py + 0.5;
+        for (int px = 0; px < width; ++px) {
+            const double sample_x = bounds.origin.x + px + 0.5;
+            const double dx = sample_x - cx;
+            const double dy = sample_y - cy;
+            // atan2 returns (-π, π]; subtract start_angle, then wrap to [0, 2π).
+            double theta = std::atan2(dy, dx) - static_cast<double>(start_angle);
+            theta = theta - kTwoPi * std::floor(theta / kTwoPi);
+            const double t = theta / kTwoPi;
+            CGFloat rgba[4];
+            sample_conic_stops(colors, positions, t, rgba);
+            // Premultiplied RGBA8 (matches kCGImageAlphaPremultipliedLast).
+            const double a = std::clamp<double>(rgba[3], 0.0, 1.0);
+            const uint8_t r = static_cast<uint8_t>(
+                std::clamp<double>(rgba[0] * a, 0.0, 1.0) * 255.0 + 0.5);
+            const uint8_t g = static_cast<uint8_t>(
+                std::clamp<double>(rgba[1] * a, 0.0, 1.0) * 255.0 + 0.5);
+            const uint8_t b = static_cast<uint8_t>(
+                std::clamp<double>(rgba[2] * a, 0.0, 1.0) * 255.0 + 0.5);
+            const uint8_t a8 = static_cast<uint8_t>(a * 255.0 + 0.5);
+            const size_t off = static_cast<size_t>(py) * bytes_per_row +
+                static_cast<size_t>(px) * 4u;
+            pixels[off + 0] = r;
+            pixels[off + 1] = g;
+            pixels[off + 2] = b;
+            pixels[off + 3] = a8;
+        }
+    }
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    if (!cs) return nullptr;
+    CGContextRef bmp = CGBitmapContextCreate(
+        pixels.data(), static_cast<size_t>(width), static_cast<size_t>(height),
+        8, bytes_per_row, cs,
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+    CGColorSpaceRelease(cs);
+    if (!bmp) return nullptr;
+    CGImageRef img = CGBitmapContextCreateImage(bmp);
+    CGContextRelease(bmp);
+    return img;
+}
+
+// pulp #1524 — CGPattern draw callback. The `info` field is the CGImageRef
+// of the tile bitmap; CG will invoke this once per tile and we paint the
+// image filling the tile rect. CG owns the pattern's draw lifetime.
+static void cg_canvas_pattern_draw_tile(void* info, CGContextRef ctx) {
+    CGImageRef img = static_cast<CGImageRef>(info);
+    if (!img || !ctx) return;
+    const CGFloat w = static_cast<CGFloat>(CGImageGetWidth(img));
+    const CGFloat h = static_cast<CGFloat>(CGImageGetHeight(img));
+    if (w <= 0 || h <= 0) return;
+    // CGPattern tile space starts at (0, 0); CGPattern handles flipping.
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
+}
+
+static const CGPatternCallbacks kPulpCgPatternCallbacks = {
+    /*version*/ 0,
+    /*drawPattern*/ &cg_canvas_pattern_draw_tile,
+    /*releaseInfo*/ nullptr  // image lifetime owned by CoreGraphicsCanvas
+};
+
 void CoreGraphicsCanvas::fill_with_active_paint() {
+    // 1) Pattern — install a CGPattern (image tile + step mode) and fill the
+    //    current clip with it. has_pattern_ takes precedence over the
+    //    gradient flags so set_fill_pattern reliably wins after a
+    //    set_fill_gradient_* call.
+    if (has_pattern_ && pattern_image_) {
+        const CGFloat tile_w = static_cast<CGFloat>(CGImageGetWidth(pattern_image_));
+        const CGFloat tile_h = static_cast<CGFloat>(CGImageGetHeight(pattern_image_));
+        if (tile_w <= 0 || tile_h <= 0) return;
+        // For `no_repeat` axes, blow up the step to a value larger than the
+        // clip bounding box so only the seed tile lands inside the clip.
+        const CGRect clip_bb = CGContextGetClipBoundingBox(ctx_);
+        const CGFloat huge = std::max<CGFloat>(clip_bb.size.width, clip_bb.size.height) +
+                              tile_w + tile_h + 1.0f;
+        const CGFloat step_x = (pattern_tile_x_ == PatternTileMode::repeat) ? tile_w : huge;
+        const CGFloat step_y = (pattern_tile_y_ == PatternTileMode::repeat) ? tile_h : huge;
+        const CGRect tile_bounds = CGRectMake(0, 0, tile_w, tile_h);
+        // Compensate for the canvas's flipped CTM (we did
+        // ScaleCTM(1, -1) at construction). Without the flip here the tile
+        // image draws upside-down because CG sees tile space top-down.
+        CGAffineTransform tile_xform = CGAffineTransformMakeScale(1.0f, -1.0f);
+        // Translate so the seed tile lands at the clip origin.
+        tile_xform = CGAffineTransformTranslate(
+            tile_xform, clip_bb.origin.x, -(clip_bb.origin.y + tile_h));
+        CGPatternRef pattern = CGPatternCreate(
+            /*info*/ pattern_image_,
+            /*bounds*/ tile_bounds,
+            /*matrix*/ tile_xform,
+            /*xStep*/ step_x,
+            /*yStep*/ step_y,
+            /*tiling*/ kCGPatternTilingNoDistortion,
+            /*isColored*/ true,
+            /*callbacks*/ &kPulpCgPatternCallbacks);
+        if (!pattern) return;
+        CGColorSpaceRef pcs = CGColorSpaceCreatePattern(nullptr);
+        if (!pcs) { CGPatternRelease(pattern); return; }
+        CGContextSetFillColorSpace(ctx_, pcs);
+        const CGFloat alpha = 1.0f;
+        CGContextSetFillPattern(ctx_, pattern, &alpha);
+        CGContextFillRect(ctx_, clip_bb);
+        CGColorSpaceRelease(pcs);
+        CGPatternRelease(pattern);
+        return;
+    }
+
     if (!has_gradient_ || grad_colors_.empty()) {
         apply_fill_color();
         return;
     }
+
+    // 2) Conic gradient — software-rasterise once per fill into a CGImage
+    //    sized to the active clip's bounding box, then paint via
+    //    CGContextDrawImage. Caches across repeated fills with the same
+    //    clip; rebuilds when clip changes (cheaper than every-pixel walk
+    //    inside a CG callback). Spec-correct two+ stop angular sweep.
+    if (gradient_kind_ == GradientKind::conic_image) {
+        const CGRect clip_bb = CGContextGetClipBoundingBox(ctx_);
+        if (clip_bb.size.width <= 0 || clip_bb.size.height <= 0) return;
+        // Lazy rebuild: drop the cached image if its size or origin no longer
+        // matches the current clip. The cheap path keeps repeated fills (e.g.
+        // animation frames over the same geometry) from re-rasterising.
+        const bool needs_rebuild = !conic_image_ ||
+            std::abs(conic_image_x_ - static_cast<float>(clip_bb.origin.x)) > 0.5f ||
+            std::abs(conic_image_y_ - static_cast<float>(clip_bb.origin.y)) > 0.5f ||
+            std::abs(conic_image_w_ - static_cast<float>(clip_bb.size.width)) > 0.5f ||
+            std::abs(conic_image_h_ - static_cast<float>(clip_bb.size.height)) > 0.5f;
+        if (needs_rebuild) {
+            release_conic_image();
+            conic_image_ = build_conic_gradient_image(
+                grad_x0_, grad_y0_, grad_x1_, grad_colors_, grad_positions_,
+                clip_bb);
+            conic_image_x_ = static_cast<float>(clip_bb.origin.x);
+            conic_image_y_ = static_cast<float>(clip_bb.origin.y);
+            conic_image_w_ = static_cast<float>(clip_bb.size.width);
+            conic_image_h_ = static_cast<float>(clip_bb.size.height);
+        }
+        if (!conic_image_) return;
+        // CTM is already flipped (scale 1, -1) at construction; counter-flip
+        // around the image rect so the bitmap paints right-side-up.
+        CGContextSaveGState(ctx_);
+        CGContextTranslateCTM(ctx_, clip_bb.origin.x, clip_bb.origin.y + clip_bb.size.height);
+        CGContextScaleCTM(ctx_, 1.0f, -1.0f);
+        CGContextDrawImage(ctx_,
+            CGRectMake(0, 0, clip_bb.size.width, clip_bb.size.height),
+            conic_image_);
+        CGContextRestoreGState(ctx_);
+        return;
+    }
+
+    // 3) Linear / single-circle radial / two-circle radial gradients via
+    //    CGGradient + CGContextDrawLinearGradient / CGContextDrawRadialGradient.
     const size_t n = grad_colors_.size();
     std::vector<CGFloat> components(n * 4);
     std::vector<CGFloat> locations(n);
@@ -780,7 +1107,16 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
 
     const CGGradientDrawingOptions opts =
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation;
-    if (gradient_is_radial_) {
+    if (gradient_kind_ == GradientKind::radial_two_circles) {
+        // pulp #1524 — full two-circle form. (x0,y0,r0) is the start /
+        // inner circle; (x1,y1,r1) is the end / outer circle.
+        CGContextDrawRadialGradient(ctx_,
+            gradient,
+            CGPointMake(grad_x0_, grad_y0_), grad_radius_inner_,
+            CGPointMake(grad_x1_, grad_y1_), grad_radius_,
+            opts);
+    } else if (gradient_kind_ == GradientKind::radial || gradient_is_radial_) {
+        // Single-circle form — inner circle collapses to centre, radius 0.
         CGContextDrawRadialGradient(ctx_,
             gradient,
             CGPointMake(grad_x0_, grad_y0_), 0.0,
