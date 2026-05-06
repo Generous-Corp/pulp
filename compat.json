@@ -901,15 +901,22 @@
       "issue": ""
     },
     "css/contain": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (browser layout/paint optimization hint, accepted silently)",
+      "supportedValues": [
+        "none",
+        "strict",
+        "content",
+        "size",
+        "inline-size",
+        "layout",
+        "style",
+        "paint"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Browser-only optimization hint.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. CSS containment is a browser hint that lets the engine skip layout/paint work for isolated subtrees. Pulp's renderer doesn't expose composition / containment boundaries the way browsers do, so the value has no rendered effect — but accepting it silently means consumers can paste browser-authored CSS verbatim. NO_OP semantics by JS shim fall-through (no `case \"contain\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/content": {
       "status": "wontfix",
@@ -923,15 +930,17 @@
       "issue": ""
     },
     "css/contentVisibility": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (browser-only offscreen-rendering hint, accepted silently)",
+      "supportedValues": [
+        "visible",
+        "auto",
+        "hidden"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Browser-only optimization hint.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. content-visibility:auto tells browsers to skip rendering offscreen subtrees; pulp's renderer doesn't have a comparable deferred-paint mode. Accepting the value (silently) keeps imported CSS portable. NO_OP semantics by JS shim fall-through (no `case \"contentVisibility\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/counterIncrement": {
       "status": "wontfix",
@@ -2005,15 +2014,17 @@
       "issue": ""
     },
     "css/overscrollBehavior": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (rubber-band / scroll-chaining hint, accepted silently)",
+      "supportedValues": [
+        "auto",
+        "contain",
+        "none"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Not in initial scope.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. overscroll-behavior controls scroll-chaining and rubber-band gestures at scroll-container boundaries; pulp doesn't actually scroll today (Overflow scroll/visible exists but no scroll-driven UX modulators), so the value is silently accepted with no rendered effect. NO_OP semantics by JS shim fall-through (no `case \"overscrollBehavior\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/padding": {
       "status": "supported",
@@ -2338,48 +2349,52 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (smooth-scroll modulator, accepted silently in pulp's non-scrolling layout)",
+      "supportedValues": [
+        "auto",
+        "smooth"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. 'smooth' scroll on link / programmatic scroll. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-behavior is a smooth-scroll modulator that needs a real scroll context; pulp accepts Overflow scroll/visible but the engine doesn't scroll today (no programmatic scrollTo, no link-anchor jump), so the property silently noop-s. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollBehavior\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollMargin": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap landing-area inset, accepted silently in pulp's non-scrolling layout)",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-margin is a scroll-snap subprop — it offsets the snap-area outside an element's box, only meaningful inside a scroll-snap container. Pulp doesn't have a scroll-snap engine, so the value is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollMargin\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollPadding": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap container inset, accepted silently in pulp's non-scrolling layout)",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-padding insets the optimal viewing region inside a scroll-snap container; it requires a scroll-snap engine to mean anything. Pulp doesn't have one, so the value is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollPadding\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollSnapType": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap container declaration, accepted silently in pulp's non-scrolling layout)",
+      "supportedValues": [
+        "none",
+        "x",
+        "y",
+        "block",
+        "inline",
+        "both",
+        "mandatory",
+        "proximity"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap container; mobile carousel / hero gallery primitive. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-snap-type marks a container as a scroll-snap surface (mobile carousel / hero gallery primitive in browsers). Pulp doesn't have a scroll-snap engine, so the declaration is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollSnapType\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/tableLayout": {
       "status": "wontfix",
@@ -2753,15 +2768,19 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/willChange": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (compositor promotion hint, accepted silently)",
+      "supportedValues": [
+        "auto",
+        "scroll-position",
+        "contents",
+        "transform",
+        "opacity"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Hint to compositor -- Pulp's renderer is GPU all the time.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. will-change is a compositor-layer promotion hint; pulp's GPU renderer doesn't expose composition layers in a way consumers can hint about, so accepting the value and ignoring it is correct (Pulp is GPU all the time anyway). NO_OP semantics by JS shim fall-through (no `case \"willChange\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/wordBreak": {
       "status": "missing",
