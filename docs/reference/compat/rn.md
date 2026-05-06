@@ -27,6 +27,16 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
+  the `@pulp/react` prop-applier now forwards `cursor`, `userSelect`,
+  and `pointerEvents` to the matching bridge fns (previously these
+  three RN-style props had no prop-applier dispatch despite the
+  bridge fns existing). Status on `rn/cursor`, `rn/userSelect`, and
+  `rn/pointerEvents` flipped `missing` → `partial` / `supported`,
+  matching the css surface coverage. `rn/flexWrap` now accepts the
+  CSS keyword string set (`'wrap'` / `'wrap-reverse'` / `'nowrap'` /
+  `'no-wrap'`) alongside the legacy boolean — the bridge routes
+  `wrap-reverse` through Yoga's `YGWrapWrapReverse` (Triage #14).
 - **2026-05-05 (pulp #1434 rn logical-edge bundle, sub-agent #27 finding)** —
   11 RN logical-flow props wired through the `@pulp/react` prop-applier
   with an LTR-only fast path: `marginStart` / `marginEnd` /

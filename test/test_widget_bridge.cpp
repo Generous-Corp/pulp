@@ -917,7 +917,7 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_THAT(flex.flex_grow, WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(flex.flex_shrink, WithinAbs(0.25f, 0.001f));
     REQUIRE_THAT(flex.flex_basis, WithinAbs(88.0f, 0.001f));
-    REQUIRE(flex.flex_wrap);
+    REQUIRE(flex.flex_wrap == FlexWrap::wrap);
     REQUIRE(flex.order == 3);
     REQUIRE_THAT(flex.preferred_width, WithinAbs(123.0f, 0.001f));
     REQUIRE_THAT(flex.preferred_height, WithinAbs(45.0f, 0.001f));
@@ -5025,6 +5025,127 @@ TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
     REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
 }
 
+// ── pulp #1434 small-wins bundle (Triage #7 + #14) ──────────────────────
+//
+// Triage #7: cursor enum fan-out — extended setCursor case ladder maps
+// the full CSS cursor keyword set to the existing View::CursorStyle
+// slots (axis-aligned + diagonal resize aliases, move/all-scroll →
+// multi-directional, none/hidden → invisible).
+//
+// Triage #14: flexWrap reverse — flex_wrap is now a tri-state enum
+// (no_wrap / wrap / wrap_reverse) routed through Yoga's
+// YGWrapWrapReverse for the previously-inexpressible CSS
+// `flex-wrap: wrap-reverse` mode. Bridge accepts the keyword strings
+// alongside the legacy 0/1 numeric path.
+
+TEST_CASE("setCursor maps the full CSS keyword set",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setCursor('a', 'col-resize');
+        createPanel('b', '');  setCursor('b', 'row-resize');
+        createPanel('c', '');  setCursor('c', 'nwse-resize');
+        createPanel('d', '');  setCursor('d', 'nesw-resize');
+        createPanel('e', '');  setCursor('e', 'move');
+        createPanel('f', '');  setCursor('f', 'not-allowed');
+        createPanel('g', '');  setCursor('g', 'grabbing');
+        createPanel('h', '');  setCursor('h', 'none');
+        createPanel('i', '');  setCursor('i', 'all-scroll');
+        createPanel('j', '');  setCursor('j', 'parchment-curl'); // unknown → default
+    )");
+
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("a")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("b")->cursor() == CS::vertical_resize);
+    REQUIRE(bridge.widget("c")->cursor() == CS::top_left_resize);
+    REQUIRE(bridge.widget("d")->cursor() == CS::top_right_resize);
+    REQUIRE(bridge.widget("e")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("f")->cursor() == CS::not_allowed);
+    REQUIRE(bridge.widget("g")->cursor() == CS::grabbing);
+    REQUIRE(bridge.widget("h")->cursor() == CS::invisible);
+    REQUIRE(bridge.widget("i")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("j")->cursor() == CS::default_);
+}
+
+TEST_CASE("setCursor accepts axis-aligned aliases",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('e', ''); setCursor('e', 'e-resize');
+        createPanel('w', ''); setCursor('w', 'w-resize');
+        createPanel('n', ''); setCursor('n', 'n-resize');
+        createPanel('s', ''); setCursor('s', 's-resize');
+        createPanel('ns',''); setCursor('ns', 'ns-resize');
+        createPanel('ew',''); setCursor('ew', 'ew-resize');
+    )");
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("e")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("w")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("ew")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("n")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("s")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("ns")->cursor() == CS::vertical_resize);
+}
+
+TEST_CASE("setFlex flex_wrap accepts wrap-reverse keyword",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', ''); setFlex('a', 'flex_wrap', 'wrap-reverse');
+        createPanel('b', ''); setFlex('b', 'flex_wrap', 'wrap');
+        createPanel('c', ''); setFlex('c', 'flex_wrap', 'nowrap');
+        createPanel('d', ''); setFlex('d', 'flex_wrap', 'no-wrap');
+        createPanel('e', ''); setFlex('e', 'flex_wrap', 1);  // legacy numeric
+        createPanel('f', ''); setFlex('f', 'flex_wrap', 0);
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(bridge.widget("b")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("c")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("d")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("e")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("f")->flex().flex_wrap == FlexWrap::no_wrap);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards flex-wrap: wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexWrap', 'wrap-reverse');
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+}
+
+TEST_CASE("flex-flow shorthand recognizes wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexFlow', 'row wrap-reverse');
+    )");
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(f.direction == FlexDirection::row);
+}
+
 // ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────
 //
 // Bridge maps the CSS border-style keyword to View::BorderStyle. Skia
@@ -5141,6 +5262,88 @@ TEST_CASE("border-style: none short-circuits the stroke",
         REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rect);
         REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
     }
+}
+
+// ── pulp #1434 — canvasSetFontFull bridge fn ─────────────────────────────
+//
+// The Canvas2D shim's full CSS font shorthand parser dispatches through
+// `canvasSetFontFull(id, family, size, weight, slant, letterSpacing)`.
+// Cover the bridge fn directly to lock in the recorded
+// CanvasDrawCmd::set_font_full payload field-for-field, independent of
+// the JS-side parse layer covered in test_canvas2d_shim.cpp.
+TEST_CASE("WidgetBridge canvasSetFontFull records weight/slant verbatim",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive the bridge fn directly (bypassing the JS parser) and assert
+    // the recorded CanvasDrawCmd carries the full payload.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-canvas';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        // Bypass the JS parser — call the bridge fn directly with each
+        // payload field so the recorded CanvasDrawCmd round-trips
+        // verbatim.
+        canvasSetFontFull(c._id, 'Inter', 18.0, 700, 1, 0.5);
+    )");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+
+    const auto& cmd = canvas->commands().front();
+    REQUIRE(cmd.type == pulp::view::CanvasDrawCmd::Type::set_font_full);
+    REQUIRE(cmd.text == "Inter");
+    REQUIRE_THAT(cmd.extra, WithinAbs(18.0f, 1e-5f));   // size
+    REQUIRE_THAT(cmd.x,     WithinAbs(700.0f, 1e-5f));  // weight
+    REQUIRE_THAT(cmd.y,     WithinAbs(1.0f, 1e-5f));    // slant=italic
+    REQUIRE_THAT(cmd.x2,    WithinAbs(0.5f, 1e-5f));    // letter_spacing
+}
+
+TEST_CASE("WidgetBridge canvasSetFontFull replays through Canvas::set_font_full",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive a CanvasWidget paint onto a RecordingCanvas and assert the
+    // backend received both the legacy set_font (back-compat) AND the
+    // rich set_font_full carrying weight/slant. RecordingCanvas's
+    // set_font_full override emits both per the existing #927 contract.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-replay';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        canvasSetFontFull(c._id, 'Helvetica', 14.0, 300, 0, 0);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-replay");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    const pulp::canvas::DrawCommand* full = nullptr;
+    for (const auto& c : rec.commands()) {
+        if (c.type == DrawType::set_font_full) { full = &c; break; }
+    }
+    REQUIRE(full != nullptr);
+    REQUIRE(full->text == "Helvetica");
+    REQUIRE_THAT(full->f[0], WithinAbs(14.0f, 1e-5f));   // size
+    REQUIRE_THAT(full->f[1], WithinAbs(300.0f, 1e-5f));  // weight
+    REQUIRE_THAT(full->f[2], WithinAbs(0.0f, 1e-5f));    // slant=upright
 }
 
 // pulp #1434 (sub-agent #12 follow-up) — align_content multi-line

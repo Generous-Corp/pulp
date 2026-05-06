@@ -23,6 +23,20 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
+        // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The
+        // legacy `set_font` only carries family + size; the JS shim now
+        // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+        // <family>`. `set_font_full` carries the parsed weight / slant
+        // through to `Canvas::set_font_full`, which Skia honours via
+        // `make_font(family, size, weight, slant)`. CG falls back to
+        // family+size (no slant override) — same as the base
+        // `set_font_full` default. Layout in CanvasDrawCmd:
+        //   text  = family
+        //   extra = size (px)
+        //   x     = weight (100..900, cast to int)
+        //   y     = slant (0=upright, 1=italic/oblique)
+        //   x2    = letter_spacing (0 from shorthand; reserved)
+        set_font_full,
         // Style
         set_fill_color, set_stroke_color, set_line_width,
         set_line_cap, set_line_join,

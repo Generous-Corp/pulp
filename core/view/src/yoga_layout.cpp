@@ -112,7 +112,12 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         YGNodeStyleSetFlexShrink(node, 0.0f);
     }
 
-    YGNodeStyleSetFlexWrap(node, f.flex_wrap ? YGWrapWrap : YGWrapNoWrap);
+    // pulp #1434 Triage #14 — tri-state wrap; YGWrapWrapReverse covers
+    // the previously-inexpressible `wrap-reverse` mode.
+    YGWrap yoga_wrap = YGWrapNoWrap;
+    if (f.flex_wrap == FlexWrap::wrap)              yoga_wrap = YGWrapWrap;
+    else if (f.flex_wrap == FlexWrap::wrap_reverse) yoga_wrap = YGWrapWrapReverse;
+    YGNodeStyleSetFlexWrap(node, yoga_wrap);
 
     // Gap
     float gap = f.gap;
