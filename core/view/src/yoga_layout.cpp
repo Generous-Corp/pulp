@@ -370,6 +370,46 @@ static std::vector<View*> ordered_visible_children(View& parent) {
     return children;
 }
 
+// pulp #1543 — wire View's border-width state through to Yoga so the
+// box-sizing math (#1516) is correct. Pulp's borders have always been
+// painted as a Skia stroke, but Yoga never knew about them. With
+// box-sizing default `border-box`, Yoga subtracts (padding + border)
+// from the declared dimensions to compute the inner content area. If
+// the border slot is 0 in Yoga's view, the content area is too large
+// by 2 * border_width and children leak under the painted stroke.
+//
+// Per-edge resolution (pulp #1566 — Codex P2 follow-up): an explicitly
+// set per-side value wins, even if it's 0. CSS / RN semantics: a
+// shorthand `borderWidth: 10` with `borderTopWidth: 0` must yield a
+// 0-px top border. Only when the per-edge `set` flag is false do we
+// fall back to the uniform `border_width()`. Yoga's
+// `YGNodeStyleSetBorder` takes a px float — Yoga has no percent border
+// API (matches the CSS spec, where `border-width: <%>` is invalid).
+//
+// Negative widths are nonsensical — clamp to 0 (which under the new
+// semantics means "no border on this edge", same as an explicit 0).
+static void apply_border_widths(YGNodeRef node, const View& view) {
+    const bool has_sides   = view.has_border_sides();
+    const bool has_uniform = view.has_border();
+    if (!has_sides && !has_uniform) return;
+
+    const float uniform = has_uniform ? std::max(0.0f, view.border_width()) : 0.0f;
+    auto resolve_edge = [&](bool edge_set, float per_side) -> float {
+        if (edge_set) return std::max(0.0f, per_side);   // explicit wins (incl. 0)
+        return uniform;                                  // fall back to shorthand
+    };
+    const float top    = resolve_edge(view.has_border_top_set(),    view.border_top_width());
+    const float right  = resolve_edge(view.has_border_right_set(),  view.border_right_width());
+    const float bottom = resolve_edge(view.has_border_bottom_set(), view.border_bottom_width());
+    const float left   = resolve_edge(view.has_border_left_set(),   view.border_left_width());
+    // Always emit; Yoga short-circuits 0-px borders internally and we
+    // need 0 to be explicit so it overrides any prior style state.
+    YGNodeStyleSetBorder(node, YGEdgeTop,    top);
+    YGNodeStyleSetBorder(node, YGEdgeRight,  right);
+    YGNodeStyleSetBorder(node, YGEdgeBottom, bottom);
+    YGNodeStyleSetBorder(node, YGEdgeLeft,   left);
+}
+
 static void build_yoga_subtree(View& view, YGNodeRef node) {
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
@@ -380,6 +420,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
     apply_flex_style(node, view.flex(), is_absolute);
+    apply_border_widths(node, view);
     YGNodeSetContext(node, &view);
 
     auto children = ordered_visible_children(view);

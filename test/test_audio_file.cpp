@@ -553,6 +553,61 @@ TEST_CASE("MemoryMappedAudioReader opens WAV files and reads frame ranges",
     std::filesystem::remove(path);
 }
 
+TEST_CASE("MemoryMappedAudioReader fails closed for unsupported mapped files",
+          "[audio][file][mmap][issue-640]") {
+    auto wav_path = unique_temp_audio_path("_mmap_valid.wav");
+    auto text_path = unique_temp_audio_path("_mmap_unsupported.txt");
+    std::filesystem::remove(wav_path);
+    std::filesystem::remove(text_path);
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.0f, 0.25f, 0.5f}};
+    REQUIRE(write_wav_file(wav_path.string(), data));
+    {
+        std::ofstream f(text_path, std::ios::binary);
+        f << "not audio";
+        REQUIRE(f.good());
+    }
+
+    MemoryMappedAudioReader reader;
+    REQUIRE(reader.open(wav_path.string()));
+    REQUIRE(reader.is_open());
+    REQUIRE(reader.info().num_frames == 3);
+
+    REQUIRE_FALSE(reader.open(text_path.string()));
+    REQUIRE_FALSE(reader.is_open());
+    REQUIRE(reader.info().num_frames == 0);
+    REQUIRE(reader.data() == nullptr);
+    REQUIRE(reader.size() == 0);
+
+    std::filesystem::remove(wav_path);
+    std::filesystem::remove(text_path);
+}
+
+TEST_CASE("MemoryMappedAudioReader leaves destinations untouched past EOF",
+          "[audio][file][mmap][issue-640]") {
+    auto path = unique_temp_audio_path("_mmap_eof.wav");
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 32000;
+    data.channels = {{0.0f, 0.5f}};
+    REQUIRE(write_wav_file(path.string(), data));
+
+    MemoryMappedAudioReader reader;
+    REQUIRE(reader.open(path.string()));
+
+    float dest[2] = {-7.0f, -8.0f};
+    float* channels[] = {dest};
+    REQUIRE(reader.read_frames(channels, 1, 99, 2));
+    REQUIRE(dest[0] == -7.0f);
+    REQUIRE(dest[1] == -8.0f);
+
+    reader.close();
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("offline processing handles guards, block tails, and file dispatch",
           "[audio][file][offline][issue-640]") {
     AudioFileData input;

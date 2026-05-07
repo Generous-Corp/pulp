@@ -137,7 +137,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: false
-          lfs: true
+          # No current coverage input is stored as an LFS object. Keep this
+          # false so self-hosted macOS coverage does not fail when git-lfs
+          # tries to install its own pre-push hook in the reused workspace.
+          lfs: false
 
       - name: Install Linux dependencies + Clang tooling
         if: matrix.os == 'linux'

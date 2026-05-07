@@ -1,0 +1,25 @@
+{
+  "id": "yoga/box-sizing",
+  "surface": "yoga",
+  "kind": "layout",
+  "viewport": { "w": 200, "h": 120 },
+  "tolerance": { "rect": 0.001 },
+  "tree": {
+    "id": "root",
+    "type": "View",
+    "style": {
+      "direction": "column",
+      "padding": 10,
+      "border_width": 4
+    },
+    "children": [
+      {
+        "id": "content",
+        "type": "View",
+        "style": {
+          "flex_grow": 1
+        }
+      }
+    ]
+  }
+}

@@ -151,13 +151,49 @@ void View::paint_all(canvas::Canvas& canvas) {
     // shadow was painted onto the parent's compositing context (before
     // saveLayer) which broke CSS opacity stacking and could mask
     // subsequent child-layer content on certain Skia paths.
-    bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_
+    bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f)
+                       || !filter_chain_.empty() || needs_layer_
                        || (effect_ && effect_->needs_layer());
     if (needs_layer) {
-        if (effect_)
+        if (effect_) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
-        else
+        } else if (!filter_chain_.empty()) {
+            // pulp #1434 Phase A2-4 — full CSS filter chain. Translate
+            // View::FilterOp into canvas::FilterChainEntry (parallel
+            // shape) and hand off to the canvas backend; Skia composes
+            // via SkImageFilters, CG falls back to blur-only.
+            std::vector<pulp::canvas::Canvas::FilterChainEntry> chain;
+            chain.reserve(filter_chain_.size());
+            for (const auto& op : filter_chain_) {
+                pulp::canvas::Canvas::FilterChainEntry e{};
+                using ViewK = View::FilterOp::Kind;
+                using CanvK = pulp::canvas::Canvas::FilterChainEntry::Kind;
+                switch (op.kind) {
+                    case ViewK::blur:        e.kind = CanvK::blur;        break;
+                    case ViewK::brightness:  e.kind = CanvK::brightness;  break;
+                    case ViewK::contrast:    e.kind = CanvK::contrast;    break;
+                    case ViewK::grayscale:   e.kind = CanvK::grayscale;   break;
+                    case ViewK::hue_rotate:  e.kind = CanvK::hue_rotate;  break;
+                    case ViewK::invert:      e.kind = CanvK::invert;      break;
+                    case ViewK::opacity:     e.kind = CanvK::opacity;     break;
+                    case ViewK::saturate:    e.kind = CanvK::saturate;    break;
+                    case ViewK::sepia:       e.kind = CanvK::sepia;       break;
+                    case ViewK::drop_shadow: e.kind = CanvK::drop_shadow; break;
+                }
+                e.amount      = op.amount;
+                e.angle_deg   = op.angle_deg;
+                e.ds_offset_x = op.ds_offset_x;
+                e.ds_offset_y = op.ds_offset_y;
+                e.ds_blur     = op.ds_blur;
+                e.ds_color    = op.ds_color;
+                chain.push_back(e);
+            }
+            canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
+                                            opacity_, chain.data(),
+                                            static_cast<int>(chain.size()));
+        } else {
             canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
+        }
     }
 
     // Outset drop shadows paint inside the compositing layer so the view's

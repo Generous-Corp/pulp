@@ -14,7 +14,12 @@ if(APPLE AND NOT PULP_IOS)
                 ${CMAKE_SOURCE_DIR})
     set_tests_properties(cmake-ios-auv3-configure PROPERTIES
         SKIP_RETURN_CODE 77
-        TIMEOUT 900)
+        TIMEOUT 900
+        # Tagged `slow` for fast-CI exclusion (#1589): a fresh-cache
+        # configure spends ~3 minutes downloading + unpacking iOS-leg
+        # FetchContent sources before the actual smoke fires. Full-CI
+        # (push to main / nightly / workflow_dispatch) still runs it.
+        LABELS slow)
 endif()
 
 # AU v2 component-type selection smoke — hardens the aufx→aumf flip
@@ -37,7 +42,10 @@ add_test(NAME cmake-pulp-add-binary-data-encoder
     COMMAND ${CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_binary_data_encoder.cmake)
 set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
-    LABELS "cmake;binary-data;issue-898"
+    # `slow` (#1589): runs `cmake -P` which spawns a CMake interpreter
+    # to encode a synthetic 1 MB asset; consistently 4-5 sec wall on
+    # all three platforms. Excluded from PR fast-CI.
+    LABELS "cmake;binary-data;issue-898;slow"
     TIMEOUT 60)
 
 # Install-layout regression for issue-905 follow-up: when the SDK is
@@ -51,7 +59,10 @@ add_test(NAME cmake-pulp-install-layout
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_install_layout.cmake)
 set_tests_properties(cmake-pulp-install-layout PROPERTIES
-    LABELS "cmake;binary-data;issue-905"
+    # `slow` (#1589): runs `cmake --install` from this build into a
+    # temp prefix and inspects the staged layout. Cheap on warm builds
+    # but pays a configure-amortised cost — pull it out of PR fast-CI.
+    LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
 # retry_git_clone unit test (setup.sh helper). Guards the #425 P1
@@ -575,7 +586,10 @@ catch_discover_tests(pulp-test-codesign)
 # Sync primitives tests (SeqLock, TripleBuffer)
 add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-sync)
+# `slow` (#1589): hammer tests run a writer + readers for 500 ms each
+# to surface ordering bugs. Sanitizers.yml exercises the same code
+# under TSan; PR fast-CI can skip the redundant smoke.
+catch_discover_tests(pulp-test-sync PROPERTIES LABELS slow)
 
 # License and BigInteger tests
 add_executable(pulp-test-license test_license.cpp)
@@ -674,7 +688,9 @@ catch_discover_tests(pulp-test-view-host-bridge)
 # Scan blacklist (workstream 03 slice 3.3a)
 add_executable(pulp-test-scan-blacklist test_scan_blacklist.cpp)
 target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-scan-blacklist)
+# `slow` (#1589): file-mtime sleep loops (rebuilt-plugin-not-blacklisted
+# flow waits on filesystem timestamp resolution). Each test ~1s.
+catch_discover_tests(pulp-test-scan-blacklist PROPERTIES LABELS slow)
 # Hosted editor API (workstream 03 slice 3.4)
 add_executable(pulp-test-hosted-editor test_hosted_editor.cpp)
 target_link_libraries(pulp-test-hosted-editor PRIVATE pulp::host Catch2::Catch2WithMain)
@@ -694,7 +710,9 @@ catch_discover_tests(pulp-test-transport-hook)
 # Scan cache (workstream 03 slice 3.1)
 add_executable(pulp-test-scan-cache test_scan_cache.cpp)
 target_link_libraries(pulp-test-scan-cache PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-scan-cache)
+# `slow` (#1589): each scenario waits for filesystem mtime resolution
+# (~1s each on every platform). Excluded from PR fast-CI.
+catch_discover_tests(pulp-test-scan-cache PROPERTIES LABELS slow)
 # Processor memory-pressure hook (workstream 05 slice 5.3)
 add_executable(pulp-test-memory-pressure test_memory_pressure.cpp)
 target_link_libraries(pulp-test-memory-pressure PRIVATE pulp::format Catch2::Catch2WithMain)
@@ -986,7 +1004,10 @@ catch_discover_tests(pulp-test-runtime)
 # alternation in sanitizers.yml's --tests-regex).
 add_executable(pulp-test-sync-race-hammer test_sync_race_hammer.cpp)
 target_link_libraries(pulp-test-sync-race-hammer PRIVATE pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-sync-race-hammer)
+# `slow` (#1589): N-thread race smoke. Sanitizer builds also pick this
+# up via the dedicated sanitizers.yml workflow, so PR fast-CI doesn't
+# need to re-run it.
+catch_discover_tests(pulp-test-sync-race-hammer PROPERTIES LABELS slow)
 
 # Events tests
 add_executable(pulp-test-events test_events.cpp)
@@ -999,7 +1020,11 @@ catch_discover_tests(pulp-test-events-async-helpers)
 
 add_executable(pulp-test-events-timer-helpers test_events_timer_helpers.cpp)
 target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-events-timer-helpers)
+# `slow` (#1589): Timer hammer + UAF-free destroy-while-dispatched
+# tests deliberately exercise message-loop pacing (~0.3-1.5 sec each
+# depending on platform). Excluded from PR fast-CI; sanitizers.yml
+# still covers Timer under TSan.
+catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 
 # Audio file I/O tests
 add_executable(pulp-test-audio-file test_audio_file.cpp)
@@ -1302,7 +1327,9 @@ catch_discover_tests(pulp-test-script)
 # Scripted UI hot reload/theme reload tests
 add_executable(pulp-test-scripted-ui test_scripted_ui.cpp)
 target_link_libraries(pulp-test-scripted-ui PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-scripted-ui)
+# `slow` (#1589): ScriptedUiSession reload tests sleep on file-watcher
+# debounce + filesystem mtime; ~0.5-1 sec each. Excluded from PR fast-CI.
+catch_discover_tests(pulp-test-scripted-ui PROPERTIES LABELS slow)
 
 # JS engine abstraction tests (shared across all backends)
 add_executable(pulp-test-js-engine test_js_engine.cpp)
@@ -1475,8 +1502,12 @@ catch_discover_tests(pulp-test-widgets)
 # Hot-reload tests
 add_executable(pulp-test-hot-reload test_hot_reload.cpp)
 target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
+# `slow` (#1589): each HotReloader scenario sleeps on file-watcher
+# debounce + filesystem mtime resolution (~1-1.5 sec each).
 catch_discover_tests(pulp-test-hot-reload
-    PROPERTIES RESOURCE_LOCK hot-reload-file-watcher)
+    PROPERTIES
+        RESOURCE_LOCK hot-reload-file-watcher
+        LABELS slow)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
@@ -1524,6 +1555,16 @@ catch_discover_tests(pulp-test-text-input)
 add_executable(pulp-test-layout-w3c test_layout_w3c.cpp)
 target_link_libraries(pulp-test-layout-w3c PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-layout-w3c)
+
+# Visual semantic snapshot harness. This is a custom-main Catch2 binary:
+# --self-test runs its focused tests, while --fixture emits a stable JSON
+# snapshot for tools/harness/visual/runner.py.
+add_executable(pulp-test-visual visual/pulp-test-visual.cpp)
+target_link_libraries(pulp-test-visual PRIVATE pulp::view Catch2::Catch2)
+add_test(NAME visual-harness-self-test COMMAND pulp-test-visual --self-test)
+set_tests_properties(visual-harness-self-test PROPERTIES
+    LABELS "visual;harness;yoga"
+    TIMEOUT 30)
 
 # CanvasWidget tests (JS-driven custom drawing)
 add_executable(pulp-test-canvas-widget test_canvas_widget.cpp)
@@ -1617,7 +1658,10 @@ add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
 target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
 # issue #902 bound-pump test runs the 1M-job cap; budget headroom for slow
 # CI runners and sanitizer builds. Default discover timeout is too tight
-# when a regression of the bound would hang indefinitely.
+# when a regression of the bound would hang indefinitely. Other shim
+# scenarios in this binary stay in PR fast-CI — they're cheap and
+# important — so this binary is *not* labelled `slow` even though one
+# of its tests pays a 1-3 sec wall cost.
 catch_discover_tests(pulp-test-web-compat-react-shims
     PROPERTIES TIMEOUT 180
 )
@@ -2047,6 +2091,11 @@ catch_discover_tests(pulp-test-theme-presets)
 add_executable(pulp-test-appearance test_appearance_tracker.cpp)
 target_link_libraries(pulp-test-appearance PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-appearance)
+
+# Splash screen lifecycle and paint behavior
+add_executable(pulp-test-splash-screen test_splash_screen.cpp)
+target_link_libraries(pulp-test-splash-screen PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-splash-screen)
 
 # New widgets (EqCurve, MidiKeyboard, ColorPicker, FileDropZone, SplitView, PropertyList, Breadcrumb)
 add_executable(pulp-test-phase9-widgets test_phase9_widgets.cpp)

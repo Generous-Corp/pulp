@@ -43,6 +43,7 @@ if str(REPO_ROOT_GUESS) not in sys.path:
 from tools.harness.adapters import base as adapters_base  # noqa: E402
 from tools.harness.adapters.base import CatalogEntry, Result  # noqa: E402
 from tools.harness.status import STATUS_ORDER, Status, StatusCounts  # noqa: E402
+from tools.harness.visual import runner as visual_runner  # noqa: E402
 
 logger = logging.getLogger("pulp.harness.verifier")
 
@@ -180,7 +181,12 @@ def get_short_sha(repo_root: Path) -> str:
         return "unknown"
 
 
-def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> str:
+def render_markdown(
+    results_by_surface: dict[str, list[Result]],
+    sha: str,
+    visual_counts: Optional[dict[str, dict]] = None,
+) -> str:
+    visual_counts = visual_counts or {}
     lines: list[str] = []
     lines.append("# Harness coverage")
     lines.append("")
@@ -199,13 +205,14 @@ def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> st
     )
     lines.append("## Summary")
     lines.append("")
-    lines.append("| Surface | Total | PASS | DIVERGE | NO-OP | NOT-IMPL | OOS | PASS % | Progress % | Drift |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Surface | Total | PASS | DIVERGE | NO-OP | NOT-IMPL | OOS | PASS % | Progress % | Drift | Visual pass |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for surface, results in results_by_surface.items():
         counts = StatusCounts.from_results([r.status for r in results])
         drifts = sum(1 for r in results if r.drifts)
+        visual = visual_counts.get(surface, {"label": "0/0"})
         lines.append(
-            "| `{}/` | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} |".format(
+            "| `{}/` | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {} |".format(
                 surface,
                 counts.total,
                 counts.pass_,
@@ -216,6 +223,7 @@ def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> st
                 counts.pass_pct,
                 counts.progress_pct,
                 drifts,
+                visual["label"],
             )
         )
     if len(results_by_surface) > 1:
@@ -225,8 +233,10 @@ def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> st
             for r in results
             if r.drifts
         )
+        visual_pass = sum(int(v.get("pass", 0)) for v in visual_counts.values())
+        visual_total = sum(int(v.get("total", 0)) for v in visual_counts.values())
         lines.append(
-            "| **TOTAL** | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} |".format(
+            "| **TOTAL** | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {}/{} |".format(
                 total_counts.total,
                 total_counts.pass_,
                 total_counts.diverge,
@@ -236,6 +246,8 @@ def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> st
                 total_counts.pass_pct,
                 total_counts.progress_pct,
                 all_drifts,
+                visual_pass,
+                visual_total,
             )
         )
     lines.append("")
@@ -283,7 +295,12 @@ def render_markdown(results_by_surface: dict[str, list[Result]], sha: str) -> st
     return "\n".join(lines)
 
 
-def render_json(results_by_surface: dict[str, list[Result]], sha: str) -> dict:
+def render_json(
+    results_by_surface: dict[str, list[Result]],
+    sha: str,
+    visual_counts: Optional[dict[str, dict]] = None,
+) -> dict:
+    visual_counts = visual_counts or {}
     out_surfaces = {}
     for surface, results in results_by_surface.items():
         counts = StatusCounts.from_results([r.status for r in results])
@@ -297,11 +314,14 @@ def render_json(results_by_surface: dict[str, list[Result]], sha: str) -> dict:
             "pass_pct": round(counts.pass_pct, 2),
             "progress_pct": round(counts.progress_pct, 2),
             "drift_count": sum(1 for r in results if r.drifts),
+            "visual_pass": visual_counts.get(surface, {"pass": 0, "total": 0, "label": "0/0"}),
             "results": [r.to_dict() for r in results],
         }
     total_counts = StatusCounts.from_results(
         [r.status for results in results_by_surface.values() for r in results]
     )
+    visual_pass = sum(int(v.get("pass", 0)) for v in visual_counts.values())
+    visual_total = sum(int(v.get("total", 0)) for v in visual_counts.values())
     return {
         "schema_version": "0.1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -321,6 +341,11 @@ def render_json(results_by_surface: dict[str, list[Result]], sha: str) -> dict:
                 for r in results
                 if r.drifts
             ),
+            "visual_pass": {
+                "pass": visual_pass,
+                "total": visual_total,
+                "label": f"{visual_pass}/{visual_total}" if visual_total else f"{visual_pass}/0",
+            },
         },
         "surfaces": out_surfaces,
     }
@@ -343,8 +368,9 @@ def write_outputs(
     json_path = build_dir / f"harness-coverage-{sha}.json"
     md_path = build_dir / "harness-coverage.md"
 
-    json_payload = render_json(results_by_surface, sha)
-    md_payload = render_markdown(results_by_surface, sha)
+    visual_counts = visual_runner.visual_pass_counts(repo_root, results_by_surface.keys())
+    json_payload = render_json(results_by_surface, sha, visual_counts)
+    md_payload = render_markdown(results_by_surface, sha, visual_counts)
 
     json_path.write_text(json.dumps(json_payload, indent=2))
     md_path.write_text(md_payload)
@@ -405,6 +431,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Trim a leading "coverage" subcommand if invoked via `pulp harness coverage`.
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == "visual":
+        return visual_runner.main(argv)
     if argv and argv[0] == "coverage":
         argv = argv[1:]
 
@@ -440,9 +468,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         results_by_surface[s] = run_surface(repo_root, s)
 
     sha = get_short_sha(repo_root)
+    visual_counts = visual_runner.visual_pass_counts(repo_root, results_by_surface.keys())
 
     if args.json:
-        print(json.dumps(render_json(results_by_surface, sha), indent=2))
+        print(json.dumps(render_json(results_by_surface, sha, visual_counts), indent=2))
         return 0
 
     written = write_outputs(
@@ -459,13 +488,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"# pulp harness coverage @ {sha}")
     print(f"")
     print(f"{'surface':<10} {'total':>6} {'PASS':>6} {'DIVERGE':>8} {'NO-OP':>6} "
-          f"{'NOT-IMPL':>9} {'OOS':>5} {'PASS%':>7} {'drift':>6}")
+          f"{'NOT-IMPL':>9} {'OOS':>5} {'PASS%':>7} {'drift':>6} {'visual':>8}")
     for surface, results in results_by_surface.items():
         c = StatusCounts.from_results([r.status for r in results])
         drifts = sum(1 for r in results if r.drifts)
+        visual = visual_counts.get(surface, {"label": "0/0"})
         print(
             f"{surface:<10} {c.total:>6} {c.pass_:>6} {c.diverge:>8} "
-            f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% {drifts:>6}"
+            f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% "
+            f"{drifts:>6} {visual['label']:>8}"
         )
     if len(results_by_surface) > 1:
         c = total_counts
@@ -475,9 +506,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             for r in results
             if r.drifts
         )
+        visual_pass = sum(int(v.get("pass", 0)) for v in visual_counts.values())
+        visual_total = sum(int(v.get("total", 0)) for v in visual_counts.values())
         print(
             f"{'TOTAL':<10} {c.total:>6} {c.pass_:>6} {c.diverge:>8} "
-            f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% {all_drifts:>6}"
+            f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% "
+            f"{all_drifts:>6} {f'{visual_pass}/{visual_total}':>8}"
         )
     print()
     for label, path in written.items():
