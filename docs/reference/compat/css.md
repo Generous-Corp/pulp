@@ -33,6 +33,24 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-3)** — `css/direction` (and matching
+  `yoga/direction`, `rn/direction`) wired through a new
+  `View::WritingDirection` enum + `setDirection(id, "ltr"|"rtl"|
+  "inherit")` bridge fn. `yoga_layout.cpp` dispatches via
+  `YGNodeStyleSetDirection` so `direction: rtl` flips Yoga's row-axis
+  flow (flexDirection 'row' visually reverses under RTL). The CSS
+  shim's `direction` case forwards the keyword verbatim; the
+  `@pulp/react` JSX layer exposes `writingDirection` (CSS spec
+  `direction` clashes with `FlexProps.direction` in the pulp prop
+  surface; the el.style adapter route still works for raw CSS).
+  Reclassified missing → supported on css + yoga; rn/direction stays
+  partial pending the prop-applier's logical-edge resolver
+  (#1497's `*Start`/`*End` mapping is currently LTR-only fast-path —
+  RTL-aware mapping is a follow-up). `rn/writingDirection` flagged
+  `wontfix` per the harness oracle (iOS-only RN spec).
+  Skia paragraph_style.setTextDirection at text shape is the
+  remaining piece — landing alongside the SkParagraph integration
+  in a follow-up.
 - **2026-05-06 (pulp #1434 Phase A2-1 PR 1)** — CSS animations +
   transitions infrastructure landed. New
   `core/view/include/pulp/view/css_animation.hpp` ships the type

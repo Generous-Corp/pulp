@@ -27,6 +27,16 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-3)** — `rn/direction` partial via
+  the `@pulp/react` `writingDirection` prop. JSX surface uses RN's
+  `writingDirection` (CSS `direction` already routes through
+  FlexProps in this codebase); both the CSS-string-form
+  `style.direction = 'rtl'` and the JSX `writingDirection` reach the
+  shared `setDirection` bridge fn. Yoga honors via
+  `YGNodeStyleSetDirection`. RN logical-edge bundle (#1497) keeps its
+  LTR-only fast-path; RTL-aware mapping in the prop-applier is a
+  follow-up. `rn/writingDirection` flagged `wontfix` per the harness
+  oracle (iOS-only RN spec; cross-platform OOS).
 - **2026-05-06 (pulp #1549)** — `rn/mixBlendMode` flipped `missing` →
   `supported`. RN's New Architecture `mixBlendMode` style prop now
   reaches the bridge via the `@pulp/react` prop-applier (`prop-applier.ts`

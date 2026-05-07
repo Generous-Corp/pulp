@@ -707,6 +707,14 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Web designs almost universally reset to `border-box`.
         case 'boxSizing':    return call('setBoxSizing', id, value as string);
 
+        // pulp #1434 Phase A2-3 — writing direction (RN ViewStyle uses
+        // `writingDirection` for this — CSS uses `direction`, but the
+        // pulp prop name `direction` already routes to FlexProps via
+        // setFlex above. The CSS-string-form `style.direction = 'rtl'`
+        // path goes through the el.style adapter's `direction` case
+        // which calls setDirection directly).
+        case 'writingDirection': return call('setDirection', id, value as string);
+
         // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
         // the full shorthand into a list of TransitionSpecs that the
         // dispatcher (PR 2 of the ladder) consults when a property

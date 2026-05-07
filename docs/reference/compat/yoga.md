@@ -43,6 +43,12 @@ pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
 
 ## Recent updates
 
+- **2026-05-06 (pulp #1434 Phase A2-3)** — `yoga/direction` wired at
+  the View layer. `View::WritingDirection` enum (ltr / rtl / auto_)
+  propagated to Yoga via `YGNodeStyleSetDirection(node, YGDirectionLTR
+  | RTL | Inherit)` in `yoga_layout.cpp`. RTL flips Yoga's row-axis
+  flow — flexDirection 'row' visually reverses under RTL.
+  Complementary to #1542's FlexStyle-layer wiring (see entry below).
 - **2026-05-06 (pulp #1543)** — `yoga/borderWidth` plus the four per-edge
   variants (`yoga/borderTopWidth` / `borderRightWidth` / `borderBottomWidth`
   / `borderLeftWidth`) flipped `missing` → `supported`. Pulp's borders

@@ -839,6 +839,25 @@ public:
     void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }
     bool text_overflow_ellipsis() const { return text_ellipsis_; }
 
+    /// pulp #1434 Phase A2-3 — writing direction (CSS `direction` /
+    /// RN `writingDirection`). LTR is the default; RTL flips text
+    /// shaping (Skia paragraph_style.setTextDirection), Yoga's flow
+    /// (YGDirectionRTL — flexDirection 'row' visually reverses), and
+    /// textAlign 'auto' resolution at paint time. The View::direction_
+    /// state propagates inheritance only when the caller plumbs it
+    /// through the tree (Phase A2-3 keeps inheritance opt-in;
+    /// automatic-cascade is a follow-up). Enum is tri-state — `auto_`
+    /// defers to parent / first-strong-character heuristic.
+    enum class WritingDirection { ltr, rtl, auto_ };
+    void set_direction(WritingDirection d) { direction_ = d; }
+    WritingDirection direction() const { return direction_; }
+    /// Resolve `auto_` → ltr (LTR fallback, until first-strong-character
+    /// detection is wired). Use this at paint time when you need a
+    /// concrete direction.
+    WritingDirection resolved_direction() const {
+        return direction_ == WritingDirection::auto_ ? WritingDirection::ltr : direction_;
+    }
+
     /// White-space: nowrap (CSS `white-space: nowrap`). Pulp #1410. Generic
     /// flag so non-Label widgets (Button, custom text-bearing views) and
     /// text-shaper consumers can react to nowrap without dynamic_casting
@@ -1009,6 +1028,7 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
+    WritingDirection direction_ = WritingDirection::auto_;  // pulp #1434 A2-3
     // pulp #1549 — CSS / RN mix-blend-mode. Default kSrcOver (canvas
     // BlendMode::normal) is a paint-time no-op; any non-default value
     // forces a saveLayer() at paint time so the subtree composites back

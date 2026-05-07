@@ -528,6 +528,16 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // pulp #1434 Phase A2-3 — CSS `direction: ltr | rtl`. Maps to
+        // View::WritingDirection via setDirection bridge fn; Yoga
+        // honors at layout, Skia paragraph_style at text shape.
+        case "direction": {
+            if (typeof setDirection !== "undefined") {
+                setDirection(id, resolved);
+            }
+            break;
+        }
+
         // pulp #1514 — list-style cluster. Pulp doesn't model
         // <li>/<ul>/<ol> semantics; the bridge stores the values
         // verbatim. Marker glyph rendering is deferred — flipping

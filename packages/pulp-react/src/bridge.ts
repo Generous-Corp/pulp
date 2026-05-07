@@ -107,6 +107,9 @@ declare global {
     // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
     // dotted at stroke time. Other named styles degrade to solid.
     const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    /// pulp #1434 Phase A2-3 — writing direction. Maps to
+    /// View::WritingDirection; Yoga + Skia honor at layout / text shape.
+    const setDirection: ((id: string, dir: 'ltr' | 'rtl' | 'inherit' | string) => void) | undefined;
     // pulp #1514 — list-style cluster. Pulp doesn't model
     // <li>/<ul>/<ol> semantics; the bridge stores the value
     // verbatim on the View. Marker glyph rendering is deferred —
@@ -326,6 +329,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-3 — writing direction.
+        'setDirection',
         // pulp #1434 Phase A2-1 — transitions + animations.
         'setTransition', 'setTransitionProperty', 'setTransitionDuration',
         'setTransitionDelay', 'setTransitionTimingFunction',

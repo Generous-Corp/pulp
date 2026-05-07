@@ -238,6 +238,16 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-3 — RN-style writing direction. Maps to
+    /// View::WritingDirection via the setDirection bridge fn. Yoga
+    /// propagates direction through layout (RTL flips flexDirection
+    /// 'row' visually); Skia paragraph_style picks up the same value
+    /// at text shape time. The CSS spec name `direction` already
+    /// routes through FlexProps in this codebase (`FlexDirection`
+    /// shorthand), so the JSX surface uses RN's `writingDirection`;
+    /// the `style.direction = 'rtl'` path goes through the el.style
+    /// adapter and reaches the same bridge fn.
+    writingDirection?: 'ltr' | 'rtl' | 'auto' | 'inherit';
     /// pulp #1434 Phase A2-1 — CSS transitions + animations.
     /// `transition` accepts the full CSS shorthand string; longhand
     /// fields apply uniformly across the parsed list.
