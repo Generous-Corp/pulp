@@ -2,11 +2,21 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/format/test_signal.hpp>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifdef _WIN32
+#  include <process.h>
+#  define pulp_getpid() _getpid()
+#else
+#  include <unistd.h>
+#  define pulp_getpid() ::getpid()
+#endif
 
 using namespace pulp::format;
 using Catch::Matchers::WithinAbs;
@@ -14,9 +24,16 @@ using Catch::Matchers::WithinAbs;
 namespace {
 
 std::filesystem::path unique_temp_wav_path(std::string_view suffix) {
-    static int counter = 0;
+    // Combine pid + steady-clock nanoseconds + per-process counter so parallel
+    // ctest invocations (`ctest -j4` in CI) don't collide on /tmp/pulp-test-signal-*.wav.
+    // See pulp #1257 review comment r3175949820.
+    static std::atomic<unsigned long long> counter{0};
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto pid = static_cast<long long>(pulp_getpid());
+    const auto seq = counter.fetch_add(1, std::memory_order_relaxed);
     return std::filesystem::temp_directory_path() /
-           ("pulp-test-signal-" + std::to_string(++counter) + std::string(suffix));
+           ("pulp-test-signal-" + std::to_string(pid) + "-" +
+            std::to_string(now) + "-" + std::to_string(seq) + std::string(suffix));
 }
 
 pulp::audio::AudioFileData make_test_audio() {
