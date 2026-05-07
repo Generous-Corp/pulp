@@ -183,6 +183,25 @@ arc parameters through directly:
 - **`arcTo(x1, y1, x2, y2, radius)`** — Skia: `SkPath::arcTo(p1, p2, radius)` (the 5-arg overload). CG: `CGPathAddArcToPoint`. Radius is honoured. Degenerate (collinear / zero-radius) cases collapse to `lineTo` per spec.
 - **`ellipse(cx, cy, rx, ry, rotation, start, end, anticlockwise)`** — Skia: arc on an axis-aligned oval, transformed through `SkMatrix::RotateRad`. CG: `CGPathAddArc` through a `CGAffineTransform` carrying translate + rotate + non-uniform scale. Rotation is honoured.
 - **`roundRect(x, y, w, h, radii)`** — Skia: `SkRRect::MakeRectRadii` (4-corner). CG: 8-segment per-corner layout with adjacent-corner clamping. Supports the full CSS spec radii forms (number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], `{x, y}` elliptical corner).
+### Catalog hygiene: 10-entry `tests` round-trip (pulp #1526)
+
+The 10 canvas2d entries below were cataloged in #1366 and wired across
+#1348 / #1480, but their `compat.json` `tests` field was empty — there
+was no single test pinning the round-trip "JS shim → bridge → CanvasWidget
+command stream" for the set. Two new Catch2 cases under `[issue-1526]`
+cover the round-trip (recorded `set_global_alpha` / `set_blend_mode` /
+`set_line_cap` / `set_line_join` / `set_text_align` / `set_text_baseline`
+/ `set_line_dash` / `quad_to` / `cubic_to` / `move_to` cmds) and the
+spec-default + assignment getter round-trip. Each catalog entry now
+references the new test:
+
+- `globalAlpha`, `globalCompositeOperation`
+- `lineCap`, `lineJoin`, `lineDashOffset`
+- `textAlign`, `textBaseline`
+- `quadraticCurveTo`, `bezierCurveTo`, `arc`
+
+No behaviour change — this slice closes the catalog `tests`-field gap
+the entries inherited from PR #1366.
 
 ### Follow-up: `direction` + `filter` (pulp #1520)
 

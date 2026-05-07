@@ -171,7 +171,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          # No current CI input is stored as an LFS object. Keep this false so
+          # self-hosted workspaces with Pulp's pre-push hook do not fail when
+          # git-lfs tries to install its own hook during checkout.
+          lfs: false
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
           # GitHub-hosted runners get a fresh VM each run anyway, so the
@@ -293,7 +296,22 @@ jobs:
         # GH-hosted ubuntu/macos-15 runners also have ≥4 cores so this
         # doesn't regress their previous behavior. Higher parallelism
         # roughly halves test phase wall-time on multi-core hosts.
-        run: ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        #
+        # Fast-CI / full-CI split (#1589). On `pull_request` events, the
+        # `slow` label is added to the existing `validation` exclusion so
+        # PRs skip wall-time-heavy tests (cmake-ios-auv3-configure ~3 min,
+        # filesystem-mtime sleep loops, Timer hammers, etc — see
+        # docs/guides/local-ci.md > Fast-CI vs full-CI). On push to main /
+        # nightly schedule / workflow_dispatch the full suite still runs
+        # so slow tests gate landing into the release lane.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS_EXCLUDE="validation|slow"
+          else
+            LABELS_EXCLUDE="validation"
+          fi
+          ctest --output-on-failure -C Release -LE "$LABELS_EXCLUDE" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -310,9 +328,15 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: build
         shell: cmd
+        # Fast-CI / full-CI split (#1589): same conditional as the
+        # non-Windows step above. cmd doesn't have bash conditionals so
+        # we lean on the GitHub Actions expression to pick the value
+        # before the cmd shell ever sees it.
+        env:
+          PULP_CTEST_LABELS_EXCLUDE: ${{ github.event_name == 'pull_request' && 'validation|slow' || 'validation' }}
         run: |
           chcp 65001
-          ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+          ctest --output-on-failure -C Release -LE "%PULP_CTEST_LABELS_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's

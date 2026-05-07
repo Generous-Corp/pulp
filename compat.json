@@ -32,12 +32,13 @@
     "_changelog": {
       "2026-04-30": "Initial population — 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
       "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
-      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199)."
+      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
+      "2026-05-06": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563."
     },
     "counts": {
       "css": 199,
       "rn": 120,
-      "yoga": 53,
+      "yoga": 55,
       "react": 0,
       "html": 59,
       "canvas2d": 63,
@@ -911,15 +912,22 @@
       "issue": ""
     },
     "css/contain": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (browser layout/paint optimization hint, accepted silently)",
+      "supportedValues": [
+        "none",
+        "strict",
+        "content",
+        "size",
+        "inline-size",
+        "layout",
+        "style",
+        "paint"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Browser-only optimization hint.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. CSS containment is a browser hint that lets the engine skip layout/paint work for isolated subtrees. Pulp's renderer doesn't expose composition / containment boundaries the way browsers do, so the value has no rendered effect — but accepting it silently means consumers can paste browser-authored CSS verbatim. NO_OP semantics by JS shim fall-through (no `case \"contain\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/content": {
       "status": "wontfix",
@@ -933,15 +941,17 @@
       "issue": ""
     },
     "css/contentVisibility": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (browser-only offscreen-rendering hint, accepted silently)",
+      "supportedValues": [
+        "visible",
+        "auto",
+        "hidden"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Browser-only optimization hint.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. content-visibility:auto tells browsers to skip rendering offscreen subtrees; pulp's renderer doesn't have a comparable deferred-paint mode. Accepting the value (silently) keeps imported CSS portable. NO_OP semantics by JS shim fall-through (no `case \"contentVisibility\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/counterIncrement": {
       "status": "wontfix",
@@ -1052,24 +1062,27 @@
     },
     "css/filter": {
       "status": "supported",
-      "mapsTo": "setFilter(id, value)",
+      "mapsTo": "web-compat-style-decl.js forwards `filter` keyword string verbatim to setFilter (widget_bridge.cpp); bridge parses the function chain into View::FilterOp[]; view.cpp paint dispatches via canvas.save_layer_with_filters; Skia backend composes the chain via SkImageFilters::Compose + SkColorFilters::Matrix.",
       "supportedValues": [
-        "blur(<px>)"
+        "blur(<px>)",
+        "brightness(<number>)",
+        "contrast(<number>)",
+        "grayscale(<number>)",
+        "hue-rotate(<deg|rad|turn|grad>)",
+        "invert(<number>)",
+        "opacity(<number>)",
+        "saturate(<number>)",
+        "sepia(<number>)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order",
+        "\"none\" clears the chain"
       ],
-      "unsupportedValues": [
-        "brightness",
-        "contrast",
-        "drop-shadow",
-        "grayscale",
-        "hue-rotate",
-        "invert",
-        "opacity",
-        "saturate",
-        "sepia",
-        "multi-function chain"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFilter parses chained functions in source order\"",
+        "test/test_widget_bridge.cpp::\"setFilter parses brightness/contrast/grayscale/etc\""
       ],
-      "tests": [],
-      "notes": "Bridge parses 'blur(Npx)'. Other filter functions pass through verbatim.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow. CG canvas backend currently degrades the chain to blur-only collapse (color-matrix filters silently no-op); SkColorFilter-equivalent for CG is a follow-up.",
       "issue": ""
     },
     "css/flex": {
@@ -2015,15 +2028,17 @@
       "issue": ""
     },
     "css/overscrollBehavior": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (rubber-band / scroll-chaining hint, accepted silently)",
+      "supportedValues": [
+        "auto",
+        "contain",
+        "none"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Not in initial scope.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. overscroll-behavior controls scroll-chaining and rubber-band gestures at scroll-container boundaries; pulp doesn't actually scroll today (Overflow scroll/visible exists but no scroll-driven UX modulators), so the value is silently accepted with no rendered effect. NO_OP semantics by JS shim fall-through (no `case \"overscrollBehavior\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/padding": {
       "status": "supported",
@@ -2348,48 +2363,52 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (smooth-scroll modulator, accepted silently in pulp's non-scrolling layout)",
+      "supportedValues": [
+        "auto",
+        "smooth"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. 'smooth' scroll on link / programmatic scroll. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-behavior is a smooth-scroll modulator that needs a real scroll context; pulp accepts Overflow scroll/visible but the engine doesn't scroll today (no programmatic scrollTo, no link-anchor jump), so the property silently noop-s. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollBehavior\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollMargin": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap landing-area inset, accepted silently in pulp's non-scrolling layout)",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-margin is a scroll-snap subprop — it offsets the snap-area outside an element's box, only meaningful inside a scroll-snap container. Pulp doesn't have a scroll-snap engine, so the value is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollMargin\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollPadding": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap container inset, accepted silently in pulp's non-scrolling layout)",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-padding insets the optimal viewing region inside a scroll-snap container; it requires a scroll-snap engine to mean anything. Pulp doesn't have one, so the value is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollPadding\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/scrollSnapType": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (scroll-snap container declaration, accepted silently in pulp's non-scrolling layout)",
+      "supportedValues": [
+        "none",
+        "x",
+        "y",
+        "block",
+        "inline",
+        "both",
+        "mandatory",
+        "proximity"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. scroll-snap container; mobile carousel / hero gallery primitive. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified missing (NOT-IMPL) → noop. scroll-snap-type marks a container as a scroll-snap surface (mobile carousel / hero gallery primitive in browsers). Pulp doesn't have a scroll-snap engine, so the declaration is silently accepted with no rendered effect. Common in design-tool exports (Figma / v0 / Claude Design HTML). NO_OP semantics by JS shim fall-through (no `case \"scrollSnapType\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/tableLayout": {
       "status": "wontfix",
@@ -2763,15 +2782,19 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/willChange": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "no-op (compositor promotion hint, accepted silently)",
+      "supportedValues": [
+        "auto",
+        "scroll-position",
+        "contents",
+        "transform",
+        "opacity"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Hint to compositor -- Pulp's renderer is GPU all the time.",
-      "issue": ""
+      "notes": "pulp #1528: reclassified wontfix → noop. will-change is a compositor-layer promotion hint; pulp's GPU renderer doesn't expose composition layers in a way consumers can hint about, so accepting the value and ignoring it is correct (Pulp is GPU all the time anyway). NO_OP semantics by JS shim fall-through (no `case \"willChange\":` in web-compat-style-decl.js).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1528"
     },
     "css/wordBreak": {
       "status": "missing",
@@ -3441,15 +3464,18 @@
     },
     "rn/filter": {
       "status": "supported",
-      "mapsTo": "@pulp/react prop-applier forwards CSS string to setFilter (widget_bridge.cpp:3767). Bridge currently parses only `blur(Npx)`.",
+      "mapsTo": "@pulp/react prop-applier forwards CSS-string verbatim to setFilter (post sub-agent #27 wiring; widget_bridge.cpp parses the full function chain since this PR).",
       "supportedValues": [
-        "blur(Npx)"
+        "blur(<px>)",
+        "brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia (each with numeric or angle args)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR. Bridge parser today recognizes only blur(); other CSS filter functions (brightness, contrast, drop-shadow, grayscale, invert, opacity, saturate, sepia, hue-rotate) are a follow-up.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow.",
       "issue": ""
     },
     "rn/flex": {
@@ -4333,54 +4359,70 @@
       "issue": ""
     },
     "rn/textAlignVertical": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "setFlex(id, 'align_items', mapped) — top→flex-start, center→center, bottom→flex-end, auto→auto",
+      "supportedValues": [
         "auto",
         "top",
         "bottom",
         "center"
       ],
-      "tests": [],
-      "notes": "Android-only in RN; could map to flex align.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Android-only in RN with no CSS analogue. RN's spec applies WITHIN a text container; pulp's flex-only View model has no inline text-block concept, so we map to alignItems on the owning View — closest semantic. A View with one text child gets the same visual top/center/bottom alignment.",
+      "issue": "1547"
     },
     "rn/textDecorationColor": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setTextDecorationColor(id, color)",
+      "supportedValues": [
+        "any color"
       ],
-      "tests": [],
-      "notes": "Not modeled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Bridge setter has been registered since #1434. pulp #1547 wired the @pulp/react JSX dispatch.",
+      "issue": "1547"
     },
     "rn/textDecorationLine": {
-      "status": "missing",
-      "mapsTo": "no branch (use textDecoration in CSS surface only)",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "setTextDecoration(id, line)",
+      "supportedValues": [
         "none",
         "underline",
         "line-through",
-        "underline line-through"
+        "overline",
+        "underline line-through",
+        "underline overline",
+        "overline line-through",
+        "underline overline line-through"
       ],
-      "tests": [],
-      "notes": "Use bridge setTextDecoration via CSS surface; @pulp/react does not surface.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Routes to the same Label::TextDecoration setter as the CSS shorthand. The bridge setter only honors a single decoration line today; RN's compound multi-line forms (e.g. 'underline line-through') are normalized on the JS side by picking the first recognized single token, so the value renders as that single decoration rather than the fully combined RN appearance. Codex post-merge audit, PR #1564.",
+      "issue": "1547"
     },
     "rn/textDecorationStyle": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setTextDecorationStyle(id, style)",
+      "supportedValues": [
+        "solid",
+        "double",
+        "dotted",
+        "dashed",
+        "wavy"
       ],
-      "tests": [],
-      "notes": "Not modeled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Bridge accepts all 5 spec values and stores them on Label. Paint path renders solid regardless today; non-solid styles fall back to solid (spec-allowed).",
+      "issue": "1547"
     },
     "rn/textShadowColor": {
       "status": "missing",
@@ -4617,6 +4659,40 @@
       ],
       "tests": [],
       "notes": "Yoga upstream supports YGAuto / percent; Pulp accepts only px float. pulp #1434 rn batch C: bridge accepts NN% and the \"auto\" keyword; FlexStyle::dim_flex_basis drives YGNodeStyleSetFlexBasis{,Percent,Auto}. content remains unsupported.",
+      "issue": ""
+    },
+    "yoga/flex": {
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis.",
+      "supportedValues": [
+        "<grow>",
+        "<grow> <shrink>",
+        "<grow> <shrink> <basis>"
+      ],
+      "unsupportedValues": [
+        "'auto'",
+        "'none'",
+        "'initial'"
+      ],
+      "tests": [
+        "test/web-compat/test_popover_row_template_1147.cpp"
+      ],
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. Keyword forms (auto/none/initial) parse as NaN and silently set flex_grow=0 — same divergence as the css surface.",
+      "issue": ""
+    },
+    "yoga/flexFlow": {
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js case 'flexFlow' tokenizes the shorthand and dispatches setFlex(id, 'direction', ...) + setFlex(id, 'flex_wrap', ...) onto FlexStyle.direction / FlexStyle.flex_wrap.",
+      "supportedValues": [
+        "row|column|row-reverse|column-reverse",
+        "nowrap|no-wrap|wrap|wrap-reverse",
+        "combined two-token shorthand (e.g. \"row wrap-reverse\")"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\""
+      ],
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser (pulp #1434 Triage #14 extended it to cover `-reverse` modes); mirrors `css/flexFlow`.",
       "issue": ""
     },
     "yoga/justifyContent": {
@@ -5045,58 +5121,68 @@
       "issue": ""
     },
     "yoga/borderWidth": {
-      "status": "missing",
-      "mapsTo": "no FlexStyle field -- Pulp handles border purely as a paint overlay (View::set_border_*).",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdge*, view.border_*_width). Per-side override (set_border_top/right/bottom/left, reached via setBorderTopWidth etc.) wins; otherwise the uniform View::border_width() is forwarded to all four edges. Couples with #1516 box-sizing so Yoga's content-box / border-box math gets accurate border insets (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all (in layout sense)"
+        "%"
       ],
       "tests": [],
-      "notes": "Yoga's BORDER edges contribute to content-box sizing. Pulp's borders are paint-only, not measured by layout. This breaks parity with Yoga measurement when borders are large.",
+      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. Yoga has no YGNodeStyleSetBorderPercent (matches CSS spec: % is invalid for border-width).",
       "issue": ""
     },
     "yoga/borderTopWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeTop, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same as borderWidth.",
+      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w).",
       "issue": ""
     },
     "yoga/borderRightWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeRight, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderRightWidth(id, w).",
       "issue": ""
     },
     "yoga/borderBottomWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeBottom, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderBottomWidth(id, w).",
       "issue": ""
     },
     "yoga/borderLeftWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeLeft, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderLeftWidth(id, w).",
       "issue": ""
     },
     "yoga/position": {
@@ -5983,46 +6069,52 @@
       "issue": "1346"
     },
     "canvas2d/roundRect": {
-      "status": "supported",
-      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> canvasPathRoundRect with 4-corner radii. Skia: SkRRect::MakeRectRadii. CG: 8-segment per-corner layout.",
+      "status": "partial",
+      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> moveTo + lineTos + arcTos. Uniform-corner case only.",
       "supportedValues": [
-        "number (uniform)",
-        "{x, y} object (elliptical corner)",
-        "array [r] / [r1,r2] / [r1,r2,r3] / [r1,r2,r3,r4] (CSS spec)"
+        "uniform radius (number, or array[1])"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "non-uniform radii (4 distinct corners) — falls back to largest single value"
+      ],
       "tests": [],
-      "notes": "pulp #1521 promotion. Native per-corner radii via SkRRect (Skia) / CGPath layout (CG). Replaces the uniform-only approximation.",
-      "issue": "1521"
+      "notes": "PR #1348. arcTo approximation is conservative — see canvas2d/arcTo.",
+      "issue": "1346"
     },
     "canvas2d/arc": {
-      "status": "supported",
-      "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> canvasPathArc. Skia: SkPath::arcTo(oval, startDeg, sweepDeg, false). CG: CGPathAddArc.",
+      "status": "partial",
+      "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> path-mode emit as cubic-bezier segments via canvasMoveTo + canvasCubicTo. Bridge has immediate-mode canvasArc but no path-mode arc primitive.",
       "supportedValues": [
         "any arc"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "pulp #1521 promotion. Native SkPath::arcTo (Skia) / CGPathAddArc (CG). Replaces the per-quadrant cubic-bezier approximation; full circles and half circles are now closed-form correct.",
-      "issue": "1521"
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases.",
+      "issue": "1346"
     },
     "canvas2d/arcTo": {
-      "status": "supported",
-      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius). CG: CGPathAddArcToPoint.",
+      "status": "partial",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> conservative lineTo(x1,y1) + lineTo(x2,y2). Radius is currently ignored.",
       "supportedValues": [
-        "any arcTo (radius honoured)"
+        "any arcTo (radius ignored)"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "geometrically-correct arcTo with the proper radius-tangent computation"
+      ],
       "tests": [],
-      "notes": "pulp #1521 promotion. Native tangent-arc; radius is no longer ignored. Degenerate (collinear / zero-radius) cases collapse to lineTo per spec.",
-      "issue": "1521"
+      "notes": "PR #1348. Used by roundRect and FilterBank's marquee corners; fidelity loss is minimal for those use cases. File a follow-up if a plugin needs spec-compliant arcTo.",
+      "issue": "1346"
     },
     "canvas2d/bezierCurveTo": {
       "status": "supported",
       "mapsTo": "ctx.bezierCurveTo -> canvasCubicTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6031,31 +6123,33 @@
       "mapsTo": "ctx.quadraticCurveTo -> canvasQuadTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
     "canvas2d/ellipse": {
-      "status": "supported",
-      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> canvasPathEllipse. Skia: SkPath::arcTo on a temporary oval, rotated through SkMatrix. CG: CGPathAddArc through CGAffineTransform.",
+      "status": "partial",
+      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> rotation IGNORED; if rx===ry falls through to arc; otherwise emits a 4-segment cubic approximation.",
       "supportedValues": [
-        "any ellipse (rotation honoured)"
+        "axis-aligned ellipses (rotation ignored)"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "non-zero rotation"
+      ],
       "tests": [],
-      "notes": "pulp #1521 promotion. Rotation is now honoured — previously ignored.",
-      "issue": "1521"
+      "notes": "PR #1348. FilterBank doesn't use ellipse — this is a thin parity shim.",
+      "issue": "1346"
     },
     "canvas2d/fill": {
-      "status": "partial",
-      "mapsTo": "ctx.fill -> _syncGlobalState + _applyFillStyle + canvasFillPath.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fill rule arg ('evenodd' / 'nonzero') — accepted but ignored"
-      ],
+      "status": "supported",
+      "mapsTo": "ctx.fill(rule?) -> _syncGlobalState + _applyFillStyle + canvasFillPath(id, rule). Rule encoded as int (0=nonzero, 1=evenodd) and threaded through CanvasDrawCmd::int_val.",
+      "supportedValues": ["nonzero (default)", "evenodd"],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
-      "issue": ""
+      "notes": "pulp #1522 wired the fillRule arg end to end. Skia: SkPathBuilder::setFillType(kEvenOdd|kWinding) before drawPath. CG: CGContextEOFillPath / CGContextFillPath.",
+      "issue": "1522"
     },
     "canvas2d/stroke": {
       "status": "supported",
@@ -6067,15 +6161,13 @@
       "issue": ""
     },
     "canvas2d/clip": {
-      "status": "partial",
-      "mapsTo": "ctx.clip(fillRule) -> canvasClip (intersects current clip with current path). Falls back to no-op if canvasClip absent.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fillRule arg — bridge always uses non-zero today"
-      ],
+      "status": "supported",
+      "mapsTo": "ctx.clip(rule?) -> canvasClip(id, rule). Rule encoded as int (0=nonzero, 1=evenodd) and threaded through CanvasDrawCmd::int_val. Falls back to no-op if canvasClip absent.",
+      "supportedValues": ["nonzero (default)", "evenodd"],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
-      "issue": ""
+      "notes": "pulp #1522 wired the fillRule arg end to end. Backed by SkCanvas::clipPath after SkPathBuilder::setFillType (Skia) / CGContextEOClip vs CGContextClip (CG). (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
+      "issue": "1522"
     },
     "canvas2d/isPointInPath": {
       "status": "partial",
@@ -6369,7 +6461,9 @@
       "unsupportedValues": [
         "lineDashOffset mutation between draws (must re-call setLineDash to push new phase)"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "Minor edge case; file a follow-up if observable.",
       "issue": ""
     },
@@ -6418,7 +6512,9 @@
         "square"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6431,7 +6527,9 @@
         "bevel"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6456,7 +6554,9 @@
         "[0, 1]"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -6492,7 +6592,9 @@
         "luminosity"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
       "issue": "1346"
     },
@@ -6529,7 +6631,9 @@
         "end"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6545,7 +6649,9 @@
         "bottom"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
