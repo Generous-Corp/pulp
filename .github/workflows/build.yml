@@ -171,7 +171,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          # No current CI input is stored as an LFS object. Keep this false so
+          # self-hosted workspaces with Pulp's pre-push hook do not fail when
+          # git-lfs tries to install its own hook during checkout.
+          lfs: false
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
           # GitHub-hosted runners get a fresh VM each run anyway, so the

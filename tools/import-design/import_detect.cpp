@@ -204,10 +204,21 @@ InputSnapshot snapshot_input(const fs::path& input) {
     if (fs::is_directory(input)) {
         snap.is_directory = true;
         std::error_code ec;
+        std::vector<fs::path> html_candidates;
         for (auto& entry : fs::directory_iterator(input, ec)) {
-            if (!ec)
-                snap.directory_basenames.push_back(entry.path().filename().string());
+            if (ec) break;
+            auto path = entry.path();
+            snap.directory_basenames.push_back(path.filename().string());
+            std::error_code file_ec;
+            if (entry.is_regular_file(file_ec)) {
+                auto ext = lower_trim(path.extension().string());
+                if (ext == ".html" || ext == ".htm")
+                    html_candidates.push_back(path);
+            }
         }
+        std::sort(snap.directory_basenames.begin(), snap.directory_basenames.end());
+        std::sort(html_candidates.begin(), html_candidates.end());
+
         // Prefer code.html (Stitch-style), then index.html.
         for (auto candidate : {"code.html", "index.html"}) {
             auto p = input / candidate;
@@ -216,6 +227,8 @@ InputSnapshot snapshot_input(const fs::path& input) {
                 break;
             }
         }
+        if (snap.html_text.empty() && !html_candidates.empty())
+            snap.html_text = read_text_file(html_candidates.front());
     } else {
         snap.directory_basenames.push_back(input.filename().string());
         snap.html_text = read_text_file(input);

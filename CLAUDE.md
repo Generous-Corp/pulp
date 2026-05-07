@@ -282,6 +282,42 @@ git worktree remove ../pulp-phase-audio
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
 
+When creating a fresh worktree for a task that references `planning/`, initialize the planning submodule before reading specs or handoffs:
+
+```bash
+git submodule update --init planning
+```
+
+If a named planning file is still missing after initialization, verify the current planning checkout or source planning repo before treating the file as nonexistent.
+
+Fresh worktrees may also have only `external/skia-build/` headers and
+`VERSION.md`, without the platform static libraries. For work that needs
+Skia raster determinism, first check for a populated `SKIA_DIR` or reuse the
+primary checkout's cached `external/skia-build` when it has the required
+`*-gpu/lib/Release` libraries. Skia-dependent smoke tests should either run
+against that locked cache or skip with a clear "locked raster dependency not
+installed" reason; they should not replace the Skia render proof with a fake
+or unrelated renderer.
+
+For the visual-harness Docker smoke, prefer
+`tools/harness/visual/docker-build.sh` over a raw `docker build`. The wrapper
+uses the pinned `linux/amd64` Skia archive and a reusable local buildx cache
+under `~/.cache/pulp/visual-harness/buildx`; the Dockerfile also keeps
+BuildKit cache mounts for apt packages, the Skia release zip, and pip wheels.
+That cache is intentionally machine-local, so repeated runs from new worktrees
+or SSH hosts on the same machine should reuse downloaded inputs.
+
+For future visual fixtures that need interaction or screenshots, reuse Pulp's
+existing hooks before adding platform-specific automation: drive views with
+`View::simulate_click`, `simulate_drag`, and `simulate_hover`; capture headless
+view trees with `pulp::view::render_to_png` / `render_to_file`, or live host
+surfaces with `WindowHost::capture_png()`. Non-Apple platforms require a
+registered screenshot provider via `set_screenshot_provider()`, so cross-
+platform tests should install that provider or report a clear unsupported skip.
+When macOS rendering is the product risk, run the local arm64-darwin smoke in
+addition to the Docker smoke; Docker proves the dependency recipe, not Apple's
+screenshot or live-window capture paths.
+
 ### Status Tracking
 
 Status is tracked in `planning/STATUS.md` (private submodule). Phase specs live in `planning/` with goals, deliverables, acceptance criteria, test plans, and notes. After writing or updating files in `planning/`, always commit and push to the planning repo.
