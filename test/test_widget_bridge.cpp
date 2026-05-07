@@ -8381,6 +8381,28 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        sa._applyProperty('mixBlendMode', 'plus-lighter');
+        sb._applyProperty('mixBlendMode', 'plus-darker');
+    )");
+
+    auto* a = bridge.widget("a");
+    auto* b = bridge.widget("b");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(a->mix_blend_mode() == BM::lighter);
+    REQUIRE(b->mix_blend_mode() == BM::lighter);
+    REQUIRE(a->has_non_default_blend_mode());
+    REQUIRE(b->has_non_default_blend_mode());
+}
+
 // ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
 //
 // These tests close the loop on the five compat.json entries that flipped
@@ -8416,31 +8438,6 @@ TEST_CASE("Wave 2 canvas2d — ctx.fill('evenodd') reaches Canvas::fill_current_
     WidgetBridge bridge(engine, root, store);
 
     bridge.load_script(R"(
-        createPanel('a', '');
-        createPanel('b', '');
-        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
-        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
-        sa._applyProperty('mixBlendMode', 'plus-lighter');
-        sb._applyProperty('mixBlendMode', 'plus-darker');
-    )");
-
-    auto* a = bridge.widget("a");
-    auto* b = bridge.widget("b");
-    REQUIRE(a != nullptr);
-    REQUIRE(b != nullptr);
-    REQUIRE(a->mix_blend_mode() == BM::lighter);
-    REQUIRE(b->mix_blend_mode() == BM::lighter);
-    REQUIRE(a->has_non_default_blend_mode());
-    REQUIRE(b->has_non_default_blend_mode());
-}
-
-TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — CSS Backgrounds & Borders L3 named widths.
-    // Pulp picks 1/2/4 px (slightly thinner than browsers' canonical
-    // 1/3/5 — see compat.json css/borderWidth note).
-    ScriptEngine engine;
-    View root;
         var c = document.createElement('canvas');
         c.id = 'evenodd-fill';
         c.width = 100; c.height = 100;
@@ -8476,12 +8473,13 @@ TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
     REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
+          "[view][bridge][css][wave2-css]") {
+    // Wave 2 css.2 — CSS Backgrounds & Borders L3 named widths.
+    // Pulp picks 1/2/4 px (slightly thinner than browsers' canonical
+    // 1/3/5 — see compat.json css/borderWidth note).
     ScriptEngine engine;
     View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
@@ -8502,14 +8500,16 @@ TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with Fil
     REQUIRE_THAT(bridge.widget("thick")->border_width(), WithinAbs(4.0f, 0.001f));
 }
 
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.4 — Skia distinguishes italic-vs-oblique only via
-    // the `slnt` font variation axis, which most bundled fonts don't
-    // ship. Aliasing oblique -> italic upgrades a silent no-op to the
-    // closest visual approximation.
+TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
+          "[view][bridge][canvas][wave2-canvas2d]") {
     ScriptEngine engine;
     View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'evenodd-clip';
         c.width = 100; c.height = 100;
@@ -8542,12 +8542,14 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
     REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
+          "[view][bridge][css][wave2-css]") {
+    // Wave 2 css.4 — Skia distinguishes italic-vs-oblique only via
+    // the `slnt` font variation axis, which most bundled fonts don't
+    // ship. Aliasing oblique -> italic upgrades a silent no-op to the
+    // closest visual approximation.
     ScriptEngine engine;
     View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
@@ -8568,12 +8570,16 @@ TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 
     REQUIRE(lb->font_style() == 1);   // italic (angle ignored)
 }
 
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — em/rem default to 14 px, vh/vw default to a
-    // 600x800 viewport (matches resolveLength fallback).
+TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
+          "[view][bridge][canvas][wave2-canvas2d]") {
     ScriptEngine engine;
     View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'roundrect-4';
         c.width = 100; c.height = 100;
@@ -8616,12 +8622,12 @@ TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport"
     REQUIRE_THAT(rrCmd.floats[5], WithinAbs(16.0f, 1e-5f));  // bl_y
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
+          "[view][bridge][css][wave2-css]") {
+    // Wave 2 css.2 — em/rem default to 14 px, vh/vw default to a
+    // 600x800 viewport (matches resolveLength fallback).
     ScriptEngine engine;
     View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
@@ -8646,14 +8652,16 @@ TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads throug
     REQUIRE_THAT(bridge.widget("d")->left(), WithinAbs(200.0f, 0.05f));
 }
 
-TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
-          "[view][bridge][css][wave2-css]") {
-    // Wave 2 css.2 — margin shorthand re-tokenized so each edge
-    // routes through the same string-aware setFlex pathway as the
-    // per-edge longhands. `margin: auto` centers via Yoga's
-    // YGNodeStyleSetMarginAuto when paired across opposing edges.
+TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
+          "[view][bridge][canvas][wave2-canvas2d]") {
     ScriptEngine engine;
     View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'ellipse-rot';
         c.width = 100; c.height = 100;
@@ -8692,12 +8700,14 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
     REQUIRE_THAT(eCmd.f[4], WithinAbs(static_cast<float>(M_PI / 4.0), 1e-4f));
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
+          "[view][bridge][css][wave2-css]") {
+    // Wave 2 css.2 — margin shorthand re-tokenized so each edge
+    // routes through the same string-aware setFlex pathway as the
+    // per-edge longhands. `margin: auto` centers via Yoga's
+    // YGNodeStyleSetMarginAuto when paired across opposing edges.
     ScriptEngine engine;
     View root;
-    root.set_bounds({0, 0, 400, 200});
-    root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
@@ -8725,6 +8735,18 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
     REQUIRE_THAT(fb.dim_margin_bottom.value, WithinAbs(10.0f, 0.001f));
     REQUIRE(fb.dim_margin_left.unit   == DimensionUnit::px);
     REQUIRE_THAT(fb.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
         var c = document.createElement('canvas');
         c.id = 'stroke-text';
         c.width = 200; c.height = 100;
@@ -8757,4 +8779,259 @@ TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_te
     // (the pre-#1525 approximation).
     REQUIRE(strokeTextCount == 1);
     REQUIRE(fillTextCount == 0);
+}
+
+// ── pulp Wave 3 html bundle (ARIA + querySelector) ─────────────────────
+//
+// Wave 3 html.2 / #1476: aria-label / role attributes flow through the
+// html-compat shim into View::access_label_ / View::access_role_ slots
+// that the macOS NSAccessibility bridge already consumes.  Wave 3 html.3:
+// document.querySelector accepts attribute selectors, compound selectors,
+// and descendant / child combinators in addition to the previously
+// supported tag/.class/#id forms.
+
+TEST_CASE("HTML aria-label routes to View access_label",
+          "[view][bridge][wave3-html][html-aria]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Direct bridge fn — exercises the C++ entry point JS-side
+    // setAttribute('aria-label', ...) collapses onto.
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setAccessibilityLabel('a', 'Volume control');
+    )");
+
+    auto* a = bridge.widget("a");
+    REQUIRE(a != nullptr);
+    REQUIRE(a->access_label() == "Volume control");
+}
+
+TEST_CASE("HTML role attribute routes through ARIA->AccessRole bucket",
+          "[view][bridge][wave3-html][html-aria]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Mirror the seven ARIA role buckets we collapse the spec onto.
+    bridge.load_script(R"(
+        createPanel('s', '');  setAccessibilityRole('s', 'slider');
+        createPanel('cb', ''); setAccessibilityRole('cb', 'checkbox');
+        createPanel('sw', ''); setAccessibilityRole('sw', 'switch');
+        createPanel('im', ''); setAccessibilityRole('im', 'img');
+        createPanel('pb', ''); setAccessibilityRole('pb', 'progressbar');
+        createPanel('hd', ''); setAccessibilityRole('hd', 'heading');
+        createPanel('bn', ''); setAccessibilityRole('bn', 'button');
+        createPanel('un', ''); setAccessibilityRole('un', '');
+    )");
+
+    REQUIRE(bridge.widget("s")->access_role()  == View::AccessRole::slider);
+    REQUIRE(bridge.widget("cb")->access_role() == View::AccessRole::toggle);
+    REQUIRE(bridge.widget("sw")->access_role() == View::AccessRole::toggle);
+    REQUIRE(bridge.widget("im")->access_role() == View::AccessRole::image);
+    REQUIRE(bridge.widget("pb")->access_role() == View::AccessRole::meter);
+    REQUIRE(bridge.widget("hd")->access_role() == View::AccessRole::label);
+    // 'button' has no Pulp enum slot — collapses to `group`.
+    REQUIRE(bridge.widget("bn")->access_role() == View::AccessRole::group);
+    // Empty / unknown role clears to none.
+    REQUIRE(bridge.widget("un")->access_role() == View::AccessRole::none);
+}
+
+TEST_CASE("HTML setAttribute(aria-label) flushes through web-compat shim",
+          "[view][bridge][wave3-html][html-aria]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // End-to-end: createElement -> appendChild (so _nativeCreated is true)
+    // -> setAttribute('aria-label', ...) goes through the shim's fast path
+    // and reaches View::access_label_ via the bridge fn.
+    bridge.load_script(R"(
+        var d = document.createElement('div');
+        d.id = 'a11y-target';
+        document.body.appendChild(d);
+        d.setAttribute('aria-label', 'Save preset');
+        d.setAttribute('role', 'button');
+    )");
+
+    auto idVal = engine.evaluate("document.getElementById('a11y-target')._id");
+    auto id = std::string(idVal.getWithDefault<std::string_view>(""));
+    auto* v = bridge.widget(id);
+    REQUIRE(v != nullptr);
+    REQUIRE(v->access_label() == "Save preset");
+    // 'button' -> group bucket.
+    REQUIRE(v->access_role() == View::AccessRole::group);
+}
+
+TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",
+          "[view][bridge][wave3-html][html-aria]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // React commits attributes BEFORE mounting in some commit orders, so
+    // setAttribute('aria-label', ...) sees _nativeCreated === false.  The
+    // shim must replay through __replayAriaAttributes__ once the native
+    // node lands via appendChild.
+    bridge.load_script(R"(
+        var d = document.createElement('div');
+        d.id = 'a11y-replay';
+        // NOTE — appendChild has not run yet, so the element isn't native.
+        // Force the pre-mount path by clearing the flag the createElement
+        // helper sets after the createCol call.
+        d._nativeCreated = false;
+        d.setAttribute('aria-label', 'Filter cutoff');
+        d.setAttribute('role', 'slider');
+        // Now mount.  appendChild -> _ensureNative -> __replayAriaAttributes__
+        document.body.appendChild(d);
+    )");
+
+    auto idVal = engine.evaluate("document.getElementById('a11y-replay')._id");
+    auto id = std::string(idVal.getWithDefault<std::string_view>(""));
+    auto* v = bridge.widget(id);
+    REQUIRE(v != nullptr);
+    REQUIRE(v->access_label() == "Filter cutoff");
+    REQUIRE(v->access_role() == View::AccessRole::slider);
+}
+
+TEST_CASE("querySelector matches tag / .class / #id forms",
+          "[view][bridge][wave3-html][html-querySelector]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var p = document.createElement('div');
+        p.id = 'qs-root';
+        document.body.appendChild(p);
+        var a = document.createElement('span'); a.id = 'a'; a.className = 'foo';
+        var b = document.createElement('span'); b.id = 'b'; b.className = 'bar baz';
+        var c = document.createElement('p');    c.id = 'c'; c.className = 'foo qux';
+        p.appendChild(a); p.appendChild(b); p.appendChild(c);
+
+        globalThis.__byTag    = document.querySelector('p') !== null;
+        globalThis.__byId     = document.querySelector('#b') !== null;
+        globalThis.__byCls    = document.querySelectorAll('.foo').length;
+        globalThis.__compound = document.querySelector('span.foo')   !== null;
+        globalThis.__missing  = document.querySelector('.nope');
+    )");
+
+    REQUIRE(engine.evaluate("__byTag").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__byId").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__byCls").getWithDefault<int64_t>(0) == 2);
+    REQUIRE(engine.evaluate("__compound").getWithDefault<bool>(false));
+    // Missing match returns null, which the value bridge marshals as
+    // "is null" — encode as a JS boolean for the test assertion.
+    auto missingIsNull = engine.evaluate("__missing === null").getWithDefault<bool>(false);
+    REQUIRE(missingIsNull);
+}
+
+TEST_CASE("querySelector matches attribute selectors",
+          "[view][bridge][wave3-html][html-querySelector]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var d1 = document.createElement('div'); d1.id='d1';
+        d1.setAttribute('data-kind', 'preset');
+        var d2 = document.createElement('div'); d2.id='d2';
+        d2.setAttribute('data-kind', 'preset-named');
+        var d3 = document.createElement('div'); d3.id='d3';
+        d3.setAttribute('data-kind', 'cooked');
+        var d4 = document.createElement('div'); d4.id='d4';
+        d4.setAttribute('aria-label', 'X');
+        document.body.appendChild(d1);
+        document.body.appendChild(d2);
+        document.body.appendChild(d3);
+        document.body.appendChild(d4);
+
+        globalThis.__hasAttr = document.querySelectorAll('[data-kind]').length;
+        globalThis.__eqAttr  = document.querySelector('[data-kind="preset"]') !== null;
+        globalThis.__eqId    = document.querySelector('[data-kind="preset"]').id;
+        globalThis.__prefix  = document.querySelectorAll('[data-kind^="preset"]').length;
+        globalThis.__contain = document.querySelectorAll('[data-kind*="ook"]').length;
+        globalThis.__suffix  = document.querySelectorAll('[data-kind$="ed"]').length;
+        globalThis.__withAria= document.querySelector('[aria-label]').id;
+    )");
+
+    REQUIRE(engine.evaluate("__hasAttr").getWithDefault<int64_t>(0)  == 3);
+    REQUIRE(engine.evaluate("__eqAttr").getWithDefault<bool>(false));
+    REQUIRE(std::string(engine.evaluate("__eqId").getWithDefault<std::string_view>("")) == "d1");
+    REQUIRE(engine.evaluate("__prefix").getWithDefault<int64_t>(0)   == 2);
+    REQUIRE(engine.evaluate("__contain").getWithDefault<int64_t>(0)  == 1);
+    REQUIRE(engine.evaluate("__suffix").getWithDefault<int64_t>(0)   == 2);
+    REQUIRE(std::string(engine.evaluate("__withAria").getWithDefault<std::string_view>("")) == "d4");
+}
+
+TEST_CASE("querySelector descendant and child combinators",
+          "[view][bridge][wave3-html][html-querySelector]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var outer = document.createElement('section');
+        outer.className = 'panel';
+        var mid   = document.createElement('div');
+        mid.className   = 'mid';
+        var inner = document.createElement('span'); inner.id = 'inner';
+        var sibling = document.createElement('span'); sibling.id = 'sib';
+        // tree: section.panel > div.mid > span#inner ; section.panel > span#sib
+        document.body.appendChild(outer);
+        outer.appendChild(mid);
+        mid.appendChild(inner);
+        outer.appendChild(sibling);
+
+        globalThis.__desc        = document.querySelector('section span') !== null;
+        globalThis.__descId      = document.querySelector('section.panel span').id;
+        globalThis.__directHit   = document.querySelector('section.panel > span').id;
+        globalThis.__directMiss  = document.querySelector('section.panel > p');
+        globalThis.__deepDescAll = document.querySelectorAll('.panel span').length;
+    )");
+
+    REQUIRE(engine.evaluate("__desc").getWithDefault<bool>(false));
+    // descendant `section.panel span` finds the deepest match first per
+    // BFS — `span#inner` (or `span#sib` — both match; the first BFS hit
+    // wins).  We only require that the result IS one of the two, which
+    // it must be when the matcher works.
+    auto descId = std::string(engine.evaluate("__descId").getWithDefault<std::string_view>(""));
+    REQUIRE((descId == "inner" || descId == "sib"));
+    // child `section.panel > span` matches only `sib` (mid is the
+    // immediate parent of `inner`, not section).
+    REQUIRE(std::string(engine.evaluate("__directHit").getWithDefault<std::string_view>("")) == "sib");
+    REQUIRE(engine.evaluate("__directMiss === null").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__deepDescAll").getWithDefault<int64_t>(0) == 2);
+}
+
+TEST_CASE("querySelector tolerates unsupported pseudo-classes",
+          "[view][bridge][wave3-html][html-querySelector]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // `div.foo:hover` MUST NOT throw — we strip the pseudo-class and
+    // match the rest so React-style code that hands us `selector + :hover`
+    // still resolves (the `:hover` semantics are implemented separately
+    // via the StyleSheet :hover pipeline).
+    bridge.load_script(R"(
+        var d = document.createElement('div');
+        d.id = 'pseudo'; d.className = 'foo';
+        document.body.appendChild(d);
+
+        globalThis.__pseudoOk = document.querySelector('div.foo:hover') !== null;
+        globalThis.__pseudoId = document.querySelector('div.foo:hover').id;
+    )");
+
+    REQUIRE(engine.evaluate("__pseudoOk").getWithDefault<bool>(false));
+    REQUIRE(std::string(engine.evaluate("__pseudoId").getWithDefault<std::string_view>("")) == "pseudo");
 }

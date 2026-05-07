@@ -146,6 +146,11 @@ Element.prototype._ensureNative = function() {
     if (typeof __replayMediaAttributes__ === "function") {
         __replayMediaAttributes__(this);
     }
+    // pulp Wave 3 html.2 / #1476 — replay any ARIA attributes that were
+    // set on this element before the native widget existed.
+    if (typeof __replayAriaAttributes__ === "function") {
+        __replayAriaAttributes__(this);
+    }
 };
 
 // pulp #1147 — shared helper that maps presentational HTML attributes
@@ -166,6 +171,26 @@ function __replayMediaAttributes__(el) {
     }
     if (h !== undefined) {
         var ph = parseFloat(h); if (ph === ph) setFlex(el._id, "height", ph);
+    }
+}
+
+// pulp Wave 3 html.2 / #1476 — replay ARIA attributes (`aria-label` /
+// `role`) when the native widget comes online.  React/JSX commits
+// attributes before `appendChild` mounts the node, so by the time
+// `setAttribute('aria-label', ...)` runs the bridge has no native id
+// yet; we capture the value in `_attributes` (the existing path) and
+// flush it through the bridge once `_nativeCreated` is true.
+// Idempotent: safe to call from `_ensureNative` and from any later
+// mount path (`appendChild`, `insertBefore`, etc.).
+function __replayAriaAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    var label = el._attributes["aria-label"];
+    if (label !== undefined && typeof setAccessibilityLabel === "function") {
+        setAccessibilityLabel(el._id, String(label));
+    }
+    var role = el._attributes["role"];
+    if (role !== undefined && typeof setAccessibilityRole === "function") {
+        setAccessibilityRole(el._id, String(role));
     }
 }
 
@@ -615,6 +640,25 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "for" && this.tagName === "LABEL") {
         this._installLabelForRouting();
     }
+    // pulp Wave 3 html.2 / #1476 — ARIA accessibility setters.
+    // `aria-label` / `role` round-trip through native View::access_label_
+    // and View::access_role_ so the macOS NSAccessibility bridge (and
+    // the cross-platform AccessibilityTree snapshot) can read them.
+    // Other ARIA attributes still store via _attributes for getAttribute
+    // round-tripping; only the two with a Pulp storage slot are
+    // forwarded today.  The bridge is a no-op when the widget hasn't
+    // been created yet — a follow-up appendChild path replays the
+    // attribute through the same code path.
+    else if (name === "aria-label") {
+        if (this._nativeCreated && typeof setAccessibilityLabel === "function") {
+            setAccessibilityLabel(this._id, String(value));
+        }
+    }
+    else if (name === "role") {
+        if (this._nativeCreated && typeof setAccessibilityRole === "function") {
+            setAccessibilityRole(this._id, String(value));
+        }
+    }
 };
 
 Element.prototype.getAttribute = function(name) {
@@ -1052,6 +1096,10 @@ function _reparentNative(child, parentId) {
     // node is recreated so the new flex sizing matches the original.
     if (typeof __replayMediaAttributes__ === "function") {
         __replayMediaAttributes__(child);
+    }
+    // pulp Wave 3 html.2 / #1476 — replay ARIA attributes after reparent.
+    if (typeof __replayAriaAttributes__ === "function") {
+        __replayAriaAttributes__(child);
     }
 
     // Recursively reparent children
