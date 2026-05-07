@@ -112,18 +112,62 @@ class PulpMidiManagerTest {
     }
 
     @Test
-    fun getTransportTypeUsesPlatformProtocolOnlyOnAndroid13AndNewer() {
+    fun resolveTransportTypeReturnsBytestreamOnPre33() {
+        // Codex P2 on PR #1275 — drive BOTH SDK branches deterministically
+        // through the static helper, so the test catches a regression on
+        // either side regardless of the JVM's reported SDK_INT.
+        val deviceInfo = mock<MidiDeviceInfo>()
+        // The pre-33 branch never reads defaultProtocol, but stub it
+        // anyway so a future change that accidentally calls it on
+        // older SDKs would surface as a wrong-transport assertion
+        // rather than a silent fallback.
+        whenever(deviceInfo.defaultProtocol).thenReturn(PulpMidiManager.TRANSPORT_UMP)
+
+        for (sdk in intArrayOf(21, 28, 30, 32)) {
+            assertEquals(
+                "sdkInt=$sdk must report bytestream transport",
+                PulpMidiManager.TRANSPORT_BYTESTREAM,
+                PulpMidiManager.resolveTransportType(sdk, deviceInfo),
+            )
+        }
+    }
+
+    @Test
+    fun resolveTransportTypeUsesPlatformProtocolOn33AndNewer() {
+        val deviceInfo = mock<MidiDeviceInfo>()
+        whenever(deviceInfo.defaultProtocol).thenReturn(PulpMidiManager.TRANSPORT_UMP)
+
+        for (sdk in intArrayOf(33, 34, 35)) {
+            assertEquals(
+                "sdkInt=$sdk must defer to MidiDeviceInfo.defaultProtocol (UMP)",
+                PulpMidiManager.TRANSPORT_UMP,
+                PulpMidiManager.resolveTransportType(sdk, deviceInfo),
+            )
+        }
+
+        // Negotiated bytestream on a 33+ device must also propagate
+        // through (i.e. the helper doesn't unconditionally return UMP
+        // on new SDKs — it really delegates to defaultProtocol).
+        whenever(deviceInfo.defaultProtocol).thenReturn(PulpMidiManager.TRANSPORT_BYTESTREAM)
+        assertEquals(
+            PulpMidiManager.TRANSPORT_BYTESTREAM,
+            PulpMidiManager.resolveTransportType(33, deviceInfo),
+        )
+    }
+
+    @Test
+    fun getTransportTypeDelegatesToResolveHelper() {
+        // Sanity check that the production entry point still flows
+        // through the testable helper (otherwise the parameterised
+        // tests above would only exercise dead code).
         val midiManager = mock<MidiManager>()
         val deviceInfo = mock<MidiDeviceInfo>()
         whenever(deviceInfo.defaultProtocol).thenReturn(PulpMidiManager.TRANSPORT_UMP)
         val manager = PulpMidiManager(contextWith(midiManager))
 
-        val expectedTransport = if (Build.VERSION.SDK_INT >= 33) {
-            PulpMidiManager.TRANSPORT_UMP
-        } else {
-            PulpMidiManager.TRANSPORT_BYTESTREAM
-        }
-
+        val expectedTransport = PulpMidiManager.resolveTransportType(
+            Build.VERSION.SDK_INT, deviceInfo,
+        )
         assertEquals(expectedTransport, manager.getTransportType(deviceInfo))
     }
 

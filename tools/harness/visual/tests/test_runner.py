@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -123,6 +125,57 @@ class RunnerTests(unittest.TestCase):
             orphan.write_text("{}", encoding="utf-8")
 
             self.assertEqual(spec.orphaned_golden_paths(root, ["yoga"]), [orphan])
+
+    def test_generate_requires_explicit_all_or_entry(self) -> None:
+        # Codex P2 on PR #1598 — `--generate` without `--all` or
+        # `--entry` previously regenerated every golden silently.
+        # Now require an explicit opt-in to bulk rewrites.
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            rc = runner.main(["--generate", "--surface", "yoga"])
+        self.assertEqual(rc, 2)
+        self.assertIn("--generate requires", buf.getvalue())
+        self.assertIn("--all", buf.getvalue())
+        self.assertIn("--entry", buf.getvalue())
+
+    def test_verify_with_all_emits_deprecation_warning(self) -> None:
+        # `--all` is redundant with `--verify` (omitting --entry already
+        # runs every fixture). Emit a warning to discourage the pattern.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture_with_golden(root, "yoga", "a")
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                # We expect either rc != 0 (no binary built) OR rc == 0;
+                # the warning must be emitted regardless. Use --build-dir
+                # pointing at a non-existent path so we exit early after
+                # the warning (binary not found → rc=2 with FileNotFoundError).
+                runner.main([
+                    "--verify",
+                    "--all",
+                    "--surface", "yoga",
+                    "--repo-root", str(root),
+                    "--build-dir", str(root / "build-nonexistent"),
+                ])
+            self.assertIn("--all is redundant with --verify", buf.getvalue())
+
+    def test_generate_with_all_does_not_complain_about_missing_entry(self) -> None:
+        # The `--all` flag IS the explicit opt-in for `--generate`, so
+        # `pulp harness visual --generate --surface=yoga --all` should
+        # NOT print the "requires --all OR --entry" error.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture_with_golden(root, "yoga", "a")
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                runner.main([
+                    "--generate",
+                    "--all",
+                    "--surface", "yoga",
+                    "--repo-root", str(root),
+                    "--build-dir", str(root / "build-nonexistent"),
+                ])
+            self.assertNotIn("--generate requires", buf.getvalue())
 
     def _write_fixture_with_golden(self, root: Path, surface: str, name: str) -> None:
         fixture_dir = root / "tools" / "harness" / "visual" / "fixtures" / surface

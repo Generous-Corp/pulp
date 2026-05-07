@@ -21,8 +21,22 @@ TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 # Swift file under these prefixes must classify into exactly one tier
 # OR appear in `_TIER_COMPLETENESS_ALLOWLIST` with a documented reason.
 _FIRST_PARTY_PREFIXES = ("core/", "tools/", "apple/", "android/", "inspect/")
+# Extension list MUST stay in lock-step with the
+# `coverage_tier_check.py::_INSTRUMENTED_EXTS` set + every
+# Kotlin/Swift extension we audit. A drift between the two means the
+# completeness gate silently skips files that the coverage pipeline
+# DOES instrument. See `test_first_party_extensions_match_coverage_pipeline`
+# below for the structural assertion. Codex P2 on PR #1154.
 _FIRST_PARTY_SUFFIXES = (
-    ".cpp", ".hpp", ".mm", ".h", ".kt", ".swift",
+    # C/C++/Obj-C/Obj-C++ — every extension in
+    # coverage_tier_check._INSTRUMENTED_EXTS:
+    ".c", ".cc", ".cpp", ".cxx", ".c++",
+    ".h", ".hh", ".hpp", ".hxx", ".h++",
+    ".m", ".mm",
+    # Non-C-family first-party sources (Kotlin / Swift) audited here
+    # but classified by the Kotlin / Swift coverage lanes, not by
+    # `is_instrumented_source`:
+    ".kt", ".swift",
 )
 
 # Files that intentionally fall outside every tier. Empty by design —
@@ -167,11 +181,57 @@ class InstrumentedSourceTests(unittest.TestCase):
                   "platform/mac/foo.mm", "tools/cli/cmd_pr.cpp"):
             self.assertTrue(ctc.is_instrumented_source(p), msg=p)
 
+    def test_c_family_sources_are_instrumented(self) -> None:
+        # Codex P2 on PR #1154 — `is_instrumented_source` accepts every
+        # C-family extension (.c / .cc / .cxx / .m), but the
+        # completeness audit was only walking .cpp/.hpp/.mm/.h/.kt/.swift,
+        # which silently skipped real instrumented sources (e.g. a
+        # `core/audio/src/codecs.c`).
+        for p in (
+            "core/audio/src/codecs.c",
+            "core/audio/src/foo.cc",
+            "core/audio/src/bar.cxx",
+            "platform/mac/baz.m",
+            "core/dsp/src/quux.c++",
+            "core/audio/include/mixer.hh",
+            "core/midi/include/parse.hxx",
+            "core/audio/include/api.h++",
+        ):
+            self.assertTrue(ctc.is_instrumented_source(p), msg=p)
+
     def test_non_cpp_is_not_instrumented(self) -> None:
         for p in ("tools/cmake/PulpUtils.cmake", "tools/build-skia.sh",
                   "tools/scripts/coverage_tier_check.py",
                   "ship/templates/appcast.xml.in", "README.md"):
             self.assertFalse(ctc.is_instrumented_source(p), msg=p)
+
+
+class FirstPartySuffixDriftTests(unittest.TestCase):
+    """Test-side suffix list must include every C-family ext that the
+    coverage pipeline instruments. Codex P2 on PR #1154.
+
+    Without this guard, the completeness gate silently skips real
+    instrumented sources whose extension was added to
+    `coverage_tier_check._INSTRUMENTED_EXTS` but not to the audit walk
+    here — so a `core/audio/src/codecs.c` would never be classified
+    into any tier and the gate would report green.
+    """
+
+    def test_audit_suffixes_cover_every_instrumented_extension(self) -> None:
+        # The audit walks {C-family ∪ Kotlin ∪ Swift}. The C-family
+        # subset MUST be a superset of the C-family extensions that
+        # `is_instrumented_source` accepts.
+        c_family_in_audit = {s for s in _FIRST_PARTY_SUFFIXES if s not in (".kt", ".swift")}
+        missing = ctc._INSTRUMENTED_EXTS - c_family_in_audit
+        self.assertEqual(
+            missing, set(),
+            f"_FIRST_PARTY_SUFFIXES is missing C-family extension(s) "
+            f"{sorted(missing)} that the coverage pipeline instruments "
+            "(see coverage_tier_check._INSTRUMENTED_EXTS). The completeness "
+            "audit will silently skip files with these extensions, hiding "
+            "real coverage gaps. Either add them to _FIRST_PARTY_SUFFIXES "
+            "or remove them from _INSTRUMENTED_EXTS — keep the two in sync.",
+        )
 
     def test_aggregate_skips_non_instrumented_files(self) -> None:
         # Codex #612 P1: a PR that only touches CMake/Python under
