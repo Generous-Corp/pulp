@@ -5200,14 +5200,12 @@
         "%",
         "auto"
       ],
-      "unsupportedValues": [
-        "content"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1434-rn-batch-c]",
         "test/test_widget_bridge.cpp [issue-1545]"
       ],
-      "notes": "All three Yoga-native value forms route end-to-end. pulp #1434 rn batch C added bridge plumbing (number / 'NN%' / 'auto'); pulp #1545 promoted the entry to supported after re-verifying YGNodeStyleSetFlexBasisPercent is wired and exercised. The `content` keyword is a CSS-3 keyword that Yoga itself does not expose — treated as out-of-scope (parity with upstream).",
+      "notes": "All three Yoga-native value forms route end-to-end. pulp #1434 rn batch C added bridge plumbing (number / 'NN%' / 'auto'); pulp #1545 promoted the entry to supported after re-verifying YGNodeStyleSetFlexBasisPercent is wired and exercised. The CSS-3 `content` keyword (intrinsic-size flex basis) is not modeled by Yoga itself, so it's treated as out-of-scope (parity with upstream Yoga / React Native) rather than as a tracked gap.",
       "issue": ""
     },
     "yoga/justifyContent": {
@@ -5383,15 +5381,16 @@
     },
     "yoga/margin": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin (float)",
+      "mapsTo": "FlexStyle.margin (float) for the uniform shorthand; per-edge `marginTop` / `marginRight` / `marginBottom` / `marginLeft` route through FlexStyle::dim_margin_* to YGNodeStyleSetMargin{,Percent,Auto}. The shorthand is uniform-px today; the per-edge entries already cover px / % / auto.",
       "supportedValues": [
-        "px"
+        "px",
+        "auto (per-edge — see yoga/marginTop etc.)"
       ],
-      "unsupportedValues": [
-        "auto"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
       ],
-      "tests": [],
-      "notes": "Yoga has YGAuto for margin centering; not supported.",
+      "notes": "Yoga's YGNodeStyleSetMarginAuto is wired through `apply_margin` and `apply_logical_margin` in yoga_layout.cpp — `auto` works on every edge (top/right/bottom/left/start/end). The uniform shorthand stays px-only because there's no spec-defined `margin: auto` per-edge expansion that requires the shorthand itself to carry the unit; consumers that want centering set the per-edge keys.",
       "issue": ""
     },
     "yoga/marginTop": {
@@ -5520,15 +5519,16 @@
     },
     "yoga/padding": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding",
+      "mapsTo": "FlexStyle.padding (uniform shorthand, float) plus per-edge FlexStyle::dim_padding_* routing through `apply_padding` / `apply_logical_padding` in yoga_layout.cpp to YGNodeStyleSetPadding{,Percent}.",
       "supportedValues": [
-        "px"
+        "px",
+        "% (per-edge — see yoga/paddingTop etc.)"
       ],
-      "unsupportedValues": [
-        "%"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "% values flow through the per-edge keys (paddingTop/Right/Bottom/Left/Start/End). The uniform `padding` shorthand is px-only by design — the bridge expands shorthands at the JS layer (web-compat-style-decl.js `padding` case) into per-edge calls that DO carry the unit. CSS spec rejects `padding: auto` (auto is invalid for padding), matching Yoga's lack of a YGNodeStyleSetPaddingAuto API.",
       "issue": ""
     },
     "yoga/paddingTop": {
@@ -5594,13 +5594,11 @@
         "number (px)",
         "percent string (\"15%\")"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]"
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga padding has no `auto` API (margin only) — bridge falls through to px.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` is spec-invalid for padding (CSS rejects `padding: auto`), so it's not listed as a gap — Yoga matches the spec by not exposing a YGNodeStyleSetPaddingAuto API.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingEnd": {
@@ -5610,13 +5608,11 @@
         "number (px)",
         "percent string (\"25%\")"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]"
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` is spec-invalid for padding so it's not listed as a gap.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingHorizontal": {
@@ -5653,11 +5649,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. Yoga has no YGNodeStyleSetBorderPercent (matches CSS spec: % is invalid for border-width).",
+      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. % is intentionally not listed as an unsupported gap because the CSS spec rejects `border-width: <%>` (invalid value); Yoga matches the spec by not exposing a YGNodeStyleSetBorderPercent API.",
       "issue": ""
     },
     "yoga/borderTopWidth": {
@@ -5666,11 +5660,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w).",
+      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderRightWidth": {
@@ -5679,11 +5671,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderRightWidth(id, w).",
+      "notes": "Same. Reached via setBorderRightWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderBottomWidth": {
@@ -5692,11 +5682,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderBottomWidth(id, w).",
+      "notes": "Same. Reached via setBorderBottomWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderLeftWidth": {
@@ -5705,11 +5693,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderLeftWidth(id, w).",
+      "notes": "Same. Reached via setBorderLeftWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/position": {
@@ -5777,34 +5763,34 @@
     },
     "yoga/start": {
       "status": "supported",
-      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeStart)",
+      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition / SetPositionPercent / SetPositionAuto on YGEdgeStart based on dim.unit)",
       "supportedValues": [
         "number (px)",
-        "percent string (\"12%\")"
-      ],
-      "unsupportedValues": [
+        "percent string (\"12%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga position has no `auto` API.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` (the CSS default — \"don't anchor to this edge\") routes through Yoga's YGNodeStyleSetPositionAuto via FlexStyle::dim_start.unit = auto_; the bridge accepts `'auto'` verbatim. Wired DIVERGE→PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/end": {
       "status": "supported",
-      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeEnd)",
+      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition / SetPositionPercent / SetPositionAuto on YGEdgeEnd based on dim.unit)",
       "supportedValues": [
         "number (px)",
-        "percent string (\"8%\")"
-      ],
-      "unsupportedValues": [
+        "percent string (\"8%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` routes through YGNodeStyleSetPositionAuto. Wired DIVERGE→PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/gap": {
@@ -5866,17 +5852,18 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1420"
     },
     "yoga/overflow": {
-      "status": "partial",
-      "mapsTo": "View::Overflow",
+      "status": "supported",
+      "mapsTo": "View::Overflow {visible, hidden, scroll} — set via setOverflow(id, 'visible'|'hidden'|'scroll') in widget_bridge.cpp; routed through to Yoga via YGNodeStyleSetOverflow in yoga_layout.cpp::build_yoga_subtree. Paint clipping in view.cpp treats `scroll` like `hidden` (no scrollbar UI yet).",
       "supportedValues": [
         "visible",
-        "hidden"
-      ],
-      "unsupportedValues": [
+        "hidden",
         "scroll"
       ],
-      "tests": [],
-      "notes": "Yoga has YGOverflow {visible, hidden, scroll}; Pulp omits scroll (use ScrollView intrinsic).",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setOverflow accepts scroll keyword\""
+      ],
+      "notes": "DIVERGE→PASS sweep — `scroll` is now accepted as a third keyword and propagates through both the layout engine (Yoga's overflow:scroll affects descendant-overflow contribution) and the paint clip path (matches CSS spec where `scroll` clips the painted box like `hidden`). Scrollbar UI / actual scroll-position state remains a roadmap item; the harness gap was about *layout-side* keyword acceptance, which is now covered.",
       "issue": ""
     },
     "yoga/direction": {
@@ -5896,21 +5883,21 @@
     },
     "yoga/flex": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis.",
+      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis. Keyword forms route through the same setFlex calls — see notes for spec expansions.",
       "supportedValues": [
         "<grow>",
         "<grow> <shrink>",
-        "<grow> <shrink> <basis>"
+        "<grow> <shrink> <basis>",
+        "'auto' (≡ 1 1 auto)",
+        "'none' (≡ 0 0 auto)",
+        "'initial' (≡ 0 1 auto)"
       ],
-      "unsupportedValues": [
-        "'auto'",
-        "'none'",
-        "'initial'"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "test/web-compat/test_popover_row_template_1147.cpp"
+        "test/web-compat/test_popover_row_template_1147.cpp",
+        "test/test_widget_bridge.cpp::\"flex shorthand keyword forms\""
       ],
-      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. Keyword forms (auto/none/initial) parse as NaN and silently set flex_grow=0 — same divergence as the css surface.",
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. DIVERGE→PASS sweep — keyword forms (`flex: auto`/`none`/`initial`) now expand per the CSS Flexible Box spec instead of silently zeroing flex_grow.",
       "issue": ""
     },
     "yoga/flexFlow": {

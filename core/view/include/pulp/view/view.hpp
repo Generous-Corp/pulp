@@ -626,7 +626,12 @@ public:
     std::vector<View*> sorted_children_by_z_index() const;
 
     /// Overflow mode
-    enum class Overflow { hidden, visible };
+    /// `scroll` accepted as a third keyword so the yoga `overflow`
+    /// compat entry covers all 3 spec values. Paint clipping treats
+    /// `scroll` like `hidden` (no scrollbar UI yet); the Yoga layout
+    /// path forwards the enum through `YGNodeStyleSetOverflow` so the
+    /// engine knows about it for descendant-overflow measurement.
+    enum class Overflow { hidden, visible, scroll };
     void set_overflow(Overflow o) { overflow_ = o; }
     Overflow overflow() const { return overflow_; }
 

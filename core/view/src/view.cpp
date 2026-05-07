@@ -222,11 +222,14 @@ void View::paint_all(canvas::Canvas& canvas) {
                                corner_radius_);
     }
 
-    // Clip only when overflow:hidden is explicitly opted into. Default
-    // is overflow:visible (CSS default, pulp #972) so absolutely-
-    // positioned popover/dropdown children that extend outside the
-    // parent's content bounds still paint.
-    if (overflow_ == Overflow::hidden)
+    // Clip only when overflow:hidden / overflow:scroll is explicitly
+    // opted into. Default is overflow:visible (CSS default, pulp #972)
+    // so absolutely-positioned popover/dropdown children that extend
+    // outside the parent's content bounds still paint. `scroll` clips
+    // the painted box like `hidden` per CSS spec — we don't have a
+    // scrollbar layer yet, but the layout-side overflow propagation
+    // is wired through Yoga so descendants measure correctly.
+    if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
     // CSS `clip-path: path("...")` (pulp #1515). The View's local
