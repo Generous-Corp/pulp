@@ -134,6 +134,72 @@ class WorkflowSourceOfTruthTests(unittest.TestCase):
         )
 
 
+class ConfigKeysAreConsumed(unittest.TestCase):
+    """Every non-comment key in coverage_config.json must actually be read.
+
+    Anti-drift for #1052: `filters` and `exclude_filters` lived in this
+    JSON unread for months, implying a contract that didn't exist
+    (source-set filtering actually happens via COVERAGE_IGNORE_REGEX in
+    local_diff_cover.sh / scripts/run_coverage.sh, NOT via this JSON).
+    A user who edits `exclude_filters` to skip `external/**` sees no
+    effect — silent no-op.
+
+    Contract: every key in coverage_config.json (except `_comment` and
+    other underscore-prefixed metadata keys) must appear by name in
+    either tools/scripts/local_diff_cover.sh or
+    .github/workflows/coverage.yml. If you add a key here without
+    wiring it up, this test fails loudly with the offending key and a
+    pointer back to this issue.
+
+    To intentionally add documentation-only metadata: prefix the key
+    with `_` (e.g. `_meta`, `_doc`) and it will be skipped, matching
+    the existing `_comment` convention.
+    """
+
+    WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
+
+    def test_every_config_key_has_a_consumer(self) -> None:
+        with CONFIG.open() as f:
+            cfg = json.load(f)
+        script_text = SCRIPT.read_text()
+        workflow_text = self.WORKFLOW.read_text()
+        unread = []
+        for key in cfg.keys():
+            # Documentation-only keys (matching the `_comment` pattern)
+            # are exempt — they exist for readers, not consumers.
+            if key.startswith("_"):
+                continue
+            if key in script_text or key in workflow_text:
+                continue
+            unread.append(key)
+        self.assertEqual(
+            unread, [],
+            f"coverage_config.json contains unread key(s) {unread!r} — "
+            f"silent no-op per #1052. Either wire the key into "
+            f"tools/scripts/local_diff_cover.sh / .github/workflows/coverage.yml, "
+            f"remove it, or rename it with a leading underscore "
+            f"(e.g. `_meta`) if it is documentation-only metadata.",
+        )
+
+    def test_silent_noop_filter_keys_stay_removed(self) -> None:
+        """Belt-and-suspenders: explicit reject for the two keys that
+        triggered #1052. Even if a future change adds them back AND
+        wires them up partially, this test forces the contributor to
+        revisit the audit and decide intentionally."""
+        with CONFIG.open() as f:
+            cfg = json.load(f)
+        for ghost in ("filters", "exclude_filters"):
+            self.assertNotIn(
+                ghost, cfg,
+                f"coverage_config.json must not define `{ghost}` — these "
+                f"keys were a silent no-op (#1052). Source-set filtering "
+                f"belongs in COVERAGE_IGNORE_REGEX (local_diff_cover.sh / "
+                f"scripts/run_coverage.sh), not in this JSON. If you have "
+                f"a genuine reason to wire one of these in, update this "
+                f"test and link the new design.",
+            )
+
+
 class ObjectDiscoveryParityTests(unittest.TestCase):
     """local_diff_cover.sh must mirror run_coverage.sh's object-set passes.
 
