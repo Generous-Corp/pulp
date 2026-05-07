@@ -1062,24 +1062,27 @@
     },
     "css/filter": {
       "status": "supported",
-      "mapsTo": "setFilter(id, value)",
+      "mapsTo": "web-compat-style-decl.js forwards `filter` keyword string verbatim to setFilter (widget_bridge.cpp); bridge parses the function chain into View::FilterOp[]; view.cpp paint dispatches via canvas.save_layer_with_filters; Skia backend composes the chain via SkImageFilters::Compose + SkColorFilters::Matrix.",
       "supportedValues": [
-        "blur(<px>)"
+        "blur(<px>)",
+        "brightness(<number>)",
+        "contrast(<number>)",
+        "grayscale(<number>)",
+        "hue-rotate(<deg|rad|turn|grad>)",
+        "invert(<number>)",
+        "opacity(<number>)",
+        "saturate(<number>)",
+        "sepia(<number>)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order",
+        "\"none\" clears the chain"
       ],
-      "unsupportedValues": [
-        "brightness",
-        "contrast",
-        "drop-shadow",
-        "grayscale",
-        "hue-rotate",
-        "invert",
-        "opacity",
-        "saturate",
-        "sepia",
-        "multi-function chain"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFilter parses chained functions in source order\"",
+        "test/test_widget_bridge.cpp::\"setFilter parses brightness/contrast/grayscale/etc\""
       ],
-      "tests": [],
-      "notes": "Bridge parses 'blur(Npx)'. Other filter functions pass through verbatim.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow. CG canvas backend currently degrades the chain to blur-only collapse (color-matrix filters silently no-op); SkColorFilter-equivalent for CG is a follow-up.",
       "issue": ""
     },
     "css/flex": {
@@ -3461,15 +3464,18 @@
     },
     "rn/filter": {
       "status": "supported",
-      "mapsTo": "@pulp/react prop-applier forwards CSS string to setFilter (widget_bridge.cpp:3767). Bridge currently parses only `blur(Npx)`.",
+      "mapsTo": "@pulp/react prop-applier forwards CSS-string verbatim to setFilter (post sub-agent #27 wiring; widget_bridge.cpp parses the full function chain since this PR).",
       "supportedValues": [
-        "blur(Npx)"
+        "blur(<px>)",
+        "brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia (each with numeric or angle args)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR. Bridge parser today recognizes only blur(); other CSS filter functions (brightness, contrast, drop-shadow, grayscale, invert, opacity, saturate, sepia, hue-rotate) are a follow-up.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow.",
       "issue": ""
     },
     "rn/flex": {
@@ -5115,58 +5121,68 @@
       "issue": ""
     },
     "yoga/borderWidth": {
-      "status": "missing",
-      "mapsTo": "no FlexStyle field -- Pulp handles border purely as a paint overlay (View::set_border_*).",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdge*, view.border_*_width). Per-side override (set_border_top/right/bottom/left, reached via setBorderTopWidth etc.) wins; otherwise the uniform View::border_width() is forwarded to all four edges. Couples with #1516 box-sizing so Yoga's content-box / border-box math gets accurate border insets (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all (in layout sense)"
+        "%"
       ],
       "tests": [],
-      "notes": "Yoga's BORDER edges contribute to content-box sizing. Pulp's borders are paint-only, not measured by layout. This breaks parity with Yoga measurement when borders are large.",
+      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. Yoga has no YGNodeStyleSetBorderPercent (matches CSS spec: % is invalid for border-width).",
       "issue": ""
     },
     "yoga/borderTopWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeTop, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same as borderWidth.",
+      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w).",
       "issue": ""
     },
     "yoga/borderRightWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeRight, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderRightWidth(id, w).",
       "issue": ""
     },
     "yoga/borderBottomWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeBottom, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderBottomWidth(id, w).",
       "issue": ""
     },
     "yoga/borderLeftWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeLeft, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderLeftWidth(id, w).",
       "issue": ""
     },
     "yoga/position": {
@@ -6072,7 +6088,9 @@
         "any arc"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases.",
       "issue": "1346"
     },
@@ -6094,7 +6112,9 @@
       "mapsTo": "ctx.bezierCurveTo -> canvasCubicTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6103,7 +6123,9 @@
       "mapsTo": "ctx.quadraticCurveTo -> canvasQuadTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6439,7 +6461,9 @@
       "unsupportedValues": [
         "lineDashOffset mutation between draws (must re-call setLineDash to push new phase)"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "Minor edge case; file a follow-up if observable.",
       "issue": ""
     },
@@ -6488,7 +6512,9 @@
         "square"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6501,7 +6527,9 @@
         "bevel"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6526,7 +6554,9 @@
         "[0, 1]"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -6562,7 +6592,9 @@
         "luminosity"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
       "issue": "1346"
     },
@@ -6599,7 +6631,9 @@
         "end"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6615,7 +6649,9 @@
         "bottom"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
