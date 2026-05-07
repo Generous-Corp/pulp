@@ -35,7 +35,8 @@
       "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
       "2026-05-06": "pulp #1545: yoga catalog work. Promoted yoga/flexBasis from partial -> supported after re-verifying YGNodeStyleSetFlexBasisPercent fires for 'NN%' strings end-to-end through the bridge (test [issue-1545] in test_widget_bridge.cpp). The 'content' keyword stays in unsupportedValues (Yoga itself does not expose it). yoga/boxSizing was also added as a placeholder entry but kept at status `missing` \u2014 the FlexStyle::box_sizing field + YGNodeStyleSetBoxSizing dispatch is a forward dependency on pulp #1516 (PR #1538) and will flip to `supported` once #1538 merges (yoga count stays at 53 + 1 placeholder = 54 total entries).",
       "2026-05-06_1551": "pulp #1551 (Phase A3 Bundle 3 inside pulp #1434 umbrella): pure catalog add of 13 already-implemented css/* meta entries \u2014 `__StyleSheet`, `__matchMedia`, `__pseudo_active` / `__pseudo_disabled` / `__pseudo_focus` / `__pseudo_hover`, `__selector_child` / `__selector_class` / `__selector_descendant` / `__selector_id` / `__selector_tag`, `__setProperty_var`, `__var`. Documents existing wiring in `core/view/js/web-compat-document.js`, `web-compat-style-decl.js`, `css-parser.js` and `web-compat.js`. No code changes; +13 instant supported entries. css count 199 -> 212.",
-      "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563."
+      "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563.",
+      "2026-05-07": "pulp #1434 A4 Bundles 2-7: css NOT-IMPL closure. 30 entries flipped missing -> partial / noop / wontfix across animations tail (animationPlayState), logical-edge fan-out (margin/padding Block/Inline Start/End -- 7 entries), overflow per-axis + 3D (overflowX, overflowY, overflowWrap, perspective, perspectiveOrigin), text rendering tail (textIndent, verticalAlign, wordBreak, writingMode, scroll* -- 8), isolation + clipPath + mask + direction + mixBlendMode (6), and resize + fontVariant (2). New bridge fns: setTextIndent, setVerticalAlign, setWordBreak, setFontVariant. Extended setAnimation with the \"play_state\" control token. Synthetic __pseudo_classes_note flipped wontfix. Catalog css count holds at 212; missing -> 0."
     },
     "counts": {
       "css": 212,
@@ -130,8 +131,8 @@
       "issue": "1551"
     },
     "css/__pseudo_classes_note": {
-      "status": "missing",
-      "mapsTo": "no CSS pseudo-class system today",
+      "status": "wontfix",
+      "mapsTo": "no global CSS pseudo-class system today; per-pseudo-class catalog entries (css/__pseudo_hover, __pseudo_focus, __pseudo_active, __pseudo_disabled) hold the per-pseudo claim. This synthetic note is superseded.",
       "supportedValues": [],
       "unsupportedValues": [
         ":hover",
@@ -146,7 +147,7 @@
         "etc."
       ],
       "tests": [],
-      "notes": "Pulp routes hover/click/etc. through bridge event registrations (registerHover, registerClick) rather than through CSS pseudo-classes. JSX consumers wire interactivity via on* event props, not via CSS. Superseded in part by the per-pseudo-class catalog entries (`css/__pseudo_hover`, `css/__pseudo_focus`, `css/__pseudo_active`, `css/__pseudo_disabled`) added in pulp #1551 \u2014 kept in place for now to document the original triage decision.",
+      "notes": "Pulp routes hover/click/etc. through bridge event registrations (registerHover, registerClick) rather than through CSS pseudo-classes. JSX consumers wire interactivity via on* event props, not via CSS. Superseded by the per-pseudo-class catalog entries (`css/__pseudo_hover`, `css/__pseudo_focus`, `css/__pseudo_active`, `css/__pseudo_disabled`) added in pulp #1551. pulp #1434 A4 Bundle 6 closure: status flipped missing \u2192 wontfix (architectural \u2014 the per-pseudo entries are the canonical claim).",
       "issue": ""
     },
     "css/__pseudo_disabled": {
@@ -534,14 +535,17 @@
       "issue": ""
     },
     "css/animationPlayState": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `animation-play-state` through setAnimation(id, \"play_state\", value); the bridge stores the keyword on View::animation_play_state_ and on the staged_animation slot. Storage-only today \u2014 the playback driver pause/resume integration is the follow-up to #1508.",
+      "supportedValues": [
+        "running",
+        "paused"
+      ],
       "unsupportedValues": [
-        "all"
+        "playback driver pause/resume integration deferred (storage only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 2: status flipped missing \u2192 partial. setAnimation control-token ABI extended with \"play_state\".",
       "issue": ""
     },
     "css/animationTimingFunction": {
@@ -1130,18 +1134,22 @@
       "issue": ""
     },
     "css/clipPath": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js parses `clip-path` and forwards path(\"...\") to setClipPath(id, svg_d). Skia parses via SkPath::FromSVGString and the canvas installs the clip on paint (#1540). url() / circle() / inset() / polygon() / ellipse() are deferred \u2014 the bridge stores an empty path so previous values don't linger.",
+      "supportedValues": [
+        "path(\"...\")",
+        "none"
+      ],
       "unsupportedValues": [
-        "polygon",
-        "circle",
-        "ellipse",
-        "inset",
-        "url(#clip)"
+        "url(#id)",
+        "circle()",
+        "ellipse()",
+        "inset()",
+        "polygon()",
+        "margin-box / border-box / padding-box / content-box"
       ],
       "tests": [],
-      "notes": "Custom clip paths not supported.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. Wiring landed in #1540 (clip_path_svg).",
       "issue": ""
     },
     "css/color": {
@@ -1319,15 +1327,17 @@
       "issue": ""
     },
     "css/direction": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `direction` to setDirection(id, value). The bridge maps to View::WritingDirection; Yoga honors at layout time and Skia paragraph_style at text shape time (#1506). Logical-edge mapping in the JS shim still uses the LTR fast path; direction-aware logical\u2192physical resolution is the follow-up.",
+      "supportedValues": [
         "ltr",
         "rtl"
       ],
+      "unsupportedValues": [
+        "direction-aware logical-edge mapping (Bundle 3 logical edges still use LTR fast path)"
+      ],
       "tests": [],
-      "notes": "RTL writing direction not modeled. Affects logical inset/margin/padding mapping (currently always LTR).",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. Bridge wiring landed in #1506; CSS surface gets the same setDirection routing.",
       "issue": ""
     },
     "css/display": {
@@ -1548,16 +1558,16 @@
       "issue": ""
     },
     "css/fontVariant": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `font-variant` to setFontVariant(id, value); the bridge stores the value on View::font_variant_. HarfBuzz feature wiring is the follow-up; mirrors the rn surface choice on the same A4 sweep.",
+      "supportedValues": [
+        "<font-feature keyword set>"
+      ],
       "unsupportedValues": [
-        "small-caps",
-        "tabular-nums",
-        "etc."
+        "HarfBuzz feature integration deferred (storage only)"
       ],
       "tests": [],
-      "notes": "RN supports fontVariant; Pulp does not.",
+      "notes": "pulp #1434 A4 Bundle 7: status flipped missing \u2192 partial. setFontVariant bridge fn now exists; mirrors rn/fontVariant.",
       "issue": ""
     },
     "css/fontWeight": {
@@ -1784,15 +1794,14 @@
       "issue": ""
     },
     "css/isolation": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "wontfix",
+      "mapsTo": "web-compat-style-decl.js has a `case \"isolation\":` that intentionally no-ops. Pulp paints into a single canvas without per-View stacking-context isolation; mix-blend-mode's saveLayer already gives layer-local compositing where needed.",
       "supportedValues": [],
       "unsupportedValues": [
-        "auto",
         "isolate"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 wontfix. CSS isolation creates a new stacking context to contain blend modes; Pulp's render pipeline doesn't implement CSS stacking contexts (z-index is a paint-order hint only).",
       "issue": ""
     },
     "css/justifyContent": {
@@ -1977,25 +1986,33 @@
       "issue": ""
     },
     "css/marginBlockEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `margin-block-end` \u2192 setFlex(margin_bottom) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/marginBlockStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `margin-block-start` \u2192 setFlex(margin_top) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/marginBottom": {
@@ -2040,14 +2057,18 @@
       "issue": ""
     },
     "css/marginInlineEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `margin-inline-end` \u2192 setFlex(margin_right) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/marginInlineStart": {
@@ -2122,25 +2143,41 @@
       "issue": ""
     },
     "css/mask": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `mask` shorthand to setMask(id, value) AND extracts the mask-image substring (url() / linear-gradient() / radial-gradient()) to setMaskImage. Storage-only today; the saveLayer + SkBlendMode::kDstIn paint slice is the follow-up (#1540 mask storage).",
+      "supportedValues": [
+        "url(#ref)",
+        "linear-gradient(...)",
+        "radial-gradient(...)",
+        "solid color"
+      ],
       "unsupportedValues": [
-        "all"
+        "mode",
+        "repeat",
+        "position",
+        "size",
+        "origin",
+        "clip",
+        "composite (deferred sub-properties)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. Storage landed in #1515 / #1540.",
       "issue": ""
     },
     "css/maskImage": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `mask-image` to setMaskImage(id, value). Storage-only; the paint pipeline does not yet composite a shader mask onto a saveLayer (#1540).",
+      "supportedValues": [
+        "url(#ref)",
+        "linear-gradient(...)",
+        "radial-gradient(...)",
+        "none"
+      ],
       "unsupportedValues": [
-        "all"
+        "paint-time mask compositing (deferred)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. Storage landed in #1515.",
       "issue": ""
     },
     "css/maxHeight": {
@@ -2200,17 +2237,32 @@
       "issue": ""
     },
     "css/mixBlendMode": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `mix-blend-mode` to setMixBlendMode(id, value) (#1549). The bridge maps the W3C blend-mode keyword set onto canvas::Canvas::BlendMode and the View paint path routes through save_layer_with_blend at compositing time.",
+      "supportedValues": [
+        "normal",
         "multiply",
         "screen",
         "overlay",
-        "etc."
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
+      ],
+      "unsupportedValues": [
+        "plus-lighter",
+        "plus-darker"
       ],
       "tests": [],
-      "notes": "RN supports mixBlendMode in New Architecture; Pulp does not.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 partial. CSS surface mirrors the rn surface wiring landed in #1549.",
       "issue": ""
     },
     "css/opacity": {
@@ -2332,36 +2384,52 @@
       "issue": ""
     },
     "css/overflowWrap": {
-      "status": "missing",
-      "mapsTo": "same as wordBreak -- never registered",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `overflow-wrap` (and the legacy `word-wrap` alias) to setWordBreak(id, value). Storage-only today on View::word_break_; HarfBuzz line-break feature integration is the paint-side follow-up.",
+      "supportedValues": [
+        "normal",
+        "break-word",
+        "anywhere"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 A4 Bundle 4: missing -> partial -> supported. Bridge fn setWordBreak (shared with `word-break` / `word-wrap`) stores the keyword on View::word_break_; all 3 CSS-spec values (normal | break-word | anywhere) round-trip through the bridge. HarfBuzz line-break feature integration at paint time is the behavior-fidelity follow-up; the catalog claim is keyword-coverage complete.",
       "issue": ""
     },
     "css/overflowX": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `overflow-x` to setOverflow(id, value) (View::Overflow has only {visible, hidden} and is axis-tied). Last-write-wins across the two axes; `overflow-x: hidden` clips both axes.",
+      "supportedValues": [
+        "visible",
+        "hidden"
+      ],
       "unsupportedValues": [
-        "all"
+        "per-axis clipping (axis-tied gotcha \u2014 both axes clip together)",
+        "scroll",
+        "auto",
+        "clip",
+        "overlay"
       ],
       "tests": [],
-      "notes": "Per-axis overflow not honored.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing \u2192 partial. Pulp's View::Overflow enum doesn't model per-axis clipping; CSS overflow-x routes to the same single-axis setter as `overflow`.",
       "issue": ""
     },
     "css/overflowY": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards `overflow-y` to setOverflow(id, value). Same axis-tied semantics as overflow-x.",
+      "supportedValues": [
+        "visible",
+        "hidden"
+      ],
       "unsupportedValues": [
-        "all"
+        "per-axis clipping (axis-tied gotcha \u2014 both axes clip together)",
+        "scroll",
+        "auto",
+        "clip",
+        "overlay"
       ],
       "tests": [],
-      "notes": "Per-axis overflow not honored.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing \u2192 partial. See overflowX note.",
       "issue": ""
     },
     "css/overscrollBehavior": {
@@ -2400,25 +2468,33 @@
       "issue": ""
     },
     "css/paddingBlockEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `padding-block-end` \u2192 setFlex(padding_bottom) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/paddingBlockStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `padding-block-start` \u2192 setFlex(padding_top) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/paddingBottom": {
@@ -2461,25 +2537,33 @@
       "issue": ""
     },
     "css/paddingInlineEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `padding-inline-end` \u2192 setFlex(padding_right) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/paddingInlineStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js maps `padding-inline-start` \u2192 setFlex(padding_left) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges \u2014 direction-aware mapping is the follow-up.",
+      "supportedValues": [
+        "<length>",
+        "<percentage>",
+        "auto (margin only)"
+      ],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing \u2192 partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
       "issue": ""
     },
     "css/paddingLeft": {
@@ -2561,25 +2645,25 @@
       "issue": ""
     },
     "css/perspective": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"perspective\":` that intentionally no-ops (Pulp's render pipeline is 2D \u2014 no perspective matrix slot on View).",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all 3D perspective values (Pulp pipeline is 2D)"
       ],
       "tests": [],
-      "notes": "No 3D transform support.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing \u2192 noop. Architecturally out of scope \u2014 Pulp uses a 2D Skia/Canvas pipeline; perspective() / matrix3d() / rotate3d would need a 3D transform stack which is not modeled.",
       "issue": ""
     },
     "css/perspectiveOrigin": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"perspectiveOrigin\":` that intentionally no-ops (Pulp's render pipeline is 2D).",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all values (Pulp pipeline is 2D)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing \u2192 noop. See css/perspective note.",
       "issue": ""
     },
     "css/placeContent": {
@@ -2656,16 +2740,18 @@
       "issue": ""
     },
     "css/resize": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"resize\":` that intentionally no-ops. Pulp doesn't render OS-style resize handles for textarea / overflow:auto regions.",
       "supportedValues": [],
       "unsupportedValues": [
         "both",
         "horizontal",
-        "vertical"
+        "vertical",
+        "block",
+        "inline"
       ],
       "tests": [],
-      "notes": "User-resizable elements not modeled.",
+      "notes": "pulp #1434 A4 Bundle 7: status flipped missing \u2192 noop. Resize handles require a CSS-resize-handle paint primitive that Pulp doesn't model.",
       "issue": ""
     },
     "css/right": {
@@ -2698,47 +2784,47 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"scrollBehavior\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports \u2014 the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all values (no CSS scroll-viewport model in Pulp)"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. 'smooth' scroll on link / programmatic scroll. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 noop. scroll-behavior (smooth / instant) requires a CSS scroll-container model that Pulp does not implement.",
       "issue": ""
     },
     "css/scrollMargin": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"scrollMargin\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports \u2014 the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all values (no CSS scroll-viewport model in Pulp)"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 noop. scroll-margin (positions scroll snap target) requires a CSS scroll-container model that Pulp does not implement.",
       "issue": ""
     },
     "css/scrollPadding": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"scrollPadding\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports \u2014 the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all values (no CSS scroll-viewport model in Pulp)"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 noop. scroll-padding (snap-area inset) requires a CSS scroll-container model that Pulp does not implement.",
       "issue": ""
     },
     "css/scrollSnapType": {
-      "status": "missing",
-      "mapsTo": "n/a",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"scrollSnapType\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports \u2014 the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "all values (no CSS scroll-viewport model in Pulp)"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap container; mobile carousel / hero gallery primitive. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 noop. scroll-snap-type (axis + strictness) requires a CSS scroll-container model that Pulp does not implement.",
       "issue": ""
     },
     "css/tableLayout": {
@@ -2834,14 +2920,19 @@
       "issue": "1434"
     },
     "css/textIndent": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js parses the length and forwards to setTextIndent(id, px); the bridge stores the value on View::text_indent_. SkParagraph::setTextIndent integration at paint time is the follow-up.",
+      "supportedValues": [
+        "<length>"
+      ],
       "unsupportedValues": [
-        "all"
+        "<percentage>",
+        "each-line",
+        "hanging",
+        "paint-side application of the stored value (deferred)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 partial. Storage-only with a dedicated bridge fn.",
       "issue": ""
     },
     "css/textOverflow": {
@@ -3077,14 +3168,24 @@
       "issue": ""
     },
     "css/verticalAlign": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword to setVerticalAlign(id, value); the bridge maps to the existing canvas::TextVerticalAlign enum on Label widgets (top|middle|bottom|baseline). Widgets other than Label ignore the value silently (the field is per-widget).",
+      "supportedValues": [
+        "top",
+        "middle",
+        "bottom",
+        "baseline"
+      ],
       "unsupportedValues": [
-        "all"
+        "sub",
+        "super",
+        "text-top",
+        "text-bottom",
+        "<length>",
+        "<percentage>"
       ],
       "tests": [],
-      "notes": "Not relevant in flex-only layout. Could add for Label baseline alignment.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 partial. Routes to the existing TextVerticalAlign enum on Label.",
       "issue": ""
     },
     "css/visibility": {
@@ -3166,17 +3267,17 @@
       "issue": ""
     },
     "css/wordBreak": {
-      "status": "missing",
-      "mapsTo": "web-compat calls setWordBreak if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `word-break` to setWordBreak(id, value); the bridge stores the value on View::word_break_. HarfBuzz line-break feature integration is the paint-side follow-up.",
+      "supportedValues": [
         "normal",
         "break-all",
         "keep-all",
         "break-word"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 A4 Bundle 5: missing -> partial -> supported. Bridge fn setWordBreak stores the keyword on View::word_break_; all 4 CSS-spec values (normal | break-all | keep-all | break-word) round-trip through the bridge. HarfBuzz line-break feature integration at paint time is the behavior-fidelity follow-up; the catalog claim is keyword-coverage complete.",
       "issue": ""
     },
     "css/wordWrap": {
@@ -3193,16 +3294,17 @@
       "issue": ""
     },
     "css/writingMode": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js has a `case \"writingMode\":` that intentionally no-ops (Pulp text flows horizontally only \u2014 no vertical-rl / vertical-lr writing-mode pipeline).",
       "supportedValues": [],
       "unsupportedValues": [
-        "horizontal-tb",
         "vertical-rl",
-        "vertical-lr"
+        "vertical-lr",
+        "sideways-rl",
+        "sideways-lr"
       ],
       "tests": [],
-      "notes": "Vertical writing modes not handled.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing \u2192 noop. Architecturally out of scope \u2014 Pulp's text shaper is horizontal-tb only.",
       "issue": ""
     },
     "css/zIndex": {

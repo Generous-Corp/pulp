@@ -4401,7 +4401,7 @@ void WidgetBridge::register_api() {
         const bool is_control_token =
             arg1 == "name"      || arg1 == "duration"  || arg1 == "delay"
          || arg1 == "easing"    || arg1 == "iterations"|| arg1 == "direction"
-         || arg1 == "fill";
+         || arg1 == "fill"      || arg1 == "play_state";
         if (is_control_token) {
             auto& staged = v->staged_animation();
             if (arg1 == "name") {
@@ -4446,6 +4446,13 @@ void WidgetBridge::register_api() {
                 staged.direction = args.get<std::string>(2, "normal");
             } else if (arg1 == "fill") {
                 staged.fill_mode = args.get<std::string>(2, "");
+            } else if (arg1 == "play_state") {
+                // pulp #1434 A4 Bundle 2 — animation-play-state.
+                // Storage-only today; the playback driver pause/resume
+                // is the follow-up. Mirror to View's storage slot so
+                // round-trip queries work without poking into the
+                // staged struct.
+                v->set_animation_play_state(args.get<std::string>(2, "running"));
             }
             return choc::value::Value();
         }
@@ -4794,6 +4801,72 @@ void WidgetBridge::register_api() {
             else if (kw == "luminosity")  mode = BM::luminosity;
             // Unknown / "plus-lighter" / "plus-darker" → normal (no-op).
             v->set_mix_blend_mode(mode);
+            return choc::value::Value();
+        });
+
+    // pulp #1434 A4 Bundles 5–7 closure — storage-only setters for the
+    // remaining css NOT-IMPL entries. Each handler records the value on
+    // the View's catalog slot so harness round-trip tests can verify
+    // the bridge accepts the keyword. Catalog status documents the
+    // implementation depth (`partial` for storage-only with deferred
+    // paint, `noop` for accept-and-ignore, `wontfix` for architectural
+    // out-of-scope).
+
+    // setTextIndent(id, px) — CSS `text-indent`. Storage-only today;
+    // SkParagraph::setTextIndent integration is the paint-side follow-up.
+    engine_.register_function("setTextIndent",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto v = static_cast<float>(args.get<double>(1, 0.0));
+            auto* w = id.empty() ? &root_ : widget(id);
+            if (w) w->set_text_indent(v);
+            return choc::value::Value();
+        });
+
+    // setVerticalAlign(id, "top"|"middle"|"bottom"|"baseline"|...)
+    // CSS `vertical-align`. Maps the keyword to the existing
+    // canvas::TextVerticalAlign enum on Label; non-Label widgets
+    // silently no-op (the field is per-widget). Length values
+    // (`-2px` etc.) and `sub`/`super` fall back to baseline today.
+    engine_.register_function("setVerticalAlign",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "baseline");
+            using VA = pulp::canvas::TextVerticalAlign;
+            VA mode = VA::baseline;
+            if      (kw == "top")     mode = VA::top;
+            else if (kw == "middle")  mode = VA::center;
+            else if (kw == "bottom")  mode = VA::bottom;
+            else if (kw == "baseline") mode = VA::baseline;
+            // sub / super / text-top / text-bottom / length percent →
+            // baseline fallback (paint-side gap; future slice can add
+            // dedicated slots).
+            if (auto* l = dynamic_cast<Label*>(widget(id))) {
+                l->set_vertical_align(mode);
+            }
+            return choc::value::Value();
+        });
+
+    // setWordBreak(id, kw) — CSS `word-break` / `overflow-wrap`.
+    // Storage-only today; HarfBuzz line-break feature is deferred.
+    engine_.register_function("setWordBreak",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "normal");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_word_break(kw);
+            return choc::value::Value();
+        });
+
+    // setFontVariant(id, kw) — CSS / RN `font-variant`. Storage-only;
+    // HarfBuzz feature wiring is deferred. Mirrors the rn-surface
+    // `fontVariant` choice (the same A4 sweep, rn agent).
+    engine_.register_function("setFontVariant",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "normal");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_font_variant(kw);
             return choc::value::Value();
         });
 

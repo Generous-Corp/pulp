@@ -827,6 +827,30 @@ public:
     void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
     const std::string& background_origin() const   { return background_origin_; }
 
+    // pulp #1434 A4 Bundles 5–7 closure — storage-only slots for CSS
+    // properties closed in the css NOT-IMPL sweep. Each slot is round-
+    // trippable so harness tests can verify the bridge accepts the
+    // value, and so a future paint-time slice can honor it without a
+    // JS-side change. Catalog status documents the implementation
+    // depth (`partial` / `noop` / `wontfix`).
+    void set_text_indent(float v)                  { text_indent_ = v; }
+    float text_indent() const                      { return text_indent_; }
+    void set_word_break(std::string kw)            { word_break_ = std::move(kw); }
+    const std::string& word_break() const          { return word_break_; }
+    void set_font_variant(std::string kw)          { font_variant_ = std::move(kw); }
+    const std::string& font_variant() const        { return font_variant_; }
+    void set_writing_mode(std::string kw)          { writing_mode_ = std::move(kw); }
+    const std::string& writing_mode() const        { return writing_mode_; }
+    void set_isolation(std::string kw)             { isolation_ = std::move(kw); }
+    const std::string& isolation() const           { return isolation_; }
+    void set_resize(std::string kw)                { resize_ = std::move(kw); }
+    const std::string& resize() const              { return resize_; }
+    /// Animation play-state. Stored on the staged_animation slot via the
+    /// existing setAnimation control-token ABI; this duplicate slot is
+    /// for direct round-trip queries.
+    void set_animation_play_state(std::string kw)  { animation_play_state_ = std::move(kw); }
+    const std::string& animation_play_state() const { return animation_play_state_; }
+
 
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
@@ -1049,6 +1073,15 @@ private:
     std::string background_attachment_;  // pulp #1517 — noop today
     std::string background_clip_;        // pulp #1517 — partial (text deferred)
     std::string background_origin_;      // pulp #1517 — noop today
+
+    // pulp #1434 A4 Bundles 5–7 closure — storage-only catalog slots.
+    float       text_indent_ = 0.0f;       // partial (paint deferred)
+    std::string word_break_;               // partial (HarfBuzz feature deferred)
+    std::string font_variant_;             // partial (HarfBuzz feature deferred)
+    std::string writing_mode_;             // noop (Pulp horizontal-only)
+    std::string isolation_;                // wontfix (no z-buffer)
+    std::string resize_;                   // noop (no resize handles)
+    std::string animation_play_state_;     // partial (storage only)
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;

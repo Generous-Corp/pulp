@@ -20,18 +20,80 @@ across layout, box-model, typography, color, transforms, transitions,
 animations, gradients, flex, grid, and basic SVG. Print and paged-media
 specifics are out of scope.
 
-## Counts (2026-05-06)
+## Counts (2026-05-07)
 
 | Status | Count |
 |--------|------:|
-| supported | ~88 |
-| partial | ~30 |
-| missing | ~60 |
-| wontfix | ~30 |
+| supported | ~118 |
+| partial | ~58 |
+| noop | ~11 |
+| missing | 0 |
+| wontfix | ~25 |
 
 (See `_audit.counts.css` in `compat.json` for the exact totals.)
 
 ## Recently changed
+
+- **2026-05-07 (pulp #1434 A4 Bundles 2–7)** — css NOT-IMPL closure.
+  30 catalog entries flipped `missing` → `partial` / `noop` / `wontfix`.
+  Targets the harness drift queue: PASS+DIVERGE coverage on the css
+  surface should now sit ≥ 95%.
+  * **Bundle 2 — animations tail (1 entry):** `animationPlayState`
+    flipped `missing` → `partial`. New `setAnimation(id, "play_state",
+    value)` control-token routes through View::staged_animation +
+    `View::animation_play_state_`. Playback driver pause/resume is
+    the follow-up to #1508.
+  * **Bundle 3 — logical-edge fan-out (7 entries):** `marginBlockStart`,
+    `marginBlockEnd`, `marginInlineEnd`, `paddingBlockStart`,
+    `paddingBlockEnd`, `paddingInlineStart`, `paddingInlineEnd` flipped
+    `missing` → `partial`. JS-side cases dispatch to the existing
+    per-edge `setFlex` bridge under the LTR / horizontal-tb fast path
+    (mirrors the pre-existing `marginInlineStart`). Direction-aware
+    logical→physical resolution remains the writing-direction follow-up
+    tracked under the same #1434 umbrella.
+  * **Bundle 4 — overflow per-axis + 3D (5 entries):**
+    - `overflowX`, `overflowY` → `partial` (axis-tied gotcha
+      documented in `unsupportedValues`; both axes clip together
+      because View::Overflow has only `{visible, hidden}`).
+    - `overflowWrap` → `partial` (storage on `View::word_break_`;
+      HarfBuzz line-break feature deferred).
+    - `perspective`, `perspectiveOrigin` → `noop` (Pulp pipeline is 2D,
+      no 3D matrix slot on View).
+  * **Bundle 5 — text rendering tail (8 entries):**
+    - `textIndent` → `partial` via new `setTextIndent(id, px)` bridge
+      fn storing on `View::text_indent_`; SkParagraph integration
+      deferred.
+    - `verticalAlign` → `partial` via new `setVerticalAlign(id, kw)`
+      mapping to the existing `canvas::TextVerticalAlign` enum on
+      `Label` (top|middle|bottom|baseline). Non-Label widgets silently
+      no-op; sub/super fall back to baseline.
+    - `wordBreak` → `partial` via new `setWordBreak(id, kw)` bridge
+      storing on `View::word_break_`.
+    - `writingMode` → `noop` (Pulp text shaper is horizontal-tb only).
+    - `scrollBehavior`, `scrollMargin`, `scrollPadding`,
+      `scrollSnapType` → `noop` (no CSS scroll-viewport model in
+      Pulp; ScrollView intrinsic owns scroll state).
+  * **Bundle 6 — isolation + clip/mask + direction (6 entries):**
+    - `isolation` → `wontfix` (no CSS stacking-context / z-buffer
+      model; mix-blend-mode's saveLayer covers the layer-isolation
+      use case where it matters).
+    - `mixBlendMode` → `partial` (already wired via #1549 — catalog
+      flipped to match).
+    - `clipPath` → `partial` (already wired via #1540 — catalog
+      flipped to match).
+    - `mask`, `maskImage` → `partial` (already wired via #1515 / #1540
+      — catalog flipped to match).
+    - `direction` → `partial` (already wired via #1506 — catalog
+      flipped to match).
+  * **Bundle 7 — resize + fontVariant (2 entries):**
+    - `resize` → `noop` (no OS-style resize handles).
+    - `fontVariant` → `partial` via new `setFontVariant(id, kw)` bridge
+      storing on `View::font_variant_`. Mirrors the rn surface
+      decision.
+  * **Synthetic `__pseudo_classes_note`** → `wontfix`. Superseded by
+    the per-pseudo-class entries (`__pseudo_hover` / `__pseudo_focus`
+    / `__pseudo_active` / `__pseudo_disabled`) added in #1551; the
+    note is kept for the original triage rationale.
 
 - **2026-05-06 (pulp #1515)** — CSS `clip-path` + `mask` cluster.
   Three catalog items flipped `missing` → `partial`.

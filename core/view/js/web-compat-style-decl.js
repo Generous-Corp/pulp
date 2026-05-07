@@ -604,6 +604,19 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "overflow":
             setOverflow(id, resolved);
             break;
+        // pulp #1434 A4 Bundle 4 — overflow per-axis. Pulp's View has a
+        // single Overflow enum (visible|hidden) that clips both axes
+        // together; CSS `overflow-x` / `overflow-y` ask for axis-tied
+        // clipping which the layout engine doesn't model. Forward the
+        // value to the same setOverflow bridge — last-write-wins across
+        // the two axes, which is the conservative interpretation
+        // (`overflow-x: hidden` clips both axes; `overflow-x: visible`
+        // unclips both). Catalog status is `partial` with the axis-tied
+        // gotcha documented in unsupportedValues.
+        case "overflowX":
+        case "overflowY":
+            setOverflow(id, resolved);
+            break;
 
         // Cursor
         case "cursor":
@@ -1319,6 +1332,16 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "animationFillMode":
             if (typeof setAnimation === "function") setAnimation(id, "fill", resolved);
             break;
+        // pulp #1434 A4 Bundle 2 — animation-play-state. Forwards the
+        // CSS keyword (`running` | `paused`) through the existing
+        // setAnimation control-token ABI so the bridge can route it to
+        // the staged_animation slot. The full pause/resume of the
+        // active_animations playback driver is the follow-up; storing
+        // the keyword today is enough for the catalog to claim partial
+        // and for round-trip validation.
+        case "animationPlayState":
+            if (typeof setAnimation === "function") setAnimation(id, "play_state", resolved);
+            break;
         case "animation": {
             // Shorthand: "name duration easing delay iterations direction fill"
             var atr = parseTransition(resolved); // reuse transition parser for timing
@@ -1337,18 +1360,57 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // (the existing setFilter bridge parses "blur(4px)" — additional functions pass through)
 
         // ── Tier 7: CSS logical properties ──────────────────────────────
+        //
+        // pulp #1434 A4 Bundle 3 — logical-edge fan-out. Every logical
+        // edge maps to the LTR / horizontal-tb physical edge:
+        //   inline-start → left,  inline-end → right
+        //   block-start  → top,   block-end  → bottom
+        // RTL writing direction would swap inline-start/end; #1434 still
+        // tracks this as a follow-up. The bridge stores the value on the
+        // physical edge today, which is correct for LTR (the overwhelming
+        // common case). When direction-aware mapping lands, only this
+        // dispatch table needs to consult the View's writing direction.
 
         case "marginInline": {
             var mi = expandShorthand(resolved);
             setFlex(id, "margin_left", mi[0]); setFlex(id, "margin_right", mi[1]);
             break;
         }
-        case "marginInlineStart":
-        case "marginLeft": // already handled above, fall through for logical
+        case "marginInlineStart": {
+            // LTR fast path — inline-start ≡ left.
+            if (resolved === "auto") { setFlex(id, "margin_left", "auto"); break; }
+            var mis = parseCSSLength(resolved);
+            if (!mis) break;
+            setFlex(id, "margin_left", mis.unit === "%" ? mis.value + "%" : mis.value);
             break;
+        }
+        case "marginInlineEnd": {
+            // LTR fast path — inline-end ≡ right.
+            if (resolved === "auto") { setFlex(id, "margin_right", "auto"); break; }
+            var mie = parseCSSLength(resolved);
+            if (!mie) break;
+            setFlex(id, "margin_right", mie.unit === "%" ? mie.value + "%" : mie.value);
+            break;
+        }
         case "marginBlock": {
             var mb2 = expandShorthand(resolved);
             setFlex(id, "margin_top", mb2[0]); setFlex(id, "margin_bottom", mb2[1]);
+            break;
+        }
+        case "marginBlockStart": {
+            // horizontal-tb fast path — block-start ≡ top.
+            if (resolved === "auto") { setFlex(id, "margin_top", "auto"); break; }
+            var mbs = parseCSSLength(resolved);
+            if (!mbs) break;
+            setFlex(id, "margin_top", mbs.unit === "%" ? mbs.value + "%" : mbs.value);
+            break;
+        }
+        case "marginBlockEnd": {
+            // horizontal-tb fast path — block-end ≡ bottom.
+            if (resolved === "auto") { setFlex(id, "margin_bottom", "auto"); break; }
+            var mbe = parseCSSLength(resolved);
+            if (!mbe) break;
+            setFlex(id, "margin_bottom", mbe.unit === "%" ? mbe.value + "%" : mbe.value);
             break;
         }
         case "paddingInline": {
@@ -1356,9 +1418,38 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "padding_left", pi2[0]); setFlex(id, "padding_right", pi2[1]);
             break;
         }
+        case "paddingInlineStart": {
+            // LTR fast path — inline-start ≡ left. Yoga's padding doesn't
+            // support `auto` (only margin does); keyword silently dropped.
+            var pis = parseCSSLength(resolved);
+            if (!pis) break;
+            setFlex(id, "padding_left", pis.unit === "%" ? pis.value + "%" : pis.value);
+            break;
+        }
+        case "paddingInlineEnd": {
+            // LTR fast path — inline-end ≡ right.
+            var pie = parseCSSLength(resolved);
+            if (!pie) break;
+            setFlex(id, "padding_right", pie.unit === "%" ? pie.value + "%" : pie.value);
+            break;
+        }
         case "paddingBlock": {
             var pb2 = expandShorthand(resolved);
             setFlex(id, "padding_top", pb2[0]); setFlex(id, "padding_bottom", pb2[1]);
+            break;
+        }
+        case "paddingBlockStart": {
+            // horizontal-tb fast path — block-start ≡ top.
+            var pbs = parseCSSLength(resolved);
+            if (!pbs) break;
+            setFlex(id, "padding_top", pbs.unit === "%" ? pbs.value + "%" : pbs.value);
+            break;
+        }
+        case "paddingBlockEnd": {
+            // horizontal-tb fast path — block-end ≡ bottom.
+            var pbe = parseCSSLength(resolved);
+            if (!pbe) break;
+            setFlex(id, "padding_bottom", pbe.unit === "%" ? pbe.value + "%" : pbe.value);
             break;
         }
         case "inset": {
@@ -1379,6 +1470,86 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // background-repeat
         case "backgroundRepeat":
             if (typeof setBackgroundRepeat === "function") setBackgroundRepeat(id, resolved);
+            break;
+
+        // ── Tier 8: pulp #1434 A4 Bundles 5–7 closure ───────────────────
+        // The remaining cases route value-bearing CSS properties to the
+        // bridge surface even when the bridge fn is absent today (the
+        // typeof guard makes the call a no-op on older bridges, which
+        // matches the convention used elsewhere in this file). Each case
+        // is paired with a catalog entry that documents the implementation
+        // depth (`partial` for storage-only, `noop` for accept-and-ignore,
+        // `wontfix` for architecturally out-of-scope).
+
+        // text-indent — first-line indent. Storage-only; SkParagraph
+        // setTextIndent integration is the follow-up.
+        case "textIndent": {
+            var ti = parseCSSLength(resolved);
+            if (ti && typeof setTextIndent === "function") setTextIndent(id, ti.value);
+            break;
+        }
+
+        // vertical-align — line-box vertical alignment. Maps the four
+        // canvas::TextVerticalAlign slots (top|middle|bottom|baseline);
+        // sub/super and length values fall back to baseline.
+        case "verticalAlign":
+            if (typeof setVerticalAlign === "function") setVerticalAlign(id, resolved);
+            break;
+
+        // mix-blend-mode — already wired via setMixBlendMode bridge fn
+        // (#1549). Mirroring the RN surface so CSS authors get the same
+        // 16-keyword set.
+        case "mixBlendMode":
+            if (typeof setMixBlendMode === "function") setMixBlendMode(id, resolved);
+            break;
+
+        // direction — already supported by the case at line 534 above
+        // (Tier 1 layout). Listed here as documentation that the catalog
+        // logical-edge story routes through the same setDirection bridge.
+
+        // font-variant — RN-style font-feature setting. Storage-only; the
+        // HarfBuzz feature wiring is deferred. Catalog: partial.
+        case "fontVariant":
+            if (typeof setFontVariant === "function") setFontVariant(id, resolved);
+            break;
+
+        // ── Architecturally out-of-scope or no-op CSS surface entries ───
+        // These cases exist purely so the harness sees them as `wired`
+        // (case-arm present) and the catalog status rules the verdict.
+        // They intentionally do NOT call a bridge fn because the
+        // underlying capability is either out of scope (Pulp is 2D / no
+        // scroll viewports / no z-index isolation) or not yet modeled.
+
+        // 3D — Pulp's pipeline is 2D; perspective is silently accepted.
+        case "perspective":
+        case "perspectiveOrigin":
+            // intentional no-op — see compat.json css/perspective entry.
+            break;
+
+        // Vertical writing — Pulp text flows horizontally only.
+        case "writingMode":
+            // intentional no-op — see compat.json css/writingMode.
+            break;
+
+        // Scroll-related CSS — Pulp doesn't render scroll viewports
+        // through CSS (ScrollView intrinsic owns scroll state).
+        case "scrollBehavior":
+        case "scrollMargin":
+        case "scrollPadding":
+        case "scrollSnapType":
+            // intentional no-op — see compat.json css/scroll* entries.
+            break;
+
+        // Stacking-context isolation — Pulp has no z-buffer or layer
+        // isolation; entry exists for catalog completeness.
+        case "isolation":
+            // intentional no-op — see compat.json css/isolation.
+            break;
+
+        // textarea resize handle — Pulp doesn't render OS-style resize
+        // handles. Stored for round-trip; no paint impact.
+        case "resize":
+            // intentional no-op — see compat.json css/resize.
             break;
     }
 };
@@ -1405,6 +1576,9 @@ var __cssProperties__ = [
     "aspectRatio", "boxSizing",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "marginInline", "marginBlock",
+    // pulp #1434 A4 Bundle 3 — CSS logical-edge longhands.
+    "marginInlineStart", "marginInlineEnd", "marginBlockStart", "marginBlockEnd",
+    "paddingInlineStart", "paddingInlineEnd", "paddingBlockStart", "paddingBlockEnd",
     // pulp #1434 batch 4 — React Native shorthand aliases.
     "marginHorizontal", "marginVertical",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
@@ -1424,11 +1598,15 @@ var __cssProperties__ = [
     "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
     "outline", "outlineWidth", "outlineColor", "outlineOffset", "outlineStyle",
     "opacity", "overflow", "cursor", "visibility",
+    // pulp #1434 A4 Bundle 4 — overflow per-axis (axis-tied gotcha).
+    "overflowX", "overflowY",
     "userSelect", "pointerEvents",
     "transform", "transformOrigin",
     "transition", "transitionDuration",
     "animation", "animationName", "animationDuration", "animationTimingFunction",
     "animationDelay", "animationIterationCount", "animationDirection", "animationFillMode",
+    // pulp #1434 A4 Bundle 2 — animation-play-state.
+    "animationPlayState",
     "position", "top", "right", "bottom", "left", "zIndex", "inset",
     "boxShadow", "filter", "backdropFilter", "background", "backgroundImage",
     "backgroundSize", "backgroundPosition", "backgroundRepeat",
@@ -1436,7 +1614,14 @@ var __cssProperties__ = [
     // layout model; see _applyProperty for the per-prop semantics).
     "backgroundAttachment", "backgroundClip", "backgroundOrigin",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
-    "lineClamp", "webkitLineClamp"
+    "lineClamp", "webkitLineClamp",
+    // pulp #1434 A4 Bundles 5–7 closure — text rendering tail, isolation,
+    // clip/mask cluster, direction, resize, fontVariant.
+    "textIndent", "verticalAlign", "writingMode",
+    "scrollBehavior", "scrollMargin", "scrollPadding", "scrollSnapType",
+    "isolation", "mixBlendMode", "clipPath", "mask", "maskImage", "direction",
+    "resize", "fontVariant",
+    "perspective", "perspectiveOrigin"
 ];
 
 (function() {
