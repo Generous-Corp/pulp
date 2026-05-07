@@ -27,6 +27,15 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-4)** — `rn/filter` extended from
+  `blur(Npx)`-only to the full CSS Filter Effects function set
+  (`brightness` / `contrast` / `grayscale` / `hue-rotate` / `invert` /
+  `opacity` / `saturate` / `sepia` / `drop-shadow` plus chains). The
+  `@pulp/react` prop-applier already forwards the CSS string verbatim
+  (sub-agent #27's bridge-wires bundle); the bridge now parses the
+  full chain and routes to Skia's `SkImageFilters::Compose` +
+  `SkColorFilters::Matrix` via the new
+  `canvas.save_layer_with_filters(...)` API.
 - **2026-05-06 (pulp #1547)** — RN textDecoration cluster surfaced at
   the `@pulp/react` JSX layer: `textDecorationLine`,
   `textDecorationColor`, `textDecorationStyle` all flipped `missing` →

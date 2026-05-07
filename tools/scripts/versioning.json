@@ -18,7 +18,10 @@
         "core/**/platform/**",
         "tools/cli/**/*.cpp",
         "tools/cli/**/*.hpp",
-        "tools/cli/**/*.h"
+        "tools/cli/**/*.h",
+        "tools/import-design/**/*.cpp",
+        "tools/import-design/**/*.hpp",
+        "tools/import-design/**/*.h"
       ],
       "public_api_paths": [
         "core/**/include/**/*.hpp",

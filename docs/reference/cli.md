@@ -633,7 +633,7 @@ Namespace profile setup note:
 
 ### harness
 
-Run the catalog coverage harness. The command delegates to `tools/harness/verifier.py` and compares `compat.json` support claims against machine-derived oracles. The first wired adapter is the Yoga surface from #1395.
+Run the catalog coverage harness and deterministic visual snapshot harness. Coverage mode delegates to `tools/harness/verifier.py` and compares `compat.json` support claims against machine-derived oracles. Visual mode delegates to `tools/harness/visual/runner.py` and compares semantic Yoga layout snapshots against checked-in goldens.
 
 ```bash
 pulp harness --surface=yoga
@@ -641,9 +641,13 @@ pulp harness coverage --surface=yoga
 pulp harness --all
 pulp harness --surface=yoga --json
 pulp harness --surface=yoga --no-docs
+pulp harness visual --verify --all
+pulp harness visual --generate --surface=yoga --entry=yoga/box-sizing
 ```
 
-By default, the harness writes `build/harness-coverage-<sha>.json`, `build/harness-coverage.md`, and `docs/reports/harness-coverage.md`. Use `--json` for stdout-only machine output.
+By default, coverage mode writes `build/harness-coverage-<sha>.json`, `build/harness-coverage.md`, and `docs/reports/harness-coverage.md`. Use `--json` for stdout-only machine output. Coverage JSON includes `visual_pass` per surface, counted from checked-in visual goldens against the current `compat.json` surface total.
+
+Visual mode requires the `pulp-test-visual` target to be built first. Use `--build-dir` or `--binary` when the binary is not under the default `build/` or `build-visual/` directories.
 
 ### ship
 

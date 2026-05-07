@@ -1,0 +1,25 @@
+{
+  "id": "yoga/aspect-ratio",
+  "surface": "yoga",
+  "kind": "layout",
+  "viewport": { "w": 220, "h": 160 },
+  "tolerance": { "rect": 0.001 },
+  "tree": {
+    "id": "root",
+    "type": "View",
+    "style": {
+      "direction": "column",
+      "align_items": "start"
+    },
+    "children": [
+      {
+        "id": "ratio-box",
+        "type": "View",
+        "style": {
+          "width": 120,
+          "aspect_ratio": 1.5
+        }
+      }
+    ]
+  }
+}

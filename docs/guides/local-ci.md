@@ -299,6 +299,62 @@ Important constraints in the current phase:
   provider routing lives under the GitHub Actions workflow/provider config and
   the `cloud namespace` helper commands
 
+## Fast-CI vs full-CI (`build.yml`)
+
+Issue #1589 split the `Build and Test` workflow into two test
+trajectories without forking the YAML:
+
+- **Fast-CI** runs on `pull_request` events. The ctest invocation
+  excludes BOTH the `validation` and `slow` CTest labels, dropping the
+  longest-running tests so PR cycle time stays tight. Examples that
+  carry `LABELS slow` today (defined in `test/CMakeLists.txt`):
+  - `cmake-ios-auv3-configure` — fresh-cache ~3 min iOS-leg configure
+  - `cmake-pulp-add-binary-data-encoder` / `cmake-pulp-install-layout`
+  - `pulp-test-hot-reload`, `pulp-test-scripted-ui`, `pulp-test-scan-cache`,
+    `pulp-test-scan-blacklist` (filesystem-mtime sleep loops)
+  - `pulp-test-sync`, `pulp-test-sync-race-hammer`,
+    `pulp-test-events-timer-helpers` (race + timer hammers; also covered
+    under sanitizer.yml's TSan lane)
+
+- **Full-CI** runs on `push` to `main`, the nightly schedule, and
+  `workflow_dispatch`. Only the `validation` label is excluded — every
+  `slow`-labelled test runs before code lands on the release lane.
+
+Both paths satisfy the branch-protection-required `macos` /
+advisory `linux` / advisory `windows` alias gates because the alias
+jobs read each matrix leg's outcome via the GitHub API.
+
+### Tagging a new test as slow
+
+Add `LABELS slow` either to a single test's `set_tests_properties`, or
+to a Catch2 binary's `catch_discover_tests(... PROPERTIES LABELS slow)`
+so every discovered test inherits the label:
+
+```cmake
+add_test(NAME my-expensive-cmake-smoke COMMAND ...)
+set_tests_properties(my-expensive-cmake-smoke PROPERTIES
+    LABELS "smoke;slow"
+    TIMEOUT 600)
+
+add_executable(pulp-test-my-suite test_my_suite.cpp)
+target_link_libraries(pulp-test-my-suite PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-my-suite PROPERTIES LABELS slow)
+```
+
+Rule of thumb for `slow`: a test consistently >5 sec on at least one
+platform, OR a sleep-bounded smoke (file-mtime, hammer race, message-loop
+bound) whose value lies in soak coverage rather than per-PR feedback.
+Anything covered by sanitizers.yml or another scheduled lane is a
+strong candidate.
+
+### Demoting a fast test to slow (or vice versa)
+
+`ctest --test-dir build -L slow -N` lists every test currently tagged
+`slow`. To move a test in or out of the fast-CI surface, add or remove
+the `slow` label in `test/CMakeLists.txt` (or the appropriate subdir
+CMakeLists) and reconfigure. There's no separate registry to keep in
+sync.
+
 ## Switching a job's runner without a code change
 
 Every runner-selection decision in `.github/workflows/*.yml` is driven by
