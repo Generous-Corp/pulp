@@ -74,6 +74,7 @@ struct ScriptCommand {
 
 static const ScriptCommand script_commands[] = {
     {"ci-local", "tools/local-ci/local_ci.py",       "Local-first CI across configured hosts"},
+    {"harness",  "tools/harness/verifier.py",        "Catalog-driven coverage harness (compat.json verifier)"},
 };
 
 static constexpr int script_command_count = sizeof(script_commands) / sizeof(script_commands[0]);

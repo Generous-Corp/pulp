@@ -88,7 +88,7 @@ this version.
 3. Rebuild (`cmake --build build`). CMake re-runs
    `tools/scripts/build_migration_index.py` at configure time, so
    reconfigure (`cmake -S . -B build`) if the file list changes.
-4. Verify locally: `./build/tools/cli/pulp upgrade --notes
+4. Verify locally: `./build/pulp upgrade --notes
    --from 0.26.0 --to 0.27.0`.
 5. Commit. The generated `tools/cli/migration_index.cpp` lives at
    `${CMAKE_BINARY_DIR}/generated/migration_index.cpp` — it is NOT

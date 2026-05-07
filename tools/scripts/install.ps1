@@ -83,7 +83,22 @@ if (-not (Test-Path $PulpExe)) {
     exit 1
 }
 
-Write-Host "  Installed: pulp v$Version"
+try {
+    $InstalledVersion = (& $PulpExe version 2>$null | Select-Object -First 1)
+} catch {
+    $InstalledVersion = $null
+}
+if (-not $InstalledVersion) {
+    $InstalledVersion = "pulp v$Version"
+}
+Write-Host "  Installed: $InstalledVersion"
+
+$PulpCppExe = Join-Path $InstallDir "pulp-cpp.exe"
+if (Test-Path $PulpCppExe) {
+    Write-Host "  Installed: pulp-cpp delegate"
+} else {
+    Write-Host "  No pulp-cpp delegate found; this is expected only for pre-0.78.0 releases."
+}
 
 # ── Add to PATH ─────────────────────────────────────────────────────────────
 

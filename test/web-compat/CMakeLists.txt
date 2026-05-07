@@ -25,12 +25,22 @@ add_executable(pulp-test-web-compat-layout
     test_layout_grid.cpp
     test_layout_position.cpp
     test_layout_nested.cpp
+    test_layout_aspect_ratio.cpp
 )
 target_link_libraries(pulp-test-web-compat-layout PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-compat-layout PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
 target_compile_definitions(pulp-test-web-compat-layout PRIVATE
     PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
 )
+# pulp #1434 — test_layout_aspect_ratio.cpp exercises the CSS shim via
+# document.createElement + appendChild, which (like the events / prelude
+# targets) deep-recurses through QuickJS↔C++ DOM ops. Match the prelude
+# stack size so the CSS-shim end-to-end tests don't blow the default.
+if(APPLE)
+    target_link_options(pulp-test-web-compat-layout PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-web-compat-layout PRIVATE -Wl,-z,stacksize=16777216)
+endif()
 catch_discover_tests(pulp-test-web-compat-layout)
 
 # Event tests
@@ -42,12 +52,21 @@ add_executable(pulp-test-web-compat-events
     test_events_bubbling.cpp
     test_selector_matching.cpp
     test_element_api.cpp
+    test_css_hover_translation.cpp
 )
 target_link_libraries(pulp-test-web-compat-events PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-compat-events PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
 target_compile_definitions(pulp-test-web-compat-events PRIVATE
     PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
 )
+# pulp #1323 — CSS-hover tests do appendChild + StyleSheet attach;
+# match the prelude target's 16 MB stack so QuickJS↔C++ interleaving
+# inside _processStyleElement → _applyTo doesn't blow the default.
+if(APPLE)
+    target_link_options(pulp-test-web-compat-events PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-web-compat-events PRIVATE -Wl,-z,stacksize=16777216)
+endif()
 catch_discover_tests(pulp-test-web-compat-events)
 
 # Web-compat prelude tests (document, Element, style, parser, StyleSheet)
@@ -116,3 +135,39 @@ elseif(UNIX)
     target_link_options(pulp-test-headless-frame-pump PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-headless-frame-pump)
+
+# pulp #1434 batch 3 — CSS translator gap fills: backdropFilter,
+# textDecoration{Line,Color,Style}, fontWeight keyword translation.
+# Exercises the JS shim → bridge round trip via
+# document.createElement / appendChild / style.X = ... — same DOM-shim
+# stack-depth profile as the prelude / aspect-ratio targets, so match
+# the 16 MB stack the rest of the web-compat suite uses.
+add_executable(pulp-test-css-translator-gaps-1434 test_css_translator_gaps_1434.cpp)
+target_link_libraries(pulp-test-css-translator-gaps-1434 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-css-translator-gaps-1434 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-css-translator-gaps-1434 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-css-translator-gaps-1434 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-css-translator-gaps-1434 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-css-translator-gaps-1434)
+
+# #1147 regression: nested-flex popover row template — inline <svg> with
+# width/height attributes must reserve layout space, and a <span> with
+# nested flex children must lay out those children instead of clobbering
+# them with the parent's text-only intrinsic measurement.
+add_executable(pulp-test-popover-row-template-1147 test_popover_row_template_1147.cpp)
+target_link_libraries(pulp-test-popover-row-template-1147 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-popover-row-template-1147 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-popover-row-template-1147 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-popover-row-template-1147)

@@ -2,12 +2,7 @@
 //! fuzzy "Did you mean...?" UX fixes.
 //!
 //! The reference file is `tests/fixtures/help/expected_cpp.txt`,
-//! captured from a built `pulp` binary by running `./pulp help`. The
-//! Rust banner uses `pulp-rs` everywhere the C++ banner uses `pulp`,
-//! so the comparison normalises both sides before diffing:
-//!
-//! - `pulp-rs —` ↔ `pulp —` (header line)
-//! - `Usage: pulp-rs <…>` ↔ `Usage: pulp <…>`
+//! captured from a built `pulp` binary by running `./pulp help`.
 //!
 //! The "Examples" section uses literal `pulp create ...` lines on
 //! both sides — those aren't the banner name, they're example
@@ -27,8 +22,8 @@ fn fixture_dir() -> PathBuf {
 }
 
 /// Normalise Rust banner so it can be diffed against the captured
-/// C++ banner. `pulp-rs` → `pulp` everywhere except inside the
-/// "Examples" block, which already uses `pulp …` on both sides.
+/// C++ banner. The flip branch should already use `pulp`; keeping
+/// this helper makes legacy fixture diffs easier to review.
 fn normalise_rust_banner(s: &str) -> String {
     s.replace(
         "pulp-rs — Pulp audio plugin framework CLI",
@@ -40,13 +35,13 @@ fn normalise_rust_banner(s: &str) -> String {
 #[test]
 fn help_banner_matches_cpp_output() {
     let expected = fs::read_to_string(fixture_dir().join("expected_cpp.txt")).expect("fixture");
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("help")
         .env_remove("NO_COLOR")
         .output()
         .expect("run");
-    assert!(output.status.success(), "pulp-rs help exited non-zero");
+    assert!(output.status.success(), "pulp help exited non-zero");
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     let normalised = normalise_rust_banner(&stdout);
     assert!(
@@ -57,7 +52,7 @@ fn help_banner_matches_cpp_output() {
 
 #[test]
 fn help_banner_exit_code_is_zero() {
-    Command::cargo_bin("pulp-rs")
+    Command::cargo_bin("pulp")
         .expect("binary")
         .arg("help")
         .assert()
@@ -66,18 +61,18 @@ fn help_banner_exit_code_is_zero() {
 
 #[test]
 fn bare_invocation_prints_banner_and_exits_zero() {
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .output()
         .expect("run");
     assert!(
         output.status.success(),
-        "bare `pulp-rs` should exit 0 to match C++; got {:?}",
+        "bare `pulp` should exit 0 to match C++; got {:?}",
         output.status.code()
     );
     let stdout = String::from_utf8(output.stdout).expect("utf8");
     assert!(
-        stdout.contains("pulp-rs — Pulp audio plugin framework CLI"),
+        stdout.contains("pulp — Pulp audio plugin framework CLI"),
         "bare invocation should print the usage banner"
     );
     assert!(
@@ -88,7 +83,7 @@ fn bare_invocation_prints_banner_and_exits_zero() {
 
 #[test]
 fn unknown_command_suggests_close_match() {
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("buld")
         .output()
@@ -100,7 +95,7 @@ fn unknown_command_suggests_close_match() {
         "expected 'Unknown command: buld' in stderr, got: {stderr}"
     );
     assert!(
-        stderr.contains("Did you mean: pulp-rs build?"),
+        stderr.contains("Did you mean: pulp build?"),
         "expected fuzzy suggestion for 'buld' → 'build', got: {stderr}"
     );
 }
@@ -110,7 +105,7 @@ fn unknown_command_suggests_projects_for_project_typo() {
     // Distance 1 edge case: `projets` is closer to `projects` than
     // any other command — make sure we don't accidentally suggest
     // `project` (the singular).
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("projets")
         .output()
@@ -118,14 +113,14 @@ fn unknown_command_suggests_projects_for_project_typo() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).expect("utf8");
     assert!(
-        stderr.contains("Did you mean: pulp-rs project"),
+        stderr.contains("Did you mean: pulp project"),
         "expected a project/projects suggestion, got: {stderr}"
     );
 }
 
 #[test]
 fn unknown_command_falls_back_when_no_close_match() {
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("xyzxyzxyz")
         .output()
@@ -137,7 +132,7 @@ fn unknown_command_falls_back_when_no_close_match() {
         "expected unknown-command line, got: {stderr}"
     );
     assert!(
-        stderr.contains("Run `pulp-rs help` for usage"),
+        stderr.contains("Run `pulp help` for usage"),
         "expected fallback hint when no close match, got: {stderr}"
     );
 }
@@ -147,14 +142,14 @@ fn unknown_command_does_not_suggest_deferred_commands_silently() {
     // `audo` is closer to `audio` than to `add`/`audit`. Make sure
     // the suggester reaches into the full known-commands list, not
     // just the native-Rust ports.
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .arg("audo")
         .output()
         .expect("run");
     let stderr = String::from_utf8(output.stderr).expect("utf8");
     assert!(
-        stderr.contains("Did you mean: pulp-rs audio?"),
+        stderr.contains("Did you mean: pulp audio?"),
         "expected suggestion for 'audo' → 'audio', got: {stderr}"
     );
 }

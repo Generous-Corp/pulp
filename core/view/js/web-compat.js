@@ -1087,14 +1087,30 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // Display / flex direction
         case "display":
             if (resolved === "none") { setVisible(id, false); }
-            else if (resolved === "flex" || resolved === "block") { setVisible(id, true); }
+            // pulp #1420 — inline-block ≡ block, inline-flex ≡ flex in pulp's
+            // non-text-flowing layout (matches RN + CSS formatting-context
+            // semantics where there is no inline flow). 4 of these were
+            // silently dropped by Spectr today.
+            else if (resolved === "flex" || resolved === "block" ||
+                     resolved === "inline-block" || resolved === "inline-flex") {
+                setVisible(id, true);
+            }
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             break;
         case "flexDirection":
-            setFlex(id, "direction", resolved === "row" ? "row" : "col");
+            // pulp #1434 (rn batch B) — forward all four CSS values
+            // verbatim so the bridge can route to YGFlexDirectionRow /
+            // RowReverse / Column / ColumnReverse.
+            setFlex(id, "direction",
+                resolved === "row" ? "row" :
+                resolved === "row-reverse" ? "row-reverse" :
+                resolved === "column-reverse" ? "column-reverse" :
+                "col");
             break;
         case "flexWrap":
-            setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);
+            // pulp #1434 Triage #14 — forward keyword verbatim so the
+            // bridge can route wrap-reverse through YGWrapWrapReverse.
+            setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
             setFlex(id, "flex_grow", parseFloat(resolved) || 0);
@@ -1142,15 +1158,20 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Dimensions
+        // Dimensions — pulp #1423 forwards percent values verbatim so
+        // the bridge can route to Yoga's percent API.
         case "width": {
             var w = parseCSSLength(resolved);
-            if (w) setFlex(id, "width", w.value);
+            if (!w) break;
+            if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
             var h = parseCSSLength(resolved);
-            if (h) setFlex(id, "height", h.value);
+            if (!h) break;
+            if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            else setFlex(id, "height", h.value);
             break;
         }
         case "minWidth": {
@@ -1372,10 +1393,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "position":
             setPosition(id, resolved);
             break;
-        case "top": { var tv = parseCSSLength(resolved); if (tv) setTop(id, tv.value); break; }
-        case "right": { var rv = parseCSSLength(resolved); if (rv) setRight(id, rv.value); break; }
-        case "bottom": { var bv = parseCSSLength(resolved); if (bv) setBottom(id, bv.value); break; }
-        case "left": { var lv = parseCSSLength(resolved); if (lv) setLeft(id, lv.value); break; }
+        // pulp #1434 batch 6 — top/right/bottom/left forward percent
+        // values verbatim so the bridge can route to Yoga's percent API.
+        case "top": {
+            var tv = parseCSSLength(resolved); if (!tv) break;
+            if (tv.unit === "%") setTop(id, tv.value + "%"); else setTop(id, tv.value);
+            break;
+        }
+        case "right": {
+            var rv = parseCSSLength(resolved); if (!rv) break;
+            if (rv.unit === "%") setRight(id, rv.value + "%"); else setRight(id, rv.value);
+            break;
+        }
+        case "bottom": {
+            var bv = parseCSSLength(resolved); if (!bv) break;
+            if (bv.unit === "%") setBottom(id, bv.value + "%"); else setBottom(id, bv.value);
+            break;
+        }
+        case "left": {
+            var lv = parseCSSLength(resolved); if (!lv) break;
+            if (lv.unit === "%") setLeft(id, lv.value + "%"); else setLeft(id, lv.value);
+            break;
+        }
 
         // z-index
         case "zIndex":

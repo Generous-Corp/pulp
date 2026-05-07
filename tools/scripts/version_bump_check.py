@@ -533,6 +533,17 @@ def surface_trailer_override(
         level = m.group(1).lower()
         if level == "none":
             continue
+        # pulp #1054 — `skip` levels MUST carry a non-empty
+        # `reason="..."` (the level itself doesn't document intent —
+        # the reason does). Mirrors the unscoped-form enforcement at
+        # `_range_has_version_bump_skip_trailer()` (Codex P2 #1310 →
+        # PR #1315). Per-surface `<surface>=patch|minor|major` levels
+        # are explicit bump verdicts and don't need a reason — the
+        # level itself is the documented intent.
+        if level == "skip":
+            rm = re.search(r'reason\s*=\s*"([^"]+)"', v)
+            if not (rm and rm.group(1).strip()):
+                continue
         if level in LEVELS or level == "skip":
             return level
     return None

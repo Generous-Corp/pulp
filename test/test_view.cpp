@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -1041,6 +1042,103 @@ TEST_CASE("Absolute child positioned outside parent's bounds still paints",
     REQUIRE_FALSE(saw_parent_clip);
 }
 
+// pulp #1409 paint-time probe series — empirical answer to the Spectr
+// [I] "preset items render outside overlay" report. The framework
+// already pushes a parent clip_rect before children paint when the
+// parent has overflow:hidden, so the symptom is consumer-side, not
+// framework-side. These tests stand as a regression guard — if any of
+// them flips to a fail, paint-time clipping has regressed.
+TEST_CASE("Probe: overflow:hidden parent clip-rect precedes child paint",
+          "[view][probe][issue-overlay-clip]") {
+    using namespace pulp::canvas;
+
+    View parent;
+    parent.set_bounds({0, 0, 100, 100});
+    parent.set_overflow(View::Overflow::hidden);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 200, 100});
+    child->set_background_color(Color::rgba8(0, 255, 0, 255));
+    parent.add_child(std::move(child));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    int parent_clip_idx = -1;
+    int child_fill_idx = -1;
+    Color last_fill{};
+    for (int i = 0; i < (int)rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 100.0f &&
+            parent_clip_idx == -1) {
+            parent_clip_idx = i;
+        }
+        if (cmd.type == DrawCommand::Type::set_fill_color) last_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::fill_rect &&
+            cmd.f[2] == 200.0f && cmd.f[3] == 100.0f &&
+            last_fill.g8() == 255 && last_fill.r8() == 0 &&
+            child_fill_idx == -1) {
+            child_fill_idx = i;
+        }
+    }
+    INFO("parent_clip_idx=" << parent_clip_idx << " child_fill_idx=" << child_fill_idx
+         << " total_cmds=" << rc.commands().size());
+    REQUIRE(parent_clip_idx >= 0);
+    REQUIRE(child_fill_idx >= 0);
+    REQUIRE(parent_clip_idx < child_fill_idx);
+}
+
+// pulp #1409 paint-time probe — absolutely-positioned child translated
+// past the parent's right edge. Mirrors a Spectr preset-menu item
+// scenario where a row's `position: absolute; left: 80px` puts it past
+// a 100×40 dropdown's content rect. The clip must STILL precede the
+// child's paint command in the recording — translates do not reset the
+// active clip.
+TEST_CASE("Probe: overflow:hidden parent clips translated absolute child too",
+          "[view][probe][issue-overlay-clip]") {
+    using namespace pulp::canvas;
+
+    View parent;
+    parent.set_bounds({0, 0, 100, 40});
+    parent.set_overflow(View::Overflow::hidden);
+
+    auto child = std::make_unique<View>();
+    // Bounds-x positions the child at parent-x=80, so its 60px width
+    // extends 40px past the parent's right edge.
+    child->set_bounds({80, 0, 60, 40});
+    child->set_position(View::Position::absolute);
+    child->set_background_color(Color::rgba8(0, 0, 255, 255));
+    parent.add_child(std::move(child));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    int parent_clip_idx = -1;
+    int child_fill_idx = -1;
+    Color last_fill{};
+    for (int i = 0; i < (int)rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 40.0f &&
+            parent_clip_idx == -1) {
+            parent_clip_idx = i;
+        }
+        if (cmd.type == DrawCommand::Type::set_fill_color) last_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::fill_rect &&
+            cmd.f[2] == 60.0f && cmd.f[3] == 40.0f &&
+            last_fill.b8() == 255 && last_fill.r8() == 0 && last_fill.g8() == 0 &&
+            child_fill_idx == -1) {
+            child_fill_idx = i;
+        }
+    }
+    REQUIRE(parent_clip_idx >= 0);
+    REQUIRE(child_fill_idx >= 0);
+    REQUIRE(parent_clip_idx < child_fill_idx);
+}
+
 // ── pulp #1026: React Native pointerEvents 4-valued enum ────────────────────
 
 TEST_CASE("View::hit_test honors pointerEvents == auto (default)",
@@ -1211,6 +1309,9 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     v.set_corner_radius_tl(8.0f);
     REQUIRE(v.has_corner_radii());
     REQUIRE_THAT(v.corner_radius_tl(), WithinAbs(8.0f, 1e-5f));
+    // pulp #1171 — when a per-corner setter is the FIRST setter (no
+    // prior set_border_radius), there's no uniform radius to seed from,
+    // so unset corners stay 0.
     REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(0.0f, 1e-5f));
 
     v.set_corner_radius_tr(12.0f);
@@ -1219,6 +1320,70 @@ TEST_CASE("View per-corner radii setters flip has_corner_radii",
     REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(12.0f, 1e-5f));
     REQUIRE_THAT(v.corner_radius_bl(), WithinAbs(4.0f,  1e-5f));
     REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
+}
+
+// pulp #1171 (Codex P2 on #1044) — uniform set_border_radius() followed
+// by a single per-corner override must NOT zero the other three corners.
+// Previously: set_border_radius(10); set_corner_radius_tl(2);
+// rendered as {2, 0, 0, 0}, silently discarding the uniform 10.
+TEST_CASE("set_border_radius + per-corner override seeds remaining corners",
+          "[view][border][issue-1171][codex-p2]") {
+    View v;
+    v.set_border_radius(10.0f);
+    REQUIRE_FALSE(v.has_corner_radii());
+
+    v.set_corner_radius_tl(2.0f);
+    REQUIRE(v.has_corner_radii());
+
+    REQUIRE_THAT(v.corner_radius_tl(), WithinAbs(2.0f,  1e-5f));
+    REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(10.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_bl(), WithinAbs(10.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_br(), WithinAbs(10.0f, 1e-5f));
+}
+
+TEST_CASE("set_border_radius + multiple per-corner overrides — promote runs once",
+          "[view][border][issue-1171][codex-p2]") {
+    View v;
+    v.set_border_radius(8.0f);
+    v.set_corner_radius_tr(4.0f);
+    // After the first per-corner setter, has_corner_radii_ flips true
+    // and subsequent setters MUST NOT re-promote (which would clobber
+    // the already-overridden TR back to 8). promote_uniform_to_per_corner
+    // is guarded on `!has_corner_radii_`.
+    v.set_corner_radius_bl(0.0f);
+    REQUIRE_THAT(v.corner_radius_tl(), WithinAbs(8.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(4.0f, 1e-5f));  // not 8
+    REQUIRE_THAT(v.corner_radius_bl(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_br(), WithinAbs(8.0f, 1e-5f));
+}
+
+TEST_CASE("simulate_click bubble does NOT walk past `this` receiver",
+          "[view][simulate_click][issue-1171][codex-p2]") {
+    // Build: outer (PARENT) > root (this) > child.
+    // outer has on_click set. root + child have no on_click.
+    // Calling root->simulate_click(...) MUST NOT bubble up to outer —
+    // that would leak the synthetic click across component boundaries
+    // (the bug Codex flagged on #1073).
+    View outer;
+    outer.set_bounds({0, 0, 200, 200});
+    bool outer_clicked = false;
+    outer.on_click = [&]() { outer_clicked = true; };
+
+    auto root_owned = std::make_unique<View>();
+    root_owned->set_bounds({10, 10, 100, 100});
+    auto* root = root_owned.get();
+    outer.add_child(std::move(root_owned));
+
+    auto child_owned = std::make_unique<View>();
+    child_owned->set_bounds({5, 5, 50, 50});
+    root->add_child(std::move(child_owned));
+
+    // Click at root-local {30,30} which is inside child's bounds.
+    // hit_test resolves to child (no on_click). Bubble walks up to
+    // root — and STOPS there per the fix (root == this). Without the
+    // fix it would walk past root to outer and fire outer.on_click.
+    root->simulate_click({30, 30});
+    REQUIRE_FALSE(outer_clicked);
 }
 
 TEST_CASE("View::paint_all routes background through path API when per-corner radii set",
@@ -1256,4 +1421,280 @@ TEST_CASE("View::paint_all routes background through path API when per-corner ra
         REQUIRE(rc.count(DrawCommand::Type::begin_path) >= 1);
         REQUIRE(rc.count(DrawCommand::Type::close_path) >= 1);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// pulp #1321: window resize triggers root View Yoga relayout
+// ═══════════════════════════════════════════════════════════════════
+//
+// The macOS standalone window plumbs an NSWindow resize through to
+// PulpView::setFrameSize: and the PulpWindowDelegate's windowDidResize:
+// notification, both of which now call root.set_bounds(...) +
+// root.layout_children(). This Catch2 test exercises the same model
+// path that those AppKit hooks invoke, asserting that descendants
+// reflow when the root is given a new size.
+
+TEST_CASE("Window resize reflows Yoga layout (pulp #1321)",
+          "[view][layout][issue-1321]") {
+    View root;
+    root.flex().direction = FlexDirection::row;
+
+    auto child_a = std::make_unique<View>();
+    child_a->flex().flex_grow = 1.0f;
+    auto* child_a_ptr = child_a.get();
+    root.add_child(std::move(child_a));
+
+    auto child_b = std::make_unique<View>();
+    child_b->flex().flex_grow = 1.0f;
+    auto* child_b_ptr = child_b.get();
+    root.add_child(std::move(child_b));
+
+    // ── Initial layout at 1320×892 (Spectr default standalone size) ──
+    root.set_bounds({0, 0, 1320, 892});
+    root.layout_children();
+
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(660.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(660.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(892.0f));
+
+    // ── Simulate the user dragging the window down to 800×500 ────────
+    // (matches the osascript repro in the issue body).
+    root.set_bounds({0, 0, 800, 500});
+    root.layout_children();
+
+    // Each flex:1 child must now occupy half of the new width and the
+    // full new height — i.e. Yoga reflowed against the new constraints
+    // rather than reusing the original 1320×892 root size.
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(400.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(400.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(500.0f));
+    REQUIRE(child_b_ptr->bounds().height == Catch::Approx(500.0f));
+
+    // ── Resize back up — content reflows again, no hysteresis ────────
+    root.set_bounds({0, 0, 1600, 1000});
+    root.layout_children();
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(800.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(800.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(1000.0f));
+}
+
+TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
+          "(pulp #1321)",
+          "[view][layout][issue-1321]") {
+    using namespace pulp::view;
+
+    // Mirrors a Spectr-style chrome layout: a stretchy content area
+    // followed by a fixed-height bottom toolbar. The toolbar must keep
+    // its 48px height regardless of the window's new height, and the
+    // content area must absorb the rest.
+    View root;
+    root.flex().direction = FlexDirection::column;
+
+    auto content = std::make_unique<View>();
+    content->flex().flex_grow = 1.0f;
+    auto* content_ptr = content.get();
+    root.add_child(std::move(content));
+
+    auto toolbar = std::make_unique<View>();
+    toolbar->flex().preferred_height = 48.0f;
+    auto* toolbar_ptr = toolbar.get();
+    root.add_child(std::move(toolbar));
+
+    root.set_bounds({0, 0, 1320, 892});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(844.0f));
+
+    // Shrink — toolbar still 48px, content absorbs the loss.
+    root.set_bounds({0, 0, 800, 500});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(452.0f));
+    REQUIRE(toolbar_ptr->bounds().width == Catch::Approx(800.0f));
+
+    // Grow — same invariants hold.
+    root.set_bounds({0, 0, 1600, 1000});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(952.0f));
+}
+
+// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+//
+// PR #1297 added overflow:visible hit-test extension so that absolutely-
+// positioned popovers / dropdowns whose content escapes their bounds box
+// still receive clicks. The original implementation only extended the box
+// 500px DOWNWARD, which broke left-extending popovers (e.g. Spectr's bands
+// picker that opens to the left of its trigger). This suite locks the
+// extension to ±500px on all four sides.
+//
+// Each direction places a "popover" grandchild positioned outside its
+// overflow:visible parent in the tested direction — overflow:visible
+// passes the click through to the parent's hit_test recursion, which
+// then matches the grandchild's local_bounds. Without symmetric slack,
+// the parent rejects the click before recursion happens for left/right/up.
+namespace {
+struct PopoverFixture {
+    View root;
+    View* container{nullptr};   // overflow:visible host
+    View* popover{nullptr};     // grandchild positioned outside container
+
+    // dx/dy are the popover's offset *relative to the container's local
+    // origin* — negative values escape the container in the −x/−y direction.
+    PopoverFixture(float dx, float dy) {
+        root.set_bounds({0, 0, 2000, 2000});
+        auto c = std::make_unique<View>();
+        c->set_bounds({600, 600, 100, 100});
+        c->set_overflow(View::Overflow::visible);
+        container = c.get();
+
+        auto p = std::make_unique<View>();
+        // 50x50 popover anchored at (dx, dy) inside container's local space.
+        p->set_bounds({dx, dy, 50, 50});
+        popover = p.get();
+        c->add_child(std::move(p));
+        root.add_child(std::move(c));
+    }
+};
+} // namespace
+
+TEST_CASE("View::hit_test extends overflow:visible 500px to the LEFT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (-200, 25) → root-space (400..450, 625..675).
+    // 100px to the LEFT of container.x=600 covers root.x = 425.
+    PopoverFixture f(-200, 25);
+    REQUIRE(f.root.hit_test({425, 650}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px to the RIGHT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (200, 25) → root-space (800..850, 625..675).
+    // 100px to the RIGHT of container.right=700 covers root.x = 825.
+    PopoverFixture f(200, 25);
+    REQUIRE(f.root.hit_test({825, 650}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px UPWARD",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (25, -200) → root-space (625..675, 400..450).
+    // 100px ABOVE container.y=600 covers root.y = 425.
+    PopoverFixture f(25, -200);
+    REQUIRE(f.root.hit_test({650, 425}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px DOWNWARD",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (25, 200) → root-space (625..675, 800..850).
+    // 100px BELOW container.bottom=700 covers root.y = 825.
+    // This direction was already supported pre-#1148 — guards regression.
+    PopoverFixture f(25, 200);
+    REQUIRE(f.root.hit_test({650, 825}) == f.popover);
+}
+
+TEST_CASE("View::hit_test does NOT extend overflow:visible past 500px LEFT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover anchored 600px LEFT of container — outside the symmetric
+    // ±500px slack, so the click must miss the popover entirely. With
+    // container x=600, popover at container-local x=-650 lands at
+    // root.x = -50..0; we probe root.x = 0 → container-local x = -600,
+    // beyond the -500 slack.
+    PopoverFixture f(-650, 25);
+    REQUIRE(f.root.hit_test({0, 650}) != f.popover);
+}
+
+// ── pulp #1368 round 2 — absolute children with inset:0 + explicit height ──
+//
+// Spectr filterbank repro per round-2 investigation. Two `<canvas>` siblings
+// share the same wrap parent (1320×860) with `position: absolute; inset: 0`
+// (top/right/bottom/left = 0), but each has an explicit setFlex height —
+// pr_1 = 760, pr_2 = 860. The visible-rendering symptom on the live plugin
+// is consistent with pr_1's bounds_.y landing above the visible window
+// region, which would push every fillRect into the title-bar area via the
+// parent's translate(bounds_.x, bounds_.y) in View::paint_all.
+//
+// These tests pin the contract: when `position: absolute; inset: 0` is
+// combined with an explicit height that is SHORTER than the parent, the
+// child's resolved bounds_ must place its origin at (0, 0) — i.e. inset:0
+// wins over the explicit height for positioning. If a future Yoga / layout
+// change instead resolves y as `parent.height - explicit_height` (anchoring
+// the box to the bottom because inset top:0 + bottom:0 conflicts with the
+// explicit height), the Spectr symptom reappears.
+//
+// As of v0.74.0 this test is expected to FAIL when the resolved y is
+// non-zero — the FAIL is the round-2 reproduction.
+
+TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
+          "[view][issue-1368][round2]") {
+    using P = View::Position;
+
+    View wrap;
+    wrap.set_bounds({0, 0, 1320, 860});
+
+    auto pr1 = std::make_unique<View>();
+    pr1->set_id("pr_1");
+    pr1->set_position(P::absolute);
+    pr1->set_top(0);
+    pr1->set_right(0);
+    pr1->set_bottom(0);
+    pr1->set_left(0);
+    pr1->flex().preferred_height = 760.0f;
+    auto* pr1_ptr = pr1.get();
+
+    auto pr2 = std::make_unique<View>();
+    pr2->set_id("pr_2");
+    pr2->set_position(P::absolute);
+    pr2->set_top(0);
+    pr2->set_right(0);
+    pr2->set_bottom(0);
+    pr2->set_left(0);
+    pr2->flex().preferred_height = 860.0f;
+    auto* pr2_ptr = pr2.get();
+
+    wrap.add_child(std::move(pr1));
+    wrap.add_child(std::move(pr2));
+
+    wrap.layout_children();
+
+    INFO("pr_1 bounds=(" << pr1_ptr->bounds().x << "," << pr1_ptr->bounds().y
+         << "," << pr1_ptr->bounds().width << "," << pr1_ptr->bounds().height << ")");
+    INFO("pr_2 bounds=(" << pr2_ptr->bounds().x << "," << pr2_ptr->bounds().y
+         << "," << pr2_ptr->bounds().width << "," << pr2_ptr->bounds().height << ")");
+
+    // Both children must paint flush with the parent's top-left. Negative or
+    // shifted y values reproduce the #1368 round-2 hypothesis: parent's
+    // translate(bounds_.x, bounds_.y) in View::paint_all pushes the canvas
+    // child off-window so fillRect at (50, 50) lands in the title-bar region.
+    REQUIRE(pr1_ptr->bounds().x == 0.0f);
+    REQUIRE(pr1_ptr->bounds().y == 0.0f);
+    REQUIRE(pr2_ptr->bounds().x == 0.0f);
+    REQUIRE(pr2_ptr->bounds().y == 0.0f);
+}
+
+TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
+          "[view][issue-1368][round2]") {
+    // CSS spec: when both top:0 and bottom:0 are set on a position:absolute
+    // box, the box must stretch to fill the parent height — explicit
+    // `height: 760` is overconstrained and the spec says inset wins (the
+    // box gets parent.height = 860). Confirm Pulp/Yoga match that contract.
+    View wrap;
+    wrap.set_bounds({0, 0, 1320, 860});
+
+    auto pr1 = std::make_unique<View>();
+    pr1->set_position(View::Position::absolute);
+    pr1->set_top(0);
+    pr1->set_right(0);
+    pr1->set_bottom(0);
+    pr1->set_left(0);
+    pr1->flex().preferred_height = 760.0f;
+    auto* pr1_ptr = pr1.get();
+
+    wrap.add_child(std::move(pr1));
+    wrap.layout_children();
+
+    INFO("pr_1 bounds=(" << pr1_ptr->bounds().x << "," << pr1_ptr->bounds().y
+         << "," << pr1_ptr->bounds().width << "," << pr1_ptr->bounds().height << ")");
+
+    REQUIRE(pr1_ptr->bounds().y == 0.0f);
+    // Width should match the parent — inset left:0 + right:0 fills horizontally.
+    REQUIRE(pr1_ptr->bounds().width == 1320.0f);
 }

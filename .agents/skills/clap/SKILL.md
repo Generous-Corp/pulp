@@ -364,8 +364,8 @@ Build and smoke a CLAP bundle with the Pulp CLI:
 
 ```bash
 # Build everything, then validate
-./build/tools/cli/pulp build
-./build/tools/cli/pulp validate          # runs clap-validator if installed
+./build/pulp build
+./build/pulp validate          # runs clap-validator if installed
 ```
 
 Direct `clap-validator` usage (matches what `cmd_validate.cpp` invokes):

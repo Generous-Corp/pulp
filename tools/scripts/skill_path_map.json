@@ -9,16 +9,21 @@
         "core/format/include/pulp/format/aax*",
         "external/AAX-SDK/**",
         "tools/cmake/PulpAAX.cmake"
-      ]
+      ],
+      "_doc": {
+        "empty-ok": "external/AAX-SDK/** intentionally empty — AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
+      }
     },
     "ara": {
       "paths": [
         "core/format/src/ara*",
-        "core/format/src/ara/**",
         "core/format/include/pulp/format/ara*",
         "core/format/include/pulp/format/ara/**",
         "external/ara-sdk/**"
-      ]
+      ],
+      "_doc": {
+        "empty-ok": "external/ara-sdk/** intentionally empty — ARA SDK is developer-supplied per the ara skill"
+      }
     },
     "auv3": {
       "paths": [
@@ -49,7 +54,6 @@
       "paths": [
         "core/format/src/au_v2_adapter.cpp",
         "core/format/src/au_v2_instrument.cpp",
-        "core/format/src/au_v2_entry.*",
         "core/format/src/au_v2_cocoa_view.mm",
         "core/format/include/pulp/format/au_v2_adapter.hpp",
         "core/format/include/pulp/format/au_v2_instrument.hpp",
@@ -91,33 +95,34 @@
       "paths": [
         "tools/scripts/cmajor_external.py",
         "tools/scripts/test_cmajor_external.py",
-        "examples/cmajor-*/**",
-        "core/**/*cmajor*"
+        "examples/cmajor-*/**"
       ]
     },
     "engine": {
       "paths": [
-        "core/view/src/js_bridge*",
-        "core/view/include/**/js_bridge*",
-        "core/view/src/engine*",
+        "core/view/src/js_*",
+        "core/view/include/pulp/view/js_engine*",
+        "core/view/src/script_engine*",
+        "core/view/include/pulp/view/script_engine*",
         "core/view/js/web-compat-*.js",
-        "external/quickjs*/**",
-        "tools/cmake/PulpJsEngine.cmake"
-      ]
+        "external/quickjs*/**"
+      ],
+      "_doc": {
+        "empty-ok": "external/quickjs*/** intentionally empty — QuickJS is fetched at configure time, not vendored"
+      }
     },
     "faust": {
       "paths": [
         "examples/faust-*/**",
-        "tools/scripts/faust*",
-        "core/signal/**/*faust*"
+        "core/dsl/include/pulp/dsl/faust*",
+        "tools/cmake/PulpFaust.cmake"
       ]
     },
     "hosting": {
       "paths": [
         "core/host/**",
         "examples/plugin-host-demo/**",
-        "tools/cli/commands/host.cpp",
-        "tools/cli/commands/scan.cpp"
+        "tools/cli/cmd_host.cpp"
       ]
     },
     "ios": {
@@ -142,15 +147,12 @@
       "paths": [
         "tools/scripts/jsfx_subset.py",
         "tools/scripts/test_jsfx_subset.py",
-        "examples/jsfx-*/**",
-        "core/signal/**/*jsfx*"
+        "examples/jsfx-*/**"
       ]
     },
     "mpe": {
       "paths": [
-        "core/midi/src/*mpe*",
         "core/midi/include/**/*mpe*",
-        "core/midi/src/*ump*",
         "core/midi/include/**/*ump*",
         "examples/mpe-*/**"
       ]
@@ -158,12 +160,6 @@
     "packages": {
       "paths": [
         "tools/packages/**",
-        "tools/cli/cmd_add.cpp",
-        "tools/cli/cmd_audit.cpp",
-        "tools/cli/cmd_fetch.cpp",
-        "tools/cli/cmd_install.cpp",
-        "tools/cli/cmd_remove.cpp",
-        "tools/cli/cmd_search.cpp",
         "DEPENDENCIES.md",
         "NOTICE.md",
         "tools/deps/manifest.json"
@@ -180,7 +176,6 @@
       "paths": [
         "core/canvas/src/*sdf*",
         "core/canvas/src/*msdf*",
-        "core/canvas/src/*psdf*",
         "core/canvas/include/**/*sdf*",
         "core/canvas/include/**/*msdf*",
         "core/canvas/include/**/*psdf*",
@@ -200,17 +195,12 @@
       "paths": [
         "core/runtime/src/*stream*",
         "core/runtime/include/**/*stream*",
-        "core/events/src/*stream*",
-        "core/events/include/**/*stream*",
-        "examples/streams-*/**"
+        "examples/stream-*/**"
       ]
     },
     "threejs-bridge": {
       "paths": [
-        "core/view/src/threejs*",
-        "core/view/include/**/threejs*",
-        "examples/threejs-*/**",
-        "tools/scripts/threejs*"
+        "examples/threejs-*/**"
       ]
     },
     "upgrade": {
@@ -252,9 +242,6 @@
     },
     "webview-ui": {
       "paths": [
-        "core/view/src/webview*",
-        "core/view/include/**/webview*",
-        "core/view/platform/**/webview*",
         "examples/webview-*/**"
       ]
     }

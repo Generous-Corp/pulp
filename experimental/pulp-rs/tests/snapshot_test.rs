@@ -61,7 +61,7 @@ fn normalise_registry_field(mut v: Value) -> Value {
 }
 
 fn run(args: &[&str], home: &Path) -> Value {
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").unwrap();
     cmd.args(args);
     cmd.env("PULP_HOME", home);
     let output = cmd.output().expect("run pulp-rs");
@@ -121,7 +121,7 @@ fn config_list_json_snapshot_populated() {
 #[test]
 fn upgrade_check_only_json_snapshot_disabled() {
     let home = tempfile::tempdir().unwrap();
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").unwrap();
     cmd.args(["upgrade", "--check-only", "--json"]);
     cmd.env("PULP_HOME", home.path())
         .env("PULP_RS_CLI_VERSION", "0.37.0")

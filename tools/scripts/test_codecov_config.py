@@ -245,6 +245,10 @@ class CodecovYamlStructure(unittest.TestCase):
     def test_core_axes_use_canonical_directory_mappings(self):
         # Core subsystem ids come directly from core/* and should map to
         # exactly that directory in both flag and component declarations.
+        # Components MAY additionally declare `!`-prefix exclude patterns
+        # to push platform-specific subtrees into the matching platform
+        # component (#1055); the first include path must still be the
+        # canonical `core/<name>/**` directory glob.
         flags = self.doc["flags"]
         components = self.components_by_id()
 
@@ -252,12 +256,17 @@ class CodecovYamlStructure(unittest.TestCase):
             if not entry.is_dir():
                 continue
             expected_flag_paths = [f"core/{entry.name}/"]
-            expected_component_paths = [f"core/{entry.name}/**"]
+            expected_canonical = f"core/{entry.name}/**"
             with self.subTest(component=entry.name):
                 self.assertEqual(flags[entry.name]["paths"], expected_flag_paths)
+                paths = components[entry.name]["paths"]
+                include_paths = [p for p in paths if not p.startswith("!")]
                 self.assertEqual(
-                    components[entry.name]["paths"],
-                    expected_component_paths,
+                    include_paths,
+                    [expected_canonical],
+                    f"{entry.name} component must declare exactly one include "
+                    "path mapped to its core/<name>/** directory; additional "
+                    "entries must be `!`-prefix exclusions.",
                 )
 
     def test_advisory_statuses_stay_informational(self):

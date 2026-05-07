@@ -185,9 +185,19 @@ def load_compat_map(path: Path) -> CompatMap:
                     glob=str(r.get("glob", "")),
                 ))
             else:
-                # Unknown requirement kind — skip silently rather than
-                # crash. The self-check below catches obvious typos.
-                continue
+                # pulp #1171 (Codex P2 on #1068) — unknown `kind` was
+                # skipped silently, so a typo like `"kind": "tests"` in
+                # tools/scripts/compat_path_map.json silently dropped
+                # that requirement from enforcement and CI passed
+                # while a required compat artifact check was disabled.
+                # Surface the typo as a hard error at config-load time
+                # so the gate fails loudly instead of silently
+                # under-enforcing.
+                raise ValueError(
+                    "compat_path_map.json: unknown requirement kind "
+                    f"{kind!r} for source {source!r} (entry={r!r}); "
+                    "valid kinds: 'compat-json', 'doc', 'test'."
+                )
         paths[source] = out
     return CompatMap(paths=paths)
 

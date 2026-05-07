@@ -142,6 +142,11 @@ std::string read_file_text(const fs::path& path) {
                        std::istreambuf_iterator<char>());
 }
 
+std::string normalize_newlines(std::string text) {
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
+}
+
 std::string quote(const fs::path& path) {
     return shell_quote(path.string());
 }
@@ -639,6 +644,30 @@ TEST_CASE("cli common config helpers honor PULP_HOME and project-dir overrides",
     REQUIRE(resolve_create_projects_base_dir(repo) == tmp.path / "projects");
 }
 
+TEST_CASE("cli common config parser skips comments malformed lines and other sections",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    ScopedEnv pulp_home_env("PULP_HOME", (tmp.path / "home").string());
+
+    write_file(tmp.path / "home" / "config.toml",
+               "  # leading comment\n"
+               "\n"
+               "[updates]\n"
+               "projects_dir = \"ignored\"\n"
+               "[create]\n"
+               "malformed line without equals\n"
+               "projects_dir = Bare Projects # trailing comment\n"
+               "mode = 'manual'\n"
+               "[other]\n"
+               "mode = wrong\n");
+
+    REQUIRE(read_user_config_value("create", "projects_dir") == "Bare Projects");
+    REQUIRE(read_user_config_value("create", "mode") == "manual");
+    REQUIRE(read_user_config_value("updates", "projects_dir") == "ignored");
+    REQUIRE(read_user_config_value("missing", "projects_dir").empty());
+    REQUIRE(read_user_config_value("create", "absent").empty());
+}
+
 TEST_CASE("cli common config fallback expands user and relative project directories",
           "[cli][common][issue-643]") {
     TempDir tmp;
@@ -658,9 +687,18 @@ TEST_CASE("cli common config fallback expands user and relative project director
                 == fs::absolute("relative-projects"));
     }
 
+    {
+        ScopedEnv projects_dir("PULP_PROJECTS_DIR", "\"~\"");
+        REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo") == tmp.path / "home");
+    }
+
+    ScopedEnv no_projects_dir("PULP_PROJECTS_DIR", "");
     REQUIRE(write_user_config_value("create", "projects_dir", "~/Configured Projects"));
     REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo")
             == tmp.path / "home" / "Configured Projects");
+
+    REQUIRE(write_user_config_value("create", "projects_dir", "~"));
+    REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo") == tmp.path / "home");
 
     TempDir empty_config;
     ScopedEnv empty_home("PULP_HOME", (empty_config.path / "empty-home").string());
@@ -823,6 +861,33 @@ TEST_CASE("cli common AAX helpers classify SDKs, bundles, and validator output",
         ScopedEnv aax_validator("PULP_AAX_VALIDATOR_DIR", validator.string());
         REQUIRE(find_aax_validator_root() == fs::absolute(validator));
     }
+
+    {
+        CapturedStreams capture;
+        print_aax_setup_guidance(true, false);
+        auto out = capture.out.str();
+        REQUIRE(out.find(aax_sdk_download_label()) != std::string::npos);
+        REQUIRE(out.find(aax_validator_download_label()) == std::string::npos);
+        REQUIRE(out.find("PULP_AAX_SDK_DIR") != std::string::npos);
+        REQUIRE(out.find("PULP_AAX_VALIDATOR_DIR") == std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        print_aax_setup_guidance(false, true);
+        auto out = capture.out.str();
+        REQUIRE(out.find(aax_sdk_download_label()) == std::string::npos);
+        REQUIRE(out.find(aax_validator_download_label()) != std::string::npos);
+        REQUIRE(out.find("PULP_AAX_SDK_DIR") == std::string::npos);
+        REQUIRE(out.find("PULP_AAX_VALIDATOR_DIR") != std::string::npos);
+    }
+
+    auto temp_note = write_temp_text_file("pulp-cli-common-test", "temporary note\n");
+    REQUIRE(temp_note.filename().string().find("pulp-cli-common-test-") == 0);
+    REQUIRE(temp_note.extension() == ".txt");
+    REQUIRE(normalize_newlines(read_file_text(temp_note)) == "temporary note\n");
+    std::error_code remove_ec;
+    fs::remove(temp_note, remove_ec);
 
     REQUIRE(run_aax_validator_command({}, tmp.path / "Plugin.aaxplugin", false).empty());
     REQUIRE(aax_validator_passed("result_status: E_COMPLETED_PASS"));

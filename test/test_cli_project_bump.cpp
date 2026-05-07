@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -408,6 +409,85 @@ TEST_CASE("undo_batch_path replaces colons for Windows safety",
     auto fn = p.filename().string();
     REQUIRE(fn.find(':') == std::string::npos);
     REQUIRE(fn.find("2026-04-21T14-30-00Z") != std::string::npos);
+}
+
+// ── JSON parser hardening — skip unknown ARRAY / OBJECT fields ──
+//
+// The Rust port writes UndoEntry with a `notes: [...]` array that
+// the C++ writer never emitted. Pre-fix, the C++ hand-rolled JSON
+// parser fell through to its primitive-or-string branch when it saw
+// `[`, mis-read the next field's separator, and corrupted the rest
+// of the entry — every Rust-written undo file got skipped on
+// `pulp project undo` with "pin kind changed since bump". The
+// hardening adds an explicit `j.skip_value()` for ARRAY / OBJECT
+// values. This test lock that behavior in: a Rust-shaped batch
+// (with `notes: [...]`) round-trips through the C++ parser AND
+// produces a parsed UndoEntry whose `pin_kind` and `edits[]` fields
+// match what was written.
+
+TEST_CASE("read_undo_batch skips unknown ARRAY field (notes) without desyncing",
+          "[project-bump][issue-244]") {
+    TempDir tmp;
+    auto path = tmp.path / "bump-undo-2026-04-26T18-00-00Z.json";
+    // Rust-written shape: identical to C++ except for `notes: [...]`
+    // between `failure_reason` and `edits`. The body has to round-trip
+    // C++ → C++ AND Rust → C++; this fixture is the Rust-side one.
+    std::ofstream f(path, std::ios::binary);
+    f << R"({
+  "timestamp": "2026-04-26T18:00:00Z",
+  "target_version": "0.41.0",
+  "entries": [
+    {
+      "project_path": "/tmp/some/project",
+      "project_name": "Demo",
+      "old_pin": "0.40.0",
+      "old_pin_style_has_v": false,
+      "pin_kind": "PulpTomlSdkVersion",
+      "status": "bumped",
+      "failure_reason": "",
+      "notes": [
+        "mirrored find_package(Pulp ...) 0.40.0 -> 0.41.0"
+      ],
+      "edits": [
+        {
+          "path": "/tmp/some/project/pulp.toml",
+          "kind": "PulpTomlSdkVersion",
+          "old_value": "0.40.0",
+          "new_value": "0.41.0",
+          "old_value_style_has_v": false
+        },
+        {
+          "path": "/tmp/some/project/CMakeLists.txt",
+          "kind": "CMakeFindPackagePulpVersion",
+          "old_value": "0.40.0",
+          "new_value": "0.41.0",
+          "old_value_style_has_v": false
+        }
+      ]
+    }
+  ]
+})";
+    f.close();
+
+    auto batch = pb::read_undo_batch(path);
+    REQUIRE(batch);
+    REQUIRE(batch->target_version == "0.41.0");
+    REQUIRE(batch->entries.size() == 1);
+
+    const auto& e = batch->entries[0];
+    REQUIRE(e.project_name == "Demo");
+    REQUIRE(e.status == "bumped");
+    // The Rust-shape `notes: [...]` array should be SILENTLY skipped
+    // and the parser should NOT lose its place — `edits` must
+    // populate cleanly afterward.
+    REQUIRE(e.pin_kind == pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(e.edits.size() == 2);
+    REQUIRE(e.edits[0].kind == pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(e.edits[1].kind == pb::PinKind::CMakeFindPackagePulpVersion);
+    REQUIRE(e.edits[0].old_value == "0.40.0");
+    REQUIRE(e.edits[0].new_value == "0.41.0");
+    REQUIRE(e.edits[1].old_value == "0.40.0");
+    REQUIRE(e.edits[1].new_value == "0.41.0");
 }
 
 // ── --dry-run equivalence ───────────────────────────────────────────────────

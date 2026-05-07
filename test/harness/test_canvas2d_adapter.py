@@ -1,0 +1,450 @@
+"""Tests for the canvas2d catalog harness adapter.
+
+Per CLAUDE.md "tests ship with fixes" — this is the same-PR test surface
+for the canvas2d adapter (#1392, week 1 cut, fourth surface).
+
+Run via::
+
+    cd /path/to/pulp
+    python3 -m pytest test/harness/ -v
+    # or, without pytest installed:
+    python3 -m unittest discover -s test/harness -v
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+# Make the harness package importable.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.harness.adapters.base import CatalogEntry  # noqa: E402
+from tools.harness.adapters.canvas2d import Canvas2dAdapter  # noqa: E402
+from tools.harness.status import Status, StatusCounts  # noqa: E402
+from tools.harness.verifier import (  # noqa: E402
+    collect_entries,
+    load_compat,
+    run_surface,
+)
+
+
+class Canvas2dAdapterClassifyTest(unittest.TestCase):
+    """Classify each catalog status family on known-good and known-bad fixtures."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.adapter = Canvas2dAdapter(REPO_ROOT)
+
+    # ── Known-good entries ───────────────────────────────────────────
+
+    def test_supported_method_is_PASS(self):
+        """fillRect: supported, mapsTo cites canvasRect (which is registered)."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/fillRect",
+            status="supported",
+            maps_to="ctx.fillRect(x,y,w,h) -> canvasRect(id,x,y,w,h).",
+            supported_values=["any rectangle"],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+        self.assertFalse(result.drifts, msg=result.detail)
+
+    def test_supported_attribute_is_PASS(self):
+        """lineWidth: bridge has canvasSetLineWidth, no unsupported values."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/lineWidth",
+            status="supported",
+            maps_to="canvasSetLineWidth(id, value)",
+            supported_values=[],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    def test_pulp_extension_is_PASS(self):
+        """_native_canvasFillCircle: Pulp-only convenience; bridge canvasFillCircle exists."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/_native_canvasFillCircle",
+            status="supported",
+            maps_to="Pulp-specific bridge fn (canvasFillCircle).",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    # ── Oracle-pinned partial (gotcha) ───────────────────────────────
+
+    def test_oracle_partial_arc_is_DIVERGE(self):
+        """ctx.arc is pinned at partial in the oracle (gotcha #1: arc-as-path)."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/arc",
+            status="partial",
+            maps_to="ctx.arc -> path-mode emit as cubic-bezier via canvasMoveTo + canvasCubicTo.",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
+        self.assertIn("arc-as-path", result.detail)
+        self.assertFalse(result.drifts, msg=result.detail)
+
+    def test_oracle_supported_radial_is_PASS(self):
+        """createRadialGradient — pulp #1524 promoted DIVERGE → PASS.
+        Both circles are now wired through to the backend (Skia
+        MakeTwoPointConical, CG full CGContextDrawRadialGradient with
+        both circles); the oracle expectedStatus is unset (defaults to
+        supported), so the catalog status `supported` matches and the
+        adapter classifies PASS."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/createRadialGradient",
+            status="supported",
+            maps_to="ctx.createRadialGradient -> canvasSetRadialGradient + canvasSetRadialGradientTwoCircles.",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    # ── Oracle-pinned missing ────────────────────────────────────────
+
+    def test_oracle_supported_conic_is_PASS(self):
+        """createConicGradient: pulp #1524 — Skia routes through
+        SkGradientShader::MakeSweep; CG software-rasterises a CGImage
+        of the active clip's bounding box (per-pixel atan2 sweep) and
+        paints it via CGContextDrawImage. Catalog status is
+        `supported`; adapter classifies PASS."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/createConicGradient",
+            status="supported",
+            maps_to="ctx.createConicGradient -> canvasSetConicGradient.",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    def test_oracle_missing_shadow_is_NOT_IMPL(self):
+        """Synthetic NOT-IMPL entry — uses an explicitly fabricated
+        catalog payload (status='missing', mapsTo='Not implemented.')
+        rather than the real shadow* entries which are now PASS after
+        issue-1434 batch 7.
+
+        The entry name is still `canvas2d/shadowBlur` only because that
+        used to be the canonical missing-entry exemplar; the adapter
+        only consults the oracle by name when the catalog payload says
+        the entry is missing — so this test keeps exercising the
+        NOT-IMPL classification path independently of the live catalog.
+        """
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/shadowBlur",
+            status="missing",
+            maps_to="Not implemented.",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.NOT_IMPL, msg=result.detail)
+
+    # ── Catalog `mapsTo` heuristics ──────────────────────────────────
+
+    def test_unimpl_mapsTo_is_NOT_IMPL(self):
+        """An entry whose mapsTo says 'Not implemented' is NOT-IMPL even
+        if the oracle didn't pre-mark it missing."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/filter",
+            status="missing",
+            maps_to="Not implemented in shim or bridge.",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.NOT_IMPL, msg=result.detail)
+
+    def test_wontfix_is_OOS(self):
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/fillRect",
+            status="wontfix",
+            maps_to="explicitly out of scope",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.OOS)
+
+    def test_entry_not_in_oracle_is_OOS(self):
+        """A made-up canvas2d entry the oracle doesn't define is OOS."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/madeUpMethod",
+            status="missing",
+            maps_to="placeholder",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.OOS)
+
+    # ── DIVERGE detection ────────────────────────────────────────────
+
+    def test_supported_with_unsupported_values_is_DIVERGE(self):
+        """fillStyle: catalog says supported but lists CanvasPattern as
+        unsupported — that's a drift signal the harness must catch."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/fillStyle",
+            status="supported",
+            maps_to="canvasSetFillColor or canvasSetLinearGradient",
+            supported_values=["solid color", "CanvasGradient"],
+            unsupported_values=["CanvasPattern"],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
+        self.assertTrue(result.drifts, msg=result.detail)
+
+    def test_mapsTo_cites_unregistered_bridge_fn_is_DIVERGE(self):
+        """If catalog claims a route through canvasNonExistent (not registered),
+        that's a strong DIVERGE — catalog and bridge disagree."""
+        e = CatalogEntry(
+            surface="canvas2d",
+            name="canvas2d/measureText",
+            status="supported",
+            maps_to="ctx.measureText -> canvasNonExistentFakeFn(id, text)",
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
+        self.assertIn("canvasNonExistentFakeFn", str(result.extra_unsupported))
+
+
+class Canvas2dBridgeAndShimIntrospectionTest(unittest.TestCase):
+    """Verify the adapter actually reads bridge + shim correctly."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.adapter = Canvas2dAdapter(REPO_ROOT)
+
+    def test_bridge_fns_extracted(self):
+        """Sanity: known canvas* register_function calls land in the set."""
+        for fn in ("canvasRect", "canvasFillPath", "canvasSetFont", "canvasMoveTo"):
+            with self.subTest(fn=fn):
+                self.assertIn(fn, self.adapter._bridge_fns, msg=f"{fn} missing from bridge fn set")
+
+    def test_shim_methods_extracted(self):
+        """Sanity: known shim CRC2D methods land in the set."""
+        for m in ("fillRect", "stroke", "arc", "createLinearGradient", "addColorStop"):
+            with self.subTest(method=m):
+                self.assertIn(m, self.adapter._shim_methods, msg=f"{m} missing from shim method set")
+
+    def test_no_phantom_bridge_fn(self):
+        """Negative: a clearly-fake bridge fn name must NOT appear."""
+        self.assertNotIn("canvasTotallyFakeFn", self.adapter._bridge_fns)
+
+
+class VerifierEndToEndTest(unittest.TestCase):
+    """Full pipeline — compat.json -> all 63 canvas2d entries -> coverage report."""
+
+    def test_collects_all_canvas2d_entries(self):
+        compat = load_compat(REPO_ROOT)
+        entries = collect_entries(compat, "canvas2d")
+        # canvas2d has 63 real entries (the `_note` key is skipped by the
+        # entry collector since it's a string, not a dict payload).
+        self.assertEqual(
+            len(entries),
+            63,
+            f"compat.json canvas2d/ must have 63 real entries (got {len(entries)})",
+        )
+
+    def test_runs_canvas2d_surface_end_to_end(self):
+        results = run_surface(REPO_ROOT, "canvas2d")
+        self.assertEqual(len(results), 63)
+        # Every result must have a Status enum (no exceptions / Nones)
+        for r in results:
+            self.assertIsInstance(r.status, Status)
+
+    def test_no_canvas2d_entry_crashes(self):
+        """All 63 catalog entries must classify without exception."""
+        compat = load_compat(REPO_ROOT)
+        entries = collect_entries(compat, "canvas2d")
+        adapter = Canvas2dAdapter(REPO_ROOT)
+        for e in entries:
+            r = adapter.run(e)
+            self.assertIsInstance(r.status, Status, msg=e.name)
+
+    def test_coverage_distribution_is_nonzero(self):
+        """Sanity: with the catalog as-is, we have at least some PASS, some
+        DIVERGE, and some NOT-IMPL. Otherwise the harness is broken."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        statuses = [r.status for r in results]
+        counts = StatusCounts.from_results(statuses)
+        self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
+        self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
+        self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
+
+    def test_known_gotcha_entries_classified_DIVERGE(self):
+        """The remaining oracle-pinned gotcha entries must always be DIVERGE.
+        Regression guard for the SKILL gotchas catalog. (createRadialGradient
+        was DIVERGE before pulp #1524 wired the two-circle form; it's now
+        PASS — see test_oracle_supported_radial_is_PASS.)"""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        for name in (
+            "canvas2d/arc",
+            "canvas2d/arcTo",
+            "canvas2d/ellipse",
+            "canvas2d/transform",
+        ):
+            with self.subTest(entry=name):
+                self.assertIn(name, by_name)
+                self.assertEqual(
+                    by_name[name].status,
+                    Status.DIVERGE,
+                    msg=f"{name} must be DIVERGE per oracle gotcha pin: {by_name[name].detail}",
+                )
+
+    def test_known_unimpl_entries_classified_NOT_IMPL(self):
+        """The filter and direction entries must remain NOT-IMPL.
+
+        issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
+        shadowOffsetY are now PASS — see
+        `test_known_pass_entries_classified_PASS`.
+
+        pulp #1434 bridge-thin gap-fill: createConicGradient is now
+        DIVERGE (CG degraded), miterLimit / imageSmoothingEnabled /
+        imageSmoothingQuality are now PASS — see
+        `test_bridge_thin_gap_fill_entries_classified_PASS`.
+
+        Sub-agent #24 follow-up to #1480: createPattern is now
+        DIVERGE — Skia path renders real tiled fills via
+        SkShader::MakeImage; CG degrades. See
+        `test_bridge_thin_pattern_classified_DIVERGE`."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        for name in (
+            "canvas2d/filter",
+            "canvas2d/direction",
+        ):
+            with self.subTest(entry=name):
+                self.assertIn(name, by_name)
+                self.assertEqual(
+                    by_name[name].status,
+                    Status.NOT_IMPL,
+                    msg=f"{name} must be NOT-IMPL: {by_name[name].detail}",
+                )
+
+    def test_bridge_thin_gap_fill_entries_classified_PASS(self):
+        """pulp #1434 bridge-thin gap-fill — three entries flipped from
+        NOT-IMPL → PASS by adding the missing canvas* bridge fns and
+        wiring through to existing Skia / CG capabilities.
+
+        miterLimit, imageSmoothingEnabled, imageSmoothingQuality use
+        Skia primitives that already existed (SkPaint::setStrokeMiter,
+        SkSamplingOptions) and CG primitives that already existed
+        (CGContextSetMiterLimit, CGContextSetInterpolationQuality)."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        for name in (
+            "canvas2d/miterLimit",
+            "canvas2d/imageSmoothingEnabled",
+            "canvas2d/imageSmoothingQuality",
+        ):
+            with self.subTest(entry=name):
+                self.assertIn(name, by_name)
+                self.assertEqual(
+                    by_name[name].status,
+                    Status.PASS,
+                    msg=f"{name} must be PASS after #1434: {by_name[name].detail}",
+                )
+
+    def test_conic_classified_PASS(self):
+        """pulp #1524 — createConicGradient promoted DIVERGE → PASS.
+        Skia: SkGradientShader::MakeSweep. CG: software-rasterised
+        CGImage of the active clip's bounding box (per-pixel atan2
+        sweep + colour-stop interpolation), painted via
+        CGContextDrawImage."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        name = "canvas2d/createConicGradient"
+        self.assertIn(name, by_name)
+        self.assertEqual(
+            by_name[name].status,
+            Status.PASS,
+            msg=f"{name} must be PASS after #1524: {by_name[name].detail}",
+        )
+
+    def test_pattern_classified_PASS(self):
+        """pulp #1524 — createPattern promoted DIVERGE → PASS. Skia
+        routes through SkShader::MakeImage with SkTileMode per axis;
+        CG installs a real CGPattern via CGPatternCreate +
+        CGPatternCallbacks (image-tile draw callback) +
+        CGContextSetFillPattern. `no_repeat` axes blow up the tile step
+        beyond the clip bounding box so only the seed tile lands."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        name = "canvas2d/createPattern"
+        self.assertIn(name, by_name)
+        self.assertEqual(
+            by_name[name].status,
+            Status.PASS,
+            msg=f"{name} must be PASS after #1524: {by_name[name].detail}",
+        )
+
+    def test_shadow_entries_classified_PASS(self):
+        """issue-1434 batch 7 — Canvas2D shadow* state setters are
+        wired through the bridge + shim + Skia + CG canvas backends.
+        Entries reclassify from NOT-IMPL → PASS."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        for name in (
+            "canvas2d/shadowBlur",
+            "canvas2d/shadowColor",
+            "canvas2d/shadowOffsetX",
+            "canvas2d/shadowOffsetY",
+        ):
+            with self.subTest(entry=name):
+                self.assertIn(name, by_name)
+                self.assertEqual(
+                    by_name[name].status,
+                    Status.PASS,
+                    msg=f"{name} must be PASS post-batch-7: {by_name[name].detail}",
+                )
+
+    def test_json_output_contains_all_entries(self):
+        from tools.harness.verifier import render_json
+
+        results = run_surface(REPO_ROOT, "canvas2d")
+        payload = render_json({"canvas2d": results}, sha="test")
+        self.assertIn("canvas2d", payload["surfaces"])
+        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 63)
+        self.assertEqual(
+            payload["surfaces"]["canvas2d"]["total"],
+            len(payload["surfaces"]["canvas2d"]["results"]),
+        )
+
+
+class VerifierCliTest(unittest.TestCase):
+    """Smoke-tests the CLI entrypoint via subprocess."""
+
+    def test_canvas2d_subcommand_exits_zero(self):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "tools" / "harness" / "verifier.py"),
+                "--surface=canvas2d",
+                "--json",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["surfaces"]["canvas2d"]["total"], 63)
+
+
+if __name__ == "__main__":
+    unittest.main()

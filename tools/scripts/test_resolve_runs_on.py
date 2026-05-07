@@ -136,7 +136,7 @@ def test_optional_namespace_no_env_returns_empty() -> None:
     _assert(out == "", f"expected empty stdout, got {out!r}")
 
 
-def test_optional_namespace_with_explicit_routes_to_namespace() -> None:
+def test_optional_namespace_with_explicit_routes_under_namespace_provider() -> None:
     _, out, _ = _run([
         "--target-name", "macOS (ARM64)",
         "--mode", "optional-namespace",
@@ -149,6 +149,21 @@ def test_optional_namespace_with_explicit_routes_to_namespace() -> None:
     })
     _assert(json.loads(out) == "namespace-profile-generouscorp-macos",
             f"unexpected macOS namespace selector: {out!r}")
+
+
+def test_optional_namespace_explicit_wins_under_github_hosted_provider() -> None:
+    _, out, _ = _run([
+        "--target-name", "macOS (ARM64)",
+        "--mode", "optional-namespace",
+        "--explicit-env", "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
+        "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+    ], env_extra={
+        "REQUESTED_PROVIDER": "github-hosted",
+        "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON":
+            '["self-hosted","sanitizer"]',
+    })
+    _assert(json.loads(out) == ["self-hosted", "sanitizer"],
+            f"explicit macOS selector ignored: {out!r}")
 
 
 def test_optional_namespace_falls_back_to_namespace_env() -> None:

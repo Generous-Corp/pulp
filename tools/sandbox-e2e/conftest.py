@@ -3,16 +3,20 @@
 Binary discovery (in priority order):
 
 1. Env-var overrides:
-     PULP_CPP_BINARY_FOR_TEST  — the C++ pulp binary (pre-swap: ~/.pulp/bin/pulp)
-     PULP_RS_BINARY_FOR_TEST   — the Rust pulp prototype
+     PULP_CPP_BINARY_FOR_TEST  — the C++ pulp-cpp delegate
+     PULP_RS_BINARY_FOR_TEST   — the Rust pulp binary
 
 2. Build-artifact paths relative to the repo root:
-     build/tools/cli/pulp                                     (C++)
-     experimental/pulp-rs/target/release/pulp-rs              (Rust)
-     experimental/pulp-rs/target/debug/pulp-rs                (Rust, fallback)
+     build/tools/cli/pulp-cpp                                 (C++, post-swap)
+     build/tools/cli/pulp                                     (C++, pre-swap fallback)
+     experimental/pulp-rs/target/release/pulp                 (Rust, post-swap)
+     experimental/pulp-rs/target/debug/pulp                   (Rust, fallback)
+     experimental/pulp-rs/target/release/pulp-rs              (Rust, pre-swap fallback)
+     experimental/pulp-rs/target/debug/pulp-rs                (Rust, pre-swap fallback)
 
 3. Fallback to the installed binary:
-     ~/.pulp/bin/pulp                                         (C++)
+     ~/.pulp/bin/pulp-cpp                                     (C++, post-swap)
+     ~/.pulp/bin/pulp                                         (C++, pre-swap fallback)
 
 If neither candidate is found, tests that need the binary are skipped
 with a clear message. Tests never run against "whatever happens to
@@ -53,13 +57,15 @@ REPO_ROOT = _find_repo_root()
 
 
 def _discover_cpp_binary() -> Path | None:
-    """Locate the C++ ``pulp`` binary under test. See module docstring."""
+    """Locate the C++ ``pulp-cpp`` binary under test. See module docstring."""
     override = os.environ.get("PULP_CPP_BINARY_FOR_TEST")
     if override:
         candidate = Path(override).expanduser()
         return candidate if candidate.exists() else None
     candidates = [
+        REPO_ROOT / "build" / "tools" / "cli" / "pulp-cpp",
         REPO_ROOT / "build" / "tools" / "cli" / "pulp",
+        Path.home() / ".pulp" / "bin" / "pulp-cpp",
         Path.home() / ".pulp" / "bin" / "pulp",
     ]
     for c in candidates:
@@ -69,10 +75,8 @@ def _discover_cpp_binary() -> Path | None:
 
 
 def _discover_rust_binary() -> Path | None:
-    """Locate the Rust ``pulp-rs`` binary. The pre-swap name is
-    ``pulp-rs``; post-swap it will be ``pulp`` in the same position as
-    the C++ binary, but the harness always stages it under a clear
-    name so scenarios are unambiguous."""
+    """Locate the Rust ``pulp`` binary. Pre-swap ``pulp-rs`` paths remain
+    as fallbacks so older branches can still run the harness."""
     override = os.environ.get("PULP_RS_BINARY_FOR_TEST")
     if override:
         candidate = Path(override).expanduser()
@@ -80,6 +84,8 @@ def _discover_rust_binary() -> Path | None:
 
     # Build artifacts, then a sibling-worktree fallback (pre-merge).
     candidates = [
+        REPO_ROOT / "experimental" / "pulp-rs" / "target" / "release" / "pulp",
+        REPO_ROOT / "experimental" / "pulp-rs" / "target" / "debug" / "pulp",
         REPO_ROOT / "experimental" / "pulp-rs" / "target" / "release" / "pulp-rs",
         REPO_ROOT / "experimental" / "pulp-rs" / "target" / "debug" / "pulp-rs",
     ]
@@ -88,6 +94,8 @@ def _discover_rust_binary() -> Path | None:
     if not (REPO_ROOT / "experimental").exists():
         for sibling in REPO_ROOT.parent.glob("pulp*"):
             for rel in (
+                "experimental/pulp-rs/target/release/pulp",
+                "experimental/pulp-rs/target/debug/pulp",
                 "experimental/pulp-rs/target/release/pulp-rs",
                 "experimental/pulp-rs/target/debug/pulp-rs",
             ):
@@ -109,8 +117,8 @@ def cpp_binary() -> Path:
     path = _discover_cpp_binary()
     if path is None:
         pytest.skip(
-            "C++ pulp binary not found. Set PULP_CPP_BINARY_FOR_TEST "
-            "or build build/tools/cli/pulp."
+            "C++ pulp-cpp binary not found. Set PULP_CPP_BINARY_FOR_TEST "
+            "or build build/tools/cli/pulp-cpp."
         )
     return path
 
@@ -120,7 +128,7 @@ def rust_binary() -> Path:
     path = _discover_rust_binary()
     if path is None:
         pytest.skip(
-            "Rust pulp-rs binary not found. Set PULP_RS_BINARY_FOR_TEST "
+            "Rust pulp binary not found. Set PULP_RS_BINARY_FOR_TEST "
             "or `cargo build --release` under experimental/pulp-rs/."
         )
     return path

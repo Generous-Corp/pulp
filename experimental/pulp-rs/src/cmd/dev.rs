@@ -302,6 +302,119 @@ mod tests {
         assert!(err.to_string().contains("not in a Pulp project"));
     }
 
+    // ── parse_args edge cases (#45 coverage uplift) ─────────────────────
+
+    #[test]
+    fn parse_handles_short_help_flag() {
+        let p = parse_args(&to_vec(&["-h"]));
+        assert!(p.wants_help);
+    }
+
+    #[test]
+    fn parse_handles_short_test_flag() {
+        let p = parse_args(&to_vec(&["-t"]));
+        assert!(p.run_tests);
+        assert!(p.test_filter.is_none());
+    }
+
+    #[test]
+    fn parse_captures_validate_flag() {
+        let p = parse_args(&to_vec(&["--validate"]));
+        assert!(p.run_validate);
+        assert!(!p.run_tests);
+    }
+
+    #[test]
+    fn parse_captures_explicit_run_target() {
+        let p = parse_args(&to_vec(&["--run", "examples/foo"]));
+        assert_eq!(p.launch_target.as_deref(), Some("examples/foo"));
+    }
+
+    #[test]
+    fn parse_dangling_run_falls_through_to_build_args() {
+        // `--run` with no value (last token) shouldn't crash; the bare
+        // `--run` becomes a build_arg and launch_target stays None.
+        let p = parse_args(&to_vec(&["--run"]));
+        assert_eq!(p.build_args, vec!["--run"]);
+        assert!(p.launch_target.is_none());
+    }
+
+    // ── run() integration paths (#45 coverage uplift) ───────────────────
+    //
+    // These need a fixture so `project::resolve(cwd)` returns Some.
+    // A standalone `pulp.toml` is the cheapest fixture; the build path
+    // is then driven by RecordingSpawner so no real cmake/ninja runs.
+    // `pulp-cpp` is not on PATH in the test env (DEFAULT_CPP_BINARY)
+    // so `fallthrough::delegate` returns NotFound and the function
+    // body executes locally — same assumption the existing tests rely
+    // on.
+
+    fn write_standalone_fixture(root: &std::path::Path) {
+        std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
+        std::fs::write(
+            root.join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.20)\n\
+             project(Cov VERSION 0.1.0)\n\
+             find_package(Pulp 0.40.0 REQUIRED)\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn run_dispatches_validate_message_when_flag_set() {
+        let td = tempfile::tempdir().unwrap();
+        write_standalone_fixture(td.path());
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = parse_args(&to_vec(&["--validate"]));
+        let rc = run(td.path(), &args, &rec, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains("validator integration stays on the C++ binary"),
+            "missing validate notice in stdout: {s:?}"
+        );
+    }
+
+    #[test]
+    fn run_dispatches_ctest_with_filter_when_test_flag_set() {
+        let td = tempfile::tempdir().unwrap();
+        write_standalone_fixture(td.path());
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = parse_args(&to_vec(&["--test-filter=Knob"]));
+        let rc = run(td.path(), &args, &rec, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let calls = rec.calls.borrow();
+        let ctest_call = calls
+            .iter()
+            .find(|inv| inv.program == "ctest")
+            .expect("expected a ctest invocation");
+        assert!(ctest_call.args.iter().any(|a| a == "-R"));
+        assert!(ctest_call.args.iter().any(|a| a == "Knob"));
+        assert!(
+            ctest_call.args.iter().any(|a| a == "--output-on-failure"),
+            "ctest invocation should include --output-on-failure: {:?}",
+            ctest_call.args
+        );
+    }
+
+    #[test]
+    fn run_emits_watch_loop_stub_when_no_launch_target() {
+        let td = tempfile::tempdir().unwrap();
+        write_standalone_fixture(td.path());
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = parse_args(&[]);
+        let rc = run(td.path(), &args, &rec, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains("Watch loop stub"),
+            "expected watch-loop stub message in stdout: {s:?}"
+        );
+    }
+
     fn to_vec(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_owned()).collect()
     }

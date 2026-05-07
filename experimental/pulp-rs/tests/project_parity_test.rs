@@ -28,7 +28,7 @@ fn plant(src_fixture: &str, dst_dir: &Path) -> PathBuf {
 }
 
 fn run_bump(cwd: &Path, pulp_home: &Path, extra: &[&str]) -> std::process::Output {
-    let mut cmd = Command::cargo_bin("pulp-rs").expect("binary");
+    let mut cmd = Command::cargo_bin("pulp").expect("binary");
     cmd.current_dir(cwd);
     cmd.env("PULP_HOME", pulp_home);
     cmd.env_remove("NO_COLOR");
@@ -206,7 +206,7 @@ fn bump_allow_downgrade_flag_permits_older_target() {
 #[test]
 fn project_bare_help_exits_one() {
     let td = tempfile::tempdir().unwrap();
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .unwrap()
         .current_dir(td.path())
         .arg("project")
@@ -225,7 +225,7 @@ fn project_bare_help_exits_one() {
 #[test]
 fn project_help_exits_zero() {
     let td = tempfile::tempdir().unwrap();
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .unwrap()
         .current_dir(td.path())
         .args(["project", "help"])
@@ -237,7 +237,7 @@ fn project_help_exits_zero() {
 #[test]
 fn project_unknown_subcommand_exits_two() {
     let td = tempfile::tempdir().unwrap();
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .unwrap()
         .current_dir(td.path())
         .args(["project", "nope"])
@@ -264,7 +264,7 @@ fn undo_reverts_latest_bump_end_to_end() {
     assert_ne!(after_bump, original);
 
     // Now undo.
-    let undo = Command::cargo_bin("pulp-rs")
+    let undo = Command::cargo_bin("pulp")
         .unwrap()
         .current_dir(&project)
         .env("PULP_HOME", &home)
@@ -296,7 +296,7 @@ fn undo_with_no_batch_exits_one() {
     let td = tempfile::tempdir().unwrap();
     let home = td.path().join("pulp-home");
     fs::create_dir_all(&home).unwrap();
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .unwrap()
         .current_dir(td.path())
         .env("PULP_HOME", &home)

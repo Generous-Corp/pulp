@@ -1,11 +1,13 @@
 #pragma once
 
+#include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace pulp::format::detail {
@@ -115,6 +117,36 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     chrome.tab_panel_ = std::move(tab_panel);
     chrome.extra_window_height_ = 32.0f;
     return chrome;
+}
+
+/// Build a `WindowOptions` for the standalone editor host from the
+/// processor's `ViewSize` hints (as cached by `ViewBridge`) plus the
+/// chrome layout. The min_* fields propagate end-to-end so platform
+/// hosts (e.g. macOS `setContentMinSize:`) can clamp interactive resize
+/// to the processor's declared minimum. (closes #1362)
+inline view::WindowOptions make_standalone_window_options(
+    const ViewSize& size_hints,
+    const StandaloneEditorChrome& chrome,
+    std::string title,
+    bool use_gpu) {
+    const float extra_h = chrome.extra_window_height() > 0.0f
+        ? chrome.extra_window_height() : 0.0f;
+    view::WindowOptions opts;
+    opts.title = std::move(title);
+    opts.width = static_cast<float>(size_hints.preferred_width);
+    opts.height = static_cast<float>(size_hints.preferred_height) + extra_h;
+    // Forward min_* from the processor's ViewSize so the OS-level
+    // window host can refuse interactive resize below the declared
+    // minimum. Chrome rows (settings tab) extend the floor on the
+    // height axis in lockstep with the preferred-height extension
+    // above so the editor area can never shrink below its own min.
+    if (size_hints.min_width > 0)
+        opts.min_width = static_cast<float>(size_hints.min_width);
+    if (size_hints.min_height > 0)
+        opts.min_height = static_cast<float>(size_hints.min_height) + extra_h;
+    opts.resizable = true;
+    opts.use_gpu = use_gpu;
+    return opts;
 }
 
 inline view::WindowHost::ContentSize standalone_editor_content_size(

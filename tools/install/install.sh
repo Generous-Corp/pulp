@@ -11,6 +11,10 @@
 #   PULP_INSTALL_DIR  — install directory (default: ~/.pulp/bin)
 #   PULP_VERSION      — version to install (default: latest)
 #   PULP_NO_MODIFY_PATH — set to 1 to skip PATH modification
+#
+# Scope:
+#   Installs Pulp CLI artifacts only. It does not install Shipyard or the
+#   GitHub CLI (`gh`); those are optional source-checkout contributor tools.
 
 set -e
 
@@ -40,6 +44,10 @@ for arg in "$@"; do
             echo "Environment variables:"
             echo "  PULP_INSTALL_DIR   Install directory"
             echo "  PULP_VERSION       Version to install"
+            echo ""
+            echo "Scope:"
+            echo "  Installs Pulp CLI artifacts only."
+            echo "  Does not install Shipyard or GitHub CLI (gh)."
             exit 0
             ;;
     esac
@@ -161,6 +169,7 @@ fi
 
 echo ""
 echo "Pulp CLI installed successfully!"
+echo "This installed Pulp only; it did not install Shipyard or GitHub CLI (gh)."
 echo ""
 echo "Get started:"
 echo "  pulp create MyPlugin     # create your first plugin"
@@ -169,6 +178,7 @@ echo ""
 echo "Or clone the framework:"
 echo "  git clone https://github.com/$REPO.git"
 echo "  cd pulp && ./setup.sh"
+echo "  ./tools/install-shipyard.sh   # optional: source-checkout PR/CI tooling"
 echo ""
 if [ "$NO_MODIFY_PATH" != "1" ]; then
     echo "Restart your shell or run: source $PROFILE"

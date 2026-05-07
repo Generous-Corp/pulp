@@ -1,8 +1,9 @@
-//! `pulp-rs` — experimental Rust prototype of the Pulp CLI.
+//! `pulp-rs` — Rust implementation of the Pulp CLI.
 //!
-//! **Not production. Not shipped. Not wired into `CMake`.** The crate
-//! exists to answer a single question tracked in [issue #686]:
-//! *should Pulp migrate its CLI from C++ (`tools/cli/*.cpp`) to Rust?*
+//! The crate owns the user-facing `pulp` binary after the Phase 8
+//! cutover. CMake still builds and installs the legacy C++ CLI as
+//! `pulp-cpp` so Rust can fall through for commands that have not moved
+//! yet.
 //!
 //! [issue #686]: https://github.com/danielraffel/pulp/issues/686
 //!
@@ -75,6 +76,7 @@
 // in idiomatic error-composition code. Allowed per-site, not globally,
 // to avoid suppressing real issues.
 
+pub mod build_info;
 pub mod bump;
 pub mod cmd;
 pub mod color;
@@ -83,6 +85,7 @@ pub mod diag;
 pub mod error;
 pub mod fallthrough;
 pub mod help;
+pub mod install;
 pub mod parse;
 pub mod pkg;
 pub mod proc;

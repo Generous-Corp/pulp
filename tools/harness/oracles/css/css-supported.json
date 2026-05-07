@@ -1,0 +1,128 @@
+{
+  "version": "compat.json @ feat/harness-css-1392",
+  "source": "core/view/js/web-compat-style-decl.js (case wiring) + tools/import-design/catalogs/mdn-css.tsv (MDN spec) + packages/pulp-react/src/prop-applier.ts (React prop route) + curated CSS-spec enum value sets (Mozilla/MDN)",
+  "notes": [
+    "The `wired` set is derived AT RUNTIME by parsing `case \"X\":` tokens out",
+    "of `core/view/js/web-compat-style-decl.js`. It is the strongest available",
+    "evidence that a CSS property reaches the bridge via the `el.style.X = ...`",
+    "code path. The adapter falls back to this dynamic set rather than baking",
+    "it into the oracle, so the oracle stays version-stable and the wiring",
+    "stays a single source of truth.",
+    "",
+    "The `enums` table below is curated from the CSS specs (MDN). Only enum-",
+    "valued properties that are wired through web-compat-style-decl.js need",
+    "an entry — non-enum kinds (length, color, shorthand, number) and",
+    "unwired entries are short-circuited by the adapter before the enum check."
+  ],
+  "enums": {
+    "alignContent": {
+      "values": ["flex-start", "flex-end", "center", "stretch", "space-between", "space-around", "space-evenly"],
+      "default": "stretch"
+    },
+    "alignItems": {
+      "values": ["flex-start", "flex-end", "center", "baseline", "stretch"],
+      "default": "stretch"
+    },
+    "alignSelf": {
+      "values": ["auto", "flex-start", "flex-end", "center", "baseline", "stretch"],
+      "default": "auto"
+    },
+    "animationDirection": {
+      "values": ["normal", "reverse", "alternate", "alternate-reverse"],
+      "default": "normal"
+    },
+    "animationFillMode": {
+      "values": ["none", "forwards", "backwards", "both"],
+      "default": "none"
+    },
+    "boxSizing": {
+      "values": ["content-box", "border-box"],
+      "default": "content-box"
+    },
+    "cursor": {
+      "values": [
+        "auto", "default", "none", "pointer", "text", "wait",
+        "move", "grab", "grabbing", "not-allowed", "crosshair", "help",
+        "progress", "context-menu", "cell",
+        "n-resize", "e-resize", "s-resize", "w-resize",
+        "ne-resize", "nw-resize", "se-resize", "sw-resize",
+        "ew-resize", "ns-resize", "nesw-resize", "nwse-resize",
+        "col-resize", "row-resize",
+        "all-scroll", "zoom-in", "zoom-out"
+      ],
+      "default": "auto"
+    },
+    "display": {
+      "values": ["block", "inline", "inline-block", "flex", "inline-flex", "grid", "inline-grid", "none", "contents", "table", "table-row", "table-cell"],
+      "default": "inline"
+    },
+    "flexDirection": {
+      "values": ["row", "row-reverse", "column", "column-reverse"],
+      "default": "row"
+    },
+    "flexWrap": {
+      "values": ["nowrap", "wrap", "wrap-reverse"],
+      "default": "nowrap"
+    },
+    "fontStyle": {
+      "values": ["normal", "italic", "oblique"],
+      "default": "normal"
+    },
+    "justifyContent": {
+      "values": ["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"],
+      "default": "flex-start"
+    },
+    "listStylePosition": {
+      "values": ["inside", "outside"],
+      "default": "outside"
+    },
+    "listStyleType": {
+      "values": ["none", "disc", "circle", "square", "decimal"],
+      "default": "disc"
+    },
+    "overflow": {
+      "values": ["visible", "hidden", "scroll", "auto", "clip"],
+      "default": "visible"
+    },
+    "pointerEvents": {
+      "values": ["auto", "none", "all", "visible", "visible-painted", "visible-fill", "visible-stroke"],
+      "default": "auto"
+    },
+    "position": {
+      "values": ["static", "relative", "absolute", "fixed", "sticky"],
+      "default": "static"
+    },
+    "textAlign": {
+      "values": ["left", "right", "center", "justify", "start", "end"],
+      "default": "start"
+    },
+    "textDecoration": {
+      "values": ["none", "underline", "overline", "line-through", "blink"],
+      "default": "none"
+    },
+    "textTransform": {
+      "values": ["none", "capitalize", "uppercase", "lowercase"],
+      "default": "none"
+    },
+    "userSelect": {
+      "values": ["auto", "none", "text", "all", "contain"],
+      "default": "auto"
+    },
+    "visibility": {
+      "values": ["visible", "hidden", "collapse"],
+      "default": "visible"
+    },
+    "whiteSpace": {
+      "values": ["normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces"],
+      "default": "normal"
+    },
+    "wordBreak": {
+      "values": ["normal", "break-all", "keep-all", "break-word"],
+      "default": "normal"
+    },
+    "overflowWrap": {
+      "values": ["normal", "break-word", "anywhere"],
+      "default": "normal"
+    }
+  }
+}

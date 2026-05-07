@@ -26,10 +26,12 @@ Layer 1 (fast, per-edit, agent-specific)
     hooks/scripts/cli-plugin-sync.sh, Claude Code PostToolUse hooks
     → advisory "hint" mode output only
 
-Layer 2 (pre-push, agent-agnostic, advisory)
+Layer 2 (pre-push, agent-agnostic, ENFORCING — pulp #1144)
     .githooks/pre-push
-    → same scripts, "report" mode, warns by default
-    → PULP_ENFORCE_PREPUSH=1 upgrades to hard fail
+    → same scripts, "report" mode, BLOCKS push by default
+    → PULP_DISABLE_PREPUSH_GATES=1 demotes to advisory (the old default)
+    → PULP_DISABLE_PREPUSH_DIFF_COVER=1 demotes the diff-cover gate only
+    → PULP_SKIP_PREPUSH=1 skips ALL gates (true emergencies)
 
 Layer 3 (PR gate, authoritative)
     .github/workflows/version-skill-check.yml
@@ -85,11 +87,15 @@ tools/scripts/install-githooks.sh
 git config core.hooksPath .githooks
 ```
 
-After that, every `git push` runs both scripts. By default warnings print but don't block — set `PULP_ENFORCE_PREPUSH=1` (CI does this) to upgrade to hard failures. Single-push bypass for emergencies:
+After that, every `git push` runs both scripts. **As of pulp #1144 the gates block the push by default** — fix the violation locally rather than burning a 20-min CI roundtrip. Bypass knobs (use sparingly; CI runs the same gates regardless):
 
 ```bash
-PULP_SKIP_PREPUSH=1 git push
+PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/deps to advisory
+PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push     # demote diff-cover gate only
+PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (true emergencies)
 ```
+
+The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env vars are accepted as silent no-ops — they used to *promote* advisory warnings to hard failures, which is now the default. Setting them just confirms what you already get.
 
 ---
 
@@ -124,7 +130,7 @@ For full design + recommended branch protection see
 
 ## Shipyard stage
 
-`tools/shipyard.toml` gains a `version-skill-check` stage that mirrors the CI workflow. This keeps `shipyard ship` (the primary merge path) in lockstep with GitHub Actions.
+`tools/shipyard.toml` gains a `version-skill-check` stage that mirrors the CI workflow. This keeps `shipyard pr` (the primary PR/shipping path) in lockstep with GitHub Actions.
 
 Note: **Shipyard configuration changes** (the `tools/shipyard.toml` file itself, `tools/install-shipyard.sh`, and everything under `.github/workflows/`) are mapped to the `ci` skill in `skill_path_map.json`. That means editing the merge workflow automatically demands a `ci` SKILL.md review — the skill-sync gate catches shipyard-config drift the same way it catches subsystem-code drift.
 
@@ -132,16 +138,16 @@ Note: **Shipyard configuration changes** (the `tools/shipyard.toml` file itself,
 
 ## "Push a PR" — the one-command path
 
-Typing `pulp pr` (or saying "push a PR" / "ship this" / "we're done" to an agent configured with this policy in `CLAUDE.md`) runs the full pipeline:
+Typing `shipyard pr` (or saying "push a PR" / "ship this" / "we're done" to an agent configured with this policy in `CLAUDE.md`) runs the full pipeline:
 
 1. `skill_sync_check.py --mode=report` — hard-fails here if a mapped path is touched without a SKILL.md update. The only reason to bounce back to you is to add a gotcha or a bypass trailer.
 2. `version_bump_check.py --mode=apply` — applies the required bump(s) to `CMakeLists.txt` / `plugin.json` / `marketplace.json`, staging them. Appends a CHANGELOG stub.
 3. `git commit` — single "chore: bump ..." commit.
-4. `gh pr create` — PR body auto-populated with the bump verdict.
-5. `shipyard ship` — cross-platform validation + merge on green.
+4. Branch push + PR creation + Shipyard state recording.
+5. Cross-platform validation + merge on green.
 6. On merge, `.github/workflows/auto-release.yml` diffs the version files against the previous push, creates the matching tag(s), and the existing tag-triggered release workflows publish binaries.
 
-Never type `gh pr create` + `shipyard ship` separately. Never run the version-bump scripts by hand unless debugging.
+Never type `gh pr create` + `shipyard ship` separately. Never run the version-bump scripts by hand unless debugging. Direct `gh pr create` is a manual bypass only and can leave a PR outside Shipyard's tracked state until reconciled.
 
 ---
 
@@ -181,7 +187,7 @@ Two artifacts have to stay in lockstep after every release: the **GitHub Release
 
 **Division of labor:**
 
-- **Shipyard** — pre-merge. Runs `shipyard ship` to validate + merge PRs on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
+- **Shipyard** — pre-merge. Runs `shipyard pr` to create/track PRs, validate, and merge on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
 - **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag. CHANGELOG regeneration is handled separately by `post-tag-sync.yml` (below) so binary builds and docs sync can fail independently.
 - **Shipyard's `.github/workflows/post-tag-sync.yml`** — post-tag (installed by `shipyard release-bot hook install`). On tag push, runs `shipyard changelog regenerate` to rewrite `CHANGELOG.md`, commits as `pulp-release-bot` with `[skip ci]` and the three bypass trailers, and pushes back to main (rebase-retry loop handles races).
 - **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with body populated via `shipyard changelog regenerate --release-notes vX.Y.Z` (same generator as `CHANGELOG.md`, so the two cannot drift).
@@ -189,7 +195,7 @@ Two artifacts have to stay in lockstep after every release: the **GitHub Release
 **End-to-end sequence:**
 
 ```
-pulp pr  (shipyard ship merges the bump PR on green)
+shipyard pr  (Shipyard merges the bump PR on green)
        ↓
 auto-release.yml  (diffs version files, pushes vX.Y.Z tag)
        ↓
@@ -250,8 +256,14 @@ dependency-pin update, not a Pulp-versioning event:
 
 ```bash
 python3 tools/deps/audit.py --strict --check-upstream --format markdown
-# edit tools/shipyard.toml
+shipyard pin bump --to vX.Y.Z
 python3 tools/deps/validate_hosts.py
 ```
+
+Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
+the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
+guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
+macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
+and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.

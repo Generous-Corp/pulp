@@ -3,7 +3,7 @@
 //! # Why a dispatcher module
 //!
 //! The usage banner itself lives in [`crate::help`] so three callers
-//! share the same bytes: the explicit `pulp-rs help` subcommand
+//! share the same bytes: the explicit `pulp help` subcommand
 //! (dispatched here), the bare-invocation fallback in `main.rs`, and
 //! the fuzzy suggester.
 //!
@@ -16,7 +16,7 @@ use std::io::Write;
 use crate::error::Result;
 use crate::help;
 
-/// Run `pulp-rs help`. Always exits with 0 when writes succeed.
+/// Run `pulp help`. Always exits with 0 when writes succeed.
 ///
 /// # Errors
 ///
@@ -35,7 +35,7 @@ mod tests {
         let mut buf = Vec::new();
         run(&mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        assert!(s.contains("pulp-rs — Pulp audio plugin framework CLI"));
+        assert!(s.contains("pulp — Pulp audio plugin framework CLI"));
         assert!(s.contains("Examples:"));
     }
 }

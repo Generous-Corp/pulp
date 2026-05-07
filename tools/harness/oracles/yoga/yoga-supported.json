@@ -1,0 +1,114 @@
+{
+  "version": "v3.2.1",
+  "source": "tools/import-design/catalogs/yoga.tsv + https://www.yogalayout.dev/docs/styling + facebook/yoga@v3.2.1 YGEnums.h",
+  "properties": {
+    "alignContent": {
+      "kind": "enum",
+      "values": ["flex-start", "flex-end", "center", "stretch", "space-between", "space-around", "space-evenly"],
+      "default": "flex-start"
+    },
+    "alignItems": {
+      "kind": "enum",
+      "values": ["flex-start", "flex-end", "center", "stretch", "baseline"],
+      "default": "stretch"
+    },
+    "alignSelf": {
+      "kind": "enum",
+      "values": ["auto", "flex-start", "flex-end", "center", "stretch", "baseline"],
+      "default": "auto"
+    },
+    "aspectRatio": {
+      "kind": "number",
+      "notes": "width/height ratio; non-standard CSS semantics in Yoga"
+    },
+    "borderBottomWidth": {"kind": "length"},
+    "borderEndWidth":    {"kind": "length", "notes": "writing-direction relative"},
+    "borderLeftWidth":   {"kind": "length"},
+    "borderRightWidth":  {"kind": "length"},
+    "borderStartWidth":  {"kind": "length", "notes": "writing-direction relative"},
+    "borderTopWidth":    {"kind": "length"},
+    "borderWidth":       {"kind": "length", "notes": "shorthand for all edges"},
+    "bottom":            {"kind": "length-or-percentage", "notes": "physical edge"},
+    "columnGap":         {"kind": "length-or-percentage"},
+    "direction": {
+      "kind": "enum",
+      "values": ["inherit", "ltr", "rtl"],
+      "default": "inherit"
+    },
+    "display": {
+      "kind": "enum",
+      "values": ["flex", "none"],
+      "default": "flex"
+    },
+    "end":               {"kind": "length-or-percentage", "notes": "writing-direction relative (RTL-aware)"},
+    "flex":              {"kind": "number", "notes": "positive=flex-grow, negative=flex-shrink semantics"},
+    "flexBasis":         {"kind": "length-or-percentage-or-auto"},
+    "flexDirection": {
+      "kind": "enum",
+      "values": ["row", "row-reverse", "column", "column-reverse"],
+      "default": "column",
+      "notes": "Yoga default is column (CSS default is row)"
+    },
+    "flexFlow":          {"kind": "string", "notes": "shorthand: flex-direction + flex-wrap"},
+    "flexGrow":          {"kind": "number", "default": 0},
+    "flexShrink":        {"kind": "number", "default": 0, "notes": "Yoga default is 0 (CSS default is 1)"},
+    "flexWrap": {
+      "kind": "enum",
+      "values": ["nowrap", "wrap", "wrap-reverse"],
+      "default": "nowrap"
+    },
+    "gap":               {"kind": "length-or-percentage", "notes": "shorthand for row-gap and column-gap"},
+    "height":            {"kind": "length-or-percentage-or-auto"},
+    "inset":             {"kind": "length-or-percentage", "notes": "shorthand top/right/bottom/left"},
+    "insetBlock":        {"kind": "length-or-percentage"},
+    "insetBlockEnd":     {"kind": "length-or-percentage"},
+    "insetBlockStart":   {"kind": "length-or-percentage"},
+    "insetInline":       {"kind": "length-or-percentage"},
+    "insetInlineEnd":    {"kind": "length-or-percentage"},
+    "insetInlineStart":  {"kind": "length-or-percentage"},
+    "justifyContent": {
+      "kind": "enum",
+      "values": ["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"],
+      "default": "flex-start"
+    },
+    "left":              {"kind": "length-or-percentage", "notes": "physical edge"},
+    "margin":            {"kind": "edge-set", "notes": "shorthand for all edges"},
+    "marginBottom":      {"kind": "length-or-percentage-or-auto"},
+    "marginEnd":         {"kind": "length-or-percentage-or-auto", "notes": "writing-direction relative"},
+    "marginHorizontal":  {"kind": "length-or-percentage-or-auto", "notes": "left+right shorthand (RN style)"},
+    "marginLeft":        {"kind": "length-or-percentage-or-auto"},
+    "marginRight":       {"kind": "length-or-percentage-or-auto"},
+    "marginStart":       {"kind": "length-or-percentage-or-auto", "notes": "writing-direction relative"},
+    "marginTop":         {"kind": "length-or-percentage-or-auto"},
+    "marginVertical":    {"kind": "length-or-percentage-or-auto", "notes": "top+bottom shorthand (RN style)"},
+    "maxHeight":         {"kind": "length-or-percentage"},
+    "maxWidth":          {"kind": "length-or-percentage"},
+    "minHeight":         {"kind": "length-or-percentage"},
+    "minWidth":          {"kind": "length-or-percentage"},
+    "order":             {"kind": "number", "notes": "RN extension; lower values render first"},
+    "overflow": {
+      "kind": "enum",
+      "values": ["visible", "hidden", "scroll"],
+      "default": "visible"
+    },
+    "padding":           {"kind": "edge-set", "notes": "shorthand for all edges"},
+    "paddingBottom":     {"kind": "length-or-percentage"},
+    "paddingEnd":        {"kind": "length-or-percentage", "notes": "writing-direction relative"},
+    "paddingHorizontal": {"kind": "length-or-percentage", "notes": "left+right shorthand (RN style)"},
+    "paddingLeft":       {"kind": "length-or-percentage"},
+    "paddingRight":      {"kind": "length-or-percentage"},
+    "paddingStart":      {"kind": "length-or-percentage", "notes": "writing-direction relative"},
+    "paddingTop":        {"kind": "length-or-percentage"},
+    "paddingVertical":   {"kind": "length-or-percentage", "notes": "top+bottom shorthand (RN style)"},
+    "position": {
+      "kind": "enum",
+      "values": ["static", "relative", "absolute"],
+      "default": "relative"
+    },
+    "right":             {"kind": "length-or-percentage", "notes": "physical edge"},
+    "rowGap":            {"kind": "length-or-percentage"},
+    "start":             {"kind": "length-or-percentage", "notes": "writing-direction relative (RTL-aware)"},
+    "top":               {"kind": "length-or-percentage", "notes": "physical edge"},
+    "width":             {"kind": "length-or-percentage-or-auto"}
+  }
+}

@@ -1,0 +1,240 @@
+name: Release-CLI watchdog
+
+# Layer 2-equivalent watchdog for `release-cli.yml`, modeled on
+# `auto-release-watchdog.yml` (which watches `auto-release.yml`).
+# Motivating incident: pulp #1375 — release-cli runs for v0.74.0 and
+# v0.74.1 both failed at the Yoga cache-priming step on the
+# windows-arm64 matrix leg with exit code 127. Because release-cli is
+# what produces the SDK tarballs and CLI binaries (NOT the GitHub
+# Release object itself, which is created in the final `release` job
+# only after build+smoke succeed across the matrix), a single matrix
+# leg failing leaves a release record like:
+#   - v0.74.0: GitHub release exists with only plugin .pkg files
+#     (those come from sign-and-release.yml, a different workflow);
+#     no `pulp-sdk-*-*.tar.gz`, no `pulp-cli-*` archives.
+#   - v0.74.1: no GitHub release at all. `pulp sdk install --version
+#     0.74.1` 404s.
+# In both cases there is NO existing alert — nothing to tell the repo
+# owner that the SDK/CLI artifacts are missing. This watchdog opens a
+# tracking issue when release-cli concludes failure for a tag, and
+# auto-closes it when the SDK/CLI assets are present on the
+# corresponding GitHub release.
+#
+# Design notes:
+# - Triggers on `workflow_run` completion for `release-cli.yml`. We
+#   fire on success too, because a partial-matrix success can still
+#   leave assets missing (one matrix leg failed in build-cli but the
+#   release job ran with whatever artifacts uploaded).
+# - Tracking issue title is keyed on the tag: one tracker per
+#   release. (auto-release-watchdog uses a single global tracker; we
+#   need per-tag granularity because a single bad tag's tarballs can
+#   be backfilled independently via `gh workflow run release-cli.yml
+#   --ref vX.Y.Z`.)
+# - Closes a tracker only when the GitHub release exists AND has at
+#   least one `pulp-sdk-*-*.tar.gz` asset attached.
+# - Mirrors the file shape and style of auto-release-watchdog.yml so
+#   future drift between the two stays obvious.
+
+on:
+  workflow_run:
+    workflows: ["Release CLI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: release-cli-watchdog-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    name: Alert on release-cli outcome
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+
+    steps:
+      - name: Determine release tag for this run
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # release-cli.yml triggers on `push: tags: ['v*']` and
+          # `workflow_dispatch`. In both cases head_branch carries the
+          # tag name (for tag-push, GitHub puts the tag in head_branch;
+          # for workflow_dispatch the user-supplied ref is the tag).
+          # If we can't extract a tag-shaped value, bail without an
+          # alert — this prevents non-tag runs (e.g. someone pushed a
+          # branch that happens to match release-cli's filter) from
+          # opening spurious trackers.
+          tag=""
+          if [[ "$RUN_BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
+              tag="$RUN_BRANCH"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag='$tag' from head_branch='$RUN_BRANCH'."
+
+      - name: Skip non-tag runs
+        if: steps.tag.outputs.tag == ''
+        run: |
+          echo "release-cli ran for a non-tag ref ($RUN_BRANCH) — nothing to watchdog."
+
+      - name: Inspect release assets for tag
+        if: steps.tag.outputs.tag != ''
+        id: assets
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+
+          # Does the GitHub release exist for this tag?
+          if gh release view "$TAG" --repo "$repo" --json tagName \
+                  >/dev/null 2>&1; then
+              release_exists=true
+          else
+              release_exists=false
+          fi
+
+          sdk_count=0
+          cli_count=0
+          if [ "$release_exists" = "true" ]; then
+              assets_json=$(
+                  gh release view "$TAG" --repo "$repo" \
+                      --json assets --jq '.assets[].name'
+              )
+              sdk_count=$(echo "$assets_json" | grep -cE '^pulp-sdk-.*\.(tar\.gz|zip)$' || true)
+              cli_count=$(echo "$assets_json" | grep -cE '^pulp-(darwin|linux|windows)-.*\.(tar\.gz|zip)$' || true)
+          fi
+
+          echo "release_exists=$release_exists" >> "$GITHUB_OUTPUT"
+          echo "sdk_count=$sdk_count"           >> "$GITHUB_OUTPUT"
+          echo "cli_count=$cli_count"           >> "$GITHUB_OUTPUT"
+          echo "Release exists=$release_exists, SDK assets=$sdk_count, CLI assets=$cli_count for $TAG."
+
+      - name: Maintain tracking issue
+        if: steps.tag.outputs.tag != ''
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_EXISTS: ${{ steps.assets.outputs.release_exists }}
+          SDK_COUNT: ${{ steps.assets.outputs.sdk_count }}
+          CLI_COUNT: ${{ steps.assets.outputs.cli_count }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+
+          title="release-cli failed for ${TAG} — SDK/CLI artifacts may be missing"
+
+          # Look up tracker in BOTH open and closed state so a returning
+          # green run can close an existing tracker (mirror of #475
+          # close-path pattern, same as auto-release-watchdog).
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          # Closure path: assets are present.
+          if [ "$RELEASE_EXISTS" = "true" ] && [ "$SDK_COUNT" -gt 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Assets recovered for $TAG — closing tracker #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "release-cli for ${TAG} now reports release present with SDK_COUNT=${SDK_COUNT}, CLI_COUNT=${CLI_COUNT}. Closing. Run: ${RUN_URL}"
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "Assets present for $TAG and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          # Alert path: workflow concluded but assets are NOT present.
+          # Include the case where conclusion=success but assets are
+          # missing — that's the silent-failure pattern from #1375
+          # (v0.74.0: release exists with plugin .pkg only, no SDK).
+          if [ "$RUN_CONCLUSION" = "success" ] && [ "$RELEASE_EXISTS" = "true" ] && [ "$SDK_COUNT" -eq 0 ]; then
+              kind="success_with_missing_assets"
+          elif [ "$RUN_CONCLUSION" = "failure" ]; then
+              kind="run_failure"
+          elif [ "$RELEASE_EXISTS" = "false" ]; then
+              kind="no_release"
+          else
+              # Run concluded but conclusion is something we don't act
+              # on (e.g. cancelled). Don't open a tracker — release
+              # cadence check (Layer 3) will catch a stranded tag with
+              # no release within 45 minutes.
+              echo "Conclusion=$RUN_CONCLUSION assets=$SDK_COUNT — not opening tracker."
+              exit 0
+          fi
+
+          {
+            echo "_Auto-generated by \`.github/workflows/release-cli-watchdog.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            echo "**Tag:** \`${TAG}\`"
+            echo "**release-cli run:** ${RUN_URL}"
+            echo "**Run conclusion:** ${RUN_CONCLUSION}"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo "**Trigger:** ${RUN_EVENT}"
+            echo "**GitHub release exists:** ${RELEASE_EXISTS}"
+            echo "**SDK tarballs attached:** ${SDK_COUNT}"
+            echo "**CLI archives attached:** ${CLI_COUNT}"
+            echo
+            case "$kind" in
+              run_failure)
+                echo "**release-cli concluded \`failure\`.** A matrix leg likely failed in"
+                echo "\`build-cli\` (most often the shared-cache priming step on Windows-arm64,"
+                echo "which exits 127 on a transient PATH/shell hiccup — see #1375)."
+                echo "If the failure was the priming flake, the natural fix is to retrigger"
+                echo "\`release-cli.yml\` against the existing tag:"
+                ;;
+              success_with_missing_assets)
+                echo "**release-cli concluded \`success\` BUT the \`${TAG}\` release has no"
+                echo "\`pulp-sdk-*\` tarballs attached.** This is the v0.74.0 pattern —"
+                echo "\`sign-and-release.yml\` published the plugin .pkg files to the release,"
+                echo "but \`release-cli.yml\` failed mid-matrix and uploaded no SDK/CLI artifacts."
+                echo "Retrigger \`release-cli.yml\` against the tag to backfill:"
+                ;;
+              no_release)
+                echo "**No GitHub release exists for \`${TAG}\` yet.** \`release-cli.yml\` is"
+                echo "what creates the GitHub release object — its \`release\` job runs only"
+                echo "after \`build-cli\` and \`smoke-cli\` succeed across the matrix. If those"
+                echo "failed, no release got created. Retrigger \`release-cli.yml\` against the"
+                echo "tag to publish:"
+                ;;
+            esac
+            echo
+            echo "\`\`\`"
+            echo "gh workflow run release-cli.yml --ref ${TAG} -f version=${TAG}"
+            echo "\`\`\`"
+            echo
+            echo "_This tracker auto-closes when the release exists with at least one"
+            echo "\`pulp-sdk-*\` asset attached._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue for $TAG."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label bug,ci,blocks-release 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing} for $TAG."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              if [ "$existing_state" = "CLOSED" ]; then
+                  gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+              fi
+          fi

@@ -289,8 +289,8 @@ shift.
 Build and validate a VST3 bundle:
 
 ```bash
-./build/tools/cli/pulp build
-./build/tools/cli/pulp validate         # runs pluginval --strictness-level 5
+./build/pulp build
+./build/pulp validate         # runs pluginval --strictness-level 5
 ```
 
 Direct `pluginval` invocation (matches what `cmd_validate.cpp` uses):

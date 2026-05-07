@@ -35,7 +35,7 @@ If you only need monophonic aftertouch or a global mod wheel, plain
 ### 1. Scaffold with `--mpe`
 
 ```bash
-./build/tools/cli/pulp create MySynth --type instrument --mpe
+./build/pulp create MySynth --type instrument --mpe
 ```
 
 The CLI post-processes the generated descriptor to add

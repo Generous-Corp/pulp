@@ -70,8 +70,8 @@ pytest tools/sandbox-e2e/
 pytest tools/sandbox-e2e/ -m "plugin_surface or rollback or parity"
 
 # pin specific binaries (useful in CI and when iterating on a branch)
-PULP_CPP_BINARY_FOR_TEST=/path/to/pulp \
-PULP_RS_BINARY_FOR_TEST=/path/to/pulp-rs \
+PULP_CPP_BINARY_FOR_TEST=/path/to/pulp-cpp \
+PULP_RS_BINARY_FOR_TEST=/path/to/pulp \
     pytest tools/sandbox-e2e/
 ```
 
@@ -82,10 +82,10 @@ PULP_RS_BINARY_FOR_TEST=/path/to/pulp-rs \
 1. `PULP_CPP_BINARY_FOR_TEST` / `PULP_RS_BINARY_FOR_TEST` env
    overrides
 2. Build artifacts:
-   - C++: `build/tools/cli/pulp`
-   - Rust: `experimental/pulp-rs/target/release/pulp-rs`
-3. Fallback for C++: `~/.pulp/bin/pulp` (the user's installed binary,
-   copied into the sandbox — never invoked in place)
+   - C++: `build/tools/cli/pulp-cpp` (`build/tools/cli/pulp` on old branches)
+   - Rust: `experimental/pulp-rs/target/release/pulp`
+3. Fallback for C++: `~/.pulp/bin/pulp-cpp` (`~/.pulp/bin/pulp` on old
+   branches), copied into the sandbox — never invoked in place
 4. Sibling-worktree fallback for Rust (looks under `../pulp*`)
 
 If neither is found, the relevant tests `pytest.skip(...)` with a

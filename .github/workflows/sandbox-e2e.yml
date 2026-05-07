@@ -6,9 +6,9 @@
 # but gracefully handles the case where either isn't buildable on this
 # branch / OS:
 #
-#   - `experimental/pulp-rs/` only exists on `explore/rust-cli-prototype`
-#     (or after its Phase 8 merge). When the dir is absent, skip the
-#     Rust build and let the harness auto-skip any Rust-dependent test.
+#   - `experimental/pulp-rs/` only exists after Phase 8 prep lands. When
+#     the dir is absent, skip the Rust build and let the harness
+#     auto-skip any Rust-dependent test.
 #   - Linux needs apt deps for the C++ build (ALSA / X11 / Wayland via
 #     SDL3). We install the minimum set; if the build still fails, that
 #     regression is worth catching and not a sandbox-harness problem.
@@ -93,10 +93,12 @@ jobs:
             -DPULP_BUILD_TESTS=OFF \
             -DPULP_BUILD_EXAMPLES=OFF
           cmake --build build --target pulp-cli --parallel
-          if [[ -x "$PWD/build/tools/cli/pulp" ]]; then
+          if [[ -x "$PWD/build/tools/cli/pulp-cpp" ]]; then
+            echo "bin=$PWD/build/tools/cli/pulp-cpp" >> "$GITHUB_OUTPUT"
+          elif [[ -x "$PWD/build/tools/cli/pulp" ]]; then
             echo "bin=$PWD/build/tools/cli/pulp" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning ::C++ build did not produce build/tools/cli/pulp; Rust-dependent tests will skip"
+            echo "::warning ::C++ build did not produce build/tools/cli/pulp-cpp or build/tools/cli/pulp; Rust-dependent tests will skip"
           fi
         continue-on-error: true
 
@@ -106,11 +108,11 @@ jobs:
         working-directory: experimental/pulp-rs
         run: |
           set -o pipefail
-          cargo build --release --bin pulp-rs
-          if [[ -x "$PWD/target/release/pulp-rs" ]]; then
-            echo "bin=$PWD/target/release/pulp-rs" >> "$GITHUB_OUTPUT"
+          cargo build --release --bin pulp
+          if [[ -x "$PWD/target/release/pulp" ]]; then
+            echo "bin=$PWD/target/release/pulp" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning ::Rust build did not produce target/release/pulp-rs"
+            echo "::warning ::Rust build did not produce target/release/pulp"
           fi
         continue-on-error: true
 

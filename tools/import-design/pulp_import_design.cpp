@@ -5,6 +5,7 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/state/store.hpp>
+#include "import_detect.hpp"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -53,6 +54,15 @@ static void print_usage() {
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
+    std::cout << "  --detect-only     Detect (source, format-version, parser-version) for\n";
+    std::cout << "                    --file or --directory <path> against compat.json without\n";
+    std::cout << "                    parsing. Prints match counts and confidence.\n";
+    std::cout << "  --directory <p>   Path to a directory export (alternative to --file).\n";
+    std::cout << "  --compat <path>   compat.json override (default: discover from cwd / repo root).\n";
+    std::cout << "  --report-new-format\n";
+    std::cout << "                    Emit a fingerprint-diff JSON suitable for hand-editing\n";
+    std::cout << "                    into a new compat.json[imports/<source>/detected-formats]\n";
+    std::cout << "                    entry. Implies --detect-only.\n";
     std::cout << "  --help            Show this help\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
@@ -122,6 +132,11 @@ int main(int argc, char* argv[]) {
     bool execute_bundle = false;                         // pulp #468 native-runtime path
     std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
     bool emit_classnames = true;                          // default on for --from claude
+    // pulp #1031 — versioned detect surface
+    bool detect_only = false;
+    bool report_new_format = false;
+    std::string input_directory;                          // --directory: alternative to --file
+    std::string compat_override;                          // --compat: explicit compat.json path
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -189,6 +204,15 @@ int main(int argc, char* argv[]) {
             if (what == "classnames") emit_classnames = true;
         } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
             emit_classnames = false;
+        } else if (std::strcmp(argv[i], "--detect-only") == 0) {
+            detect_only = true;
+        } else if (std::strcmp(argv[i], "--report-new-format") == 0) {
+            report_new_format = true;
+            detect_only = true;
+        } else if (std::strcmp(argv[i], "--directory") == 0 && i + 1 < argc) {
+            input_directory = argv[++i];
+        } else if (std::strcmp(argv[i], "--compat") == 0 && i + 1 < argc) {
+            compat_override = argv[++i];
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
@@ -222,6 +246,90 @@ int main(int argc, char* argv[]) {
         if (!write_file(tokens_file, w3c)) return 1;
         std::cout << "Exported " << (theme.colors.size() + theme.dimensions.size() + theme.strings.size())
                   << " tokens → " << tokens_file << "\n";
+        return 0;
+    }
+
+    // ── pulp #1031 — versioned detect-only path ─────────────────────────
+    // Runs against compat.json without invoking the source parsers.
+    if (detect_only) {
+        namespace det = pulp::import_detect;
+
+        std::string scan_path = input_file.empty() ? input_directory : input_file;
+        if (scan_path.empty()) {
+            std::cerr << "Error: --detect-only requires --file <path> or --directory <path>\n";
+            return 1;
+        }
+        if (!fs::exists(scan_path)) {
+            std::cerr << "Error: path does not exist: " << scan_path << "\n";
+            return 1;
+        }
+
+        // Resolve compat.json — explicit override > walk parents > cwd.
+        fs::path compat_path;
+        if (!compat_override.empty()) {
+            compat_path = compat_override;
+        } else {
+            fs::path start = fs::is_directory(scan_path)
+                ? fs::path(scan_path)
+                : fs::path(scan_path).parent_path();
+            if (start.empty()) start = fs::current_path();
+            compat_path = det::find_compat_json(start);
+            if (compat_path.empty())
+                compat_path = det::find_compat_json(fs::current_path());
+        }
+        if (compat_path.empty() || !fs::exists(compat_path)) {
+            std::cerr << "Error: compat.json not found"
+                         " (pass --compat <path> or run from a Pulp checkout)\n";
+            return 1;
+        }
+
+        auto manifest_text = read_file(compat_path.string());
+        auto manifest = det::parse_compat_json(manifest_text);
+        if (!manifest) {
+            std::cerr << "Error: malformed compat.json at " << compat_path << "\n";
+            return 1;
+        }
+
+        auto snap = det::snapshot_input(scan_path);
+        auto result = det::detect(*manifest, snap);
+
+        if (report_new_format) {
+            auto report = det::build_new_format_report(*manifest, snap, result);
+            std::cout << det::render_new_format_json(report);
+            return 0;
+        }
+
+        if (result.source.empty()) {
+            std::cout << "no detected source for " << scan_path << "\n";
+            std::cout << "  compat.json: " << compat_path.string() << " (schema "
+                      << manifest->compat_schema_version << ")\n";
+            return 2;  // distinct from generic failure (1)
+        }
+
+        std::cout << "detected source: " << result.source << "\n";
+        std::cout << "  format-version: " << result.format_version << "\n";
+        std::cout << "  parser-version: " << result.parser_version << "\n";
+        std::cout << "  fingerprint match: " << result.matched_clauses
+                  << "/" << result.total_clauses;
+        if (!result.matched_kinds.empty()) {
+            std::cout << " (";
+            for (size_t i = 0; i < result.matched_kinds.size(); ++i) {
+                if (i) std::cout << ", ";
+                std::cout << result.matched_kinds[i];
+            }
+            std::cout << ")";
+        }
+        std::cout << "\n";
+        std::cout << "  confidence: " << result.confidence_pct << "%\n";
+
+        if (result.confidence_pct < 80) {
+            std::cout << "warning: confidence below 80% — this export may be a newer\n"
+                      << "         format-version than Pulp recognises. Pulp will use\n"
+                      << "         the most-recent matching parser; gaps surface in\n"
+                      << "         import-report.json. To file a new format detector:\n"
+                      << "  pulp import-design --file " << scan_path
+                      << " --report-new-format\n";
+        }
         return 0;
     }
 

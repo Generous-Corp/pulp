@@ -202,8 +202,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         return false;
     }
 
-    const uint32_t w = bridge->size_hints().preferred_width;
-    const uint32_t h = bridge->size_hints().preferred_height;
+    const auto& size_hints = bridge->size_hints();
+    const uint32_t w = size_hints.preferred_width;
+    const uint32_t h = size_hints.preferred_height;
     auto desc = processor_->descriptor();
 
     auto chrome = detail::make_standalone_editor_chrome(
@@ -229,12 +230,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto* settings_ptr = chrome.settings_panel();
     auto& window_root = chrome.window_root();
 
-    view::WindowOptions opts;
-    opts.title = desc.name + " — Standalone";
-    opts.width = static_cast<float>(w);
-    opts.height = static_cast<float>(h) + chrome.extra_window_height();
-    opts.resizable = true;
-    opts.use_gpu = use_gpu;
+    // Build WindowOptions from the bridge's cached ViewSize hints so
+    // min_width/min_height propagate to platform window hosts that
+    // honor them (#1362).
+    auto opts = detail::make_standalone_window_options(
+        size_hints, chrome, desc.name + " — Standalone", use_gpu);
 
     auto window = view::WindowHost::create(window_root, opts);
     if (!window) {

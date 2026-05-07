@@ -53,12 +53,50 @@ jobs:
         id: guard
         shell: bash
         run: |
-          # Inspect the tip commit for Release: skip or Revert subject.
+          # Inspect the tip commit for Release: skip / Version-Bump: skip
+          # / Revert subject.
           subject=$(git log -1 --format=%s HEAD)
           body=$(git log -1 --format=%B HEAD)
 
           if echo "$body" | git interpret-trailers --parse | grep -iq '^release: skip'; then
               echo "Release: skip trailer present — no tagging."
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          # pulp #1308 follow-up — honor `Version-Bump: skip reason="..."`
+          # the same way `Release: skip` is honored. Authors use this
+          # trailer for fix/feat changes that genuinely don't bump the
+          # SDK or plugin (e.g. JS-only changes to packages/pulp-react/
+          # which versions independently via npm, or docs fixups
+          # accidentally typed as `fix:`). Without honoring it, the
+          # stranded-fix-detector at the bottom of this workflow fires
+          # and opens a tracker issue requiring a follow-up bump PR
+          # — but the author already declared no bump is needed and a
+          # follow-up bump would synthesize a release the consumers
+          # don't actually need.
+          #
+          # The version-bump-required gate at PR time
+          # (.github/workflows/version-skill-check.yml) ALREADY accepts
+          # this trailer to let fix/feat merges through. Honoring it
+          # here keeps the two layers in lock-step instead of having
+          # the post-merge layer second-guess the explicit opt-out.
+          #
+          # Match shape: unscoped `Version-Bump: skip reason="<non-empty>"` ONLY.
+          # Per-surface forms like `Version-Bump: sdk=skip` mean "skip
+          # this surface's bump" but don't opt out of the whole release
+          # gate (they're handled by the per-surface verdict pipeline
+          # in version_bump_check.py). Mirrors the same matching shape
+          # as `_range_has_version_bump_skip_trailer()` in
+          # tools/scripts/version_bump_check.py — including the
+          # requirement that the reason be NON-EMPTY (Codex P2 on the
+          # original #1310 fix; the earlier regex allowed bare
+          # `reason=` with no value, but the Python gate rejects it).
+          # If the two layers disagreed on validity, an author could
+          # write `reason=""` that passes here but fails at PR time
+          # (or vice-versa) — making the bypass inconsistent.
+          if echo "$body" | git interpret-trailers --parse | \
+              grep -iE '^version-bump:[[:space:]]+skip\b.*reason[[:space:]]*=[[:space:]]*"[^"]+"'; then
+              echo "Version-Bump: skip trailer present — no tagging."
               echo "skip=1" >> "$GITHUB_OUTPUT"
               exit 0
           fi

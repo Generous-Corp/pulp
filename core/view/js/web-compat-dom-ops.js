@@ -38,8 +38,33 @@ if (!Element.prototype.appendChild ||
         __domAppend(this._id, child._id, child.tagName.toLowerCase());
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
+        // pulp #1147 — replay presentational `width`/`height` HTML
+        // attributes that were captured before mount. React/JSX commits
+        // setAttribute() before appendChild(), and the C++ __domAppend
+        // path doesn't see those attributes — so a fresh SVG arrives
+        // here as 0×0 and the row collapses. Style flushAll() doesn't
+        // cover attribute paths, only `style.*`. Apply only to layout-
+        // leaf media tags so semantic block elements aren't surprised
+        // by stale presentational hints.
+        if (typeof __replayMediaAttributes__ === "function") {
+            __replayMediaAttributes__(child);
+        }
         child.style._flushAll();
         child._reapplyStylesheets();
+        // pulp #1323 — `<style>` elements receive CSS via either direct
+        // textContent assignment or child Text nodes (React's reconciler
+        // takes the second path). When a Text-bearing child lands under a
+        // `<style>` parent, route the aggregated text through the CSS
+        // translator so `:hover` rules get registered.
+        if ((this.tagName === "STYLE" || this._isStyleElement)
+                && typeof _processStyleElement === "function") {
+            var aggregated = "";
+            for (var ci = 0; ci < this._children.length; ci++) {
+                aggregated += this._children[ci]._textContent || "";
+            }
+            this._textContent = aggregated;
+            _processStyleElement(this);
+        }
         return child;
     };
     Element.prototype.appendChild.__pulp_dom_ops__ = true;

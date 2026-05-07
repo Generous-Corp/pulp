@@ -1,8 +1,11 @@
 // Automated test for CanvasWidget (JS-driven custom drawing)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <cmath>
+#include <limits>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -352,12 +355,22 @@ TEST_CASE("CanvasWidget partial fillRect leaves untouched pixels transparent",
     REQUIRE(outside.r == 0);
 }
 
-TEST_CASE("CanvasWidget clearRect actually clears Skia pixels",
-          "[canvas_widget][skia][issue-929]") {
-    // Pre-fill the surface with opaque white (simulates a parent's paint
-    // pass having already drawn the underlying area). A subsequent
-    // clearRect issued through CanvasWidget must replace those pixels
-    // with transparent black, not SrcOver-blend a transparent fill.
+TEST_CASE("CanvasWidget clearRect zeros its own backing store, not the parent",
+          "[canvas_widget][skia][issue-929][issue-1368]") {
+    // pulp #1368 contract update: each CanvasWidget paints into its own
+    // save_layer-backed offscreen so JS-driven clearRect (kClear blend)
+    // can only zero THIS canvas's backing store. The parent surface is
+    // untouched by the clear; on layer restore the empty layer composites
+    // back as a no-op SrcOver and the parent pixels survive.
+    //
+    // Pre-#1368, clearRect was emitted directly on the inbound parent
+    // surface, so it nuked sibling-painted pixels. The check we now want:
+    //
+    //   parent surface pre-painted white
+    //     → CanvasWidget with clearRect over its full bounds runs alone
+    //     → parent stays WHITE (HTML <canvas> spec — sibling canvases
+    //       have their own backing stores, so clear on canvas A cannot
+    //       affect the parent surface or canvas B's content).
     SkImageInfo info = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType,
                                          kPremul_SkAlphaType,
                                          SkColorSpace::MakeSRGB());
@@ -375,14 +388,17 @@ TEST_CASE("CanvasWidget clearRect actually clears Skia pixels",
     cw.add_command(c);
     cw.paint(canvas);
 
+    // The parent surface's white must be preserved because the clearRect
+    // landed inside the canvas widget's per-canvas backing store and the
+    // empty layer composited back as a SrcOver no-op.
     auto px = sample_pixel(surface.get(), 16, 16);
-    INFO("Cleared pixel rgba=("
+    INFO("Pixel after canvas clearRect rgba=("
          << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
-    REQUIRE(px.a == 0);
-    REQUIRE(px.r == 0);
-    REQUIRE(px.g == 0);
-    REQUIRE(px.b == 0);
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 255);
+    REQUIRE(px.b == 255);
 }
 
 // pulp #949 — FilterBank-style repro: a parent View paints a dark navy
@@ -932,4 +948,1130 @@ TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the brid
         if (is_green) saw_green_full_fill = true;
     }
     REQUIRE(saw_green_full_fill);
+}
+
+// ── pulp #1368 — CanvasWidget::paint balances save/restore across frames ──
+//
+// Spectr's filterbank uses two `<canvas>` widgets in identical configuration.
+// One paints visibly, the other doesn't. The visible one (overlay sibling)
+// runs after the invisible one (main sibling). Fillrects on the invisible
+// canvas with huge bounds tinted the title-bar region above the canvas —
+// strongly suggesting a transform leak: an unrestored `ctx.save()` from a
+// prior frame's draw script left GState (transform, clip) on the canvas
+// stack, which the parent View's outer `canvas.restore()` can't pop because
+// it only pops one level.
+//
+// Defense: CanvasWidget::paint snapshots `save_count()` at entry and calls
+// `restore_to_count()` after the JS replay so any leftover save is dropped
+// and the parent always sees the canvas at the depth it expects.
+
+TEST_CASE("CanvasWidget::paint balances save/restore even when JS misses restore",
+          "[canvas_widget][issue-1368]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    // Simulate an unbalanced JS draw script: ctx.save() + ctx.scale(2,2)
+    // followed by a fillRect, but the matching ctx.restore() is missing
+    // (e.g., the JS hit an early-return path).
+    CanvasDrawCmd s;
+    s.type = CanvasDrawCmd::Type::save;
+    cw.add_command(s);
+
+    CanvasDrawCmd sc;
+    sc.type = CanvasDrawCmd::Type::scale;
+    sc.x = 2.0f; sc.y = 2.0f;
+    cw.add_command(sc);
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // NOTE: no matching restore command — JS bug.
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    const int depth_after = rc.save_count();
+
+    // The whole point of the fix: even with an unbalanced draw script,
+    // the canvas's save-stack depth must return to where it started so
+    // the parent View's outer save/restore is balanced and no GState
+    // leaks onto sibling widgets.
+    REQUIRE(depth_after == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint twice with unbalanced JS does not accumulate depth",
+          "[canvas_widget][issue-1368]") {
+    // Same scenario painted twice — without the fix the second frame
+    // would land at depth 2 (1 leaked save per frame). Asserting depth
+    // stays at the entry baseline across multiple frames is the regression
+    // guard for the Spectr filterbank repro.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd s; s.type = CanvasDrawCmd::Type::save; cw.add_command(s);
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 10; r.h = 10;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // Deliberately no restore.
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    cw.paint(rc);
+    cw.paint(rc);
+    REQUIRE(rc.save_count() == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint preserves baseline depth even with extra restores",
+          "[canvas_widget][issue-1368]") {
+    // Inverse pathology: JS calls ctx.restore() more times than it
+    // ctx.save()'d. RecordingCanvas guards depth at zero so the over-pop
+    // doesn't underflow; CanvasWidget::paint must still leave the depth
+    // at exactly the captured entry depth, not below.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd r1;
+    r1.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(r1);
+    CanvasDrawCmd r2;
+    r2.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(r2);
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    REQUIRE(rc.save_count() == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint nested under a parent save still balances",
+          "[canvas_widget][issue-1368]") {
+    // Mimic View::paint_all wrapping: outer save → bounds translate → call
+    // CanvasWidget::paint → outer restore. With an unbalanced JS save
+    // inside paint(), the outer restore must still bring the canvas back
+    // to exactly the depth that existed before the wrapper's save() was
+    // pushed. This is the Spectr filterbank invariant — sibling widgets
+    // painted after this canvas must see a clean parent canvas state.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd s; s.type = CanvasDrawCmd::Type::save; cw.add_command(s);
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // No restore in the JS list — the unbalanced case.
+
+    const int depth_at_root = rc.save_count();
+    rc.save();                  // outer wrapper, mirrors View::paint_all
+    rc.translate(10.0f, 20.0f); // bounds translate
+    cw.paint(rc);
+    rc.restore();               // outer wrapper restore
+
+    REQUIRE(rc.save_count() == depth_at_root);
+}
+
+// ── pulp #1368 — per-canvas backing-store isolation via save_layer ─────
+//
+// Root cause beyond the save/restore depth defense above: JS-driven
+// `clearRect` lowers to a kClear blend (SkBlendMode::kClear /
+// CGContextClearRect) which unconditionally zeros destination texels
+// regardless of source alpha. Without per-canvas isolation the kClear
+// hits the shared parent surface and erases pixels that sibling
+// canvases just painted. HTML <canvas> semantics require each <canvas>
+// to have its own backing store; the fix wraps every CanvasWidget
+// paint in `save_layer()` over its local bounds so kClear can only
+// affect the layer, then `restore()` composites the layer back into
+// the parent via SrcOver — preserving sibling pixels.
+//
+// These tests assert the structural property at the recording-canvas
+// level (depth bracketing, save count contribution) so they run on
+// every platform without needing Skia. The pixel-level proof lives
+// in the [skia] tests below.
+
+TEST_CASE("CanvasWidget::paint opens a per-canvas save_layer over its bounds",
+          "[canvas_widget][issue-1368]") {
+    // The save_layer() default falls back to save() on RecordingCanvas,
+    // so the depth must rise by exactly one between entry and the JS
+    // replay. We sample the depth mid-replay using a draw command we
+    // queue between the entry point and the natural end of paint().
+    // RecordingCanvas tracks save_depth_ via save() / restore(), so the
+    // depth observable to a queued sub-command would be entry_depth + 1
+    // when the layer is open.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 0, 255};
+    cw.add_command(r);
+
+    REQUIRE(rc.save_count() == 0);
+    cw.paint(rc);
+    // Post-paint depth returns to entry depth — bracketed correctly.
+    REQUIRE(rc.save_count() == 0);
+
+    // The recorded stream must contain exactly one save (the layer push)
+    // attributable to the canvas widget itself. Future state-tracking
+    // additions to paint() may add nested saves; but at minimum, paint()
+    // must contribute a leading save. Walk the recorded commands,
+    // verify a `save` appears before the queued fill_rect.
+    int save_idx = -1, fill_idx = -1;
+    int idx = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (save_idx < 0 && cmd.type == DrawCommand::Type::save) save_idx = idx;
+        if (cmd.type == DrawCommand::Type::fill_rect) { fill_idx = idx; break; }
+        ++idx;
+    }
+    REQUIRE(save_idx >= 0);
+    REQUIRE(fill_idx > save_idx);
+}
+
+TEST_CASE("CanvasWidget::paint skips save_layer when bounds are degenerate",
+          "[canvas_widget][issue-1368]") {
+    // A zero-size canvas widget would open a degenerate layer if we
+    // unconditionally pushed save_layer. Skip the layer in that case
+    // — there is nothing to isolate, and Skia rejects zero-area
+    // saveLayer in some configurations. Confirm by asserting no `save`
+    // is emitted when the JS draw queue is empty AND bounds are 0.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 0, 0});
+
+    cw.paint(rc);
+
+    // No layer push, no draws, no saves. Pre-fix this also held; the
+    // assertion now also holds post-fix because of the degenerate-bounds
+    // guard in CanvasWidget::paint.
+    int save_count_in_stream = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::save) ++save_count_in_stream;
+    }
+    REQUIRE(save_count_in_stream == 0);
+}
+
+TEST_CASE("Two sibling CanvasWidgets each open their own backing store",
+          "[canvas_widget][issue-1368]") {
+    // Spectr filterbank scenario in command-stream form: two canvas
+    // widgets share a parent View and paint sequentially. Each one's
+    // paint() must contribute its own save (the per-canvas layer
+    // push). Without the fix sibling-2's clearRect would hit the
+    // parent surface; the structural guard here is "each canvas
+    // contributes the bracketing save" — pixel-level isolation is
+    // covered by the [skia] tests below.
+    RecordingCanvas rc;
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = {255, 0, 0, 255};
+        cw1->add_command(r);
+    }
+
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        // Sibling 2 starts with a clearRect — the smoking-gun bug pattern.
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw2->add_command(c);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+
+    parent.paint_all(rc);
+
+    // Count clear_rects and saves AFTER the first canvas's fill_rect
+    // landed. Because each canvas widget opens its own layer, the
+    // clear_rect must appear AFTER an additional save (the second
+    // canvas's layer push) and before the matching restores. If the
+    // layer were not pushed, the clear_rect would land on the parent
+    // surface — outside any save/restore bracket attributable to
+    // CanvasWidget::paint.
+    int first_fill = -1;
+    int clear_after_first_fill = -1;
+    int save_between = 0;
+    int idx = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (first_fill < 0 && cmd.type == DrawCommand::Type::fill_rect) {
+            first_fill = idx;
+        } else if (first_fill >= 0 && cmd.type == DrawCommand::Type::save) {
+            ++save_between;
+        } else if (first_fill >= 0 && clear_after_first_fill < 0 &&
+                   cmd.type == DrawCommand::Type::clear_rect) {
+            clear_after_first_fill = idx;
+        }
+        ++idx;
+    }
+    REQUIRE(first_fill >= 0);
+    REQUIRE(clear_after_first_fill > first_fill);
+    // Between the first fill_rect and the second canvas's clear_rect,
+    // there must be at least one extra save — the second canvas's
+    // per-canvas backing store layer.
+    REQUIRE(save_between >= 1);
+}
+
+#ifdef PULP_HAS_SKIA
+
+// pulp #1368 — visual sibling isolation. Two CanvasWidgets paint
+// against a shared parent surface; sibling-2 starts its frame with
+// clearRect over its full bounds. Pre-fix, the clearRect zeroed the
+// shared parent texels and erased sibling-1's pixels. Post-fix, each
+// canvas paints into its own save_layer-backed offscreen so kClear
+// only affects the layer and sibling-1's draws survive.
+TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    // Sibling 1: paints opaque red across its bounds.
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 0, 255);
+        cw1->add_command(r);
+    }
+
+    // Sibling 2: starts its frame with clearRect over its full bounds
+    // (mirrors a JS canvas idiom). Pre-fix this kClear nuked sibling 1's
+    // red on the shared parent. Post-fix, kClear is contained to
+    // sibling 2's own layer and the parent surface keeps sibling 1's red.
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw2->add_command(c);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+    parent.paint_all(canvas);
+
+    auto px = sample_pixel(surface.get(), 32, 32);
+    INFO("Sibling-isolation pixel rgba=("
+         << int(px.r) << "," << int(px.g) << ","
+         << int(px.b) << "," << int(px.a) << ")");
+    // Sibling 1's red survived sibling 2's clearRect.
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 0);
+    REQUIRE(px.b == 0);
+}
+
+// pulp #1368 — destination-out compositing must also be contained.
+// `globalCompositeOperation = "destination-out"` punches alpha holes
+// in the destination. Without per-canvas isolation, sibling-2's
+// destination-out fill would punch a hole through sibling-1's pixels
+// on the shared parent surface. With the layer fix, the destination-
+// out lands inside sibling-2's own layer; sibling-1's pixels survive.
+TEST_CASE("Sibling CanvasWidget destination-out does not punch holes in siblings",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(0, 200, 0, 255);  // green
+        cw1->add_command(r);
+    }
+
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        // Switch sibling 2 into destination-out mode and fill — without
+        // the layer this would punch holes through sibling-1's green
+        // on the shared parent surface.
+        CanvasDrawCmd mode;
+        mode.type = CanvasDrawCmd::Type::set_blend_mode;
+        // BlendMode enum value for destination-out — RecordingCanvas /
+        // SkiaCanvas both accept it via set_blend_mode(static_cast<
+        // BlendMode>(int_val)). The exact int doesn't matter for the
+        // test; we just need a punch-through compositing operator.
+        mode.int_val = static_cast<int>(pulp::canvas::Canvas::BlendMode::destination_out);
+        cw2->add_command(mode);
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(0, 0, 0, 255);
+        cw2->add_command(r);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+    parent.paint_all(canvas);
+
+    auto px = sample_pixel(surface.get(), 32, 32);
+    INFO("destination-out isolation pixel rgba=("
+         << int(px.r) << "," << int(px.g) << ","
+         << int(px.b) << "," << int(px.a) << ")");
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 0);
+    REQUIRE(px.g == 200);
+    REQUIRE(px.b == 0);
+}
+
+// pulp #1368 — single-canvas paints should not change output. The
+// per-canvas layer must be visually equivalent to direct-on-parent
+// painting for an isolated canvas; the layer's existence is a
+// correctness fix for the multi-canvas case, not a behaviour change
+// for single-canvas use.
+TEST_CASE("Single CanvasWidget paint is pixel-equivalent with the layer wrap",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 32, 32});
+    parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));
+
+    auto cw = std::make_unique<CanvasWidget>();
+    cw->set_bounds({0, 0, 32, 32});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 32; c.h = 32;
+        cw->add_command(c);
+    }
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 4; r.y = 4; r.w = 24; r.h = 24;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
+        cw->add_command(r);
+    }
+    parent.add_child(std::move(cw));
+    parent.paint_all(canvas);
+
+    // Inside the painted rect: magenta. Pre- and post-#1368 both must
+    // produce magenta here because the layer composites the painted
+    // pixels back onto the parent.
+    auto inside = sample_pixel(surface.get(), 16, 16);
+    REQUIRE(inside.a == 255);
+    REQUIRE(inside.r == 255);
+    REQUIRE(inside.g == 0);
+    REQUIRE(inside.b == 255);
+
+    // In the cleared region (everything in the canvas widget bounds
+    // outside the small fill_rect), the layer is transparent and
+    // composites back over the parent's navy bg. The parent's navy
+    // therefore shows through. Pre-#1368 the kClear leaked onto the
+    // parent surface and would have produced (0,0,0,0) here instead.
+    auto cleared = sample_pixel(surface.get(), 1, 1);
+    INFO("Cleared-region pixel rgba=("
+         << int(cleared.r) << "," << int(cleared.g) << ","
+         << int(cleared.b) << "," << int(cleared.a) << ")");
+    REQUIRE(cleared.a == 255);
+    REQUIRE(cleared.r == 8);
+    REQUIRE(cleared.g == 12);
+    REQUIRE(cleared.b == 24);
+}
+
+#endif  // PULP_HAS_SKIA
+// ── pulp #1368 round 2 — current_transform() snapshot for paint diagnostics ──
+//
+// The Spectr filterbank repro shows pr_1's first-instruction `fillRect(50,50,…)`
+// landing in the title-bar region above the canvas. Either bounds_.y is wrong
+// (Track B layout test) or the inbound CTM has a translation that pushes draws
+// off-window (Track A diagnostic).  Canvas::current_transform() is the new
+// virtual the env-gated `PULP_LOG_CANVAS_PAINT=1` trace reads to log the CTM
+// as it actually exists at paint() entry, so Spectr can paste a per-frame line
+// like
+//   [pulp:canvas-paint] id=pr_1 bounds=(0,0,1320,760) ctm=[1,0,0,1,0,-100]
+// into #1368.  The tests below pin the introspection contract on
+// RecordingCanvas (the only backend exercised in Catch2): identity at start,
+// updated by translate/scale, and reset across save/restore.
+
+TEST_CASE("RecordingCanvas::current_transform tracks identity at start",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 1.0f);
+    REQUIRE(t.b == 0.0f);
+    REQUIRE(t.c == 0.0f);
+    REQUIRE(t.d == 1.0f);
+    REQUIRE(t.e == 0.0f);
+    REQUIRE(t.f == 0.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform reflects translate",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    rc.translate(10.0f, 20.0f);
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 1.0f);
+    REQUIRE(t.d == 1.0f);
+    REQUIRE(t.e == 10.0f);
+    REQUIRE(t.f == 20.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform restores across save/restore",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    rc.save();
+    rc.translate(50.0f, 60.0f);
+    auto inner = rc.current_transform();
+    REQUIRE(inner.e == 50.0f);
+    REQUIRE(inner.f == 60.0f);
+    rc.restore();
+    auto outer = rc.current_transform();
+    REQUIRE(outer.e == 0.0f);
+    REQUIRE(outer.f == 0.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform composes translate + scale",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    // CanvasRenderingContext2D semantics: translate THEN scale in user space
+    // means current = T * S, so a unit-square corner (1,1) maps to (10+2, 20+3).
+    rc.translate(10.0f, 20.0f);
+    rc.scale(2.0f, 3.0f);
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 2.0f);
+    REQUIRE(t.d == 3.0f);
+    REQUIRE(t.e == 10.0f);
+    REQUIRE(t.f == 20.0f);
+}
+
+// ── pulp #1368 round 2 — env-gated paint trace: coverage exercise ───────────
+//
+// PULP_LOG_CANVAS_PAINT=1 is the diagnostic switch Spectr uses to capture
+// per-frame bounds + CTM + cmd_total + per-type summary. The fprintf+map
+// walk in CanvasWidget::paint() is purely instrumentation — guarded behind
+// a single getenv per paint and otherwise a complete no-op. These tests
+// exercise the gated path so diff-coverage isn't blocked by
+// "instrumentation isn't covered" against a behavior change that only
+// surfaces when the env var is set.
+
+#include <cstdlib>
+#include <string>
+
+namespace {
+
+// Cross-platform setenv/unsetenv wrappers — Windows MSVC ships _putenv_s
+// instead of POSIX setenv/unsetenv. The instrumentation tests don't care
+// about thread-safety; both POSIX setenv() and _putenv_s() are documented
+// non-reentrant against getenv() on the same key.
+inline void portable_setenv(const char* key, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(key, value);
+#else
+    ::setenv(key, value, 1);
+#endif
+}
+
+inline void portable_unsetenv(const char* key) {
+#if defined(_WIN32)
+    _putenv_s(key, "");  // empty string clears on Windows
+#else
+    ::unsetenv(key);
+#endif
+}
+
+class ScopedEnv {
+public:
+    ScopedEnv(const char* key, const char* value) : key_(key) {
+        const char* prev = std::getenv(key);
+        prev_value_ = prev ? std::string(prev) : std::string();
+        had_prev_ = prev != nullptr;
+        portable_setenv(key, value);
+    }
+    ~ScopedEnv() {
+        if (had_prev_) portable_setenv(key_, prev_value_.c_str());
+        else portable_unsetenv(key_);
+    }
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+private:
+    const char* key_;
+    std::string prev_value_;
+    bool had_prev_;
+};
+
+} // namespace
+
+TEST_CASE("CanvasWidget::paint logging path runs when PULP_LOG_CANVAS_PAINT=1",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({10, 20, 200, 100});
+
+    // Mix of command types so the per-type tally has multiple entries.
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 0, 255};
+    cw.add_command(r);
+
+    CanvasDrawCmd c;
+    c.type = CanvasDrawCmd::Type::clear_rect;
+    c.x = 5; c.y = 5; c.w = 10; c.h = 10;
+    cw.add_command(c);
+
+    CanvasDrawCmd s;
+    s.type = CanvasDrawCmd::Type::save;
+    cw.add_command(s);
+    CanvasDrawCmd rs;
+    rs.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(rs);
+
+    // Should not throw, should run the env-gated logging block once, and the
+    // command replay must still happen normally on the recording canvas.
+    REQUIRE_NOTHROW(cw.paint(rc));
+
+    // The replay still happens — fill_rect and clear_rect both reach rc.
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::clear_rect) == 1);
+}
+
+// Hit every CanvasDrawCmd::Type case in canvas_cmd_type_name's switch by
+// queueing one command of each type. Coverage of canvas_cmd_type_name is
+// only reached when the env-gated logging path runs over commands_ — so
+// this test sets PULP_LOG_CANVAS_PAINT=1 and enumerates the full type set.
+TEST_CASE("CanvasWidget::paint logging summary covers every CanvasDrawCmd type",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 200});
+
+    auto add = [&](CanvasDrawCmd::Type t) {
+        CanvasDrawCmd c;
+        c.type = t;
+        c.x = 0; c.y = 0; c.w = 10; c.h = 10;
+        c.color = {128, 128, 128, 255};
+        cw.add_command(c);
+    };
+
+    add(CanvasDrawCmd::Type::fill_rect);
+    add(CanvasDrawCmd::Type::stroke_rect);
+    add(CanvasDrawCmd::Type::fill_rounded_rect);
+    add(CanvasDrawCmd::Type::stroke_rounded_rect);
+    add(CanvasDrawCmd::Type::fill_circle);
+    add(CanvasDrawCmd::Type::stroke_circle);
+    add(CanvasDrawCmd::Type::stroke_line);
+    add(CanvasDrawCmd::Type::stroke_arc);
+    add(CanvasDrawCmd::Type::fill_text);
+    add(CanvasDrawCmd::Type::set_font);
+    add(CanvasDrawCmd::Type::set_text_align);
+    add(CanvasDrawCmd::Type::set_text_baseline);
+    add(CanvasDrawCmd::Type::set_fill_color);
+    add(CanvasDrawCmd::Type::set_stroke_color);
+    add(CanvasDrawCmd::Type::set_line_width);
+    add(CanvasDrawCmd::Type::set_line_cap);
+    add(CanvasDrawCmd::Type::set_line_join);
+    add(CanvasDrawCmd::Type::set_global_alpha);
+    add(CanvasDrawCmd::Type::set_blend_mode);
+    add(CanvasDrawCmd::Type::set_fill_gradient_linear);
+    add(CanvasDrawCmd::Type::set_fill_gradient_radial);
+    add(CanvasDrawCmd::Type::clear_fill_gradient);
+    add(CanvasDrawCmd::Type::begin_path);
+    add(CanvasDrawCmd::Type::move_to);
+    add(CanvasDrawCmd::Type::line_to);
+    add(CanvasDrawCmd::Type::quad_to);
+    add(CanvasDrawCmd::Type::cubic_to);
+    add(CanvasDrawCmd::Type::close_path);
+    add(CanvasDrawCmd::Type::fill_path);
+    add(CanvasDrawCmd::Type::stroke_path);
+    add(CanvasDrawCmd::Type::clip_path);
+    // save/restore covered in the previous test
+    add(CanvasDrawCmd::Type::translate);
+    add(CanvasDrawCmd::Type::scale);
+    add(CanvasDrawCmd::Type::rotate);
+    add(CanvasDrawCmd::Type::clip_rect);
+    add(CanvasDrawCmd::Type::set_transform);
+    add(CanvasDrawCmd::Type::clip);
+    add(CanvasDrawCmd::Type::draw_image);
+    add(CanvasDrawCmd::Type::set_line_dash);
+    add(CanvasDrawCmd::Type::put_image_data);
+    add(CanvasDrawCmd::Type::clear);
+    // clear_rect covered in the previous test
+
+    REQUIRE_NOTHROW(cw.paint(rc));
+    // No assertion on rc — some types are no-ops on RecordingCanvas; the
+    // point is that canvas_cmd_type_name's switch covered each case.
+}
+
+TEST_CASE("CanvasWidget::paint logging path is silent when env unset or empty",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    // No env var set — the logging block must be skipped entirely (gated
+    // behind canvas_paint_logging_enabled()).
+    portable_unsetenv("PULP_LOG_CANVAS_PAINT");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 10; r.h = 10;
+    cw.add_command(r);
+
+    REQUIRE_NOTHROW(cw.paint(rc));
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+
+    // "0" / empty also disable.
+    {
+        ScopedEnv g0("PULP_LOG_CANVAS_PAINT", "0");
+        REQUIRE_NOTHROW(cw.paint(rc));
+    }
+    {
+        ScopedEnv ge("PULP_LOG_CANVAS_PAINT", "");
+        REQUIRE_NOTHROW(cw.paint(rc));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// pulp #1387 gap #2 — NaN / Infinity defense at add_command boundary
+// ─────────────────────────────────────────────────────────────────────
+//
+// Spectr's filterbank reproduced this: an off-screen drag computed a
+// gain that briefly went through divide-by-zero on a transient layout
+// (canvas-y/halfH where halfH was 0 mid-resize), feeding NaN into one
+// canvasLineTo call. Skia/CG's coordinate state then carried the NaN
+// for the rest of the frame, painting the bands as solid grey blobs
+// (the same color all subsequent draws inherited from the corrupted
+// transform). One bad coord was enough to taint the whole frame.
+//
+// The defense lives at CanvasWidget::add_command. Sanitization is
+// recording-side (not paint-side) so every backend — Skia GPU, CG
+// CPU, RecordingCanvas, headless capture — gets clean numerics
+// without retrofitting each one.
+
+TEST_CASE("CanvasWidget::add_command sanitizes NaN to 0 (pulp #1387 gap #2)",
+          "[canvas_widget][issue-1387]") {
+    CanvasWidget cw;
+
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::line_to;
+    cmd.x = std::nanf("");
+    cmd.y = 100.0f;
+    cw.add_command(cmd);
+
+    REQUIRE(cw.command_count() == 1);
+    const auto& stored = cw.commands()[0];
+    REQUIRE(stored.x == 0.0f);   // NaN -> 0
+    REQUIRE(stored.y == 100.0f); // finite -> passthrough
+}
+
+TEST_CASE("CanvasWidget::add_command sanitizes ±Infinity to 0",
+          "[canvas_widget][issue-1387]") {
+    CanvasWidget cw;
+
+    {
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::move_to;
+        cmd.x = std::numeric_limits<float>::infinity();
+        cmd.y = 50.0f;
+        cw.add_command(cmd);
+    }
+    {
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::move_to;
+        cmd.x = -std::numeric_limits<float>::infinity();
+        cmd.y = 60.0f;
+        cw.add_command(cmd);
+    }
+
+    REQUIRE(cw.command_count() == 2);
+    REQUIRE(cw.commands()[0].x == 0.0f);
+    REQUIRE(cw.commands()[1].x == 0.0f);
+    REQUIRE(cw.commands()[0].y == 50.0f);
+    REQUIRE(cw.commands()[1].y == 60.0f);
+}
+
+TEST_CASE("CanvasWidget::add_command sanitizes every coord field",
+          "[canvas_widget][issue-1387]") {
+    // Quad / cubic carry x2/y2/x3/y3; rect carries w/h; arc carries extra.
+    // Verify all numeric coord/extra slots are sanitized in one shot.
+    CanvasWidget cw;
+
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::cubic_to;
+    cmd.x  = std::nanf("");
+    cmd.y  = std::nanf("");
+    cmd.x2 = std::nanf("");
+    cmd.y2 = std::nanf("");
+    cmd.x3 = std::nanf("");
+    cmd.y3 = std::nanf("");
+    cmd.w  = std::numeric_limits<float>::infinity();
+    cmd.h  = -std::numeric_limits<float>::infinity();
+    cmd.extra = std::nanf("");
+    cw.add_command(cmd);
+
+    const auto& s = cw.commands()[0];
+    REQUIRE(s.x == 0.0f);
+    REQUIRE(s.y == 0.0f);
+    REQUIRE(s.x2 == 0.0f);
+    REQUIRE(s.y2 == 0.0f);
+    REQUIRE(s.x3 == 0.0f);
+    REQUIRE(s.y3 == 0.0f);
+    REQUIRE(s.w == 0.0f);
+    REQUIRE(s.h == 0.0f);
+    REQUIRE(s.extra == 0.0f);
+}
+
+TEST_CASE("CanvasWidget::add_command sanitizes gradient stop positions",
+          "[canvas_widget][issue-1387]") {
+    // gradient_positions is the only std::vector<float> in CanvasDrawCmd.
+    // A NaN stop position would make Skia's gradient shader produce
+    // undefined output. Sanitize each entry.
+    CanvasWidget cw;
+
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
+    cmd.gradient_positions = {0.0f, std::nanf(""), 0.5f, std::numeric_limits<float>::infinity(), 1.0f};
+    cw.add_command(cmd);
+
+    const auto& positions = cw.commands()[0].gradient_positions;
+    REQUIRE(positions.size() == 5);
+    REQUIRE(positions[0] == 0.0f);
+    REQUIRE(positions[1] == 0.0f);  // NaN -> 0
+    REQUIRE(positions[2] == 0.5f);
+    REQUIRE(positions[3] == 0.0f);  // +inf -> 0
+    REQUIRE(positions[4] == 1.0f);
+}
+
+TEST_CASE("CanvasWidget::add_command preserves finite values exactly",
+          "[canvas_widget][issue-1387]") {
+    // Sanity check: finite values pass through unmodified — no precision
+    // loss from the std::isfinite check. (isfinite is a pure predicate;
+    // the value is returned unchanged when it passes.)
+    CanvasWidget cw;
+
+    CanvasDrawCmd cmd;
+    cmd.type = CanvasDrawCmd::Type::fill_rect;
+    cmd.x = 12.345f;
+    cmd.y = -987.654f;
+    cmd.w = 0.0f;     // valid zero
+    cmd.h = 1e-6f;    // tiny finite
+    cmd.extra = -0.0f; // negative zero is finite
+    cw.add_command(cmd);
+
+    const auto& s = cw.commands()[0];
+    REQUIRE(s.x == 12.345f);
+    REQUIRE(s.y == -987.654f);
+    REQUIRE(s.w == 0.0f);
+    REQUIRE(s.h == 1e-6f);
+    REQUIRE(s.extra == -0.0f);
+}
+
+// ── pulp #1434 batch 7: Canvas2D shadow* sticky state ────────────────────────
+//
+// Verify the new CanvasDrawCmd shadow command types flush through to the
+// underlying canvas. RecordingCanvas captures one DrawCommand per setter so
+// tests can assert on the exact emit order — same pattern the bridge tests
+// use for set_fill_color / set_line_width / set_blend_mode.
+//
+// The full JS-→ bridge → widget chain is covered by test_canvas2d_shim.cpp
+// (which round-trips ctx.shadow* -> canvasSetShadow* bridge calls). Here we
+// exercise the widget-internal dispatch (the leg that converts CanvasDrawCmd
+// into Canvas:: virtual calls) directly.
+
+TEST_CASE("CanvasWidget replays shadow setters onto the canvas",
+          "[canvas_widget][issue-1434-batch-7]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd color;
+    color.type = CanvasDrawCmd::Type::set_shadow_color;
+    color.color = pulp::canvas::Color::rgba8(255, 0, 0, 200);
+    cw.add_command(color);
+
+    CanvasDrawCmd blur;
+    blur.type = CanvasDrawCmd::Type::set_shadow_blur;
+    blur.extra = 8.0f;
+    cw.add_command(blur);
+
+    CanvasDrawCmd ox;
+    ox.type = CanvasDrawCmd::Type::set_shadow_offset_x;
+    ox.extra = 4.0f;
+    cw.add_command(ox);
+
+    CanvasDrawCmd oy;
+    oy.type = CanvasDrawCmd::Type::set_shadow_offset_y;
+    oy.extra = 6.0f;
+    cw.add_command(oy);
+
+    CanvasDrawCmd rect;
+    rect.type = CanvasDrawCmd::Type::fill_rect;
+    rect.x = 10; rect.y = 10; rect.w = 50; rect.h = 30;
+    rect.color = pulp::canvas::Color::rgba8(0, 128, 255, 255);
+    cw.add_command(rect);
+
+    cw.paint(rc);
+
+    // Find the four shadow setter commands in the recording.
+    int color_idx = -1, blur_idx = -1, ox_idx = -1, oy_idx = -1;
+    int rect_idx = -1;
+    for (size_t i = 0; i < rc.commands().size(); ++i) {
+        switch (rc.commands()[i].type) {
+            case DrawCommand::Type::set_shadow_color:    color_idx = (int)i; break;
+            case DrawCommand::Type::set_shadow_blur:     blur_idx  = (int)i; break;
+            case DrawCommand::Type::set_shadow_offset_x: ox_idx    = (int)i; break;
+            case DrawCommand::Type::set_shadow_offset_y: oy_idx    = (int)i; break;
+            case DrawCommand::Type::fill_rect:           rect_idx  = (int)i; break;
+            default: break;
+        }
+    }
+
+    REQUIRE(color_idx >= 0);
+    REQUIRE(blur_idx  >= 0);
+    REQUIRE(ox_idx    >= 0);
+    REQUIRE(oy_idx    >= 0);
+    REQUIRE(rect_idx  >= 0);
+
+    // Order matters — JS sets shadow* THEN draws. Every setter must
+    // land before the draw or the shadow won't apply to it.
+    REQUIRE(color_idx < rect_idx);
+    REQUIRE(blur_idx  < rect_idx);
+    REQUIRE(ox_idx    < rect_idx);
+    REQUIRE(oy_idx    < rect_idx);
+
+    // Payload round-trips: color is captured as rgba in [0,1] floats.
+    REQUIRE(rc.commands()[color_idx].color.r == Catch::Approx(255.0f / 255.0f));
+    REQUIRE(rc.commands()[color_idx].color.a == Catch::Approx(200.0f / 255.0f));
+    REQUIRE(rc.commands()[blur_idx].f[0]  == Catch::Approx(8.0f));
+    REQUIRE(rc.commands()[ox_idx].f[0]    == Catch::Approx(4.0f));
+    REQUIRE(rc.commands()[oy_idx].f[0]    == Catch::Approx(6.0f));
+}
+
+TEST_CASE("CanvasWidget shadow setters can be cleared mid-stream",
+          "[canvas_widget][issue-1434-batch-7]") {
+    // Sanity: setting shadowColor to fully transparent and shadowBlur to
+    // 0 emits subsequent setter commands, the canvas backends gate the
+    // actual rendering on those values. Tests for the gating predicate
+    // live in the SkiaCanvas / CoreGraphicsCanvas backends; here we
+    // verify that the widget faithfully forwards every assignment so
+    // that subsequent draws see the cleared state.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    // Activate.
+    CanvasDrawCmd c1; c1.type = CanvasDrawCmd::Type::set_shadow_color;
+    c1.color = pulp::canvas::Color::rgba8(0, 0, 0, 255);
+    cw.add_command(c1);
+    CanvasDrawCmd b1; b1.type = CanvasDrawCmd::Type::set_shadow_blur; b1.extra = 4.0f;
+    cw.add_command(b1);
+
+    // Draw 1.
+    CanvasDrawCmd r1; r1.type = CanvasDrawCmd::Type::fill_rect;
+    r1.x = 0; r1.y = 0; r1.w = 10; r1.h = 10;
+    cw.add_command(r1);
+
+    // Deactivate (color → fully transparent).
+    CanvasDrawCmd c2; c2.type = CanvasDrawCmd::Type::set_shadow_color;
+    c2.color = pulp::canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
+    cw.add_command(c2);
+
+    // Draw 2.
+    CanvasDrawCmd r2; r2.type = CanvasDrawCmd::Type::fill_rect;
+    r2.x = 50; r2.y = 50; r2.w = 10; r2.h = 10;
+    cw.add_command(r2);
+
+    cw.paint(rc);
+
+    // Two set_shadow_color commands must appear, one before each rect.
+    int set_color_count = 0;
+    int last_alpha_x255 = -1;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_shadow_color) {
+            ++set_color_count;
+            last_alpha_x255 = static_cast<int>(cmd.color.a * 255.0f + 0.5f);
+        }
+    }
+    REQUIRE(set_color_count == 2);
+    REQUIRE(last_alpha_x255 == 0);  // most-recent shadowColor was transparent
+}
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("SkiaCanvas honors sticky Canvas2D shadow state on fillRect",
+          "[canvas_widget][issue-1434-batch-7][skia]") {
+    // Rasterise a filled rect with shadowColor + shadowBlur + offset
+    // active and confirm that pixels OUTSIDE the rect (in the shadow
+    // region) are non-transparent — i.e., the DropShadow image filter
+    // actually fired. We also verify the inverse: a pixel far from the
+    // shadow's expected reach stays at the cleared background colour.
+    SkImageInfo info = SkImageInfo::Make(64, 64,
+                                          kRGBA_8888_SkColorType,
+                                          kPremul_SkAlphaType,
+                                          SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    // Clear to opaque white so we can detect "shadow shows through".
+    canvas.set_fill_color(pulp::canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));
+    canvas.fill_rect(0, 0, 64, 64);
+
+    // Activate sticky shadow — opaque red, modest blur, large offset.
+    canvas.set_shadow_color(pulp::canvas::Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+    canvas.set_shadow_blur(8.0f);
+    canvas.set_shadow_offset_x(8.0f);
+    canvas.set_shadow_offset_y(8.0f);
+
+    // Draw a small black rect — the shadow appears ~8px to the
+    // bottom-right of it.
+    canvas.set_fill_color(pulp::canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_rect(16, 16, 16, 16);
+
+    // Pixel at (40, 40) is 8px past the bottom-right corner of the rect
+    // along both axes — directly under the shadow centre.
+    auto shadow_px = sample_pixel(surface.get(), 40, 40);
+    INFO("shadow px rgba=(" << int(shadow_px.r) << "," << int(shadow_px.g)
+         << "," << int(shadow_px.b) << "," << int(shadow_px.a) << ")");
+    // Red channel should dominate (we shadowed with opaque red on white)
+    // and the pixel must be tinted away from the white background.
+    REQUIRE(shadow_px.r > shadow_px.g);
+    REQUIRE(shadow_px.r > shadow_px.b);
+    REQUIRE(shadow_px.g < 240);
+
+    // Pixel at (4, 4) — far from both the rect and its shadow — must
+    // remain pure white. Confirms the shadow doesn't bleed everywhere.
+    auto far_px = sample_pixel(surface.get(), 4, 4);
+    REQUIRE(far_px.r == 255);
+    REQUIRE(far_px.g == 255);
+    REQUIRE(far_px.b == 255);
+}
+
+TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
+          "[canvas_widget][issue-1434-batch-7][skia]") {
+    // Sanity: with shadowColor alpha == 0, even non-zero blur+offset
+    // must not produce any shadowed pixels — match Canvas2D spec
+    // ("if shadowColor's alpha is 0, no shadow is drawn").
+    SkImageInfo info = SkImageInfo::Make(32, 32,
+                                          kRGBA_8888_SkColorType,
+                                          kPremul_SkAlphaType,
+                                          SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_fill_color(pulp::canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));
+    canvas.fill_rect(0, 0, 32, 32);
+
+    canvas.set_shadow_color(pulp::canvas::Color::rgba(1.0f, 0.0f, 0.0f, 0.0f));
+    canvas.set_shadow_blur(4.0f);
+    canvas.set_shadow_offset_x(4.0f);
+    canvas.set_shadow_offset_y(4.0f);
+
+    canvas.set_fill_color(pulp::canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_rect(8, 8, 8, 8);
+
+    // Pixel at (20, 20) would be in the shadow region if the shadow
+    // were active — confirm it stays white.
+    auto px = sample_pixel(surface.get(), 20, 20);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 255);
+    REQUIRE(px.b == 255);
+}
+#endif  // PULP_HAS_SKIA
+
+// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter dispatch ────────────
+//
+// Asserts that the CanvasWidget paint loop forwards the new
+// `set_direction` / `set_filter` commands through to the underlying
+// canvas (here, RecordingCanvas) so the JS shim's setter intent reaches
+// the active backend on every frame.
+
+TEST_CASE("CanvasWidget paint dispatches set_direction to the canvas",
+          "[canvas_widget][issue-1520]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd dir;
+    dir.type = CanvasDrawCmd::Type::set_direction;
+    dir.int_val = 1; // rtl
+    cw.add_command(dir);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    int direction_cmds = 0;
+    float observed_value = -1.0f;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::set_direction) {
+            ++direction_cmds;
+            observed_value = cmd.f[0];
+        }
+    }
+    REQUIRE(direction_cmds == 1);
+    REQUIRE(observed_value == static_cast<float>(
+        pulp::canvas::Canvas::TextDirection::rtl));
+}
+
+TEST_CASE("CanvasWidget paint dispatches set_filter to the canvas",
+          "[canvas_widget][issue-1520]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd filt;
+    filt.type = CanvasDrawCmd::Type::set_filter;
+    filt.text = "blur(5px) sepia(60%)";
+    cw.add_command(filt);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    bool saw_filter = false;
+    std::string observed_string;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::set_filter) {
+            saw_filter = true;
+            observed_string = cmd.text;
+        }
+    }
+    REQUIRE(saw_filter);
+    REQUIRE(observed_string == "blur(5px) sepia(60%)");
 }

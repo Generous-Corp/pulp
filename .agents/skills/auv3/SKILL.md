@@ -366,8 +366,8 @@ the explicit close, NOT to add it.
 Build and validate via the Pulp CLI:
 
 ```bash
-./build/tools/cli/pulp build
-./build/tools/cli/pulp validate         # runs auval via the auval-<name> CTest target
+./build/pulp build
+./build/pulp validate         # runs auval via the auval-<name> CTest target
 ```
 
 Manual `auval` (macOS only — `auval` is an Apple tool):

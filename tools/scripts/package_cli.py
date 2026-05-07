@@ -13,19 +13,28 @@ at /Users/runner/Library/Caches/Pulp/... and crashed on every user
 machine. release-cli.yml now invokes this script so the artifact is
 self-contained.
 
+Phase 8 dual-binary support (#783): when `--cpp-binary` is passed,
+the tarball also ships `pulp-cpp[.exe]` so the post-swap layout
+(Rust `pulp` + C++ `pulp-cpp` delegate) can land both binaries with
+one upgrade. Without `--cpp-binary` the script keeps the legacy
+single-binary contract, so pre-swap release lanes stay byte-identical.
+
 Usage (called from .github/workflows/release-cli.yml):
     python3 tools/scripts/package_cli.py \\
-        --binary build/tools/cli/pulp \\
+        --binary build/pulp \\
+        --cpp-binary build/tools/cli/pulp-cpp \\
         --build-dir build \\
         --platform darwin-arm64 \\
         --out pulp-darwin-arm64.tar.gz
 
 Layout produced inside the tarball:
     pulp                        (the binary, rpath rewritten)
+    pulp-cpp                    (optional, post-swap; rpath rewritten)
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
 The smoke gate from PR #395 verifies the output runs on a runner
-that did NOT build the binary.
+that did NOT build the binary. Phase 8 extends the smoke check to
+exercise pulp-cpp too when the dual-binary flag is set.
 """
 
 from __future__ import annotations
@@ -175,9 +184,21 @@ def write_zip(out: Path, files: list[Path], inner_names: list[str]) -> None:
             z.write(src, arcname=name)
 
 
+def stage_binary(src: Path, stage: Path, out_name: str, is_windows: bool) -> Path:
+    """Copy `src` into `stage/<out_name>`, restore exec bit on Unix."""
+    staged = stage / out_name
+    shutil.copy2(src, staged)
+    if not is_windows:
+        staged.chmod(0o755)
+    return staged
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--binary", required=True, type=Path)
+    p.add_argument("--binary", required=True, type=Path,
+                   help="Primary user-facing pulp binary (Rust post-swap, C++ pre-swap).")
+    p.add_argument("--cpp-binary", required=False, type=Path, default=None,
+                   help="Optional pulp-cpp delegate binary (Phase 8 dual-binary tarball).")
     p.add_argument("--build-dir", required=True, type=Path)
     p.add_argument("--platform", required=True)
     p.add_argument("--out", required=True, type=Path)
@@ -185,6 +206,9 @@ def main() -> int:
 
     if not args.binary.exists():
         print(f"FAIL: binary not at {args.binary}", file=sys.stderr)
+        return 2
+    if args.cpp_binary is not None and not args.cpp_binary.exists():
+        print(f"FAIL: --cpp-binary not at {args.cpp_binary}", file=sys.stderr)
         return 2
 
     is_windows = args.platform.startswith("windows-")
@@ -194,14 +218,22 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         stage = Path(td)
         bin_name = "pulp.exe" if is_windows else "pulp"
-        staged_bin = stage / bin_name
-        shutil.copy2(args.binary, staged_bin)
-        # Restore exec bit (shutil.copy2 preserves perms but be safe).
-        if not is_windows:
-            staged_bin.chmod(0o755)
+        staged_bin = stage_binary(args.binary, stage, bin_name, is_windows)
 
         files = [staged_bin]
         names = [bin_name]
+
+        # Phase 8: when caller passes --cpp-binary, bundle it as
+        # pulp-cpp[.exe]. The Rust pulp's `upgrade --install` looks
+        # for this name in the extracted archive and drops it into
+        # the sibling slot.
+        staged_cpp: Path | None = None
+        if args.cpp_binary is not None:
+            cpp_name = "pulp-cpp.exe" if is_windows else "pulp-cpp"
+            staged_cpp = stage_binary(args.cpp_binary, stage, cpp_name, is_windows)
+            files.append(staged_cpp)
+            names.append(cpp_name)
+            print(f"bundled: {args.cpp_binary} -> {cpp_name}", flush=True)
 
         wgpu = find_wgpu_lib(args.build_dir, args.platform)
         if wgpu is not None and wgpu.exists():
@@ -227,13 +259,21 @@ def main() -> int:
 
         # Rewrite rpaths so the bundled dylib is found via @loader_path
         # (macOS) or $ORIGIN (Linux). Windows finds DLLs in the same
-        # directory automatically.
+        # directory automatically. Apply to both staged binaries so
+        # `pulp-cpp` can also load the bundled wgpu — without this the
+        # delegate path crashes on a clean user machine.
         if is_macos:
-            print("rewriting macOS rpath", flush=True)
+            print("rewriting macOS rpath: pulp", flush=True)
             fix_rpath_macos(staged_bin)
+            if staged_cpp is not None:
+                print("rewriting macOS rpath: pulp-cpp", flush=True)
+                fix_rpath_macos(staged_cpp)
         elif is_linux:
-            print("rewriting Linux rpath", flush=True)
+            print("rewriting Linux rpath: pulp", flush=True)
             fix_rpath_linux(staged_bin)
+            if staged_cpp is not None:
+                print("rewriting Linux rpath: pulp-cpp", flush=True)
+                fix_rpath_linux(staged_cpp)
 
         if is_windows:
             write_zip(args.out, files, names)

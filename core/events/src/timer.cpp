@@ -71,6 +71,8 @@ void Timer::schedule_next(std::shared_ptr<Impl> impl, std::uint64_t gen) {
             return;
         if (impl->generation.load(std::memory_order_acquire) != gen)
             return;
+        if (!impl->repeating)
+            impl->active.store(false, std::memory_order_release);
         impl->callback();
         if (!impl->repeating)
             return;

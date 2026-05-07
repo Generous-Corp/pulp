@@ -8,6 +8,351 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0782"></a>
+## [0.78.2] - 2026-05-06
+
+- feat(import-ir): Phase 1 spike — IR types + Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1) ([#1499](https://github.com/danielraffel/pulp/pull/1499))
+- feat(view): yoga alignContent + width/height auto (sub-agent #12 followup, refs pulp #1434) ([#1494](https://github.com/danielraffel/pulp/pull/1494))
+- fix(rn): wire backfaceVisibility / cursor / filter / pointerEvents / textTransform / transformOrigin / userSelect (refs pulp #1434, sub-agent #27 finding) ([#1497](https://github.com/danielraffel/pulp/pull/1497))
+- feat(view): borderStyle dashed/dotted/double/groove/ridge renderer (refs pulp #1434, Triage #10/#13) ([#1490](https://github.com/danielraffel/pulp/pull/1490))
+- feat(view/css): parse oklch / oklab / lch / lab / color() (refs pulp #1434, Triage #8) ([#1481](https://github.com/danielraffel/pulp/pull/1481))
+- feat(view): yoga per-edge margin/padding accept percent + auto (cross-surface, refs pulp #1434) ([#1477](https://github.com/danielraffel/pulp/pull/1477))
+- feat(canvas2d): wire conicGradient + imageSmoothing + miterLimit bridge setters (refs pulp #1434) ([#1480](https://github.com/danielraffel/pulp/pull/1480))
+- feat(harness): add 'noop' catalog status — close css/animation* drift (closes pulp #1475) ([#1478](https://github.com/danielraffel/pulp/pull/1478))
+- fix(harness): html catalog cleanup — push surface to 100% (refs pulp #1434) ([#1479](https://github.com/danielraffel/pulp/pull/1479))
+- fix(harness): css catalog hygiene — 8 stale entries, drift 60 → 54 (refs pulp #1434) ([#1474](https://github.com/danielraffel/pulp/pull/1474))
+- fix(harness): canvas2d catalog hygiene — flip 5 over-claimed entries to partial (refs pulp #1434) ([#1472](https://github.com/danielraffel/pulp/pull/1472))
+- feat(rn): walk transform array → bridge translate/rotate/scale calls (refs pulp #1434, Triage #9) ([#1468](https://github.com/danielraffel/pulp/pull/1468))
+
+<a id="v0781"></a>
+## [0.78.1] - 2026-05-05
+
+- fix(cli): bake SDK version into Rust release binary ([#1466](https://github.com/danielraffel/pulp/pull/1466))
+- fix(view/text): textAlign 'auto' + 'justify' (refs pulp #1434 Triage #11) ([#1458](https://github.com/danielraffel/pulp/pull/1458))
+- fix(view/css): parse boxShadow shorthand → setBoxShadow bridge (refs pulp #1434, Triage #15) ([#1461](https://github.com/danielraffel/pulp/pull/1461))
+- fix(view): yoga value-aliasing for flex-start/flex-end + column/row-reverse + baseline (closes pulp #1434 rn batch B) ([#1452](https://github.com/danielraffel/pulp/pull/1452))
+
+<a id="v0780"></a>
+## [0.78.0] - 2026-05-05
+
+- feature/phase8 default flip prepped ([#1450](https://github.com/danielraffel/pulp/pull/1450))
+- fix(rn): wire display: flex / none to existing visible/yoga path (refs pulp #1434) ([#1456](https://github.com/danielraffel/pulp/pull/1456))
+- fix(rn): forward percent strings + 'auto' for width/height/min/max/flexBasis (rn Batch C, refs pulp #1434) ([#1455](https://github.com/danielraffel/pulp/pull/1455))
+- fix(view/css): yoga top/right/bottom/left percent (closes pulp #1434 batch 6) ([#1451](https://github.com/danielraffel/pulp/pull/1451))
+- fix(harness/rn): catalog hygiene for stale NOT-IMPL entries (refs pulp #1434) ([#1449](https://github.com/danielraffel/pulp/pull/1449))
+- feat(canvas2d): sticky shadow cluster — color/blur/offsetX/offsetY (closes pulp #1434 batch 7) ([#1446](https://github.com/danielraffel/pulp/pull/1446))
+- validate/phase8 integrated ([#1005](https://github.com/danielraffel/pulp/pull/1005))
+- fix(view/css): yoga RN-alias fan-out (closes pulp #1434 batch 4) ([#1445](https://github.com/danielraffel/pulp/pull/1445))
+- fix(view/css): wire backdropFilter, textDecoration longhands, and fontWeight keywords (pulp #1434 batch 3) ([#1444](https://github.com/danielraffel/pulp/pull/1444))
+
+<a id="v0770"></a>
+## [0.77.0] - 2026-05-05
+
+- fix(view/css): translate width/height percent values through to Yoga (closes pulp #1423) ([#1426](https://github.com/danielraffel/pulp/pull/1426))
+- codex/shipyard rust docs ([#1441](https://github.com/danielraffel/pulp/pull/1441))
+- feat(yoga): aspect-ratio support across FlexStyle, CSS shim, and @pulp/react (pulp #1434 batch 5) ([#1437](https://github.com/danielraffel/pulp/pull/1437))
+- feat(view/css): translate `white-space: nowrap` to native single-line layout (closes #1410) ([#1411](https://github.com/danielraffel/pulp/pull/1411))
+- fix(harness): catalog-hygiene sweep + css OOS reclassification (refs pulp #1434) ([#1436](https://github.com/danielraffel/pulp/pull/1436))
+- feat(harness): rn surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1396](https://github.com/danielraffel/pulp/pull/1396))
+- feat(@pulp/react): SvgRect + SvgLine intrinsics (closes pulp #1416) ([#1421](https://github.com/danielraffel/pulp/pull/1421))
+- fix(harness/yoga): claim display:flex+none, add inline-block/inline-flex routing (closes pulp #1420) ([#1422](https://github.com/danielraffel/pulp/pull/1422))
+- feat(harness): css surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1397](https://github.com/danielraffel/pulp/pull/1397))
+- feat(harness): canvas2d surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1399](https://github.com/danielraffel/pulp/pull/1399))
+- feat(harness): html surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1398](https://github.com/danielraffel/pulp/pull/1398))
+- fix(view): host idle pumps must drain timers, not just rAF (pulp #1412) ([#1425](https://github.com/danielraffel/pulp/pull/1425))
+- feat(harness): auto-discover surface adapters via pkgutil + decorator (closes #1401) ([#1415](https://github.com/danielraffel/pulp/pull/1415))
+- test(view): regression guard for overflow:hidden parent clip-rect (refs pulp #1409) ([#1414](https://github.com/danielraffel/pulp/pull/1414))
+- fix(view/css): translate `text-overflow: ellipsis` to native truncation (closes #1407) ([#1408](https://github.com/danielraffel/pulp/pull/1408))
+- fix(harness/yoga): normalize annotated catalog values before exact-string match ([#1417](https://github.com/danielraffel/pulp/pull/1417))
+
+<a id="v0760"></a>
+## [0.76.0] - 2026-05-04
+
+- feat(hooks): pre-push detects shipyard-vs-direct push origin (pulp #1406) ([#1406](https://github.com/danielraffel/pulp/pull/1406))
+- fix(view/ios): wire IOSGpuWindowHost::set_idle_callback into CADisplayLink (closes pulp #1402 — iOS slice) ([#1405](https://github.com/danielraffel/pulp/pull/1405))
+- feat(harness): yoga surface adapter + first machine-derived coverage (closes #1391, #1392 partial, #1393 partial, #1394 partial) ([#1395](https://github.com/danielraffel/pulp/pull/1395))
+- fix(view/mac): wire MacGpuWindowHost::set_idle_callback into CVDisplayLink (closes pulp #1387 gap #3) ([#1400](https://github.com/danielraffel/pulp/pull/1400))
+- fix(view/android): pump WidgetBridge idle each vsync (closes pulp #1402 — Android slice) ([#1404](https://github.com/danielraffel/pulp/pull/1404))
+- fix(view): NaN/±Inf defense in CanvasWidget::add_command (closes pulp #1387 gap #2) ([#1389](https://github.com/danielraffel/pulp/pull/1389))
+
+<a id="v0756"></a>
+## [0.75.6] - 2026-05-04
+
+- fix(@pulp/react): prop-applier auto-arms registerPointer/Wheel + routes overflow (closes #1381, #1387 gaps #1+#4) ([#1388](https://github.com/danielraffel/pulp/pull/1388))
+
+<a id="v0755"></a>
+## [0.75.5] - 2026-05-04
+
+- fix(view/mac): PulpMetalView opaque + wantsUpdateLayer (closes pulp #1382) ([#1385](https://github.com/danielraffel/pulp/pull/1385))
+
+<a id="v0754"></a>
+## [0.75.4] - 2026-05-04
+
+- fix(canvas/mac): CoreGraphicsCanvas::set_blend_mode honors all BlendMode values (closes pulp #1371) ([#1377](https://github.com/danielraffel/pulp/pull/1377))
+
+<a id="v0752"></a>
+## [0.75.2] - 2026-05-04
+
+- fix(view): position:absolute children skip flex-line participation (closes pulp #1379, #998) ([#1380](https://github.com/danielraffel/pulp/pull/1380))
+
+<a id="v0751"></a>
+## [0.75.1] - 2026-05-04
+
+- fix(view): UTF-8-safe JS prelude embedding (closes pulp #1382) ([#1383](https://github.com/danielraffel/pulp/pull/1383))
+- fix(ci): retry-on-fail Yoga priming + asset watchdog for release-cli (closes #1375) ([#1378](https://github.com/danielraffel/pulp/pull/1378))
+- docs(skills): codify Canvas2D bridge gotchas for importer + shim authors ([#1376](https://github.com/danielraffel/pulp/pull/1376))
+
+<a id="v0750"></a>
+## [0.75.0] - 2026-05-04
+
+- fix(view): instrument CanvasWidget::paint + layout repro test for #1368 round 2 ([#1370](https://github.com/danielraffel/pulp/pull/1370))
+
+<a id="v0741"></a>
+## [0.74.1] - 2026-05-04
+
+- fix(view): per-CanvasWidget save_layer for HTML <canvas> sibling isolation (closes pulp #1368) ([#1372](https://github.com/danielraffel/pulp/pull/1372))
+
+<a id="v0740"></a>
+## [0.74.0] - 2026-05-04
+
+- fix(view): canvas widget paint balances save/restore (closes pulp #1368) ([#1369](https://github.com/danielraffel/pulp/pull/1369))
+
+<a id="v0730"></a>
+## [0.73.0] - 2026-05-03
+
+- fix(view): overlay auto-dismisses on ESC + outside-click (closes pulp #1361) ([#1365](https://github.com/danielraffel/pulp/pull/1365))
+
+<a id="v0726"></a>
+## [0.72.6] - 2026-05-03
+
+- fix(format): StandaloneApp honors view_size().min_* (closes pulp #1362) ([#1364](https://github.com/danielraffel/pulp/pull/1364))
+- audit(compat): refresh matrix from spec walk + post-#1027 surface ([#1366](https://github.com/danielraffel/pulp/pull/1366))
+- feat(@pulp/react): synthesize event for JSX handlers (closes pulp #1352) ([#1363](https://github.com/danielraffel/pulp/pull/1363))
+
+<a id="v0725"></a>
+## [0.72.5] - 2026-05-03
+
+- fix(canvas/mac): shape fills honor active gradient (closes pulp #1359) ([#1360](https://github.com/danielraffel/pulp/pull/1360))
+
+<a id="v0724"></a>
+## [0.72.4] - 2026-05-03
+
+- fix(view/skia): shape fills honor active gradient_shader_ (closes #1350) ([#1353](https://github.com/danielraffel/pulp/pull/1353))
+- fix(view): inline <svg width/height> attrs reserve flex layout space (closes pulp #1147) ([#1347](https://github.com/danielraffel/pulp/pull/1347))
+- feat(view): translate CSS :hover rules to mouseenter/mouseleave listeners (closes #1323, #1149 part b) ([#1345](https://github.com/danielraffel/pulp/pull/1345))
+- fix(view): wire Canvas2D shim methods so FilterBank renders (closes pulp #1346 + augments #1322) ([#1348](https://github.com/danielraffel/pulp/pull/1348))
+
+<a id="v0723"></a>
+## [0.72.3] - 2026-05-03
+
+- fix(canvas/mac): CoreGraphicsCanvas implements path / gradient / transform (closes pulp #1322) ([#1329](https://github.com/danielraffel/pulp/pull/1329))
+- fix(view): auto-claim active_overlay from CSS position:absolute + high z-index (pulp #1148 slice b) ([#1344](https://github.com/danielraffel/pulp/pull/1344))
+
+<a id="v0722"></a>
+## [0.72.2] - 2026-05-03
+
+- fix(view): make overflow:visible hit_test extension symmetric on all 4 sides (pulp #1148 slice a) ([#1343](https://github.com/danielraffel/pulp/pull/1343))
+- fix(view): overlay_contains walks overflow:visible children (closes pulp #1320) ([#1328](https://github.com/danielraffel/pulp/pull/1328))
+- fix(view, mac): NSWindow resize triggers root View relayout (closes pulp #1321) ([#1327](https://github.com/danielraffel/pulp/pull/1327))
+- fix(ci): remove silent-no-op patterns from skill_path_map.json (closes #1053) ([#1325](https://github.com/danielraffel/pulp/pull/1325))
+- fix(ci): thread lcov --remove through coverage pipeline so LCOV_EXCL markers propagate (closes #1058) ([#1326](https://github.com/danielraffel/pulp/pull/1326))
+- fix(ci): make codecov component classification mutually exclusive (closes #1055) ([#1324](https://github.com/danielraffel/pulp/pull/1324))
+- fix(ci): add core/dsl/** to infrastructure tier (closes #1056) ([#1319](https://github.com/danielraffel/pulp/pull/1319))
+- fix(ci): per-surface Version-Bump: skip requires non-empty reason (closes #1054) ([#1318](https://github.com/danielraffel/pulp/pull/1318))
+- fix(ci): flip pre-push gates from advisory to enforcing by default (closes #1144) ([#1317](https://github.com/danielraffel/pulp/pull/1317))
+
+<a id="v0721"></a>
+## [0.72.1] - 2026-05-03
+
+- fix(view): overlay fast-path honors hit_test guards (Codex P1 #1313 + P2 #1314) ([#1316](https://github.com/danielraffel/pulp/pull/1316))
+- fix(ci): require non-empty Version-Bump skip reason in auto-release watchdog (Codex P2 on #1310) ([#1315](https://github.com/danielraffel/pulp/pull/1315))
+
+<a id="v0720"></a>
+## [0.72.0] - 2026-05-03
+
+- feat(view): generalize overlay-click routing for React popovers (closes pulp #1148) ([#1297](https://github.com/danielraffel/pulp/pull/1297))
+
+<a id="v0710"></a>
+## [0.71.0] - 2026-05-03
+
+- feat(import-design): wire @pulp/css-adapt into emitted output (#1039) ([#1060](https://github.com/danielraffel/pulp/pull/1060))
+- docs(skill/import-design): record v0.69 audit lessons + #1148 pattern ([#1298](https://github.com/danielraffel/pulp/pull/1298))
+- fix(ci): auto-release.yml stranded-fix watchdog must honor Version-Bump: skip (closes #1308) ([#1310](https://github.com/danielraffel/pulp/pull/1310))
+
+<a id="v0700"></a>
+## [0.70.0] - 2026-05-03
+
+- fix(view, ci): Codex P2 sweep — 4 follow-ups bundled (closes #1171) ([#1296](https://github.com/danielraffel/pulp/pull/1296))
+- fix(pulp-react): externalize react/reconciler/scheduler in dist build (pulp #1292) ([#1295](https://github.com/danielraffel/pulp/pull/1295))
+- feat(view): @pulp/react SvgPath intrinsic (pulp #994) ([#1291](https://github.com/danielraffel/pulp/pull/1291))
+
+<a id="v0692"></a>
+## [0.69.2] - 2026-05-03
+
+- fix(view): ScrollView::hit_test honors pointer_events (Codex P1, closes #1170) ([#1289](https://github.com/danielraffel/pulp/pull/1289))
+- fix(view): parse font-family CSS lists and pick first non-empty family (pulp #1151) ([#1174](https://github.com/danielraffel/pulp/pull/1174))
+- feat(cli): versioned import-design detection (pulp #1031) ([#1047](https://github.com/danielraffel/pulp/pull/1047))
+- test(midi): cover UMP helper factories ([#1277](https://github.com/danielraffel/pulp/pull/1277))
+- test(cli): cover version diag file-reader edges ([#1281](https://github.com/danielraffel/pulp/pull/1281))
+- test(cli): cover common config edge paths ([#1268](https://github.com/danielraffel/pulp/pull/1268))
+- test(view): cover widget bridge gpu fallbacks ([#1267](https://github.com/danielraffel/pulp/pull/1267))
+- test: cover python binding edge paths ([#1264](https://github.com/danielraffel/pulp/pull/1264))
+- fix(ship): tolerate malformed appcast lengths ([#1262](https://github.com/danielraffel/pulp/pull/1262))
+- test(canvas): cover CPU fallback helpers ([#1265](https://github.com/danielraffel/pulp/pull/1265))
+- test: cover scan blacklist edge cases ([#1255](https://github.com/danielraffel/pulp/pull/1255))
+- test(cli): cover import-design tool shellout paths ([#1272](https://github.com/danielraffel/pulp/pull/1272))
+- test(format): cover remote view session edges ([#1258](https://github.com/danielraffel/pulp/pull/1258))
+- test: cover widget paint edge paths ([#1270](https://github.com/danielraffel/pulp/pull/1270))
+- test(platform): cover nested permission override clear ([#1249](https://github.com/danielraffel/pulp/pull/1249))
+- test: cover i18n parser edge cases ([#1259](https://github.com/danielraffel/pulp/pull/1259))
+- test(events): cover action broadcaster missing listener removal ([#1254](https://github.com/danielraffel/pulp/pull/1254))
+
+<a id="v0691"></a>
+## [0.69.1] - 2026-05-02
+
+- fix(events): deactivate one-shot timers after firing ([#1253](https://github.com/danielraffel/pulp/pull/1253))
+- test(format): cover settings panel interactions ([#1260](https://github.com/danielraffel/pulp/pull/1260))
+- test: cover js engine recommendation edges ([#1261](https://github.com/danielraffel/pulp/pull/1261))
+- test: cover workflow lint wiring ([#1251](https://github.com/danielraffel/pulp/pull/1251))
+- test(view): cover app framework edge paths ([#1247](https://github.com/danielraffel/pulp/pull/1247))
+- test(ci): improve local-ci helper coverage ([#1246](https://github.com/danielraffel/pulp/pull/1246))
+- test: cover theme contrast helper edges ([#1252](https://github.com/danielraffel/pulp/pull/1252))
+- test(coverage): harden Codecov config invariants ([#1250](https://github.com/danielraffel/pulp/pull/1250))
+- test(audio): cover coreaudio format registry edges ([#1248](https://github.com/danielraffel/pulp/pull/1248))
+- test(view): cover asset manager edge paths ([#1245](https://github.com/danielraffel/pulp/pull/1245))
+- test: cover mkdocs hook branches ([#1244](https://github.com/danielraffel/pulp/pull/1244))
+- test(tools): cover pulp sandbox helpers ([#1243](https://github.com/danielraffel/pulp/pull/1243))
+- test(tools): cover format validation checker ([#1242](https://github.com/danielraffel/pulp/pull/1242))
+- test(tools): complete docs generator coverage ([#1241](https://github.com/danielraffel/pulp/pull/1241))
+- test(view): cover theme validation and file edges ([#1240](https://github.com/danielraffel/pulp/pull/1240))
+- test(ci): cover skill sync helper edges ([#1231](https://github.com/danielraffel/pulp/pull/1231))
+- test(runtime): cover websocket frame edge paths ([#1239](https://github.com/danielraffel/pulp/pull/1239))
+- test(view): cover eq curve edge interactions ([#1238](https://github.com/danielraffel/pulp/pull/1238))
+- test(ci): cover lcov cobertura edges ([#1237](https://github.com/danielraffel/pulp/pull/1237))
+- test(ci): cover cobertura merge edges ([#1236](https://github.com/danielraffel/pulp/pull/1236))
+- test(packages): cover freshness check edge paths ([#1235](https://github.com/danielraffel/pulp/pull/1235))
+- test(ci): cover runs-on resolver edges ([#1234](https://github.com/danielraffel/pulp/pull/1234))
+- test(tools): cover cmajor external edges ([#1233](https://github.com/danielraffel/pulp/pull/1233))
+- test(packages): cover registry validator edges ([#1232](https://github.com/danielraffel/pulp/pull/1232))
+- test: cover build migration index edge paths ([#1230](https://github.com/danielraffel/pulp/pull/1230))
+- test: cover validate_hosts tooling ([#1229](https://github.com/danielraffel/pulp/pull/1229))
+- test: cover top-level audit tool ([#1228](https://github.com/danielraffel/pulp/pull/1228))
+- test(local-ci): cover android target helper ([#1227](https://github.com/danielraffel/pulp/pull/1227))
+- test(tools): complete limitations coverage ([#1226](https://github.com/danielraffel/pulp/pull/1226))
+- test: cover compat sync edge paths ([#1225](https://github.com/danielraffel/pulp/pull/1225))
+- test(ci): cover cli sync checker edges ([#1224](https://github.com/danielraffel/pulp/pull/1224))
+- test: cover add-component tool ([#1223](https://github.com/danielraffel/pulp/pull/1223))
+- test(ci): cover swift coverage runner edges ([#1222](https://github.com/danielraffel/pulp/pull/1222))
+- test(deps): cover dependency audit edges ([#1221](https://github.com/danielraffel/pulp/pull/1221))
+- test(ci): cover version bump check edges ([#1220](https://github.com/danielraffel/pulp/pull/1220))
+- test: cover run_python_coverage entrypoint ([#1219](https://github.com/danielraffel/pulp/pull/1219))
+- test: add docs-sync edge coverage ([#1218](https://github.com/danielraffel/pulp/pull/1218))
+- test: cover auto-release decision CLI edges ([#1215](https://github.com/danielraffel/pulp/pull/1215))
+- test(tools): cover package cli edges ([#1217](https://github.com/danielraffel/pulp/pull/1217))
+- test(tools): cover status ladder edge paths ([#1216](https://github.com/danielraffel/pulp/pull/1216))
+- test(tools): cover jsfx subset edges ([#1214](https://github.com/danielraffel/pulp/pull/1214))
+- test(ci): cover coverage diff comment edges ([#1213](https://github.com/danielraffel/pulp/pull/1213))
+- test(tools): cover iwyu annotate edges ([#1212](https://github.com/danielraffel/pulp/pull/1212))
+- test(tools): cover binary data encoder ([#1207](https://github.com/danielraffel/pulp/pull/1207))
+- test: cover embed_js generator ([#1211](https://github.com/danielraffel/pulp/pull/1211))
+- test: add coverage tier check edge coverage ([#1210](https://github.com/danielraffel/pulp/pull/1210))
+- test: cover mkdocs hooks ([#1209](https://github.com/danielraffel/pulp/pull/1209))
+- test(tools): cover docs generator paths ([#1208](https://github.com/danielraffel/pulp/pull/1208))
+- test(tools): cover docs consistency checks ([#1206](https://github.com/danielraffel/pulp/pull/1206))
+- test(canvas): cover fallback drawing edges ([#1201](https://github.com/danielraffel/pulp/pull/1201))
+- test(audio): cover system volume command edges ([#1202](https://github.com/danielraffel/pulp/pull/1202))
+- test(canvas): cover sdf atlas cache lifecycle edges ([#1198](https://github.com/danielraffel/pulp/pull/1198))
+- test(canvas): cover msdf and psdf atlas edges ([#1197](https://github.com/danielraffel/pulp/pull/1197))
+- test(canvas): cover sdf atlas api edges ([#1196](https://github.com/danielraffel/pulp/pull/1196))
+- test(runtime): cover gzip header rejection paths ([#1078](https://github.com/danielraffel/pulp/pull/1078))
+- test(tools): cover bench diff reporting paths ([#1205](https://github.com/danielraffel/pulp/pull/1205))
+- test(canvas): cover image convolution edge paths ([#1200](https://github.com/danielraffel/pulp/pull/1200))
+- test(render): cover gpu graph helper state paths ([#1096](https://github.com/danielraffel/pulp/pull/1096))
+- test(platform): cover registry fallback stubs ([#1083](https://github.com/danielraffel/pulp/pull/1083))
+- test(canvas): cover sdf text helper edges ([#1195](https://github.com/danielraffel/pulp/pull/1195))
+- test(runtime): cover license and analytics edges ([#1115](https://github.com/danielraffel/pulp/pull/1115))
+- test(canvas): cover rectangle list edge no-ops ([#1203](https://github.com/danielraffel/pulp/pull/1203))
+- test(events): cover async helper edge paths ([#1088](https://github.com/danielraffel/pulp/pull/1088))
+- test(view): cover toolbar and breadcrumb interactions ([#1097](https://github.com/danielraffel/pulp/pull/1097))
+- test(cli): cover create fail-fast edge paths ([#1104](https://github.com/danielraffel/pulp/pull/1104))
+- test(runtime): cover expression evaluator edge paths ([#1113](https://github.com/danielraffel/pulp/pull/1113))
+- test(signal): cover interpolator endpoints and impulses ([#1116](https://github.com/danielraffel/pulp/pull/1116))
+- test(view): cover asset manager edge paths ([#1125](https://github.com/danielraffel/pulp/pull/1125))
+- test(view): cover widget bridge native event edges ([#1194](https://github.com/danielraffel/pulp/pull/1194))
+- test(canvas): cover sdf software renderer edge paths ([#1199](https://github.com/danielraffel/pulp/pull/1199))
+- test(canvas): cover attributed string layout edges ([#1204](https://github.com/danielraffel/pulp/pull/1204))
+- test(ci): cover lcov cobertura edge paths ([#1117](https://github.com/danielraffel/pulp/pull/1117))
+- test(view): cover design import edge paths ([#1072](https://github.com/danielraffel/pulp/pull/1072))
+- test(audio): cover buffering reader tail lifecycle paths ([#1121](https://github.com/danielraffel/pulp/pull/1121))
+- test(view): cover frame clock lifecycle edges ([#1126](https://github.com/danielraffel/pulp/pull/1126))
+- test(runtime): cover file and library helper edges ([#1114](https://github.com/danielraffel/pulp/pull/1114))
+- test(render): cover draw batcher merge blockers ([#1122](https://github.com/danielraffel/pulp/pull/1122))
+- test(osc): cover malformed bundle edges ([#1118](https://github.com/danielraffel/pulp/pull/1118))
+- test(audio): cover workgroup fallback lifecycle ([#1128](https://github.com/danielraffel/pulp/pull/1128))
+- test(view): cover svg path parser edge cases ([#1191](https://github.com/danielraffel/pulp/pull/1191))
+- test(render): cover texture atlas full-capacity edges ([#1127](https://github.com/danielraffel/pulp/pull/1127))
+- test(events): cover volume detector edge paths ([#1079](https://github.com/danielraffel/pulp/pull/1079))
+- test(midi): cover factory data byte bounds ([#1062](https://github.com/danielraffel/pulp/pull/1062))
+- test(view): cover table model edge bookkeeping ([#1188](https://github.com/danielraffel/pulp/pull/1188))
+- test(view): cover file browser edge paths ([#1089](https://github.com/danielraffel/pulp/pull/1089))
+- test(state): cover binding gesture edges ([#1185](https://github.com/danielraffel/pulp/pull/1185))
+- test(runtime): cover memory message channel edges ([#1184](https://github.com/danielraffel/pulp/pull/1184))
+- test(canvas): cover text layout edge paths ([#1186](https://github.com/danielraffel/pulp/pull/1186))
+- test(canvas): cover svg edge paths ([#1187](https://github.com/danielraffel/pulp/pull/1187))
+- fix(signal): handle degenerate polynomial roots ([#1051](https://github.com/danielraffel/pulp/pull/1051))
+- test(canvas): cover path to sdf guard edges ([#1190](https://github.com/danielraffel/pulp/pull/1190))
+- fix(signal): clamp meter process channel counts ([#1066](https://github.com/danielraffel/pulp/pull/1066))
+- test(midi): cover sysex accumulator tail paths ([#1129](https://github.com/danielraffel/pulp/pull/1129))
+- test(signal): cover fast math boundary cutoffs ([#1189](https://github.com/danielraffel/pulp/pull/1189))
+- test(audio): cover compressed reader rejection ([#1074](https://github.com/danielraffel/pulp/pull/1074))
+- test(audio): cover hotplug callback edges ([#1086](https://github.com/danielraffel/pulp/pull/1086))
+- test(audio): cover channel set edge paths ([#1133](https://github.com/danielraffel/pulp/pull/1133))
+- test(cli): cover host wrapper edge paths ([#1075](https://github.com/danielraffel/pulp/pull/1075))
+- test(render): cover gpu compute pool bookkeeping ([#1143](https://github.com/danielraffel/pulp/pull/1143))
+- test(platform): cover progress parser delimiter edges ([#1137](https://github.com/danielraffel/pulp/pull/1137))
+- test(events): cover service discovery edge paths ([#1045](https://github.com/danielraffel/pulp/pull/1045))
+- test(host): cover background scanner restart after cancel ([#1071](https://github.com/danielraffel/pulp/pull/1071))
+- test(packages): cover validation tool edge paths ([#1142](https://github.com/danielraffel/pulp/pull/1142))
+- fix(midi): clear stale running status on undefined system bytes ([#1102](https://github.com/danielraffel/pulp/pull/1102))
+- test(state): cover undo history edge cases ([#1119](https://github.com/danielraffel/pulp/pull/1119))
+- test(signal): cover meter reset and clip edges ([#1134](https://github.com/danielraffel/pulp/pull/1134))
+- test(events): cover ipc error state edges ([#1139](https://github.com/danielraffel/pulp/pull/1139))
+- test(signal): cover processor chain reset edges ([#1135](https://github.com/danielraffel/pulp/pull/1135))
+- test(render): cover render loop edge paths ([#1082](https://github.com/danielraffel/pulp/pull/1082))
+- docs: codify coverage no-idle loop ([#1138](https://github.com/danielraffel/pulp/pull/1138))
+- fix(audio): guard load measurer invalid timing inputs ([#1085](https://github.com/danielraffel/pulp/pull/1085))
+- test(tools): cover status ladder checker ([#1140](https://github.com/danielraffel/pulp/pull/1140))
+- test(format): cover descriptor validation edges ([#1120](https://github.com/danielraffel/pulp/pull/1120))
+- test(cli): cover package registry cache fallbacks ([#1136](https://github.com/danielraffel/pulp/pull/1136))
+- test(midi): cover sysex sidecar lifecycle ([#1132](https://github.com/danielraffel/pulp/pull/1132))
+- test(view): cover split and concertina layout widgets ([#1099](https://github.com/danielraffel/pulp/pull/1099))
+- test: cover host scan cache fallback paths ([#1123](https://github.com/danielraffel/pulp/pull/1123))
+- test(runtime): cover text diff edge paths ([#1084](https://github.com/danielraffel/pulp/pull/1084))
+- test(audio): cover excerpt window boundary arithmetic ([#1131](https://github.com/danielraffel/pulp/pull/1131))
+- test(ship): cover appcast malformed optional fields ([#1141](https://github.com/danielraffel/pulp/pull/1141))
+- test(state): cover state tree listener detach edges ([#1112](https://github.com/danielraffel/pulp/pull/1112))
+- test(runtime): cover json-rpc edge paths ([#1111](https://github.com/danielraffel/pulp/pull/1111))
+- test(midi): cover MPE voice tracker tail paths ([#1110](https://github.com/danielraffel/pulp/pull/1110))
+- test(state): cover preset manager edge paths ([#1109](https://github.com/danielraffel/pulp/pull/1109))
+- test(format): cover AAX model validation edges ([#1108](https://github.com/danielraffel/pulp/pull/1108))
+- test(host): cover graph serializer edge paths ([#1107](https://github.com/danielraffel/pulp/pull/1107))
+- test(runtime): cover URL parser edge paths ([#1106](https://github.com/danielraffel/pulp/pull/1106))
+- fix(canvas): normalize wrapped color hues ([#1105](https://github.com/danielraffel/pulp/pull/1105))
+- test(view): cover preset browser edge paths ([#1103](https://github.com/danielraffel/pulp/pull/1103))
+- test(view): cover accessibility tree edges ([#1101](https://github.com/danielraffel/pulp/pull/1101))
+- test(view): cover code editor edge paths ([#1100](https://github.com/danielraffel/pulp/pull/1100))
+- test(view): cover table list edge paths ([#1098](https://github.com/danielraffel/pulp/pull/1098))
+- fix(view): cover property list edge paths ([#1095](https://github.com/danielraffel/pulp/pull/1095))
+- test(local-ci): cover deterministic helper edges ([#1094](https://github.com/danielraffel/pulp/pull/1094))
+- test(view): cover graph editor edge paths ([#1093](https://github.com/danielraffel/pulp/pull/1093))
+- test(cli): cover inspect command edge paths ([#1092](https://github.com/danielraffel/pulp/pull/1092))
+- test(view): cover ui component edge paths ([#1091](https://github.com/danielraffel/pulp/pull/1091))
+- fix(view): harden color picker edge paths ([#1090](https://github.com/danielraffel/pulp/pull/1090))
+- test(runtime): cover ip address helpers ([#1087](https://github.com/danielraffel/pulp/pull/1087))
+- test(midi): cover midi file edge paths ([#1081](https://github.com/danielraffel/pulp/pull/1081))
+- test(runtime): cover base64 decode edge paths ([#1080](https://github.com/danielraffel/pulp/pull/1080))
+- test(view): cover widget bridge raf cancellation ([#1065](https://github.com/danielraffel/pulp/pull/1065))
+
 <a id="v0690"></a>
 ## [0.69.0] - 2026-04-30
 
@@ -35,8 +380,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test(runtime): cover range edge paths ([#1034](https://github.com/danielraffel/pulp/pull/1034))
 
 <a id="v0680"></a>
-## [0.69.0]
-
 ## [0.68.0] - 2026-04-30
 
 - fix(view): bubble click up to ancestor on_click handler (#1067) ([#1073](https://github.com/danielraffel/pulp/pull/1073))
@@ -45,8 +388,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test(audio): cover BufferView clear accessors ([#1033](https://github.com/danielraffel/pulp/pull/1033))
 
 <a id="v0670"></a>
-## [0.68.0]
-
 ## [0.67.0] - 2026-04-30
 
 - feat(cli): emit classnames.json from import-design --from claude (#1035) ([#1048](https://github.com/danielraffel/pulp/pull/1048))
@@ -976,6 +1317,31 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.2]: https://github.com/danielraffel/pulp/releases/tag/v0.78.2
+[0.78.1]: https://github.com/danielraffel/pulp/releases/tag/v0.78.1
+[0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0
+[0.77.0]: https://github.com/danielraffel/pulp/releases/tag/v0.77.0
+[0.76.0]: https://github.com/danielraffel/pulp/releases/tag/v0.76.0
+[0.75.6]: https://github.com/danielraffel/pulp/releases/tag/v0.75.6
+[0.75.5]: https://github.com/danielraffel/pulp/releases/tag/v0.75.5
+[0.75.4]: https://github.com/danielraffel/pulp/releases/tag/v0.75.4
+[0.75.2]: https://github.com/danielraffel/pulp/releases/tag/v0.75.2
+[0.75.1]: https://github.com/danielraffel/pulp/releases/tag/v0.75.1
+[0.75.0]: https://github.com/danielraffel/pulp/releases/tag/v0.75.0
+[0.74.1]: https://github.com/danielraffel/pulp/releases/tag/v0.74.1
+[0.74.0]: https://github.com/danielraffel/pulp/releases/tag/v0.74.0
+[0.73.0]: https://github.com/danielraffel/pulp/releases/tag/v0.73.0
+[0.72.6]: https://github.com/danielraffel/pulp/releases/tag/v0.72.6
+[0.72.5]: https://github.com/danielraffel/pulp/releases/tag/v0.72.5
+[0.72.4]: https://github.com/danielraffel/pulp/releases/tag/v0.72.4
+[0.72.3]: https://github.com/danielraffel/pulp/releases/tag/v0.72.3
+[0.72.2]: https://github.com/danielraffel/pulp/releases/tag/v0.72.2
+[0.72.1]: https://github.com/danielraffel/pulp/releases/tag/v0.72.1
+[0.72.0]: https://github.com/danielraffel/pulp/releases/tag/v0.72.0
+[0.71.0]: https://github.com/danielraffel/pulp/releases/tag/v0.71.0
+[0.70.0]: https://github.com/danielraffel/pulp/releases/tag/v0.70.0
+[0.69.2]: https://github.com/danielraffel/pulp/releases/tag/v0.69.2
+[0.69.1]: https://github.com/danielraffel/pulp/releases/tag/v0.69.1
 [0.69.0]: https://github.com/danielraffel/pulp/releases/tag/v0.69.0
 [0.68.1]: https://github.com/danielraffel/pulp/releases/tag/v0.68.1
 [0.68.0]: https://github.com/danielraffel/pulp/releases/tag/v0.68.0

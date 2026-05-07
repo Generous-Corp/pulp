@@ -51,20 +51,24 @@ cmake -S . -B build -DPULP_SANITIZER=address
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`
 
-**CLI tool:**
+**CLI tool (source tree):**
 ```bash
-./build/tools/cli/pulp build       # configure + build
-./build/tools/cli/pulp test        # run test suite
-./build/tools/cli/pulp validate    # run format validators (auval, clap-validator)
-./build/tools/cli/pulp ship sign --identity "Developer ID Application: ..."
-./build/tools/cli/pulp ship package --version 1.0.0
-./build/tools/cli/pulp ship check  # show signing status
-./build/tools/cli/pulp version             # show SDK and project version
-./build/tools/cli/pulp version bump patch  # bump version
-./build/tools/cli/pulp version check       # verify version consistency
-./build/tools/cli/pulp dev --test          # watch + rebuild + test loop
-./build/tools/cli/pulp build --watch       # watch + rebuild loop
+./build/pulp build       # configure + build
+./build/pulp test        # run test suite
+./build/pulp validate    # run format validators (auval, clap-validator)
+./build/pulp ship sign --identity "Developer ID Application: ..."
+./build/pulp ship package --version 1.0.0
+./build/pulp ship check  # show signing status
+./build/pulp version             # show SDK and project version
+./build/pulp version bump patch  # bump version
+./build/pulp version check       # verify version consistency
+./build/pulp dev --test          # watch + rebuild + test loop
+./build/pulp build --watch       # watch + rebuild loop
 ```
+
+After the Rust CLI cutover, source builds produce `./build/pulp` as
+the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
+delegate for commands that still live in C++.
 
 **Note:** All plugin formats build and pass tests, including PulpSynth CLAP.
 
@@ -162,6 +166,22 @@ Pulp uses a PreText-inspired text layout architecture (measure once, reflow fore
 - `TextShaper::layout()` — cheap: pure arithmetic over cached widths, no font calls
 - HarfBuzz, ICU, and SkParagraph are bundled in the Skia pre-built binaries — no separate vendoring needed
 - Fallback to character-width estimation when Skia unavailable
+
+### Layout Model — Flex + Grid only (deliberate)
+
+Pulp's layout engine is **Yoga** (`external/yoga/`), so the layout primitives are exactly what Yoga supports: **CSS Flexbox + CSS Grid** (Grid landed in Yoga 3.0, wired in PR #1509). CSS block flow, table layout, multi-column, floats, and print pagination are **out of scope by design**.
+
+When implementing a feature or assessing a compat gap, **don't reach for non-Yoga layout primitives**. If a property in `compat.json` is marked `wontfix` because it requires block/inline/table/multi-column/float/print primitives, that's the architectural ceiling — not a bug to fix. Reasons:
+
+1. **Yoga is the engine.** Adding non-Yoga layout means either a parallel layout engine (double maintenance) or block/table/columns reimplemented over Yoga (massive refactor).
+2. **React Native parity.** RN is also flex+grid-only. `@pulp/react` and the JS bridge depend on this contract.
+3. **GPU-first render pipeline.** Skia/Dawn favor a single tree-walk layout pass; multi-pass sequential algorithms (block flow, table cell auto-sizing, multi-column balancing, float wrap, paginated layout) don't compose with the render pipeline cleanly.
+4. **Use case is structured panels.** Pulp targets audio plugin UIs + cross-platform apps — knobs, faders, side panels, popovers. Newspaper columns and complex tables are not real Pulp use cases.
+5. **Modern design tools output flex/grid.** Figma, Stitch, v0, Pencil all produce flex containers + grid as their default layout primitives. Tooling alignment matters for the design-import path (#1434).
+
+The honest tradeoff: Pulp will never be a general-purpose web browser. It IS the right shape for cross-platform native UI. CSS coverage at ~95% raw / ~100% on non-OOS denominator IS the architectural ceiling, not a goal to push past by adding layout primitives.
+
+For the user-facing version of this rationale, see `docs/reference/layout-model.md`.
 
 ---
 
@@ -277,6 +297,42 @@ git worktree remove ../pulp-phase-audio
 ```
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
+
+When creating a fresh worktree for a task that references `planning/`, initialize the planning submodule before reading specs or handoffs:
+
+```bash
+git submodule update --init planning
+```
+
+If a named planning file is still missing after initialization, verify the current planning checkout or source planning repo before treating the file as nonexistent.
+
+Fresh worktrees may also have only `external/skia-build/` headers and
+`VERSION.md`, without the platform static libraries. For work that needs
+Skia raster determinism, first check for a populated `SKIA_DIR` or reuse the
+primary checkout's cached `external/skia-build` when it has the required
+`*-gpu/lib/Release` libraries. Skia-dependent smoke tests should either run
+against that locked cache or skip with a clear "locked raster dependency not
+installed" reason; they should not replace the Skia render proof with a fake
+or unrelated renderer.
+
+For the visual-harness Docker smoke, prefer
+`tools/harness/visual/docker-build.sh` over a raw `docker build`. The wrapper
+uses the pinned `linux/amd64` Skia archive and a reusable local buildx cache
+under `~/.cache/pulp/visual-harness/buildx`; the Dockerfile also keeps
+BuildKit cache mounts for apt packages, the Skia release zip, and pip wheels.
+That cache is intentionally machine-local, so repeated runs from new worktrees
+or SSH hosts on the same machine should reuse downloaded inputs.
+
+For future visual fixtures that need interaction or screenshots, reuse Pulp's
+existing hooks before adding platform-specific automation: drive views with
+`View::simulate_click`, `simulate_drag`, and `simulate_hover`; capture headless
+view trees with `pulp::view::render_to_png` / `render_to_file`, or live host
+surfaces with `WindowHost::capture_png()`. Non-Apple platforms require a
+registered screenshot provider via `set_screenshot_provider()`, so cross-
+platform tests should install that provider or report a clear unsupported skip.
+When macOS rendering is the product risk, run the local arm64-darwin smoke in
+addition to the Docker smoke; Docker proves the dependency recipe, not Apple's
+screenshot or live-window capture paths.
 
 ### Status Tracking
 
@@ -482,17 +538,25 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 **Enforcement (three layers, one source of truth):**
 
 1. **Agent hooks (Layer 1)** — `hooks/scripts/cli-plugin-sync.sh` runs `version_bump_check.py` and `skill_sync_check.py` in `--mode=hint` on every PostToolUse so you see drift while iterating. Advisory only.
-2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. Advisory by default; `PULP_ENFORCE_PREPUSH=1` upgrades to hard failure.
-3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report` with `PULP_ENFORCE_PREPUSH=1`. No bypass other than the commit trailers below.
+2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. **Enforcing by default** (pulp #1144 — was advisory pre-#1144 and burned 80+ minutes per multi-touch PR on CI roundtrips). `PULP_DISABLE_PREPUSH_GATES=1` demotes back to advisory; `PULP_SKIP_PREPUSH=1` skips entirely (emergencies only).
+3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report`. CI is hard-failing (no env-var demotion). No bypass other than the commit trailers below.
 
 **Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `shipyard pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `shipyard pr` orchestrates:
 
 1. `skill_sync_check.py --mode=report` — hard-fails on missing SKILL.md updates.
 2. `version_bump_check.py --mode=apply` — rewrites version files and CHANGELOG stub.
-3. `git commit` + `gh pr create` + `shipyard ship` — one command, merges on green.
+3. Branch push, PR creation, Shipyard state recording, and cross-platform validation — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
-Shipyard v0.19.1+ (pinned as v0.29.0 in `tools/shipyard.toml`) auto-discovers Pulp's `tools/scripts/` layout; `.shipyard/config.toml [validation]` additionally pins the paths explicitly for reproducibility.
+Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.
+
+`pulp pr` defaults to the same Shipyard path. A human can opt out in their
+local checkout with `pulp config set pr.workflow github` or `manual`, or
+temporarily with `PULP_PR_WORKFLOW` / `--workflow`, but agents should not
+select those workflows unless the user explicitly requests that bypass.
+`pulp status` reports the effective PR workflow and local tool health.
+
+Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scripts/` layout; `.shipyard/config.toml [validation]` additionally pins the paths explicitly for reproducibility.
 
 **Bypass trailers** (tip commit, never PR body — audit trail lives in git):
 
@@ -611,8 +675,9 @@ pulp coverage diff pulp-test-widget-bridge
 The threshold + surface filters live in
 `tools/scripts/coverage_config.json` — edit there once and CI
 (`.github/workflows/coverage.yml`) plus this local script stay in
-sync. The pre-push hook runs this check advisory-by-default;
-`PULP_ENFORCE_PREPUSH_DIFF_COVER=1` upgrades it to a hard block.
+sync. The pre-push hook runs this check enforcing-by-default
+(pulp #1144); `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to
+advisory if you genuinely need to push a known coverage gap.
 
 The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
@@ -740,7 +805,9 @@ Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/cre
 
 ### CI Workflow
 
-**Never merge a PR without green CI on all three platforms (macOS, Ubuntu, Windows).** Use the `ci` skill for all merges — it handles the full workflow.
+Use Shipyard for all merges. Current Pulp branch protection requires the
+macOS lane; Linux and Windows still run in GitHub Actions but are advisory
+unless branch protection changes.
 
 #### The `ship` workflow (primary path for all agents)
 
@@ -755,15 +822,14 @@ shipyard pr --skip-bump plugin --bump-reason="test-only change"
 shipyard pr --skip-skill-update ci --skill-reason="docs-only"
 shipyard pr --skip-target ubuntu                # deliberate lane skip
 
-# `pulp pr` is a Pulp-side wrapper; it still works and delegates to shipyard pr.
-# Use either — agents should prefer `shipyard pr` for directness.
+# `pulp pr` is a Pulp-side wrapper; it defaults to shipyard pr and reports
+# opt-out workflows via `pulp status`. Agents should prefer `shipyard pr`.
 pulp pr
 
 # Lower-level Shipyard commands — use only for diagnostics or recovery, NOT as the
 # default ship path:
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
-shipyard cloud run build <branch>         # dispatch to Namespace
+shipyard ship                             # resume/operate on an existing Shipyard-managed PR
 
 # SSH preflight (v0.20.0+ / Shipyard #106): exit codes are distinct.
 #   0 — success
@@ -779,25 +845,31 @@ shipyard cloud run build <branch>         # dispatch to Namespace
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
 1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
-2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens a PR, and invokes `shipyard ship`
-3. `shipyard ship` validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
-4. Merges only when ALL targets pass
+2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and invokes Shipyard validation
+3. Shipyard validates the macOS lane through the local self-hosted runner path
+4. GitHub Actions runs Linux and Windows on GitHub-hosted runners as advisory checks
 5. Posts a closeout comment
 
 `local_ci.py` remains in the repo as a legacy fallback but is scheduled for removal (see issue #120).
 
-#### GitHub Actions (backup gate)
+#### GitHub Actions
 
-PRs also trigger `.github/workflows/build.yml` which builds and tests on all three platforms via Namespace runners. This is a redundant safety net — Shipyard's local validation is the primary path.
+PRs trigger `.github/workflows/build.yml` on all three platforms. macOS routes
+to the local self-hosted runner through `PULP_LOCAL_MACOS_RUNS_ON_JSON` when
+that repo variable is set. Linux and Windows use GitHub-hosted runners and are
+advisory unless explicitly required by branch protection.
 
 #### Runner priority (hard rule)
 
-**Always use Namespace for cloud CI. Never rely on GitHub-hosted runners as the primary path.**
+Namespace is decommissioned for Pulp CI. Do not use `--mode namespace` or set
+`*_NAMESPACE_*_RUNS_ON_JSON` repo variables.
 
-1. **Namespace** (default): `shipyard cloud run build <branch>`
-2. **Local VMs** (fallback): `ssh ubuntu`, `ssh win` via `shipyard run`
-3. **GitHub-hosted** (last resort): Only if Namespace is unavailable.
+1. **macOS local runner**: primary required gate.
+2. **GitHub-hosted Linux/Windows**: advisory cross-platform signal.
+3. **SSH Ubuntu/Windows**: use only when a human explicitly asks for those local hosts.
 
-macOS runs locally in parallel with Namespace/SSH Ubuntu/Windows builds.
+If Shipyard tries to probe SSH Ubuntu or Windows for a macOS-focused PR where
+those hosts are not in scope, use `--skip-target ubuntu --skip-target windows`
+and file a Shipyard issue if the CLI should have inferred that from config.
 
 See `docs/guides/local-ci.md` for setup.

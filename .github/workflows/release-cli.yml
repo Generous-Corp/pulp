@@ -102,9 +102,16 @@ jobs:
         run: cmake --build build --config Release
         shell: bash
 
-      - name: Strip binary (Unix)
+      # Phase 8: post-swap there are TWO CLI binaries shipping side by
+      # side — `pulp` (Rust, the user-facing default) at the top of
+      # the build dir, and `pulp-cpp` (C++, the fallthrough delegate
+      # for library-linked subcommands like ship/validate/host) under
+      # `tools/cli/`. The release tarball must include both.
+      - name: Strip binaries (Unix)
         if: runner.os != 'Windows'
-        run: strip build/tools/cli/pulp
+        run: |
+          strip build/pulp
+          strip build/tools/cli/pulp-cpp
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
@@ -116,11 +123,17 @@ jobs:
       # at /Users/runner/Library/Caches/Pulp/... and crashed on every
       # user machine). The smoke-cli matrix gate (PR #395) verifies
       # the result actually runs on a clean runner.
+      #
+      # `package_cli.py --cpp-binary` (added on validate/phase8-integrated)
+      # bundles `pulp-cpp` alongside `pulp` in the same tarball so the
+      # Rust binary's fallthrough paths can find their delegate after
+      # the user extracts and runs.
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
           python3 tools/scripts/package_cli.py \
-            --binary build/tools/cli/pulp \
+            --binary build/pulp \
+            --cpp-binary build/tools/cli/pulp-cpp \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -130,7 +143,8 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           python tools/scripts/package_cli.py `
-            --binary build/tools/cli/Release/pulp.exe `
+            --binary build/pulp.exe `
+            --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
             --build-dir build `
             --platform ${{ matrix.platform }} `
             --out pulp-${{ matrix.platform }}.zip
@@ -285,75 +299,84 @@ jobs:
       # so we can grep stderr for the diagnostic patterns even when
       # pulp itself exits 0 (defense-in-depth — some runtime loaders
       # warn but don't fail).
-      - name: Smoke `pulp help` (Unix)
+      - name: Smoke `pulp help` + `pulp-cpp help` (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          BIN=/tmp/pulp-smoke/${{ matrix.artifact }}
-          echo "Testing $BIN"
-          file "$BIN" || true
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            echo "--- otool -L (load commands) ---"
-            otool -L "$BIN" || true
-            echo "--- otool -l rpaths ---"
-            otool -l "$BIN" | awk '/LC_RPATH/{flag=1} flag{print; if (/path /) {flag=0}}' | head -20 || true
-          else
-            echo "--- ldd ---"
-            ldd "$BIN" || true
-          fi
-          echo "--- pulp help ---"
-          set +e
-          "$BIN" help > /tmp/pulp-smoke.out 2> /tmp/pulp-smoke.err
-          rc=$?
-          set -e
-          echo "exit=$rc"
-          echo "--- stdout ---"; cat /tmp/pulp-smoke.out || true
-          echo "--- stderr ---"; cat /tmp/pulp-smoke.err || true
-          if [ "$rc" -ne 0 ]; then
-            echo "FAIL: pulp help returned exit $rc"
-            exit 1
-          fi
-          # Belt + suspenders: dyld/ld.so warnings shouldn't appear even on rc=0.
-          if grep -qE "Library not loaded|Symbol not found|cannot open shared object|undefined symbol|@rpath/" /tmp/pulp-smoke.err; then
-            echo "FAIL: dyld/ld.so error in stderr (artifact is non-portable)"
-            exit 1
-          fi
-          # Same check for stdout (some loaders write there).
-          if grep -qE "Library not loaded|Symbol not found|cannot open shared object" /tmp/pulp-smoke.out; then
-            echo "FAIL: loader error in stdout"
-            exit 1
-          fi
-          echo "OK: pulp help is portable on ${{ matrix.platform }}."
+          # Phase 8: tarball ships both `pulp` (Rust) and `pulp-cpp`
+          # (C++) side by side. Smoke both — a broken pulp-cpp delegate
+          # would silently break every fallthrough subcommand the
+          # moment users invoke `pulp ship`, `pulp validate`, etc.
+          for ART in pulp pulp-cpp; do
+            BIN=/tmp/pulp-smoke/$ART
+            echo "===== Testing $BIN ====="
+            file "$BIN" || true
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              echo "--- otool -L (load commands) ---"
+              otool -L "$BIN" || true
+              echo "--- otool -l rpaths ---"
+              otool -l "$BIN" | awk '/LC_RPATH/{flag=1} flag{print; if (/path /) {flag=0}}' | head -20 || true
+            else
+              echo "--- ldd ---"
+              ldd "$BIN" || true
+            fi
+            echo "--- $ART help ---"
+            set +e
+            "$BIN" help > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            rc=$?
+            set -e
+            echo "exit=$rc"
+            echo "--- stdout ---"; cat /tmp/$ART-smoke.out || true
+            echo "--- stderr ---"; cat /tmp/$ART-smoke.err || true
+            if [ "$rc" -ne 0 ]; then
+              echo "FAIL: $ART help returned exit $rc"
+              exit 1
+            fi
+            # Belt + suspenders: dyld/ld.so warnings shouldn't appear even on rc=0.
+            if grep -qE "Library not loaded|Symbol not found|cannot open shared object|undefined symbol|@rpath/" /tmp/$ART-smoke.err; then
+              echo "FAIL: dyld/ld.so error in stderr (artifact is non-portable)"
+              exit 1
+            fi
+            # Same check for stdout (some loaders write there).
+            if grep -qE "Library not loaded|Symbol not found|cannot open shared object" /tmp/$ART-smoke.out; then
+              echo "FAIL: loader error in stdout"
+              exit 1
+            fi
+            echo "OK: $ART help is portable on ${{ matrix.platform }}."
+          done
 
-      - name: Smoke `pulp help` (Windows)
+      - name: Smoke `pulp help` + `pulp-cpp help` (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $bin = Join-Path $env:TEMP "pulp-smoke\${{ matrix.artifact }}"
-          Write-Host "Testing $bin"
-          # Print imported DLLs for diagnostic context (no failure if dumpbin missing).
-          try { dumpbin /dependents $bin 2>$null } catch { Write-Host "(dumpbin unavailable; skipping)" }
-          $stdout = New-TemporaryFile
-          $stderr = New-TemporaryFile
-          $proc = Start-Process -FilePath $bin -ArgumentList "help" `
-              -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait -NoNewWindow
-          Write-Host "exit=$($proc.ExitCode)"
-          Write-Host "--- stdout ---"
-          Get-Content $stdout -ErrorAction SilentlyContinue
-          Write-Host "--- stderr ---"
-          $err = Get-Content $stderr -ErrorAction SilentlyContinue
-          $err
-          if ($proc.ExitCode -ne 0) {
-              Write-Error "FAIL: pulp.exe help returned exit $($proc.ExitCode)"
-              exit 1
+          # Phase 8: tarball ships both `pulp.exe` (Rust) and
+          # `pulp-cpp.exe` (C++) side by side. Smoke both.
+          foreach ($art in @("pulp.exe", "pulp-cpp.exe")) {
+              $bin = Join-Path $env:TEMP "pulp-smoke\$art"
+              Write-Host "===== Testing $bin ====="
+              try { dumpbin /dependents $bin 2>$null } catch { Write-Host "(dumpbin unavailable; skipping)" }
+              $stdout = New-TemporaryFile
+              $stderr = New-TemporaryFile
+              $proc = Start-Process -FilePath $bin -ArgumentList "help" `
+                  -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait -NoNewWindow
+              Write-Host "exit=$($proc.ExitCode)"
+              Write-Host "--- stdout ---"
+              Get-Content $stdout -ErrorAction SilentlyContinue
+              Write-Host "--- stderr ---"
+              $err = Get-Content $stderr -ErrorAction SilentlyContinue
+              $err
+              if ($proc.ExitCode -ne 0) {
+                  Write-Error "FAIL: $art help returned exit $($proc.ExitCode)"
+                  exit 1
+              }
+              if ($err -match "DLL was not found|side-by-side|ImportError|missing.*\.dll") {
+                  Write-Error "FAIL: missing-DLL error in stderr (artifact is non-portable)"
+                  exit 1
+              }
+              Write-Host "OK: $art help is portable on ${{ matrix.platform }}."
           }
-          if ($err -match "DLL was not found|side-by-side|ImportError|missing.*\.dll") {
-              Write-Error "FAIL: missing-DLL error in stderr (artifact is non-portable)"
-              exit 1
-          }
-          Write-Host "OK: pulp.exe help is portable on ${{ matrix.platform }}."
 
   release:
     needs: [build-cli, smoke-cli]
@@ -431,7 +454,9 @@ jobs:
             irm https://www.generouscorp.com/pulp/install.ps1 | iex
             ```
 
-            Or download the binary for your platform below.
+            These installers place the Rust `pulp` CLI and the C++ `pulp-cpp`
+            delegate on your PATH. Or download the binary archive for your
+            platform below.
           files: |
             artifacts/**/*
           draft: false

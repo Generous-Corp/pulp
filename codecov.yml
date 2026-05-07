@@ -236,12 +236,24 @@ component_management:
         informational: true
   individual_components:
     # Core subsystems — mirror every top-level core/** directory.
+    #
+    # Subsystems that house platform-specific subtrees (`audio`, `midi`,
+    # `view`, `render`, `platform`, `canvas`) explicitly exclude those
+    # subtrees so each first-party file lands in exactly one component
+    # bucket — see #1055. Platform-specific code is owned by the
+    # `apple`/`android`/`linux`/`windows` components below; without the
+    # `!`-exclude here those files were silently double-counted, inflating
+    # coverage for both the subsystem and the platform.
     - component_id: audio
       name: audio
-      paths: ["core/audio/**"]
+      paths:
+        - "core/audio/**"
+        - "!core/audio/platform/**"
     - component_id: canvas
       name: canvas
-      paths: ["core/canvas/**"]
+      paths:
+        - "core/canvas/**"
+        - "!core/canvas/platform/**"
     - component_id: dsl
       name: dsl
       paths: ["core/dsl/**"]
@@ -256,16 +268,31 @@ component_management:
       paths: ["core/host/**"]
     - component_id: midi
       name: midi
-      paths: ["core/midi/**"]
+      paths:
+        - "core/midi/**"
+        - "!core/midi/platform/**"
     - component_id: osc
       name: osc
       paths: ["core/osc/**"]
     - component_id: platform
       name: platform
-      paths: ["core/platform/**"]
+      paths:
+        - "core/platform/**"
+        # Each platform-OS subtree is owned by the matching platform
+        # component below. `core/platform/platform/posix/**` is kept in
+        # because it is shared POSIX scaffolding, not OS-specific.
+        - "!core/platform/platform/ios/**"
+        - "!core/platform/platform/mac/**"
+        - "!core/platform/platform/linux/**"
+        - "!core/platform/platform/win/**"
+        - "!core/platform/src/android/**"
+        - "!core/platform/include/pulp/platform/android/**"
+        - "!core/platform/include/pulp/platform/win/**"
     - component_id: render
       name: render
-      paths: ["core/render/**"]
+      paths:
+        - "core/render/**"
+        - "!core/render/platform/**"
     - component_id: runtime
       name: runtime
       paths: ["core/runtime/**"]
@@ -277,14 +304,18 @@ component_management:
       paths: ["core/state/**"]
     - component_id: view
       name: view
-      paths: ["core/view/**"]
-    # Platform (4) — cross-cut the subsystems.
+      paths:
+        - "core/view/**"
+        - "!core/view/platform/**"
+    # Platform (4) — cross-cut the subsystems. Patterns within each
+    # platform component must not overlap each other (Codecov double-
+    # counts files matched twice within the same component, inflating
+    # the line totals — caught on #1055 as `platform,android,android`
+    # 3-way matches).
     - component_id: android
       name: android
       paths:
-        - "core/platform/src/android/**"
         - "android/**"
-        - "core/render/platform/android/**"
         - "core/**/android/**"
     - component_id: apple
       name: apple
@@ -304,7 +335,9 @@ component_management:
         - "core/**/win/**"
         - "core/**/windows/**"
         - "core/**/wasapi/**"
-    # Surface (4)
+    # Surface (4) — `tools` excludes `tools/cli/**` so the more specific
+    # `cli` component owns those files; otherwise every CLI file is
+    # double-counted (#1055).
     - component_id: cli
       name: cli
       paths: ["tools/cli/**"]
@@ -316,4 +349,6 @@ component_management:
       paths: ["ship/**"]
     - component_id: tools
       name: tools
-      paths: ["tools/**"]
+      paths:
+        - "tools/**"
+        - "!tools/cli/**"

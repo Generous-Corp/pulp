@@ -24,8 +24,8 @@ Help users discover, evaluate, and add third-party audio libraries to their Pulp
 Search the registry for packages matching a need:
 
 ```bash
-./build/tools/cli/pulp search "<query>"
-./build/tools/cli/pulp suggest --description "<what the user needs>"
+./build/pulp search "<query>"
+./build/pulp suggest --description "<what the user needs>"
 ```
 
 Or read the registry directly for full details:
@@ -46,7 +46,7 @@ cat tools/packages/registry.json | python3 -m json.tool
 ## Adding a Package
 
 ```bash
-./build/tools/cli/pulp add <package-id>
+./build/pulp add <package-id>
 ```
 
 This will:
@@ -106,6 +106,21 @@ DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored
 alias differs from the canonical name — add the alias to
 `DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
 list on the manifest entry.
+
+## Bundled Toolchain Pins
+
+Some prebuilt toolchains carry bundled third-party components that are not
+separate source directories in `external/`. For example, the Skia prebuilt
+toolchain used by visual tests bundles Dawn, HarfBuzz, and ICU through Skia's
+`DEPS` file. Track those exact nested revisions in the parent manifest entry
+with a structured field such as `determinism.bundled_pins`, and mirror the
+human-readable version in `DEPENDENCIES.md`, `external/<toolchain>/VERSION.md`,
+and any relevant reference doc.
+
+Do not add a separate manifest entry for a nested toolchain component unless
+Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
+will require standalone NOTICE/licensing rows for something whose license and
+distribution boundary are already covered by the parent prebuilt.
 
 Synthetic missing-dep test: `tools/deps/test_audit.py::
 ManifestSourceScannerTests::test_uncovered_detection_catches_missing_pip_dep`

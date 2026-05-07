@@ -1,0 +1,10 @@
+{
+  "_comment": "pulp #1031 detection expectations for the stitch/2025.04 fixture. Used by pulp-test-import-detect to assert (source, format-version, parser-version, matched-clauses, total-clauses, confidence_pct >= threshold).",
+  "source": "stitch",
+  "format-version": "2025.04",
+  "parser-version": "1.0",
+  "matched-clauses": 3,
+  "total-clauses": 3,
+  "min-confidence-pct": 100,
+  "fingerprint-kinds": ["directory-files", "html-script-src", "tailwind-config-token"]
+}

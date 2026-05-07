@@ -35,8 +35,8 @@ When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
 **"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
 run `shipyard pr` (not `gh pr create` + `shipyard ship` separately).
 
-`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned at
-v0.29.0 in `tools/shipyard.toml`). It:
+`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; currently pinned
+in `tools/shipyard.toml`). It:
 
 1. Calls `tools/scripts/skill_sync_check.py` (resolved via Shipyard's
    `[validation]` path-discovery, explicit in `.shipyard/config.toml`) and
@@ -46,8 +46,8 @@ v0.29.0 in `tools/shipyard.toml`). It:
    Claude plugin, and marketplace versions consistently, honoring any
    `Version-Bump:` trailers.
 3. Commits the bump (if any) as `chore: bump <surfaces>`.
-4. `gh pr create` with a generated body.
-5. `shipyard ship` for cross-platform validate + merge on green.
+4. Pushes the branch, creates the PR, and records Shipyard tracking state.
+5. Runs cross-platform validate + merge on green.
 6. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
    publishes binaries on merge.
 
@@ -55,14 +55,28 @@ Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+Direct `gh pr create` is an explicit emergency/manual bypass only. If the
+user asks for that path, state the tracking gap up front: the PR may not
+appear in Shipyard-managed state or the macOS GUI until it is reconciled or
+re-shipped through Shipyard.
+
 `pulp pr` is a Pulp-side wrapper that delegates to `shipyard pr`; both are
-valid, agents should prefer `shipyard pr` for directness.
+valid, agents should prefer `shipyard pr` for directness. Humans can opt out
+of Shipyard for their own checkout with `pulp config set pr.workflow github`
+or `manual`, but agents should not choose those workflows unless the user
+explicitly asks for a manual/emergency bypass. `pulp status` reports the
+effective workflow and whether its required local tool is installed.
 
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
-diagnostics, experimental branches, or when `shipyard pr` itself is being
-debugged. Do not use them as the primary ship path.
+diagnostics, experimental branches, existing Shipyard-managed PRs, or when
+`shipyard pr` itself is being debugged. Do not use them as the primary ship
+path.
 
-### Behaviour notes at the current pin (v0.29.0)
+### Shipyard pin and behaviour notes
+
+Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
+Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
+signed/notarized `.dmg`, so the version and asset metadata must move together.
 
 - **Release SDKs are expected to include desktop WebView symbols**
   (pulp #695). `.github/workflows/release-cli.yml` now configures the
@@ -72,6 +86,13 @@ debugged. Do not use them as the primary ship path.
   `make_webview_embedded_resource_fetcher`. If you touch the release
   workflow or `tools/scripts/release-cli-local.sh`, preserve that
   contract or WebView-using downstream SDK consumers will link-fail.
+- **Phase 8 CLI flip ships two CLI binaries.** Release CLI jobs must
+  preserve Rust `pulp` as the user-facing binary and C++ `pulp-cpp`
+  as the fallthrough delegate in the same archive. Smoke both names:
+  `pulp version --json` for the Rust path, and at least one C++-owned
+  command through `PULP_RS_CPP_BINARY=/path/to/pulp-cpp pulp ...` or a
+  direct `pulp-cpp ...` invocation. Do not resurrect `pulp-rs` as the
+  shipped binary name.
 - **macOS binary is signed + notarized** (Shipyard v0.29.0). On
   macOS 26.3+ XProtect skips the deep scan for notarized binaries,
   cutting `shipyard pr` cold-start ~4-5x (from ~5-6s to ~1-1.5s).
@@ -167,7 +188,7 @@ period (see danielraffel/pulp#120).
 ```bash
 # Primary: Shipyard
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard pr                               # create, track, validate, and merge on green
 shipyard ship --resume                    # pick up an interrupted ship (v0.3.0+)
 shipyard ship --no-resume                 # discard stale state, start fresh
 shipyard ship-state list                  # in-flight ships (title, url, sha)
@@ -327,21 +348,27 @@ To install Shipyard locally for the first time:
 ```bash
 ./tools/install-shipyard.sh           # download + verify pinned binary
 ./tools/install-shipyard.sh --status  # show installed vs pinned version
-export PATH="$HOME/.pulp/bin:$PATH"   # add ~/.pulp/bin to PATH (one-time)
+export PATH="$HOME/.local/bin:$PATH"  # add ~/.local/bin to PATH (one-time)
 ```
 
-After install, every Pulp checkout that has `~/.pulp/bin` on PATH gets
+The public Pulp installer intentionally does not install Shipyard or GitHub
+CLI (`gh`). Ordinary Pulp users can create, build, run, and upgrade projects
+without either tool. Treat them as source-checkout contributor dependencies
+for PR/CI work; `gh` is required only for GitHub-facing maintenance commands
+and the explicit `pr.workflow=github` bypass.
+
+After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
 that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
 instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
 edit and worktree-safety checks.
 
-The two tools cover the same target matrix (mac local + Linux SSH +
-Windows SSH + Namespace cloud) and accept the same `--base` flag for
-develop branches. Shipyard adds evidence-gated merge that checks
-per-platform proof for the exact merge-candidate SHA, which is stricter
-than `local_ci.py`'s `job.passed` check.
+The two tools cover the same target matrix (mac local + GitHub-hosted
+Linux/Windows; legacy SSH targets only when explicitly requested) and accept
+the same `--base` flag for develop branches. Shipyard adds evidence-gated
+merge that checks per-platform proof for the exact merge-candidate SHA, which
+is stricter than `local_ci.py`'s `job.passed` check.
 
 ## Prerequisites Check
 
@@ -350,7 +377,8 @@ Before running any CI command, verify the required tooling AND provider config e
 ```bash
 # Required
 test -f tools/local-ci/local_ci.py || echo "ERROR: local CI not found — is this a recent checkout?"
-command -v gh >/dev/null || echo "ERROR: gh CLI not installed (brew install gh)"
+command -v shipyard >/dev/null || echo "ERROR: shipyard not installed (run ./tools/install-shipyard.sh)"
+command -v gh >/dev/null || echo "WARNING: gh CLI not installed; GitHub-facing fallback/triage commands will be unavailable"
 
 # Preferred (shared machine-global local CI config)
 test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "WARNING: no shared local CI config — copy tools/local-ci/config.example.json there"
@@ -358,26 +386,52 @@ test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "W
 # Fallback (worktree-local legacy config)
 test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config.json"
 
-# CRITICAL: Verify Namespace is the default cloud provider
-python3 tools/local-ci/local_ci.py cloud defaults 2>/dev/null | grep -q "default provider: namespace" || echo "WARNING: Namespace is not the default provider — run: python3 tools/local-ci/local_ci.py cloud defaults"
+# Verify GitHub Actions runner routing. Namespace is decommissioned.
+gh variable list -R danielraffel/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
+gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
 
-**If Namespace is not the default provider**, the config needs to be updated. The shared config at `~/Library/Application Support/Pulp/local-ci/config.json` must include:
+## Visual Harness Container
 
-```json
-{
-  "github_actions": {
-    "defaults": {
-      "provider": "namespace",
-      "workflow": "build"
-    }
-  }
-}
+`ci/visual-harness.Dockerfile` and `.github/workflows/visual-harness.yml`
+provide the deterministic visual-harness smoke environment. The Docker image
+downloads the pinned Skia `chrome/m144` Linux release asset, verifies its
+SHA-256, installs the bundled Pulp fonts into fontconfig, and installs
+`skia-python==144.0.post2` for the B.0 SkPicture byte-identity smoke. The
+workflow runs that Linux container and also runs the same pytest smoke on
+macOS arm64 so the future canonical raster lane has a platform signal. The
+`macOS local smoke` job resolves `runs-on` from
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
+when the local selector variable is absent. On the persistent local runner,
+this job deliberately uses the installed `python3.12` and a worktree-local venv
+instead of `actions/setup-python`, because that action defaults to GitHub's
+hosted `/Users/runner` toolcache path and can fail before tests start.
+
+Use it when a fresh worktree has only `external/skia-build` headers/metadata
+and no platform static libraries:
+
+```bash
+tools/harness/visual/docker-build.sh
+docker run --rm -v "$PWD:/workspace" pulp-visual-harness
 ```
 
-This ensures all cloud CI dispatches use Namespace by default. Without this, the system falls back to slow GitHub-hosted runners. Verify with `python3 tools/local-ci/local_ci.py cloud defaults` — it should show `configured default provider: namespace`.
+The wrapper defaults to the pinned Skia `linux-x64` lane (`linux/amd64`) and
+keeps a reusable local buildx cache under
+`~/.cache/pulp/visual-harness/buildx`. The Dockerfile also uses BuildKit cache
+mounts for apt packages, the Skia release zip, and pip wheels, so repeated
+runs on the same Mac/Ubuntu SSH host do not re-download the expensive inputs
+unless the lock or digest changes. Override with `PULP_VISUAL_IMAGE`,
+`PULP_VISUAL_DOCKER_PLATFORM`, or `PULP_VISUAL_DOCKER_CACHE` if a host needs a
+separate cache namespace.
+
+GitHub-hosted Ubuntu must create a `docker-container` Buildx builder before
+calling the wrapper; the default `docker` driver on that image rejects
+`type=local` cache export unless containerd image storage is enabled.
+
+The container is a reproducible smoke/developer environment. It does not
+replace the future canonical arm64-darwin raster-golden gate.
 
 ## Language Correction
 
@@ -389,11 +443,12 @@ Then proceed with the `ship` workflow below.
 
 ## Runner Priority (hard rule)
 
-**Namespace is the default runner provider** for all three platform legs
-(Linux, Windows, macOS) as of 2026-04-24. Every PR-triggered or manually
-dispatched `build.yml` run routes to Namespace unless explicitly overridden.
-GitHub-hosted is the explicit opt-out for the rare case where a specific
-lane needs to be validated on GHA infrastructure.
+**GitHub-hosted is the default runner provider** for Linux and Windows.
+macOS routes to the local self-hosted runner through
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` when that repo variable is set; this is the
+only branch-protection blocker on `main`. Namespace is decommissioned: do not
+use `--mode namespace`, do not set `PULP_NAMESPACE_*_RUNS_ON_JSON`, and do not
+redispatch PRs to Namespace.
 
 The default chain (`.github/workflows/build.yml` `resolve-provider` job):
 
@@ -401,52 +456,47 @@ The default chain (`.github/workflows/build.yml` `resolve-provider` job):
 REQUESTED_PROVIDER:
   ${{ inputs.runner_provider             # explicit workflow_dispatch input
    || vars.PULP_DEFAULT_RUNNER_PROVIDER  # repo-level override
-   || 'namespace' }}                     # hardcoded fallback
+   || 'github-hosted' }}                 # hardcoded fallback
 ```
 
 Priority order:
-1. **Namespace (default)** — no action required; PR opens or pushes use it automatically.
-2. **Local SSH VMs** — used by `shipyard ship` directly (`ssh ubuntu`, `ssh-windows`). Useful for fast feedback when Namespace is slow or for reproducing bugs interactively.
-3. **GitHub-hosted** — last resort; explicitly request with `-f runner_provider=github-hosted` if you need to compare behaviour against GHA-specific environment quirks.
+1. **macOS local GitHub runner** — `build.yml` reads `PULP_LOCAL_MACOS_RUNS_ON_JSON` into `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON`; with the usual value `["self-hosted","sanitizer"]`, the macOS build uses Daniels-MacBook-Pro.
+2. **GitHub-hosted Linux/Windows** — advisory; failures should be filed as platform issues and should not block a macOS-focused merge.
+3. **Legacy SSH targets** — only when the user explicitly asks. Do not use `ssh ubuntu` or `ssh win` by default.
 
-**No more cancel-and-redispatch ritual.** Before 2026-04-24 agents had to
-cancel the auto-triggered github-hosted run and re-dispatch with
-`-f runner_provider=namespace`. That muscle memory is now obsolete — the
-first PR-triggered run is already Namespace-backed.
+The `resolve_runs_on.py` optional-namespace mode must still honor explicit
+selectors before checking `REQUESTED_PROVIDER`. Otherwise the local macOS repo
+variable is ignored when the provider is `github-hosted`, and the required
+`macos` gate falls back to hosted `macos-15`.
 
-**Historical override (removed on 2026-04-24)**: The `resolve-provider`
-job previously hardcoded Windows to `github-hosted` on `pull_request`
-events because Namespace Windows capacity was intermittently
-unavailable. That override is gone. If Namespace Windows capacity
-regresses and PRs start blocking, re-introduce the override via a
-short-lived PR rather than leaving it in-tree; revert once capacity is
-restored.
+Build and coverage checkouts keep `lfs: false` even on macOS. The repo has
+LFS attributes for historical Skia binary paths, but no current CI input is a
+tracked LFS object; enabling checkout LFS on the reused self-hosted workspace
+causes `git lfs install --local` to fail because Pulp already owns the
+`pre-push` hook.
 
 ### Overrides when you need them
 
-- **Dispatch a specific run on github-hosted** (comparing behaviour, reproducing a GHA-specific bug):
+- **Dispatch a specific run on github-hosted** (normal Linux/Windows path, or comparing hosted macOS behaviour):
   ```bash
   gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=github-hosted
   ```
-- **Pin to a specific Namespace runner selector** (larger instance, arm64, etc.): pass the per-OS `linux_runner_selector_json` / `windows_runner_selector_json` / `macos_runner_selector_json` workflow_dispatch inputs.
-- **Via `shipyard cloud run`**: same dispatch path. `shipyard cloud run build <branch>` picks up `[cloud] provider = namespace` from `.shipyard/config.toml` and fires the workflow with the matching provider input.
+- **Pin macOS to a local runner selector**: set `PULP_LOCAL_MACOS_RUNS_ON_JSON` at the repo level, or pass `macos_runner_selector_json` on a manual dispatch. Keep the selector compatible with the runner labels (`self-hosted`, `sanitizer`).
+- **Do not use Namespace overrides**: any remaining Namespace variable or mode is stale configuration and should be removed rather than worked around.
 
 ## Commands
 
-### `ship [branch]` — The main workflow
+### Legacy `local_ci.py ship [branch]`
 
-Creates a PR, runs CI, and merges on green. This is the default when someone says "ship this" or "push to main".
+Historical fallback only. The normal workflow for "ship this" or "push to
+main" is `shipyard pr`, which owns PR creation, Shipyard tracking state,
+validation, and merge-on-green.
 
-1. Ensure all changes are committed
-2. Push the branch to origin with `-u`
-3. Create a PR via `gh pr create` (to main, or to a develop branch if specified)
-4. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>`
-5. If ALL targets pass → `gh pr merge <PR#> --squash --delete-branch`
-6. If ANY target fails → report failures, leave PR open
-7. Notify when done (terminal bell)
+Use this only when debugging the legacy local CI controller itself. It does
+not provide the same Shipyard state discipline as `shipyard pr`.
 
 ```bash
-# Ship to main (default)
+# Legacy fallback only
 python3 tools/local-ci/local_ci.py ship [branch]
 
 # Ship to a develop branch (for multi-piece features)
@@ -768,6 +818,10 @@ Locally:
 
 **Tag safety:** the auto-release workflow is idempotent-strict — if a tag already exists pointing at a different SHA, it fails loudly rather than overwriting. See `docs/guides/versioning.md` for the manual recovery recipe.
 
+**Shared-source priming is retry-wrapped (#1375):** every `ensure_shared_git_source` call in `setup.sh` runs through `ensure_shared_git_source_with_retry` (3 attempts, 5s/10s/20s backoff, scrubs the partial cache target between attempts). Motivated by v0.74.0 + v0.74.1 release-cli runs both dying on `windows-arm64` mid-`Priming shared Yoga source cache` with exit 127 — a transient command-not-found on a Windows shell wrapper. The retry happens at the WRAPPER level, not inside `ensure_shared_git_source`, because that function uses a `set -e` subshell which a 127 tears down before any inner retry can engage. Override attempts via `PULP_PRIMING_RETRY_ATTEMPTS=N`.
+
+**Per-tag release-cli watchdog (#1375):** `.github/workflows/release-cli-watchdog.yml` triggers on `workflow_run` for `release-cli.yml`. It resolves the tag from `head_branch`, queries the GitHub release for `pulp-sdk-*` and `pulp-{darwin,linux,windows}-*` assets via `gh release view`, and opens a per-tag tracker on three failure shapes: `run_failure`, `success_with_missing_assets` (the v0.74.0 pattern — release exists with only plugin .pkg files from `sign-and-release.yml`), `no_release` (the v0.74.1 pattern — `release-cli`'s `release` job never ran because `build-cli`/`smoke-cli` failed). The tracker's body suggests `gh workflow run release-cli.yml --ref vX.Y.Z -f version=vX.Y.Z` to backfill, and auto-closes when the SDK assets land. This is documented as Layer 2b in `docs/guides/release-watchdog.md`.
+
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
 
 ## Coverage workflow (`#566` Phase 1)
@@ -792,8 +846,10 @@ Gotchas:
 - **Global vs per-tier enforcement**: `diff-cover --fail-under=75` is already required. The per-tier gate is still `continue-on-error: true` while the tier definitions soak; don't silently flip that to required without updating `docs/guides/coverage.md` and the issue trail.
 - **Don't `|| ...` the `merge_cobertura` step in `coverage-diff-gate`.** The script uses a DEDICATED exit code (2 = `EXIT_ALL_INPUTS_MISSING`) for the intentionally-tolerated "every input XML missing or empty" case; the diff-cover step then renders the no-XML fallback. Any other non-zero exit (1 = real error: parse failure, script bug, IO error) MUST fail the gate — otherwise a corrupted artifact silently bypasses the required 75% diff-coverage check. Codex P1 reviews on both PR #654 (original `|| echo` shape masked everything) and PR #660 (collapsing rc==1 into the tolerated case let `xml.etree.ParseError` slip through) drove the current shape. The workflow branches on the exact code with `if rc -eq 0` / `elif rc -eq 2` / `else fail`. The script's `EXIT_ALL_INPUTS_MISSING` constant + the workflow's literal `2` are paired — change them in lockstep, and add fixture-tests in `test_merge_cobertura.py` if you alter the contract.
 - **Local mirror of the diff-cover gate.** `tools/scripts/local_diff_cover.sh` runs the same `diff-cover --fail-under=$THRESHOLD` flow CI runs, so coverage-only failures don't cost a 20-min CI roundtrip. The threshold + filters are read from `tools/scripts/coverage_config.json` — both the workflow's diff-cover step and the local script consume that file, so editing the JSON in one place keeps CI + local + the pre-push hook in lockstep. Bypass with `PULP_SKIP_DIFF_COVER=1` for workflow-only or doc-only PRs. The Claude Code `/coverage-diff` slash command and `pulp coverage diff` CLI subcommand are thin wrappers over the same script. The pre-push hook runs the script advisory-by-default; `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` upgrades to a hard block. Test coverage in `tools/scripts/test_local_diff_cover.py` includes an anti-drift gate that fails if a future edit hardcodes `--fail-under=NN` back into `coverage.yml`.
+- **`diff_cover_excludes` pattern + flag-shape contract** (PR #1005, learned the hard way). diff-cover's `--exclude` is `nargs='+'` with default action — repeated `--exclude=foo --exclude=bar` keeps only the LAST entry. AND its matching is fnmatch against (a) the file's basename and (b) its absolute path; a literal relative path like `tools/cli/cmd_loop.cpp` matches NEITHER and is a silent no-op. So entries in `coverage_config.json` MUST be a basename (`cmd_loop.cpp`) or a glob (`**/cmd_loop.cpp`), and both `local_diff_cover.sh` and `coverage.yml` MUST splat them under a SINGLE `--exclude val1 val2 ...` flag (NOT a per-entry `--exclude=PATH` loop). The previous shape was silent-broken since #919; a new exclude (scanner_clap.cpp) on PR #1005 surfaced the latent bug because it was a 2-entry config that suddenly mattered. Don't introduce a 3-entry config without re-checking that the splatted form still works.
 - **`merge_cobertura.py` normalises Windows backslash paths and applies `COVERAGE_IGNORE_REGEX` itself.** Two sneaky bugs found together on PR #660 by walking the actual merged XML: (1) the Windows cobertura emits filenames with backslash separators (`core\\format\\src\\clap_adapter.cpp`), Linux/macOS use forward slashes — without normalisation the merge stores them as TWO files and diff-cover matches the backslash variant against the git diff (which uses forward slashes), finding 0 hits and silently reporting 0% on cross-platform code that was actually exercised on Linux. (2) The Windows leg was leaking ~250 `test\*` entries into the cobertura because run_coverage.sh's `COVERAGE_IGNORE_REGEX` matches `/test/` only — backslash paths slipped past. The merge now normalises slashes AND mirrors the same exclude regex (`tools/scripts/merge_cobertura.py::_IGNORE_RE`) so the gate's view is consistent regardless of which OS produced an artifact. Keep the regex in lockstep with `scripts/run_coverage.sh::COVERAGE_IGNORE_REGEX`.
 - **Install PyYAML before any step that imports it.** `tools/scripts/test_coverage_tier_check.py` calls `ctc.load_targets()` which imports `yaml`, so the `Install PyYAML` step in `coverage.yml` must run BEFORE both the fixture-tests step and the per-tier gate step. Issue #900 caught the original ordering where the install ran after the test, so runners without preinstalled PyYAML hard-failed the required coverage job. If you add another script under `tools/scripts/` that imports `yaml` and gets wired into a workflow, make sure the PyYAML install step precedes every step that runs it.
+- **Every first-party source must classify into exactly one tier (#1056).** `ci/coverage-targets.yaml` tier globs are silent no-ops if a new source path falls outside every tier — it inherits the looser global 75% floor instead of its intended tier. The `TierCoverageCompleteness` cases in `tools/scripts/test_coverage_tier_check.py` lock this in (every tier matches at least one file; every first-party source under `core/`, `tools/`, `apple/`, `android/`, `inspect/` lands in exactly one tier). Non-instrumented surfaces (`apple/**.swift`, `android/**.kt`, `apple/Package.swift`) classify under `infrastructure` for audit-completeness; the `is_instrumented_source` filter in `coverage_tier_check.py` keeps them out of the score so they don't bias the per-tier number.
 
 ## IWYU advisory gate (`#594` Phase 2)
 
@@ -898,3 +954,41 @@ Gotchas surfaced while landing the four-phase SignalGraph follow-up:
   `ship` SKILL.md § "`sign-and-release.yml` must declare …" for the
   full gotcha; pulp #720 + #724 for the history. When adding a new
   release-time workflow, add the same block.
+
+### Shipyard-drift detection — pre-push hook logs push origin (pulp #1406)
+
+`.githooks/pre-push` writes every push to `.git/.shipyard-drift-log`
+(tab-separated: timestamp, branch, sha, origin) so we can audit when
+PRs went up via `shipyard pr` (the canonical full-validation path)
+versus a direct `git push` (which silently bypasses skill-sync,
+version-bump, diff-coverage, and SSH-host validation, turning CI
+into the discovery channel).
+
+**Origin signals** (any one marks the push as supervised):
+- `SHIPYARD_PR_RUNNING=1` — set by shipyard's wrapper when it
+  invokes git push internally. Upstream feature request open at
+  the shipyard CLI repo to make this canonical.
+- `PULP_VIA_SHIPYARD=1` — user-set fallback marker for supervised
+  direct pushes (e.g. inside a `shipyard ship` retry, or when
+  using `git push` deliberately under shipyard tooling that
+  doesn't expose the env var yet).
+
+**Behavior**:
+- Push proceeds either way (escape hatches need to keep working).
+- When neither var is set, hook prints a loud warning with the
+  recovery checklist (rate-limit / shipyard-bug / SSH-down).
+- The drift log is append-only and gitignored.
+
+**When to suppress the warning** (acceptable temporary fallback):
+1. GraphQL rate limit exhausted — verify with
+   `gh api rate_limit --jq .resources.graphql.remaining` and
+   note the reset time.
+2. Shipyard tool itself fails — file an issue at the shipyard CLI
+   repo, link it in the PR description.
+3. SSH host unreachable — prefer `shipyard pr --skip-target NAME`
+   (deliberate skip) over direct push.
+
+In all three cases, set `PULP_VIA_SHIPYARD=1` on the direct-push
+command to record the push as supervised AND suppress the warning.
+
+After the obstacle clears, resume `shipyard pr` on the next PR.

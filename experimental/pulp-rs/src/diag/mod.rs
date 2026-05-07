@@ -30,6 +30,7 @@ pub use findings::{analyze, Finding, Inputs, ProjectEntry, Severity};
 
 use std::path::{Path, PathBuf};
 
+use crate::build_info;
 use crate::error::Result;
 use crate::parse::SemverCompat;
 use crate::registry;
@@ -40,9 +41,8 @@ use crate::registry;
 /// `findings[]` list.
 #[derive(Debug, Default)]
 pub struct VersionDiag {
-    /// Installed CLI version (we lie a bit: this is actually
-    /// `PULP_RS_CLI_VERSION` env override or the Cargo package
-    /// version, since the prototype isn't bound to the C++ `PULP_SDK_VERSION`).
+    /// Installed CLI version (`PULP_RS_CLI_VERSION` test override or
+    /// the Pulp SDK version baked into the CMake-built binary).
     pub cli: SemverCompat,
     /// Plugin `version` field.
     pub plugin: SemverCompat,
@@ -88,20 +88,6 @@ pub fn resolve_active_project_root(start: &Path) -> (Option<PathBuf>, bool) {
     (None, false)
 }
 
-/// Determine the CLI version for reporting purposes.
-///
-/// Precedence:
-/// 1. `PULP_RS_CLI_VERSION` env — only used in tests and benches.
-/// 2. `CARGO_PKG_VERSION` — the prototype's own version.
-fn cli_version_string() -> String {
-    if let Ok(v) = std::env::var("PULP_RS_CLI_VERSION") {
-        if !v.is_empty() {
-            return v;
-        }
-    }
-    env!("CARGO_PKG_VERSION").to_owned()
-}
-
 /// Runtime overrides that let callers inject values that would
 /// otherwise come from environment probing.
 ///
@@ -136,7 +122,10 @@ pub fn collect(cwd: &Path) -> Result<VersionDiag> {
 ///
 /// See [`collect`].
 pub fn collect_with(cwd: &Path, opts: &CollectOpts) -> Result<VersionDiag> {
-    let cli_raw = opts.cli_version.clone().unwrap_or_else(cli_version_string);
+    let cli_raw = opts
+        .cli_version
+        .clone()
+        .unwrap_or_else(build_info::cli_version_string);
     let mut d = VersionDiag {
         cli: SemverCompat::parse(&cli_raw),
         ..Default::default()

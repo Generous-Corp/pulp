@@ -84,3 +84,135 @@ TEST_CASE("ScrollView: hit testing follows scrolled content", "[scrollview]") {
     auto* hit = sv.hit_test({10, 30});
     REQUIRE(hit == label_ptr);
 }
+
+// ── pulp #1170: ScrollView honors React Native pointerEvents ───────────────
+//
+// Codex P1 follow-up on #1044 — ScrollView::hit_test shadowed View::hit_test
+// without honoring pointer_events(), so setPointerEvents("box-only"/"box-none"
+// /"none") was a silent no-op for any scrollable container.
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == none (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    sv.add_child(std::move(child));
+
+    sv.set_pointer_events(View::PointerEvents::none);
+    REQUIRE(sv.hit_test({75, 75}) == nullptr);
+    REQUIRE(sv.hit_test({10, 10}) == nullptr);
+}
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-only (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    sv.add_child(std::move(child));
+
+    // box_only: descent skipped — hits inside child bounds resolve to the
+    // ScrollView itself, not to the child.
+    sv.set_pointer_events(View::PointerEvents::box_only);
+    REQUIRE(sv.hit_test({75, 75}) == &sv);
+    REQUIRE(sv.hit_test({10, 10}) == &sv);
+}
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-none (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    auto* child_ptr = child.get();
+    sv.add_child(std::move(child));
+
+    // box_none: child is hit-testable, but a point in the ScrollView's
+    // own bounds (not on a child) returns nullptr — never self.
+    sv.set_pointer_events(View::PointerEvents::box_none);
+    REQUIRE(sv.hit_test({75, 75}) == child_ptr);
+    REQUIRE(sv.hit_test({10, 10}) == nullptr);
+}
+
+TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 100});
+    // Content taller than view → vertical scrollbar appears at the right edge.
+    sv.set_content_size({200, 400});
+
+    sv.set_pointer_events(View::PointerEvents::box_none);
+    // Hit near the right edge would normally land on the v-scrollbar
+    // and return self; box_none must suppress that.
+    REQUIRE(sv.hit_test({195, 50}) == nullptr);
+}
+
+// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+//
+// ScrollView::hit_test had the same right/down-only asymmetry as
+// View::hit_test. Lock the symmetric ±500px slack here too so left- or
+// up-extending popovers anchored inside a scroll container hit-test
+// correctly.
+//
+// Same fixture pattern as test_view.cpp: place a popover grandchild
+// outside an overflow:visible container in each direction, assert the
+// ScrollView routes the click into the popover via the symmetric slack.
+namespace {
+struct ScrollPopoverFixture {
+    ScrollView sv;
+    View* container{nullptr};
+    View* popover{nullptr};
+
+    ScrollPopoverFixture(float dx, float dy) {
+        sv.set_bounds({0, 0, 2000, 2000});
+        sv.set_content_size({2000, 2000});
+        auto c = std::make_unique<View>();
+        c->set_bounds({600, 600, 100, 100});
+        c->set_overflow(View::Overflow::visible);
+        container = c.get();
+
+        auto p = std::make_unique<View>();
+        p->set_bounds({dx, dy, 50, 50});
+        popover = p.get();
+        c->add_child(std::move(p));
+        sv.add_child(std::move(c));
+    }
+};
+} // namespace
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the LEFT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(-200, 25);
+    REQUIRE(f.sv.hit_test({425, 650}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the RIGHT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(200, 25);
+    REQUIRE(f.sv.hit_test({825, 650}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px UPWARD",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(25, -200);
+    REQUIRE(f.sv.hit_test({650, 425}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px DOWNWARD",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(25, 200);
+    REQUIRE(f.sv.hit_test({650, 825}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test does NOT extend overflow:visible past 500px LEFT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(-650, 25);
+    REQUIRE(f.sv.hit_test({0, 650}) != f.popover);
+}

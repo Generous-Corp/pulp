@@ -10,6 +10,20 @@ using pulp::platform::has_platform_backend;
 using pulp::platform::query;
 using pulp::platform::request;
 
+namespace {
+
+PermissionState state_different_from(PermissionState state) {
+    switch (state) {
+        case PermissionState::NotDetermined: return PermissionState::Granted;
+        case PermissionState::Granted:       return PermissionState::Denied;
+        case PermissionState::Denied:        return PermissionState::Granted;
+        case PermissionState::Restricted:    return PermissionState::Granted;
+    }
+    return PermissionState::Granted;
+}
+
+}  // namespace
+
 TEST_CASE("query returns a concrete state for every permission class",
           "[platform][permissions]") {
     for (auto p : {
@@ -128,6 +142,24 @@ TEST_CASE("PermissionsOverride guards nest - outer state restores after inner ex
     }
     // Inner guard popped — outer "Denied" must still hold.
     REQUIRE(query(Permission::Microphone) == PermissionState::Denied);
+}
+
+TEST_CASE("nested PermissionsOverride clear exposes backend then restores outer state",
+          "[platform][permissions][override]") {
+    const auto backend_state = query(Permission::Microphone);
+    const auto outer_state = state_different_from(backend_state);
+
+    PermissionsOverride outer;
+    outer.set(Permission::Microphone, outer_state);
+    REQUIRE(query(Permission::Microphone) == outer_state);
+
+    {
+        PermissionsOverride inner;
+        inner.clear(Permission::Microphone);
+        REQUIRE(query(Permission::Microphone) == backend_state);
+    }
+
+    REQUIRE(query(Permission::Microphone) == outer_state);
 }
 
 TEST_CASE("has_platform_backend reports truthfully for the current target",

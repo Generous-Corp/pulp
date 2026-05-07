@@ -889,6 +889,24 @@ auto* knob = dynamic_cast<Knob*>(bridge->widget("osc-0"));
 
 Falls back to C++ widget hierarchy if JS fails (any exception → catch → C++ fallback).
 
+### Bridge idle pump must run each vsync (pulp #1402)
+
+`android_render_frame()` (in `core/render/platform/android/gpu_surface_android.cpp`) MUST call `g_widget_bridge->poll_async_results()` once per vsync — at the top, before `begin_frame()`. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on Android: the callback gets queued in `pending_frame_ids_`, but nothing drains it because there's no idle callback wired into the AChoreographer loop the way macOS now wires it into CVDisplayLink (PR #1400).
+
+Symptoms when missing:
+- `requestAnimationFrame(loop)` chain queues forever, never animates
+- `setTimeout(cb, 100)` never fires
+- Animations only advance during touch events (because touch handlers happen to call `request_repaint`, but that doesn't drain `pending_frame_ids_`)
+
+The fix is one call at the top of `android_render_frame`:
+```cpp
+if (g_widget_bridge) {
+    g_widget_bridge->poll_async_results();
+}
+```
+
+Hard to unit-test on Android (no emulator path → integration tests gated). The contract being asserted is already covered by `test_widget_bridge.cpp`'s `[issue-921]` tag (rAF→repaint chain via `poll_async_results`); the Android wiring is structural connection, not behavioral.
+
 ## Known Blockers
 
 1. **x86_64 Skia build** — Only arm64 Skia is built. Emulator runs arm64 via translation but an x86_64 build would be faster.

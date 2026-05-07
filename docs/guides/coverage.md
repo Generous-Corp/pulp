@@ -254,6 +254,35 @@ at a **75%** floor. Sub-threshold diff coverage hard-fails this check
 and blocks the merge — adding untested code means either adding tests
 or splitting the untested portion into its own PR.
 
+**Per-file exclusions (`diff_cover_excludes`).** A small set of files
+can be exempted from the diff-coverage gate when they're thin
+dispatchers / generated code / defensive-only code that is exercised
+end-to-end via shell-out tests but doesn't propagate llvm-cov line
+data. The list lives in `tools/scripts/coverage_config.json` under
+`diff_cover_excludes`.
+
+Two contracts that are easy to violate (and silently no-op):
+
+1. **Entries must be a basename or a glob.** diff-cover's `--exclude`
+   matches via fnmatch against (a) the file's basename and (b) its
+   absolute path. A literal relative path like
+   `tools/cli/cmd_loop.cpp` matches NEITHER and silently does
+   nothing. Use a basename (`cmd_loop.cpp`) or a glob
+   (`**/cmd_loop.cpp`).
+2. **Pass under a single `--exclude` flag.** diff-cover's `--exclude`
+   is `nargs='+'` with default action — repeated `--exclude=foo
+   --exclude=bar` keeps only the LAST entry. The local script and
+   workflow both splat all entries under one flag for that reason.
+
+Both contracts are locked in by `DiffCoverExcludeContractTests` in
+`tools/scripts/test_local_diff_cover.py`. Reverting either breaks the
+suite loudly with an actionable message.
+
+Use the exclude list sparingly. The bar is "this file's defensive
+behavior is genuinely exercised by an end-to-end test, but llvm-cov
+doesn't propagate the coverage data" — not "this file's tests are
+hard to write."
+
 ### Phase 3 PR cadence
 
 Phase 3 is tranche work, not a queue stall. While a Codecov remediation

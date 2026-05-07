@@ -35,7 +35,7 @@ use tempfile::tempdir;
 /// Shell out to the built `pulp-rs` binary with a fresh `PULP_HOME`
 /// pointing at a test-owned tempdir.
 fn pulp_rs() -> Command {
-    let mut c = Command::cargo_bin("pulp-rs").expect("pulp-rs binary");
+    let mut c = Command::cargo_bin("pulp").expect("pulp-rs binary");
     c.env_remove("PULP_UPDATE_CHECK_DISABLED");
     c
 }

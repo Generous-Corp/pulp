@@ -21,7 +21,7 @@ void print_help() {
     std::cout <<
         "pulp projects — manage the ~/.pulp/projects.json registry\n\n"
         "Usage:\n"
-        "  pulp projects list               Show registered projects\n"
+        "  pulp projects list [--json]      Show registered projects\n"
         "  pulp projects add [<path>]       Register a project (defaults to CWD)\n"
         "  pulp projects remove <path>      Remove a project by path\n"
         "\n"
@@ -32,9 +32,68 @@ void print_help() {
         "registry — that's a diagnostic escape hatch, not the default.\n";
 }
 
-int do_list() {
+// Local JSON string escaper. Same shape as `version_diag.cpp`'s helper
+// so output is byte-consistent with the rest of the CLI's --json
+// surfaces. Kept inline rather than reaching for choc::json because
+// the projects-list payload is tiny and self-contained.
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned>(c) & 0xff);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
+int do_list(bool json_mode) {
     auto reg = prjreg::registry_path();
     auto projects = prjreg::read_registry(reg);
+
+    if (json_mode) {
+        // Schema mirrors `experimental/pulp-rs/src/cmd/projects.rs`'s
+        // `render_json` so cross-binary consumers (incl. the Phase 8
+        // sandbox harness and any user automation) see identical
+        // output regardless of which binary served the call. The
+        // Rust port already implemented this; the C++ port silently
+        // ignored the flag and printed human text — caught by the
+        // post-Phase-8 cross-binary parity probe.
+        std::cout << "{\n  \"registry\": \""
+                  << json_escape(reg.generic_string()) << "\",\n  \"projects\": [";
+        for (size_t i = 0; i < projects.size(); ++i) {
+            const auto& p = projects[i];
+            bool missing = !fs::exists(p.path);
+            std::cout << (i == 0 ? "\n    " : ",\n    ") << "{";
+            std::cout << "\"path\": \""
+                      << json_escape(p.path.generic_string()) << "\", ";
+            std::cout << "\"name\": \""
+                      << json_escape(p.name.empty() ? p.path.filename().string()
+                                                     : p.name)
+                      << "\", ";
+            std::cout << "\"registered_at\": \""
+                      << json_escape(p.registered_at) << "\", ";
+            std::cout << "\"missing_on_disk\": "
+                      << (missing ? "true" : "false");
+            std::cout << "}";
+        }
+        if (!projects.empty()) std::cout << "\n  ";
+        std::cout << "]\n}\n";
+        return 0;
+    }
 
     std::cout << "Registry: " << reg.string() << "\n";
     if (projects.empty()) {
@@ -131,7 +190,13 @@ int cmd_projects(const std::vector<std::string>& args) {
     const auto& sub = args[0];
     std::vector<std::string> rest(args.begin() + 1, args.end());
 
-    if (sub == "list" || sub == "ls") return do_list();
+    if (sub == "list" || sub == "ls") {
+        bool json_mode = false;
+        for (const auto& a : rest) {
+            if (a == "--json") json_mode = true;
+        }
+        return do_list(json_mode);
+    }
     if (sub == "add")                 return do_add(rest);
     if (sub == "remove" || sub == "rm") return do_remove(rest);
 

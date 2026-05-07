@@ -22,6 +22,21 @@
 #
 # Consumed by `tools/scripts/coverage_tier_check.py`, invoked from the
 # `coverage-diff-gate` job alongside the existing diff-cover invocation.
+#
+# Coverage scope (#1056):
+#   This file gates the Cobertura/Clang-instrumented native diff lane.
+#   `coverage_tier_check.py::is_instrumented_source` filters non-C/C++/
+#   Obj-C files at aggregate time, so Kotlin (`.kt`) and Swift (`.swift`)
+#   sources never bias a tier score even if their paths match a glob.
+#   We classify them anyway (under `infrastructure`) so the audit recipe
+#   reports zero unmatched first-party files — non-instrumented sources
+#   tracked through other coverage flags (JaCoCo for Kotlin, SwiftPM for
+#   Swift; see `docs/guides/coverage.md` §"Language coverage") still get
+#   a deliberate home in this file rather than silently falling out.
+#
+#   Tier completeness is locked in structurally by
+#   `tools/scripts/test_coverage_tier_check.py::TierCoverageCompleteness`
+#   per the audit pattern in #1049 / #841 / #1056.
 
 version: 1
 
@@ -30,6 +45,7 @@ tiers:
     line_target: 80
     paths:
       - core/audio/**
+      - core/dsl/**
       - core/format/**
       - core/host/**
       - core/midi/**
@@ -48,9 +64,20 @@ tiers:
     line_target: 50
     paths:
       - core/events/**
+      - core/dsl/**          # pulp #1056 — DSL processor scaffolding (Faust wrapper headers)
       - core/runtime/**
       - core/state/**
       - core/canvas/**
       - core/osc/**
       - ship/**
       - tools/**
+      # Platform integration. Kotlin (`android/**.kt`) and Swift
+      # (`apple/**.swift`, `apple/Package.swift`) are filtered out by
+      # `is_instrumented_source` before they bias this tier's score, but
+      # we classify them here so the audit completeness check has a
+      # deliberate home for every first-party file. The instrumented
+      # `apple/Sources/PulpSwift/PulpBridge.{cpp,h}` shim does count
+      # toward the infrastructure floor, matching the rest of the
+      # platform-glue surfaces.
+      - android/**
+      - apple/**

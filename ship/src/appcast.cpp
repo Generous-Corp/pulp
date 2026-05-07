@@ -111,7 +111,16 @@ std::optional<Appcast> Appcast::from_xml(const std::string& xml) {
         item.ed_signature = extract_attr(item_xml, "sparkle:edSignature");
 
         auto length_str = extract_attr(item_xml, "length");
-        if (!length_str.empty()) item.file_size = std::stoull(length_str);
+        if (!length_str.empty()) {
+            try {
+                size_t parsed = 0;
+                auto size = std::stoull(length_str, &parsed);
+                if (parsed == length_str.size())
+                    item.file_size = size;
+            } catch (...) {
+                item.file_size = 0;
+            }
+        }
 
         // Extract CDATA description
         auto cdata_start = item_xml.find("<![CDATA[");

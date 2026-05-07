@@ -539,3 +539,24 @@ class IntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+    def test_unknown_kind_in_map_raises_at_load(self) -> None:
+        # pulp #1171 (Codex P2 on #1068) — a typo'd `kind` like "tests"
+        # used to be silently dropped, leaving CI green while a required
+        # compat-artifact gate was effectively disabled. The fix raises
+        # at config-load time so the misconfiguration fails loudly.
+        cfg = self.tmp / "tools/scripts/compat_path_map.json"
+        data = json.loads(cfg.read_text())
+        data["paths"].setdefault("core/view/src/scroll_view.cpp", []).append(
+            {"kind": "tests", "glob": "test/test_scroll*.cpp"},  # <-- typo
+        )
+        cfg.write_text(json.dumps(data, indent=2) + "\n")
+        self.f.commit("chore: typo in compat_path_map kind")
+        code, out = _run_script(
+            self.tmp, "--mode=report", "--enforce", *self._common_args(),
+        )
+        # Hard-fail: exit non-zero, name the bad kind, valid kinds in the
+        # error message so the author can correct the typo.
+        self.assertNotEqual(code, 0, msg=out)
+        self.assertIn("tests", out)
+        self.assertIn("compat-json", out)  # listed as a valid kind

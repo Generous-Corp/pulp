@@ -132,6 +132,38 @@ Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
 4. **Hard-coding `editor_size()` when you actually want resize
    bounds.** Override `view_size()` and return a `ViewSize` with
    real min/max; hosts use those to constrain user-drag resize.
+5. **Forgetting that adapters must read `bridge.size_hints().min_*`
+   when building the host's `WindowOptions`.** The bridge caches
+   `Processor::view_size()` in `size_hints_`, but each adapter is
+   responsible for forwarding `min_width`/`min_height` (and
+   `preferred_*`) into its window/host options. The standalone
+   adapter centralizes this in `detail::make_standalone_window_options`
+   so the chrome-height shift is applied consistently (#1362). Other
+   adapters wiring an OS window (e.g. host apps registering a
+   `WindowHost::Factory`) need the same propagation; reading only
+   `preferred_*` leaves the OS host with a zero minimum and lets
+   plugins shrink below their declared floor.
+6. **Idle-pump must drain timers + frames + async results — not just
+   frames.** The platform host idle entry point (Mac CVDisplayLink,
+   iOS CADisplayLink, Android AChoreographer) is the only thing that
+   drives `WidgetBridge` per vsync when no input event fires. There
+   are TWO bridge methods that drain different queues:
+   - `poll_async_results()`: async-shell results (`execAsync` callbacks)
+     + rAF callbacks (`__flushFrames__`). Does NOT pump message loop
+     or drain timers.
+   - `service_frame_callbacks()`: pumps engine message loop + drains
+     native-tracked `setTimeout` / `setInterval` (`__flushTimers__`)
+     + rAF callbacks. Does NOT drain async-shell results.
+
+   Host idle paths must call BOTH (`poll_async_results()` first, then
+   `service_frame_callbacks()`). Calling only the first drops timer
+   callbacks on the floor — `setTimeout(fn, 100)` queues forever and
+   only fires when an unrelated event happens to pump the message
+   loop (pulp #1412, regression of PRs #1400/#1404/#1405).
+   `ScriptedUiSession::poll()` does this pair on Mac/iOS standalone;
+   `core/render/platform/android/gpu_surface_android.cpp::android_render_frame()`
+   does the same pair on Android. Tests live under `[issue-1412]` in
+   `test/test_widget_bridge.cpp`.
 
 ## Tests
 

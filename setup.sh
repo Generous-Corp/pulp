@@ -367,6 +367,65 @@ retry_git_clone() {
     return 1
 }
 
+# Retry-on-failure wrapper around `ensure_shared_git_source`.
+#
+# Motivating incident (#1375): the v0.74.0 + v0.74.1 release-cli runs
+# both died at the same point on the `windows-arm64` matrix leg —
+# `Priming shared Yoga source cache...` immediately followed by
+# `##[error]Process completed with exit code 127.`. 127 is the standard
+# "command not found" exit, almost always a transient PATH / shell
+# wrapper hiccup on Windows runners (cmd-vs-bash, MSYS-vs-Git-Bash,
+# etc). The same priming step succeeded for the 5 deps before it on
+# both runs, and succeeded entirely on v0.75.0 — so this is flaky,
+# not deterministic, and the natural mitigation is a retry.
+#
+# Doing the retry inside `ensure_shared_git_source` doesn't help — the
+# subshell uses `set -e` and a 127 inside it tears the function down
+# before any inner retry can engage. Wrap the WHOLE call instead, and
+# scrub any half-written target between attempts so the next try gets
+# a clean clone path.
+#
+# Every shared-source priming call goes through this wrapper so the
+# same flake doesn't migrate to a different dep next release.
+ensure_shared_git_source_with_retry() {
+    local label="$1"
+    local repo="$2"
+    local ref="$3"
+    local dir_name="$4"
+    local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
+    local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
+    local attempts="${PULP_PRIMING_RETRY_ATTEMPTS:-3}"
+    local sleep_s=5
+    local i rc
+
+    for i in $(seq 1 "$attempts"); do
+        rc=0
+        ensure_shared_git_source "$label" "$repo" "$ref" "$dir_name" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            if [ "$i" -gt 1 ]; then
+                info "$label priming succeeded on attempt $i/$attempts"
+            fi
+            return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+            warn "$label priming attempt $i/$attempts failed (exit=$rc) — retrying after ${sleep_s}s"
+            # Scrub any partial target so the next attempt sees a clean
+            # state. Mirrors retry_git_clone's per-attempt cleanup.
+            if [ -e "$target" ]; then
+                rm -rf "$target"
+            fi
+            # Best-effort lock release in case the inner subshell exited
+            # before its EXIT trap fired (e.g. SIGKILL / 127).
+            rmdir "$lockdir" >/dev/null 2>&1 || true
+            sleep "$sleep_s"
+            sleep_s=$((sleep_s * 2))
+        else
+            fail "$label priming failed after $attempts attempts (last exit=$rc)"
+            return "$rc"
+        fi
+    done
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -640,10 +699,10 @@ step "Setting up external SDKs"
 FETCHCONTENT_CACHE_ROOT="$(fetchcontent_cache_root)"
 info "Shared FetchContent source cache: $FETCHCONTENT_CACHE_ROOT"
 
-ensure_shared_git_source "CHOC" "https://github.com/Tracktion/choc.git" \
+ensure_shared_git_source_with_retry "CHOC" "https://github.com/Tracktion/choc.git" \
     "f0f5cdf5a938b8b779fea6c083571cce5ccab925" "$(fetchcontent_cache_dir_name "choc" "f0f5cdf5a938b8b779fea6c083571cce5ccab925")"
 
-ensure_shared_git_source "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
+ensure_shared_git_source_with_retry "WebGPU-distribution" "https://github.com/eliemichel/WebGPU-distribution.git" \
     "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab" "$(fetchcontent_cache_dir_name "webgpu" "17dcd42a7683355e7a40ac4e97e77f36dff5b5ab")"
 
 WGPU_NATIVE_VERSION="v24.0.3.1"
@@ -655,25 +714,25 @@ if [ -n "$WGPU_RUNTIME_NAME" ]; then
         "$REPO_ROOT/build/_deps/${WGPU_RUNTIME_NAME}-src"
 fi
 
-ensure_shared_git_source "SDL3" "https://github.com/libsdl-org/SDL.git" \
+ensure_shared_git_source_with_retry "SDL3" "https://github.com/libsdl-org/SDL.git" \
     "release-3.2.12" "$(fetchcontent_cache_dir_name "sdl3" "release-3.2.12")"
 
-ensure_shared_git_source "CLAP" "https://github.com/free-audio/clap.git" \
+ensure_shared_git_source_with_retry "CLAP" "https://github.com/free-audio/clap.git" \
     "1.2.2" "$(fetchcontent_cache_dir_name "clap" "1.2.2")"
 
-ensure_shared_git_source "LV2" "https://github.com/lv2/lv2.git" \
+ensure_shared_git_source_with_retry "LV2" "https://github.com/lv2/lv2.git" \
     "v1.18.10" "$(fetchcontent_cache_dir_name "lv2" "v1.18.10")"
 
-ensure_shared_git_source "Yoga" "https://github.com/facebook/yoga.git" \
+ensure_shared_git_source_with_retry "Yoga" "https://github.com/facebook/yoga.git" \
     "v3.2.1" "$(fetchcontent_cache_dir_name "yoga" "v3.2.1")"
 
-ensure_shared_git_source "Catch2" "https://github.com/catchorg/Catch2.git" \
+ensure_shared_git_source_with_retry "Catch2" "https://github.com/catchorg/Catch2.git" \
     "v3.7.1" "$(fetchcontent_cache_dir_name "catch2" "v3.7.1")"
 
 # VST3 SDK
 VST3_SDK_REF="v3.7.12_build_20"
 VST3_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
-ensure_shared_git_source "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
+ensure_shared_git_source_with_retry "VST3 SDK" "https://github.com/steinbergmedia/vst3sdk.git" \
     "$VST3_SDK_REF" "$(fetchcontent_cache_dir_name "vst3sdk" "$VST3_SDK_REF")"
 VST3_DIR="$REPO_ROOT/external/vst3sdk"
 reuse_shared_git_source "VST3 SDK" "$VST3_SHARED_DIR" "$VST3_DIR" "pluginterfaces"
@@ -687,7 +746,7 @@ if [ "$PLATFORM" = "macOS" ]; then
     # bump to 1.4.x when AppleClang catches up. See issue #155.
     AU_SDK_REF="AudioUnitSDK-1.3.0"
     AU_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
-    ensure_shared_git_source "AudioUnitSDK" "https://github.com/apple/AudioUnitSDK.git" \
+    ensure_shared_git_source_with_retry "AudioUnitSDK" "https://github.com/apple/AudioUnitSDK.git" \
         "$AU_SDK_REF" "$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
     AU_DIR="$REPO_ROOT/external/AudioUnitSDK"
     reuse_shared_git_source "AudioUnitSDK" "$AU_SHARED_DIR" "$AU_DIR" "include/AudioUnitSDK/AUBase.h"
@@ -717,6 +776,29 @@ if [ "$PLATFORM" = "Linux" ]; then
         echo "    Common Ubuntu fix: sudo apt install libx11-dev libxext-dev libxrandr-dev libxrender-dev libxfixes-dev libxi-dev libxinerama-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev libgbm-dev libdrm-dev libdbus-1-dev"
     else
         info "Linux desktop development headers present"
+    fi
+fi
+
+# ── Optional: lcov (for full LCOV_EXCL_* marker support) ──────────────────
+#
+# Issue #1058: Pulp's coverage pipeline (scripts/run_coverage.sh +
+# tools/scripts/local_diff_cover.sh) pipes the raw .lcov from
+# `llvm-cov export` through `lcov --filter region` so source-level
+# `LCOV_EXCL_START` / `LCOV_EXCL_STOP` markers actually propagate to
+# diff-cover. The pipeline still works without lcov (it falls back to
+# the unfiltered .lcov + a warning); installing lcov just unlocks the
+# per-block exclusions.
+
+step "Checking lcov (optional, for LCOV_EXCL markers)"
+
+if command -v lcov &>/dev/null; then
+    info "lcov: $(lcov --version 2>&1 | head -1)"
+else
+    warn "lcov not found — LCOV_EXCL_START/STOP markers won't be honored in coverage reports"
+    if [ "$PLATFORM" = "macOS" ]; then
+        echo "    Optional fix: brew install lcov"
+    elif [ "$PLATFORM" = "Linux" ]; then
+        echo "    Optional fix: sudo apt install lcov"
     fi
 fi
 

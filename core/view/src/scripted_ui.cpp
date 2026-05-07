@@ -67,7 +67,18 @@ bool ScriptedUiSession::load(std::string* error) {
 bool ScriptedUiSession::poll(std::string* error) {
     bool changed = false;
     if (bridge_) {
+        // pulp #1412 — host idle pump must drain BOTH async-shell results
+        // (poll_async_results) AND timers + rAF callbacks
+        // (service_frame_callbacks). Without the second call, JS
+        // setTimeout / setInterval callbacks queue forever on Mac/iOS
+        // because nothing else drives the bridge's message loop on the
+        // host idle cadence (CVDisplayLink / CADisplayLink).
+        // poll_async_results: drains async-exec results + flushes frames.
+        // service_frame_callbacks: pumps engine message loop + drains
+        //   native-tracked timers + flushes frames.
+        // Together they form the full per-vsync bridge pump.
         bridge_->poll_async_results();
+        bridge_->service_frame_callbacks();
     }
     if (reloader_ && reloader_->poll_reload()) {
         changed = true;

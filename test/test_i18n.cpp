@@ -33,6 +33,15 @@ TEST_CASE("i18n argument substitution with multiple occurrences", "[runtime][i18
     REQUIRE(strings.translate("repeat", {"yes"}) == "yes and yes");
 }
 
+TEST_CASE("i18n argument substitution leaves unmatched placeholders", "[runtime][i18n]") {
+    LocalisedStrings strings;
+    strings.add("mixed", "{0}/{2}/{1}/{0}");
+    strings.add("empty", "before{0}after");
+
+    REQUIRE(strings.translate("mixed", {"left", "right"}) == "left/{2}/right/left");
+    REQUIRE(strings.translate("empty", {""}) == "beforeafter");
+}
+
 TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("a", "1");
@@ -69,6 +78,24 @@ TEST_CASE("i18n load .strings file", "[runtime][i18n]") {
     REQUIRE(strings.translate("save_as") == "Save As...");
 }
 
+TEST_CASE("i18n .strings parser ignores malformed lines", "[runtime][i18n]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "plain text without quotes\n";
+        f << "\"missing_end = \"ignored\";\n";
+        f << "\"missing_value\";\n";
+        f << "\"missing_value_end\" = \"unterminated\n";
+        f << "\"valid\" = \"kept\";\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("valid") == "kept");
+    REQUIRE_FALSE(strings.has("missing_value"));
+}
+
 // ── .po file format ─────────────────────────────────────────────────────
 
 TEST_CASE("i18n load .po file", "[runtime][i18n]") {
@@ -90,6 +117,30 @@ TEST_CASE("i18n load .po file", "[runtime][i18n]") {
     REQUIRE(strings.translate("goodbye") == "Auf Wiedersehen");
 }
 
+TEST_CASE("i18n .po parser handles continuations and empty entries", "[runtime][i18n]") {
+    TemporaryFile tmp(".po");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"orphan continuation\"\n";
+        f << "msgid \"long\"\n";
+        f << "\"_key\"\n";
+        f << "msgstr \"lange\"\n";
+        f << "\"_wert\"\n";
+        f << "\n";
+        f << "msgid \"empty_translation\"\n";
+        f << "msgstr \"\"\n";
+        f << "\n";
+        f << "msgid \"\"\n";
+        f << "msgstr \"metadata ignored\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_po_file(tmp.path_string()));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("long_key") == "lange_wert");
+    REQUIRE_FALSE(strings.has("empty_translation"));
+}
+
 // ── JSON file format ────────────────────────────────────────────────────
 
 TEST_CASE("i18n load JSON file", "[runtime][i18n]") {
@@ -109,6 +160,49 @@ TEST_CASE("i18n load JSON file", "[runtime][i18n]") {
     REQUIRE(strings.translate("title") == "Pulp Audio");
     REQUIRE(strings.translate("version_label", {"1.0"}) == "Version 1.0");
     REQUIRE(strings.translate("empty") == "");
+}
+
+TEST_CASE("i18n JSON parser handles escapes and keyless entries", "[runtime][i18n]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  : \"ignored\",\n";
+        f << "  \"newline\": \"line\\nbreak\",\n";
+        f << "  \"tab\": \"left\\tright\",\n";
+        f << "  \"quote\": \"say \\\"hello\\\"\",\n";
+        f << "  \"slash\": \"path\\\\file\"\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 4);
+    REQUIRE(strings.translate("newline") == "line\nbreak");
+    REQUIRE(strings.translate("tab") == "left\tright");
+    REQUIRE(strings.translate("quote") == "say \"hello\"");
+    REQUIRE(strings.translate("slash") == "path\\file");
+}
+
+TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
+    TemporaryFile tmp(".json");
+
+    {
+        std::ofstream f(tmp.path());
+        f << "";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE_FALSE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 0);
+
+    {
+        std::ofstream f(tmp.path());
+        f << "[]";
+    }
+
+    REQUIRE_FALSE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 0);
 }
 
 // ── File load failures ──────────────────────────────────────────────────

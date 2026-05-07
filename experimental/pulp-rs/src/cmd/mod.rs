@@ -20,6 +20,7 @@ pub mod pkg;
 pub mod pr;
 pub mod project;
 pub mod projects;
+pub mod run_parse;
 pub mod scan;
 pub mod sdk;
 pub mod tool;

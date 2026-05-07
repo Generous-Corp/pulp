@@ -209,6 +209,112 @@ class MainTests(unittest.TestCase):
             with tarfile.open(out, "r:gz") as tar:
                 self.assertEqual(sorted(tar.getnames()), ["libwgpu_native.so", "pulp"])
 
+    def test_main_packages_dual_binary_tarball_with_cpp_binary(self) -> None:
+        # Phase 8 contract: --cpp-binary bundles `pulp-cpp` alongside
+        # `pulp` so the Rust upgrade --install can land both binaries
+        # from a single archive. rpath rewrite runs on both.
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            cpp = root / "pulp-cpp-built"
+            pulp.write_text("rust-binary", encoding="utf-8")
+            cpp.write_text("cpp-binary", encoding="utf-8")
+            wgpu = root / "libwgpu_native.dylib"
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-darwin-arm64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_macos") as fix_rpath:
+                    with argv(
+                        [
+                            "package_cli.py",
+                            "--binary",
+                            str(pulp),
+                            "--cpp-binary",
+                            str(cpp),
+                            "--build-dir",
+                            str(root / "build"),
+                            "--platform",
+                            "darwin-arm64",
+                            "--out",
+                            str(out),
+                        ]
+                    ):
+                        rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            # Both binaries must get rpath rewriting, otherwise the
+            # delegate path (pulp-cpp) crashes on a clean machine.
+            self.assertEqual(fix_rpath.call_count, 2)
+            with tarfile.open(out, "r:gz") as tar:
+                names = sorted(tar.getnames())
+            self.assertEqual(
+                names, ["libwgpu_native.dylib", "pulp", "pulp-cpp"]
+            )
+
+    def test_main_dual_binary_uses_exe_suffix_on_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built.exe"
+            cpp = root / "pulp-cpp-built.exe"
+            pulp.write_text("rust", encoding="utf-8")
+            cpp.write_text("cpp", encoding="utf-8")
+            wgpu = root / "wgpu_native.dll"
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-windows-x64.zip"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with argv(
+                    [
+                        "package_cli.py",
+                        "--binary",
+                        str(pulp),
+                        "--cpp-binary",
+                        str(cpp),
+                        "--build-dir",
+                        str(root / "build"),
+                        "--platform",
+                        "windows-x64",
+                        "--out",
+                        str(out),
+                    ]
+                ):
+                    rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            with zipfile.ZipFile(out) as z:
+                names = sorted(z.namelist())
+            self.assertEqual(
+                names, ["pulp-cpp.exe", "pulp.exe", "wgpu_native.dll"]
+            )
+
+    def test_main_returns_missing_cpp_binary_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            pulp = root / "pulp-built"
+            pulp.write_text("rust", encoding="utf-8")
+            err = io.StringIO()
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary",
+                    str(pulp),
+                    "--cpp-binary",
+                    str(root / "missing-pulp-cpp"),
+                    "--build-dir",
+                    str(root / "build"),
+                    "--platform",
+                    "linux-x64",
+                    "--out",
+                    str(root / "pulp.tar.gz"),
+                ]
+            ):
+                with contextlib.redirect_stderr(err):
+                    rc = pc.main()
+
+        self.assertEqual(rc, 2)
+        self.assertIn("FAIL: --cpp-binary not at", err.getvalue())
+
     def test_main_packages_windows_zip_without_rpath_rewrite(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)

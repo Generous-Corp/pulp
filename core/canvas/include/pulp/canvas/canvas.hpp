@@ -170,7 +170,14 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
-enum class TextAlign { left, center, right };
+// pulp #1434 — added `justify` for CSS / RN `text-align: justify`.
+// SkiaCanvas dispatches `kJustify` via SkParagraph when the backend
+// supports it; CG / RecordingCanvas back-ends approximate as `left`
+// (no kerning-controlled space distribution) until full SkParagraph
+// integration lands. `auto` (writing-direction-relative) is resolved
+// at the widget layer before reaching the canvas — Label::paint
+// translates `auto` → `left` (LTR) or `right` (RTL).
+enum class TextAlign { left, center, right, justify };
 enum class TextVerticalAlign { top, center, bottom, baseline };
 enum class TextBaseline { top, middle, bottom };
 enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };
@@ -185,6 +192,23 @@ public:
     // ── State ────────────────────────────────────────────────────────────
     virtual void save() = 0;
     virtual void restore() = 0;
+
+    /// Return the current save-stack depth. Used by CanvasWidget::paint()
+    /// (pulp #1368) to defend against JS-driven `ctx.save()` / `ctx.restore()`
+    /// imbalance: snapshot the depth at paint entry, replay the queued
+    /// commands, then `restore_to_count(initial_depth)` to drop any leftover
+    /// saves. Mirrors SkCanvas::getSaveCount / CGContext save-stack depth.
+    /// Default returns 0 — backends without an introspectable stack rely on
+    /// the default `restore_to_count` no-op below to leave behavior unchanged.
+    virtual int save_count() const { return 0; }
+
+    /// Pop the save stack down to `target` (typically captured earlier via
+    /// `save_count()`). Backends that support it pop any leftover saves so an
+    /// unbalanced JS draw script can't leak a `ctx.save()` into the parent
+    /// View's paint scope (pulp #1368). Default is a no-op so non-tracking
+    /// backends keep their existing behavior; the CanvasWidget defense is
+    /// meaningful only on backends that override both methods.
+    virtual void restore_to_count(int target) { (void)target; }
 
     // ── Transform ────────────────────────────────────────────────────────
     virtual void translate(float x, float y) = 0;
@@ -226,6 +250,31 @@ public:
         (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
     }
 
+    /// Affine 2x3 transform snapshot, six floats laid out as
+    /// CanvasRenderingContext2D.setTransform / DOMMatrix:
+    ///   [ a c e ]
+    ///   [ b d f ]
+    ///   [ 0 0 1 ]
+    /// Identity is `{1, 0, 0, 1, 0, 0}`.
+    struct AffineTransform2x3 {
+        float a = 1.0f, b = 0.0f;
+        float c = 0.0f, d = 1.0f;
+        float e = 0.0f, f = 0.0f;
+    };
+
+    /// Snapshot the current device matrix (CTM) without mutating canvas
+    /// state. Used by `CanvasWidget::paint()` diagnostics (pulp #1368) to
+    /// log the inbound transform per paint when `PULP_LOG_CANVAS_PAINT=1`
+    /// is set, so we can confirm whether a missing canvas paint is caused
+    /// by the CTM ending up off-window vs the widget never being painted
+    /// at all. Default returns identity for backends without an
+    /// introspectable matrix; SkiaCanvas (`getTotalMatrix`),
+    /// CoreGraphicsCanvas (`CGContextGetCTM`), and RecordingCanvas (manual
+    /// matrix tracking) override.
+    virtual AffineTransform2x3 current_transform() const {
+        return {};
+    }
+
     // ── Clipping ─────────────────────────────────────────────────────────
     virtual void clip_rect(float x, float y, float w, float h) = 0;
 
@@ -240,6 +289,35 @@ public:
     virtual void set_line_width(float w) = 0;
     virtual void set_line_cap(LineCap cap) = 0;
     virtual void set_line_join(LineJoin join) = 0;
+
+    /// Canvas2D `ctx.miterLimit`. Sticky stroke state — controls when a
+    /// `miter` join collapses to a `bevel` (Skia / CG default = 10). Spec
+    /// requires non-finite or non-positive values to be silently ignored;
+    /// callers that want spec semantics should clamp at the JS bridge.
+    /// Default no-op so backends without miter-limit support compile;
+    /// SkiaCanvas (`SkPaint::setStrokeMiter`) and CoreGraphicsCanvas
+    /// (`CGContextSetMiterLimit`) override. RecordingCanvas captures a
+    /// `set_miter_limit` command for tests. pulp #1434.
+    virtual void set_miter_limit(float limit) { (void)limit; }
+
+    /// Canvas2D image-smoothing quality enum. Mirrors the spec's
+    /// `imageSmoothingQuality` attribute. The bridge maps the JS string
+    /// values (`"low" | "medium" | "high"`) onto these.
+    enum class ImageSmoothingQuality { low, medium, high };
+
+    /// Canvas2D `ctx.imageSmoothingEnabled` + `imageSmoothingQuality`.
+    /// Sticky paint flag honored by subsequent `drawImage` calls. When
+    /// `enabled` is false the backend uses nearest-neighbour sampling;
+    /// when true the quality enum picks the resampler. Default no-op so
+    /// backends without smoothing support compile; SkiaCanvas
+    /// (`SkSamplingOptions`) and CoreGraphicsCanvas
+    /// (`CGContextSetInterpolationQuality`) override. RecordingCanvas
+    /// captures a `set_image_smoothing` command for tests. pulp #1434.
+    virtual void set_image_smoothing(bool enabled,
+                                     ImageSmoothingQuality quality
+                                         = ImageSmoothingQuality::low) {
+        (void)enabled; (void)quality;
+    }
 
     // ── Gradients ────────────────────────────────────────────────────────
     /// Set a linear gradient as the fill paint.
@@ -256,6 +334,20 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+    /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
+    /// is the outer / end circle. Backends with a real two-circle shader
+    /// (Skia `MakeTwoPointConical`, CG `CGContextDrawRadialGradient`)
+    /// override; the default forwards to the single-circle overload using
+    /// the outer circle so older fallbacks still get a usable gradient.
+    virtual void set_fill_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_fill_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
     /// Set a conic (sweep) gradient as the fill paint.
     virtual void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                           const Color* colors, const float* positions,
@@ -265,6 +357,36 @@ public:
 
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
+
+    /// pulp #1434 bridge-thin gap-fill — Canvas2D `ctx.createPattern`.
+    /// Tile mode per axis: `repeat` mirrors Skia's `SkTileMode::kRepeat`,
+    /// `no_repeat` mirrors `SkTileMode::kDecal`. Spec values map as:
+    ///   "repeat"     → (repeat,    repeat)
+    ///   "repeat-x"   → (repeat,    no_repeat)
+    ///   "repeat-y"   → (no_repeat, repeat)
+    ///   "no-repeat"  → (no_repeat, no_repeat)
+    enum class PatternTileMode { repeat, no_repeat };
+
+    /// Set an image pattern as the fill paint. `image_src` is a file path
+    /// or `data:` URL — same identifier shape `draw_image_from_file`
+    /// consumes, so backends share one decode path. Default is no-op so
+    /// CPU-only / minimal canvases compile; SkiaCanvas overrides with a
+    /// real `SkShader::MakeImage`. Empty `image_src` clears any active
+    /// pattern (mirrors `clear_fill_gradient`'s reset semantics).
+    virtual void set_fill_pattern(const std::string& image_src,
+                                   PatternTileMode tile_x,
+                                   PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
+
+    /// Stroke counterpart. Rare in production code; default no-op.
+    /// SkiaCanvas overrides via the same `SkShader::MakeImage` path
+    /// applied to the stroke paint.
+    virtual void set_stroke_pattern(const std::string& image_src,
+                                     PatternTileMode tile_x,
+                                     PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
 
     // ── Blend modes ─────────────────────────────────────────────────────
     /// Indices 0..15 match the existing W3C "advanced" composite ops and
@@ -310,6 +432,52 @@ public:
     virtual void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                           float x, float y) {
         (void)cp1x; (void)cp1y; (void)cp2x; (void)cp2y; line_to(x, y);
+    }
+    /// pulp #1521 — native arc subpath. Maps to Canvas2D
+    /// `ctx.arc(cx, cy, r, startAngle, endAngle, anticlockwise)` and to
+    /// SkPath::arcTo(SkRect, startDeg, sweepDeg, false) on Skia. Replaces
+    /// the JS shim's bezier approximation. The default fallback emits a
+    /// quadrant-segmented cubic-bezier polyline so capture-only backends
+    /// (RecordingCanvas) still produce a meaningful command stream when
+    /// they choose not to override.
+    virtual void arc(float cx, float cy, float radius,
+                     float start_angle, float end_angle,
+                     bool anticlockwise) {
+        (void)cx; (void)cy; (void)radius;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native arcTo. Maps to Canvas2D
+    /// `ctx.arcTo(x1, y1, x2, y2, radius)` and to
+    /// SkPath::arcTo(p1, p2, radius) on Skia (the 5-arg overload that
+    /// computes the tangent arc between the current point, p1, and p2).
+    virtual void arc_to(float x1, float y1, float x2, float y2, float radius) {
+        (void)x1; (void)y1; (void)x2; (void)y2; (void)radius;
+    }
+    /// pulp #1521 — native ellipse subpath. Maps to Canvas2D
+    /// `ctx.ellipse(cx, cy, rx, ry, rotation, startAngle, endAngle,
+    /// anticlockwise)`. Honours `rotation` (rx/ry axis rotation in
+    /// radians) by transforming the arc through SkMatrix on Skia.
+    virtual void ellipse(float cx, float cy, float rx, float ry,
+                         float rotation,
+                         float start_angle, float end_angle,
+                         bool anticlockwise) {
+        (void)cx; (void)cy; (void)rx; (void)ry; (void)rotation;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native rounded-rectangle subpath with per-corner
+    /// radii. Maps to Canvas2D `ctx.roundRect(x, y, w, h, radii)` and to
+    /// SkRRect::MakeRectRadii on Skia. Radii layout matches the CSS
+    /// 8-value form: top-left x/y, top-right x/y, bottom-right x/y,
+    /// bottom-left x/y. The JS shim normalizes the 1/2/3/4-value forms
+    /// to 8 floats before crossing the bridge.
+    virtual void round_rect(float x, float y, float w, float h,
+                            float tl_x, float tl_y,
+                            float tr_x, float tr_y,
+                            float br_x, float br_y,
+                            float bl_x, float bl_y) {
+        (void)x; (void)y; (void)w; (void)h;
+        (void)tl_x; (void)tl_y; (void)tr_x; (void)tr_y;
+        (void)br_x; (void)br_y; (void)bl_x; (void)bl_y;
     }
     /// Close the current path subpath.
     virtual void close_path() {}
@@ -402,6 +570,52 @@ public:
         save(); // fallback: just save state
         (void)x; (void)y; (void)w; (void)h;
         (void)opacity; (void)blur_radius;
+    }
+
+    /// pulp #1434 Phase A2-4 — full CSS filter-chain layer save.
+    /// Each entry in `chain` is one filter function; the canvas backend
+    /// composes them via `SkImageFilters::Compose` (Skia) or, for
+    /// CG-only paths, falls back to whichever entries the platform can
+    /// render natively. Default impl falls through to `save_layer` with
+    /// any blur entries collapsed to a single radius — preserves the
+    /// blur-only behavior that platforms without filter-chain support
+    /// already had.
+    struct FilterChainEntry {
+        enum class Kind {
+            blur,
+            brightness,
+            contrast,
+            grayscale,
+            hue_rotate,
+            invert,
+            opacity,
+            saturate,
+            sepia,
+            drop_shadow,
+        };
+        Kind kind = Kind::blur;
+        float amount = 0.0f;
+        float angle_deg = 0.0f;
+        float ds_offset_x = 0.0f;
+        float ds_offset_y = 0.0f;
+        float ds_blur = 0.0f;
+        Color ds_color{};
+    };
+    virtual void save_layer_with_filters(float x, float y, float w, float h,
+                                          float opacity,
+                                          const FilterChainEntry* chain,
+                                          int count) {
+        // Fallback: collapse to single-blur save_layer (prior behavior
+        // for platforms without filter-chain support).
+        float blur = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            if (chain[i].kind == FilterChainEntry::Kind::blur) {
+                blur += chain[i].amount;
+            } else if (chain[i].kind == FilterChainEntry::Kind::opacity) {
+                opacity *= chain[i].amount;
+            }
+        }
+        save_layer(x, y, w, h, opacity, blur);
     }
 
     // ── Text ─────────────────────────────────────────────────────────────
@@ -622,6 +836,56 @@ public:
                                  Color color, bool inset = false,
                                  float corner_radius = 0.0f);
 
+    // ── Canvas2D drop shadow state (issue-1434 batch 7) ────────────────
+    /// Sticky drop-shadow state that wraps subsequent draw operations,
+    /// matching the CanvasRenderingContext2D `shadowColor` / `shadowBlur`
+    /// / `shadowOffsetX` / `shadowOffsetY` properties. The shadow renders
+    /// only when `color.a > 0` AND (blur > 0 OR offset_x != 0 OR
+    /// offset_y != 0) — same gate Chromium / WebKit use. Setting color to
+    /// fully transparent (alpha == 0) effectively disables the shadow even
+    /// if blur/offset are non-zero, mirroring spec semantics.
+    ///
+    /// Backends that draw via SkPaint / CGContext layer the shadow onto
+    /// the next draw call by configuring an image filter (Skia
+    /// DropShadow) or `CGContextSetShadowWithColor` respectively. The
+    /// default implementation here is a no-op so backends that haven't
+    /// opted into shadow support compile unchanged; SkiaCanvas,
+    /// CoreGraphicsCanvas, and RecordingCanvas override to actually
+    /// honor (or capture) the state.
+    virtual void set_shadow_color(Color color) { (void)color; }
+    virtual void set_shadow_blur(float blur)   { (void)blur; }
+    virtual void set_shadow_offset_x(float dx) { (void)dx; }
+    virtual void set_shadow_offset_y(float dy) { (void)dy; }
+
+    // ── Canvas2D direction / filter (pulp #1520) ───────────────────────
+    /// Canvas2D `ctx.direction`. Sticky text-shaping direction that
+    /// applies to subsequent fillText / strokeText calls. Spec values:
+    ///   ltr     — left-to-right (default; matches SkShaper leftToRight=true)
+    ///   rtl     — right-to-left (HarfBuzz buffer direction RTL)
+    ///   inherit — pulled from the canvas element / document writing
+    ///             direction. On backends without a per-View writing
+    ///             direction yet, treated as ltr (the most common case).
+    /// Default no-op so backends without a real bidi/HarfBuzz path
+    /// remain unaffected; SkiaCanvas overrides to wire through to the
+    /// SkShaper invocation flag, RecordingCanvas captures one
+    /// `set_direction` command per setter so canvas2d harness tests
+    /// can assert flush order. Real bidi support (mixed-script
+    /// paragraphs requiring the Bidi algorithm) tracks separately.
+    enum class TextDirection { ltr, rtl, inherit };
+    virtual void set_direction(TextDirection direction) { (void)direction; }
+
+    /// Canvas2D `ctx.filter`. Sticky CSS <filter-function-list> string
+    /// applied to subsequent fill / stroke / text / image draws. Spec
+    /// supports: blur, brightness, contrast, drop-shadow, grayscale,
+    /// hue-rotate, invert, opacity, saturate, sepia. The default is
+    /// "none". SkiaCanvas parses the string into an SkImageFilter chain
+    /// and applies via SkPaint::setImageFilter; CG and other backends
+    /// can store the value but render unfiltered. RecordingCanvas
+    /// captures the raw string. Distinct from CSS `filter` on a View
+    /// (#1503) — that filter applies to the View element, this one
+    /// applies to the per-context Canvas2D paints inside it.
+    virtual void set_filter(const std::string& filter) { (void)filter; }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -712,6 +976,31 @@ struct DrawCommand {
         write_pixels,       ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
         // ── issue-925: setBoxShadow / draw_box_shadow ─────────────────
         draw_box_shadow,    ///< x/y/w/h in f[0..3], blur in f[4], spread/offsets via floats payload
+        // ── issue-1434 batch 7: Canvas2D shadow* state setters ────────
+        // Sticky state changes; the recording target captures one cmd
+        // per setter so tests can assert on the bridge's flush order.
+        set_shadow_color,    ///< color in `color`
+        set_shadow_blur,     ///< blur (px) in f[0]
+        set_shadow_offset_x, ///< dx (px) in f[0]
+        set_shadow_offset_y, ///< dy (px) in f[0]
+        // ── issue-1434 bridge-thin gap-fill: Canvas2D state setters ───
+        // Sticky stroke / image state. Captured one cmd per setter so
+        // the canvas2d bridge harness can assert flush order.
+        set_miter_limit,     ///< limit in f[0]
+        set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky setters.
+        // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
+        // filter raw CSS <filter-function-list> string (e.g.
+        // "blur(5px) sepia(80%)") in `text`. RecordingCanvas captures
+        // each setter so tests can assert the JS shim flushed the
+        // sticky state before the next text/image/fill draw.
+        set_direction,
+        set_filter,
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // image source path / data URI in `text`, tile modes packed into
+        // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
+        set_fill_pattern,
+        set_stroke_pattern,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── issue-929: real clearRect that replaces pixels ────────────
@@ -727,7 +1016,16 @@ struct DrawCommand {
         cubic_to,             ///< (cp1x, cp1y, cp2x, cp2y, x, y) in f[0..5]
         close_path,           ///< no payload
         fill_current_path,    ///< no payload — uses last set_fill_color
-        stroke_current_path   ///< no payload — uses last set_stroke_color + set_line_width
+        stroke_current_path,  ///< no payload — uses last set_stroke_color + set_line_width
+        // ── pulp #1521: native arc subpaths (replace JS bezier approx) ─
+        // Captured so widgets that emit native arc commands can be
+        // asserted at the command-stream level without a Skia raster
+        // surface. Maps 1:1 to the new Canvas::arc / arc_to / ellipse /
+        // round_rect virtual methods.
+        arc,                  ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
+        arc_to,               ///< (x1, y1, x2, y2, radius) in f[0..4]
+        ellipse,              ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
+        round_rect            ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
     };
 
     Type type;
@@ -758,6 +1056,8 @@ public:
 
     void save() override;
     void restore() override;
+    int save_count() const override { return save_depth_; }
+    void restore_to_count(int target) override;
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
@@ -766,6 +1066,7 @@ public:
     void capture_paint_baseline_transform() override;
     void concat_transform(float a, float b, float c,
                           float d, float e, float f) override;
+    AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
     void set_blend_mode(BlendMode mode) override;
@@ -811,6 +1112,37 @@ public:
                          float dx, float dy, float blur, float spread,
                          Color color, bool inset, float corner_radius) override;
 
+    // issue-1434 batch 7 — capture sticky Canvas2D shadow state setters
+    // so tests can assert that JS `ctx.shadowColor = ...; ctx.shadowBlur =
+    // ...; ctx.fillRect(...)` flushes the shadow state through to the
+    // canvas before the geometry is recorded.
+    void set_shadow_color(Color color) override;
+    void set_shadow_blur(float blur) override;
+    void set_shadow_offset_x(float dx) override;
+    void set_shadow_offset_y(float dy) override;
+
+    // issue-1434 bridge-thin gap-fill — capture sticky stroke / image
+    // state so tests can assert that JS `ctx.miterLimit = ...` and
+    // `ctx.imageSmoothingEnabled = ...` flush through to the canvas
+    // before the next geometry is recorded.
+    void set_miter_limit(float limit) override;
+    void set_image_smoothing(bool enabled,
+                             ImageSmoothingQuality quality) override;
+
+    // pulp #1520 — Canvas2D ctx.direction / ctx.filter capture.
+    void set_direction(TextDirection direction) override;
+    void set_filter(const std::string& filter) override;
+
+    // pulp #1434 bridge-thin gap-fill — capture pattern setter intents
+    // so canvas2d harness tests can assert flush order without needing
+    // a real raster surface or decoded image.
+    void set_fill_pattern(const std::string& image_src,
+                          PatternTileMode tile_x,
+                          PatternTileMode tile_y) override;
+    void set_stroke_pattern(const std::string& image_src,
+                            PatternTileMode tile_x,
+                            PatternTileMode tile_y) override;
+
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape
     // without needing a real raster surface. Pure capture; no geometry
@@ -825,9 +1157,39 @@ public:
     void fill_current_path() override;
     void stroke_current_path() override;
 
+    // pulp #1521 — native arc subpaths (recorded as DrawCommands so
+    // widget tests can assert emit order without a raster surface).
+    void arc(float cx, float cy, float radius,
+             float start_angle, float end_angle,
+             bool anticlockwise) override;
+    void arc_to(float x1, float y1, float x2, float y2,
+                float radius) override;
+    void ellipse(float cx, float cy, float rx, float ry,
+                 float rotation,
+                 float start_angle, float end_angle,
+                 bool anticlockwise) override;
+    void round_rect(float x, float y, float w, float h,
+                    float tl_x, float tl_y,
+                    float tr_x, float tr_y,
+                    float br_x, float br_y,
+                    float bl_x, float bl_y) override;
+
 private:
     std::vector<DrawCommand> commands_;
     size_t baseline_capture_count_ = 0;
+    // pulp #1368 — track save/restore depth so RecordingCanvas can model
+    // the same save_count() / restore_to_count() contract as the live
+    // backends. This lets CanvasWidget::paint() unit tests assert that the
+    // outer save/restore wrapper drops any leftover saves emitted by an
+    // unbalanced JS draw script.
+    int save_depth_ = 0;
+    // pulp #1368 round 2 — track the current device matrix so
+    // current_transform() returns a faithful CTM in unit tests. The matrix
+    // is saved/restored alongside save_depth_, and translate/scale/rotate/
+    // set_transform/concat_transform mutate it. Layout in column-major
+    // CanvasRenderingContext2D order: [a, b, c, d, e, f].
+    AffineTransform2x3 ctm_{};
+    std::vector<AffineTransform2x3> ctm_stack_;
 };
 
 } // namespace pulp::canvas

@@ -842,5 +842,59 @@ class MainTests(unittest.TestCase):
         self.assertIn("hint only", stdout.getvalue())
 
 
+class PerSurfaceTrailerSkipRequiresReason(unittest.TestCase):
+    """pulp #1054 — Version-Bump: <surface>=skip MUST carry a non-empty
+    reason="..." (mirrors PR #1315's enforcement on the unscoped form).
+    Earlier shapes silently accepted bare `cli=skip` and `cli=skip reason=""`.
+    """
+
+    def test_canonical_per_surface_skip_with_reason(self) -> None:
+        result = vbc.surface_trailer_override(
+            {"version-bump": ['cli=skip reason="legitimate"']},
+            "version-bump",
+            "cli",
+        )
+        self.assertEqual(result, "skip")
+
+    def test_per_surface_skip_without_reason_rejected(self) -> None:
+        # Bare `cli=skip` is rejected — author must explain why.
+        result = vbc.surface_trailer_override(
+            {"version-bump": ['cli=skip']},
+            "version-bump",
+            "cli",
+        )
+        self.assertIsNone(result)
+
+    def test_per_surface_skip_with_empty_reason_rejected(self) -> None:
+        # `cli=skip reason=""` is rejected (empty quotes don't count).
+        result = vbc.surface_trailer_override(
+            {"version-bump": ['cli=skip reason=""']},
+            "version-bump",
+            "cli",
+        )
+        self.assertIsNone(result)
+
+    def test_per_surface_skip_with_whitespace_only_reason_rejected(self) -> None:
+        # `cli=skip reason="   "` is rejected (whitespace-only doesn't count).
+        result = vbc.surface_trailer_override(
+            {"version-bump": ['cli=skip reason="   "']},
+            "version-bump",
+            "cli",
+        )
+        self.assertIsNone(result)
+
+    def test_per_surface_patch_minor_major_dont_require_reason(self) -> None:
+        # Bump-level trailers don't need a reason — the level itself
+        # documents intent (the bump verdict IS the explanation).
+        for level in ("patch", "minor", "major"):
+            with self.subTest(level=level):
+                result = vbc.surface_trailer_override(
+                    {"version-bump": [f"cli={level}"]},
+                    "version-bump",
+                    "cli",
+                )
+                self.assertEqual(result, level)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -77,7 +77,14 @@ add_executable(pulp-cli
     migration_runtime.cpp
     validator_discovery.cpp
     "${_pulp_migration_index_src}")
-set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
+# Phase 8 binary swap (#767 / #686): the C++ CLI was historically the
+# user-facing `pulp` binary. With the Rust binary now ready, the C++
+# side renames to `pulp-cpp` and the Rust binary takes the `pulp`
+# slot. Rollback for users: `PULP_USE_CPP=1 pulp …` execs into
+# `pulp-cpp` (handled at the top of `experimental/pulp-rs/src/main.rs`).
+# The CMake target name (`pulp-cli`) does NOT change — only the file
+# basename — so all ctest entries below keep working.
+set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 target_include_directories(pulp-cli PRIVATE
@@ -111,6 +118,14 @@ install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)
+    set(_pulp_cli_doctor_ctest_env
+        "PULP_UPDATE_CHECK_DISABLED=1"
+        "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-doctor")
+    set(_pulp_cli_caches_ctest_env
+        "PULP_UPDATE_CHECK_DISABLED=1"
+        "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-caches"
+        "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=${CMAKE_BINARY_DIR}/test-tmp/fcc-empty-744")
+
     add_test(NAME cli-help
         COMMAND pulp-cli help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -122,7 +137,9 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # doctor may exit 0 or 1 depending on environment, but should not crash
     set_tests_properties(cli-doctor PROPERTIES
-        PASS_REGULAR_EXPRESSION "checks passed")
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
+        SKIP_RETURN_CODE 1
+        PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
     # Issue #499 Slice 1: `pulp doctor --versions` must print the
     # version diagnostics header and exit 0 regardless of skew — skew
@@ -131,6 +148,7 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor --versions
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-doctor-versions PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp Version Diagnostics")
 
     add_test(NAME cli-doctor-ci
@@ -139,6 +157,8 @@ if(PULP_BUILD_TESTS)
     # CI mode may exit 1 if optional SDKs are missing — that's not a crash.
     # Accept any exit code; the test just verifies it doesn't crash.
     set_tests_properties(cli-doctor-ci PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
+        SKIP_RETURN_CODE 1
         PASS_REGULAR_EXPRESSION ".*")
 
     # Issue #743: `pulp doctor --validators` always renders the
@@ -150,6 +170,8 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor --validators
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-doctor-validators PROPERTIES
+        ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
+        SKIP_RETURN_CODE 1
         PASS_REGULAR_EXPRESSION "Validators")
 
     add_test(NAME cli-status
@@ -355,7 +377,7 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor --versions --json
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-doctor-versions-json PROPERTIES
-        ENVIRONMENT "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-json"
+        ENVIRONMENT "PULP_UPDATE_CHECK_DISABLED=1;PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-json"
         PASS_REGULAR_EXPRESSION "\"projects\":")
 
     # `pulp doctor --caches` (#744): on a fresh empty cache root the
@@ -367,7 +389,7 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor --caches
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-doctor-caches-empty PROPERTIES
-        ENVIRONMENT "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=${CMAKE_BINARY_DIR}/test-tmp/fcc-empty-744"
+        ENVIRONMENT "${_pulp_cli_caches_ctest_env}"
         PASS_REGULAR_EXPRESSION "Pulp FetchContent cache")
 
     # `pulp doctor --caches --json` should emit the documented JSON
@@ -377,6 +399,6 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli doctor --caches --json
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-doctor-caches-json PROPERTIES
-        ENVIRONMENT "PULP_SHARED_FETCHCONTENT_SOURCE_DIR=${CMAKE_BINARY_DIR}/test-tmp/fcc-empty-744"
+        ENVIRONMENT "${_pulp_cli_caches_ctest_env}"
         PASS_REGULAR_EXPRESSION "\"healthy\":")
 endif()

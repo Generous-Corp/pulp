@@ -1146,6 +1146,153 @@ fn do_undo(args: &UndoArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
             skipped += 1;
             continue;
         }
+        // Multi-edit batch (Phase 8 / pulp#740) — iterate over the
+        // recorded edits and revert each one separately. Standalone
+        // bumps write two edits (pulp.toml sdk_version + the
+        // `find_package(Pulp ...)` mirror); legacy source-tree bumps
+        // write one. The path-keyed staging mirrors the C++ undo at
+        // `tools/cli/cmd_project.cpp:910` so the on-disk format is
+        // round-trippable across binaries (caught by sandbox-e2e
+        // `test_bump_undo_round_trips_cpp_to_rust`).
+        if !e.edits.is_empty() {
+            let mut staged: std::collections::BTreeMap<std::path::PathBuf, String> =
+                std::collections::BTreeMap::new();
+            let mut originals: std::collections::BTreeMap<std::path::PathBuf, String> =
+                std::collections::BTreeMap::new();
+            let mut skip_reason: Option<String> = None;
+            let mut failure_reason: Option<String> = None;
+
+            for edit in &e.edits {
+                if edit.path.as_os_str().is_empty() || !edit.path.exists() {
+                    failure_reason = Some(format!("missing {}", edit.path.display()));
+                    break;
+                }
+                if !staged.contains_key(&edit.path) {
+                    let source = std::fs::read_to_string(&edit.path).unwrap_or_default();
+                    if source.is_empty() {
+                        failure_reason = Some(format!("could not read {}", edit.path.display()));
+                        break;
+                    }
+                    staged.insert(edit.path.clone(), source);
+                }
+                let body = staged.get(&edit.path).expect("just inserted").clone();
+                let site = bump::site_for_kind(&body, edit.kind);
+                if site.kind != edit.kind {
+                    skip_reason = Some("pin kind changed since bump".to_owned());
+                    break;
+                }
+                let current_matches = if !edit.new_value.is_empty() {
+                    if site.current_pin == edit.new_value {
+                        true
+                    } else {
+                        let have = bump::normalize_pin(&site.current_pin);
+                        let want = bump::normalize_pin(&edit.new_value);
+                        !have.is_empty() && have == want
+                    }
+                } else if edit.kind != bump::PinKind::PulpTomlSdkPath {
+                    bump::normalize_pin(&site.current_pin) == batch.target_version
+                } else {
+                    // Empty-new on a sdk_path edit means "leave alone";
+                    // counts as already-correct for revert purposes.
+                    true
+                };
+                if !current_matches {
+                    skip_reason =
+                        Some("current value no longer matches bumped value".to_owned());
+                    break;
+                }
+                let restored_value = {
+                    let normalized_old = bump::normalize_pin(&edit.old_value);
+                    if normalized_old.is_empty() {
+                        edit.old_value.clone()
+                    } else {
+                        normalized_old
+                    }
+                };
+                let Some(restored) = bump::rewrite_pin(
+                    &body,
+                    &site,
+                    &restored_value,
+                    edit.old_value_style_has_v,
+                ) else {
+                    failure_reason = Some("rewrite failed".to_owned());
+                    break;
+                };
+                staged.insert(edit.path.clone(), restored);
+            }
+
+            if let Some(reason) = failure_reason {
+                writeln!(
+                    out,
+                    "  {}failed{} {}  ({})",
+                    color::red(),
+                    color::reset(),
+                    e.project_name,
+                    reason
+                )
+                .ok();
+                failed += 1;
+                continue;
+            }
+            if let Some(reason) = skip_reason {
+                writeln!(
+                    out,
+                    "  {}skipped{} {}  ({})",
+                    color::yellow(),
+                    color::reset(),
+                    e.project_name,
+                    reason
+                )
+                .ok();
+                skipped += 1;
+                continue;
+            }
+
+            // Snapshot originals before write so we can roll back if
+            // any single write fails partway through.
+            for path in staged.keys() {
+                if let Ok(body) = std::fs::read_to_string(path) {
+                    originals.insert(path.clone(), body);
+                }
+            }
+            let mut write_failed = false;
+            for (path, body) in &staged {
+                if write_text_atomic(path, body).is_err() {
+                    write_failed = true;
+                    break;
+                }
+            }
+            if write_failed {
+                for (path, body) in &originals {
+                    let _ = write_text_atomic(path, body);
+                }
+                writeln!(
+                    out,
+                    "  {}failed{} {}  (write failed; original files restored)",
+                    color::red(),
+                    color::reset(),
+                    e.project_name,
+                )
+                .ok();
+                failed += 1;
+                continue;
+            }
+            writeln!(
+                out,
+                "  {}reverted{} {}  {} -> {}",
+                color::green(),
+                color::reset(),
+                e.project_name,
+                batch.target_version,
+                fmt_pin(&e.old_pin, e.old_pin_style_has_v),
+            )
+            .ok();
+            reverted += 1;
+            continue;
+        }
+
+        // Legacy single-CMake undo (pre-pulp#740 batches). Kept for
+        // back-compat with undo files written by older builds.
         let cmake_path = e.project_path.join("CMakeLists.txt");
         if !cmake_path.exists() {
             writeln!(
@@ -2050,6 +2197,14 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let root = td.path();
         write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        // bump_one() guards on `cmake_path.exists()` BEFORE the standalone
+        // dispatch (matching the C++ side: a real consumer always carries
+        // a CMakeLists.txt with a `find_package(Pulp ...)` mirror). The
+        // fixture mirrors that shape so the standalone path is reachable.
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.45.0 REQUIRED)\n",
+        );
         let args = BumpArgs::default();
         let e = bump_one(root, "stdalone", "0.40.0", &args, noop_verify);
         assert_eq!(e.status, "skipped");
@@ -2061,6 +2216,10 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let root = td.path();
         write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.45.0 REQUIRED)\n",
+        );
         let args = BumpArgs {
             allow_downgrade: true,
             ..BumpArgs::default()
@@ -2087,5 +2246,84 @@ mod tests {
         assert!(b.allow_cli_skew);
         assert!(b.allow_redundant);
         assert!(b.verify_builds);
+    }
+
+    /// do_undo on a multi-edit (standalone) batch must restore BOTH
+    /// pulp.toml sdk_version AND the find_package(Pulp ...) mirror in
+    /// CMakeLists.txt. Pre-fix the loop only walked CMakeLists.txt and
+    /// compared against entry-level pin_kind, which is
+    /// `PulpTomlSdkVersion` for standalone bumps — so every standalone
+    /// undo got skipped with "pin kind changed since bump" (caught
+    /// during sandbox cross-binary testing). Locks the multi-edit
+    /// behavior into the unit suite so it can't regress silently.
+    #[test]
+    fn do_undo_round_trips_multi_edit_standalone_batch() {
+        let td = tempfile::tempdir().unwrap();
+        let project = td.path().join("clock");
+        std::fs::create_dir_all(&project).unwrap();
+        write(&project.join("pulp.toml"), "sdk_version = \"0.40.0\"\n");
+        write(
+            &project.join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.20)\n\
+             project(Clock VERSION 1.0.0)\n\
+             find_package(Pulp 0.40.0 REQUIRED)\n",
+        );
+        let original_toml = std::fs::read(project.join("pulp.toml")).unwrap();
+        let original_cmake = std::fs::read(project.join("CMakeLists.txt")).unwrap();
+
+        let home = td.path().join("pulp-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let env = Env {
+            pulp_home: Some(home.clone()),
+            cwd: project.clone(),
+            registry_path: home.join("projects.json"),
+            cli_version: "99.99.99".to_owned(),
+        };
+
+        // Bump (writes 2 edits in the entry).
+        let mut bump_out = Vec::new();
+        let bump_args = BumpArgs {
+            to_version: "0.41.0".to_owned(),
+            allow_cli_skew: true,
+            allow_redundant: true,
+            ..BumpArgs::default()
+        };
+        let bump_rc = run_with(Sub::Bump(bump_args), &env, &mut bump_out).unwrap();
+        assert_eq!(bump_rc, 0, "bump failed: {:?}", String::from_utf8_lossy(&bump_out));
+        assert!(std::fs::read_to_string(project.join("pulp.toml"))
+            .unwrap()
+            .contains("0.41.0"));
+        assert!(std::fs::read_to_string(project.join("CMakeLists.txt"))
+            .unwrap()
+            .contains("find_package(Pulp 0.41.0"));
+
+        // Undo (must restore both files byte-exact).
+        let mut undo_out = Vec::new();
+        let undo_rc = do_undo(&UndoArgs::default(), &env, &mut undo_out).unwrap();
+        assert_eq!(
+            undo_rc, 0,
+            "undo non-zero: {:?}",
+            String::from_utf8_lossy(&undo_out)
+        );
+        let report = String::from_utf8_lossy(&undo_out);
+        assert!(
+            report.contains("reverted"),
+            "expected 'reverted' in undo report: {report}"
+        );
+        assert!(
+            !report.contains("pin kind changed"),
+            "regression: 'pin kind changed since bump' in standalone undo: {report}"
+        );
+
+        assert_eq!(
+            std::fs::read(project.join("pulp.toml")).unwrap(),
+            original_toml,
+            "pulp.toml not byte-restored after undo"
+        );
+        assert_eq!(
+            std::fs::read(project.join("CMakeLists.txt")).unwrap(),
+            original_cmake,
+            "CMakeLists.txt not byte-restored after undo"
+        );
     }
 }

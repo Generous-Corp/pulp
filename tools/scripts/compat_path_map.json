@@ -16,7 +16,7 @@
     "core/view/js/web-compat-canvas.js": [
       {"kind": "compat-json", "prefix": "canvas2d/"},
       {"kind": "doc", "path": "docs/reference/compat/canvas2d.md"},
-      {"kind": "test", "glob": "test/test_canvas_widget*.cpp"}
+      {"kind": "test", "glob": "test/test_canvas*.cpp"}
     ],
     "core/view/js/web-compat-element.js": [
       {"kind": "compat-json", "prefix": "html/"},

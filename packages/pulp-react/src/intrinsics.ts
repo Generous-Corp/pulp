@@ -12,7 +12,8 @@ import type {
     LabelProps, ButtonProps, TextEditorProps,
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
-    ListBoxProps, CanvasProps, ImageProps, IconProps,
+    ListBoxProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
+    SvgRectProps, SvgLineProps,
 } from './types.js';
 
 // Each intrinsic is a function component that emits a host element with
@@ -44,3 +45,6 @@ export const ListBox = (props: ListBoxProps): ReactElement => createElement('Lis
 export const Canvas = (props: CanvasProps): ReactElement => createElement('Canvas' as unknown as 'div', props as unknown as object);
 export const Image = (props: ImageProps): ReactElement => createElement('Image' as unknown as 'div', props as unknown as object);
 export const Icon = (props: IconProps): ReactElement => createElement('Icon' as unknown as 'div', props as unknown as object);
+export const SvgPath = (props: SvgPathProps): ReactElement => createElement('SvgPath' as unknown as 'div', props as unknown as object);
+export const SvgRect = (props: SvgRectProps): ReactElement => createElement('SvgRect' as unknown as 'div', props as unknown as object);
+export const SvgLine = (props: SvgLineProps): ReactElement => createElement('SvgLine' as unknown as 'div', props as unknown as object);

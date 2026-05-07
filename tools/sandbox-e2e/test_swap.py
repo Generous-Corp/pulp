@@ -187,6 +187,195 @@ def test_projects_list_round_trips_across_binaries(
 
 
 # -----------------------------------------------------------------------------
+# Scenario 2c — bump → undo round-trip across binaries (#46)
+# -----------------------------------------------------------------------------
+#
+# The Phase 8 swap is a one-way door for any user mid-bump. If a user ran
+# `pulp project bump` under the C++ binary and then `pulp project undo`
+# under Rust (or vice versa), the undo file must round-trip exactly. The
+# undo file format is the most opinionated cross-binary contract Pulp
+# ships — these tests freeze it.
+
+
+@pytest.mark.cross_binary
+def test_bump_undo_round_trips_cpp_to_rust(
+    sandbox: Sandbox,
+    cpp_binary: Path,
+    rust_binary: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    project = tmp_path_factory.mktemp("bump-roundtrip-cpp-rs")
+    (project / "pulp.toml").write_text(
+        '[pulp]\nsdk_version = "0.40.0"\n'
+    )
+    (project / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(BumpUndo VERSION 1.0.0 LANGUAGES CXX)\n"
+        "find_package(Pulp 0.40.0 REQUIRED)\n"
+    )
+    original_toml = (project / "pulp.toml").read_bytes()
+    original_cmake = (project / "CMakeLists.txt").read_bytes()
+
+    # Bump under C++.
+    #
+    # cwd MUST be inside the consumer project, NOT the sandbox root.
+    # `pulp project bump` walks up from cwd looking for a Pulp-source
+    # checkout (CMakeLists.txt + core/ + tools/cli + tools/shipyard.toml)
+    # and refuses to run if it finds one. The sandbox-root happens to
+    # have a stub `pulp.toml` but is otherwise empty — fine — but if
+    # the test's cwd inherits any ancestor that looks like a Pulp
+    # checkout, the bump aborts. Pinning cwd to `project` keeps the
+    # walk strictly inside the fixture.
+    sandbox.stage_binary(cpp_binary, as_name="pulp")
+    bumped = sandbox.run(
+        ["project", "bump", "0.41.0", "--allow-cli-skew",
+         "--allow-redundant"],
+        cwd=project,
+        timeout=30.0,
+    )
+    if bumped.returncode != 0:
+        pytest.skip(
+            f"C++ project bump unsupported in sandbox env "
+            f"(rc={bumped.returncode}, stderr={bumped.stderr[:200]!r})"
+        )
+    assert b"0.41.0" in (project / "pulp.toml").read_bytes()
+    assert b"0.41.0" in (project / "CMakeLists.txt").read_bytes()
+
+    # Locate the undo file C++ wrote.
+    undo_files = sorted(sandbox.home.glob("bump-undo-*.json"))
+    if not undo_files:
+        pytest.skip(
+            "C++ bump didn't produce a discoverable undo file in this env"
+        )
+    # Both binaries accept the bare TIMESTAMP, NOT the full filename.
+    # `bump-undo-2026-04-21T14-30-00Z.json` -> `2026-04-21T14-30-00Z`.
+    undo_timestamp = undo_files[-1].name[len("bump-undo-"):-len(".json")]
+
+    # Swap to Rust and undo.
+    (sandbox.bin_dir / "pulp").rename(sandbox.bin_dir / "pulp-cpp")
+    sandbox.stage_binary(rust_binary, as_name="pulp")
+    undo = sandbox.run(
+        ["project", "undo", undo_timestamp],
+        cwd=project,
+        timeout=30.0,
+    )
+    if undo.returncode != 0 and "not yet implemented" in undo.stderr.lower():
+        pytest.skip(
+            f"Rust project undo not yet ported (rc={undo.returncode})"
+        )
+    undo.expect_success()
+
+    # Byte-exact restore — round-trip is hostile to whitespace quibbles.
+    assert (project / "pulp.toml").read_bytes() == original_toml, (
+        f"Rust undo didn't byte-restore pulp.toml after C++ bump: "
+        f"undo stdout={undo.stdout!r}"
+    )
+    assert (project / "CMakeLists.txt").read_bytes() == original_cmake, (
+        f"Rust undo didn't byte-restore CMakeLists.txt after C++ bump"
+    )
+
+
+@pytest.mark.cross_binary
+def test_bump_undo_round_trips_rust_to_cpp(
+    sandbox: Sandbox,
+    cpp_binary: Path,
+    rust_binary: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Symmetric reverse of the C++→Rust round-trip. Catches divergence
+    in Rust's UndoEntry serialization (e.g. an extra field that C++'s
+    hand-rolled JSON parser can't skip) — exact case caught here when
+    Rust serialized a `notes` array C++ didn't expect, mis-parsed the
+    next field, and silently skipped every entry with "pin kind changed
+    since bump"."""
+    project = tmp_path_factory.mktemp("bump-roundtrip-rs-cpp")
+    (project / "pulp.toml").write_text('[pulp]\nsdk_version = "0.40.0"\n')
+    (project / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(BumpUndoRev VERSION 1.0.0 LANGUAGES CXX)\n"
+        "find_package(Pulp 0.40.0 REQUIRED)\n"
+    )
+    original_toml = (project / "pulp.toml").read_bytes()
+    original_cmake = (project / "CMakeLists.txt").read_bytes()
+
+    sandbox.stage_binary(rust_binary, as_name="pulp")
+    bumped = sandbox.run(
+        ["project", "bump", "0.41.0", "--allow-cli-skew",
+         "--allow-redundant"],
+        cwd=project,
+        timeout=30.0,
+    )
+    if bumped.returncode != 0:
+        pytest.skip(
+            f"Rust project bump unsupported in sandbox env "
+            f"(rc={bumped.returncode}, stderr={bumped.stderr[:200]!r})"
+        )
+    assert b"0.41.0" in (project / "pulp.toml").read_bytes()
+    assert b"0.41.0" in (project / "CMakeLists.txt").read_bytes()
+
+    undo_files = sorted(sandbox.home.glob("bump-undo-*.json"))
+    if not undo_files:
+        pytest.skip("Rust bump didn't produce a discoverable undo file")
+    undo_timestamp = undo_files[-1].name[len("bump-undo-"):-len(".json")]
+
+    (sandbox.bin_dir / "pulp").rename(sandbox.bin_dir / "pulp-rs")
+    sandbox.stage_binary(cpp_binary, as_name="pulp")
+    undo = sandbox.run(
+        ["project", "undo", undo_timestamp],
+        cwd=project,
+        timeout=30.0,
+    )
+    if undo.returncode != 0 and "not yet implemented" in undo.stderr.lower():
+        pytest.skip(f"C++ project undo unsupported here (rc={undo.returncode})")
+    undo.expect_success()
+
+    assert (project / "pulp.toml").read_bytes() == original_toml, (
+        f"C++ undo didn't byte-restore pulp.toml after Rust bump: "
+        f"undo stdout={undo.stdout!r}"
+    )
+    assert (project / "CMakeLists.txt").read_bytes() == original_cmake, (
+        f"C++ undo didn't byte-restore CMakeLists.txt after Rust bump"
+    )
+
+
+@pytest.mark.cross_binary
+def test_pulp_home_env_is_honored_by_both_binaries(
+    sandbox: Sandbox,
+    cpp_binary: Path,
+    rust_binary: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Both binaries must agree on PULP_HOME's role: writes from one
+    must be visible to the other when the env var points to the same
+    dir. Sanity-checks the most basic cross-binary contract underlying
+    every other scenario in this file."""
+    alt_home = tmp_path_factory.mktemp("alt-pulp-home")
+
+    sandbox.stage_binary(cpp_binary, as_name="pulp")
+    sandbox.run(
+        ["config", "set", "update.mode", "off"],
+        env_overrides={"PULP_HOME": str(alt_home)},
+        timeout=15.0,
+    ).expect_success()
+    cpp_wrote = (alt_home / "config.toml").exists()
+    assert cpp_wrote, (
+        f"C++ didn't write config.toml under PULP_HOME={alt_home}; "
+        f"contents={list(alt_home.iterdir())}"
+    )
+
+    # Rust reads the same alt_home.
+    sandbox.stage_binary(rust_binary, as_name="pulp")
+    rust_read = sandbox.run(
+        ["config", "get", "update.mode"],
+        env_overrides={"PULP_HOME": str(alt_home)},
+    ).expect_success()
+    assert rust_read.stdout.strip() == "off", (
+        f"Rust didn't read PULP_HOME-rooted config: "
+        f"stdout={rust_read.stdout!r}"
+    )
+
+
+# -----------------------------------------------------------------------------
 # Scenario 3 — PULP_USE_CPP=1 rollback against real C++ binary
 # -----------------------------------------------------------------------------
 
@@ -334,19 +523,32 @@ def test_doctor_versions_parity_across_binaries(
 
 
 # -----------------------------------------------------------------------------
-# Scenario 7 — Library-linked command delegation
+# Scenario 7 — Subcommands that must fall through to pulp-cpp
 # -----------------------------------------------------------------------------
 #
-# pulp ship / validate / inspect / host / audio / import-design /
-# export-tokens / design-debug are C++-only. Post-swap they must route
-# from the Rust binary through the Phase 7 fallthrough wrapper to
-# pulp-cpp.
+# Two flavours, same fallthrough contract:
 #
-# We verify this with a stub pulp-cpp that tags its output. If the
-# Rust binary reaches the stub, we see the tag + exit 42.
+# 1. **Library-linked, C++-only by design**: pulp ship / validate /
+#    inspect / host / audio / import-design / export-tokens /
+#    design-debug. These will never be ported to Rust (they link Pulp's
+#    C++ libs directly). Post-swap they MUST route from the Rust binary
+#    through the Phase 7 fallthrough wrapper to pulp-cpp.
+#
+# 2. **New C++ subcommands listed in Rust help but not yet ported to
+#    Rust**: drift items where the C++ side gained a subcommand after
+#    the Rust port's last sync. The fallthrough is the safety net -
+#    even without a Rust-native implementation, the user-facing
+#    behavior must be unchanged. As of 2026-05-05: pulp loop (#940),
+#    pulp coverage (#919), and pulp harness (#1395) are help-visible
+#    but still C++-owned.
+#
+# We verify both classes the same way: stage a stub pulp-cpp that tags
+# its output. If the Rust binary reaches the stub, we see the tag +
+# exit 42.
 
 
 LIBRARY_LINKED_COMMANDS: tuple[tuple[str, ...], ...] = (
+    # By-design library-linked commands.
     ("ship", "check"),
     ("validate", "--help"),
     ("inspect", "--help"),
@@ -355,6 +557,11 @@ LIBRARY_LINKED_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("import-design", "--help"),
     ("export-tokens", "--help"),
     ("design-debug", "--help"),
+    # Drift items - new C++ subcommands not yet ported to Rust. When
+    # a Rust port lands, move the entry to a parity test instead.
+    ("loop", "--help"),     # #940 — landed on main 2026-04-28
+    ("coverage", "--help"),  # #919 — landed on main 2026-04-28
+    ("harness", "--help"),  # #1395 — landed on main 2026-05-05
 )
 
 

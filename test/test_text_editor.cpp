@@ -178,6 +178,17 @@ TEST_CASE("TextEditor key event: Up goes to start in single-line", "[view][text_
     // Up in single-line moves to start — verify by typing
 }
 
+TEST_CASE("TextEditor ignores key-up and unhandled keys", "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.set_text("abc");
+
+    auto key_up = key_event(KeyCode::left);
+    key_up.is_down = false;
+    REQUIRE_FALSE(editor.on_key_event(key_up));
+    REQUIRE_FALSE(editor.on_key_event(key_event(KeyCode::tab)));
+    REQUIRE(editor.text() == "abc");
+}
+
 TEST_CASE("TextEditor single-line navigation treats embedded newlines as plain text", "[view][text_editor]") {
     TextEditor editor;
     editor.on_focus_changed(true);
@@ -196,6 +207,51 @@ TEST_CASE("TextEditor single-line navigation treats embedded newlines as plain t
 
     REQUIRE(editor.on_key_event(key_event(KeyCode::end_)));
     REQUIRE(editor.caret_pos() == 8);
+}
+
+TEST_CASE("TextEditor word and modifier navigation clamp to expected caret positions",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    const std::string text = "alpha beta_gamma 42";
+    editor.set_text(text);
+
+    REQUIRE(editor.caret_pos() == static_cast<int>(text.size()));
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModAlt)));
+    REQUIRE(editor.caret_pos() == static_cast<int>(text.size()) - 2);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, kModAlt)));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModAlt)));
+    REQUIRE(editor.caret_pos() == 16);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, main_modifier())));
+    REQUIRE(editor.caret_pos() == static_cast<int>(text.size()));
+}
+
+TEST_CASE("TextEditor shift navigation extends and clears selection",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("abcd");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModShift)));
+    REQUIRE(editor.on_key_event(key_event(KeyCode::right, kModShift)));
+    REQUIRE(editor.caret_pos() == 2);
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "ab");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left)));
+    REQUIRE(editor.caret_pos() == 1);
+    REQUIRE_FALSE(editor.has_selection());
 }
 
 TEST_CASE("TextEditor multi-line up and down preserve the visual column", "[view][text_editor]") {
@@ -294,6 +350,28 @@ TEST_CASE("TextEditor Delete removes selected text and undo restores it",
     REQUIRE(editor.undo());
     REQUIRE(editor.text() == "Delete me");
     REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+}
+
+TEST_CASE("TextEditor Delete removes the character after the caret and redo reapplies it",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("abc");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::delete_)));
+    REQUIRE(editor.text() == "bc");
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "abc");
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.redo());
+    REQUIRE(editor.text() == "bc");
+    REQUIRE(editor.caret_pos() == 0);
 }
 
 TEST_CASE("TextEditor marked text replacement tracks the active range",
@@ -465,6 +543,51 @@ TEST_CASE("TextEditor mouse double-click selects word", "[view][text_editor]") {
     e.is_down = true;
     editor.on_mouse_event(e);
     REQUIRE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor mouse shift-click extends selection from the caret",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.set_text("hello world");
+    editor.set_bounds({0, 0, 200, 30});
+
+    constexpr float char_w = 13.0f * 0.6f;
+    MouseEvent click;
+    click.position = {9.0f + 5.0f * char_w, 15};
+    click.is_down = true;
+    editor.on_mouse_event(click);
+    REQUIRE_FALSE(editor.has_selection());
+
+    MouseEvent shift_click;
+    shift_click.position = {9.0f + 2.0f * char_w, 15};
+    shift_click.modifiers = kModShift;
+    shift_click.is_down = true;
+    editor.on_mouse_event(shift_click);
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "llo");
+
+    MouseEvent key_up = shift_click;
+    key_up.is_down = false;
+    key_up.position = {9.0f, 15};
+    editor.on_mouse_event(key_up);
+    REQUIRE(editor.selected_text() == "llo");
+}
+
+TEST_CASE("TextEditor mouse double-click selects the exact word under the cursor",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.set_text("alpha beta_2!");
+    editor.set_bounds({0, 0, 200, 30});
+
+    constexpr float char_w = 13.0f * 0.6f;
+    MouseEvent e;
+    e.position = {9.0f + 8.0f * char_w, 15};
+    e.click_count = 2;
+    e.is_down = true;
+    editor.on_mouse_event(e);
+
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "beta_2");
 }
 
 TEST_CASE("TextEditor mouse triple-click selects all", "[view][text_editor]") {

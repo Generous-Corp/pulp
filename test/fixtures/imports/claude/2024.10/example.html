@@ -1,7 +1,19 @@
+<!--
+  Synthetic Claude Design fixture (Anthropic Labs export, pulp #468 / #1035 / #1031).
+
+  Two roles in one file:
+    1. pulp #1035 — exercise the classname extractor's happy paths via
+       the <style> blocks below (mono / tnum / card / btn-primary /
+       btn-secondary / numeric and the various skip cases).
+    2. pulp #1031 — versioned import-design detection. The single
+       fingerprint clause is the inline bundler script tag the Claude
+       Design export injects:
+         {"kind": "html-script-type", "value": "__bundler/template"}
+-->
 <!DOCTYPE html>
 <html>
 <head>
-<title>Synthetic Claude Design export — pulp #1035 fixture</title>
+<title>Synthetic Claude Design export — pulp #1035 / #1031 fixture</title>
 <style>
 /*
  * pulp #1035 fixture: this <style> block exercises the classname
@@ -65,5 +77,8 @@
 <div class="card mono"><span class="tnum">123.45</span></div>
 <button class="btn-primary">OK</button>
 <button class="btn-secondary">Cancel</button>
+<script type="__bundler/template">
+  // bundled React app placeholder — real exports are multi-MB
+</script>
 </body>
 </html>

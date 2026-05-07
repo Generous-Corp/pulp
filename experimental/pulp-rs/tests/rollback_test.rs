@@ -23,10 +23,10 @@ use std::path::PathBuf;
 
 use assert_cmd::Command;
 
-/// Resolve the binary name the crate's `[[bin]]` manifest declares
-/// so these tests keep working if/when the Phase 8 rename flips
-/// `pulp-rs` → `pulp` in `Cargo.toml`.
-const BIN_NAME: &str = "pulp-rs";
+/// Resolve the binary name the crate's `[[bin]]` manifest declares.
+/// Phase 8 binary swap (#767 / #686) renamed this from `pulp-rs` to
+/// `pulp` along with the Cargo `[[bin]] name` field.
+const BIN_NAME: &str = "pulp";
 
 #[test]
 fn pulp_use_cpp_without_pulp_cpp_on_path_exits_two() {

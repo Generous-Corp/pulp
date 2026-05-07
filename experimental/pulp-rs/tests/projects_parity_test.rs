@@ -92,7 +92,7 @@ fn normalise_json(mut v: serde_json::Value) -> serde_json::Value {
 }
 
 fn run_pulp_rs(args: &[&str], pulp_home: &Path) -> std::process::Output {
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").expect("pulp-rs binary");
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").expect("pulp-rs binary");
     cmd.args(args);
     cmd.env("PULP_HOME", pulp_home);
     cmd.env_remove("NO_COLOR"); // irrelevant because stdout is piped
@@ -163,7 +163,7 @@ fn projects_list_reports_registry_path_in_human_lane() {
 #[test]
 fn projects_unknown_subcommand_exits_two() {
     let home = tempfile::tempdir().unwrap();
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").unwrap();
     cmd.args(["projects", "nope"]);
     cmd.env("PULP_HOME", home.path());
     cmd.assert().code(predicate::eq(2));

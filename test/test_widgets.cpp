@@ -3,6 +3,8 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <cstdint>
+#include <memory>
 #include <vector>
 
 using namespace pulp::view;
@@ -20,6 +22,20 @@ std::vector<DrawCommand> commands_of(const RecordingCanvas& canvas,
         }
     }
     return matches;
+}
+
+std::shared_ptr<SpriteStrip> make_sprite_strip(
+    int total_width,
+    int total_height,
+    int frame_count,
+    SpriteStrip::Orientation orientation) {
+    std::vector<uint8_t> pixels(static_cast<size_t>(total_width) *
+                                static_cast<size_t>(total_height) * 4u,
+                                0x7f);
+    auto strip = std::make_shared<SpriteStrip>();
+    strip->load(pixels.data(), pixels.size(), total_width, total_height,
+                frame_count, orientation);
+    return strip;
 }
 
 }  // namespace
@@ -277,6 +293,23 @@ TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
 }
 
+// pulp #1410 — verify that nowrap puts a Label into single-line paint
+// mode (multi_line=false). Truncation is #1407's surface; this test
+// just confirms the multi_line side-effect path the bridge relies on.
+TEST_CASE("Label with nowrap + multi_line=false paints exactly one fill_text command",
+          "[view][widget][issue-1410]") {
+    Label label("Mid-band attenuation\nwith high-shelf compensation");
+    label.set_bounds({0, 0, 200, 48});
+    label.set_white_space_nowrap(true);
+    label.set_multi_line(false);  // bridge does this side-effect
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);  // would be 2 in multi_line mode (one per `\n`-split)
+}
+
 TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {
     Label label("Gain");
     label.set_bounds({0, 0, 32, 80});
@@ -367,6 +400,73 @@ TEST_CASE("Fader horizontal orientation", "[view][widget]") {
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
     REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+}
+
+TEST_CASE("Knob and Fader render loaded sprite strips",
+          "[view][widget][coverage]") {
+    auto knob_strip = make_sprite_strip(2, 9, 3, SpriteStrip::Orientation::vertical);
+    Knob knob;
+    knob.set_bounds({0, 0, 20, 30});
+    knob.set_value(0.75f);
+    knob.set_sprite_strip(knob_strip);
+
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+
+    REQUIRE(knob_canvas.count(DrawCommand::Type::draw_image) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::restore) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_arc) == 0);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_line) == 0);
+
+    auto knob_clip = commands_of(knob_canvas, DrawCommand::Type::clip_rect).front();
+    REQUIRE_THAT(knob_clip.f[2], WithinAbs(20.0, 0.001));
+    REQUIRE_THAT(knob_clip.f[3], WithinAbs(30.0, 0.001));
+
+    auto knob_scale = commands_of(knob_canvas, DrawCommand::Type::scale).front();
+    REQUIRE_THAT(knob_scale.f[0], WithinAbs(10.0, 0.001));
+    REQUIRE_THAT(knob_scale.f[1], WithinAbs(10.0, 0.001));
+
+    auto knob_translate = commands_of(knob_canvas, DrawCommand::Type::translate).front();
+    REQUIRE_THAT(knob_translate.f[0], WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(knob_translate.f[1], WithinAbs(-6.0, 0.001));
+
+    auto knob_image = commands_of(knob_canvas, DrawCommand::Type::draw_image).front();
+    REQUIRE(knob_image.text.size() == knob_strip->data_size());
+    REQUIRE_THAT(knob_image.f[2], WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(knob_image.f[3], WithinAbs(9.0, 0.001));
+
+    auto fader_strip = make_sprite_strip(12, 4, 3, SpriteStrip::Orientation::horizontal);
+    Fader fader;
+    fader.set_bounds({0, 0, 40, 20});
+    fader.set_value(0.5f);
+    fader.set_sprite_strip(fader_strip);
+
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+
+    REQUIRE(fader_canvas.count(DrawCommand::Type::draw_image) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::restore) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_circle) == 0);
+
+    auto fader_clip = commands_of(fader_canvas, DrawCommand::Type::clip_rect).front();
+    REQUIRE_THAT(fader_clip.f[2], WithinAbs(40.0, 0.001));
+    REQUIRE_THAT(fader_clip.f[3], WithinAbs(20.0, 0.001));
+
+    auto fader_scale = commands_of(fader_canvas, DrawCommand::Type::scale).front();
+    REQUIRE_THAT(fader_scale.f[0], WithinAbs(10.0, 0.001));
+    REQUIRE_THAT(fader_scale.f[1], WithinAbs(5.0, 0.001));
+
+    auto fader_translate = commands_of(fader_canvas, DrawCommand::Type::translate).front();
+    REQUIRE_THAT(fader_translate.f[0], WithinAbs(-4.0, 0.001));
+    REQUIRE_THAT(fader_translate.f[1], WithinAbs(0.0, 0.001));
+
+    auto fader_image = commands_of(fader_canvas, DrawCommand::Type::draw_image).front();
+    REQUIRE(fader_image.text.size() == fader_strip->data_size());
+    REQUIRE_THAT(fader_image.f[2], WithinAbs(12.0, 0.001));
+    REQUIRE_THAT(fader_image.f[3], WithinAbs(4.0, 0.001));
 }
 
 // ── RangeSlider (pulp issue-966) ────────────────────────────────────────────
@@ -529,6 +629,39 @@ TEST_CASE("RangeSlider renders track + fill + handle",
     // Track + active fill = 2 rounded rects, handle = 1 circle.
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
     REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+}
+
+TEST_CASE("RangeSlider vertical paint draws lower fill and inverted handle",
+          "[view][widget][issue-966][coverage]") {
+    RangeSlider rs;
+    rs.set_bounds({0, 0, 24, 200});
+    rs.set_orientation(RangeSlider::Orientation::vertical);
+    rs.set_track_thickness(6.0f);
+    rs.set_value(0.25f);
+
+    RecordingCanvas canvas;
+    rs.paint(canvas);
+
+    auto rects = commands_of(canvas, DrawCommand::Type::fill_rounded_rect);
+    REQUIRE(rects.size() == 2);
+
+    // Track is centered horizontally and spans the full vertical bounds.
+    REQUIRE_THAT(rects[0].f[0], WithinAbs(9.0, 0.001));
+    REQUIRE_THAT(rects[0].f[1], WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(rects[0].f[2], WithinAbs(6.0, 0.001));
+    REQUIRE_THAT(rects[0].f[3], WithinAbs(200.0, 0.001));
+
+    // Vertical fill grows upward from the bottom for the current value.
+    REQUIRE_THAT(rects[1].f[0], WithinAbs(9.0, 0.001));
+    REQUIRE_THAT(rects[1].f[1], WithinAbs(150.0, 0.001));
+    REQUIRE_THAT(rects[1].f[2], WithinAbs(6.0, 0.001));
+    REQUIRE_THAT(rects[1].f[3], WithinAbs(50.0, 0.001));
+
+    auto handles = commands_of(canvas, DrawCommand::Type::fill_circle);
+    REQUIRE(handles.size() == 1);
+    REQUIRE_THAT(handles.front().f[0], WithinAbs(12.0, 0.001));
+    REQUIRE_THAT(handles.front().f[1], WithinAbs(146.0, 0.001));
+    REQUIRE_THAT(handles.front().f[2], WithinAbs(8.0, 0.001));
 }
 
 TEST_CASE("RangeSlider at minimum draws track but skips empty fill",
@@ -958,6 +1091,22 @@ TEST_CASE("SpectrumView empty renders background", "[view][widget]") {
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 0);
+}
+
+TEST_CASE("SpectrumView invalid dB range only draws background",
+          "[view][widget][coverage]") {
+    SpectrumView spectrum;
+    spectrum.set_bounds({0, 0, 300, 100});
+    spectrum.set_style(SpectrumView::Style::bars);
+    spectrum.set_spectrum(std::vector<float>{-80.0f, -40.0f, -12.0f});
+    spectrum.set_range(0.0f, -80.0f);
+
+    RecordingCanvas canvas;
+    spectrum.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 0);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
 }
 
 TEST_CASE("SpectrogramView auto-configures and paints pushed spectrum",
