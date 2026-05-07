@@ -4001,6 +4001,44 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // ── pulp #1552 — line-clamp + background-repeat ─────────────────────────
+    // CSS `line-clamp` and `-webkit-line-clamp` route through the same
+    // shared case in web-compat-style-decl.js (and the @pulp/react
+    // prop-applier emits both keys via setLineClamp). Numeric only; 0
+    // disables clamping (matches CSS spec, which uses `none`). Wired on
+    // Label only — non-text views ignore the property.
+    engine_.register_function("setLineClamp", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        int n = static_cast<int>(args.get<double>(1, 0.0));
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            l->set_line_clamp(n);
+            // line-clamp implies multi-line — without multi_line_, the
+            // paint path takes the single-line branch and the clamp is a
+            // no-op. Setting > 0 implicitly enables wrap; 0 leaves the
+            // existing multi_line_ flag alone (the user may have set it
+            // independently via white-space / setMultiLine).
+            if (n > 0) l->set_multi_line(true);
+        }
+        return choc::value::Value();
+    });
+
+    // setBackgroundRepeat(id, kw) — CSS background-repeat keyword. Storage-
+    // only on the View (no-op for solid-color backgrounds, which is the
+    // only currently rendered case). Future paint work for
+    // `background-image: url(...)` / repeating gradients consults the
+    // stored slot; setting the keyword today makes the round-trip work
+    // and lets authors express intent without dropping the prop silently.
+    // Accepts: `repeat` / `repeat-x` / `repeat-y` / `no-repeat` /
+    // `space` / `round`. Unknown / empty resets to "" (paint defaults to
+    // CSS initial `repeat`).
+    engine_.register_function("setBackgroundRepeat", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto kw = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_background_repeat(kw);
+        return choc::value::Value();
+    });
+
     // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
     engine_.register_function("setPosition", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

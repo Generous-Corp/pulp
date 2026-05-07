@@ -907,6 +907,18 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'fontStyle':       return call('setFontStyle', id, value as string);
         case 'letterSpacing':   return call('setLetterSpacing', id, value as number);
         case 'lineHeight':      return call('setLineHeight', id, value as number);
+        // pulp #1552 — line-clamp + webkit-line-clamp + background-repeat
+        // wiring. Both line-clamp keys funnel through the same setter
+        // (shared CSS shim case + RN-style alias). 0 / non-finite clears
+        // the slot. backgroundRepeat is storage-only at the View layer
+        // (paint-time honoring is a follow-up for url() / repeating
+        // gradient backgrounds).
+        case 'lineClamp':
+        case 'webkitLineClamp': {
+            const n = typeof value === 'number' ? value : parseInt(String(value), 10);
+            return call('setLineClamp', id, Number.isFinite(n) ? n : 0);
+        }
+        case 'backgroundRepeat': return call('setBackgroundRepeat', id, value as string);
 
         // Widget-specific data
         case 'data':

@@ -27,6 +27,31 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1546)** — five RN entries reclassified in
+  compat.json: four shadow props flipped `missing` → `wontfix`,
+  `isolation` flipped `missing` → `noop` (corrected from the
+  initial `wontfix` after a Codex P2 review on PR #1565 noted the
+  RN oracle DOES model isolation — `rn-viewstyle.json:134` defines
+  enum `auto`|`isolate`, flagged "RN New Architecture only"). PURE
+  CATALOG: zero implementation, zero behavior change. The four
+  iOS-only legacy shadow props (`shadowColor`, `shadowOffset`,
+  `shadowOpacity`, `shadowRadius`) are superseded by `boxShadow`
+  (CSS box-shadow syntax) in modern RN (RN 0.71+); pulp already
+  supports `boxShadow` (`rn/boxShadow=supported`), so the iOS
+  legacy is genuinely out of scope rather than missing. `isolation`
+  is honestly modeled as `noop` (Pulp accepts the value but the
+  underlying box composition isn't stacking-context-isolated —
+  same pattern as `css/animation`, `css/willChange`), keeping it
+  in the rn denominator so a real implementation gap stays visible
+  in drift metrics. The harness adapter short-circuits
+  `status: wontfix` → OOS at step 0 (no adapter change needed);
+  `noop` flows through the existing NO_OP marker path via the
+  mapsTo string. Effective rn denominator (non-`wontfix`) drops
+  117 → 113; harness drift count drops 21 → 17 (the four
+  iOS-platformOnly entries were classifying OOS via the oracle's
+  `platformOnly: ios` flag while the catalog claimed `missing`,
+  producing four DRIFT entries that the explicit `wontfix` now
+  resolves cleanly; isolation classifies cleanly as NO_OP).
 - **2026-05-06 (pulp #1550)** — RN catalog hygiene partial → supported
   promotion pass. `rn/boxShadow`, `rn/cursor`, and `rn/overflow` flipped
   `partial` → `supported` after auditing the prop-applier dispatch path
