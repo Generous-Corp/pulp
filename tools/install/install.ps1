@@ -5,6 +5,10 @@
 #
 # Or with options:
 #   $env:PULP_VERSION = "0.1.0"; irm https://www.generouscorp.com/pulp/install.ps1 | iex
+#
+# Scope:
+#   Installs Pulp CLI artifacts only. It does not install Shipyard or the
+#   GitHub CLI (`gh`); those are optional source-checkout contributor tools.
 
 $ErrorActionPreference = "Stop"
 
@@ -93,6 +97,7 @@ if ($CurrentPath -notlike "*$InstallDir*") {
 
 Write-Host ""
 Write-Host "Pulp CLI installed successfully!" -ForegroundColor Green
+Write-Host "This installed Pulp only; it did not install Shipyard or GitHub CLI (gh)."
 Write-Host ""
 Write-Host "Get started:"
 Write-Host "  pulp create MyPlugin        # create your first plugin"
@@ -101,5 +106,6 @@ Write-Host ""
 Write-Host "Or clone the framework:"
 Write-Host "  git clone https://github.com/$Repo.git"
 Write-Host "  cd pulp; .\setup.sh"
+Write-Host "  bash tools/install-shipyard.sh   # optional: source-checkout PR/CI tooling"
 Write-Host ""
 Write-Host "You may need to restart your terminal for PATH changes to take effect."

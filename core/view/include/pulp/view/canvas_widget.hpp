@@ -23,20 +23,63 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
+        // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The
+        // legacy `set_font` only carries family + size; the JS shim now
+        // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+        // <family>`. `set_font_full` carries the parsed weight / slant
+        // through to `Canvas::set_font_full`, which Skia honours via
+        // `make_font(family, size, weight, slant)`. CG falls back to
+        // family+size (no slant override) — same as the base
+        // `set_font_full` default. Layout in CanvasDrawCmd:
+        //   text  = family
+        //   extra = size (px)
+        //   x     = weight (100..900, cast to int)
+        //   y     = slant (0=upright, 1=italic/oblique)
+        //   x2    = letter_spacing (0 from shorthand; reserved)
+        set_font_full,
         // Style
         set_fill_color, set_stroke_color, set_line_width,
         set_line_cap, set_line_join,
         set_global_alpha, set_blend_mode,
         // Gradient
         set_fill_gradient_linear, set_fill_gradient_radial, clear_fill_gradient,
+        /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+        /// two-circle form. Inner circle (x0,y0,r0) packed as (x, y, extra),
+        /// outer circle (x1,y1,r1) packed as (x2, y2, w). Routes to
+        /// `set_fill_gradient_radial_two_circles` (Skia: MakeTwoPointConical;
+        /// CG: full CGContextDrawRadialGradient with both circles).
+        set_fill_gradient_radial_two_circles,
         // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createConicGradient.
         // cx/cy in (x, y), start_angle in `extra`, stops in
         // gradient_colors / gradient_positions (same shape as the
         // linear / radial entries above).
         set_fill_gradient_conic,
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // Image source path / data URI in `text`, tile modes packed into
+        // `int_val` (bit 0 = x, bit 1 = y; 0 = repeat, 1 = no-repeat).
+        // Skia routes through SkShader::MakeImage; CG degrades to the
+        // active fill colour (no CGPattern dance — file a follow-up if
+        // a CG-targeted plugin actually needs tiled patterns).
+        set_fill_pattern, set_stroke_pattern,
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
         fill_path, stroke_path, clip_path,
+        // pulp #1521 — native arc subpaths (replace JS bezier approx).
+        // Layout in CanvasDrawCmd:
+        //   path_arc:        x=cx, y=cy, extra=radius,
+        //                    x2=startAngle, y2=endAngle,
+        //                    int_val=anticlockwise (0/1)
+        //   path_arc_to:     x=x1, y=y1, x2=x2, y2=y2, extra=radius
+        //   path_ellipse:    x=cx, y=cy, w=rx, h=ry, extra=rotation,
+        //                    x2=startAngle, y2=endAngle,
+        //                    int_val=anticlockwise (0/1)
+        //   path_round_rect: x=x, y=y, w=w, h=h,
+        //                    gradient_positions packed [tl_x,tl_y,
+        //                    tr_x,tr_y, br_x,br_y, bl_x,bl_y]
+        path_arc,
+        path_arc_to,
+        path_ellipse,
+        path_round_rect,
         // State
         save, restore,
         // Transform
@@ -58,6 +101,13 @@ struct CanvasDrawCmd {
         // the JS shim before the next stroke / drawImage.
         set_miter_limit,           ///< limit in `extra`
         set_image_smoothing,       ///< enabled in `int_val` (0/1), quality in `extra` (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // direction enum (0=ltr, 1=rtl, 2=inherit) in `int_val`; filter
+        // raw CSS <filter-function-list> string in `text`. Pushed by
+        // the JS shim before fillText / strokeText / fill / stroke /
+        // drawImage so the backend can wrap the next paint.
+        set_direction,
+        set_filter,
         // Clear
         clear, clear_rect
     };

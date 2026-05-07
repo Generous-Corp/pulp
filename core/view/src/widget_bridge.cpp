@@ -1414,6 +1414,45 @@ void WidgetBridge::register_api() {
         } else if (key == "row_end") {
             v->grid().grid_row_end = static_cast<int>(args.get<double>(2, 0));
         }
+        // pulp #1434 Phase A2-2 — extended grid surface.
+        else if (key == "auto_columns") {
+            auto tracks = GridStyle::parse_template(args.get<std::string>(2, "auto"));
+            if (!tracks.empty()) v->grid().auto_columns = tracks[0];
+        } else if (key == "auto_rows") {
+            auto tracks = GridStyle::parse_template(args.get<std::string>(2, "auto"));
+            if (!tracks.empty()) v->grid().auto_rows = tracks[0];
+        } else if (key == "auto_flow") {
+            v->grid().auto_flow = GridStyle::parse_auto_flow(args.get<std::string>(2, "row"));
+        } else if (key == "template_areas") {
+            v->grid().template_areas = GridStyle::parse_template_areas(args.get<std::string>(2, ""));
+        } else if (key == "grid_area") {
+            // CSS: `grid-area: header` references a named area on the
+            // parent. CSS also accepts `grid-area: 1 / 2 / 3 / 4`
+            // (row-start / col-start / row-end / col-end). Distinguish
+            // by checking for digits + slashes.
+            auto val = args.get<std::string>(2, "");
+            if (val.find('/') != std::string::npos) {
+                std::vector<int> nums;
+                std::string acc;
+                for (char c : val) {
+                    if (c == '/') {
+                        try { nums.push_back(std::stoi(acc)); } catch (...) {}
+                        acc.clear();
+                    } else if (!std::isspace(static_cast<unsigned char>(c))) acc += c;
+                }
+                if (!acc.empty()) {
+                    try { nums.push_back(std::stoi(acc)); } catch (...) {}
+                }
+                if (nums.size() >= 4) {
+                    v->grid().grid_row_start = nums[0];
+                    v->grid().grid_column_start = nums[1];
+                    v->grid().grid_row_end = nums[2];
+                    v->grid().grid_column_end = nums[3];
+                }
+            } else {
+                v->grid().grid_area_name = val;
+            }
+        }
         return choc::value::Value();
     });
 
@@ -1770,7 +1809,16 @@ void WidgetBridge::register_api() {
                 f.dim_flex_basis.unit = pulp::view::DimensionUnit::px;
             }
         }
-        else if (key == "flex_wrap") f.flex_wrap = val > 0;
+        else if (key == "flex_wrap") {
+            // pulp #1434 Triage #14 — accept numeric (legacy 0/1) and
+            // the CSS keyword strings, including the previously-
+            // inexpressible `wrap-reverse`.
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "wrap-reverse")        f.flex_wrap = FlexWrap::wrap_reverse;
+            else if (sval == "wrap")           f.flex_wrap = FlexWrap::wrap;
+            else if (sval == "nowrap" || sval == "no-wrap") f.flex_wrap = FlexWrap::no_wrap;
+            else                                f.flex_wrap = (val > 0) ? FlexWrap::wrap : FlexWrap::no_wrap;
+        }
         else if (key == "order") f.order = (int)val;
         // pulp #1423 — width/height accept either a number ("100" → px)
         // or a percentage string ("100%" → percent of parent). The CSS
@@ -1780,7 +1828,17 @@ void WidgetBridge::register_api() {
         // FlexStyle::dim_width / dim_height in yoga_layout.cpp.
         else if (key == "width") {
             auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
+            // pulp #1434 (sub-agent #12 follow-up) — accept the keyword
+            // `'auto'` for "hug contents" sizing. Yoga supports this
+            // natively via YGNodeStyleSetWidthAuto. Figma auto-layout,
+            // v0 intrinsic-sizing cards, and Claude Design responsive
+            // containers all emit this. The dispatch path in
+            // yoga_layout.cpp keys on `dim_width.unit == auto_`.
+            if (sval == "auto") {
+                f.dim_width.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_width.value = 0;
+                f.preferred_width = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
                 try {
                     f.dim_width.value = std::stof(sval.substr(0, sval.size() - 1));
                     f.dim_width.unit = pulp::view::DimensionUnit::percent;
@@ -1794,7 +1852,11 @@ void WidgetBridge::register_api() {
         }
         else if (key == "height") {
             auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
+            if (sval == "auto") {
+                f.dim_height.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_height.value = 0;
+                f.preferred_height = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
                 try {
                     f.dim_height.value = std::stof(sval.substr(0, sval.size() - 1));
                     f.dim_height.unit = pulp::view::DimensionUnit::percent;
@@ -1957,6 +2019,104 @@ void WidgetBridge::register_api() {
                 f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
             }
         }
+        // pulp #1542 — yoga logical-edge fan-out. `margin_start` /
+        // `margin_end` / `padding_start` / `padding_end` / `start` /
+        // `end` route to Yoga's YGEdgeStart / YGEdgeEnd which flip
+        // with the writing direction (set via `direction_writing` —
+        // the existing `direction` key is taken by flex-direction).
+        // Same value coverage as the per-side _left/_right siblings:
+        // px (number), percent string, plus `auto` for margin.
+        else if (key == "margin_start") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_start.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_start.value = (float)val;
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_end.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_end.value = (float)val;
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_start") {
+            // Padding has no `auto` API (Yoga); reject the keyword and
+            // fall through to the px path with a parsed value (or 0
+            // on parse failure) — same behavior as the per-side
+            // padding_top/right/bottom/left handlers above.
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_start.value = (float)val;
+                f.dim_padding_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_end.value = (float)val;
+                f.dim_padding_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "start") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_start.value = (float)val;
+                f.dim_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_end.value = (float)val;
+                f.dim_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        // pulp #1542 — node writing direction. Distinct from
+        // `direction` (which is flex-direction). Accepts `'ltr'`,
+        // `'rtl'`, `'inherit'`. Anything else reverts to `inherit`.
+        else if (key == "direction_writing") {
+            auto a = args.get<std::string>(2, "inherit");
+            if (a == "ltr")      f.writing_direction = pulp::view::FlexStyle::WritingDirection::ltr;
+            else if (a == "rtl") f.writing_direction = pulp::view::FlexStyle::WritingDirection::rtl;
+            else                 f.writing_direction = pulp::view::FlexStyle::WritingDirection::inherit;
+        }
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;
@@ -1986,6 +2146,35 @@ void WidgetBridge::register_api() {
             else if (a=="stretch")             f.align_self=FlexAlign::stretch;
             else if (a=="baseline")            f.align_self=FlexAlign::baseline;
             else                               f.align_self=FlexAlign::auto_;
+        }
+        // pulp #1434 (sub-agent #12 follow-up) — align_content controls
+        // multi-line flex cross-axis distribution. Yoga supports this
+        // natively via YGNodeStyleSetAlignContent. Accepts both bare
+        // `start`/`end` (Yoga / pulp short forms) and `flex-start` /
+        // `flex-end` (CSS / RN canonical). Space-* values (space-between
+        // / space-around / space-evenly) live on a sibling enum field
+        // (FlexStyle::align_content_space) because FlexAlign has no
+        // space variants — those don't make sense for align_items /
+        // align_self, only for align_content.
+        else if (key == "align_content") {
+            auto a = args.get<std::string>(2,"start");
+            using AcSpace = pulp::view::FlexStyle::AlignContentSpace;
+            // Reset space slot first; only the space-* branches set it.
+            f.align_content_space = AcSpace::none;
+            if (a=="start" || a=="flex-start")     f.align_content=FlexAlign::start;
+            else if (a=="center")                  f.align_content=FlexAlign::center;
+            else if (a=="end" || a=="flex-end")    f.align_content=FlexAlign::end;
+            else if (a=="stretch")                 f.align_content=FlexAlign::stretch;
+            else if (a=="space-between"||a=="space_between") {
+                f.align_content_space = AcSpace::space_between;
+            }
+            else if (a=="space-around"||a=="space_around") {
+                f.align_content_space = AcSpace::space_around;
+            }
+            else if (a=="space-evenly"||a=="space_evenly") {
+                f.align_content_space = AcSpace::space_evenly;
+            }
+            else                                   f.align_content=FlexAlign::start;
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");
@@ -2377,7 +2566,45 @@ void WidgetBridge::register_api() {
     engine_.register_function("setFontFamily", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         auto family = args.get<std::string>(1, "");
-        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_family(std::move(family));
+        if (!v) return choc::value::Value();
+        // pulp #1434 Phase A2-5 — comma-separated family list per CSS
+        // spec: split on commas, strip outer quotes, pick the first
+        // non-empty family name. The full SkFontMgr-backed resolver
+        // (which walks the list and picks the first registered family)
+        // is gated on pulp #932 — when that lands the same parsed list
+        // can be passed through verbatim. Today the bridge picks the
+        // first entry as the canonical family name; downstream font
+        // resolution (currently a no-op on Label) sees a clean string.
+        std::string first;
+        {
+            size_t i = 0;
+            while (i < family.size()) {
+                while (i < family.size() && std::isspace(static_cast<unsigned char>(family[i]))) ++i;
+                if (i >= family.size()) break;
+                size_t comma = family.find(',', i);
+                std::string seg = family.substr(i, (comma == std::string::npos ? family.size() : comma) - i);
+                while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
+                // Strip outer quotes (CSS spec: quoted family names).
+                if (seg.size() >= 2
+                    && (seg.front() == '"' || seg.front() == '\'')
+                    && seg.back() == seg.front()) {
+                    seg = seg.substr(1, seg.size() - 2);
+                }
+                if (!seg.empty()) { first = std::move(seg); break; }
+                if (comma == std::string::npos) break;
+                i = comma + 1;
+            }
+        }
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            l->set_font_family(first);
+        } else {
+            // pulp #1434 Phase A2-5 — inheritable cascade. Mirrors the
+            // setFontWeight / setLetterSpacing pattern so a container
+            // View's font-family flows down to descendant Labels.
+            // Requires View::set_inheritable_font_family which lands
+            // alongside this PR.
+            v->set_inheritable_font_family(first);
+        }
         return choc::value::Value();
     });
 
@@ -2904,6 +3131,134 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setBorderStyle(id, "solid"|"dashed"|"dotted"|...) — pulp #1434
+    // Triage #10. Maps the CSS border-style keyword to View::BorderStyle.
+    // Skia paint installs the dashed / dotted SkDashPathEffect at stroke
+    // time; double / groove / ridge / inset / outset currently degrade
+    // to solid (paint-side gap, tracked for follow-up). none / hidden
+    // short-circuit the stroke entirely.
+    engine_.register_function("setBorderStyle", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "solid");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "dashed")        v->set_border_style(View::BorderStyle::dashed);
+        else if (s == "dotted")   v->set_border_style(View::BorderStyle::dotted);
+        else if (s == "double")   v->set_border_style(View::BorderStyle::double_);
+        else if (s == "groove")   v->set_border_style(View::BorderStyle::groove);
+        else if (s == "ridge")    v->set_border_style(View::BorderStyle::ridge);
+        else if (s == "inset")    v->set_border_style(View::BorderStyle::inset);
+        else if (s == "outset")   v->set_border_style(View::BorderStyle::outset);
+        else if (s == "none")     v->set_border_style(View::BorderStyle::none);
+        else if (s == "hidden")   v->set_border_style(View::BorderStyle::hidden);
+        else                      v->set_border_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+
+    // pulp #1514 — list-style cluster (listStyle / listStyleType /
+    // listStyleImage / listStylePosition). Pulp doesn't model
+    // <li>/<ul>/<ol> semantics, so the bridge stores the values
+    // verbatim on the View so a later paint pass (or a future
+    // semantic-list surface) can honor them. Marker glyph rendering
+    // is the follow-up; this PR flips the catalog out of `missing`
+    // by wiring the round-trip + JS shorthand parsing.
+    //
+    // setListStyleType(id, "disc"|"circle"|"square"|"decimal"|"none").
+    engine_.register_function("setListStyleType", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "disc");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "none")          v->set_list_style_type(View::ListStyleType::none);
+        else if (s == "circle")   v->set_list_style_type(View::ListStyleType::circle);
+        else if (s == "square")   v->set_list_style_type(View::ListStyleType::square);
+        else if (s == "decimal")  v->set_list_style_type(View::ListStyleType::decimal);
+        else                      v->set_list_style_type(View::ListStyleType::disc);
+        return choc::value::Value();
+    });
+
+    // setListStyleImage(id, "url(...)" or "none"). Stored verbatim;
+    // bullet-image rendering is deferred (same caveat as backgroundImage).
+    engine_.register_function("setListStyleImage", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto url = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (url == "none") v->set_list_style_image("");
+        else               v->set_list_style_image(url);
+        return choc::value::Value();
+    });
+
+    // setListStylePosition(id, "outside"|"inside").
+    engine_.register_function("setListStylePosition", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "outside");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "inside") v->set_list_style_position(View::ListStylePosition::inside);
+        else               v->set_list_style_position(View::ListStylePosition::outside);
+        return choc::value::Value();
+    });
+
+    // pulp #1519 — CSS / RN outline cluster. Outline is paint-time only:
+    // it does NOT take up Yoga layout space (parent never reserves room
+    // for it). Each setter mutates one slot in isolation so a JSX prop
+    // diff that touches only `outlineColor` doesn't clobber `outlineWidth`.
+    // Skia paint inflates the box by (offset + width/2) and strokes with
+    // the standard borderStyle dash effect for dashed/dotted; other named
+    // styles (double/groove/ridge/inset/outset) currently degrade to solid
+    // — same paint-side gap as borderStyle.
+    //
+    // setOutlineColor(id, hex) — accepts the same color forms as
+    // setBackground / setBorderColor (#hex / rgb() / named).
+    engine_.register_function("setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) v->set_outline_color(parseHexColor(hex));
+        return choc::value::Value();
+    });
+
+    // setOutlineOffset(id, px) — gap between border-box edge and outline.
+    engine_.register_function("setOutlineOffset", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto offset = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_outline_offset(offset);
+        return choc::value::Value();
+    });
+
+    // setOutlineStyle(id, "solid"|"dashed"|...) — same keyword set as
+    // setBorderStyle. Reuses View::BorderStyle since the CSS spec lists
+    // the same line-style values for both properties.
+    engine_.register_function("setOutlineStyle", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "solid");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "dashed")        v->set_outline_style(View::BorderStyle::dashed);
+        else if (s == "dotted")   v->set_outline_style(View::BorderStyle::dotted);
+        else if (s == "double")   v->set_outline_style(View::BorderStyle::double_);
+        else if (s == "groove")   v->set_outline_style(View::BorderStyle::groove);
+        else if (s == "ridge")    v->set_outline_style(View::BorderStyle::ridge);
+        else if (s == "inset")    v->set_outline_style(View::BorderStyle::inset);
+        else if (s == "outset")   v->set_outline_style(View::BorderStyle::outset);
+        else if (s == "none")     v->set_outline_style(View::BorderStyle::none);
+        else if (s == "hidden")   v->set_outline_style(View::BorderStyle::hidden);
+        else                      v->set_outline_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+
+    // setOutlineWidth(id, px) — outline stroke thickness. width<=0 or
+    // outline_style==none/hidden short-circuits the paint.
+    engine_.register_function("setOutlineWidth", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto width = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_outline_width(width);
+        return choc::value::Value();
+    });
+
     // setBorderRadius(id, radius) — uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.
@@ -2964,18 +3319,24 @@ void WidgetBridge::register_api() {
         // pulp #1026 — preserve the unrelated attribute when a per-side
         // setter is called for only color OR only width, matching how
         // RN's JSX prop-applier emits property updates one at a time.
-        canvas::Color cur_color{};
-        float cur_width = 0.0f;
-        if (side == "top")    { cur_color = v->border_top_color();    cur_width = v->border_top_width(); }
-        else if (side == "right") { cur_color = v->border_right_color();  cur_width = v->border_right_width(); }
-        else if (side == "bottom"){ cur_color = v->border_bottom_color(); cur_width = v->border_bottom_width(); }
-        else if (side == "left")  { cur_color = v->border_left_color();   cur_width = v->border_left_width(); }
-        canvas::Color c = color.value_or(cur_color);
-        float w = width.value_or(cur_width);
-        if (side == "top") v->set_border_top(c, w);
-        else if (side == "right") v->set_border_right(c, w);
-        else if (side == "bottom") v->set_border_bottom(c, w);
-        else if (side == "left") v->set_border_left(c, w);
+        // pulp #1566 — route through the split color-only / width-only
+        // setters so that `setBorderTopColor` does NOT mark the per-edge
+        // WIDTH as explicitly set (which would let a stale 0 override
+        // the uniform `borderWidth` shorthand). Symmetrically,
+        // `setBorderTopWidth(0)` MUST mark the edge as explicitly set so
+        // it overrides the shorthand on that edge per CSS / RN semantics.
+        if (color.has_value()) {
+            if (side == "top")         v->set_border_top_color(*color);
+            else if (side == "right")  v->set_border_right_color(*color);
+            else if (side == "bottom") v->set_border_bottom_color(*color);
+            else if (side == "left")   v->set_border_left_color(*color);
+        }
+        if (width.has_value()) {
+            if (side == "top")         v->set_border_top_width(*width);
+            else if (side == "right")  v->set_border_right_width(*width);
+            else if (side == "bottom") v->set_border_bottom_width(*width);
+            else if (side == "left")   v->set_border_left_width(*width);
+        }
     };
     engine_.register_function("setBorderTopColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -3130,6 +3491,21 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1516 — CSS box-sizing keyword. Yoga 3.x's
+    // `YGNodeStyleSetBoxSizing` honors the spec, so we just record the
+    // enum on FlexStyle and let `build_yoga_subtree` route it through.
+    // Default `content-box` matches the CSS spec; web designs typically
+    // reset to `border-box` via `* { box-sizing: border-box }`.
+    engine_.register_function("setBoxSizing", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto kw = args.get<std::string>(1, "content-box");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        auto& f = v->flex();
+        f.box_sizing = (kw == "border-box") ? BoxSizing::border_box : BoxSizing::content_box;
+        return choc::value::Value();
+    });
+
     // Canvas drawing
     engine_.register_function("canvasClear", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, ""))))
@@ -3274,6 +3650,28 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The JS
+    // shim parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+    // <family>` and dispatches here when the parse extracts more than the
+    // legacy size+family. Args: (id, family, size, weight, slant,
+    // letter_spacing). Slant: 0 = upright, 1 = italic/oblique. Weight:
+    // 100..900 (normal=400, bold=700). The `set_font_full` cmd routes to
+    // `Canvas::set_font_full` on replay; Skia honours weight/slant via
+    // `make_font(family, size, weight, slant)`. CG falls through to the
+    // base default (family+size only).
+    engine_.register_function("canvasSetFontFull", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_font_full;
+            cmd.text  = args.get<std::string>(1, "Inter");
+            cmd.extra = (float)args.get<double>(2, 14);
+            cmd.x     = (float)args.get<double>(3, 400);   // weight
+            cmd.y     = (float)args.get<double>(4, 0);     // slant
+            cmd.x2    = (float)args.get<double>(5, 0);     // letter_spacing
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     // Path operations
     engine_.register_function("canvasBeginPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
@@ -3338,6 +3736,77 @@ void WidgetBridge::register_api() {
     engine_.register_function("canvasStrokePath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1521 — native arc subpaths. Each replaces the JS shim's
+    // bezier approximation so Skia / CG see real arc geometry. Args:
+    //   canvasPathArc(id, cx, cy, radius, startAngle, endAngle,
+    //                 anticlockwise:0/1)
+    //   canvasPathArcTo(id, x1, y1, x2, y2, radius)
+    //   canvasPathEllipse(id, cx, cy, rx, ry, rotation, startAngle,
+    //                     endAngle, anticlockwise:0/1)
+    //   canvasPathRoundRect(id, x, y, w, h,
+    //                       tl_x, tl_y, tr_x, tr_y,
+    //                       br_x, br_y, bl_x, bl_y)
+    engine_.register_function("canvasPathArc", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc;
+            cmd.x     = (float)args.get<double>(1, 0);
+            cmd.y     = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            cmd.x2    = (float)args.get<double>(4, 0);
+            cmd.y2    = (float)args.get<double>(5, 0);
+            cmd.int_val = args.get<double>(6, 0) != 0.0 ? 1 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathArcTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc_to;
+            cmd.x     = (float)args.get<double>(1, 0);
+            cmd.y     = (float)args.get<double>(2, 0);
+            cmd.x2    = (float)args.get<double>(3, 0);
+            cmd.y2    = (float)args.get<double>(4, 0);
+            cmd.extra = (float)args.get<double>(5, 0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathEllipse", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_ellipse;
+            cmd.x     = (float)args.get<double>(1, 0);   // cx
+            cmd.y     = (float)args.get<double>(2, 0);   // cy
+            cmd.w     = (float)args.get<double>(3, 0);   // rx
+            cmd.h     = (float)args.get<double>(4, 0);   // ry
+            cmd.extra = (float)args.get<double>(5, 0);   // rotation
+            cmd.x2    = (float)args.get<double>(6, 0);   // startAngle
+            cmd.y2    = (float)args.get<double>(7, 0);   // endAngle
+            cmd.int_val = args.get<double>(8, 0) != 0.0 ? 1 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathRoundRect", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_round_rect;
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.w = (float)args.get<double>(3, 0);
+            cmd.h = (float)args.get<double>(4, 0);
+            cmd.gradient_positions = {
+                (float)args.get<double>(5, 0),  (float)args.get<double>(6, 0),
+                (float)args.get<double>(7, 0),  (float)args.get<double>(8, 0),
+                (float)args.get<double>(9, 0),  (float)args.get<double>(10, 0),
+                (float)args.get<double>(11, 0), (float)args.get<double>(12, 0),
+            };
+            c->add_command(cmd);
         }
         return choc::value::Value();
     });
@@ -3547,6 +4016,44 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // ── pulp #1552 — line-clamp + background-repeat ─────────────────────────
+    // CSS `line-clamp` and `-webkit-line-clamp` route through the same
+    // shared case in web-compat-style-decl.js (and the @pulp/react
+    // prop-applier emits both keys via setLineClamp). Numeric only; 0
+    // disables clamping (matches CSS spec, which uses `none`). Wired on
+    // Label only — non-text views ignore the property.
+    engine_.register_function("setLineClamp", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        int n = static_cast<int>(args.get<double>(1, 0.0));
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            l->set_line_clamp(n);
+            // line-clamp implies multi-line — without multi_line_, the
+            // paint path takes the single-line branch and the clamp is a
+            // no-op. Setting > 0 implicitly enables wrap; 0 leaves the
+            // existing multi_line_ flag alone (the user may have set it
+            // independently via white-space / setMultiLine).
+            if (n > 0) l->set_multi_line(true);
+        }
+        return choc::value::Value();
+    });
+
+    // setBackgroundRepeat(id, kw) — CSS background-repeat keyword. Storage-
+    // only on the View (no-op for solid-color backgrounds, which is the
+    // only currently rendered case). Future paint work for
+    // `background-image: url(...)` / repeating gradients consults the
+    // stored slot; setting the keyword today makes the round-trip work
+    // and lets authors express intent without dropping the prop silently.
+    // Accepts: `repeat` / `repeat-x` / `repeat-y` / `no-repeat` /
+    // `space` / `round`. Unknown / empty resets to "" (paint defaults to
+    // CSS initial `repeat`).
+    engine_.register_function("setBackgroundRepeat", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto kw = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_background_repeat(kw);
+        return choc::value::Value();
+    });
+
     // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
     engine_.register_function("setPosition", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -3740,6 +4247,26 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setSkew(id, x_deg, y_deg) — CSS transform: skewX() / skewY().
+    // pulp #1434 Triage #9 (transform fan-out) — View::set_skew has
+    // existed since the 2D View slot was added; this surface just
+    // hadn't been registered as a JS bridge fn until now. The CSS
+    // shim's parseTransform dispatches each axis independently
+    // (skewX(α) → setSkew(id, α, 0); skewY(β) → setSkew(id, 0, β));
+    // when both appear in the same transform string the second
+    // call's arg-pattern preserves the axis the first call set
+    // (caller-side accumulation since within-string order is
+    // canonical CSS application order). The @pulp/react prop-applier
+    // walker accumulates skewX/skewY in its snapshot the same way.
+    engine_.register_function("setSkew", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto x = static_cast<float>(args.get<double>(1, 0.0));
+        auto y = static_cast<float>(args.get<double>(2, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_skew(x, y);
+        return choc::value::Value();
+    });
+
     // setTextOverflow(id, "ellipsis"|"clip") — CSS text-overflow
     engine_.register_function("setTextOverflow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -3755,25 +4282,170 @@ void WidgetBridge::register_api() {
         auto c = args.get<std::string>(1, "default");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        if (c == "pointer") v->set_cursor(View::CursorStyle::pointer);
-        else if (c == "crosshair") v->set_cursor(View::CursorStyle::crosshair);
-        else if (c == "text") v->set_cursor(View::CursorStyle::text);
-        else if (c == "grab") v->set_cursor(View::CursorStyle::grab);
-        else v->set_cursor(View::CursorStyle::default_);
+        // pulp #1434 Triage #7 — cursor enum fan-out. Map the full CSS
+        // cursor keyword set to the View::CursorStyle slots that exist
+        // today (4 base + 7 resize + invisible + multi-directional =
+        // ~12 distinct visuals). Where multiple CSS keywords map to the
+        // same visual (n/s/e/w-resize all map to the axis-aligned
+        // resize cursor; help/wait/progress all alias to default until
+        // OS-specific glyphs are wired), we collapse to the closest
+        // existing slot. CSS keywords with no semantic match (alias,
+        // copy, no-drop, all-scroll, zoom-*, cell, vertical-text,
+        // context-menu) currently fall back to default — tracked for a
+        // follow-up that adds dedicated CursorStyle slots and
+        // platform-specific glyph dispatch.
+        using CS = View::CursorStyle;
+        if (c == "pointer")              v->set_cursor(CS::pointer);
+        else if (c == "crosshair")       v->set_cursor(CS::crosshair);
+        else if (c == "text")            v->set_cursor(CS::text);
+        else if (c == "vertical-text")   v->set_cursor(CS::text);
+        else if (c == "grab")            v->set_cursor(CS::grab);
+        else if (c == "grabbing")        v->set_cursor(CS::grabbing);
+        else if (c == "not-allowed")     v->set_cursor(CS::not_allowed);
+        else if (c == "no-drop")         v->set_cursor(CS::not_allowed);
+        else if (c == "none" || c == "hidden") v->set_cursor(CS::invisible);
+        else if (c == "col-resize" || c == "ew-resize"
+                 || c == "e-resize" || c == "w-resize") {
+            v->set_cursor(CS::horizontal_resize);
+        }
+        else if (c == "row-resize" || c == "ns-resize"
+                 || c == "n-resize" || c == "s-resize") {
+            v->set_cursor(CS::vertical_resize);
+        }
+        else if (c == "nwse-resize" || c == "nw-resize" || c == "se-resize") {
+            v->set_cursor(CS::top_left_resize);
+        }
+        else if (c == "nesw-resize" || c == "ne-resize" || c == "sw-resize") {
+            v->set_cursor(CS::top_right_resize);
+        }
+        else if (c == "move" || c == "all-scroll") {
+            v->set_cursor(CS::multi_directional_resize);
+        }
+        else                             v->set_cursor(CS::default_);
         return choc::value::Value();
     });
 
-    // setFilter(id, "blur(4px)") — CSS filter property
-    engine_.register_function("setFilter", [this](choc::javascript::ArgumentList args) {
+    // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
+    //   — pulp #1434 Phase A2-4 CSS filter chain. Walks the function
+    //   sequence and builds View::FilterOp entries; the View paint
+    //   path passes the chain to canvas.save_layer_with_filters which
+    //   composes via SkImageFilters on the Skia backend (CG falls
+    //   through to blur-only for now).
+    engine_.register_function("setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto filter = args.get<std::string>(1, "");
+        auto filter_str = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        // Parse "blur(Npx)"
-        if (filter.substr(0, 5) == "blur(") {
-            auto inner = filter.substr(5, filter.find(')') - 5);
-            v->set_filter_blur(std::stof(inner));
+
+        if (filter_str == "none" || filter_str.empty()) {
+            v->clear_filter_chain();
+            v->set_filter_blur(0.0f);
+            return choc::value::Value();
         }
+
+        // Walk function-call sequence: `name(args)` repeated.
+        std::vector<View::FilterOp> chain;
+        size_t i = 0;
+        while (i < filter_str.size()) {
+            // Skip whitespace
+            while (i < filter_str.size() && std::isspace(static_cast<unsigned char>(filter_str[i]))) ++i;
+            if (i >= filter_str.size()) break;
+            // Parse name up to '('
+            size_t name_start = i;
+            while (i < filter_str.size() && filter_str[i] != '(') ++i;
+            if (i >= filter_str.size()) break;
+            std::string name = filter_str.substr(name_start, i - name_start);
+            // Trim trailing whitespace from name
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+            ++i; // skip '('
+            // Parse args up to ')'
+            size_t args_start = i;
+            int depth = 1;
+            while (i < filter_str.size() && depth > 0) {
+                if (filter_str[i] == '(') ++depth;
+                else if (filter_str[i] == ')') --depth;
+                if (depth > 0) ++i;
+            }
+            std::string args_str = filter_str.substr(args_start, i - args_start);
+            if (i < filter_str.size()) ++i; // skip ')'
+
+            View::FilterOp op{};
+            // Strip 'px' / '%' suffix and parse numeric.
+            auto parse_amount = [](const std::string& s) -> float {
+                std::string t = s;
+                while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+                if (t.size() >= 2 && t.substr(t.size() - 2) == "px") t.erase(t.size() - 2);
+                bool pct = false;
+                if (!t.empty() && t.back() == '%') { pct = true; t.pop_back(); }
+                try {
+                    float v = std::stof(t);
+                    return pct ? v / 100.0f : v;
+                } catch (...) { return 0.0f; }
+            };
+            auto parse_angle_deg = [](const std::string& s) -> float {
+                std::string t = s;
+                while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+                float scale = 1.0f;
+                // Check 4-char suffixes first so "grad" doesn't get
+                // matched as "rad" with a stray 'g' prefix.
+                if (t.size() >= 4 && t.substr(t.size() - 4) == "grad") { t.erase(t.size() - 4); scale = 0.9f; }
+                else if (t.size() >= 4 && t.substr(t.size() - 4) == "turn") { t.erase(t.size() - 4); scale = 360.0f; }
+                else if (t.size() >= 3 && t.substr(t.size() - 3) == "deg") { t.erase(t.size() - 3); }
+                else if (t.size() >= 3 && t.substr(t.size() - 3) == "rad") { t.erase(t.size() - 3); scale = 180.0f / 3.14159265358979323846f; }
+                try { return std::stof(t) * scale; } catch (...) { return 0.0f; }
+            };
+            if      (name == "blur")       { op.kind = View::FilterOp::Kind::blur;       op.amount = parse_amount(args_str); }
+            else if (name == "brightness") { op.kind = View::FilterOp::Kind::brightness; op.amount = parse_amount(args_str); }
+            else if (name == "contrast")   { op.kind = View::FilterOp::Kind::contrast;   op.amount = parse_amount(args_str); }
+            else if (name == "grayscale")  { op.kind = View::FilterOp::Kind::grayscale;  op.amount = parse_amount(args_str); }
+            else if (name == "invert")     { op.kind = View::FilterOp::Kind::invert;     op.amount = parse_amount(args_str); }
+            else if (name == "opacity")    { op.kind = View::FilterOp::Kind::opacity;    op.amount = parse_amount(args_str); }
+            else if (name == "saturate")   { op.kind = View::FilterOp::Kind::saturate;   op.amount = parse_amount(args_str); }
+            else if (name == "sepia")      { op.kind = View::FilterOp::Kind::sepia;      op.amount = parse_amount(args_str); }
+            else if (name == "hue-rotate") { op.kind = View::FilterOp::Kind::hue_rotate; op.angle_deg = parse_angle_deg(args_str); }
+            else if (name == "drop-shadow") {
+                // drop-shadow(<dx> <dy> <blur> <color>) — space-separated
+                op.kind = View::FilterOp::Kind::drop_shadow;
+                std::vector<std::string> tokens;
+                std::string tok;
+                int paren = 0;
+                for (char c : args_str) {
+                    if (c == '(') { ++paren; tok += c; continue; }
+                    if (c == ')') { --paren; tok += c; continue; }
+                    if (paren == 0 && std::isspace(static_cast<unsigned char>(c))) {
+                        if (!tok.empty()) { tokens.push_back(tok); tok.clear(); }
+                        continue;
+                    }
+                    tok += c;
+                }
+                if (!tok.empty()) tokens.push_back(tok);
+                if (tokens.size() >= 3) {
+                    op.ds_offset_x = parse_amount(tokens[0]);
+                    op.ds_offset_y = parse_amount(tokens[1]);
+                    op.ds_blur     = parse_amount(tokens[2]);
+                    if (tokens.size() >= 4) {
+                        // tokens[3..] is the color (may be space-separated rgb()).
+                        std::string color_str = tokens[3];
+                        for (size_t k = 4; k < tokens.size(); ++k) color_str += " " + tokens[k];
+                        // Lean on the existing Color::from_string parser.
+                        op.ds_color = parseColor(color_str);
+                    } else {
+                        op.ds_color = canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f);
+                    }
+                }
+            }
+            else { continue; } // unknown filter function — silently drop
+            chain.push_back(op);
+        }
+
+        // Maintain the legacy filter_blur_ slot for backward compat
+        // with paths that haven't migrated to the chain API yet.
+        float total_blur = 0.0f;
+        for (const auto& op : chain) {
+            if (op.kind == View::FilterOp::Kind::blur) total_blur += op.amount;
+        }
+        v->set_filter_blur(total_blur);
+        v->set_filter_chain(std::move(chain));
         return choc::value::Value();
     });
 
@@ -3787,6 +4459,36 @@ void WidgetBridge::register_api() {
             auto blur_px = args.get<double>(1, 0.0);
             auto* v = id.empty() ? &root_ : widget(id);
             if (v) v->set_backdrop_blur(static_cast<float>(blur_px));
+            return choc::value::Value();
+        });
+
+    // pulp #1517 — background sub-property setters. Storage-only today;
+    // see View::set_background_{attachment,clip,origin}() doc for the
+    // partial-vs-noop semantics. Wiring them here unblocks the JS shim
+    // path and lets the catalog honestly report `noop` / `partial`
+    // instead of `missing`.
+    engine_.register_function("setBackgroundAttachment",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_attachment(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundClip",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_clip(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundOrigin",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_origin(kw);
             return choc::value::Value();
         });
 
@@ -4453,6 +5155,34 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1524 — true two-circle radial gradient. Skia routes through
+    // SkGradientShader::MakeTwoPointConical; CG routes through
+    // CGContextDrawRadialGradient with both circles wired (the prior
+    // single-circle bridge silently dropped (x0, y0, r0) which broke
+    // offset / sized inner-circle gradients on both backends).
+    // Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, color2, pos2, ...)
+    engine_.register_function("canvasSetRadialGradientTwoCircles",
+            [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd;
+            cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles;
+            // Inner circle (x0, y0, r0) → (x, y, extra).
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            // Outer circle (x1, y1, r1) → (x2, y2, w).
+            cmd.x2 = (float)args.get<double>(4, 0);
+            cmd.y2 = (float)args.get<double>(5, 0);
+            cmd.w  = (float)args.get<double>(6, 50);
+            for (int i = 7; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     engine_.register_function("canvasClearGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_fill_gradient;
@@ -4475,6 +5205,50 @@ void WidgetBridge::register_api() {
                 cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
                 cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
             }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia path
+    // routes through SkShader::MakeImage with SkTileMode per axis (real
+    // tiled fill); CG path degrades to the active fill colour because
+    // CG has no first-class pattern shader without CGPattern dance —
+    // same shape as the conic-gradient fallback.
+    //
+    // Args: (id, src, tile_x, tile_y)
+    //   src      — image source (file path, "data:" URL, or "" for clear)
+    //   tile_x   — "repeat" | "no-repeat"
+    //   tile_y   — "repeat" | "no-repeat"
+    engine_.register_function("canvasSetFillPattern", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_pattern;
+            cmd.text = args.get<std::string>(1, "");          // image source
+            auto tx = args.get<std::string>(2, "repeat");
+            auto ty = args.get<std::string>(3, "repeat");
+            // Pack tile modes into int_val (bit 0 = x, bit 1 = y);
+            // 0 = repeat, 1 = no-repeat. Mirrors set_image_smoothing's
+            // pattern of folding multiple enum values into one int slot.
+            int tx_i = (tx == "no-repeat") ? 1 : 0;
+            int ty_i = (ty == "no-repeat") ? 1 : 0;
+            cmd.int_val = tx_i | (ty_i << 1);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Stroke counterpart — same shape, different command type. Routes
+    // through set_stroke_pattern on the live canvas; CG falls back to
+    // solid stroke colour.
+    engine_.register_function("canvasSetStrokePattern", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_pattern;
+            cmd.text = args.get<std::string>(1, "");
+            auto tx = args.get<std::string>(2, "repeat");
+            auto ty = args.get<std::string>(3, "repeat");
+            int tx_i = (tx == "no-repeat") ? 1 : 0;
+            int ty_i = (ty == "no-repeat") ? 1 : 0;
+            cmd.int_val = tx_i | (ty_i << 1);
             c->add_command(cmd);
         }
         return choc::value::Value();
@@ -4508,6 +5282,39 @@ void WidgetBridge::register_api() {
             if (q == "medium") qi = 1;
             else if (q == "high") qi = 2;
             cmd.extra = static_cast<float>(qi);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1520 — Canvas2D ctx.direction. Sticky text-shaping state
+    // honoured by the SkShaper / HarfBuzz path on the next fillText
+    // / strokeText. The shim coerces unknown strings to "ltr" before
+    // hitting the bridge, so we accept the resolved enum directly.
+    // Args: (id, enumVal) where enumVal ∈ 0=ltr | 1=rtl | 2=inherit.
+    engine_.register_function("canvasSetDirection", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_direction;
+            int v = static_cast<int>(args.get<double>(1, 0.0));
+            if (v < 0 || v > 2) v = 0;
+            cmd.int_val = v;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1520 — Canvas2D ctx.filter. Sticky CSS <filter-function-list>
+    // string applied to subsequent fill/stroke/text/image draws. Skia
+    // parses into an SkImageFilter chain (blur, grayscale, sepia, …);
+    // RecordingCanvas captures the raw string for harness assertions;
+    // CG / minimal backends store the value but render unfiltered until
+    // a follow-up wires the parser through (#1503 owns the View-side
+    // parser; canvas2d shares it as it lands).
+    // Args: (id, cssFilterString) — "none" disables.
+    engine_.register_function("canvasSetFilter", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_filter;
+            cmd.text = args.get<std::string>(1, "none");
             c->add_command(cmd);
         }
         return choc::value::Value();

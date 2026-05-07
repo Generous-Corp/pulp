@@ -8,12 +8,27 @@ of classify_file / aggregate / render so a regression fails fast.
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import unittest
 
 import coverage_tier_check as ctc
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
+
+# First-party source roots audited by `ci/coverage-targets.yaml`.
+# Mirrors the audit recipe in issue #1056. Every C/C++/Obj-C/Kotlin/
+# Swift file under these prefixes must classify into exactly one tier
+# OR appear in `_TIER_COMPLETENESS_ALLOWLIST` with a documented reason.
+_FIRST_PARTY_PREFIXES = ("core/", "tools/", "apple/", "android/", "inspect/")
+_FIRST_PARTY_SUFFIXES = (
+    ".cpp", ".hpp", ".mm", ".h", ".kt", ".swift",
+)
+
+# Files that intentionally fall outside every tier. Empty by design —
+# the gate catches new gaps before they go silently uncovered. Add an
+# entry here ONLY with an explanatory comment AND a linked issue.
+_TIER_COMPLETENESS_ALLOWLIST: frozenset[str] = frozenset()
 
 
 TIERS = [
@@ -195,6 +210,87 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Per-tier gate failed", body)
         self.assertIn("audio-critical", body)
         self.assertIn("infrastructure", body)
+
+
+def _enumerate_first_party_sources() -> list[str]:
+    """Return repo-relative paths of first-party source files in scope.
+
+    Mirrors the audit recipe pinned in issue #1056 — same prefixes and
+    suffixes — so the test guards exactly what the recipe walks.
+    """
+    out = subprocess.check_output(
+        ["git", "ls-files"],
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    files = [line.strip() for line in out.splitlines() if line.strip()]
+    return [
+        f for f in files
+        if f.startswith(_FIRST_PARTY_PREFIXES)
+        and f.endswith(_FIRST_PARTY_SUFFIXES)
+    ]
+
+
+class TierCoverageCompleteness(unittest.TestCase):
+    """Audit gate (#1056): every tier matches ≥1 file, every file → 1 tier.
+
+    Mirrors the structural lock-in pattern from #1005 (commits efefe144 +
+    b258730c) and the inspect classification fix from #842. Two failure
+    modes the runtime gate cannot catch on its own:
+
+    1. A tier whose globs match nothing (silent no-op — the floor never
+       binds). Hits the same bug class as #1049.
+    2. A first-party source file outside every tier (silently exempt
+       from per-tier enforcement; falls through to the looser global
+       diff-cover floor).
+
+    Both are caught here so the gate stays meaningful as the tree grows.
+    """
+
+    def test_every_tier_matches_at_least_one_file(self) -> None:
+        tiers = ctc.load_targets(TARGETS)
+        sources = _enumerate_first_party_sources()
+        self.assertGreater(len(sources), 0, "git ls-files returned no first-party sources")
+        empties: list[str] = []
+        for tier in tiers:
+            hits = [f for f in sources if ctc.classify_file(f, tiers) is tier]
+            if not hits:
+                empties.append(tier.name)
+        self.assertEqual(
+            empties, [],
+            "Tiers with zero matching first-party files (silent no-op): "
+            f"{empties}. Either tighten the patterns, remove the tier, or "
+            "document the deliberate emptiness in coverage-targets.yaml.",
+        )
+
+    def test_every_first_party_source_file_in_exactly_one_tier(self) -> None:
+        tiers = ctc.load_targets(TARGETS)
+        sources = _enumerate_first_party_sources()
+        unmatched = [
+            f for f in sources
+            if ctc.classify_file(f, tiers) is None
+            and f not in _TIER_COMPLETENESS_ALLOWLIST
+        ]
+        self.assertEqual(
+            unmatched, [],
+            f"{len(unmatched)} first-party source file(s) match no tier in "
+            "ci/coverage-targets.yaml — they would silently fall back to the "
+            "global diff-cover floor. Either classify them under an existing "
+            "tier or add a documented entry to _TIER_COMPLETENESS_ALLOWLIST. "
+            f"Unmatched: {unmatched[:10]}{'...' if len(unmatched) > 10 else ''}",
+        )
+
+    def test_allowlist_entries_actually_exist(self) -> None:
+        # Stale allowlist entries are themselves a silent gap: the file
+        # may have been deleted, leaving a phantom exemption that masks a
+        # future re-add of the same path.
+        sources = set(_enumerate_first_party_sources())
+        stale = sorted(p for p in _TIER_COMPLETENESS_ALLOWLIST if p not in sources)
+        self.assertEqual(
+            stale, [],
+            f"Allowlist references files that no longer exist: {stale}. "
+            "Remove them from _TIER_COMPLETENESS_ALLOWLIST.",
+        )
 
 
 if __name__ == "__main__":

@@ -109,35 +109,47 @@ int cmd_upgrade(const std::vector<std::string>& args) {
 
     // ── --check-only path (Slice 2 surface) ─────────────────────────────────
     //
-    // Reports what the banner would say without downloading. Reads the
-    // cache written by the on-every-invocation background refresh in
-    // pulp_cli.cpp. If the cache is empty (first run), we fall through
-    // to the legacy check to keep the UX useful.
+    // Reports what the banner would say. Uses uc::resolve_latest_with_persist
+    // so a stale or empty cache triggers a synchronous refresh. The
+    // on-every-invocation detached refresh in pulp_cli.cpp gets killed when
+    // short-lived commands exit before curl completes (#1599), so we
+    // cannot rely on it. The user is explicitly asking about updates here,
+    // so a 1–2s blocking GitHub call is the right tradeoff.
     if (check_only) {
         auto cache_path = update_cache_path();
         std::string installed = PULP_SDK_VERSION;
-        std::optional<uc::CacheEntry> cache;
-        if (!cache_path.empty()) cache = uc::read_cache_file(cache_path);
+        const bool disabled =
+            pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED").has_value();
 
         std::string latest;
         std::string url;
-        if (cache && !cache->latest_version.empty()) {
-            latest = cache->latest_version;
-            url = cache->release_notes_url;
-        } else if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED")) {
-            std::cout << "Installed:  v" << installed << "\n";
-            std::cout << "Latest:     update check disabled; not queried\n";
-            return 0;
+        if (disabled) {
+            // Honor the off-switch even when there's no cache yet — the
+            // contract is "zero network calls".
+            auto cache = !cache_path.empty() ? uc::read_cache_file(cache_path)
+                                             : std::nullopt;
+            if (cache && !cache->latest_version.empty()) {
+                latest = cache->latest_version;
+                url = cache->release_notes_url;
+            } else {
+                std::cout << "Installed:  v" << installed << "\n";
+                std::cout << "Latest:     update check disabled; not queried\n";
+                return 0;
+            }
         } else {
-            std::cout << "Cache empty; querying GitHub Releases...\n";
             uc::GitHubReleasesFetcher fetcher;
-            auto r = fetcher.fetch_latest_release(PULP_GITHUB_REPO);
-            if (!r.ok) {
-                std::cerr << "Error: could not fetch latest version: " << r.error << "\n";
+            auto resolved = uc::resolve_latest_with_persist(
+                fetcher, cache_path, PULP_GITHUB_REPO, uc::now_epoch_sec(), 24);
+            if (resolved.refreshed) {
+                std::cout << "Refreshing from GitHub Releases...\n";
+            }
+            if (!resolved.ok) {
+                std::cerr << "Error: could not fetch latest version: "
+                          << resolved.error << "\n";
                 return 1;
             }
-            latest = r.latest_version;
-            url = r.release_notes_url;
+            latest = resolved.latest_version;
+            url = resolved.release_notes_url;
         }
 
         std::cout << "Installed:  v" << installed << "\n";
@@ -154,25 +166,17 @@ int cmd_upgrade(const std::vector<std::string>& args) {
 
     std::cout << "Checking for updates...\n";
 
-    // Try the cache first so repeated `pulp upgrade` calls within the
-    // 24h window don't re-query GitHub.
+    // Resolve the latest version. resolve_latest_with_persist handles the
+    // empty/stale/fresh cases and writes the cache on a successful fetch
+    // so the next invocation isn't stuck behind the unreliable detached
+    // background refresh (#1599).
     std::string latest;
     if (target_version.empty()) {
-        auto cache_path = update_cache_path();
-        if (!cache_path.empty()) {
-            if (auto cache = uc::read_cache_file(cache_path)) {
-                if (!cache->latest_version.empty() &&
-                    !uc::is_cache_stale(*cache, uc::now_epoch_sec(), 24)) {
-                    latest = cache->latest_version;
-                }
-            }
-        }
-    }
-
-    if (latest.empty() && target_version.empty()) {
         uc::GitHubReleasesFetcher fetcher;
-        auto r = fetcher.fetch_latest_release(PULP_GITHUB_REPO);
-        if (r.ok) latest = r.latest_version;
+        auto resolved = uc::resolve_latest_with_persist(
+            fetcher, update_cache_path(), PULP_GITHUB_REPO,
+            uc::now_epoch_sec(), 24);
+        if (resolved.ok) latest = resolved.latest_version;
     }
 
     if (latest.empty() && target_version.empty()) {

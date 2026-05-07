@@ -3,6 +3,7 @@
 // and DOM operations (appendChild, removeChild, getElementById, etc.).
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "test_helpers.hpp"
 #include <pulp/view/asset_manager.hpp>
 #include <fstream>
@@ -794,4 +795,533 @@ TEST_CASE("WebCompat: StyleSheet display:flex defaults to row", "[webcompat][sty
     auto* w = env.widget(id);
     REQUIRE(w != nullptr);
     REQUIRE(w->flex().direction == FlexDirection::row);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Modern CSS color spaces (pulp #1434 Triage #8)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Spike-quality oklch / oklab / lch / lab / color() → sRGB hex.
+// Tolerances are intentionally generous (±2 hex levels per channel)
+// because the conversion math involves Bradford adaptation + matrix
+// products + gamma encode; the goal is "reasonably close round-trip"
+// not "bit-exact reference". Reference values cross-checked against
+// the CSS Color 4 reference implementation
+// (https://www.w3.org/TR/css-color-4/) for sanity but allowing for
+// the slight divergence of double-precision arithmetic.
+
+namespace {
+    // Helper: extract decimal channel values from a "#rrggbb[aa]" hex
+    // string. Returns {r, g, b, a} in [0, 255] (a defaults to 255).
+    struct Rgba { int r, g, b, a; };
+    Rgba parseHex(const std::string& hex) {
+        Rgba out{0, 0, 0, 255};
+        if (hex.size() < 7 || hex[0] != '#') return out;
+        auto h2 = [&](size_t i) -> int {
+            return std::stoi(hex.substr(i, 2), nullptr, 16);
+        };
+        out.r = h2(1);
+        out.g = h2(3);
+        out.b = h2(5);
+        if (hex.size() >= 9) out.a = h2(7);
+        return out;
+    }
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch returns hex", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    auto hex = std::string(result.getWithDefault<std::string_view>(""));
+    REQUIRE(hex.size() >= 7);
+    REQUIRE(hex[0] == '#');
+    auto rgba = parseHex(hex);
+    // oklch(0.7 0.18 240) is a saturated blue — blue channel dominates
+    // and red is moderately damped.
+    REQUIRE(rgba.b > rgba.r);
+    REQUIRE(rgba.b > rgba.g);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklab black returns near-black", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklab(0 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r <= 4);
+    REQUIRE(rgba.g <= 4);
+    REQUIRE(rgba.b <= 4);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklab white returns near-white", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklab(1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 250);
+    REQUIRE(rgba.g >= 250);
+    REQUIRE(rgba.b >= 250);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch with percent L", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // 70% L should round-trip to the same color as 0.7 L.
+    auto a = env.engine.evaluate("parseCSSColor('oklch(70% 0.18 240)')");
+    auto b = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    REQUIRE(std::string(a.getWithDefault<std::string_view>("")) ==
+            std::string(b.getWithDefault<std::string_view>("")));
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch with alpha", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240 / 50%)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    // 50% alpha should be ~127 ± 1.
+    REQUIRE(rgba.a >= 126);
+    REQUIRE(rgba.a <= 128);
+}
+
+TEST_CASE("WebCompat: parseCSSColor lab returns hex", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('lab(50 -40 60)')");
+    auto hex = std::string(result.getWithDefault<std::string_view>(""));
+    REQUIRE(hex.size() >= 7);
+    REQUIRE(hex[0] == '#');
+    auto rgba = parseHex(hex);
+    // lab(50 -40 60) — green-shifted, yellow-shifted: green > red, green > blue.
+    REQUIRE(rgba.g > rgba.b);
+}
+
+TEST_CASE("WebCompat: parseCSSColor lch white", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('lch(100 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    // L=100 with zero chroma should be near-white.
+    REQUIRE(rgba.r >= 250);
+    REQUIRE(rgba.g >= 250);
+    REQUIRE(rgba.b >= 250);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(srgb) passthrough", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('color(srgb 1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r == 255);
+    REQUIRE(rgba.g == 0);
+    REQUIRE(rgba.b == 0);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(srgb-linear) gamma encodes", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // Linear 0.5 → sRGB gamma-encoded ≈ 188.
+    auto result = env.engine.evaluate("parseCSSColor('color(srgb-linear 0.5 0.5 0.5)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 186);
+    REQUIRE(rgba.r <= 190);
+    REQUIRE(rgba.g == rgba.r);
+    REQUIRE(rgba.b == rgba.r);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(display-p3) maps to sRGB", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // P3 red is wider than sRGB red; clamping should yield max-red sRGB.
+    auto result = env.engine.evaluate("parseCSSColor('color(display-p3 1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r == 255);
+    REQUIRE(rgba.g <= 5);
+    REQUIRE(rgba.b <= 5);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(display-p3) gray passes through", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // P3 (0.5, 0.5, 0.5) gamma-encoded = sRGB (0.5, 0.5, 0.5) — gray
+    // is invariant across same-white-point spaces (D65 == D65).
+    auto result = env.engine.evaluate("parseCSSColor('color(display-p3 0.5 0.5 0.5)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 125);
+    REQUIRE(rgba.r <= 130);
+    REQUIRE(std::abs(rgba.r - rgba.g) <= 1);
+    REQUIRE(std::abs(rgba.g - rgba.b) <= 1);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch radians", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // 4.18879rad ≈ 240deg — should match the 240deg path.
+    auto a = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 4.18879rad)')");
+    auto b = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    auto ra = parseHex(std::string(a.getWithDefault<std::string_view>("")));
+    auto rb = parseHex(std::string(b.getWithDefault<std::string_view>("")));
+    REQUIRE(std::abs(ra.r - rb.r) <= 2);
+    REQUIRE(std::abs(ra.g - rb.g) <= 2);
+    REQUIRE(std::abs(ra.b - rb.b) <= 2);
+}
+
+TEST_CASE("WebCompat: parseCSSColor unknown color() space returns null", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('color(rec2020 0.5 0.5 0.5)') === null");
+    REQUIRE(result.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: parseCSSColor malformed oklch returns null", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(banana)') === null");
+    REQUIRE(result.getWithDefault<bool>(false) == true);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Modern transform fan-out (pulp #1434 Triage #9)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// CSS transform string: scaleX/Y, skewX/Y, rotateX/Y/Z, matrix, plus
+// rad/turn/grad angle units. Bridge: setSkew newly registered;
+// rotateX/Y + matrix3d + perspective silently drop (pulp's 2D View
+// has no 3D model); scaleX/Y last-write-wins (uniform setScale only).
+
+TEST_CASE("WebCompat: parseTransform handles rad units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(1rad)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) > 57.0);  // 1 rad ≈ 57.3°
+    REQUIRE(result.getWithDefault<double>(0) < 58.0);
+}
+
+TEST_CASE("WebCompat: parseTransform handles turn units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(0.5turn)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) == 180.0);
+}
+
+TEST_CASE("WebCompat: parseTransform handles grad units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(100grad)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) == 90.0);  // 100 grad = 90°
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes scaleX", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('scaleX(2)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "scaleX");
+    auto val = env.engine.evaluate("parseTransform('scaleX(2)')[0].args[0]");
+    REQUIRE(val.getWithDefault<double>(0) == 2.0);
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes skewX/skewY", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn1 = env.engine.evaluate("parseTransform('skewX(10deg)')[0].fn");
+    REQUIRE(std::string(fn1.getWithDefault<std::string_view>("")) == "skewX");
+    auto fn2 = env.engine.evaluate("parseTransform('skewY(5deg)')[0].fn");
+    REQUIRE(std::string(fn2.getWithDefault<std::string_view>("")) == "skewY");
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes rotateZ", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('rotateZ(45deg)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "rotateZ");
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes matrix(a b c d tx ty)", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('matrix(1, 0, 0, 1, 50, 30)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "matrix");
+    auto len = env.engine.evaluate("parseTransform('matrix(1, 0, 0, 1, 50, 30)')[0].args.length");
+    REQUIRE(len.getWithDefault<double>(0) == 6.0);
+}
+
+TEST_CASE("WebCompat: parseTransform multi-op walk", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto len = env.engine.evaluate("parseTransform('translateX(10px) rotate(45deg) scaleX(2) skewX(5deg)').length");
+    REQUIRE(len.getWithDefault<double>(0) == 4.0);
+}
+
+TEST_CASE("WebCompat: setSkew bridge fn registered", "[webcompat][bridge][issue-1434-tx]") {
+    // pulp #1434 Triage #9 — setSkew is now a registered bridge fn.
+    // Earlier, View::set_skew existed in C++ but was unreachable from
+    // JS; the parser stored skewX/skewY on the snapshot but couldn't
+    // dispatch.
+    TestEnvironment env;
+    auto result = env.engine.evaluate("typeof setSkew");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "function");
+}
+
+// pulp #1434 Triage #9 P1 fix (Codex post-merge audit) —
+// matrix(a,b,c,d,tx,ty) must dispatch to setTransform with all 6
+// components verbatim, NOT decompose to translate+uniform-scale+rotate
+// (which silently dropped c/d skew components on rotation matrices and
+// could mask zero-scale collapses).
+
+TEST_CASE("WebCompat: matrix() preserves all 6 components verbatim",
+          "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p1]") {
+    TestEnvironment env;
+    // Install a recorder for setTransform so we can inspect args.
+    // The element must be attached (`_nativeCreated`) before style
+    // assignments forward to the bridge — match the pattern from
+    // existing CSSStyleDeclaration tests.
+    env.engine.evaluate(R"JS(
+        var __setTransformCalls = [];
+        setTransform = function(id, a, b, c, d, e, f) {
+            __setTransformCalls.push([id, a, b, c, d, e, f]);
+        };
+        var el = document.createElement('div');
+        document.body.appendChild(el);
+        el.style.transform = 'matrix(0.866, 0.5, -0.5, 0.866, 100, 50)';
+    )JS");
+
+    auto numCalls = env.engine.evaluate("__setTransformCalls.length");
+    REQUIRE(numCalls.getWithDefault<double>(0) == 1.0);
+
+    // Verify all 6 components round-trip.
+    auto a = env.engine.evaluate("__setTransformCalls[0][1]").getWithDefault<double>(0);
+    auto b = env.engine.evaluate("__setTransformCalls[0][2]").getWithDefault<double>(0);
+    auto c = env.engine.evaluate("__setTransformCalls[0][3]").getWithDefault<double>(0);
+    auto d = env.engine.evaluate("__setTransformCalls[0][4]").getWithDefault<double>(0);
+    auto e = env.engine.evaluate("__setTransformCalls[0][5]").getWithDefault<double>(0);
+    auto f = env.engine.evaluate("__setTransformCalls[0][6]").getWithDefault<double>(0);
+    REQUIRE_THAT(a, Catch::Matchers::WithinAbs(0.866, 0.001));
+    REQUIRE_THAT(b, Catch::Matchers::WithinAbs(0.5,   0.001));
+    REQUIRE_THAT(c, Catch::Matchers::WithinAbs(-0.5,  0.001));
+    REQUIRE_THAT(d, Catch::Matchers::WithinAbs(0.866, 0.001));
+    REQUIRE_THAT(e, Catch::Matchers::WithinAbs(100.0, 0.001));
+    REQUIRE_THAT(f, Catch::Matchers::WithinAbs(50.0,  0.001));
+}
+
+TEST_CASE("WebCompat: matrix() with zero scale (a=b=0) preserves the collapse",
+          "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p2]") {
+    // P2 fix: an intentional zero-scale collapse (a=b=0) used to be
+    // masked by the decomposition computing sx=1 fallback. With direct
+    // setTransform passthrough, a=b=0 reaches the bridge unchanged.
+    TestEnvironment env;
+    env.engine.evaluate(R"JS(
+        var __setTransformCalls = [];
+        setTransform = function(id, a, b, c, d, e, f) {
+            __setTransformCalls.push([id, a, b, c, d, e, f]);
+        };
+        var el = document.createElement('div');
+        document.body.appendChild(el);
+        el.style.transform = 'matrix(0, 0, 0, 0, 100, 50)';
+    )JS");
+    auto a = env.engine.evaluate("__setTransformCalls[0][1]").getWithDefault<double>(-1.0);
+    auto b = env.engine.evaluate("__setTransformCalls[0][2]").getWithDefault<double>(-1.0);
+    auto c = env.engine.evaluate("__setTransformCalls[0][3]").getWithDefault<double>(-1.0);
+    auto d = env.engine.evaluate("__setTransformCalls[0][4]").getWithDefault<double>(-1.0);
+    REQUIRE_THAT(a, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(b, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(c, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(d, Catch::Matchers::WithinAbs(0.0, 0.001));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// pulp #1551 — CSS catalog Bundle 3: 13 already-implemented features
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// One Catch2 case per catalog entry. Each one drives the existing
+// implementation through the same path a consumer (Spectr's editor.js
+// or @pulp/react JSX) would hit, so the assertions double as a
+// regression net for the catalog entries.
+//
+// Scope deliberately narrow: smoke-level "does the existing
+// implementation actually do what the catalog claims". Edge-case
+// behaviour (multi-rule layering, focus/blur snapshot restore, var()
+// nested fallbacks, etc.) is covered by neighbouring tests
+// (test_css_hover_translation.cpp, test_selector_matching.cpp) — see
+// the `tests` field on each compat.json entry.
+
+TEST_CASE("WebCompat: :hover pseudo wires mouseenter/mouseleave (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __sheet = new StyleSheet({ '.h': { backgroundColor: 'red' } });
+        // _setupPseudoHover only matches when parsed.pseudo === 'hover'.
+        __sheet._parsedRules[0].parsed.pseudo = 'hover';
+        __sheet.attach();
+        var __hEl = document.createElement('div');
+        __hEl.className = 'h';
+        document.body.appendChild(__hEl);
+    )JS");
+    auto wired = env.engine.evaluate(
+        "!!__hEl._hoverState && __hEl._hoverState.propsList.length === 1");
+    REQUIRE(wired.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :focus pseudo wires focus/blur listeners (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __fEl = document.createElement('input');
+        __fEl.className = 'f';
+        document.body.appendChild(__fEl);
+        _setupPseudoFocus(__fEl, { backgroundColor: 'red' });
+    )JS");
+    auto setup = env.engine.evaluate("__fEl._focusSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :active pseudo wires mousedown/mouseup listeners (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __aEl = document.createElement('button');
+        __aEl.className = 'a';
+        document.body.appendChild(__aEl);
+        _setupPseudoActive(__aEl, { backgroundColor: 'red' });
+    )JS");
+    auto setup = env.engine.evaluate("__aEl._activeSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :disabled pseudo applies styles when el.disabled is set (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __dEl = document.createElement('button');
+        __dEl.className = 'd';
+        __dEl.disabled = true;
+        var __dSheet = new StyleSheet({ '.d': { width: '42px' } });
+        // Force the parsed pseudo to 'disabled' so _applyTo routes
+        // through the :disabled branch.
+        __dSheet._parsedRules[0].parsed.pseudo = 'disabled';
+        __dSheet.attach();
+        document.body.appendChild(__dEl);
+    )JS");
+    auto applied = env.engine.evaluate("__dEl.style._props.width");
+    REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "42px");
+}
+
+TEST_CASE("WebCompat: tag selector matches by lowercase tagName (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __tEl = document.createElement('button');
+    )JS");
+    auto matched = env.engine.evaluate(
+        "_matchesSelector(__tEl, _parseSelector('button'))");
+    auto rejected = env.engine.evaluate(
+        "_matchesSelector(__tEl, _parseSelector('input'))");
+    REQUIRE(matched.getWithDefault<bool>(false) == true);
+    REQUIRE(rejected.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: id selector matches via getAttribute('id') (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __iEl = document.createElement('div');
+        __iEl.id = 'unique';
+    )JS");
+    auto matched = env.engine.evaluate(
+        "_matchesSelector(__iEl, _parseSelector('#unique'))");
+    auto rejected = env.engine.evaluate(
+        "_matchesSelector(__iEl, _parseSelector('#other'))");
+    REQUIRE(matched.getWithDefault<bool>(false) == true);
+    REQUIRE(rejected.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: class selector requires every class in classList (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __cEl = document.createElement('div');
+        __cEl.className = 'foo bar';
+    )JS");
+    auto onlyFoo = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo'))");
+    auto compound = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo.bar'))");
+    auto missing = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo.baz'))");
+    REQUIRE(onlyFoo.getWithDefault<bool>(false) == true);
+    REQUIRE(compound.getWithDefault<bool>(false) == true);
+    REQUIRE(missing.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: descendant combinator walks ancestor chain (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __gp = document.createElement('section');
+        var __p = document.createElement('div');
+        var __c = document.createElement('span');
+        __gp._children.push(__p);
+        __p._parentElement = __gp;
+        __p._children.push(__c);
+        __c._parentElement = __p;
+    )JS");
+    auto descendant = env.engine.evaluate(
+        "_matchesSelector(__c, _parseSelector('section span'))");
+    REQUIRE(descendant.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: child combinator requires immediate parent (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __gp2 = document.createElement('section');
+        var __p2 = document.createElement('div');
+        var __c2 = document.createElement('span');
+        __gp2._children.push(__p2);
+        __p2._parentElement = __gp2;
+        __p2._children.push(__c2);
+        __c2._parentElement = __p2;
+    )JS");
+    auto direct = env.engine.evaluate(
+        "_matchesSelector(__c2, _parseSelector('div > span'))");
+    auto skip = env.engine.evaluate(
+        "_matchesSelector(__c2, _parseSelector('section > span'))");
+    REQUIRE(direct.getWithDefault<bool>(false) == true);
+    REQUIRE(skip.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: _matchMediaQuery resolves @media-style queries (issue-1551)",
+          "[webcompat][matchmedia][issue-1551]") {
+    // The catalog tracks `_matchMediaQuery()` (loaded with css-parser prelude),
+    // not `window.matchMedia()` — the latter lives in core/view/js/web-compat.js
+    // which is not part of the WidgetBridge prelude chain. Stylesheets and
+    // matched-media @rules go through `_matchMediaQuery` directly. The shape
+    // tested here is what the engine actually exposes today.
+    TestEnvironment env(800, 600);
+    auto match_min = env.engine.evaluate(
+        "_matchMediaQuery('(min-width: 600px)')");
+    auto miss_min = env.engine.evaluate(
+        "_matchMediaQuery('(min-width: 1200px)')");
+    auto orient = env.engine.evaluate(
+        "_matchMediaQuery('(orientation: landscape)')");
+    REQUIRE(match_min.getWithDefault<bool>(false) == true);
+    REQUIRE(miss_min.getWithDefault<bool>(true) == false);
+    REQUIRE(orient.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: var(--name) resolves through motion-token bridge (issue-1551)",
+          "[webcompat][css-var][issue-1551]") {
+    TestEnvironment env;
+    env.eval("setMotionToken('v1551-w', 64);");
+    auto resolved = env.engine.evaluate("_resolveVar('var(--v1551-w)')");
+    auto withFallback = env.engine.evaluate("_resolveVar('var(--v1551-missing, 12)')");
+    REQUIRE(std::string(resolved.getWithDefault<std::string_view>("")) == "64");
+    REQUIRE(std::string(withFallback.getWithDefault<std::string_view>("")) == "12");
+}
+
+TEST_CASE("WebCompat: setProperty('--name') routes to motion-token bridge (issue-1551)",
+          "[webcompat][css-var][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __spEl = document.createElement('div');
+        __spEl.style.setProperty('--v1551-h', '128px');
+    )JS");
+    auto roundTrip = env.engine.evaluate("getMotionToken('v1551-h')");
+    REQUIRE(roundTrip.getWithDefault<double>(-1.0) == 128.0);
+}
+
+TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issue-1551)",
+          "[webcompat][stylesheet][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __ssEl = document.createElement('div');
+        __ssEl.className = 'ss-1551';
+        document.body.appendChild(__ssEl);
+        var __ssSheet = new StyleSheet({ '.ss-1551': { width: '99px' } });
+        __ssSheet.attach();
+    )JS");
+    auto applied = env.engine.evaluate("__ssEl.style._props.width");
+    auto attached = env.engine.evaluate("__ssSheet._attached");
+    REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "99px");
+    REQUIRE(attached.getWithDefault<bool>(false) == true);
+
+    // Detach is the second half of the catalog claim.
+    env.eval("__ssSheet.detach();");
+    auto detached = env.engine.evaluate("__ssSheet._attached");
+    REQUIRE(detached.getWithDefault<bool>(true) == false);
 }

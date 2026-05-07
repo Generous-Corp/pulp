@@ -15,6 +15,18 @@ export type FlexDirection = 'row' | 'col';
 export type FlexAlign = 'start' | 'center' | 'end' | 'stretch';
 export type FlexAlignSelf = 'start' | 'center' | 'end' | 'stretch' | 'auto';
 export type FlexJustify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
+/// pulp #1434 (sub-agent #12 follow-up) — align-content controls
+/// multi-line flex cross-axis distribution. Yoga supports it natively
+/// via YGNodeStyleSetAlignContent. Accepts bare and prefixed CSS / RN
+/// spellings (`flex-start` / `flex-end`) plus the three space-*
+/// distributions (which only make sense on align-content, not
+/// align-items / align-self).
+export type FlexAlignContent =
+    | 'start' | 'flex-start'
+    | 'center'
+    | 'end' | 'flex-end'
+    | 'stretch'
+    | 'space-between' | 'space-around' | 'space-evenly';
 
 export interface FlexProps {
     direction?: FlexDirection;
@@ -55,6 +67,34 @@ export interface FlexProps {
     /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
     /// `marginBottom`.
     marginVertical?: number | string;
+    /// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+    /// CSS-spec-equivalent flow props. LTR-only fast path:
+    /// Start → Left, End → Right. RTL deferred to a future direction
+    /// system. Values are number (px), percent string, or `'auto'` on
+    /// margin (matches the per-edge surface).
+    marginStart?: number | string;
+    marginEnd?: number | string;
+    paddingStart?: number | string;
+    paddingEnd?: number | string;
+    borderStartWidth?: number;
+    borderEndWidth?: number;
+    /// CSS positional logical aliases. LTR: start → left, end → right.
+    start?: number | string;
+    end?: number | string;
+    /// CSS `inset` shorthand: `'10px'`, `'10px 20px'`, etc. Fans out
+    /// to top/right/bottom/left via the same expansion rules as
+    /// `margin` / `padding`.
+    inset?: number | string;
+    /// CSS `inset-block` → top + bottom.
+    insetBlock?: number | string;
+    /// CSS `inset-inline` → left + right (LTR).
+    insetInline?: number | string;
+    /// pulp #1518 — RN-style `flex: <number>` shorthand. Positive `n`
+    /// expands to `{flexGrow: n, flexShrink: 1, flexBasis: 0}`; `0`
+    /// to `(0, 0, 'auto')`; negative to `(0, 1, 'auto')`. Matches RN
+    /// semantics, which is what JSX `<View flex={1} />` consumers
+    /// expect.
+    flex?: number;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string
@@ -62,7 +102,10 @@ export interface FlexProps {
     /// `YGNodeStyleSetFlexBasisAuto`; percent maps to
     /// `YGNodeStyleSetFlexBasisPercent`.
     flexBasis?: number | string;
-    flexWrap?: boolean;
+    /// pulp #1434 Triage #14 — accept boolean (legacy true/false) or
+    /// the CSS keyword string. `"wrap-reverse"` routes through Yoga's
+    /// YGWrapWrapReverse path; previously coerced to plain `wrap`.
+    flexWrap?: boolean | 'wrap' | 'nowrap' | 'no-wrap' | 'wrap-reverse';
     order?: number;
     /// pulp #1434 (rn batch C) — number (px) or percent string
     /// (`'100%'`). Yoga's percent API is dispatched on
@@ -75,6 +118,12 @@ export interface FlexProps {
     maxHeight?: number | string;
     alignItems?: FlexAlign;
     alignSelf?: FlexAlignSelf;
+    /// pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-
+    /// axis distribution. Maps to `setFlex(id, 'align_content', ...)`
+    /// → Yoga's `YGNodeStyleSetAlignContent`. Only meaningful on a
+    /// flex container with `flexWrap: true`; on a single-line container
+    /// it has no visible effect.
+    alignContent?: FlexAlignContent;
     justifyContent?: FlexJustify;
     /// pulp #1434 — width/height ratio for the cross axis. RN-compatible.
     /// When set on a View with `width: 100, aspectRatio: 1.5`, the layout
@@ -87,6 +136,12 @@ export interface FlexProps {
 export interface StyleProps {
     background?: string;            // hex; maps to setBackground
     backgroundGradient?: string;    // CSS-string; maps to setBackgroundGradient
+    /// pulp #1517 — CSS background sub-properties. Stored on the View
+    /// for round-tripping; paint impact partial today (see compat.json
+    /// css/backgroundAttachment / Clip / Origin).
+    backgroundAttachment?: 'scroll' | 'fixed' | 'local';
+    backgroundClip?: 'border-box' | 'padding-box' | 'content-box' | 'text';
+    backgroundOrigin?: 'border-box' | 'padding-box' | 'content-box';
     border?: { color: string; width?: number; radius?: number };  // setBorder
     borderTop?: { color: string; width: number };                  // setBorderSide
     borderRight?: { color: string; width: number };
@@ -98,6 +153,23 @@ export interface StyleProps {
     borderColor?: string;
     borderWidth?: number;
     borderRadius?: number;
+    /// pulp #1434 Triage #10 — CSS / RN border-style keyword. Skia
+    /// installs SkDashPathEffect for `'dashed'` / `'dotted'`; other
+    /// named styles (`'double'`, `'groove'`, `'ridge'`, `'inset'`,
+    /// `'outset'`) currently degrade to solid (paint-side gap).
+    /// `'none'` / `'hidden'` skip the stroke entirely.
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
+                | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
+    /// pulp #1514 — CSS list-style cluster. Pulp doesn't model
+    /// HTML `<li>` / `<ul>` / `<ol>` semantics, so these props
+    /// round-trip the value to View slots without painting a
+    /// marker glyph today (catalog: `partial`). Marker glyph
+    /// rendering is the follow-up. `listStyle` is the shorthand
+    /// (`'<type> <position> <image>'` in any order).
+    listStyle?: string;
+    listStyleType?: 'none' | 'disc' | 'circle' | 'square' | 'decimal';
+    listStyleImage?: string;
+    listStylePosition?: 'inside' | 'outside';
     borderTopColor?: string;
     borderRightColor?: string;
     borderBottomColor?: string;
@@ -110,8 +182,75 @@ export interface StyleProps {
     borderTopRightRadius?: number;
     borderBottomLeftRadius?: number;
     borderBottomRightRadius?: number;
+    /// pulp #1519 — CSS / RN outline cluster. Outline is paint-only:
+    /// it draws OUTSIDE the border-box and does NOT take up Yoga
+    /// layout space. Style keyword set mirrors borderStyle (CSS spec
+    /// identical). dashed/dotted install SkDashPathEffect at stroke
+    /// time; double/groove/ridge/inset/outset currently degrade to
+    /// solid (paint-side gap, same as borderStyle); none/hidden /
+    /// zero-width skip the stroke.
+    outlineColor?: string;
+    outlineOffset?: number;
+    outlineStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
+                | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
+    outlineWidth?: number;
     opacity?: number;
     visible?: boolean;
+    /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
+    /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
+    /// keyword / string straight through to the matching setter.
+    /// (cursor / pointerEvents / userSelect superset of the small-wins
+    /// bundle (Triage #7 / #12 / #13) — types kept trimmed to the
+    /// actual bridge surface; broader CSS spec values are documented as
+    /// over-claims in the catalog.)
+    backfaceVisibility?: 'hidden' | 'visible';
+    cursor?: string;
+    filter?: string;
+    pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
+    textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum
+    /// number of visible text lines on a multi-line Label; setting >0
+    /// implicitly enables wrap on the bridge side. `0` disables clamp
+    /// (CSS spec uses `none`; `0` is the numeric equivalent here).
+    /// Both keys funnel through the same `setLineClamp` bridge fn.
+    lineClamp?: number;
+    webkitLineClamp?: number;
+    /// CSS `background-repeat` keyword (pulp #1552). Storage-only at
+    /// the View level today — paint-time honoring requires
+    /// `background-image: url(...)` / repeating-gradient backgrounds
+    /// which haven't landed yet. Accepts the standard CSS keyword set.
+    backgroundRepeat?: 'repeat' | 'repeat-x' | 'repeat-y' | 'no-repeat'
+                     | 'space' | 'round';
+    /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
+    /// or two-keyword combos (`'left top'`). Bridge expects fractional
+    /// 0..1 coordinates; the prop-applier parses the string before
+    /// dispatching.
+    transformOrigin?: string;
+    userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1516 — CSS box-sizing. Web designs almost universally
+    /// reset to `border-box` via `* { box-sizing: border-box }`;
+    /// Yoga 3.x honors the spec via YGNodeStyleSetBoxSizing.
+    boxSizing?: 'content-box' | 'border-box';
+    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
+    /// StyleProps so JSX can express `display: grid` layouts directly.
+    /// Bridge handles template-track parsing, named-area parsing, and
+    /// the grid-area shorthand.
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    gridTemplateAreas?: string;
+    gridAutoColumns?: string;
+    gridAutoRows?: string;
+    gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense' | 'dense';
+    gridArea?: string;
+    gridColumn?: string;
+    gridRow?: string;
+    gridColumnStart?: number;
+    gridColumnEnd?: number;
+    gridRowStart?: number;
+    gridRowEnd?: number;
+    gridGap?: number;
+    gridColumnGap?: number;
+    gridRowGap?: number;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

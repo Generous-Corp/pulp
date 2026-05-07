@@ -196,4 +196,34 @@ CacheEntry refresh_cache(Fetcher& fetcher,
                          const std::string& owner_repo,
                          std::int64_t now_epoch_sec);
 
+// Resolved latest-version answer for `pulp upgrade` and friends.
+//
+// `refreshed` is true when the fetcher was actually called (cache was
+// empty or stale); false when a fresh cache entry served the answer.
+// On fetch failure (`ok=false`), the previous cache is left untouched on
+// disk — clobbering a known-good value with a network blip is worse than
+// a stale read.
+struct ResolvedLatest {
+    bool ok = false;
+    bool refreshed = false;
+    std::string latest_version;
+    std::string release_notes_url;
+    std::string error;
+};
+
+// Read the cache; if missing/empty/stale, query the fetcher and persist
+// the result to `cache_path` (best-effort). Returns the resolved value.
+//
+// This was extracted from cmd_upgrade.cpp's check-only and upgrade paths
+// so they share one source of truth and so the fallback behaviour is
+// directly unit-testable. The on-every-invocation detached refresh in
+// pulp_cli.cpp cannot be relied on for short-lived commands — it gets
+// reaped at process exit before curl returns (#1599) — so the upgrade
+// surfaces refresh synchronously.
+ResolvedLatest resolve_latest_with_persist(Fetcher& fetcher,
+                                           const fs::path& cache_path,
+                                           const std::string& owner_repo,
+                                           std::int64_t now_epoch_sec,
+                                           int interval_hours);
+
 }  // namespace pulp::cli::update_check

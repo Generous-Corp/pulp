@@ -337,6 +337,145 @@ TEST_CASE("refresh_cache carries forward previous on fetch failure",
     REQUIRE(next.last_check_epoch_sec == 2'000);
 }
 
+// ── resolve_latest_with_persist (#1599) ─────────────────────────────────────
+//
+// Regression for the "cache permanently stuck at v0.73.0 despite v0.78.2
+// being live" trap: pulp_cli.cpp's detached background refresh gets reaped
+// at process exit before curl finishes, so the cache never gets updated
+// through that path. The upgrade surfaces have to refresh synchronously
+// AND persist the result themselves.
+
+TEST_CASE("resolve_latest_with_persist returns fresh-cache value without fetching",
+          "[cli][update-check][issue-1599]") {
+    auto dir = make_tmpdir("resolve-fresh");
+    auto path = dir / "update-cache.json";
+
+    uc::CacheEntry seed;
+    seed.last_check_epoch_sec = 1'000;   // 1h ago at "now"=4'600
+    seed.latest_version = "0.78.2";
+    seed.release_notes_url = "https://example/tag/v0.78.2";
+    REQUIRE(uc::write_cache_file(path, seed));
+
+    FakeFetcher fetcher;
+    fetcher.canned.ok = true;
+    fetcher.canned.latest_version = "9.9.9";   // would be returned if called
+
+    auto resolved = uc::resolve_latest_with_persist(
+        fetcher, path, "owner/repo", /*now=*/4'600, /*interval_hours=*/24);
+
+    REQUIRE(resolved.ok);
+    REQUIRE_FALSE(resolved.refreshed);
+    REQUIRE(resolved.latest_version == "0.78.2");
+    REQUIRE(fetcher.call_count == 0);
+}
+
+TEST_CASE("resolve_latest_with_persist refreshes + writes when cache is stale",
+          "[cli][update-check][issue-1599]") {
+    auto dir = make_tmpdir("resolve-stale");
+    auto path = dir / "update-cache.json";
+
+    uc::CacheEntry seed;
+    seed.last_check_epoch_sec = 1'000;
+    seed.latest_version = "0.73.0";   // stuck-stale value
+    seed.release_notes_url = "https://example/tag/v0.73.0";
+    REQUIRE(uc::write_cache_file(path, seed));
+
+    FakeFetcher fetcher;
+    fetcher.canned.ok = true;
+    fetcher.canned.latest_version = "0.78.2";
+    fetcher.canned.release_notes_url = "https://example/tag/v0.78.2";
+
+    // 25h later → stale
+    const std::int64_t now = 1'000 + 25 * 3600;
+    auto resolved = uc::resolve_latest_with_persist(
+        fetcher, path, "owner/repo", now, 24);
+
+    REQUIRE(resolved.ok);
+    REQUIRE(resolved.refreshed);
+    REQUIRE(resolved.latest_version == "0.78.2");
+    REQUIRE(fetcher.call_count == 1);
+
+    // Persisted to disk so the next invocation doesn't re-fetch.
+    auto on_disk = uc::read_cache_file(path);
+    REQUIRE(on_disk.has_value());
+    REQUIRE(on_disk->latest_version == "0.78.2");
+    REQUIRE(on_disk->last_check_epoch_sec == now);
+}
+
+TEST_CASE("resolve_latest_with_persist refreshes when no cache file exists",
+          "[cli][update-check][issue-1599]") {
+    auto dir = make_tmpdir("resolve-empty");
+    auto path = dir / "update-cache.json";   // intentionally not created
+
+    FakeFetcher fetcher;
+    fetcher.canned.ok = true;
+    fetcher.canned.latest_version = "1.2.3";
+    fetcher.canned.release_notes_url = "https://example/tag/v1.2.3";
+
+    auto resolved = uc::resolve_latest_with_persist(
+        fetcher, path, "owner/repo", /*now=*/5'000, /*interval_hours=*/24);
+
+    REQUIRE(resolved.ok);
+    REQUIRE(resolved.refreshed);
+    REQUIRE(resolved.latest_version == "1.2.3");
+
+    auto on_disk = uc::read_cache_file(path);
+    REQUIRE(on_disk.has_value());
+    REQUIRE(on_disk->latest_version == "1.2.3");
+}
+
+TEST_CASE("resolve_latest_with_persist leaves disk untouched on fetch failure",
+          "[cli][update-check][issue-1599]") {
+    auto dir = make_tmpdir("resolve-fail");
+    auto path = dir / "update-cache.json";
+
+    uc::CacheEntry seed;
+    seed.last_check_epoch_sec = 1'000;
+    seed.latest_version = "0.73.0";
+    seed.release_notes_url = "https://example/tag/v0.73.0";
+    REQUIRE(uc::write_cache_file(path, seed));
+
+    FakeFetcher fetcher;
+    fetcher.canned.ok = false;
+    fetcher.canned.error = "curl failed";
+
+    const std::int64_t now = 1'000 + 25 * 3600;
+    auto resolved = uc::resolve_latest_with_persist(
+        fetcher, path, "owner/repo", now, 24);
+
+    REQUIRE_FALSE(resolved.ok);
+    REQUIRE(resolved.refreshed);
+    REQUIRE(resolved.error == "curl failed");
+
+    // Don't clobber a known-good value with a transient failure.
+    auto on_disk = uc::read_cache_file(path);
+    REQUIRE(on_disk.has_value());
+    REQUIRE(on_disk->latest_version == "0.73.0");
+    REQUIRE(on_disk->last_check_epoch_sec == 1'000);
+}
+
+TEST_CASE("resolve_latest_with_persist refreshes when cached version is empty",
+          "[cli][update-check][issue-1599]") {
+    auto dir = make_tmpdir("resolve-empty-version");
+    auto path = dir / "update-cache.json";
+
+    uc::CacheEntry seed;
+    seed.last_check_epoch_sec = 4'500;   // recent timestamp
+    seed.latest_version = "";            // but no version
+    REQUIRE(uc::write_cache_file(path, seed));
+
+    FakeFetcher fetcher;
+    fetcher.canned.ok = true;
+    fetcher.canned.latest_version = "0.80.0";
+
+    auto resolved = uc::resolve_latest_with_persist(
+        fetcher, path, "owner/repo", /*now=*/5'000, /*interval_hours=*/24);
+
+    REQUIRE(resolved.ok);
+    REQUIRE(resolved.refreshed);
+    REQUIRE(resolved.latest_version == "0.80.0");
+}
+
 // ── Banner-suppression bookkeeping ──────────────────────────────────────────
 
 TEST_CASE("banner_shown_for_version gates banner reprint",

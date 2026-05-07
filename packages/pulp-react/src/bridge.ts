@@ -85,6 +85,10 @@ declare global {
     // ── Visual style ────────────────────────────────────────────────
     function setBackground(id: string, hexColor: string): void;
     function setBackgroundGradient(id: string, css: string): void;
+    // pulp #1517 — background sub-properties (storage-only, partial paint).
+    const setBackgroundAttachment: ((id: string, kw: string) => void) | undefined;
+    const setBackgroundClip:       ((id: string, kw: string) => void) | undefined;
+    const setBackgroundOrigin:     ((id: string, kw: string) => void) | undefined;
     function setBorder(id: string, hexColor: string, width: number, radius: number): void;
     function setBorderSide(
         id: string,
@@ -99,6 +103,21 @@ declare global {
     const setBorderColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderWidth: ((id: string, width: number) => void) | undefined;
     const setBorderRadius: ((id: string, radius: number) => void) | undefined;
+    // pulp #1434 Triage #10 — border-style keyword. Bridge maps to
+    // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
+    // dotted at stroke time. Other named styles degrade to solid.
+    const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    // pulp #1514 — list-style cluster. Pulp doesn't model
+    // <li>/<ul>/<ol> semantics; the bridge stores the value
+    // verbatim on the View. Marker glyph rendering is deferred —
+    // catalog status is `partial` (stored, not painted).
+    const setListStyleType: ((id: string, type: string) => void) | undefined;
+    const setListStyleImage: ((id: string, url: string) => void) | undefined;
+    const setListStylePosition: ((id: string, pos: string) => void) | undefined;
+    /// pulp #1434 Phase A2-2 — CSS Grid bridge fn. The C++ side parses
+    /// template-track strings, named-area strings, and the grid-area
+    /// shorthand (named token vs `row / col / row / col` numeric form).
+    const setGrid: ((id: string, key: string, value: string | number) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -111,6 +130,13 @@ declare global {
     const setBorderTopRightRadius: ((id: string, radius: number) => void) | undefined;
     const setBorderBottomLeftRadius: ((id: string, radius: number) => void) | undefined;
     const setBorderBottomRightRadius: ((id: string, radius: number) => void) | undefined;
+    // pulp #1519 — outline cluster. Paint-time ring drawn OUTSIDE the
+    // border-box; does NOT take Yoga layout space. Style keyword set
+    // mirrors setBorderStyle.
+    const setOutlineColor: ((id: string, hexColor: string) => void) | undefined;
+    const setOutlineOffset: ((id: string, offsetPx: number) => void) | undefined;
+    const setOutlineStyle: ((id: string, style: string) => void) | undefined;
+    const setOutlineWidth: ((id: string, widthPx: number) => void) | undefined;
     function setOpacity(id: string, alpha: number): void;
     function setVisible(id: string, visible: boolean): void;
     function setPosition(id: string, top: number, left: number, right?: number, bottom?: number): void;
@@ -142,11 +168,25 @@ declare global {
     function setTranslate(id: string, x: number, y: number): void;
     function setRotation(id: string, degrees: number): void;
     function setScale(id: string, scale: number): void;
+    // pulp #1434 Triage #9 fan-out — setSkew dispatches both axes at
+    // once. View::set_skew has existed since the 2D slot was added;
+    // the bridge fn registration landed alongside this prop-applier
+    // walker extension so skewX/skewY now reaches the View.
+    function setSkew(id: string, x_deg: number, y_deg: number): void;
 
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
     function setTextColor(id: string, hexColor: string): void;
     function setTextAlign(id: string, align: 'left' | 'center' | 'right'): void;
+
+    // pulp #1552 — line-clamp + background-repeat. setLineClamp clamps
+    // a multi-line Label to N visible lines (0 disables; >=1 enables
+    // wrap implicitly on the bridge side). setBackgroundRepeat is
+    // storage-only on the View; paint-time honoring lands with the
+    // background-image / repeating-gradient work. Optional at runtime
+    // so older bridges still link.
+    const setLineClamp: ((id: string, n: number) => void) | undefined;
+    const setBackgroundRepeat: ((id: string, kw: string) => void) | undefined;
 
     // ── Widget-specific data ────────────────────────────────────────
     function setSpectrumData(id: string, samples: number[] | Float32Array): void;
@@ -201,15 +241,24 @@ export function createMockBridge(): MockBridge {
         'createImage', 'createIcon', 'createProgress', 'createMeter', 'createXYPad',
         'createGrid', 'removeWidget', 'moveWidget', 'insertChild',
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
+        // pulp #1517 — background sub-properties (mostly noop today).
+        'setBackgroundAttachment', 'setBackgroundClip', 'setBackgroundOrigin',
         // pulp #1027 — per-attribute border setters needed for the audit
         // PR #1166 finding-#4 fix (preserve unset siblings).
-        'setBorderColor', 'setBorderWidth', 'setBorderRadius',
+        'setBorderColor', 'setBorderWidth', 'setBorderRadius', 'setBorderStyle',
+        // pulp #1514 — list-style cluster mock-bridge fns. The bridge
+        // stores the value on the View; paint-time marker rendering
+        // is deferred (catalog: `partial`).
+        'setListStyleType', 'setListStyleImage', 'setListStylePosition',
         'setBorderTopColor', 'setBorderRightColor',
         'setBorderBottomColor', 'setBorderLeftColor',
         'setBorderTopWidth', 'setBorderRightWidth',
         'setBorderBottomWidth', 'setBorderLeftWidth',
         'setBorderTopLeftRadius', 'setBorderTopRightRadius',
         'setBorderBottomLeftRadius', 'setBorderBottomRightRadius',
+        // pulp #1519 — RN outline cluster (paint-time ring outside the
+        // border-box; does not affect Yoga layout).
+        'setOutlineColor', 'setOutlineOffset', 'setOutlineStyle', 'setOutlineWidth',
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
         // pulp #1434 Triage #15 — boxShadow surfaced at the @pulp/react
         // layer; mock-bridge captures both setBoxShadow (with the full
@@ -218,12 +267,17 @@ export function createMockBridge(): MockBridge {
         // pulp #1434 Triage #9 — transform array dispatches a
         // consolidated trio of bridge calls; mock-bridge captures
         // all three so vitest cases can assert on the args + arity.
-        'setTranslate', 'setRotation', 'setScale',
+        'setTranslate', 'setRotation', 'setScale', 'setSkew',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.
         'setTop', 'setRight', 'setBottom', 'setLeft', 'setZIndex',
         'setText', 'setTextColor', 'setTextAlign',
+        // pulp #1552 — line-clamp + webkit-line-clamp + background-repeat.
+        // CSS shim and prop-applier both route through these two setters;
+        // mock-bridge captures the round-trip so vitest can assert dispatch
+        // shape (numeric line count + keyword string).
+        'setLineClamp', 'setBackgroundRepeat',
         // pulp #1434 batch 3 — typography keyword translation needs the
         // mock bridge to capture setFontWeight calls so the prop-applier
         // fontWeight test can assert on the numeric value handed off
@@ -237,6 +291,12 @@ export function createMockBridge(): MockBridge {
         'setTextDecorationColor', 'setTextDecorationStyle',
         // pulp #1366 / #1434 — backdrop-filter (numeric blur arg).
         'setBackdropFilter',
+        // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
+        // 7 setX bridge fns now reachable from @pulp/react JSX. The
+        // C++ side has had these registered for a while; the gap was
+        // purely on the prop-applier dispatch.
+        'setBackfaceVisibility', 'setCursor', 'setFilter',
+        'setPointerEvents', 'setTransformOrigin', 'setUserSelect',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
         'setValue', 'setTheme', 'layout', 'on', 'registerHover',
         // pulp #1381 — registerPointer arms the bridge's on_pointer_event
@@ -250,6 +310,10 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1516 — CSS box-sizing keyword (content-box / border-box).
+        'setBoxSizing',
+        // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
+        'setGrid',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

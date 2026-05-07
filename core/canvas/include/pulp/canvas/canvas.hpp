@@ -334,6 +334,20 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+    /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
+    /// is the outer / end circle. Backends with a real two-circle shader
+    /// (Skia `MakeTwoPointConical`, CG `CGContextDrawRadialGradient`)
+    /// override; the default forwards to the single-circle overload using
+    /// the outer circle so older fallbacks still get a usable gradient.
+    virtual void set_fill_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_fill_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
     /// Set a conic (sweep) gradient as the fill paint.
     virtual void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                           const Color* colors, const float* positions,
@@ -343,6 +357,36 @@ public:
 
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
+
+    /// pulp #1434 bridge-thin gap-fill — Canvas2D `ctx.createPattern`.
+    /// Tile mode per axis: `repeat` mirrors Skia's `SkTileMode::kRepeat`,
+    /// `no_repeat` mirrors `SkTileMode::kDecal`. Spec values map as:
+    ///   "repeat"     → (repeat,    repeat)
+    ///   "repeat-x"   → (repeat,    no_repeat)
+    ///   "repeat-y"   → (no_repeat, repeat)
+    ///   "no-repeat"  → (no_repeat, no_repeat)
+    enum class PatternTileMode { repeat, no_repeat };
+
+    /// Set an image pattern as the fill paint. `image_src` is a file path
+    /// or `data:` URL — same identifier shape `draw_image_from_file`
+    /// consumes, so backends share one decode path. Default is no-op so
+    /// CPU-only / minimal canvases compile; SkiaCanvas overrides with a
+    /// real `SkShader::MakeImage`. Empty `image_src` clears any active
+    /// pattern (mirrors `clear_fill_gradient`'s reset semantics).
+    virtual void set_fill_pattern(const std::string& image_src,
+                                   PatternTileMode tile_x,
+                                   PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
+
+    /// Stroke counterpart. Rare in production code; default no-op.
+    /// SkiaCanvas overrides via the same `SkShader::MakeImage` path
+    /// applied to the stroke paint.
+    virtual void set_stroke_pattern(const std::string& image_src,
+                                     PatternTileMode tile_x,
+                                     PatternTileMode tile_y) {
+        (void)image_src; (void)tile_x; (void)tile_y;
+    }
 
     // ── Blend modes ─────────────────────────────────────────────────────
     /// Indices 0..15 match the existing W3C "advanced" composite ops and
@@ -388,6 +432,52 @@ public:
     virtual void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                           float x, float y) {
         (void)cp1x; (void)cp1y; (void)cp2x; (void)cp2y; line_to(x, y);
+    }
+    /// pulp #1521 — native arc subpath. Maps to Canvas2D
+    /// `ctx.arc(cx, cy, r, startAngle, endAngle, anticlockwise)` and to
+    /// SkPath::arcTo(SkRect, startDeg, sweepDeg, false) on Skia. Replaces
+    /// the JS shim's bezier approximation. The default fallback emits a
+    /// quadrant-segmented cubic-bezier polyline so capture-only backends
+    /// (RecordingCanvas) still produce a meaningful command stream when
+    /// they choose not to override.
+    virtual void arc(float cx, float cy, float radius,
+                     float start_angle, float end_angle,
+                     bool anticlockwise) {
+        (void)cx; (void)cy; (void)radius;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native arcTo. Maps to Canvas2D
+    /// `ctx.arcTo(x1, y1, x2, y2, radius)` and to
+    /// SkPath::arcTo(p1, p2, radius) on Skia (the 5-arg overload that
+    /// computes the tangent arc between the current point, p1, and p2).
+    virtual void arc_to(float x1, float y1, float x2, float y2, float radius) {
+        (void)x1; (void)y1; (void)x2; (void)y2; (void)radius;
+    }
+    /// pulp #1521 — native ellipse subpath. Maps to Canvas2D
+    /// `ctx.ellipse(cx, cy, rx, ry, rotation, startAngle, endAngle,
+    /// anticlockwise)`. Honours `rotation` (rx/ry axis rotation in
+    /// radians) by transforming the arc through SkMatrix on Skia.
+    virtual void ellipse(float cx, float cy, float rx, float ry,
+                         float rotation,
+                         float start_angle, float end_angle,
+                         bool anticlockwise) {
+        (void)cx; (void)cy; (void)rx; (void)ry; (void)rotation;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native rounded-rectangle subpath with per-corner
+    /// radii. Maps to Canvas2D `ctx.roundRect(x, y, w, h, radii)` and to
+    /// SkRRect::MakeRectRadii on Skia. Radii layout matches the CSS
+    /// 8-value form: top-left x/y, top-right x/y, bottom-right x/y,
+    /// bottom-left x/y. The JS shim normalizes the 1/2/3/4-value forms
+    /// to 8 floats before crossing the bridge.
+    virtual void round_rect(float x, float y, float w, float h,
+                            float tl_x, float tl_y,
+                            float tr_x, float tr_y,
+                            float br_x, float br_y,
+                            float bl_x, float bl_y) {
+        (void)x; (void)y; (void)w; (void)h;
+        (void)tl_x; (void)tl_y; (void)tr_x; (void)tr_y;
+        (void)br_x; (void)br_y; (void)bl_x; (void)bl_y;
     }
     /// Close the current path subpath.
     virtual void close_path() {}
@@ -480,6 +570,52 @@ public:
         save(); // fallback: just save state
         (void)x; (void)y; (void)w; (void)h;
         (void)opacity; (void)blur_radius;
+    }
+
+    /// pulp #1434 Phase A2-4 — full CSS filter-chain layer save.
+    /// Each entry in `chain` is one filter function; the canvas backend
+    /// composes them via `SkImageFilters::Compose` (Skia) or, for
+    /// CG-only paths, falls back to whichever entries the platform can
+    /// render natively. Default impl falls through to `save_layer` with
+    /// any blur entries collapsed to a single radius — preserves the
+    /// blur-only behavior that platforms without filter-chain support
+    /// already had.
+    struct FilterChainEntry {
+        enum class Kind {
+            blur,
+            brightness,
+            contrast,
+            grayscale,
+            hue_rotate,
+            invert,
+            opacity,
+            saturate,
+            sepia,
+            drop_shadow,
+        };
+        Kind kind = Kind::blur;
+        float amount = 0.0f;
+        float angle_deg = 0.0f;
+        float ds_offset_x = 0.0f;
+        float ds_offset_y = 0.0f;
+        float ds_blur = 0.0f;
+        Color ds_color{};
+    };
+    virtual void save_layer_with_filters(float x, float y, float w, float h,
+                                          float opacity,
+                                          const FilterChainEntry* chain,
+                                          int count) {
+        // Fallback: collapse to single-blur save_layer (prior behavior
+        // for platforms without filter-chain support).
+        float blur = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            if (chain[i].kind == FilterChainEntry::Kind::blur) {
+                blur += chain[i].amount;
+            } else if (chain[i].kind == FilterChainEntry::Kind::opacity) {
+                opacity *= chain[i].amount;
+            }
+        }
+        save_layer(x, y, w, h, opacity, blur);
     }
 
     // ── Text ─────────────────────────────────────────────────────────────
@@ -721,6 +857,35 @@ public:
     virtual void set_shadow_offset_x(float dx) { (void)dx; }
     virtual void set_shadow_offset_y(float dy) { (void)dy; }
 
+    // ── Canvas2D direction / filter (pulp #1520) ───────────────────────
+    /// Canvas2D `ctx.direction`. Sticky text-shaping direction that
+    /// applies to subsequent fillText / strokeText calls. Spec values:
+    ///   ltr     — left-to-right (default; matches SkShaper leftToRight=true)
+    ///   rtl     — right-to-left (HarfBuzz buffer direction RTL)
+    ///   inherit — pulled from the canvas element / document writing
+    ///             direction. On backends without a per-View writing
+    ///             direction yet, treated as ltr (the most common case).
+    /// Default no-op so backends without a real bidi/HarfBuzz path
+    /// remain unaffected; SkiaCanvas overrides to wire through to the
+    /// SkShaper invocation flag, RecordingCanvas captures one
+    /// `set_direction` command per setter so canvas2d harness tests
+    /// can assert flush order. Real bidi support (mixed-script
+    /// paragraphs requiring the Bidi algorithm) tracks separately.
+    enum class TextDirection { ltr, rtl, inherit };
+    virtual void set_direction(TextDirection direction) { (void)direction; }
+
+    /// Canvas2D `ctx.filter`. Sticky CSS <filter-function-list> string
+    /// applied to subsequent fill / stroke / text / image draws. Spec
+    /// supports: blur, brightness, contrast, drop-shadow, grayscale,
+    /// hue-rotate, invert, opacity, saturate, sepia. The default is
+    /// "none". SkiaCanvas parses the string into an SkImageFilter chain
+    /// and applies via SkPaint::setImageFilter; CG and other backends
+    /// can store the value but render unfiltered. RecordingCanvas
+    /// captures the raw string. Distinct from CSS `filter` on a View
+    /// (#1503) — that filter applies to the View element, this one
+    /// applies to the per-context Canvas2D paints inside it.
+    virtual void set_filter(const std::string& filter) { (void)filter; }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -823,6 +988,19 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky setters.
+        // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
+        // filter raw CSS <filter-function-list> string (e.g.
+        // "blur(5px) sepia(80%)") in `text`. RecordingCanvas captures
+        // each setter so tests can assert the JS shim flushed the
+        // sticky state before the next text/image/fill draw.
+        set_direction,
+        set_filter,
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // image source path / data URI in `text`, tile modes packed into
+        // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
+        set_fill_pattern,
+        set_stroke_pattern,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── issue-929: real clearRect that replaces pixels ────────────
@@ -838,7 +1016,16 @@ struct DrawCommand {
         cubic_to,             ///< (cp1x, cp1y, cp2x, cp2y, x, y) in f[0..5]
         close_path,           ///< no payload
         fill_current_path,    ///< no payload — uses last set_fill_color
-        stroke_current_path   ///< no payload — uses last set_stroke_color + set_line_width
+        stroke_current_path,  ///< no payload — uses last set_stroke_color + set_line_width
+        // ── pulp #1521: native arc subpaths (replace JS bezier approx) ─
+        // Captured so widgets that emit native arc commands can be
+        // asserted at the command-stream level without a Skia raster
+        // surface. Maps 1:1 to the new Canvas::arc / arc_to / ellipse /
+        // round_rect virtual methods.
+        arc,                  ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
+        arc_to,               ///< (x1, y1, x2, y2, radius) in f[0..4]
+        ellipse,              ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
+        round_rect            ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
     };
 
     Type type;
@@ -942,6 +1129,20 @@ public:
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
 
+    // pulp #1520 — Canvas2D ctx.direction / ctx.filter capture.
+    void set_direction(TextDirection direction) override;
+    void set_filter(const std::string& filter) override;
+
+    // pulp #1434 bridge-thin gap-fill — capture pattern setter intents
+    // so canvas2d harness tests can assert flush order without needing
+    // a real raster surface or decoded image.
+    void set_fill_pattern(const std::string& image_src,
+                          PatternTileMode tile_x,
+                          PatternTileMode tile_y) override;
+    void set_stroke_pattern(const std::string& image_src,
+                            PatternTileMode tile_x,
+                            PatternTileMode tile_y) override;
+
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape
     // without needing a real raster surface. Pure capture; no geometry
@@ -955,6 +1156,23 @@ public:
     void close_path() override;
     void fill_current_path() override;
     void stroke_current_path() override;
+
+    // pulp #1521 — native arc subpaths (recorded as DrawCommands so
+    // widget tests can assert emit order without a raster surface).
+    void arc(float cx, float cy, float radius,
+             float start_angle, float end_angle,
+             bool anticlockwise) override;
+    void arc_to(float x1, float y1, float x2, float y2,
+                float radius) override;
+    void ellipse(float cx, float cy, float rx, float ry,
+                 float rotation,
+                 float start_angle, float end_angle,
+                 bool anticlockwise) override;
+    void round_rect(float x, float y, float w, float h,
+                    float tl_x, float tl_y,
+                    float tr_x, float tr_y,
+                    float br_x, float br_y,
+                    float bl_x, float bl_y) override;
 
 private:
     std::vector<DrawCommand> commands_;

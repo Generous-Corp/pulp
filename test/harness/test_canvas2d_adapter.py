@@ -97,33 +97,38 @@ class Canvas2dAdapterClassifyTest(unittest.TestCase):
         self.assertIn("arc-as-path", result.detail)
         self.assertFalse(result.drifts, msg=result.detail)
 
-    def test_oracle_partial_radial_is_DIVERGE(self):
-        """createRadialGradient is pinned at partial (gotcha #3: single-circle)."""
+    def test_oracle_supported_radial_is_PASS(self):
+        """createRadialGradient — pulp #1524 promoted DIVERGE → PASS.
+        Both circles are now wired through to the backend (Skia
+        MakeTwoPointConical, CG full CGContextDrawRadialGradient with
+        both circles); the oracle expectedStatus is unset (defaults to
+        supported), so the catalog status `supported` matches and the
+        adapter classifies PASS."""
         e = CatalogEntry(
             surface="canvas2d",
             name="canvas2d/createRadialGradient",
-            status="partial",
-            maps_to="ctx.createRadialGradient — bridge takes single circle (cx,cy,r).",
+            status="supported",
+            maps_to="ctx.createRadialGradient -> canvasSetRadialGradient + canvasSetRadialGradientTwoCircles.",
         )
         result = self.adapter.run(e)
-        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
-        self.assertIn("radial-single-circle", result.detail)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
 
     # ── Oracle-pinned missing ────────────────────────────────────────
 
-    def test_oracle_partial_conic_is_DIVERGE(self):
-        """createConicGradient: pulp #1434 bridge-thin gap-fill — Skia
-        path is wired (SkGradientShader::MakeSweep), CG degrades to
-        first-stop. Oracle expectedStatus=partial pins this as DIVERGE."""
+    def test_oracle_supported_conic_is_PASS(self):
+        """createConicGradient: pulp #1524 — Skia routes through
+        SkGradientShader::MakeSweep; CG software-rasterises a CGImage
+        of the active clip's bounding box (per-pixel atan2 sweep) and
+        paints it via CGContextDrawImage. Catalog status is
+        `supported`; adapter classifies PASS."""
         e = CatalogEntry(
             surface="canvas2d",
             name="canvas2d/createConicGradient",
-            status="partial",
+            status="supported",
             maps_to="ctx.createConicGradient -> canvasSetConicGradient.",
         )
         result = self.adapter.run(e)
-        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
-        self.assertIn("cg-conic-degraded", result.detail)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
 
     def test_oracle_missing_shadow_is_NOT_IMPL(self):
         """Synthetic NOT-IMPL entry — uses an explicitly fabricated
@@ -277,15 +282,16 @@ class VerifierEndToEndTest(unittest.TestCase):
         self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
 
     def test_known_gotcha_entries_classified_DIVERGE(self):
-        """The four oracle-pinned gotcha entries must always be DIVERGE.
-        Regression guard for the SKILL gotchas catalog."""
+        """The remaining oracle-pinned gotcha entries must always be DIVERGE.
+        Regression guard for the SKILL gotchas catalog. (createRadialGradient
+        was DIVERGE before pulp #1524 wired the two-circle form; it's now
+        PASS — see test_oracle_supported_radial_is_PASS.)"""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
             "canvas2d/arc",
             "canvas2d/arcTo",
             "canvas2d/ellipse",
-            "canvas2d/createRadialGradient",
             "canvas2d/transform",
         ):
             with self.subTest(entry=name):
@@ -297,7 +303,7 @@ class VerifierEndToEndTest(unittest.TestCase):
                 )
 
     def test_known_unimpl_entries_classified_NOT_IMPL(self):
-        """The filter, pattern, direction entries must always be NOT-IMPL.
+        """The filter and direction entries must remain NOT-IMPL.
 
         issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
         shadowOffsetY are now PASS — see
@@ -308,12 +314,13 @@ class VerifierEndToEndTest(unittest.TestCase):
         imageSmoothingQuality are now PASS — see
         `test_bridge_thin_gap_fill_entries_classified_PASS`.
 
-        createPattern stayed NOT-IMPL — deferred from #1434 because it
-        needs real image-resource plumbing, not just a bridge fn."""
+        Sub-agent #24 follow-up to #1480: createPattern is now
+        DIVERGE — Skia path renders real tiled fills via
+        SkShader::MakeImage; CG degrades. See
+        `test_bridge_thin_pattern_classified_DIVERGE`."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
-            "canvas2d/createPattern",
             "canvas2d/filter",
             "canvas2d/direction",
         ):
@@ -349,19 +356,37 @@ class VerifierEndToEndTest(unittest.TestCase):
                     msg=f"{name} must be PASS after #1434: {by_name[name].detail}",
                 )
 
-    def test_bridge_thin_conic_classified_DIVERGE(self):
-        """pulp #1434 bridge-thin gap-fill — createConicGradient moves
-        from NOT-IMPL → DIVERGE because the Skia path renders the real
-        sweep via SkGradientShader::MakeSweep but CG has no native
-        conic shader and degrades to the first-stop colour."""
+    def test_conic_classified_PASS(self):
+        """pulp #1524 — createConicGradient promoted DIVERGE → PASS.
+        Skia: SkGradientShader::MakeSweep. CG: software-rasterised
+        CGImage of the active clip's bounding box (per-pixel atan2
+        sweep + colour-stop interpolation), painted via
+        CGContextDrawImage."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         name = "canvas2d/createConicGradient"
         self.assertIn(name, by_name)
         self.assertEqual(
             by_name[name].status,
-            Status.DIVERGE,
-            msg=f"{name} must be DIVERGE (CG degraded): {by_name[name].detail}",
+            Status.PASS,
+            msg=f"{name} must be PASS after #1524: {by_name[name].detail}",
+        )
+
+    def test_pattern_classified_PASS(self):
+        """pulp #1524 — createPattern promoted DIVERGE → PASS. Skia
+        routes through SkShader::MakeImage with SkTileMode per axis;
+        CG installs a real CGPattern via CGPatternCreate +
+        CGPatternCallbacks (image-tile draw callback) +
+        CGContextSetFillPattern. `no_repeat` axes blow up the tile step
+        beyond the clip bounding box so only the seed tile lands."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        name = "canvas2d/createPattern"
+        self.assertIn(name, by_name)
+        self.assertEqual(
+            by_name[name].status,
+            Status.PASS,
+            msg=f"{name} must be PASS after #1524: {by_name[name].detail}",
         )
 
     def test_shadow_entries_classified_PASS(self):

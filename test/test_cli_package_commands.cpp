@@ -337,6 +337,29 @@ TEST_CASE("cmd_target list shows source-checkout defaults without pulp.toml",
     REQUIRE(listed.stdout_text.find("macOS-arm64") != std::string::npos);
 }
 
+TEST_CASE("cmd_target add warns when installed packages do not support the new target",
+          "[cli][package-commands][target][issue-493]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"mpl-analyzer", {"0.9.0", "https://example.com/mpl-analyzer.git", "", "v0.9.0"}},
+    })));
+
+    auto added = run_in_project(tmp.path, [&] { return cmd_target({"add", "Linux-x64"}); });
+    REQUIRE(added.exit_code == 0);
+    REQUIRE(added.stdout_text.find("Added target: Linux-x64") != std::string::npos);
+    REQUIRE(added.stdout_text.find("MPL Analyzer does not support Linux-x64") !=
+            std::string::npos);
+    const std::vector<std::string> expected_targets = {
+        "macOS-arm64", "Windows-x64", "Linux-x64"
+    };
+    REQUIRE(target_strings(tmp.path) == expected_targets);
+}
+
 TEST_CASE("search, list, suggest, and audit commands use staged local data",
           "[cli][package-commands][registry][issue-643]") {
     TempDir tmp;

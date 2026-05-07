@@ -65,6 +65,23 @@ enum class LayoutMode { flex, grid };
 // through to YGFlexDirectionColumn.
 enum class FlexDirection { row, column, row_reverse, column_reverse };
 
+/// pulp #1434 Triage #14 — flex-wrap tri-state. Yoga has YGWrapNoWrap /
+/// YGWrapWrap / YGWrapWrapReverse natively. Before this slice, the
+/// FlexStyle field was a bool, so the wrap-reverse case was
+/// inexpressible — `flex-wrap: wrap-reverse` silently fell through
+/// to plain wrap.
+enum class FlexWrap { no_wrap, wrap, wrap_reverse };
+
+/// pulp #1516 — CSS `box-sizing`. Yoga 3.x has `YGNodeStyleSetBoxSizing`
+/// which natively honors the spec: with `border-box`, the declared
+/// width/height includes padding + border (the inner content area
+/// shrinks); with `content-box` (CSS default), padding + border are
+/// outside the declared dimensions. Web designs almost universally
+/// reset `* { box-sizing: border-box }`, so this matters more than
+/// the +1 catalog entry suggests — many imports only lay out
+/// correctly under border-box.
+enum class BoxSizing { content_box, border_box };
+
 // Flex alignment (auto_ = inherit from parent's align_items).
 // pulp #1434 (rn batch B) — added `baseline`. Yoga has YGAlignBaseline
 // natively; before this batch, RN exports emitting
@@ -140,6 +157,27 @@ struct FlexStyle {
     FlexDirection direction = FlexDirection::column;
     FlexAlign align_items = FlexAlign::stretch;
     FlexAlign align_self = FlexAlign::auto_;  ///< Override parent's align_items for this child
+
+    /// pulp #1434 (sub-agent #12 follow-up) — align-content is the
+    /// CSS / Yoga multi-line flex cross-axis distribution control.
+    /// Yoga supports it natively via YGNodeStyleSetAlignContent; the
+    /// only gap was a missing FlexStyle field + setter wiring. Default
+    /// matches Yoga's default (FlexStart) — note this differs from
+    /// CSS's `normal`/`stretch` defaults but matches Yoga / RN. The
+    /// usual `space-between`/`space-around`/`space-evenly` /
+    /// `flex-start`/`flex-end`/`center`/`stretch` values all map to
+    /// the existing FlexAlign enum + the FlexJustify space-* values
+    /// via `to_yg_align_content` in yoga_layout.cpp.
+    FlexAlign align_content = FlexAlign::start;
+    /// True when align_content was set to one of the space-* values
+    /// (space-between / space-around / space-evenly). FlexAlign has
+    /// no space variants because they are nonsensical for align_items
+    /// / align_self; we encode them on a sibling enum here so the
+    /// dispatcher can route to YGAlignSpaceBetween / SpaceAround /
+    /// SpaceEvenly without overloading FlexAlign across two surfaces.
+    enum class AlignContentSpace { none, space_between, space_around, space_evenly };
+    AlignContentSpace align_content_space = AlignContentSpace::none;
+
     FlexJustify justify_content = FlexJustify::start;
 
     float gap = 0;              ///< Shorthand for both row_gap and column_gap
@@ -203,6 +241,38 @@ struct FlexStyle {
     Dimension dim_padding_bottom;
     Dimension dim_padding_left;
 
+    /// pulp #1542 — yoga logical-edge fan-out. CSS / RN logical edges
+    /// (`marginStart` / `marginEnd` / `paddingStart` / `paddingEnd` /
+    /// `start` / `end`) flip with the writing direction: in LTR, `start`
+    /// is the left edge; in RTL, `start` is the right edge. Yoga
+    /// resolves this natively via `YGEdgeStart` / `YGEdgeEnd` once the
+    /// node's writing direction is set (see `writing_direction` below).
+    /// yoga_layout.cpp dispatches on `dim_*.unit`:
+    ///   • px      → YGNodeStyleSetMargin/Padding/Position(YGEdgeStart|End)
+    ///   • percent → YGNodeStyleSetMargin/Padding/PositionPercent(...)
+    ///   • auto_   → YGNodeStyleSetMarginAuto(...) (margin only; Yoga
+    ///                does not support auto on padding or position)
+    /// These fields supplement, not replace, the per-side
+    /// `dim_margin_left` / `dim_margin_right` etc. — yoga applies both
+    /// and the *_start/end pair wins for the resolved start/end edge.
+    Dimension dim_margin_start;
+    Dimension dim_margin_end;
+    Dimension dim_padding_start;
+    Dimension dim_padding_end;
+    Dimension dim_start;
+    Dimension dim_end;
+
+    /// pulp #1542 — node writing direction. Controls how Yoga resolves
+    /// `YGEdgeStart` / `YGEdgeEnd` (and how it lays out row-axis
+    /// children when no explicit start/end edge is set). Defaults to
+    /// `inherit` so the layout root's direction propagates down. The
+    /// bridge accepts the `direction_writing` sub-key on `setFlex`
+    /// (avoids collision with the existing `direction` key for
+    /// `flex-direction`) and the canonical CSS / RN values
+    /// `'ltr'` / `'rtl'` / `'inherit'`.
+    enum class WritingDirection { inherit, ltr, rtl };
+    WritingDirection writing_direction = WritingDirection::inherit;
+
     /// Resolve viewport-relative dimensions and apply to float fields.
     /// Call before layout pass with the viewport size.
     void resolve_dimensions(float parent_w, float parent_h,
@@ -217,7 +287,24 @@ struct FlexStyle {
             min_height = dim_min_height.resolve(parent_h, viewport_w, viewport_h, dpi);
     }
 
-    bool flex_wrap = false;     ///< Wrap to next line when main axis overflows
+    /// pulp #1434 Triage #14 — tri-state wrap. CSS / RN allow
+    /// `wrap-reverse` (overflows wrap UP instead of DOWN, or RIGHT
+    /// instead of LEFT depending on flex-direction). Yoga has
+    /// YGWrapWrapReverse for this; previously flex_wrap was a bool
+    /// expressible only as wrap / no-wrap. Bridge accepts numeric (0/1
+    /// for backward compat) and the CSS keyword strings ("wrap" /
+    /// "wrap-reverse" / "nowrap" / "no-wrap").
+    FlexWrap flex_wrap = FlexWrap::no_wrap;
+    /// pulp #1516 — CSS `box-sizing`. Default is `border_box` to match
+    /// Yoga 3.x's own default AND pulp's prior implicit behavior (no
+    /// existing fixture / consumer was prepared for content-box layout
+    /// math, even though that's the CSS spec default). Web designs
+    /// almost universally reset to `border-box` via
+    /// `* { box-sizing: border-box }`, so this matches what consumers
+    /// pasting JSX from Figma / v0 / Claude Design HTML expect.
+    /// Setting `content-box` opts in to CSS-spec behavior:
+    /// `width = 100; padding = 10` → outer width = 120 instead of 100.
+    BoxSizing box_sizing = BoxSizing::border_box;
     int order = 0;              ///< Layout order (lower values first, default 0)
 
     /// Aspect ratio (width / height). When set, Yoga sizes the cross axis
@@ -266,21 +353,79 @@ struct GridTrack {
     static GridTrack auto_size() { return {Type::auto_, 0}; }
 };
 
-/// Grid layout properties (CSS Grid Level 1 subset)
+/// Grid layout properties (CSS Grid Level 1 subset).
+///
+/// pulp #1434 Phase A2-2 extends the existing infrastructure with:
+///   • grid-auto-columns / grid-auto-rows  — implicit-track sizing
+///   • grid-auto-flow                       — row / column / dense
+///   • grid-template-areas                  — named-area string parser
+///   • grid-area shorthand                  — single token reference
+///     into the named-area map (resolves to the matching cell range)
 struct GridStyle {
     std::vector<GridTrack> template_columns;  ///< grid-template-columns
     std::vector<GridTrack> template_rows;     ///< grid-template-rows
+
+    /// pulp #1434 Phase A2-2 — implicit-track sizing for auto-placed
+    /// items that overflow the explicit grid. CSS spec: a single
+    /// track template that's repeated for every implicit row/column.
+    GridTrack auto_columns = GridTrack::auto_size();
+    GridTrack auto_rows    = GridTrack::auto_size();
+
+    /// pulp #1434 Phase A2-2 — auto-flow direction.
+    enum class AutoFlow {
+        row,           ///< default; fill rows left-to-right then wrap
+        column,        ///< fill columns top-to-bottom then wrap
+        row_dense,     ///< row + dense-packing (fill earlier holes)
+        column_dense,  ///< column + dense-packing
+    };
+    AutoFlow auto_flow = AutoFlow::row;
+
     float column_gap = 0;                     ///< grid-column-gap
     float row_gap = 0;                        ///< grid-row-gap
+
+    /// pulp #1434 Phase A2-2 — named-area grid. Each entry is
+    /// `{name, col_start, col_end, row_start, row_end}` (1-based,
+    /// matching CSS line-numbering). Populated by
+    /// `parse_template_areas("'h h h' 'm c c' 'f f f'")`. The
+    /// per-child `grid_area` field below references one of these
+    /// names to resolve placement.
+    struct NamedArea {
+        std::string name;
+        int col_start = 1;
+        int col_end = 1;
+        int row_start = 1;
+        int row_end = 1;
+    };
+    std::vector<NamedArea> template_areas;
 
     // Per-child grid placement
     int grid_column_start = 0;  ///< 0 = auto placement
     int grid_column_end = 0;    ///< 0 = span 1
     int grid_row_start = 0;
     int grid_row_end = 0;
+    /// pulp #1434 Phase A2-2 — `grid-area: header` references the
+    /// parent's NamedArea by name. Empty string means "no named-area
+    /// reference; use the explicit start/end fields above."
+    std::string grid_area_name;
 
     /// Parse "1fr 2fr auto 100px" into track list
     static std::vector<GridTrack> parse_template(const std::string& tmpl);
+
+    /// pulp #1434 Phase A2-2 — parse the CSS named-area grid string
+    /// (e.g. `"'h h h' 'm c c' 'f f f'"`) into the NamedArea list.
+    /// Each row is wrapped in single quotes; cells within a row are
+    /// space-separated. Cells that share a name across adjacent rows
+    /// or columns merge into a single rectangular area. `'.'` is the
+    /// CSS spec spacer token (skipped entirely).
+    static std::vector<NamedArea> parse_template_areas(const std::string& css);
+
+    /// Parse the auto-flow keyword string. Unrecognized → row.
+    static AutoFlow parse_auto_flow(const std::string& s) {
+        if (s == "column")             return AutoFlow::column;
+        if (s == "dense" || s == "row dense") return AutoFlow::row_dense;
+        if (s == "column dense")       return AutoFlow::column_dense;
+        return AutoFlow::row;
+    }
 };
 
 } // namespace pulp::view

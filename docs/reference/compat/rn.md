@@ -16,17 +16,188 @@ Spec walk:
 - [RN Layout Props](https://reactnative.dev/docs/layout-props)
 - [RN Transforms](https://reactnative.dev/docs/transforms)
 
-## Counts (2026-05-04)
+## Counts (2026-05-06)
 
 | Status | Count |
 |--------|------:|
-| supported | ~45 |
-| partial | ~3 |
-| missing | ~70 |
-| wontfix | ~3 |
+| supported | 73 |
+| partial | 24 |
+| missing | 20 |
+| wontfix | 3 |
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1546)** — five RN entries reclassified in
+  compat.json: four shadow props flipped `missing` → `wontfix`,
+  `isolation` flipped `missing` → `noop` (corrected from the
+  initial `wontfix` after a Codex P2 review on PR #1565 noted the
+  RN oracle DOES model isolation — `rn-viewstyle.json:134` defines
+  enum `auto`|`isolate`, flagged "RN New Architecture only"). PURE
+  CATALOG: zero implementation, zero behavior change. The four
+  iOS-only legacy shadow props (`shadowColor`, `shadowOffset`,
+  `shadowOpacity`, `shadowRadius`) are superseded by `boxShadow`
+  (CSS box-shadow syntax) in modern RN (RN 0.71+); pulp already
+  supports `boxShadow` (`rn/boxShadow=supported`), so the iOS
+  legacy is genuinely out of scope rather than missing. `isolation`
+  is honestly modeled as `noop` (Pulp accepts the value but the
+  underlying box composition isn't stacking-context-isolated —
+  same pattern as `css/animation`, `css/willChange`), keeping it
+  in the rn denominator so a real implementation gap stays visible
+  in drift metrics. The harness adapter short-circuits
+  `status: wontfix` → OOS at step 0 (no adapter change needed);
+  `noop` flows through the existing NO_OP marker path via the
+  mapsTo string. Effective rn denominator (non-`wontfix`) drops
+  117 → 113; harness drift count drops 21 → 17 (the four
+  iOS-platformOnly entries were classifying OOS via the oracle's
+  `platformOnly: ios` flag while the catalog claimed `missing`,
+  producing four DRIFT entries that the explicit `wontfix` now
+  resolves cleanly; isolation classifies cleanly as NO_OP).
+- **2026-05-06 (pulp #1550)** — RN catalog hygiene partial → supported
+  promotion pass. `rn/boxShadow`, `rn/cursor`, and `rn/overflow` flipped
+  `partial` → `supported` after auditing the prop-applier dispatch path
+  against the C++ bridge. All three are end-to-end wired: the prop-applier
+  forwards values verbatim, the bridge fns mutate the matching View
+  slots, and Skia / hit-testing honor them. Each got a `tests` reference
+  added (`prop-applier-box-shadow.test.ts`,
+  `prop-applier-rn-wires.test.ts`, `prop-applier-pointer.test.ts`) —
+  these tests already exist; the catalog just wasn't claiming them.
+  `unsupportedValues` cleaned up where over-broad: boxShadow keeps the
+  honest multi-shadow / array-form gap; overflow keeps `scroll`
+  (View::Overflow has no scroll mode — that's a ScrollView-intrinsic
+  concern). `rn/userSelect` was audited in the same pass but
+  intentionally stays `partial`: `setUserSelect` is registered as a
+  no-op stash in `widget_bridge.cpp` (the prop-applier dispatches but
+  the View has no UserSelect storage yet), so promotion is blocked
+  until the bridge actually applies the mode. `rn/tintColor` and
+  `rn/objectFit` (called out in #1550's issue body) are not in the
+  catalog and not wired in prop-applier — Image bridge has the
+  underlying Skia capability but no JSX → bridge dispatch — so they're
+  out of scope here and stay tracked as a future Image-prop wire-up.
+  Net catalog effect: 3 entries promoted partial → supported. PASS+DIV
+  ratio is unchanged (DIVERGE entries still count toward effective
+  coverage), but the surface report is more honest.
+- **2026-05-06 (pulp #1434 Phase A2-4)** — `rn/filter` extended from
+  `blur(Npx)`-only to the full CSS Filter Effects function set
+  (`brightness` / `contrast` / `grayscale` / `hue-rotate` / `invert` /
+  `opacity` / `saturate` / `sepia` / `drop-shadow` plus chains). The
+  `@pulp/react` prop-applier already forwards the CSS string verbatim
+  (sub-agent #27's bridge-wires bundle); the bridge now parses the
+  full chain and routes to Skia's `SkImageFilters::Compose` +
+  `SkColorFilters::Matrix` via the new
+  `canvas.save_layer_with_filters(...)` API.
+- **2026-05-06 (pulp #1547)** — RN textDecoration cluster surfaced at
+  the `@pulp/react` JSX layer: `textDecorationLine`,
+  `textDecorationColor`, `textDecorationStyle` all flipped `missing` →
+  `supported`. Each prop routes through the matching bridge fn
+  (`setTextDecoration` / `setTextDecorationColor` /
+  `setTextDecorationStyle`) which has been registered since #1434 —
+  the gap was purely on the prop-applier dispatch. RN's multi-line
+  spelling `'underline line-through'` for `textDecorationLine` passes
+  through verbatim; the C++ side parses it. Same change wired
+  `textAlignVertical` (Android-only in RN, no CSS analogue) →
+  `partial`: the four enum values map to `alignItems` on the owning
+  View (top → flex-start, center → center, bottom → flex-end,
+  auto → auto). RN's spec applies WITHIN a text container, but pulp's
+  flex-only View model has no inline text-block concept, so this is
+  the closest semantic — a View with one text child gets the same
+  visual top/center/bottom alignment.
+- **2026-05-06 (pulp #1518)** — `rn/flex` shorthand wired through the
+  `@pulp/react` prop-applier. RN-style numeric `flex={n}` now expands
+  to `{flexGrow: n, flexShrink: 1, flexBasis: 0}` (positive `n`),
+  `(0, 0, 'auto')` (zero), or `(0, 1, 'auto')` (negative). Previously
+  `<View flex={1} />` silently dropped the prop and consumers had to
+  fan it out manually. Pure adapter aliasing — no bridge or C++ work
+  needed; underlying `flex_grow` / `flex_shrink` / `flex_basis` were
+  already stable. Closes the most-cited rn gap (the doc had this
+  under "notable gaps" since the rn surface was first inventoried).
+- **2026-05-06 (pulp #1519)** — RN outline cluster surfaced at the
+  `@pulp/react` JSX layer: `outlineColor`, `outlineOffset`,
+  `outlineStyle`, `outlineWidth` all flipped `missing` → `supported`.
+  Each prop routes through its own per-attribute bridge fn
+  (`setOutlineColor` / `setOutlineOffset` / `setOutlineStyle` /
+  `setOutlineWidth`) so a JSX prop diff that touches one outline-*
+  preserves the others — same shape as the borderColor / borderWidth
+  / borderStyle cluster (#1027 + #1434 Triage #10). The View grew
+  four new slots (`outline_color_`, `outline_offset_`,
+  `outline_style_`, `outline_width_`); the line-style enum is
+  reused from `View::BorderStyle` since the CSS spec lists the
+  identical keyword set for outline + border. Skia paint inflates
+  the box by `outline_offset + outline_width / 2` and strokes —
+  outline does NOT take Yoga layout space (it draws OUTSIDE the
+  border-box and the parent never reserves room for it). Dashed /
+  dotted install `SkDashPathEffect` at outline-stroke time; other
+  named styles (double / groove / ridge / inset / outset) currently
+  degrade to solid (paint-side gap, same as borderStyle); none /
+  hidden / zero-width short-circuit the stroke entirely. The same
+  bridge fns flipped the `css/outline*` entries (`outline`,
+  `outlineColor`, `outlineOffset`, `outlineStyle`, `outlineWidth`)
+  to `supported` — the CSS translator at
+  `core/view/js/web-compat-style-decl.js` now fans the `outline:
+  <width> <style> <color>` shorthand out to the per-attribute
+  setters and routes the four longhands through them.
+- **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
+  the `@pulp/react` prop-applier now forwards `cursor`, `userSelect`,
+  and `pointerEvents` to the matching bridge fns (previously these
+  three RN-style props had no prop-applier dispatch despite the
+  bridge fns existing). Status on `rn/cursor`, `rn/userSelect`, and
+  `rn/pointerEvents` flipped `missing` → `partial` / `supported`,
+  matching the css surface coverage. `rn/flexWrap` now accepts the
+  CSS keyword string set (`'wrap'` / `'wrap-reverse'` / `'nowrap'` /
+  `'no-wrap'`) alongside the legacy boolean — the bridge routes
+  `wrap-reverse` through Yoga's `YGWrapWrapReverse` (Triage #14).
+- **2026-05-05 (pulp #1434 rn logical-edge bundle, sub-agent #27 finding)** —
+  11 RN logical-flow props wired through the `@pulp/react` prop-applier
+  with an LTR-only fast path: `marginStart` / `marginEnd` /
+  `paddingStart` / `paddingEnd` route to the matching `*Left` /
+  `*Right` per-edge bridge calls; `borderStartWidth` /
+  `borderEndWidth` route to `setBorderLeftWidth` / `setBorderRightWidth`;
+  `start` / `end` route to `setLeft` / `setRight`. The CSS `inset`
+  shorthand fans out to top/right/bottom/left with the standard
+  1/2/3/4-token expansion (numeric or percent strings forward
+  verbatim). `insetBlock` → top + bottom; `insetInline` → left +
+  right. All 11 entries flipped `missing` → `partial` — the LTR
+  assumption is the honest `unsupportedValues` caveat (true RTL bidi
+  defers to a future direction system).
+- **2026-05-05 (pulp #1434 rn bridge-wires bundle, sub-agent #27 finding)** —
+  7 RN-style props that already had C++ bridge fns registered but no
+  `@pulp/react` JSX dispatch. TS-only PR (no C++ touched): wired
+  `backfaceVisibility`, `cursor`, `filter`, `pointerEvents`,
+  `textTransform`, `transformOrigin`, `userSelect` through the
+  prop-applier to the matching `setX` setters. `transformOrigin`
+  parses CSS strings (`'NN% NN%'` / `'NNpx NNpx'` / `'center'` /
+  keyword pairs like `'left top'`) into two fractional 0..1
+  coordinates before dispatch. Status flips: `backfaceVisibility`,
+  `pointerEvents`, `textTransform`, `transformOrigin`, `filter` →
+  `supported`; `cursor`, `userSelect` → `partial` (CSS spec covers
+  more values than the bridge's enum). Highest-leverage single rn
+  PR remaining in the umbrella; closes 7 entries with zero C++ work.
+- **2026-05-05 (pulp #1434 Triage #10)** — `rn/borderStyle` surfaced
+  at the `@pulp/react` JSX layer with the full keyword set: `solid`,
+  `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`,
+  `none`, `hidden`. The prop-applier dispatches the keyword to the
+  newly-registered `setBorderStyle` bridge fn; `View::BorderStyle`
+  stores the enum and the Skia paint installs `SkDashPathEffect`
+  for `dashed` / `dotted` at stroke time. Other named styles
+  currently degrade to solid (paint-side gap). `none` / `hidden`
+  skip the stroke entirely. Reclassified missing → supported. RN
+  exports / Figma motion borders / v0.dev card outlines now port
+  verbatim.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  `rn/*` entries closed in one slice. `rn/alignContent` flipped
+  NOT-IMPL → PASS: `@pulp/react`'s `FlexProps` now exposes
+  `alignContent` (new `FlexAlignContent` type) and the prop-applier
+  forwards verbatim to `setFlex(id, 'align_content', value)`. Bridge
+  routes through `FlexStyle::align_content` /
+  `align_content_space` to Yoga's `YGNodeStyleSetAlignContent`;
+  accepts both bare and prefixed CSS spellings plus the three
+  space-* values. `rn/width` and `rn/height` flipped DIVERGE → PASS
+  for `'auto'` (Yoga "hug contents") — the TS surface already typed
+  these as `number | string` from the percent batch, so the change
+  is bridge-side: `FlexStyle::dim_*.unit == auto_` dispatches to
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`. RN snippets emitting
+  `style={{ flexWrap: 'wrap', alignContent: 'space-between' }}` or
+  `style={{ width: 'auto' }}` (Figma auto-layout exports, v0.dev,
+  Claude Design) now port verbatim.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   on the `@pulp/react` JSX surface now accept `number | string`
@@ -43,6 +214,27 @@ Spec walk:
   port verbatim. Catalog accuracy update — these entries were PASS
   already, but `supportedValues` now correctly enumerates the
   broadened type vocabulary.
+- **2026-05-05 (pulp #1434 Triage #8)** — `rn/backgroundColor`,
+  `rn/color`, and the per-edge `rn/border{Top,Right,Bottom,Left}Color`
+  + `rn/borderColor` entries now accept the CSS Color Module Level 4
+  modern color spaces: `oklch()`, `oklab()`, `lch()`, `lab()`, and
+  `color(srgb|srgb-linear|display-p3 ...)`. The shared `parseCSSColor`
+  helper (in `core/view/js/css-parser.js`, used by both the DOM-lite
+  path and any RN style consumer that resolves color strings)
+  converts to gamma-encoded sRGB hex at parse time. Reclassified
+  DIVERGE / partial → PASS for 7 `rn/*Color` entries. RN `style={{
+  color: 'oklch(0.7 0.18 240)' }}` ports verbatim from Figma copy-CSS,
+  v0.dev hero color tokens, and Claude Design transition states.
+- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `rn/transform` array
+  walker now dispatches `skewX` / `skewY` (previously stored on the
+  snapshot but silently dropped because the bridge fn wasn't
+  registered). `setSkew(id, x_deg, y_deg)` is newly registered;
+  `View::set_skew` had existed in C++ since the 2D slot landed.
+  `[{skewX:'10deg'},{skewY:'5deg'}]` produces ONE consolidated
+  `setSkew(10, 5)` call thanks to the within-array axis merging.
+  Status flipped `partial` → `supported`. Deferred (still silent
+  no-op): `rotateX` / `rotateY` / `perspective` / `matrix` — pulp's
+  2D View has no 3D rotation storage; tracked for a follow-up.
 - **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
   the RN array-of-objects shape:
   ```js
@@ -119,18 +311,15 @@ Spec walk:
 
 ## Notable gaps
 
-1. `rn/flex` shorthand — RN's `style={{flex: 1}}` is the most common
-   pattern in tutorials. `@pulp/react` users must type
-   `flexGrow={1} flexShrink={1} flexBasis={0}`.
-2. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
+1. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
    — direction-aware logical props not wired (Yoga RTL is also
    unsupported).
-3. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
+2. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
    `rn/shadowRadius` — iOS shadow surface; routed via
    `boxShadow` instead.
-4. `rn/elevation` — Android-only; not modeled.
-5. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
-6. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
+3. `rn/elevation` — Android-only; not modeled.
+4. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
+5. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
    support; bridge plumbing absent).
 
 ## SvgPath (#994 / #1291)

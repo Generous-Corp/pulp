@@ -186,23 +186,34 @@ function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
 // carry state across renders.
 //
 // Bridge gaps (deferred — TODOs + follow-up issue):
-//   • `setSkew` is unregistered (View::set_skew exists but no bridge fn).
-//     skewX/skewY entries are stored on the snapshot but not dispatched.
 //   • setScale is uniform-only — independent scaleX/scaleY axes can't
 //     round-trip. We approximate: scale > scaleX > scaleY in priority,
 //     last-write-wins within the array; if scaleX≠scaleY we emit the
 //     last seen and document the limitation.
-//   • rotateX/rotateY/perspective/matrix — 3D / matrix transforms not
+//   • rotateX/rotateY/perspective/matrix3d — 3D / matrix transforms not
 //     modeled in pulp's 2D View (no perspective; rotation is Z-axis
 //     only). Silently dropped with TODO.
+//   • matrix(a b c d tx ty) — 2D affine; the CSS shim decomposes to
+//     translate + uniform-scale + rotate components. The @pulp/react
+//     RN array surface doesn't have a matrix entry today (RN spec:
+//     only translateX/Y, scale, scaleX/Y, rotate/Z, skewX/Y), so the
+//     walker just silently drops `matrix`/`matrix3d` for parity.
+//
+// Triage #9 fan-out (this PR) — `setSkew` is now a registered bridge
+// function (View::set_skew has existed since the 2D slot was added).
+// The walker dispatches skewX/skewY by accumulating both axes and
+// emitting one consolidated setSkew(id, x_deg, y_deg) call.
 interface _TransformSnapshot {
     tx: number;
     ty: number;
     rotateDeg: number;
     scale: number;
+    skewX: number;
+    skewY: number;
     haveTranslate: boolean;
     haveRotate: boolean;
     haveScale: boolean;
+    haveSkew: boolean;
 }
 
 // Parse `'45deg'` / `'0.785rad'` / `45` (numeric) → degrees.
@@ -219,6 +230,36 @@ function _parseAngleDegrees(v: unknown): number {
     return n;
 }
 
+// pulp #1434 rn bridge-wires bundle — parse a CSS transform-origin
+// string into two fractional coordinates (0..1) the bridge expects.
+// Accepts `'center'`, `'left top'`, `'NN%'` percentages, and `'NNpx'`
+// pixel offsets (the latter assumed to be on a unit-bound View — so
+// values just clamp). Falls back to {0.5, 0.5} on unrecognized input.
+function _parseTransformOrigin(s: string): { x: number; y: number } {
+    const work = s.trim().toLowerCase();
+    if (work === 'center' || work === '') return { x: 0.5, y: 0.5 };
+    const tokens = work.split(/\s+/);
+    const tok2coord = (tok: string, axis: 'x' | 'y'): number => {
+        if (tok === 'center') return 0.5;
+        if (tok === 'left' || tok === 'top')   return 0.0;
+        if (tok === 'right' || tok === 'bottom') return 1.0;
+        if (tok.endsWith('%')) {
+            const n = parseFloat(tok.slice(0, -1));
+            return Number.isFinite(n) ? n / 100 : 0.5;
+        }
+        // Bare number / px — interpret as fractional 0..1 if <=1, else
+        // clamp to 1.0 (better than negative/over-1 garbage on the
+        // bridge side; full pixel resolution would need parent bounds).
+        const n = parseFloat(tok);
+        if (!Number.isFinite(n)) return 0.5;
+        return Math.max(0, Math.min(1, n));
+        void axis;
+    };
+    const x = tok2coord(tokens[0] ?? 'center', 'x');
+    const y = tok2coord(tokens[1] ?? tokens[0] ?? 'center', 'y');
+    return { x, y };
+}
+
 // Walk the RN-style transform array. Returns a snapshot with `have*`
 // flags so the caller can dispatch only the operations the user
 // actually specified (translate dispatch is gated on haveTranslate, etc.).
@@ -227,9 +268,11 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
         tx: 0, ty: 0,
         rotateDeg: 0,
         scale: 1,
+        skewX: 0, skewY: 0,
         haveTranslate: false,
         haveRotate: false,
         haveScale: false,
+        haveSkew: false,
     };
     for (const op of arr) {
         if (op == null || typeof op !== 'object') continue;
@@ -263,11 +306,17 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
                 snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
                 snap.haveScale = true;
                 break;
-            // skewX / skewY — View::set_skew exists in C++ but no bridge
-            // function is registered yet. Silently no-op until the bridge
-            // surface lands. pulp follow-up issue tracks the gap.
+            // pulp #1434 Triage #9 fan-out — skewX / skewY now reach the
+            // bridge via the freshly-registered setSkew(id, x_deg, y_deg).
+            // Both axes accumulate independently; one consolidated call
+            // emits at dispatch time.
             case 'skewX':
+                snap.skewX = _parseAngleDegrees(v);
+                snap.haveSkew = true;
+                break;
             case 'skewY':
+                snap.skewY = _parseAngleDegrees(v);
+                snap.haveSkew = true;
                 break;
             // 3D / matrix ops — not modeled in pulp's 2D View. Silently
             // drop. pulp follow-up tracks if/when 3D transforms are
@@ -427,6 +476,31 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             return;
         case 'flexGrow':        return call('setFlex', id, 'flex_grow', value as number);
         case 'flexShrink':      return call('setFlex', id, 'flex_shrink', value as number);
+        // pulp #1434 (#1518) — RN-style `flex: <number>` shorthand.
+        // RN spec: `flex: positive` → `{flexGrow: n, flexShrink: 1, flexBasis: 0}`;
+        // `flex: 0` → no growth / no shrink at intrinsic basis;
+        // `flex: -1` (or any negative) → no growth, can shrink at auto basis.
+        // CSS spec is more nuanced (bare number is `flex: <n> 1 0`), but RN's
+        // narrow contract is what consumers passing JSX `flex={1}` expect;
+        // our adapter is RN-flavored so we honor RN semantics.
+        case 'flex': {
+            const n = value as number;
+            if (typeof n !== 'number' || !Number.isFinite(n)) return;
+            if (n > 0) {
+                call('setFlex', id, 'flex_grow', n);
+                call('setFlex', id, 'flex_shrink', 1);
+                call('setFlex', id, 'flex_basis', 0);
+            } else if (n === 0) {
+                call('setFlex', id, 'flex_grow', 0);
+                call('setFlex', id, 'flex_shrink', 0);
+                call('setFlex', id, 'flex_basis', 'auto');
+            } else {
+                call('setFlex', id, 'flex_grow', 0);
+                call('setFlex', id, 'flex_shrink', 1);
+                call('setFlex', id, 'flex_basis', 'auto');
+            }
+            return;
+        }
         // pulp #1434 (rn batch C) — dimension keys forward
         // `number | string` so the bridge sees `'50%'` / `'auto'`
         // verbatim. Numeric values still flow through unchanged.
@@ -434,7 +508,17 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // arg as a string and detects '%' / 'auto' suffix; otherwise
         // it falls back to the numeric path.
         case 'flexBasis':       return call('setFlex', id, 'flex_basis', value as number | string);
-        case 'flexWrap':        return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        // pulp #1434 Triage #14 — flexWrap accepts boolean (legacy
+        // true/false) or the CSS keyword strings (`"wrap"` /
+        // `"wrap-reverse"` / `"nowrap"`). Forward strings verbatim
+        // so the bridge can route wrap-reverse through Yoga's
+        // YGWrapWrapReverse.
+        case 'flexWrap': {
+            if (typeof value === 'string') {
+                return call('setFlex', id, 'flex_wrap', value);
+            }
+            return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        }
         case 'order':           return call('setFlex', id, 'order', value as number);
         case 'width':           return call('setFlex', id, 'width', value as number | string);
         case 'height':          return call('setFlex', id, 'height', value as number | string);
@@ -444,6 +528,12 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'maxHeight':       return call('setFlex', id, 'max_height', value as number | string);
         case 'alignItems':      return call('setFlex', id, 'align_items', value as string);
         case 'alignSelf':       return call('setFlex', id, 'align_self', value as string);
+        // pulp #1434 (sub-agent #12 follow-up) — multi-line flex
+        // cross-axis distribution. Yoga supports it natively via
+        // YGNodeStyleSetAlignContent; the bridge accepts both bare
+        // (`start`/`end`) and prefixed (`flex-start`/`flex-end`)
+        // spellings plus the space-* values.
+        case 'alignContent':    return call('setFlex', id, 'align_content', value as string);
         case 'justifyContent':  return call('setFlex', id, 'justify_content', value as string);
         // pulp #1434 — aspectRatio routes through setFlex like the other
         // flex props. Accepts a finite positive number (RN-style); strings
@@ -455,6 +545,18 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Visual style
         case 'background':         return call('setBackground', id, value as string);
         case 'backgroundGradient': return call('setBackgroundGradient', id, value as string);
+        // pulp #1517 — background sub-properties. The bridge stores the
+        // keyword on the View slot. Paint impact today is partial:
+        //   • `backgroundAttachment` — `scroll` is conformant; `fixed` /
+        //     `local` are noop (pulp doesn't model scroll contexts).
+        //   • `backgroundClip` — `text` is the interesting variant
+        //     (paint-time SkBlendMode::kSrcIn against text glyphs);
+        //     deferred to a future PR. Other values noop on solid bg.
+        //   • `backgroundOrigin` — relevant only for repeating gradients;
+        //     noop today.
+        case 'backgroundAttachment': return call('setBackgroundAttachment', id, value as string);
+        case 'backgroundClip':       return call('setBackgroundClip',       id, value as string);
+        case 'backgroundOrigin':     return call('setBackgroundOrigin',     id, value as string);
         case 'border': {
             const b = value as { color: string; width?: number; radius?: number };
             return call('setBorder', id, b.color, b.width ?? 1, b.radius ?? 0);
@@ -467,6 +569,47 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'borderColor':  return call('setBorderColor', id, value as string);
         case 'borderWidth':  return call('setBorderWidth', id, value as number);
         case 'borderRadius': return call('setBorderRadius', id, value as number);
+        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim
+        // to setBorderStyle. Bridge maps to View::BorderStyle. Skia
+        // installs the dash effect for `dashed` / `dotted`; other
+        // named styles currently degrade to solid.
+        case 'borderStyle':  return call('setBorderStyle', id, value as string);
+        // pulp #1514 — list-style cluster. Pulp doesn't model
+        // <li>/<ul>/<ol> semantics, so the bridge stores the value
+        // verbatim on the View and a future paint pass renders the
+        // marker. Today the catalog is `partial` (stored, not
+        // painted). The shorthand `listStyle` parses on the JS side
+        // into the 3 longhands; consumers MAY emit any combo of
+        // type / position / image keywords (CSS spec: any order).
+        case 'listStyle': {
+            const sval = String(value).trim();
+            const tokens = sval.split(/\s+/);
+            const typeSet: Record<string, true> = {
+                none: true, disc: true, circle: true, square: true, decimal: true,
+            };
+            const posSet: Record<string, true> = { inside: true, outside: true };
+            let sawType = false, sawImage = false;
+            for (const tok of tokens) {
+                if (tok.indexOf('url(') === 0) {
+                    call('setListStyleImage', id, tok);
+                    sawImage = true;
+                } else if (posSet[tok]) {
+                    call('setListStylePosition', id, tok);
+                } else if (typeSet[tok]) {
+                    if (tok === 'none' && sawType && !sawImage) {
+                        call('setListStyleImage', id, 'none');
+                        sawImage = true;
+                    } else {
+                        call('setListStyleType', id, tok);
+                        sawType = true;
+                    }
+                }
+            }
+            return;
+        }
+        case 'listStyleType':     return call('setListStyleType', id, value as string);
+        case 'listStyleImage':    return call('setListStyleImage', id, value as string);
+        case 'listStylePosition': return call('setListStylePosition', id, value as string);
         case 'borderTop':    { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'top', b.width, b.color); }
         case 'borderRight':  { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'right', b.width, b.color); }
         case 'borderBottom': { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'bottom', b.width, b.color); }
@@ -486,6 +629,15 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'borderTopRightRadius':    return call('setBorderTopRightRadius', id, value as number);
         case 'borderBottomLeftRadius':  return call('setBorderBottomLeftRadius', id, value as number);
         case 'borderBottomRightRadius': return call('setBorderBottomRightRadius', id, value as number);
+        // pulp #1519 — RN outline cluster. Paint-time ring drawn OUTSIDE
+        // the border-box (no Yoga layout impact). Each prop routes to its
+        // own per-attribute bridge fn so a JSX prop diff that touches one
+        // outline-* preserves the others. Style keyword set mirrors
+        // borderStyle (CSS spec is identical).
+        case 'outlineColor':  return call('setOutlineColor',  id, value as string);
+        case 'outlineOffset': return call('setOutlineOffset', id, value as number);
+        case 'outlineStyle':  return call('setOutlineStyle',  id, value as string);
+        case 'outlineWidth':  return call('setOutlineWidth',  id, value as number);
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
         // pulp #1434 (rn batch — Triage #12) — `display: 'flex' | 'none'`.
@@ -548,6 +700,144 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Accepts the CSS keyword strings ('hidden' / 'visible' /
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
+        // pulp #1516 — CSS box-sizing. Yoga 3.x honors the spec via
+        // YGNodeStyleSetBoxSizing; consumers passing JSX
+        // `boxSizing: 'border-box'` get the standard
+        // "padding+border are inside declared dimensions" behavior.
+        // Web designs almost universally reset to `border-box`.
+        case 'boxSizing':    return call('setBoxSizing', id, value as string);
+
+        // pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+        // RN's CSS-spec-equivalent logical-flow props. LTR-only fast
+        // path: Start → Left, End → Right, inset shorthand expands to
+        // top/right/bottom/left, insetBlock → top+bottom,
+        // insetInline → left+right (LTR). True RTL bidi requires a
+        // future direction system — tracked as a separate big project.
+        // The 11 entries here close the missing-on-rn gap with the
+        // honest LTR-only caveat documented in the catalog.
+        case 'marginStart': {
+            return call('setFlex', id, 'margin_left', value as number | string);
+        }
+        case 'marginEnd': {
+            return call('setFlex', id, 'margin_right', value as number | string);
+        }
+        case 'paddingStart': {
+            return call('setFlex', id, 'padding_left', value as number | string);
+        }
+        case 'paddingEnd': {
+            return call('setFlex', id, 'padding_right', value as number | string);
+        }
+        case 'borderStartWidth': {
+            // Routes to the per-side bridge setter that preserves the
+            // unrelated attribute (color) — same pattern as borderLeftWidth.
+            return call('setBorderLeftWidth', id, value as number);
+        }
+        case 'borderEndWidth': {
+            return call('setBorderRightWidth', id, value as number);
+        }
+        case 'start': {
+            return call('setLeft', id, value as number | string);
+        }
+        case 'end': {
+            return call('setRight', id, value as number | string);
+        }
+        // CSS `inset` shorthand: 1 / 2 / 3 / 4 values fan out to
+        // top / right / bottom / left (CSS spec — same expansion as
+        // `margin` / `padding` shorthands). Numeric or percent strings.
+        case 'inset': {
+            const v = value as number | string;
+            if (typeof v === 'number') {
+                call('setTop',    id, v);
+                call('setRight',  id, v);
+                call('setBottom', id, v);
+                call('setLeft',   id, v);
+                return;
+            }
+            const tokens = String(v).trim().split(/\s+/);
+            const t = tokens[0] ?? 0;
+            const r = tokens[1] ?? t;
+            const b = tokens[2] ?? t;
+            const l = tokens[3] ?? r;
+            // Each token may be a number or a percent string — forward
+            // verbatim so the bridge can route through Yoga's
+            // YGNodeStyleSetPositionPercent path for percent values.
+            const coerce = (tok: string | number) => {
+                if (typeof tok === 'number') return tok;
+                if (tok.endsWith('%')) return tok;
+                const n = parseFloat(tok);
+                return Number.isFinite(n) ? n : tok;
+            };
+            call('setTop',    id, coerce(t));
+            call('setRight',  id, coerce(r));
+            call('setBottom', id, coerce(b));
+            call('setLeft',   id, coerce(l));
+            return;
+        }
+        case 'insetBlock': {
+            // CSS insetBlock shorthand → top + bottom.
+            const v = value as number | string;
+            call('setTop',    id, v);
+            call('setBottom', id, v);
+            return;
+        }
+        case 'insetInline': {
+            // CSS insetInline shorthand → left + right (LTR).
+            const v = value as number | string;
+            call('setLeft',  id, v);
+            call('setRight', id, v);
+            return;
+        }
+
+        // pulp #1434 Phase A2-2 — CSS Grid surface. Forwards each
+        // property verbatim to setGrid; the C++ bridge handles
+        // template-track parsing, named-area parsing, and the
+        // grid-area shorthand (named token vs `row / col / row / col`
+        // numeric form).
+        case 'gridTemplateColumns': return call('setGrid', id, 'template_columns', value as string);
+        case 'gridTemplateRows':    return call('setGrid', id, 'template_rows',    value as string);
+        case 'gridTemplateAreas':   return call('setGrid', id, 'template_areas',   value as string);
+        case 'gridAutoColumns':     return call('setGrid', id, 'auto_columns',     value as string);
+        case 'gridAutoRows':        return call('setGrid', id, 'auto_rows',        value as string);
+        case 'gridAutoFlow':        return call('setGrid', id, 'auto_flow',        value as string);
+        case 'gridArea':            return call('setGrid', id, 'grid_area',        value as string);
+        case 'gridColumn': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'column_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'column_end', parts[1]);
+            return;
+        }
+        case 'gridRow': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'row_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'row_end', parts[1]);
+            return;
+        }
+        case 'gridColumnStart': return call('setGrid', id, 'column_start', value as number);
+        case 'gridColumnEnd':   return call('setGrid', id, 'column_end',   value as number);
+        case 'gridRowStart':    return call('setGrid', id, 'row_start',    value as number);
+        case 'gridRowEnd':      return call('setGrid', id, 'row_end',      value as number);
+        case 'gridGap':         return call('setGrid', id, 'gap',          value as number);
+        case 'gridColumnGap':   return call('setGrid', id, 'column_gap',   value as number);
+        case 'gridRowGap':      return call('setGrid', id, 'row_gap',      value as number);
+
+        // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
+        // 7 RN-style props that already had C++ bridge fns registered
+        // but no `@pulp/react` prop-applier dispatch. Each forwards
+        // the keyword / string straight through to the matching setter.
+        case 'backfaceVisibility': return call('setBackfaceVisibility', id, value as string);
+        case 'cursor':             return call('setCursor', id, value as string);
+        case 'filter':             return call('setFilter', id, value as string);
+        case 'pointerEvents':      return call('setPointerEvents', id, value as string);
+        case 'textTransform':      return call('setTextTransform', id, value as string);
+        case 'userSelect':         return call('setUserSelect', id, value as string);
+        // transformOrigin accepts CSS strings of the form `'NN% NN%'`,
+        // `'NNpx NNpx'`, `'center'`, or two keyword tokens. The bridge
+        // wants two numeric fractions (0..1). Defaults to 0.5/0.5
+        // (center) when a token is unrecognized — matches CSS default.
+        case 'transformOrigin': {
+            const parsed = _parseTransformOrigin(String(value ?? 'center'));
+            return call('setTransformOrigin', id, parsed.x, parsed.y);
+        }
 
         // pulp #1434 Triage #9 — RN array transform.
         // RN's transform is an array of single-property objects:
@@ -572,6 +862,10 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (snap.haveTranslate) call('setTranslate', id, snap.tx, snap.ty);
             if (snap.haveRotate)    call('setRotation', id, snap.rotateDeg);
             if (snap.haveScale)     call('setScale', id, snap.scale);
+            // pulp #1434 Triage #9 fan-out — setSkew is now a registered
+            // bridge fn; emit one consolidated call that captures both
+            // axes accumulated in the walker.
+            if (snap.haveSkew)      call('setSkew', id, snap.skewX, snap.skewY);
             return;
         }
 
@@ -603,17 +897,34 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // follow-up — backends approximate as left for now).
         case 'textAlign':       return call('setTextAlign', id, value as string);
         // Typography — Label widgets honor these via setX bridge fns.
-        // Note: fontFamily NOT dispatched today — SkFontMgr font registration
-        // (pulp#932) blocks proper resolution and would force Skia to return
-        // a null SkTypeface when JetBrains Mono can't be looked up. The
-        // remaining typography dispatchers are needed though — the
-        // bundle's chrome layout (especially Label widths under #935 auto-grow)
-        // depends on letter-spacing and font-size being set correctly.
+        // pulp #1434 Phase A2-5 — fontFamily IS now dispatched. The
+        // bridge picks the first non-empty family from a comma-
+        // separated CSS list and stores it on the Label or on the
+        // owning View's `inheritable_font_family_` slot for container
+        // cascade. The whole-list fallback chain (full font-stack
+        // resolution) still depends on SkFontMgr registration in
+        // pulp #932 — until that lands, families that aren't already
+        // registered with Skia fall through to the platform default.
+        // Wiring is independent: when #932 lands, no consumer change
+        // is needed — the registry just resolves the same name.
+        case 'fontFamily':      return call('setFontFamily', id, value as string);
         case 'fontSize':        return call('setFontSize', id, value as number);
         case 'fontWeight':      return call('setFontWeight', id, _normalizeFontWeight(value));
         case 'fontStyle':       return call('setFontStyle', id, value as string);
         case 'letterSpacing':   return call('setLetterSpacing', id, value as number);
         case 'lineHeight':      return call('setLineHeight', id, value as number);
+        // pulp #1552 — line-clamp + webkit-line-clamp + background-repeat
+        // wiring. Both line-clamp keys funnel through the same setter
+        // (shared CSS shim case + RN-style alias). 0 / non-finite clears
+        // the slot. backgroundRepeat is storage-only at the View layer
+        // (paint-time honoring is a follow-up for url() / repeating
+        // gradient backgrounds).
+        case 'lineClamp':
+        case 'webkitLineClamp': {
+            const n = typeof value === 'number' ? value : parseInt(String(value), 10);
+            return call('setLineClamp', id, Number.isFinite(n) ? n : 0);
+        }
+        case 'backgroundRepeat': return call('setBackgroundRepeat', id, value as string);
 
         // Widget-specific data
         case 'data':

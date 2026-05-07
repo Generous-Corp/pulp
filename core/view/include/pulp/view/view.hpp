@@ -110,6 +110,14 @@ public:
     void clear_inheritable_font_weight() { inh_font_weight_.reset(); }
     std::optional<int> inheritable_font_weight() const;
 
+    /// pulp #1434 Phase A2-5 — inheritable font-family cascade. Mirrors
+    /// the font-weight pattern; Labels read this when set_font_family
+    /// hasn't been called directly. Final SkFontMgr resolution is
+    /// gated on pulp #932 — the cascade plumbing is independent.
+    void set_inheritable_font_family(std::string f) { inh_font_family_ = std::move(f); }
+    void clear_inheritable_font_family() { inh_font_family_.reset(); }
+    std::optional<std::string> inheritable_font_family() const;
+
     /// 0 = left, 1 = center, 2 = right (matches LabelAlign).
     void set_inheritable_text_align(int a) { inh_text_align_ = a; }
     void clear_inheritable_text_align() { inh_text_align_.reset(); }
@@ -305,6 +313,19 @@ public:
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
 
+    /// CSS `background-repeat` keyword (pulp #1552). Storage-only at the
+    /// View level: paint() of solid-color backgrounds (the only currently
+    /// rendered case) is a no-op for repeat semantics, but the value is
+    /// preserved so future paint logic for `background-image: url(...)` /
+    /// repeating gradients can honor it without an API break. Mirrors
+    /// the strategy used for `text-decoration-style` (pulp #1434 batch 3)
+    /// which also stores the keyword and currently degrades to solid in
+    /// paint. Accepted CSS keywords: `repeat`, `repeat-x`, `repeat-y`,
+    /// `no-repeat`, `space`, `round`. Unknown / empty = `repeat` (CSS
+    /// initial value).
+    void set_background_repeat(std::string kw) { background_repeat_ = std::move(kw); }
+    const std::string& background_repeat() const { return background_repeat_; }
+
     /// Border (optional — painted on top of background)
     void set_border(Color c, float width, float radius = 0) {
         border_color_ = c; border_width_ = width; corner_radius_ = radius; has_border_ = true;
@@ -322,11 +343,100 @@ public:
     void set_border_width(float w) { border_width_ = w; has_border_ = true; }
     void set_border_radius(float r) { corner_radius_ = r; }
 
+    /// CSS / RN border-style. pulp #1434 Triage #10 — Skia path effect
+    /// dispatches on style at paint time. CG falls through to solid
+    /// (the cg_canvas.mm path inherits the canvas-base no-op
+    /// set_line_dash). Values that pulp doesn't render natively
+    /// (`double` / `groove` / `ridge` / `inset` / `outset`) degrade to
+    /// solid — documented as a paint-time gap in the catalog. `none` /
+    /// `hidden` skip the stroke entirely (paint() short-circuits).
+    enum class BorderStyle {
+        solid,    ///< Default — single continuous line.
+        dashed,   ///< SkDashPathEffect with 3w/3w on/off pattern.
+        dotted,   ///< SkDashPathEffect with w/2w on/off pattern (round caps).
+        double_,  ///< Two parallel lines — degrades to solid for now.
+        groove,   ///< Carved-in look — degrades to solid for now.
+        ridge,    ///< Raised look — degrades to solid for now.
+        inset,    ///< 3D-shaded inset — degrades to solid for now.
+        outset,   ///< 3D-shaded outset — degrades to solid for now.
+        none,     ///< No border drawn (paint short-circuits).
+        hidden,   ///< Same as none for paint purposes.
+    };
+    void set_border_style(BorderStyle s) { border_style_ = s; }
+    BorderStyle border_style() const { return border_style_; }
+
+    /// CSS / RN list-style cluster (pulp #1514). Pulp doesn't model
+    /// HTML <li>/<ul>/<ol> semantics — these slots store the values
+    /// the consumer set so an external paint pass (or future <li>
+    /// semantic surface) can honor them. The bridge round-trips the
+    /// keyword/url; paint-time marker rendering is the follow-up.
+    enum class ListStyleType {
+        none,     ///< No marker.
+        disc,     ///< Filled circle (default for <ul>).
+        circle,   ///< Hollow circle.
+        square,   ///< Filled square.
+        decimal,  ///< Numeric (default for <ol>) — needs sibling-index, not painted yet.
+    };
+    enum class ListStylePosition {
+        outside,  ///< Marker hangs in the margin (CSS default).
+        inside,   ///< Marker is part of the content box.
+    };
+    void set_list_style_type(ListStyleType t) { list_style_type_ = t; }
+    ListStyleType list_style_type() const { return list_style_type_; }
+    void set_list_style_image(std::string url) { list_style_image_ = std::move(url); }
+    const std::string& list_style_image() const { return list_style_image_; }
+    void set_list_style_position(ListStylePosition p) { list_style_position_ = p; }
+    ListStylePosition list_style_position() const { return list_style_position_; }
+
+    /// CSS / RN outline cluster (pulp #1519). Outline is a paint-time
+    /// ring drawn OUTSIDE the border-box; it does NOT affect Yoga layout
+    /// (no parent space reserved). Slotting mirrors border-* but lives
+    /// in its own quartet of fields so a JSX prop diff that touches one
+    /// outline-* prop preserves the others. Reuses View::BorderStyle for
+    /// the line-style enum since CSS keyword sets are identical (solid /
+    /// dashed / dotted / double / groove / ridge / inset / outset / none /
+    /// hidden). The Skia paint inflates the box by `outline_offset_ +
+    /// outline_width_ / 2` and strokes; CG falls through (set_line_dash
+    /// canvas-base no-op) for dashed/dotted same as border-style.
+    void set_outline_color(Color c) { outline_color_ = c; }
+    void set_outline_offset(float px) { outline_offset_ = px; }
+    void set_outline_style(BorderStyle s) { outline_style_ = s; }
+    void set_outline_width(float px) { outline_width_ = px; }
+    Color outline_color() const { return outline_color_; }
+    float outline_offset() const { return outline_offset_; }
+    BorderStyle outline_style() const { return outline_style_; }
+    float outline_width() const { return outline_width_; }
+
+
     /// Per-side borders (CSS border-top, border-right, etc.)
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; has_border_sides_ = true; }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; has_border_sides_ = true; }
+    /// pulp #1566 (Codex P2 follow-up to #1543) — track an explicit
+    /// per-edge "set" flag so a width of 0 on one edge can override
+    /// the uniform shorthand. CSS / RN semantics: `borderWidth: 10`
+    /// followed by `borderTopWidth: 0` must yield a 0-px top border,
+    /// not the 10-px shorthand. Without a per-edge `set` bit, the
+    /// stored 0 was indistinguishable from "unset" in
+    /// `apply_border_widths` and the shorthand leaked through.
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; }
+    /// Color-only setters (pulp #1566). Setting `borderTopColor` alone
+    /// must NOT mark the top edge's WIDTH as explicitly set — that
+    /// would let a stale 0 override the uniform `borderWidth` shorthand.
+    /// Mirrors CSS, where `border-top-color` and `border-top-width` are
+    /// independent longhands.
+    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; }
+    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; }
+    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; }
+    /// Width-only setters (pulp #1566). Setting `borderTopWidth` alone
+    /// preserves the existing per-edge color and explicitly marks the
+    /// width as set — including a width of 0, which then overrides any
+    /// uniform shorthand on that edge.
+    void set_border_top_width(float w)    { border_top_.width = w;    border_top_set_ = true;    has_border_sides_ = true; }
+    void set_border_right_width(float w)  { border_right_.width = w;  border_right_set_ = true;  has_border_sides_ = true; }
+    void set_border_bottom_width(float w) { border_bottom_.width = w; border_bottom_set_ = true; has_border_sides_ = true; }
+    void set_border_left_width(float w)   { border_left_.width = w;   border_left_set_ = true;   has_border_sides_ = true; }
     /// Per-side getters (issue-1026). The standalone setBorderTop/Right/...
     /// {Color,Width} bridge calls need to preserve the unrelated attribute
     /// when only one is being changed by a JSX prop diff.
@@ -339,6 +449,14 @@ public:
     Color border_left_color() const { return border_left_.color; }
     float border_left_width() const { return border_left_.width; }
     bool has_border_sides() const { return has_border_sides_; }
+    /// pulp #1566 — per-edge "explicitly set" probes. Yoga wiring uses
+    /// these to distinguish "not set on this edge" (fall back to uniform
+    /// `border_width()`) from "explicitly set to 0" (zero wins, even if
+    /// the shorthand says 10).
+    bool has_border_top_set() const { return border_top_set_; }
+    bool has_border_right_set() const { return border_right_set_; }
+    bool has_border_bottom_set() const { return border_bottom_set_; }
+    bool has_border_left_set() const { return border_left_set_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.)
     /// pulp #1171 (Codex P2 on #1044) — when transitioning from uniform
@@ -567,15 +685,69 @@ public:
         d = transform_matrix_d_; e = transform_matrix_e_; f = transform_matrix_f_;
     }
 
-    /// CSS filter: blur(px) — per-element blur
+    /// CSS filter: blur(px) — per-element blur. Legacy single-blur slot
+    /// kept for API compatibility; the richer filter chain (Phase A2-4)
+    /// lives in `filter_chain_` below and supersedes this when non-empty.
     void set_filter_blur(float radius) { filter_blur_ = radius; }
     float filter_blur() const { return filter_blur_; }
+
+    /// pulp #1434 Phase A2-4 — full CSS filter chain. Each entry is one
+    /// filter function (blur / brightness / contrast / grayscale /
+    /// hue-rotate / invert / opacity / saturate / sepia / drop-shadow).
+    /// The Skia path walks the chain and composes via
+    /// `SkImageFilters::Compose` + color-matrix wraps; CG falls back to
+    /// blur-only. When the chain is empty, the legacy `filter_blur_`
+    /// path stays in effect (back-compat for callers still using
+    /// `set_filter_blur` directly).
+    struct FilterOp {
+        enum class Kind {
+            blur,
+            brightness,
+            contrast,
+            grayscale,
+            hue_rotate,
+            invert,
+            opacity,
+            saturate,
+            sepia,
+            drop_shadow,
+        };
+        Kind kind = Kind::blur;
+        float amount = 0.0f;       ///< blur radius in px (blur), 0..1+ amount otherwise
+        float angle_deg = 0.0f;    ///< hue-rotate only
+        // drop-shadow extras
+        float ds_offset_x = 0.0f;
+        float ds_offset_y = 0.0f;
+        float ds_blur = 0.0f;
+        Color ds_color{};
+    };
+    void set_filter_chain(std::vector<FilterOp> chain) { filter_chain_ = std::move(chain); }
+    void clear_filter_chain() { filter_chain_.clear(); }
+    const std::vector<FilterOp>& filter_chain() const { return filter_chain_; }
+    bool has_filter_chain() const { return !filter_chain_.empty(); }
 
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints (issue-926). Zero == no backdrop
     /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
     void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
     float backdrop_blur() const { return backdrop_blur_; }
+
+    /// CSS background sub-properties (pulp #1517). These slots store the
+    /// keyword for round-tripping; paint impact is partial — see notes:
+    ///   • background-attachment: only `scroll` is conformant in pulp's
+    ///     non-scrolling layout model. `fixed` / `local` need a scroll-
+    ///     context coupling we don't have. Catalog: noop.
+    ///   • background-clip: `text` would clip the bg paint to text glyphs
+    ///     via SkBlendMode::kSrcIn — deferred to a later PR. Other values
+    ///     are no-ops on solid bg. Catalog: partial.
+    ///   • background-origin: relevant only for repeating gradients (which
+    ///     we don't paint per-tile). Catalog: noop.
+    void set_background_attachment(std::string kw) { background_attachment_ = std::move(kw); }
+    const std::string& background_attachment() const { return background_attachment_; }
+    void set_background_clip(std::string kw)       { background_clip_ = std::move(kw); }
+    const std::string& background_clip() const     { return background_clip_; }
+    void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
+    const std::string& background_origin() const   { return background_origin_; }
 
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
@@ -681,10 +853,35 @@ private:
     float border_width_ = 0;
     float corner_radius_ = 0;
     bool has_border_ = false;
+    BorderStyle border_style_ = BorderStyle::solid;
+    // pulp #1514 — list-style cluster slots. Stored verbatim; paint-
+    // time marker rendering is deferred. Defaults match CSS spec
+    // (`disc` for the type, `outside` for the position, empty image).
+    ListStyleType list_style_type_ = ListStyleType::disc;
+    std::string list_style_image_{};
+    ListStylePosition list_style_position_ = ListStylePosition::outside;
+    // CSS / RN outline cluster (pulp #1519). Defaults: outline_style_
+    // is `none` so paint short-circuits unless JS opts in via
+    // setOutlineStyle. width=0 also short-circuits as a belt-and-braces
+    // guard. Color defaults to fully-transparent black; bridge writes
+    // the parsed setter value before paint.
+    Color outline_color_{};
+    float outline_offset_ = 0.0f;
+    float outline_width_ = 0.0f;
+    BorderStyle outline_style_ = BorderStyle::none;
     // Per-side borders
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};
     bool has_border_sides_ = false;
+    // pulp #1566 — per-edge "explicitly set" flags, parallel to has_top_
+    // / has_right_ / etc. for inset edges. Required so an explicit
+    // borderTopWidth=0 overrides the uniform borderWidth=10 shorthand
+    // (CSS / RN semantics). Plain `width == 0` is ambiguous because the
+    // BorderSide default-initializes to 0.
+    bool border_top_set_ = false;
+    bool border_right_set_ = false;
+    bool border_bottom_set_ = false;
+    bool border_left_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     bool has_corner_radii_ = false;
@@ -723,7 +920,11 @@ private:
           transform_matrix_e_ = 0.0f, transform_matrix_f_ = 0.0f;
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
+    std::vector<FilterOp> filter_chain_{};
     float backdrop_blur_ = 0;
+    std::string background_attachment_;  // pulp #1517 — noop today
+    std::string background_clip_;        // pulp #1517 — partial (text deferred)
+    std::string background_origin_;      // pulp #1517 — noop today
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
@@ -732,6 +933,7 @@ private:
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
     std::vector<Color> bg_gradient_colors_;
     std::vector<float> bg_gradient_positions_;
+    std::string background_repeat_;  ///< pulp #1552: CSS background-repeat keyword (storage-only)
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
@@ -748,6 +950,7 @@ private:
     std::optional<float> inh_letter_spacing_;
     std::optional<int>   inh_font_weight_;
     std::optional<int>   inh_text_align_;
+    std::optional<std::string> inh_font_family_;  // pulp #1434 Phase A2-5
 };
 
 } // namespace pulp::view

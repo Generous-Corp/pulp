@@ -23,6 +23,9 @@ The Claude Code plugin is a separate distribution surface: it can ship a new UX 
 ## Why shipyard has its own pin
 
 Shipyard is Pulp's CI controller and ships on its own cadence. Pulp pins a specific release in `tools/shipyard.toml` so every worktree exercises the same validation behaviour; bumps are a dependency update, not a Pulp feature release.
+It is not part of the public Pulp CLI installer and is not treated as a
+runtime/build dependency for Pulp users; it is a source-checkout contributor
+tool installed explicitly with `./tools/install-shipyard.sh`.
 
 ## How to surface the current SDK version
 
