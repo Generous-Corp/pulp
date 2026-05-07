@@ -401,7 +401,10 @@ downloads the pinned Skia `chrome/m144` Linux release asset, verifies its
 SHA-256, installs the bundled Pulp fonts into fontconfig, and installs
 `skia-python==144.0.post2` for the B.0 SkPicture byte-identity smoke. The
 workflow runs that Linux container and also runs the same pytest smoke on
-macOS arm64 so the future canonical raster lane has a platform signal.
+macOS arm64 so the future canonical raster lane has a platform signal. The
+`macOS local smoke` job resolves `runs-on` from
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` first and falls back to hosted `macos-15` only
+when the local selector variable is absent.
 
 Use it when a fresh worktree has only `external/skia-build` headers/metadata
 and no platform static libraries:

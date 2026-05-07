@@ -82,6 +82,10 @@ arm64-darwin as well. The Docker smoke proves the locked dependency recipe and
 fresh-worktree behavior; the local lane proves the platform that will own the
 canonical raster-golden gate.
 
+The GitHub `macOS local smoke` job reads `PULP_LOCAL_MACOS_RUNS_ON_JSON` and
+falls back to hosted `macos-15` only when that repo variable is unset. In Pulp's
+normal CI config it should resolve to the local self-hosted `sanitizer` runner.
+
 The canonical raster-golden gate for future PNG tests is the arm64-darwin
 software/raster lane. The Docker image is the reproducible dependency
 environment for smoke and developer parity, not a replacement for that lane.
