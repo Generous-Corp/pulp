@@ -44,6 +44,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::stroke_line: return "stroke_line";
         case CanvasDrawCmd::Type::stroke_arc: return "stroke_arc";
         case CanvasDrawCmd::Type::fill_text: return "fill_text";
+        case CanvasDrawCmd::Type::stroke_text: return "stroke_text";
         case CanvasDrawCmd::Type::set_font: return "set_font";
         case CanvasDrawCmd::Type::set_font_full: return "set_font_full";
         case CanvasDrawCmd::Type::set_text_align: return "set_text_align";
@@ -292,7 +293,33 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // hard-coded TextAlign::left below would force every JS draw
             // back to left-align. Drop both calls — the prior state cmds
             // own the font + alignment.
-            canvas.fill_text(cmd.text, cmd.x, cmd.y);
+            //
+            // pulp #1525 — route through the maxWidth-aware overload when
+            // the JS caller supplied `maxWidth` (cmd.w > 0). The Canvas
+            // base class default forwards back to fill_text(text, x, y),
+            // so backends without a custom override behave bit-for-bit
+            // identically to the legacy 3-arg path.
+            if (cmd.w > 0.0f) {
+                canvas.fill_text_with_max_width(cmd.text, cmd.x, cmd.y, cmd.w);
+            } else {
+                canvas.fill_text(cmd.text, cmd.x, cmd.y);
+            }
+            break;
+        case CanvasDrawCmd::Type::stroke_text:
+            // pulp #1525 — true outlined-glyph rendering. The JS shim's
+            // strokeText path emits this distinct cmd so the bridge can
+            // route through `Canvas::stroke_text` (Skia/CG override to
+            // build a stroke paint and honour `lineWidth`). The base
+            // class default still falls through to fill_text — preserving
+            // the pre-#1525 visual approximation on backends that haven't
+            // adopted the new override yet (RecordingCanvas in tests).
+            //
+            // Stroke colour comes from the `set_stroke_color` cmd that
+            // ran ahead of this one via the JS shim's _syncStrokeColor
+            // path; line width comes from the prior `set_line_width`
+            // cmd. We do NOT re-set them here (mirrors fill_text's
+            // commentary above).
+            canvas.stroke_text(cmd.text, cmd.x, cmd.y, cmd.w);
             break;
         case CanvasDrawCmd::Type::set_font:
             canvas.set_font(cmd.text, cmd.extra);

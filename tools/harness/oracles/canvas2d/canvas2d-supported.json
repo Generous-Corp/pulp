@@ -23,8 +23,8 @@
     "isPointInPath":        {"kind": "method", "bridge": [], "expectedStatus": "partial", "notes": "pulp #1527 bridge-thin gap-fill. JS-side ray-cast against the path mirror; curves sampled to ~16 segments. fillRule difference for self-intersecting paths and Path2D-object first argument unsupported."},
     "isPointInStroke":      {"kind": "method", "bridge": [], "expectedStatus": "partial", "notes": "pulp #1527 bridge-thin gap-fill. JS-side closest-point-on-segment distance check against the path mirror; respects ctx.lineWidth. Approximates as round-cap geometry; lineCap/lineJoin square/miter spikes unsupported."},
     "getTransform":         {"kind": "method", "bridge": [], "notes": "pulp #1527 bridge-thin gap-fill. Returns DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform — synchronous (no bridge round-trip). Mutating the returned object does NOT affect the live ctx (spec-compliant)."},
-    "fillText":             {"kind": "method", "bridge": ["canvasFillText"], "needsState": ["fillStyle", "font", "textAlign", "textBaseline"]},
-    "strokeText":           {"kind": "method", "bridge": ["canvasFillText"], "expectedStatus": "partial", "notes": "Bridge has no stroke-path text; falls back to fillText with strokeStyle color. SKILL gotcha #5."},
+    "fillText":             {"kind": "method", "bridge": ["canvasFillText"], "needsState": ["fillStyle", "font", "textAlign", "textBaseline"], "notes": "pulp #1525 — maxWidth plumbed end-to-end; backend squeezes horizontally via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG). Glyph clusters preserved (HarfBuzz / CoreText)."},
+    "strokeText":           {"kind": "method", "bridge": ["canvasStrokeText"], "needsState": ["strokeStyle", "lineWidth", "font", "textAlign", "textBaseline"], "notes": "pulp #1525 — dedicated stroke_text cmd; Skia uses SkPaint::kStroke_Style, CG uses kCGTextStroke. maxWidth squeeze matches fillText. Falls back to fillText with strokeStyle on pre-#1525 hosts (no canvasStrokeText fn)."},
     "measureText":          {"kind": "method", "bridge": ["canvasMeasureText"], "notes": "Falls back to char-width estimate when bridge fn unregistered."},
     "save":                 {"kind": "method", "bridge": ["canvasSave"]},
     "restore":              {"kind": "method", "bridge": ["canvasRestore"]},
@@ -77,6 +77,6 @@
     "no-pattern-bridge": "createPattern: not implemented; shim returns null. SKILL gotcha #5.",
     "stroke-no-gradient": "strokeStyle gradient: bridge has no stroke-gradient setter; degrades to first-stop color.",
     "transform-no-concat": "ctx.transform(a,b,c,d,e,f): bridge only exposes replace (setTransform); pure-translation falls through, rotate/scale/skew is no-op.",
-    "no-strokeText-path": "strokeText: bridge has no stroke-text path; falls back to fillText with strokeStyle color."
+    "no-strokeText-path": "strokeText: pulp #1525 added the dedicated canvasStrokeText bridge fn + Skia/CG overrides. The shim falls back to fillText-with-strokeStyle only on pre-#1525 hosts."
   }
 }

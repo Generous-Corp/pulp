@@ -23,6 +23,13 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
+        // pulp #1525 — Canvas2D `strokeText(text, x, y, maxWidth)` recorded
+        // as a distinct cmd so the paint loop can route it through the
+        // dedicated `Canvas::stroke_text` (true outlined glyphs) instead
+        // of the pre-#1525 fillText-with-stroke-color approximation.
+        // Layout: text in `text`, (x,y) in `x`/`y`, maxWidth in `w`
+        // (0 = no limit), font size in `extra`, color in `color`.
+        stroke_text,
         // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The
         // legacy `set_font` only carries family + size; the JS shim now
         // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]

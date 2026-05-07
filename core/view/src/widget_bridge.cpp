@@ -3608,6 +3608,37 @@ void WidgetBridge::register_api() {
             cmd.x=(float)args.get<double>(2,0); cmd.y=(float)args.get<double>(3,0);
             cmd.extra=(float)args.get<double>(4, 14);
             cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. The
+            // JS shim threads the optional maxWidth through as the 7th
+            // arg (px). `<= 0` (or absent) is the spec sentinel for "no
+            // constraint" and routes through the legacy fill_text path
+            // unchanged. Stored on `cmd.w` (which fill_text otherwise
+            // does not consume) so we don't have to grow CanvasDrawCmd.
+            cmd.w = (float)args.get<double>(6, 0.0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1525 — dedicated stroke_text bridge entry. Pre-#1525 the JS
+    // shim's `ctx.strokeText` path re-routed through `canvasFillText`
+    // with the strokeStyle as the fill colour — visually approximate
+    // but spec-incompatible (no real outlined glyphs, lineWidth ignored).
+    // canvasStrokeText records a distinct stroke_text cmd so the paint
+    // loop can route it through `Canvas::stroke_text` for true outlined
+    // rendering on backends that override it (Skia, CG).
+    //
+    // Args: (id, text, x, y, fontSize, color, maxWidth?). Color carries
+    // strokeStyle; lineWidth is set ahead of the call by the JS shim's
+    // _syncStrokeState path (canvasSetLineWidth + canvasSetStrokeColor).
+    engine_.register_function("canvasStrokeText", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_text;
+            cmd.text = args.get<std::string>(1, "");
+            cmd.x=(float)args.get<double>(2,0); cmd.y=(float)args.get<double>(3,0);
+            cmd.extra=(float)args.get<double>(4, 14);
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            cmd.w = (float)args.get<double>(6, 0.0);
             c->add_command(cmd);
         }
         return choc::value::Value();

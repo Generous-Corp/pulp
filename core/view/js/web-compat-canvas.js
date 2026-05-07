@@ -1030,14 +1030,13 @@ CanvasRenderingContext2D.prototype.isPointInStroke = function(/* path? */ x, y) 
 
 // ── pulp #964 — Text drawing ──────────────────────────────────────────────
 CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
-    void maxWidth;
     this._syncGlobalState();
     this._syncShadowState();
     this._syncFilterState();
     this._syncDirectionState();
     this._syncTextState();
     this._applyFillStyle();
-    // canvasFillText takes (id, text, x, y, size, color, family). When
+    // canvasFillText takes (id, text, x, y, size, color, maxWidth). When
     // the active fillStyle is a gradient the bridge keeps the gradient
     // active on the canvas; canvasFillText still records a colour, so
     // pass the gradient's first stop as a graceful approximation.
@@ -1050,19 +1049,50 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     // _syncTextState; canvasFillText only needs the size for its own
     // baseline math.
     var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
+    // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. Thread the
+    // optional maxWidth through to the bridge as a 7th arg in CSS px.
+    // Spec: `<= 0`, NaN, Infinity, or undefined all mean "no constraint",
+    // so we coerce to a finite positive number or 0 (the bridge sentinel).
+    var mw = +maxWidth;
+    if (!(mw > 0) || !isFinite(mw)) mw = 0;
     if (typeof canvasFillText === "function") {
-        canvasFillText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color));
+        canvasFillText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color), mw);
     }
 };
 
 CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
-    // Pulp's bridge doesn't have a stroke-text command — fall back to
-    // fillText with the strokeStyle colour. Visually close enough for
-    // the FilterBank/HUD use case.
-    void maxWidth;
+    // pulp #1525 — true outlined-glyph rendering when the host has
+    // canvasStrokeText (Pulp ≥ 0.78). On older hosts that pre-date this
+    // bridge entry, fall back to the pre-#1525 fillText-with-strokeColor
+    // approximation so the call doesn't throw — the JS shim must still
+    // produce visible text on a v0.77 host loading a v0.78 plugin.
+    this._syncGlobalState();
+    this._syncShadowState();
+    this._syncTextState();
+    // strokeText uses strokeStyle, not fillStyle. Push the active
+    // strokeStyle + lineWidth through the bridge so Canvas::stroke_text
+    // picks them up when it builds its stroke paint.
+    this._applyStrokeStyle();
+    var color = this.strokeStyle;
+    if (color && color._kind) {
+        // Colour gradients on strokeStyle aren't bridged (the
+        // ##stroke-no-gradient gotcha) — degrade to first-stop colour for
+        // parity with fillText's behaviour.
+        color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
+    }
+    var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
+    var mw = +maxWidth;
+    if (!(mw > 0) || !isFinite(mw)) mw = 0;
+    if (typeof canvasStrokeText === "function") {
+        canvasStrokeText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color), mw);
+        return;
+    }
+    // Backwards-compat fallback: pre-#1525 hosts route stroke through
+    // fillText with strokeStyle as the fill colour. Visually close
+    // enough for HUD/Filterbank text on legacy builds.
     var savedFill = this.fillStyle;
     this.fillStyle = this.strokeStyle;
-    try { this.fillText(text, x, y); }
+    try { this.fillText(text, x, y, maxWidth); }
     finally { this.fillStyle = savedFill; }
 };
 

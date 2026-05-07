@@ -649,6 +649,41 @@ public:
     virtual void fill_text(const std::string& text, float x, float y) = 0;
     virtual float measure_text(const std::string& text) = 0;
 
+    /// pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)` spec form.
+    /// When `max_width > 0` and the natural rendered advance exceeds it,
+    /// the backend MUST scale the text horizontally so the resulting run
+    /// is exactly `max_width` px wide (vertical metrics unchanged). The
+    /// default implementation falls through to `fill_text(text, x, y)`,
+    /// preserving legacy behaviour for backends that don't yet honour
+    /// the constraint (RecordingCanvas, base mocks). Skia and CoreGraphics
+    /// override this to apply an `SkMatrix::Scale(maxWidth/measured, 1)`
+    /// (Skia) / `CGContextScaleCTM(scale, 1)` (CG) around the text origin.
+    /// Glyph cluster boundaries are unaffected — HarfBuzz already shapes
+    /// each cluster as an indivisible unit, so horizontal compression
+    /// preserves cluster integrity by construction.
+    virtual void fill_text_with_max_width(const std::string& text,
+                                          float x, float y, float max_width) {
+        (void)max_width;
+        fill_text(text, x, y);
+    }
+
+    /// pulp #1525 — Canvas2D `strokeText(text, x, y, maxWidth)` spec form.
+    /// True outlined-glyph rendering: builds a stroked paint
+    /// (`SkPaint::kStroke_Style` on Skia, CG text drawing mode
+    /// kCTLineDrawingModeStroke on CoreGraphics) so the glyph outlines
+    /// honour the current `lineWidth` / `strokeStyle`. The default
+    /// implementation degrades to `fill_text` with the stroke color
+    /// pre-set by the caller — visually approximate but spec-incompatible.
+    /// Backends override to render real glyph outlines. `max_width`
+    /// semantics match `fill_text_with_max_width`.
+    virtual void stroke_text(const std::string& text, float x, float y,
+                             float max_width = 0.0f) {
+        (void)max_width;
+        // Fallback: caller must have set fill color to stroke color before
+        // invoking. Matches the pre-#1525 strokeText shim approximation.
+        fill_text(text, x, y);
+    }
+
     /// Richer font setter that propagates CSS font-weight (100..900),
     /// font-slant (0=upright, 1=italic), and letter-spacing (px between
     /// glyphs) through to the backend. Default implementation forwards to
@@ -990,6 +1025,13 @@ struct DrawCommand {
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
         fill_circle, stroke_circle, stroke_arc, stroke_line,
         set_font, set_text_align, fill_text,
+        // pulp #1525 — Canvas2D `strokeText(text, x, y, maxWidth)` records
+        // a distinct cmd so tests can assert that the bridge routed the
+        // call through the dedicated stroke_text path (rather than the
+        // pre-#1525 fillText-with-stroke-color approximation). Layout
+        // matches fill_text: text in `text`, (x,y) in f[0..1], optional
+        // maxWidth in f[2] (<=0 = no limit).
+        stroke_text,
         // pulp #927 — full font setter: family in `text`, size/weight/slant/
         // letter_spacing in f[0..3]. Emitted alongside (in addition to) the
         // legacy set_font command so existing tests that count set_font
@@ -1123,6 +1165,14 @@ public:
                        int weight, int slant, float letter_spacing) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
+    // pulp #1525 — Canvas2D fillText(text,x,y,maxWidth) + strokeText.
+    // The recording target captures `max_width` in `f[2]` so harness
+    // tests can assert the bridge plumbed the optional fourth arg
+    // through. `<=0` is the spec sentinel for "no constraint".
+    void fill_text_with_max_width(const std::string& text,
+                                  float x, float y, float max_width) override;
+    void stroke_text(const std::string& text, float x, float y,
+                     float max_width = 0.0f) override;
     float measure_text(const std::string& text) override;
 
     // issue-916 — capture the new commands so JS-driven tests can assert
