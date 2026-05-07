@@ -3901,7 +3901,7 @@
     },
     "rn/direction": {
       "status": "supported",
-      "mapsTo": "prop-applier.ts -> setDirection(id, value) -> View::set_direction (Yoga + Skia paragraph_style.setTextDirection)",
+      "mapsTo": "prop-applier.ts -> setDirection(id, value) -> View::set_direction (drives Yoga writing-direction + Skia paragraph text-direction at shape time)",
       "supportedValues": [
         "inherit",
         "ltr",
@@ -4125,7 +4125,7 @@
     },
     "rn/fontVariant": {
       "status": "partial",
-      "mapsTo": "prop-applier.ts -> setFontVariant(id, csv) (joined string of OpenType feature tokens; bridge fn registration deferred)",
+      "mapsTo": "prop-applier.ts -> setFontVariant(id, csv) -> View::set_font_variant (storage-only; A4 Bundle 1 / pulp #1611 landed the bridge fn registration)",
       "supportedValues": [
         "small-caps",
         "oldstyle-nums",
@@ -4133,11 +4133,13 @@
         "tabular-nums",
         "proportional-nums"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "paint-time HarfBuzz hb_feature_t honoring (storage-only today; shape-pass wiring deferred)"
+      ],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface accepts the RN array-of-strings shape and joins to a comma-separated string for forwarding. The bridge fn `setFontVariant` is not yet registered in widget_bridge.cpp (deferred), so paint-time honoring is a no-op until the HarfBuzz hb_feature_t shape-pass wiring lands. This entry is `partial` so the JSX surface is honest about the dispatch existing while the paint pipeline is still pending.",
+      "notes": "pulp #1434 (rn NOT-IMPL bundle 1) + A4 Bundle 1 (#1611): the @pulp/react surface accepts the RN array-of-strings shape and joins to a comma-separated string for forwarding. setFontVariant is registered in widget_bridge.cpp and stores onto View::font_variant_, but paint-time honoring is a no-op until the HarfBuzz hb_feature_t shape-pass wiring lands. This entry stays `partial` so the JSX surface is honest about the dispatch + storage existing while the paint pipeline is still pending.",
       "issue": ""
     },
     "rn/fontWeight": {

@@ -28,6 +28,26 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-07 (catalog-drift mapsTo cleanup, refs pulp #1434)** —
+  paperwork-only sweep aligning catalog `mapsTo` text and the harness
+  oracle's `bridgeFunctions.registered` list with what `widget_bridge.cpp`
+  actually registers. Seven bridge fns that landed across #1506 / #1549 /
+  #1519 / A4 #1611 (`setDirection`, `setMixBlendMode`, `setOutlineColor`,
+  `setOutlineOffset`, `setOutlineStyle`, `setOutlineWidth`, `setFontFamily`,
+  `setFontVariant`) were missing from the oracle's `registered` list, so
+  six rn entries (`direction`, `mixBlendMode`, `outlineColor`,
+  `outlineOffset`, `outlineStyle`, `outlineWidth`) tripped the
+  "mapsTo cites bridge fn(s) not in widget_bridge.cpp" DIVERGE check
+  even though the bridge was honest. `rn/direction`'s mapsTo also cited
+  the Skia internal `paragraph_style.setTextDirection` parenthetically;
+  rephrased to avoid the false-positive `setX` regex match. `rn/fontVariant`
+  flipped its mapsTo + notes to reflect that the bridge fn IS registered
+  (storage-only) — paint-time HarfBuzz `hb_feature_t` honoring stays
+  on the unsupportedValues list so the entry honestly stays `partial`
+  (storage exists, paint pipeline doesn't). No C++ / TS source change;
+  `compat.json` + `tools/harness/oracles/rn/rn-viewstyle.json` only.
+  Harness drift on rn drops 23 → 18.
+
 - **2026-05-07 (pulp #1434 rn NOT-IMPL bundle 1)** — closes the eight
   remaining rn-surface NOT-IMPL entries on the harness:
   `boxSizing` (already wired since #1545; catalog flipped supported),
