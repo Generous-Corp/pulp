@@ -618,16 +618,12 @@ CanvasRenderingContext2D.prototype.closePath = function() {
     }
 };
 
-CanvasRenderingContext2D.prototype.fill = function(fillRule) {
-    // pulp #1522 — thread Canvas2D fillRule arg through to the bridge.
-    // The HTML5 spec accepts 'nonzero' (default) or 'evenodd'. Encoded
-    // as int (0/1) so canvasFillPath can pass it via cmd.int_val.
+CanvasRenderingContext2D.prototype.fill = function() {
     this._syncGlobalState();
     this._syncShadowState();
     this._syncFilterState();
     this._applyFillStyle();
-    var rule = (fillRule === "evenodd") ? 1 : 0;
-    if (typeof canvasFillPath === "function") canvasFillPath(this._id, rule);
+    if (typeof canvasFillPath === "function") canvasFillPath(this._id);
 };
 
 CanvasRenderingContext2D.prototype.stroke = function() {
@@ -956,10 +952,8 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
     // clip region with the current path. The bridge's canvasClip
     // (issue-896) calls SkCanvas::clipPath; canvasClipRect is the older
     // rect-only path. Prefer canvasClip when available.
-    // pulp #1522 — thread the optional Canvas2D fillRule arg through to
-    // the bridge as an int (0 = nonzero/winding (default), 1 = evenodd).
-    var rule = (fillRule === "evenodd") ? 1 : 0;
-    if (typeof canvasClip === "function") canvasClip(this._id, rule);
+    void fillRule;
+    if (typeof canvasClip === "function") canvasClip(this._id);
 };
 
 // ── pulp #1527 — isPointInPath / isPointInStroke ─────────────────────────

@@ -27,22 +27,6 @@ Spec walk:
 
 ## Recently changed
 
-- **2026-05-06 (pulp #1547)** — RN textDecoration cluster surfaced at
-  the `@pulp/react` JSX layer: `textDecorationLine`,
-  `textDecorationColor`, `textDecorationStyle` all flipped `missing` →
-  `supported`. Each prop routes through the matching bridge fn
-  (`setTextDecoration` / `setTextDecorationColor` /
-  `setTextDecorationStyle`) which has been registered since #1434 —
-  the gap was purely on the prop-applier dispatch. RN's multi-line
-  spelling `'underline line-through'` for `textDecorationLine` passes
-  through verbatim; the C++ side parses it. Same change wired
-  `textAlignVertical` (Android-only in RN, no CSS analogue) →
-  `partial`: the four enum values map to `alignItems` on the owning
-  View (top → flex-start, center → center, bottom → flex-end,
-  auto → auto). RN's spec applies WITHIN a text container, but pulp's
-  flex-only View model has no inline text-block concept, so this is
-  the closest semantic — a View with one text child gets the same
-  visual top/center/bottom alignment.
 - **2026-05-06 (pulp #1518)** — `rn/flex` shorthand wired through the
   `@pulp/react` prop-applier. RN-style numeric `flex={n}` now expands
   to `{flexGrow: n, flexShrink: 1, flexBasis: 0}` (positive `n`),

@@ -33,31 +33,6 @@ specifics are out of scope.
 
 ## Recently changed
 
-- **2026-05-06 (pulp #1528)** — Eight CSS entries reclassified `wontfix` /
-  `missing` → `noop` (silently accepted, no paint impact in pulp's
-  non-scrolling / hint-free model). The entries split into two clusters:
-  * **Optimization / compositor hints (3):** `css/willChange`,
-    `css/contain`, `css/contentVisibility`. These are browser-only
-    hints — pulp's GPU renderer doesn't expose composition layers in a
-    way consumers can hint about. Accepting the value silently keeps
-    imported CSS portable.
-  * **Scroll-snap and scroll-modulator cluster (5):** `css/scrollBehavior`,
-    `css/scrollSnapType`, `css/scrollMargin`, `css/scrollPadding`,
-    `css/overscrollBehavior`. All five depend on a real scroll engine
-    (smooth-scroll programmatic jumps, scroll-snap landing areas,
-    rubber-band gestures). Pulp has Overflow scroll/visible but doesn't
-    actually scroll today, so the declarations silently noop.
-  All eight properties already noop at runtime by JS-shim fall-through
-  (no `case` arm in `web-compat-style-decl.js`); this PR only changes the
-  catalog classification + harness verdict (drift cleared on all eight).
-  Lifts the css "effective denominator" by reclassifying 4 OOS entries
-  (`status: wontfix`) and 4 NOT-IMPL entries (`status: missing`) into the
-  noop bucket — NO_OP entries semantically count as "supported in the
-  silent-accept sense", consumers can paste browser CSS verbatim. Catalog
-  noop count: 9 → 17. The css adapter
-  (`tools/harness/adapters/css.py`) gained an explicit
-  `status == "noop"` early-return so future entries don't have to rely on
-  mapsTo string-marker matching.
 - **2026-05-06 (pulp #1517)** — Background sub-properties wired through
   the JS shim and bridge: `backgroundAttachment` / `backgroundClip` /
   `backgroundOrigin` flipped from `missing` to `noop` / `partial` /

@@ -55,12 +55,7 @@ jobs:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'namespace' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
-          # Falls back to the PULP_LOCAL_MACOS_RUNS_ON_JSON repo var so the
-          # macOS leg routes to the local self-hosted runner (label `sanitizer`)
-          # without a workflow_dispatch input on auto pull_request triggers.
-          # Mirrors Shipyard's local-mac runner pattern; allows Linux + Windows
-          # to fall through to GitHub-hosted defaults via PULP_DEFAULT_RUNNER_PROVIDER='github-hosted'.
-          EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
+          EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
           NAMESPACE_LINUX_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON }}
           NAMESPACE_WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON }}
           NAMESPACE_MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
@@ -172,13 +167,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           lfs: true
-          # Self-hosted runner reuses its workspace across runs so ccache,
-          # FetchContent caches, and CMake configure persist between PRs.
-          # GitHub-hosted runners get a fresh VM each run anyway, so the
-          # default `clean: true` is wasted there too — but explicit makes
-          # the intent obvious. Net win: 5-10× faster on local mac on the
-          # 2nd+ run of any PR (cache + build dir stay warm).
-          clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -252,23 +240,7 @@ jobs:
         shell: bash
 
       - name: Configure
-        # On pull_request events, skip example plugin builds
-        # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /
-        # AraPitchTracker × VST3/AU/CLAP format variants — the heavy
-        # build targets). Tests still build + run; just not the
-        # example-plugin product bundles. Trades ~10-20 min per PR
-        # for a deferred validation that examples still compile —
-        # which runs in full on push to main / schedule.
-        # On push to main + scheduled nightly + workflow_dispatch:
-        # the full build runs (PULP_BUILD_EXAMPLES default = ON).
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
-          else
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          fi
-        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release
@@ -289,11 +261,7 @@ jobs:
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
         # Long-running tests that need more time set their own CTest TIMEOUT.
-        # `-j8` (was `-j4`) — local self-hosted runner is M1 Max with 8 P-cores;
-        # GH-hosted ubuntu/macos-15 runners also have ≥4 cores so this
-        # doesn't regress their previous behavior. Higher parallelism
-        # roughly halves test phase wall-time on multi-core hosts.
-        run: ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        run: ctest --output-on-failure -C Release -LE validation -j4 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -312,13 +280,10 @@ jobs:
         shell: cmd
         run: |
           chcp 65001
-          ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+          ctest --output-on-failure -C Release -LE validation -j4 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
-      # Plugin bundle uploads only run on push/schedule events — pull_request
-      # events skip example plugin builds (see Configure step's
-      # PULP_BUILD_EXAMPLES=OFF gating) so there are no bundles to upload.
       - name: Upload plugin bundles (macOS)
-        if: success() && runner.os == 'macOS' && github.event_name != 'pull_request'
+        if: success() && runner.os == 'macOS'
         uses: actions/upload-artifact@v5
         with:
           name: plugins-${{ matrix.key }}
@@ -329,7 +294,7 @@ jobs:
           retention-days: 7
 
       - name: Upload plugin bundles (Windows)
-        if: success() && runner.os == 'Windows' && github.event_name != 'pull_request'
+        if: success() && runner.os == 'Windows'
         uses: actions/upload-artifact@v5
         with:
           name: plugins-${{ matrix.key }}
@@ -339,7 +304,7 @@ jobs:
           retention-days: 7
 
       - name: Upload plugin bundles (Linux)
-        if: success() && runner.os == 'Linux' && github.event_name != 'pull_request'
+        if: success() && runner.os == 'Linux'
         uses: actions/upload-artifact@v5
         with:
           name: plugins-${{ matrix.key }}
@@ -414,36 +379,18 @@ jobs:
   # Discovered in #401 admin-merge: without these aliases every PR
   # stays BLOCKED forever even when all checks pass.
 
-  # Per-OS alias gates resolve to the per-matrix-leg conclusion via the
-  # GitHub API (Build and Test run -> jobs[] filtered by name prefix).
-  # Previously these checked needs.build.result which is the AGGREGATE
-  # matrix outcome — so a Linux failure failed the macOS alias too, which
-  # is the wrong shape for the operator's macOS-focus policy (Linux +
-  # Windows are advisory; only macOS blocks merge).
-  #
-  # The aliases still exist to satisfy branch-protection's required-
-  # context names (`macos`, `linux`, `windows`) which are stable across
-  # provider/runner-name flips. Each alias now gates on its own platform
-  # leg independently.
-
   macos:
     needs: build
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Gate on macOS matrix leg only
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Gate on build matrix
         run: |
-          set -euo pipefail
-          conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | startswith("macOS")) | .conclusion' | head -1)
-          echo "macOS leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "macOS leg green — macos gate ✓"
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "build matrix succeeded — macOS gate ✓"
             exit 0
           else
-            echo "macOS leg ${conclusion:-not found} — blocking macOS gate"
+            echo "build matrix result: ${{ needs.build.result }}"
             exit 1
           fi
 
@@ -452,47 +399,30 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Linux leg outcome (advisory)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Gate on build matrix
         run: |
-          set -euo pipefail
-          conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | startswith("Linux")) | .conclusion' | head -1)
-          echo "Linux leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "Linux leg green — linux gate ✓"
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "build matrix succeeded — Linux gate ✓"
             exit 0
+          else
+            echo "build matrix result: ${{ needs.build.result }}"
+            exit 1
           fi
-          # Linux is currently advisory per branch protection (only macOS
-          # is required). This alias still surfaces RED so the GitHub UI
-          # accurately reflects per-platform state, but it doesn't block
-          # merge because branch protection no longer requires `linux`.
-          # Operator-facing reminder: file linux failures via the
-          # platform:linux + affects-only:non-macos label set (see
-          # CLAUDE.md > Platform-focus policy when added).
-          echo "Linux leg ${conclusion:-not found} — failing linux alias (advisory only; not required)"
-          exit 1
 
   windows:
     needs: [build, windows-msvc-release-gate]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Windows leg outcome (advisory)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Gate on build matrix + MSVC release-path
         run: |
-          set -euo pipefail
-          conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | startswith("Windows (x64)")) | .conclusion' | head -1)
+          build_ok="${{ needs.build.result }}"
           msvc_ok="${{ needs.windows-msvc-release-gate.result }}"
-          echo "Windows matrix leg: ${conclusion:-unknown}"
-          echo "Windows MSVC release-path: $msvc_ok"
-          if [ "$conclusion" = "success" ] && [ "$msvc_ok" = "success" ]; then
-            echo "Both Windows lanes green — windows gate ✓"
+          if [ "$build_ok" = "success" ] && [ "$msvc_ok" = "success" ]; then
+            echo "build matrix + MSVC release-path both green — Windows gate ✓"
             exit 0
+          else
+            echo "build matrix result: $build_ok"
+            echo "MSVC release-path result: $msvc_ok"
+            exit 1
           fi
-          # Windows is currently advisory (see Linux comment above).
-          echo "Windows leg ${conclusion:-not found} or MSVC=$msvc_ok — failing windows alias (advisory only; not required)"
-          exit 1

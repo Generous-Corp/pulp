@@ -3693,12 +3693,7 @@ void WidgetBridge::register_api() {
 
     engine_.register_function("canvasFillPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
-            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path;
-            // pulp #1522 — optional Canvas2D fillRule arg threaded as
-            // an int (0 = nonzero/winding, 1 = evenodd). Older callers
-            // pass no arg and pick up the spec default of nonzero.
-            cmd.int_val = static_cast<int>(args.get<double>(1, 0));
-            c->add_command(cmd);
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path; c->add_command(cmd);
         }
         return choc::value::Value();
     });
@@ -5278,14 +5273,10 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // canvasClip(id, fillRule?) — intersect clip region with current path
-    // (issue-896). pulp #1522 added the optional fillRule int (0 =
-    // nonzero/winding, 1 = evenodd). Older callers pass no arg and pick
-    // up the spec default of nonzero.
+    // canvasClip(id) — intersect clip region with current path (issue-896).
     engine_.register_function("canvasClip", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip;
-            cmd.int_val = static_cast<int>(args.get<double>(1, 0));
             c->add_command(cmd);
         }
         return choc::value::Value();

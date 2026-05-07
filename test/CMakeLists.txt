@@ -1572,14 +1572,6 @@ add_executable(pulp-test-web-compat-overlay test_web_compat_overlay.cpp)
 target_link_libraries(pulp-test-web-compat-overlay PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-web-compat-overlay)
 
-# pulp #1528 — eight CSS entries reclassified wontfix/missing → noop.
-# Asserts each property is silently accepted by the JS shim without
-# throwing or corrupting unrelated View state. Pure runtime invariant
-# the catalog flip relies on.
-add_executable(pulp-test-web-compat-css-noop test_web_compat_css_noop.cpp)
-target_link_libraries(pulp-test-web-compat-css-noop PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-web-compat-css-noop)
-
 # Panel widget tests (styled containers)
 add_executable(pulp-test-panel test_panel.cpp)
 target_link_libraries(pulp-test-panel PRIVATE pulp::view Catch2::Catch2WithMain)
