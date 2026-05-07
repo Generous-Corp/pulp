@@ -324,11 +324,17 @@ void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));
 }
 
-void SkiaCanvas::clip() {
+void SkiaCanvas::clip(FillRule rule) {
     GUARD_CANVAS;
     if (!path_builder_) return;
-    // Snapshot the path (don't detach — Canvas2D allows continued use of
-    // the same path after clip()) and intersect with the current clip.
+    // pulp #1522 — apply the requested fill rule before snapshotting.
+    // setFillType is sticky on the builder, so re-set on every clip()
+    // call (subsequent fills using the same path may want a different
+    // rule). Snapshot (don't detach) — Canvas2D allows continued use
+    // of the same path after clip().
+    path_builder_->setFillType(rule == FillRule::evenodd
+                                   ? SkPathFillType::kEvenOdd
+                                   : SkPathFillType::kWinding);
     canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
 }
 
@@ -1477,7 +1483,7 @@ void SkiaCanvas::close_path() {
     if (path_builder_) path_builder_->close();
 }
 
-void SkiaCanvas::fill_current_path() {
+void SkiaCanvas::fill_current_path(FillRule rule) {
     if (!canvas_ || !path_builder_) return;
     SkPaint paint;
     paint.setAntiAlias(true);
@@ -1489,6 +1495,12 @@ void SkiaCanvas::fill_current_path() {
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
     apply_filter(paint);
+    // pulp #1522 — apply the requested Canvas2D fill rule. The path is
+    // detached on draw (Canvas2D fill semantics), so the fill type only
+    // affects this single draw and resets with the next begin_path.
+    path_builder_->setFillType(rule == FillRule::evenodd
+                                   ? SkPathFillType::kEvenOdd
+                                   : SkPathFillType::kWinding);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 

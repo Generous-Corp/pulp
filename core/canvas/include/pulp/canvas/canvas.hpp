@@ -170,6 +170,15 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
+// pulp #1522 — Canvas2D `fillRule` parameter for `ctx.fill(rule)` /
+// `ctx.clip(rule)`. Maps directly to the HTML5 spec values:
+//   - `nonzero` (default; CSS `fill-rule: nonzero` / SkPathFillType::kWinding /
+//     CGContextFillPath / CGContextClip)
+//   - `evenodd` (CSS `fill-rule: evenodd` / SkPathFillType::kEvenOdd /
+//     CGContextEOFillPath / CGContextEOClip)
+// Threaded from JS through `cmd.int_val` (0 = nonzero, 1 = evenodd) and
+// applied by every backend's `fill_current_path` / `clip` override.
+enum class FillRule { nonzero, evenodd };
 // pulp #1434 — added `justify` for CSS / RN `text-align: justify`.
 // SkiaCanvas dispatches `kJustify` via SkParagraph when the backend
 // supports it; CG / RecordingCanvas back-ends approximate as `left`
@@ -279,9 +288,11 @@ public:
     virtual void clip_rect(float x, float y, float w, float h) = 0;
 
     /// Intersect the current clip region with the current path.
-    /// Mirrors CanvasRenderingContext2D.clip(). Default no-op so
-    /// backends without a path builder remain unaffected.
-    virtual void clip() {}
+    /// Mirrors CanvasRenderingContext2D.clip(rule). `rule` selects
+    /// non-zero winding (default) or even-odd; backends that ignore
+    /// the rule fall through silently. Default no-op so backends
+    /// without a path builder remain unaffected (pulp #1522).
+    virtual void clip(FillRule rule = FillRule::nonzero) { (void)rule; }
 
     // ── Fill and stroke style ────────────────────────────────────────────
     virtual void set_fill_color(Color c) = 0;
@@ -435,8 +446,12 @@ public:
     }
     /// Close the current path subpath.
     virtual void close_path() {}
-    /// Fill the current path.
-    virtual void fill_current_path() {}
+    /// Fill the current path. `rule` selects non-zero winding (default)
+    /// or even-odd (pulp #1522). Backends that ignore the rule fall
+    /// through silently.
+    virtual void fill_current_path(FillRule rule = FillRule::nonzero) {
+        (void)rule;
+    }
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
@@ -967,7 +982,7 @@ public:
                           float d, float e, float f) override;
     AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
-    void clip() override;
+    void clip(FillRule rule = FillRule::nonzero) override;
     void set_blend_mode(BlendMode mode) override;
     void set_fill_color(Color c) override;
     void set_stroke_color(Color c) override;
@@ -1053,7 +1068,7 @@ public:
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                   float x, float y) override;
     void close_path() override;
-    void fill_current_path() override;
+    void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
 private:
