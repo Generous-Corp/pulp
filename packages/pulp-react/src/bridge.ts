@@ -107,6 +107,9 @@ declare global {
     // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
     // dotted at stroke time. Other named styles degrade to solid.
     const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    /// pulp #1434 Phase A2-3 — writing direction. Maps to
+    /// View::WritingDirection; Yoga + Skia honor at layout / text shape.
+    const setDirection: ((id: string, dir: 'ltr' | 'rtl' | 'inherit' | string) => void) | undefined;
     // pulp #1514 — list-style cluster. Pulp doesn't model
     // <li>/<ul>/<ol> semantics; the bridge stores the value
     // verbatim on the View. Marker glyph rendering is deferred —
@@ -215,6 +218,20 @@ declare global {
     /// `resetAfterCommit` so the host config owns commit-time flush.
     /// Declared as a const so consumers can branch on `typeof layout`.
     const layout: (() => void) | undefined;
+
+    // ── pulp #1515 — CSS clip-path / mask cluster ──────────────────
+    /// CSS `clip-path: path("...")`. Bridge accepts the SVG-path-d
+    /// string; Skia parses via `SkPath::FromSVGString` and installs
+    /// it as the canvas clip before children paint. URL refs and
+    /// named shape forms are deferred. Optional at runtime so older
+    /// bridges still link.
+    const setClipPath: ((id: string, svgPathD: string) => void) | undefined;
+    /// CSS `mask-image`. Storage-only today; shader composite paint
+    /// slice is the follow-up. Optional at runtime.
+    const setMaskImage: ((id: string, value: string) => void) | undefined;
+    /// CSS `mask` shorthand. Stored verbatim alongside the
+    /// `maskImage` longhand the JS shim extracts. Optional at runtime.
+    const setMask: ((id: string, shorthand: string) => void) | undefined;
 
     // ── Overlay click routing (pulp #1148) ──────────────────────────
     /// Claim the view as the active click-eligible overlay so the
@@ -326,6 +343,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-3 — writing direction.
+        'setDirection',
         // pulp #1434 Phase A2-1 — transitions + animations.
         'setTransition', 'setTransitionProperty', 'setTransitionDuration',
         'setTransitionDelay', 'setTransitionTimingFunction',
@@ -334,6 +353,8 @@ export function createMockBridge(): MockBridge {
         'setBoxSizing',
         // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
         'setGrid',
+        // pulp #1515 — CSS clip-path / mask cluster.
+        'setClipPath', 'setMaskImage', 'setMask',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

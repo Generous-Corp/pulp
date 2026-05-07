@@ -129,6 +129,12 @@ void RecordingCanvas::clip() {
     commands_.push_back({DrawCommand::Type::clip});
 }
 
+void RecordingCanvas::clip_path_svg(const std::string& svg_path_d) {
+    DrawCommand cmd{DrawCommand::Type::clip_path_svg};
+    cmd.text = svg_path_d;
+    commands_.push_back(cmd);
+}
+
 void RecordingCanvas::set_blend_mode(BlendMode mode) {
     DrawCommand cmd{DrawCommand::Type::set_blend_mode};
     cmd.f[0] = static_cast<float>(static_cast<int>(mode));
