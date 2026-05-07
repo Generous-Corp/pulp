@@ -229,6 +229,13 @@ public:
     void set_opacity(float alpha) override;
     void save_layer(float x, float y, float w, float h,
                     float opacity, float blur_radius) override;
+    // pulp #1549 — saveLayer with explicit blend mode (CSS / RN
+    // mix-blend-mode). The Skia backend honors the requested blend
+    // mode on the layer-paint so the subtree composites back with
+    // multiply / screen / overlay / etc.
+    void save_layer_with_blend(float x, float y, float w, float h,
+                               float opacity, float blur_radius,
+                               Canvas::BlendMode mode) override;
     // pulp #1434 Phase A2-4 — full CSS filter chain.
     void save_layer_with_filters(float x, float y, float w, float h,
                                   float opacity,

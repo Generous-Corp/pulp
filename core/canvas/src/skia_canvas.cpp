@@ -1435,10 +1435,10 @@ void SkiaCanvas::set_stroke_pattern(const std::string& image_src,
 
 // ── Blend modes ─────────────────────────────────────────────────────────────
 
-void SkiaCanvas::set_blend_mode(BlendMode mode) {
-    // Indices 0..15 — advanced/W3C blend modes (must stay in sync with
-    // canvas.hpp BlendMode enum).
-    // Indices 16..26 — Porter-Duff compositing modes (issue-896).
+// pulp #1549 — shared canvas BlendMode -> SkBlendMode lookup. Used by
+// set_blend_mode() and save_layer_with_blend() so the two paths can never
+// drift on the keyword set.
+static SkBlendMode skia_blend_mode_for(Canvas::BlendMode mode) {
     static const SkBlendMode map[] = {
         SkBlendMode::kSrcOver, SkBlendMode::kMultiply, SkBlendMode::kScreen,
         SkBlendMode::kOverlay, SkBlendMode::kDarken, SkBlendMode::kLighten,
@@ -1461,11 +1461,15 @@ void SkiaCanvas::set_blend_mode(BlendMode mode) {
     };
     int idx = static_cast<int>(mode);
     constexpr int count = static_cast<int>(sizeof(map) / sizeof(map[0]));
-    if (idx < 0 || idx >= count) {
-        blend_mode_ = SkBlendMode::kSrcOver;
-        return;
-    }
-    blend_mode_ = map[idx];
+    if (idx < 0 || idx >= count) return SkBlendMode::kSrcOver;
+    return map[idx];
+}
+
+void SkiaCanvas::set_blend_mode(BlendMode mode) {
+    // Indices 0..15 — advanced/W3C blend modes (must stay in sync with
+    // canvas.hpp BlendMode enum).
+    // Indices 16..26 — Porter-Duff compositing modes (issue-896).
+    blend_mode_ = skia_blend_mode_for(mode);
 }
 
 // ── Path building ───────────────────────────────────────────────────────────
@@ -2111,6 +2115,33 @@ void SkiaCanvas::save_layer(float x, float y, float w, float h,
 
     canvas_->saveLayer(&bounds, &layer_paint);
 }
+
+// pulp #1549 — saveLayer with explicit blend mode. The layer-paint's blend
+// mode is the one Skia uses when compositing the layer back onto its
+// parent at restore() time, which is exactly the CSS / RN
+// `mix-blend-mode` semantic ("isolate the subtree, then blend it back").
+void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
+                                       float opacity, float blur_radius,
+                                       Canvas::BlendMode mode) {
+    if (!canvas_) { save(); return; }
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    SkPaint layer_paint;
+
+    if (opacity < 1.0f) {
+        layer_paint.setAlphaf(opacity);
+    }
+    if (blur_radius > 0.0f) {
+        layer_paint.setImageFilter(
+            SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr));
+    }
+    if (mode != Canvas::BlendMode::normal) {
+        layer_paint.setBlendMode(skia_blend_mode_for(mode));
+    }
+
+    canvas_->saveLayer(&bounds, &layer_paint);
+}
+
 
 // pulp #1434 Phase A2-4 — full CSS filter chain composition.
 //

@@ -27,6 +27,22 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1549)** — `rn/mixBlendMode` flipped `missing` →
+  `supported`. RN's New Architecture `mixBlendMode` style prop now
+  reaches the bridge via the `@pulp/react` prop-applier (`prop-applier.ts`
+  since #1549) → `setMixBlendMode(id, kw)` (`widget_bridge.cpp`).
+  The bridge maps the 16 W3C separable + non-separable blend modes
+  (`normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`,
+  `color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`,
+  `exclusion`, `hue`, `saturation`, `color`, `luminosity`) onto the
+  shared `canvas::Canvas::BlendMode` enum and writes to a new
+  `View::mix_blend_mode_` slot. `View::paint_all` forces a saveLayer
+  via the new `Canvas::save_layer_with_blend()` API when the slot is
+  non-default, so the subtree composites back through the requested
+  mode at restore() time. Skia honors the keyword on the layer-paint;
+  CG / D2D currently fall through to plain `save_layer()` (no-op
+  blend) until those backends grow the same shim. `plus-lighter` /
+  `plus-darker` are documented as `unsupportedValues`.
 - **2026-05-06 (pulp #1546)** — five RN entries reclassified in
   compat.json: four shadow props flipped `missing` → `wontfix`,
   `isolation` flipped `missing` → `noop` (corrected from the
@@ -319,8 +335,9 @@ Spec walk:
    `boxShadow` instead.
 3. `rn/elevation` — Android-only; not modeled.
 4. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
-5. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
-   support; bridge plumbing absent).
+5. `rn/isolation` — not yet wired (Skia / CG can support; bridge
+   plumbing absent). `rn/mixBlendMode` was wired in pulp #1549 (see
+   "Recently changed" above).
 
 ## SvgPath (#994 / #1291)
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
@@ -726,6 +727,59 @@ public:
     const std::vector<FilterOp>& filter_chain() const { return filter_chain_; }
     bool has_filter_chain() const { return !filter_chain_.empty(); }
 
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `set_transitions` accepts the parsed shorthand; `transitions()`
+    /// returns the slice for the dispatcher to consult when a property
+    /// changes. Per the CSS spec, the matching is a linear walk —
+    /// later entries win when properties overlap (CSS cascade order).
+    /// PR 2 of the ladder hooks the dispatcher to the rAF idle pump
+    /// and starts driving Animation instances; PR 1 establishes the
+    /// storage shape so downstream PRs can land independently.
+    void set_transitions(std::vector<TransitionSpec> ts) { transitions_ = std::move(ts); }
+    void clear_transitions() { transitions_.clear(); }
+    const std::vector<TransitionSpec>& transitions() const { return transitions_; }
+    bool has_transitions() const { return !transitions_.empty(); }
+
+    /// Find the matching transition for a given property name. Returns
+    /// nullptr if no transition applies (CSS spec: the snap path —
+    /// commit the new value immediately). `'all'` entries match any
+    /// property; named entries match only that exact property.
+    const TransitionSpec* find_transition_for(const std::string& property) const {
+        const TransitionSpec* match = nullptr;
+        for (const auto& t : transitions_) {
+            if (t.property_name == "all") match = &t;
+            if (t.property_name == property) { match = &t; }
+        }
+        return match;
+    }
+
+    /// Active running animations on this View. Owned here so the
+    /// per-View lifetime matches the View's. PR 2 wires the
+    /// dispatcher to mutate this list; PR 1 establishes ownership.
+    std::vector<CssAnimation>& active_animations() { return active_animations_; }
+    const std::vector<CssAnimation>& active_animations() const { return active_animations_; }
+
+    /// Staged CSS animation control tokens (pulp #1434 — Codex audit on
+    /// PR #1508). The web-compat-style-decl shim invokes
+    /// `setAnimation(id, "name"|"duration"|"easing"|..., value)` one
+    /// control-token at a time — one CSS longhand per call. We
+    /// accumulate that state here; when the `name` token resolves
+    /// against the keyframes registry, the bridge seeds entries into
+    /// `active_animations_` using these accumulated values. Without
+    /// this slot the legacy ABI silently drops every web-compat
+    /// animation property.
+    struct StagedAnimation {
+        std::string name;
+        float duration_seconds = 0.0f;
+        float delay_seconds = 0.0f;
+        CssEasing easing{};
+        float iterations = 1.0f;
+        std::string direction = "normal";
+        std::string fill_mode;
+    };
+    StagedAnimation& staged_animation() { return staged_animation_; }
+    const StagedAnimation& staged_animation() const { return staged_animation_; }
+
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints (issue-926). Zero == no backdrop
     /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
@@ -818,6 +872,20 @@ public:
     /// working.
     void set_white_space_nowrap(bool n) { white_space_nowrap_ = n; }
     bool white_space_nowrap() const { return white_space_nowrap_; }
+
+    /// CSS / RN `mix-blend-mode` (pulp #1549). The blend mode applied when
+    /// this View's compositing layer composites back onto its parent. Stored
+    /// as the canvas BlendMode enum so the paint path can pass it straight
+    /// through to the layer-paint without a string lookup. Default
+    /// `BlendMode::normal` is a paint-time no-op (kSrcOver). Setting any
+    /// non-default mode forces a saveLayer() at paint time so the subtree
+    /// renders into an offscreen buffer that gets composited with the
+    /// requested blend mode — same shape as opacity / filter:blur.
+    void set_mix_blend_mode(canvas::Canvas::BlendMode m) { mix_blend_mode_ = m; }
+    canvas::Canvas::BlendMode mix_blend_mode() const { return mix_blend_mode_; }
+    bool has_non_default_blend_mode() const {
+        return mix_blend_mode_ != canvas::Canvas::BlendMode::normal;
+    }
 
     /// Cursor style hint (CSS cursor property)
     enum class CursorStyle {
@@ -955,6 +1023,10 @@ private:
     std::string clip_path_;
     std::string mask_image_;
     std::string mask_;
+    /// pulp #1434 Phase A2-1 — transition specs + active animations.
+    std::vector<TransitionSpec> transitions_{};
+    std::vector<CssAnimation> active_animations_{};
+    StagedAnimation staged_animation_{};
     std::string background_attachment_;  // pulp #1517 — noop today
     std::string background_clip_;        // pulp #1517 — partial (text deferred)
     std::string background_origin_;      // pulp #1517 — noop today
@@ -970,6 +1042,11 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
+    // pulp #1549 — CSS / RN mix-blend-mode. Default kSrcOver (canvas
+    // BlendMode::normal) is a paint-time no-op; any non-default value
+    // forces a saveLayer() at paint time so the subtree composites back
+    // through the requested blend mode.
+    canvas::Canvas::BlendMode mix_blend_mode_ = canvas::Canvas::BlendMode::normal;
 
     // Pointer capture: pointer_id → this view receives all events for that pointer
     std::vector<int> captured_pointers_;

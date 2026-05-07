@@ -706,16 +706,45 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Transition
+        // Transition (pulp #1434 Phase A2-1) — pass the full shorthand
+        // string to the bridge, which parses it into a list of
+        // TransitionSpecs (one per comma-separated entry; supports
+        // duration / delay / easing / property + cubic-bezier + steps).
+        // The legacy parseTransition / setTransitionDuration path is
+        // kept as a fallback for older runtimes.
         case "transition": {
-            var tr = parseTransition(resolved);
-            setTransitionDuration(id, tr.duration);
+            if (typeof setTransition !== "undefined") {
+                setTransition(id, resolved);
+            } else {
+                var tr = parseTransition(resolved);
+                setTransitionDuration(id, tr.duration);
+            }
             break;
         }
         case "transitionDuration": {
             var td = parseFloat(resolved);
             if (resolved.indexOf("ms") >= 0) td /= 1000;
             setTransitionDuration(id, td);
+            break;
+        }
+        case "transitionProperty": {
+            if (typeof setTransitionProperty !== "undefined") {
+                setTransitionProperty(id, resolved);
+            }
+            break;
+        }
+        case "transitionTimingFunction": {
+            if (typeof setTransitionTimingFunction !== "undefined") {
+                setTransitionTimingFunction(id, resolved);
+            }
+            break;
+        }
+        case "transitionDelay": {
+            var dly = parseFloat(resolved);
+            if (resolved.indexOf("ms") >= 0) dly /= 1000;
+            if (typeof setTransitionDelay !== "undefined") {
+                setTransitionDelay(id, dly);
+            }
             break;
         }
 

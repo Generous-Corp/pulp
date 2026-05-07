@@ -223,6 +223,13 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 }
 
 - (BOOL)isFlipped { return NO; }
+// pulp #1382 — drawRect fills the entire bounds with rgba8(30,30,46)
+// before painting the view tree, so PulpView is opaque by definition.
+// Override isOpaque=YES so AppKit doesn't composite NSWindow.backgroundColor
+// (white in light mode) under us on hover/focus repaints. Without this,
+// the Spectr filterbank flashes WHITE on mouse-over because AppKit clears
+// the dirty region with the window bg before invoking drawRect.
+- (BOOL)isOpaque { return YES; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e { (void)e; return YES; }
 
@@ -1352,6 +1359,18 @@ public:
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
+
+            // pulp #1382 — NSWindow's default backgroundColor is
+            // [NSColor windowBackgroundColor] which is white in macOS
+            // light-mode. AppKit composites this beneath the contentView
+            // on dirty-rect repaints, even when the contentView is opaque.
+            // Set the window backgroundColor to match PulpView's clear color
+            // so any compositing race / partial-paint window shows dark, not
+            // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
+            [window_ setBackgroundColor:[NSColor colorWithCalibratedRed:30.0/255.0
+                                                                  green:30.0/255.0
+                                                                   blue:46.0/255.0
+                                                                  alpha:1.0]];
 
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 

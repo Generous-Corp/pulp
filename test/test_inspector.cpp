@@ -540,6 +540,22 @@ TEST_CASE("ConsoleCapture: clear") {
     REQUIRE(capture.entries().empty());
 }
 
+TEST_CASE("ConsoleCapture: retains the newest ring buffer entries", "[inspect][console][issue-641]") {
+    ConsoleCapture capture;
+    auto cb = capture.callback();
+
+    for (int i = 0; i < 205; ++i)
+        cb("log", "entry-" + std::to_string(i));
+
+    auto entries = capture.entries();
+    REQUIRE(entries.size() == 200);
+    REQUIRE(entries.front().message == "entry-5");
+    REQUIRE(entries.back().message == "entry-204");
+
+    capture.clear();
+    REQUIRE(capture.entries().empty());
+}
+
 // ── AudioInspector ──────────────────────────────────────────────────────────
 
 #include <pulp/inspect/audio_inspector.hpp>
@@ -593,6 +609,26 @@ TEST_CASE("DomainHandler: unknown domain") {
     REQUIRE(resp.is_error);
 }
 
+TEST_CASE("DomainHandler: rejects malformed dispatch and missing inspect roots", "[inspect][domain][issue-641]") {
+    DomainHandler handler;
+
+    auto invalid = handler.handle(make_request(1, "DOMGetDocument"));
+    REQUIRE(invalid.is_error);
+    REQUIRE(invalid.params_json == "Invalid method: DOMGetDocument");
+
+    auto unknown = handler.handle(make_request(2, "Bogus.method"));
+    REQUIRE(unknown.is_error);
+    REQUIRE(unknown.params_json == "Unknown domain: Bogus");
+
+    auto dom_missing_root = handler.handle(make_request(3, methods::kDOMGetDocument));
+    REQUIRE(dom_missing_root.is_error);
+    REQUIRE(dom_missing_root.params_json == "No root view attached");
+
+    auto css_missing_root = handler.handle(make_request(4, methods::kCSSGetComputedStyle, R"({"id":"root"})"));
+    REQUIRE(css_missing_root.is_error);
+    REQUIRE(css_missing_root.params_json == "No root view attached");
+}
+
 TEST_CASE("DomainHandler: Inspector.getInfo") {
     View root;
     DomainHandler handler;
@@ -612,6 +648,34 @@ TEST_CASE("DomainHandler: DOM.getDocument") {
     auto resp = handler.handle(make_request(1, "DOM.getDocument"));
     REQUIRE_FALSE(resp.is_error);
     REQUIRE(resp.params_json.find("child1") != std::string::npos);
+}
+
+TEST_CASE("DomainHandler: DOM and CSS reject malformed params", "[inspect][domain][issue-641]") {
+    View root;
+    root.set_id("root");
+
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto dom_bad_json = handler.handle(make_request(1, methods::kDOMGetNodeById, "{"));
+    REQUIRE(dom_bad_json.is_error);
+    REQUIRE(dom_bad_json.params_json == "Invalid params for DOM.getNodeById");
+
+    auto dom_missing_id = handler.handle(make_request(2, methods::kDOMGetNodeById, R"({"nodeId":"root"})"));
+    REQUIRE(dom_missing_id.is_error);
+    REQUIRE(dom_missing_id.params_json == "Invalid params for DOM.getNodeById");
+
+    auto search_bad_json = handler.handle(make_request(3, methods::kDOMSearch, "{"));
+    REQUIRE(search_bad_json.is_error);
+    REQUIRE(search_bad_json.params_json == "Invalid params for DOM.search");
+
+    auto css_bad_json = handler.handle(make_request(4, methods::kCSSGetComputedStyle, "{"));
+    REQUIRE(css_bad_json.is_error);
+    REQUIRE(css_bad_json.params_json == "Invalid params for CSS.getComputedStyle");
+
+    auto css_missing_id = handler.handle(make_request(5, methods::kCSSGetComputedStyle, R"({"nodeId":"root"})"));
+    REQUIRE(css_missing_id.is_error);
+    REQUIRE(css_missing_id.params_json == "Invalid params for CSS.getComputedStyle");
 }
 
 TEST_CASE("DomainHandler: State.getParameters") {

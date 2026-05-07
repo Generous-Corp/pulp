@@ -223,6 +223,17 @@ export interface StyleProps {
     /// CSS `mask-image` (pulp #1515). Storage-only today; the
     /// shader composite is a follow-up paint slice.
     maskImage?: string;
+    /// pulp #1549 — RN `mixBlendMode` (New Architecture only).
+    /// Forwards to `setMixBlendMode(id, kw)`; the bridge maps the W3C
+    /// blend-mode keyword set onto the canvas `BlendMode` enum and the
+    /// View paint path uses `save_layer_with_blend()` so the subtree
+    /// composites back through the requested mode. `'normal'` (or
+    /// unknown keywords) is a paint-time no-op.
+    mixBlendMode?:
+        | 'normal' | 'multiply' | 'screen' | 'overlay'
+        | 'darken' | 'lighten' | 'color-dodge' | 'color-burn'
+        | 'hard-light' | 'soft-light' | 'difference' | 'exclusion'
+        | 'hue' | 'saturation' | 'color' | 'luminosity';
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
     /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum
@@ -244,6 +255,18 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `transition` accepts the full CSS shorthand string; longhand
+    /// fields apply uniformly across the parsed list.
+    transition?: string;
+    transitionProperty?: string;
+    transitionDuration?: number | string;
+    transitionDelay?: number | string;
+    transitionTimingFunction?:
+        | 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
+        | string; // also: 'cubic-bezier(...)', 'steps(N, end)'
+    animationName?: string;
+    animationDuration?: number | string;
     /// pulp #1516 — CSS box-sizing. Web designs almost universally
     /// reset to `border-box` via `* { box-sizing: border-box }`;
     /// Yoga 3.x honors the spec via YGNodeStyleSetBoxSizing.

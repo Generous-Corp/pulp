@@ -151,9 +151,15 @@ void View::paint_all(canvas::Canvas& canvas) {
     // shadow was painted onto the parent's compositing context (before
     // saveLayer) which broke CSS opacity stacking and could mask
     // subsequent child-layer content on certain Skia paths.
+    // pulp #1549 — `mix-blend-mode` forces a saveLayer the same way
+    // opacity / filter does so the subtree composites back through the
+    // requested blend mode at restore() time. Default `BlendMode::normal`
+    // is a paint-time no-op (kSrcOver) and stays out of `needs_layer`.
+    const bool needs_blend_layer = has_non_default_blend_mode();
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f)
                        || !filter_chain_.empty() || needs_layer_
-                       || (effect_ && effect_->needs_layer());
+                       || (effect_ && effect_->needs_layer())
+                       || needs_blend_layer;
     if (needs_layer) {
         if (effect_) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
@@ -191,6 +197,11 @@ void View::paint_all(canvas::Canvas& canvas) {
             canvas.save_layer_with_filters(0, 0, bounds_.width, bounds_.height,
                                             opacity_, chain.data(),
                                             static_cast<int>(chain.size()));
+        } else if (needs_blend_layer) {
+            // pulp #1549 — saveLayer with explicit blend mode for
+            // CSS / RN `mix-blend-mode`.
+            canvas.save_layer_with_blend(0, 0, bounds_.width, bounds_.height,
+                                         opacity_, filter_blur_, mix_blend_mode_);
         } else {
             canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
         }
