@@ -125,8 +125,13 @@ void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
     commands_.push_back(cmd);
 }
 
-void RecordingCanvas::clip() {
-    commands_.push_back({DrawCommand::Type::clip});
+void RecordingCanvas::clip(FillRule rule) {
+    DrawCommand cmd{DrawCommand::Type::clip};
+    // pulp #1522 — capture the Canvas2D fillRule (0 = nonzero/winding,
+    // 1 = evenodd). Tests assert on cmd.f[0] when verifying that ctx.clip()
+    // and ctx.clip('evenodd') flush distinct values through the stack.
+    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
 }
 
 void RecordingCanvas::set_blend_mode(BlendMode mode) {
@@ -516,8 +521,13 @@ void RecordingCanvas::close_path() {
     commands_.push_back({DrawCommand::Type::close_path});
 }
 
-void RecordingCanvas::fill_current_path() {
-    commands_.push_back({DrawCommand::Type::fill_current_path});
+void RecordingCanvas::fill_current_path(FillRule rule) {
+    DrawCommand cmd{DrawCommand::Type::fill_current_path};
+    // pulp #1522 — capture the Canvas2D fillRule (0 = nonzero/winding,
+    // 1 = evenodd). Tests assert on cmd.f[0] when verifying ctx.fill()
+    // vs ctx.fill('evenodd') flushes the right value through.
+    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
 }
 
 void RecordingCanvas::stroke_current_path() {

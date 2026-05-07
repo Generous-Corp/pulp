@@ -54,7 +54,7 @@ public:
 
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;
-    void clip() override;
+    void clip(FillRule rule = FillRule::nonzero) override;
 
     // ── Fill and stroke ──────────────────────────────────────────────────
     void set_fill_color(Color c) override;
@@ -147,7 +147,7 @@ public:
     void quad_to(float cpx, float cpy, float x, float y) override;
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y) override;
     void close_path() override;
-    void fill_current_path() override;
+    void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
     // SDF shapes
