@@ -6078,7 +6078,9 @@
         "any arc"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases.",
       "issue": "1346"
     },
@@ -6100,7 +6102,9 @@
       "mapsTo": "ctx.bezierCurveTo -> canvasCubicTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6109,7 +6113,9 @@
       "mapsTo": "ctx.quadraticCurveTo -> canvasQuadTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6445,7 +6451,9 @@
       "unsupportedValues": [
         "lineDashOffset mutation between draws (must re-call setLineDash to push new phase)"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "Minor edge case; file a follow-up if observable.",
       "issue": ""
     },
@@ -6494,7 +6502,9 @@
         "square"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6507,7 +6517,9 @@
         "bevel"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6532,7 +6544,9 @@
         "[0, 1]"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -6568,7 +6582,9 @@
         "luminosity"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
       "issue": "1346"
     },
@@ -6605,7 +6621,9 @@
         "end"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6621,7 +6639,9 @@
         "bottom"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
       "notes": "",
       "issue": ""
     },
