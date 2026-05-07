@@ -107,6 +107,21 @@ alias differs from the canonical name — add the alias to
 `DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
 list on the manifest entry.
 
+## Bundled Toolchain Pins
+
+Some prebuilt toolchains carry bundled third-party components that are not
+separate source directories in `external/`. For example, the Skia prebuilt
+toolchain used by visual tests bundles Dawn, HarfBuzz, and ICU through Skia's
+`DEPS` file. Track those exact nested revisions in the parent manifest entry
+with a structured field such as `determinism.bundled_pins`, and mirror the
+human-readable version in `DEPENDENCIES.md`, `external/<toolchain>/VERSION.md`,
+and any relevant reference doc.
+
+Do not add a separate manifest entry for a nested toolchain component unless
+Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
+will require standalone NOTICE/licensing rows for something whose license and
+distribution boundary are already covered by the parent prebuilt.
+
 Synthetic missing-dep test: `tools/deps/test_audit.py::
 ManifestSourceScannerTests::test_uncovered_detection_catches_missing_pip_dep`
 — don't delete it. If the completeness gate regresses, this is the

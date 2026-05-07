@@ -205,6 +205,25 @@ The 2026-05-06 PR plumbs both calls end-to-end:
     so a v0.78 plugin still renders visible text on a v0.77 host.
 - **`measureText`** — unchanged. Reports the natural advance regardless
   of any subsequent `fillText` `maxWidth` squeeze.
+### Catalog hygiene: 10-entry `tests` round-trip (pulp #1526)
+
+The 10 canvas2d entries below were cataloged in #1366 and wired across
+#1348 / #1480, but their `compat.json` `tests` field was empty — there
+was no single test pinning the round-trip "JS shim → bridge → CanvasWidget
+command stream" for the set. Two new Catch2 cases under `[issue-1526]`
+cover the round-trip (recorded `set_global_alpha` / `set_blend_mode` /
+`set_line_cap` / `set_line_join` / `set_text_align` / `set_text_baseline`
+/ `set_line_dash` / `quad_to` / `cubic_to` / `move_to` cmds) and the
+spec-default + assignment getter round-trip. Each catalog entry now
+references the new test:
+
+- `globalAlpha`, `globalCompositeOperation`
+- `lineCap`, `lineJoin`, `lineDashOffset`
+- `textAlign`, `textBaseline`
+- `quadraticCurveTo`, `bezierCurveTo`, `arc`
+
+No behaviour change — this slice closes the catalog `tests`-field gap
+the entries inherited from PR #1366.
 
 ### Follow-up: `direction` + `filter` (pulp #1520)
 
