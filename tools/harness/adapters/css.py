@@ -202,6 +202,23 @@ class CssAdapter(AdapterBase):
                 detail="catalog status=wontfix (explicitly out of scope)",
             )
 
+        # 0b. noop is NO_OP by definition (pulp #1528). Properties tagged
+        #     `noop` are silently accepted at the JS shim layer (they fall
+        #     through the switch in web-compat-style-decl.js without a
+        #     `case` and produce no paint impact). Distinct from `wontfix`
+        #     (genuinely out-of-scope, e.g. CSS Tables) and `missing`
+        #     (in-scope but not yet wired). NO_OP entries count toward the
+        #     compat surface as "supported in the strict accept-no-error
+        #     sense" — consumers can paste browser-CSS verbatim without
+        #     failures, the value just has no rendered effect in pulp's
+        #     non-scrolling / hint-free model.
+        if entry.status == "noop":
+            return Result(
+                entry=entry,
+                status=Status.NO_OP,
+                detail="catalog status=noop (silently accepted, no paint impact)",
+            )
+
         # 1. Synthetic entries (`__*`) — the catalog tracks CSS features
         #    rather than properties. Trust the catalog status verbatim
         #    (no oracle lookup possible) but emit through the harness
