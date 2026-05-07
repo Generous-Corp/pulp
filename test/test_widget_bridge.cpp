@@ -5264,6 +5264,101 @@ TEST_CASE("setFlex margin edges accept 'auto' keyword",
     REQUIRE(f.dim_margin_right.unit == DimensionUnit::auto_);
 }
 
+TEST_CASE("setFlex start/end accept 'auto' keyword",
+          "[view][bridge][css][diverge-pass-yoga]") {
+    // pulp DIVERGE→PASS sweep — yoga/start and yoga/end claimed `auto`
+    // as unsupported. Yoga DOES expose YGNodeStyleSetPositionAuto, so
+    // wire `'auto'` through the bridge → FlexStyle::dim_start/dim_end
+    // → yoga_layout.cpp::apply_logical_position. The keyword routes via
+    // DimensionUnit::auto_.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'start', 'auto');
+        setFlex('a', 'end',   'auto');
+    )");
+
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.dim_start.unit == DimensionUnit::auto_);
+    REQUIRE(f.dim_end.unit   == DimensionUnit::auto_);
+}
+
+TEST_CASE("flex shorthand keyword forms",
+          "[view][bridge][css][diverge-pass-yoga]") {
+    // pulp DIVERGE→PASS sweep — yoga/flex claimed `'auto'`/`'none'`/
+    // `'initial'` as unsupported because the JS shorthand parser
+    // parseFloat()ed the keyword to NaN. The CSS Flexible Box spec
+    // expansion is:
+    //   flex: auto    ≡ 1 1 auto
+    //   flex: none    ≡ 0 0 auto
+    //   flex: initial ≡ 0 1 auto
+    // Drives the CSSStyleDeclaration shim (the actual code path that
+    // contains the new keyword expansion) and verifies each keyword
+    // reaches FlexStyle with the correct grow / shrink / basis-unit.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        createPanel('c', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        var sc = new CSSStyleDeclaration({ _id: 'c', _nativeCreated: true });
+        sa.flex = 'auto';
+        sb.flex = 'none';
+        sc.flex = 'initial';
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE_THAT(fa.flex_grow,   WithinAbs(1.0, 0.0001));
+    REQUIRE_THAT(fa.flex_shrink, WithinAbs(1.0, 0.0001));
+    REQUIRE(fa.dim_flex_basis.unit == DimensionUnit::auto_);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE_THAT(fb.flex_grow,   WithinAbs(0.0, 0.0001));
+    REQUIRE_THAT(fb.flex_shrink, WithinAbs(0.0, 0.0001));
+    REQUIRE(fb.dim_flex_basis.unit == DimensionUnit::auto_);
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE_THAT(fc.flex_grow,   WithinAbs(0.0, 0.0001));
+    REQUIRE_THAT(fc.flex_shrink, WithinAbs(1.0, 0.0001));
+    REQUIRE(fc.dim_flex_basis.unit == DimensionUnit::auto_);
+}
+
+TEST_CASE("setOverflow accepts scroll keyword",
+          "[view][bridge][diverge-pass-yoga]") {
+    // pulp DIVERGE→PASS sweep — yoga/overflow claimed `scroll` as
+    // unsupported. View::Overflow now has 3 values; the bridge accepts
+    // 'scroll' as a third keyword and yoga_layout.cpp forwards it
+    // through YGNodeStyleSetOverflow. Paint clipping treats scroll
+    // like hidden (no scrollbar UI yet), but the keyword survives the
+    // round-trip — closing the harness gap.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setOverflow('a', 'scroll');
+        createPanel('b', '');
+        setOverflow('b', 'visible');
+        createPanel('c', '');
+        setOverflow('c', 'hidden');
+    )");
+
+    REQUIRE(bridge.widget("a")->overflow() == View::Overflow::scroll);
+    REQUIRE(bridge.widget("b")->overflow() == View::Overflow::visible);
+    REQUIRE(bridge.widget("c")->overflow() == View::Overflow::hidden);
+}
+
 TEST_CASE("padding_left percent caps the layout edge",
           "[view][bridge][css][issue-1434-edges]") {
     // End-to-end: percent reaches Yoga and produces the expected

@@ -152,10 +152,38 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         case "flex": {
             // Shorthand: flex: <grow> [<shrink>] [<basis>]
+            // pulp DIVERGE→PASS sweep — accept the CSS shorthand
+            // keywords `auto` / `none` / `initial`. Per the CSS Flexible
+            // Box spec these expand to:
+            //   flex: auto    ≡ 1 1 auto
+            //   flex: none    ≡ 0 0 auto
+            //   flex: initial ≡ 0 1 auto   (the CSS default)
+            // Without this branch the keyword fell through to
+            // parseFloat() → NaN → 0 and silently zeroed flex_grow,
+            // making `flex: auto` equivalent to `flex: 0` — the wrong
+            // semantics for the "fill remaining space" idiom.
+            var fkw = String(resolved).trim().toLowerCase();
+            if (fkw === "auto" || fkw === "none" || fkw === "initial") {
+                var grow   = (fkw === "auto") ? 1 : 0;
+                var shrink = (fkw === "none") ? 0 : 1;
+                setFlex(id, "flex_grow",   grow);
+                setFlex(id, "flex_shrink", shrink);
+                setFlex(id, "flex_basis",  "auto");
+                break;
+            }
             var parts = resolved.split(/\s+/);
             setFlex(id, "flex_grow", parseFloat(parts[0]) || 0);
             if (parts[1]) setFlex(id, "flex_shrink", parseFloat(parts[1]) || 0);
-            if (parts[2]) { var b = parseCSSLength(parts[2]); if (b) setFlex(id, "flex_basis", b.value); }
+            if (parts[2]) {
+                // Accept `<basis>` token = `auto` / length / percentage.
+                var basisTok = String(parts[2]).trim().toLowerCase();
+                if (basisTok === "auto") {
+                    setFlex(id, "flex_basis", "auto");
+                } else {
+                    var b = parseCSSLength(parts[2]);
+                    if (b) setFlex(id, "flex_basis", b.unit === "%" ? (b.value + "%") : b.value);
+                }
+            }
             break;
         }
         case "justifyContent":

@@ -208,7 +208,15 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
         }
     };
     auto apply_logical_position = [&](YGEdge edge, const Dimension& dim) {
-        // Yoga position has no `auto` API; fall through silently.
+        // pulp DIVERGE→PASS sweep — Yoga DOES have a position-auto API
+        // (`YGNodeStyleSetPositionAuto`). `inset-inline-start: auto` is
+        // the CSS default ("not anchored to that edge"); routing the
+        // keyword through here lets it take effect instead of being
+        // silently dropped.
+        if (dim.unit == DimensionUnit::auto_) {
+            YGNodeStyleSetPositionAuto(node, edge);
+            return;
+        }
         if (dim.unit == DimensionUnit::percent && dim.value != 0) {
             YGNodeStyleSetPositionPercent(node, edge, dim.value);
             return;
@@ -430,6 +438,21 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
                           || view.position() == View::Position::fixed;
     apply_flex_style(node, view.flex(), is_absolute);
     apply_border_widths(node, view);
+    // pulp DIVERGE→PASS sweep — wire View::Overflow through to Yoga so
+    // the engine knows about clipping context. Yoga's overflow has 3
+    // values (visible/hidden/scroll) matching CSS — for layout the only
+    // observable difference is in descendant-overflow contribution to
+    // the box's preferred size, but having the slot wired closes the
+    // yoga/overflow harness gap (paint-side clipping is in view.cpp).
+    {
+        YGOverflow yo = YGOverflowVisible;
+        switch (view.overflow()) {
+            case View::Overflow::visible: yo = YGOverflowVisible; break;
+            case View::Overflow::hidden:  yo = YGOverflowHidden;  break;
+            case View::Overflow::scroll:  yo = YGOverflowScroll;  break;
+        }
+        YGNodeStyleSetOverflow(node, yo);
+    }
     // pulp #1434 Phase A2-3 — writing direction propagates into Yoga's
     // YGDirection (controls how `start`/`end` resolve and whether
     // flexDirection: row visually reverses under RTL). Use the raw
