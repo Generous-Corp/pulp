@@ -155,6 +155,7 @@ nav:
   - Guides:
       - Web Plugins: guides/web-plugins.md
       - GPU Validation: guides/gpu-validation-checklist.md
+      - Text Shaping Determinism: reference/text-shaping.md
       - Test Coverage: guides/coverage.md
   - Policies:
       - Code Style: policies/code-style.md

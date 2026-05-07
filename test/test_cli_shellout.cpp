@@ -247,6 +247,65 @@ TEST_CASE("pulp <unknown-command> exits non-zero with a diagnostic",
     REQUIRE(mentioned);
 }
 
+TEST_CASE("pulp audio usage and parser errors are deterministic",
+          "[cli][shellout][audio][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto usage = run_pulp({"audio"});
+    REQUIRE(usage.exit_code == 0);
+    REQUIRE_FALSE(usage.timed_out);
+    REQUIRE(usage.stdout_output.find("pulp audio") != std::string::npos);
+    REQUIRE(usage.stdout_output.find("excerpt-find") != std::string::npos);
+    REQUIRE(usage.stdout_output.find("read-bundle") != std::string::npos);
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string stderr_substring;
+        std::string stdout_substring;
+    };
+
+    const std::vector<Case> cases = {
+        {{"audio", "model"}, "Unknown audio model subcommand", "pulp audio"},
+        {{"audio", "model", "activate"}, "model id is required", "pulp audio"},
+        {{"audio", "model", "list", "--surprise"}, "Unknown option: --surprise", ""},
+        {{"audio", "model", "status", "--surprise"}, "Unknown option: --surprise", ""},
+        {{"audio", "excerpt-find", "--text", "kick", "--input"}, "--input requires a value", ""},
+        {{"audio", "excerpt-find", "--top", "many"}, "invalid value for --top", ""},
+        {{"audio", "excerpt-find", "--window-ms", "soon"}, "invalid value for --window-ms", ""},
+        {{"audio", "excerpt-find", "--hop-ms", "soon"}, "invalid value for --hop-ms", ""},
+        {{"audio", "excerpt-find", "--min-score", "loud"}, "invalid value for --min-score", ""},
+        {{"audio", "excerpt-find", "--max-candidates-per-file", "lots"}, "invalid value for --max-candidates-per-file", ""},
+        {{"audio", "excerpt-find", "--unknown"}, "Unknown option: --unknown", ""},
+        {{"audio", "read-bundle"}, "bundle path is required", "pulp audio"},
+        {{"audio", "read-bundle", "bundle-a", "bundle-b"}, "Unknown argument: bundle-b", ""},
+        {{"audio", "not-audio"}, "Unknown audio subcommand", "pulp audio"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("args size: " << c.args.size());
+        auto r = run_pulp(c.args);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code != 0);
+        REQUIRE(r.stderr_output.find(c.stderr_substring) != std::string::npos);
+        if (!c.stdout_substring.empty())
+            REQUIRE(r.stdout_output.find(c.stdout_substring) != std::string::npos);
+    }
+}
+
+TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
+          "[cli][shellout][audio][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto missing = unique_temp_dir("pulp-audio-missing-bundle");
+    fs::remove_all(missing);
+    auto r = run_pulp({"audio", "read-bundle", missing.string(), "--json"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(r.stdout_output.find("\"ok\": false") != std::string::npos);
+    REQUIRE(r.stdout_output.find("bundle path does not exist") != std::string::npos);
+}
+
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
           "[cli][shellout][codex-562]") {
     // Codex 2026-04-21 wave 2 P2 on #562: `pulp config foo` previously
