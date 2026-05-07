@@ -106,7 +106,7 @@ fn scan_unknown_format_flag_returns_bad_usage() {
 
 #[test]
 fn scan_cli_unknown_format_exits_two() {
-    let output = assert_cmd::Command::cargo_bin("pulp-rs")
+    let output = assert_cmd::Command::cargo_bin("pulp")
         .expect("binary")
         .args(["scan", "--format", "notafmt"])
         .output()
@@ -127,7 +127,7 @@ fn scan_cli_empty_roots_on_isolated_home_prints_fallback() {
     // system though, so we can't guarantee empty output — instead
     // we just assert the command exits 0 (a successful no-op).
     let tmp = tempfile::tempdir().expect("tempdir");
-    let output = assert_cmd::Command::cargo_bin("pulp-rs")
+    let output = assert_cmd::Command::cargo_bin("pulp")
         .expect("binary")
         .arg("scan")
         .env("HOME", tmp.path())

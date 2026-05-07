@@ -68,6 +68,63 @@ TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",
     }
 }
 
+// pulp #1387 gap #3 — GPU `MacGpuWindowHost` previously inherited the
+// `WindowHost` base no-op for `set_idle_callback`, so standalone's
+// `scripted_ui->poll()` (which flushes JS rAF / setTimeout / async
+// queues via `bridge.poll_async_results()`) was silently dropped.
+// Spectr's filterbank canvas could call `requestAnimationFrame(cb)`
+// 60×/sec but `cb` never ran until a pointer event happened to call
+// `request_repaint`, which is why the spectrum needed mouse motion to
+// animate. The fix wires `set_idle_callback` into the CVDisplayLink
+// dispatch so the idle pump runs each vsync.
+//
+// This regression locks in the symbol-level override: the GPU host
+// must accept and store the callback (not silently drop it). A full
+// vsync-driven integration test would require driving the display
+// link from a Catch2 fixture, which `[NSApp run]` blocks; the
+// behavioral contract (`poll_async_results` flushes pending rAFs +
+// `request_repaint`s) is already covered by
+// `test_widget_bridge.cpp`'s issue-921 cases.
+TEST_CASE("macOS GPU WindowHost accepts set_idle_callback (pulp #1387 gap #3)",
+          "[view][hosts][gpu][issue-1387]") {
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+
+        View root;
+        WindowOptions opts;
+        opts.title = "WindowHost issue-1387";
+        opts.width = 200.0f;
+        opts.height = 200.0f;
+        opts.use_gpu = true;
+
+        auto host = WindowHost::create(root, opts);
+        if (!host) {
+            // GPU build path unavailable (no Skia / no Dawn) — skip.
+            SUCCEED("GPU host unavailable in this build");
+            return;
+        }
+
+        // Install + clear must both be no-throw and idempotent. Before
+        // the fix, set_idle_callback dispatched to the base class no-op
+        // which dropped the callback on the floor; after the fix the
+        // override stores it and arms `has_idle_callback_` for the
+        // display-link guard.
+        host->set_idle_callback([] {});
+        host->set_idle_callback({});
+        host->set_idle_callback([] {});
+
+        // Re-installing must not crash or leak the previous callback's
+        // captures (std::function move-assignment handles this; pin it
+        // so a future refactor can't regress).
+        std::vector<int> sink;
+        host->set_idle_callback([&sink] { sink.push_back(1); });
+        host->set_idle_callback({});
+        REQUIRE(sink.empty());
+
+        host->hide();
+    }
+}
+
 // pulp #992 — `-[PulpView mouseUp:]` SIGSEGV regression test.
 //
 // Repro: a click on a child View triggers a state change (in real apps,

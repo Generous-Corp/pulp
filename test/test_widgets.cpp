@@ -293,6 +293,23 @@ TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
 }
 
+// pulp #1410 — verify that nowrap puts a Label into single-line paint
+// mode (multi_line=false). Truncation is #1407's surface; this test
+// just confirms the multi_line side-effect path the bridge relies on.
+TEST_CASE("Label with nowrap + multi_line=false paints exactly one fill_text command",
+          "[view][widget][issue-1410]") {
+    Label label("Mid-band attenuation\nwith high-shelf compensation");
+    label.set_bounds({0, 0, 200, 48});
+    label.set_white_space_nowrap(true);
+    label.set_multi_line(false);  // bridge does this side-effect
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);  // would be 2 in multi_line mode (one per `\n`-split)
+}
+
 TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {
     Label label("Gain");
     label.set_bounds({0, 0, 32, 80});

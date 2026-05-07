@@ -278,4 +278,115 @@ mod tests {
             Some("0.40.0")
         );
     }
+
+    // ── #45 coverage uplift slice 13 — pr.rs cushion ────────────────
+
+    #[test]
+    fn read_pinned_shipyard_version_returns_none_when_no_version_line() {
+        let td = tempfile::tempdir().unwrap();
+        let tools = td.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        // toml without a `version` line at all → None.
+        std::fs::write(tools.join("shipyard.toml"), "[binary]\nrepo = \"x\"\n").unwrap();
+        assert!(read_pinned_shipyard_version(td.path()).is_none());
+    }
+
+    #[test]
+    fn read_pinned_shipyard_version_returns_none_when_value_empty() {
+        let td = tempfile::tempdir().unwrap();
+        let tools = td.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        // version = "" → still returns None (empty value rejected).
+        std::fs::write(tools.join("shipyard.toml"), "version = \"\"\n").unwrap();
+        assert!(read_pinned_shipyard_version(td.path()).is_none());
+    }
+
+    #[test]
+    fn read_pinned_shipyard_version_skips_unrelated_keys_first() {
+        let td = tempfile::tempdir().unwrap();
+        let tools = td.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(
+            tools.join("shipyard.toml"),
+            "# header comment\nrepo = \"danielraffel/Shipyard\"\nversion = \"v0.46.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_pinned_shipyard_version(td.path()).as_deref(),
+            Some("v0.46.0")
+        );
+    }
+
+    #[test]
+    fn enforce_pin_emits_advisory_line_when_pin_present() {
+        // enforce_pin is documented as advisory only — when a pin is
+        // configured, it must surface a diagnostic line so verbose
+        // runs can see what was checked. With NO pin, it stays silent.
+        let td = tempfile::tempdir().unwrap();
+        let tools = td.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(tools.join("shipyard.toml"), "version = \"v0.46.0\"\n").unwrap();
+
+        let spawner = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let fake_shipyard = std::path::PathBuf::from("/usr/local/bin/shipyard");
+        enforce_pin(td.path(), &fake_shipyard, &spawner, &mut buf);
+
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("v0.46.0"), "expected pin in output: {s:?}");
+        // No spawn — capturing-channel limitation per the docstring.
+        assert!(spawner.calls.borrow().is_empty(),
+                "enforce_pin should not spawn the binary");
+    }
+
+    #[test]
+    fn enforce_pin_silent_when_no_pin_file() {
+        let td = tempfile::tempdir().unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let fake_shipyard = std::path::PathBuf::from("/usr/local/bin/shipyard");
+        enforce_pin(td.path(), &fake_shipyard, &spawner, &mut buf);
+        assert!(buf.is_empty(), "expected no output when no pin: {:?}",
+                String::from_utf8_lossy(&buf));
+    }
+
+    #[test]
+    fn shipyard_executable_returns_path_when_on_path_or_none() {
+        // Don't assume shipyard is installed — assert the function
+        // returns a value of the right shape (Some(PathBuf) or None).
+        let res = shipyard_executable();
+        match res {
+            Some(p) => {
+                assert!(!p.as_os_str().is_empty());
+                // If found, path should end in "shipyard" or
+                // "shipyard.exe" (Windows compat).
+                let s = p.to_string_lossy();
+                assert!(s.ends_with("shipyard") || s.ends_with("shipyard.exe"),
+                        "unexpected shipyard path: {s}");
+            }
+            None => { /* not on PATH — expected on minimal test envs */ }
+        }
+    }
+
+    #[test]
+    fn parse_args_no_args_returns_default() {
+        let p = parse_args(&[]);
+        assert!(!p.native);
+        assert!(p.forward.is_empty());
+    }
+
+    #[test]
+    fn parse_args_all_forwarded_when_native_absent() {
+        let p = parse_args(&[
+            "--base".to_owned(),
+            "main".to_owned(),
+            "--skip-target".to_owned(),
+            "windows".to_owned(),
+        ]);
+        assert!(!p.native);
+        assert_eq!(
+            p.forward,
+            vec!["--base", "main", "--skip-target", "windows"]
+        );
+    }
 }

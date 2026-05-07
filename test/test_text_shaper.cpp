@@ -89,6 +89,77 @@ TEST_CASE("TextShaper layout_with_lines materializes text", "[canvas][text_shape
     REQUIRE(layout.lines[0].text.find("Hello") != std::string::npos);
 }
 
+// pulp #1410 — `white-space: nowrap` consumers pass max_lines=1 to
+// force a single-line layout regardless of `max_width`. Otherwise the
+// wrapping path fires before #1407's ellipsis truncation can engage.
+TEST_CASE("TextShaper layout with max_lines=1 forces single-line layout",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "This is a long sentence that should wrap to multiple lines", "system", 14);
+
+    auto wrapped = shaper.layout(prepared, 100.0f);
+    REQUIRE(wrapped.line_count > 1);
+
+    auto nowrap = shaper.layout(prepared, 100.0f, 0, /*max_lines=*/1);
+    REQUIRE(nowrap.line_count == 1);
+    REQUIRE(nowrap.total_width >= wrapped.lines.front().width);
+}
+
+TEST_CASE("TextShaper layout_with_lines max_lines=1 materializes the full string",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("alpha beta gamma delta", "system", 14);
+
+    auto nowrap = shaper.layout_with_lines(prepared, 50.0f, 0, /*max_lines=*/1);
+    REQUIRE(nowrap.line_count == 1);
+    REQUIRE(nowrap.lines[0].text.find("alpha") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("beta") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("gamma") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("delta") != std::string::npos);
+}
+
+// pulp #1410 (Codex pre-merge sweep) — CSS `white-space: nowrap`
+// collapses hard line breaks into a single space, both in the
+// materialized line text and in the width sum. Otherwise an input
+// like "alpha\nbeta" would measure as alpha + beta with no inter-word
+// advance, mis-reporting the intrinsic width that #1407's ellipsis
+// truncation needs to detect overflow.
+TEST_CASE("TextShaper layout_with_lines max_lines=1 collapses hard breaks to spaces",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("alpha\nbeta\ngamma", "system", 14);
+
+    auto out = shaper.layout_with_lines(prepared, 1000.0f, 0, /*max_lines=*/1);
+    REQUIRE(out.line_count == 1);
+    // Materialized line replaces newlines with spaces (CSS nowrap rule).
+    REQUIRE(out.lines[0].text.find('\n') == std::string::npos);
+    REQUIRE(out.lines[0].text.find("alpha") != std::string::npos);
+    REQUIRE(out.lines[0].text.find("beta") != std::string::npos);
+    REQUIRE(out.lines[0].text.find("gamma") != std::string::npos);
+
+    // Width must include some advance for each collapsed newline —
+    // not strictly equal to a real space (segmentation differs between
+    // "alpha\n" and "alpha "), but strictly greater than the no-space
+    // baseline of just summing word widths.
+    auto no_breaks = shaper.prepare("alphabetagamma", "system", 14);
+    auto compact = shaper.layout(no_breaks, 1000.0f);
+    REQUIRE(out.total_width > compact.lines[0].width);
+}
+
+TEST_CASE("TextShaper layout with max_lines=2 caps line count",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa", "system", 14);
+
+    auto unbounded = shaper.layout(prepared, 50.0f);
+    REQUIRE(unbounded.line_count > 2);
+
+    auto capped = shaper.layout(prepared, 50.0f, 0, /*max_lines=*/2);
+    REQUIRE(capped.line_count == 2);
+}
+
 TEST_CASE("TextShaper measure_height", "[canvas][text_shaper]") {
     TextShaper shaper;
     auto prepared = shaper.prepare("Line1\nLine2", "system", 14);

@@ -51,6 +51,11 @@ pub struct Invocation {
     pub args: Vec<String>,
     /// Optional working directory.
     pub cwd: Option<PathBuf>,
+    /// Extra environment variables exported to the child. Order is
+    /// preserved so test recorders can pin contracts that care about
+    /// it. Applied as additions on top of the parent's env (no
+    /// inherited-env clearing).
+    pub envs: Vec<(String, String)>,
 }
 
 impl Invocation {
@@ -61,6 +66,7 @@ impl Invocation {
             program: program.into(),
             args: Vec::new(),
             cwd: None,
+            envs: Vec::new(),
         }
     }
 
@@ -88,6 +94,16 @@ impl Invocation {
     #[must_use]
     pub fn cwd(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cwd = Some(dir.into());
+        self
+    }
+
+    /// Chainable env-var add. Values can be empty (matches `setenv`'s
+    /// behaviour on most systems — exports the key with an empty
+    /// value rather than clearing it). Use multiple `env()` calls for
+    /// multiple variables.
+    #[must_use]
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.envs.push((key.into(), value.into()));
         self
     }
 }
@@ -118,6 +134,9 @@ impl Spawner for SystemSpawner {
         cmd.args(&inv.args);
         if let Some(ref dir) = inv.cwd {
             cmd.current_dir(dir);
+        }
+        for (k, v) in &inv.envs {
+            cmd.env(k, v);
         }
         let status = cmd
             .status()

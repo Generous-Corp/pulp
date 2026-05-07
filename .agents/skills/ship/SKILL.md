@@ -213,6 +213,21 @@ artifact on a *clean* runner that did not build it, catching the bug
 class before tagging. If you change rpath logic, run the smoke job
 locally first or it will fail in CI for everyone else.
 
+### Phase 8 CLI release artifacts are dual-binary
+
+After the Rust CLI flip, release artifacts must contain both `pulp`
+and `pulp-cpp` in the same archive. `pulp` is the user-facing Rust CLI;
+`pulp-cpp` is the C++ delegate used for fallthrough commands that still
+link framework libraries. Do not ship `pulp-rs` as the public binary
+name, and do not drop `pulp-cpp` from tarballs or zips.
+
+Smoke both paths when touching `.github/workflows/release-cli.yml` or
+`tools/scripts/package_cli.py`: run `pulp version --json` against the
+Rust binary, then exercise a C++-owned command through
+`PULP_RS_CPP_BINARY=/path/to/pulp-cpp pulp ...` or invoke `pulp-cpp`
+directly. This preserves rollback/debug workflows such as
+`PULP_USE_CPP=1 pulp <args>` for existing Pulp projects.
+
 ### Released SDK is missing WebView symbols
 
 Symptom: a consumer links against a downloaded `pulp-sdk-<platform>`

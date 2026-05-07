@@ -517,4 +517,126 @@ mod tests {
             assert!(s.contains(cmd), "missing {cmd}");
         }
     }
+
+    // ── #45 coverage uplift slice 8 — tool.rs parse_sub edges ─────
+
+    #[test]
+    fn parse_sub_no_args_returns_help() {
+        let s = parse_sub(&[]).unwrap();
+        assert!(matches!(s, Sub::Help));
+    }
+
+    #[test]
+    fn parse_sub_list() {
+        let s = parse_sub(&["list".to_owned()]).unwrap();
+        assert!(matches!(s, Sub::List));
+    }
+
+    #[test]
+    fn parse_sub_doctor() {
+        let s = parse_sub(&["doctor".to_owned()]).unwrap();
+        assert!(matches!(s, Sub::Doctor));
+    }
+
+    #[test]
+    fn parse_sub_install_with_id_only() {
+        let s = parse_sub(&["install".to_owned(), "uv".to_owned()]).unwrap();
+        match s {
+            Sub::Install { id, all, force } => {
+                assert_eq!(id.as_deref(), Some("uv"));
+                assert!(!all);
+                assert!(!force);
+            }
+            other => panic!("expected Install, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_install_with_all_and_force() {
+        let s = parse_sub(&[
+            "install".to_owned(),
+            "--all".to_owned(),
+            "--force".to_owned(),
+        ])
+        .unwrap();
+        match s {
+            Sub::Install { id, all, force } => {
+                assert!(id.is_none());
+                assert!(all);
+                assert!(force);
+            }
+            other => panic!("expected Install, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_install_no_id_no_all_errors() {
+        let err = parse_sub(&["install".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool install"));
+    }
+
+    #[test]
+    fn parse_sub_uninstall_requires_id() {
+        let err = parse_sub(&["uninstall".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool uninstall"));
+    }
+
+    #[test]
+    fn parse_sub_path_requires_id() {
+        let err = parse_sub(&["path".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool path"));
+    }
+
+    #[test]
+    fn parse_sub_path_captures_id() {
+        let s = parse_sub(&["path".to_owned(), "uv".to_owned()]).unwrap();
+        match s {
+            Sub::Path(id) => assert_eq!(id, "uv"),
+            other => panic!("expected Path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_run_requires_id() {
+        let err = parse_sub(&["run".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp tool run"));
+    }
+
+    #[test]
+    fn parse_sub_run_captures_id_and_args() {
+        let s = parse_sub(&[
+            "run".to_owned(),
+            "uv".to_owned(),
+            "pip".to_owned(),
+            "install".to_owned(),
+            "rich".to_owned(),
+        ])
+        .unwrap();
+        match s {
+            Sub::Run { id, args } => {
+                assert_eq!(id, "uv");
+                assert_eq!(args, vec!["pip", "install", "rich"]);
+            }
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_unknown_top_level_errors() {
+        let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
+        assert!(matches!(err, CliError::UnknownSubcommand)
+                || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn run_help_short_circuits_without_registry() {
+        // Help is the only sub that doesn't need a tool-registry.json
+        // — make sure that bypass works.
+        let spawner = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = run(&Sub::Help, &spawner, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Usage: pulp tool"), "missing usage in help: {s:?}");
+    }
 }

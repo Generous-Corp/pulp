@@ -70,7 +70,7 @@ git clone --depth 1 --branch AudioUnitSDK-1.4.0 \
 Run `pulp doctor --fix` to auto-resolve what it can:
 
 ```bash
-./build/tools/cli/pulp doctor --fix
+PULP_RS_CPP_BINARY="$PWD/build/tools/cli/pulp-cpp" ./build/pulp doctor --fix
 ```
 
 Each failed check includes a fix command. Common ones:

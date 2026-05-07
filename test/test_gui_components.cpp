@@ -333,6 +333,57 @@ TEST_CASE("TextButton paint covers enabled hover and disabled states",
     REQUIRE_FALSE(btn.is_enabled());
 }
 
+// pulp #1407 — CSS `text-overflow: ellipsis` on a TextButton truncates the
+// painted label so a long string never bleeds past the rounded background.
+TEST_CASE("TextButton paint truncates long labels with U+2026 when text-overflow set",
+          "[gui][button][issue-1407]") {
+    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
+
+    TextButton btn("Mid-band attenuation with high-shelf compensation");
+    btn.set_bounds({0, 0, 80, 28});
+    btn.set_text_overflow_ellipsis(true);
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+
+    std::string drawn;
+    int fill_text_count = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text) { drawn = cmd.text; ++fill_text_count; }
+    }
+    REQUIRE(fill_text_count == 1);
+    REQUIRE(drawn.size() >= 3);
+    REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
+    // Drawn label fits inside the button minus its 8 px horizontal padding.
+    REQUIRE(canvas.measure_text(drawn) <= 80.0f - 16.0f);
+}
+
+// pulp #1407 (Codex post-merge sweep) — a TextButton narrower than its
+// 2 × 8 px horizontal padding budget collapses the available text-box
+// to ≤ 0. Without the non-positive guard inside truncate_to_width, the
+// helper would short-circuit to the full string and visibly leak the
+// label past the button's rounded background. After the guard the
+// tiny button paints just "…", which is what the bounding box can hold.
+TEST_CASE("TextButton paint with tiny width still truncates instead of leaking the label",
+          "[gui][button][issue-1407]") {
+    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
+
+    TextButton btn("Mid-band attenuation with high-shelf compensation");
+    btn.set_bounds({0, 0, 12, 28});  // 12 < 2 * 8 px padding
+    btn.set_text_overflow_ellipsis(true);
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+
+    std::string drawn;
+    int fill_text_count = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text) { drawn = cmd.text; ++fill_text_count; }
+    }
+    REQUIRE(fill_text_count == 1);
+    REQUIRE(drawn == kEllipsis);
+}
+
 TEST_CASE("HyperlinkButton paint underlines only while hovered",
           "[gui][button][coverage]") {
     HyperlinkButton link("Docs", "https://example.invalid/docs");

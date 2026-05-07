@@ -406,4 +406,121 @@ mod tests {
             assert_eq!(loc.source, "system-path");
         }
     }
+
+    // ── #45 coverage uplift slice 11 — tool_registry.rs final ─────
+
+    #[test]
+    fn load_parses_tool_registry_json_and_imprints_id() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("tool-registry.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "tools": {
+    "uv": {"binaries": {"macOS-arm64": "uv-darwin-arm64.tar.gz"}},
+    "node": {"binaries": {}}
+  }
+}"#,
+        )
+        .unwrap();
+        let reg = load(&path).unwrap();
+        assert!(reg.tools.contains_key("uv"));
+        // load() back-fills the id field on each ToolDescriptor.
+        assert_eq!(reg.tools["uv"].id, "uv");
+        assert_eq!(reg.tools["node"].id, "node");
+    }
+
+    #[test]
+    fn load_returns_io_error_on_missing_file() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("nope.json");
+        let err = load(&path).unwrap_err();
+        assert!(matches!(err, CliError::Io { .. }), "expected Io error: {err}");
+    }
+
+    #[test]
+    fn load_returns_json_error_on_malformed() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("bad.json");
+        std::fs::write(&path, "{not-json").unwrap();
+        let err = load(&path).unwrap_err();
+        assert!(matches!(err, CliError::Json { .. }), "expected Json error: {err}");
+    }
+
+    #[test]
+    fn find_tool_registry_path_walks_up_to_find_tools_packages() {
+        let td = tempfile::tempdir().unwrap();
+        let reg = td.path().join("tools").join("packages").join("tool-registry.json");
+        std::fs::create_dir_all(reg.parent().unwrap()).unwrap();
+        std::fs::write(&reg, r#"{"tools":{}}"#).unwrap();
+        let nested = td.path().join("a").join("b").join("c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let found = find_tool_registry_path(&nested).unwrap();
+        // Path resolution may add canonical /private prefix on macOS;
+        // compare via canonicalize to be hermetic.
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            reg.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn find_tool_registry_path_returns_none_when_no_marker() {
+        let td = tempfile::tempdir().unwrap();
+        assert!(find_tool_registry_path(td.path()).is_none());
+    }
+
+    #[test]
+    fn pulp_home_honors_explicit_env_var() {
+        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_var("PULP_HOME", td.path());
+        assert_eq!(pulp_home(), td.path());
+        std::env::remove_var("PULP_HOME");
+    }
+
+    #[test]
+    fn tools_dir_is_pulp_home_plus_tools() {
+        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_var("PULP_HOME", td.path());
+        assert_eq!(tools_dir(), td.path().join("tools"));
+        std::env::remove_var("PULP_HOME");
+    }
+
+    #[test]
+    fn current_platform_key_returns_documented_label() {
+        let key = current_platform_key();
+        // Must be one of the documented labels; just assert it's
+        // non-empty and well-shaped (Platform-arch with a hyphen).
+        assert!(!key.is_empty());
+        assert!(key.contains('-'), "expected Platform-arch: {key}");
+    }
+
+    #[test]
+    fn uninstall_tool_returns_false_for_missing_id() {
+        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Point PULP_HOME at a fresh tempdir so we don't touch the
+        // user's real ~/.pulp/tools tree.
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_var("PULP_HOME", td.path());
+        let removed = uninstall_tool("__never_installed_xyz__").unwrap();
+        assert!(!removed, "should be Ok(false), nothing to remove");
+        std::env::remove_var("PULP_HOME");
+    }
+
+    #[test]
+    fn uninstall_tool_removes_existing_dir() {
+        let _l = crate::test_support::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempfile::tempdir().unwrap();
+        std::env::set_var("PULP_HOME", td.path());
+        let tool_dir = td.path().join("tools").join("uv");
+        std::fs::create_dir_all(&tool_dir).unwrap();
+        std::fs::write(tool_dir.join("uv"), "stub").unwrap();
+        assert!(tool_dir.exists());
+        let removed = uninstall_tool("uv").unwrap();
+        assert!(removed);
+        assert!(!tool_dir.exists());
+        std::env::remove_var("PULP_HOME");
+    }
 }

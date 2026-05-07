@@ -5,7 +5,7 @@ description: Scaffold a new Pulp plugin or app project
 
 Scaffold a new Pulp plugin project. $ARGUMENTS should be the plugin name.
 
-Run: `./build/tools/cli/pulp create $ARGUMENTS`
+Run: `pulp create $ARGUMENTS` when the CLI is on PATH, or `./build/pulp create $ARGUMENTS` from a source build.
 
 If no arguments provided, ask the user for:
 1. **Name** — the plugin name (e.g., "My Synth")
@@ -15,6 +15,6 @@ If no arguments provided, ask the user for:
    When set, the generated descriptor declares `supports_mpe = true` and the
    header includes `<pulp/midi/mpe_buffer.hpp>`. See `docs/guides/mpe.md`.
 
-Then run: `./build/tools/cli/pulp create "<name>" --type <type> --formats <formats> [--mpe]`
+Then run: `pulp create "<name>" --type <type> --formats <formats> [--mpe]` or `./build/pulp create ...` from a source build.
 
 After scaffolding, build the new project and run its tests to verify everything works.

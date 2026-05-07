@@ -51,6 +51,19 @@ Everything else — tests, scanner, graph wiring — is format-agnostic.
   parameter edits in the slot. Otherwise `get_parameter()` can report a
   stale host-side value even though the plug-in restored its own state.
 
+### Defensive boundary for entry / factory calls (#812)
+
+`scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()`
+in `try/catch` (commit `70e3545d`). Throws across the dlopen boundary
+abort the whole scan otherwise — observed in production with bundles
+whose static-init throws C++ exceptions during `dlopen`. The fallback
+emits a synthesized `PluginInfo` (filename-derived name, no metadata)
+so the scan still surfaces the bundle. Static-init throws that fire
+*before* `dlsym` returns can't be caught at this layer; that's the
+case `pulp scan --no-load` exists for. When adding new entry-point
+calls, wrap them too — the goal is "one bad bundle never crashes a
+scan."
+
 ## Testing against a real plug-in
 
 Integration tests gate on a compile-time path macro:

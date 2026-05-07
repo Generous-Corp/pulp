@@ -1,0 +1,63 @@
+align-content	enum	flex-start, flex-end, center, stretch, space-between, space-around, space-evenly
+align-items	enum	flex-start, flex-end, center, stretch, baseline
+align-self	enum	auto, flex-start, flex-end, center, stretch, baseline
+aspect-ratio	number	width/height ratio; non-standard CSS semantics in Yoga
+border-bottom-width	length
+border-end-width	length	writing-direction relative
+border-left-width	length
+border-right-width	length
+border-start-width	length	writing-direction relative
+border-top-width	length
+border-width	length	shorthand for all edges
+bottom	length-or-percentage	physical edge
+column-gap	length-or-percentage
+direction	enum	inherit, ltr, rtl
+display	enum	flex, none
+end	length-or-percentage	writing-direction relative (RTL-aware)
+flex	number	positive=flex-grow, negative=flex-shrink semantics
+flex-basis	length-or-percentage-or-auto	auto allowed
+flex-direction	enum	row, row-reverse, column, column-reverse (Yoga default: column)
+flex-flow	string	shorthand; flex-direction + flex-wrap
+flex-grow	number	default 0
+flex-shrink	number	default 0 (note: differs from CSS default 1)
+flex-wrap	enum	nowrap, wrap, wrap-reverse
+gap	length-or-percentage	shorthand for row-gap and column-gap
+height	length-or-percentage-or-auto
+inset	length-or-percentage	shorthand top/right/bottom/left
+inset-block	length-or-percentage
+inset-block-end	length-or-percentage
+inset-block-start	length-or-percentage
+inset-inline	length-or-percentage
+inset-inline-end	length-or-percentage
+inset-inline-start	length-or-percentage
+justify-content	enum	flex-start, flex-end, center, space-between, space-around, space-evenly
+left	length-or-percentage	physical edge
+margin	edge-set	shorthand for all edges
+margin-bottom	length-or-percentage-or-auto	auto allowed
+margin-end	length-or-percentage-or-auto	writing-direction relative
+margin-horizontal	length-or-percentage-or-auto	left+right shorthand (RN style)
+margin-left	length-or-percentage-or-auto
+margin-right	length-or-percentage-or-auto
+margin-start	length-or-percentage-or-auto	writing-direction relative
+margin-top	length-or-percentage-or-auto
+margin-vertical	length-or-percentage-or-auto	top+bottom shorthand (RN style)
+max-height	length-or-percentage
+max-width	length-or-percentage
+min-height	length-or-percentage
+min-width	length-or-percentage
+overflow	enum	visible, hidden, scroll
+padding	edge-set	shorthand for all edges
+padding-bottom	length-or-percentage
+padding-end	length-or-percentage	writing-direction relative
+padding-horizontal	length-or-percentage	left+right shorthand (RN style)
+padding-left	length-or-percentage
+padding-right	length-or-percentage
+padding-start	length-or-percentage	writing-direction relative
+padding-top	length-or-percentage
+padding-vertical	length-or-percentage	top+bottom shorthand (RN style)
+position	enum	static, relative (default), absolute
+right	length-or-percentage	physical edge
+row-gap	length-or-percentage
+start	length-or-percentage	writing-direction relative (RTL-aware)
+top	length-or-percentage	physical edge
+width	length-or-percentage-or-auto

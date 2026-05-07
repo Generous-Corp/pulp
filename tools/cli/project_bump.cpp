@@ -562,6 +562,18 @@ std::optional<UndoBatch> parse_undo_batch(const std::string& json) {
                         else if (field == "pin_kind")        e.pin_kind = parse_pin_kind(val);
                         else if (field == "status")          e.status = val;
                         else if (field == "failure_reason")  e.failure_reason = val;
+                    } else if (j.pos < j.src.size() &&
+                               (j.src[j.pos] == '[' || j.src[j.pos] == '{')) {
+                        // Unknown ARRAY / OBJECT field — skip cleanly so
+                        // a Rust- or future-writer-added field (e.g.
+                        // earlier `notes: [...]`) doesn't desync the
+                        // primitive-or-string parser below and cause
+                        // the whole entry to fail with "pin kind
+                        // changed since bump". Caught by sandbox-e2e
+                        // cross-binary undo round-trip; keep this
+                        // forgiving for forward-compat with new
+                        // optional fields.
+                        j.skip_value();
                     } else {
                         // boolean / number / null
                         auto prim = j.read_primitive();

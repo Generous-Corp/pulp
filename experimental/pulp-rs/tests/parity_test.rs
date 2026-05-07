@@ -41,7 +41,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 }
 
 fn run_pulp_rs(cwd: &Path, extra_env: &[(&str, &str)]) -> String {
-    let bin = env!("CARGO_BIN_EXE_pulp-rs");
+    let bin = env!("CARGO_BIN_EXE_pulp");
     let mut cmd = Command::new(bin);
     cmd.args(["doctor", "--versions", "--json"]);
     cmd.current_dir(cwd);

@@ -18,8 +18,15 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 // Static or dynamic text display
 
-/// Text alignment for Label
-enum class LabelAlign { left, center, right };
+/// Text alignment for Label.
+/// pulp #1434 — `auto_` resolves at paint time to left (LTR) or right
+/// (RTL); pulp doesn't model RTL yet so `auto_` currently degrades to
+/// `left`. `justify` wires through to the canvas `TextAlign::justify`
+/// enum value; SkParagraph kJustify rendering lands in a follow-up —
+/// existing canvas backends treat it as `left` until then. Both values
+/// are claimed in the rn/css catalog (Figma exports + Tailwind classes
+/// emit `auto` and `justify` routinely).
+enum class LabelAlign { left, center, right, auto_, justify };
 
 class Label : public View {
 public:
@@ -71,6 +78,19 @@ public:
     void set_multi_line(bool ml) { multi_line_ = ml; }
     bool multi_line() const { return multi_line_; }
 
+    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum number
+    /// of visible text lines for a multi-line label; 0 disables clamping.
+    /// When set on a `multi_line_` Label, paint() emits at most N
+    /// newline-separated lines and replaces the trailing visible line with
+    /// the U+2026 ellipsis if any source lines were dropped. Matches the
+    /// CSS spec's "block-axis line clamp" behavior at the keyword level
+    /// (no `none` token — set 0 to clear). Wiring is shared between
+    /// `line-clamp` and `-webkit-line-clamp` in the JS shim and the
+    /// @pulp/react prop-applier (pulp #1434 catalog: both keys funnel
+    /// through the same case).
+    void set_line_clamp(int n) { line_clamp_ = (n < 0) ? 0 : n; }
+    int line_clamp() const { return line_clamp_; }
+
     /// CSS text-transform: uppercase, lowercase, capitalize, none
     enum class TextTransform { none, uppercase, lowercase, capitalize };
     void set_text_transform(TextTransform t) { text_transform_ = t; }
@@ -79,7 +99,20 @@ public:
     /// CSS text-decoration: none, underline, line-through, overline
     enum class TextDecoration { none, underline, line_through, overline };
     void set_text_decoration(TextDecoration d) { text_decoration_ = d; }
+    TextDecoration text_decoration() const { return text_decoration_; }
     void set_text_decoration_color(canvas::Color c) { decoration_color_ = c; has_decoration_color_ = true; }
+    canvas::Color text_decoration_color() const { return decoration_color_; }
+    bool has_text_decoration_color() const { return has_decoration_color_; }
+
+    /// CSS text-decoration-style: solid, double, dotted, dashed, wavy.
+    /// pulp #1434 — accepted via the JS CSS shim and the bridge so authors
+    /// can express the per-style longhand. Today the paint path always
+    /// renders as `solid`; the value is stored so future paint logic can
+    /// honor it without an API break (matches the spec's optional fallback
+    /// to solid for renderers that don't implement non-solid styles).
+    enum class TextDecorationStyle { solid, double_, dotted, dashed, wavy };
+    void set_text_decoration_style(TextDecorationStyle s) { text_decoration_style_ = s; }
+    TextDecorationStyle text_decoration_style() const { return text_decoration_style_; }
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -107,10 +140,12 @@ private:
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
     bool multi_line_ = false;
+    int line_clamp_ = 0;          ///< pulp #1552: 0=no clamp, >=1=max lines
     TextTransform text_transform_ = TextTransform::none;
     TextDecoration text_decoration_ = TextDecoration::none;
     canvas::Color decoration_color_{};
     bool has_decoration_color_ = false;
+    TextDecorationStyle text_decoration_style_ = TextDecorationStyle::solid;
     canvas::TextDirection text_direction_ = canvas::TextDirection::left_to_right;
     canvas::TextVerticalAlign vertical_align_ = canvas::TextVerticalAlign::top;
     // issue-969: explicit-vs-inherited tracking. Fields keep their default

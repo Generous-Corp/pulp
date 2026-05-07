@@ -47,9 +47,59 @@ namespace pulp::canvas {
 // Works identically regardless of how segments were measured.
 
 static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segments,
-                                          float max_width, float line_height, bool materialize) {
+                                          float max_width, float line_height, bool materialize,
+                                          int max_lines = 0) {
     ShapedLayout result;
     if (segments.empty()) return result;
+
+    // pulp #1410 — `white-space: nowrap` path. Force a single line that
+    // includes every segment (including hard newlines flattened to
+    // spaces, matching CSS nowrap behavior) so the caller sees the full
+    // intrinsic width and can decide to truncate via #1407's ellipsis.
+    // Skips the wrapping loop entirely so segments past `max_width` are
+    // not silently dropped.
+    if (max_lines == 1) {
+        // Find a representative whitespace width so newlines collapsed
+        // into spaces under CSS `white-space: nowrap` contribute the
+        // same advance the engine would have used for a literal space.
+        // Falls back to a line-height-relative estimate (≈ space/line
+        // ratio in typical fonts) when the input has no whitespace
+        // segments to sample.
+        float whitespace_width = 0.0f;
+        for (const auto& seg : segments) {
+            if (seg.is_whitespace && !seg.is_newline) {
+                whitespace_width = seg.width;
+                break;
+            }
+        }
+        if (whitespace_width == 0.0f && line_height > 0)
+            whitespace_width = line_height * 0.18f;
+
+        ShapedLayout::Line line;
+        line.first_segment = 0;
+        line.segment_count = static_cast<int>(segments.size());
+        line.y = 0;
+        float w = 0;
+        for (const auto& seg : segments) {
+            if (seg.is_newline) {
+                // CSS `white-space: nowrap` collapses hard breaks into
+                // a single space — both visually (materialized text)
+                // and in width (so #1407's overflow detection sees the
+                // collapsed advance).
+                w += whitespace_width;
+                if (materialize) line.text += ' ';
+            } else {
+                w += seg.width;
+                if (materialize) line.text += seg.text;
+            }
+        }
+        line.width = w;
+        result.lines.push_back(std::move(line));
+        result.total_width = w;
+        result.total_height = line_height;
+        result.line_count = 1;
+        return result;
+    }
 
     float current_width = 0;
     int line_start = 0;
@@ -132,6 +182,16 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
         result.lines.push_back(std::move(line));
         max_line_width = std::max(max_line_width, current_width);
         y += line_height;
+    }
+
+    // pulp #1410 — clamp to max_lines (>1) by dropping trailing lines.
+    // max_lines=1 already short-circuits at the top of the function.
+    if (max_lines > 1 && static_cast<int>(result.lines.size()) > max_lines) {
+        result.lines.resize(static_cast<std::size_t>(max_lines));
+        max_line_width = 0;
+        for (const auto& line : result.lines)
+            max_line_width = std::max(max_line_width, line.width);
+        y = max_lines * line_height;
     }
 
     result.total_width = max_line_width;
@@ -363,15 +423,15 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
 }
 
 ShapedLayout TextShaper::layout(const PreparedText& prepared, float max_width,
-                                 float line_height) const {
+                                 float line_height, int max_lines) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, false);
+    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines);
 }
 
 ShapedLayout TextShaper::layout_with_lines(const PreparedText& prepared, float max_width,
-                                            float line_height) const {
+                                            float line_height, int max_lines) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, true);
+    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines);
 }
 
 float TextShaper::measure_height(const PreparedText& prepared, float max_width,

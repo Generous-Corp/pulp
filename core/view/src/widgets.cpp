@@ -4,6 +4,7 @@
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
+#include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <choc/text/choc_JSON.h>
@@ -411,7 +412,17 @@ void Label::paint(canvas::Canvas& canvas) {
 
     // Vertical alignment
     float lh = line_height_ > 0 ? line_height_ : effective_font_size * 1.4f;
-    float text_h = multi_line_ ? lh * static_cast<float>(std::count(display_text.begin(), display_text.end(), '\n') + 1) : effective_font_size;
+    // pulp #1552 — when line-clamp drops source lines, the painted block
+    // height must reflect the *visible* line count, not the full newline
+    // count. Otherwise vertical-align: center / bottom positions the
+    // block as if the hidden lines were still rendered, leaving the
+    // visible lines offset upward (Codex P2 on PR #1573).
+    int source_lines = multi_line_ ? static_cast<int>(
+        std::count(display_text.begin(), display_text.end(), '\n')) + 1 : 1;
+    int visible_lines = source_lines;
+    if (multi_line_ && line_clamp_ > 0 && line_clamp_ < source_lines)
+        visible_lines = line_clamp_;
+    float text_h = multi_line_ ? lh * static_cast<float>(visible_lines) : effective_font_size;
     float baseline_y;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
@@ -425,7 +436,11 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
         case canvas::TextVerticalAlign::center:
         default:
-            baseline_y = bounds().height * 0.5f + effective_font_size * 0.35f;
+            // Centre the visible block within bounds, then offset to the
+            // first line's baseline. For single-line this collapses to
+            // bounds.h/2 + 0.35*font_size (the historic formula) because
+            // text_h == effective_font_size and 0.85 - 0.5 == 0.35.
+            baseline_y = (bounds().height - text_h) * 0.5f + effective_font_size * 0.85f;
             break;
     }
 
@@ -436,13 +451,25 @@ void Label::paint(canvas::Canvas& canvas) {
             int v = inh.value();
             if (v == 1) effective_text_align = LabelAlign::center;
             else if (v == 2) effective_text_align = LabelAlign::right;
+            else if (v == 3) effective_text_align = LabelAlign::auto_;
+            else if (v == 4) effective_text_align = LabelAlign::justify;
             else effective_text_align = LabelAlign::left;
         }
+    }
+
+    // pulp #1434 — resolve `auto` at paint time. `auto` is CSS
+    // writing-direction-relative: LTR → left, RTL → right. Pulp doesn't
+    // model RTL yet (yoga/direction is still NOT-IMPL), so `auto`
+    // currently degrades to `left`. When RTL lands, this becomes a
+    // lookup against the writing-direction context.
+    if (effective_text_align == LabelAlign::auto_) {
+        effective_text_align = LabelAlign::left;
     }
 
     float x = 0;
     switch (effective_text_align) {
         case LabelAlign::left:
+        case LabelAlign::auto_: // unreachable — resolved above; keeps switch exhaustive
             canvas.set_text_align(canvas::TextAlign::left);
             break;
         case LabelAlign::center:
@@ -453,45 +480,75 @@ void Label::paint(canvas::Canvas& canvas) {
             canvas.set_text_align(canvas::TextAlign::right);
             x = bounds().width;
             break;
+        case LabelAlign::justify:
+            // pulp #1434 — emit canvas TextAlign::justify so backends
+            // that wire SkParagraph kJustify can render true justified
+            // text. RecordingCanvas / CG fall back to left-alignment
+            // semantics (no kerning-controlled space distribution).
+            // Anchor x at 0 so the first line's leading edge matches a
+            // left-aligned label.
+            canvas.set_text_align(canvas::TextAlign::justify);
+            break;
     }
 
+    // pulp #1407 — track the actually-painted single-line string so the
+    // decoration block below measures the truncated text, not the
+    // original. Multi-line keeps using display_text since it paints the
+    // full string across multiple draw calls.
+    std::string draw_text = display_text;
     if (!multi_line_) {
-        // Text overflow ellipsis
-        if (text_overflow_ellipsis() && effective_text_align == LabelAlign::left) {
-            float avail = bounds().width;
-            float text_w = canvas.measure_text(display_text);
-            if (text_w > avail && display_text.size() > 3) {
-                std::string truncated = display_text;
-                while (truncated.size() > 1) {
-                    truncated.pop_back();
-                    float w = canvas.measure_text(truncated + "...");
-                    if (w <= avail) {
-                        canvas.fill_text(truncated + "...", x, baseline_y);
-                        goto decoration;
-                    }
-                }
-            }
-        }
-        canvas.fill_text(display_text, x, baseline_y);
+        // pulp #1407 — CSS `text-overflow: ellipsis`. Truncate with U+2026
+        // when the measured text exceeds the content-box, regardless of
+        // text-align (CSS truncates at the trailing edge for all three).
+        // UTF-8-safe via codepoint binary-search in truncate_to_width().
+        if (text_overflow_ellipsis())
+            draw_text = truncate_to_width(canvas, display_text, bounds().width);
+        canvas.fill_text(draw_text, x, baseline_y);
     } else {
-        float y = effective_font_size * 0.85f;
+        // pulp #1552 — CSS `line-clamp` / `-webkit-line-clamp`. When the
+        // clamp count is set and the text would emit more lines than
+        // allowed, paint at most N lines and append the U+2026 ellipsis
+        // to the last visible line if any source lines were dropped.
+        // 0 disables clamping (matches CSS spec; spec uses `none`).
+        // visible_lines / source_lines / text_h are computed earlier so
+        // vertical-align positioning reflects the clamped block height.
+        bool need_ellipsis = (line_clamp_ > 0 && source_lines > line_clamp_);
+
+        // Start from the clamped baseline so the first visible line
+        // sits at the top of the centered/bottom-aligned block.
+        float y = baseline_y;
         size_t pos = 0;
+        int emitted = 0;
         while (pos < display_text.size()) {
+            if (emitted >= visible_lines) break;
             size_t nl = display_text.find('\n', pos);
             if (nl == std::string::npos) nl = display_text.size();
-            canvas.fill_text(display_text.substr(pos, nl - pos), x, y);
+            std::string line = display_text.substr(pos, nl - pos);
+            // Last visible line under a clamp that truncated source lines:
+            // append U+2026 (UTF-8: 0xE2 0x80 0xA6) to signal truncation.
+            // pulp #1552 — matches the CSS "block-axis ellipsis" intent
+            // for line-clamp (the spec ties this to text-overflow: ellipsis;
+            // pulp's Label honors that intent without requiring the
+            // separate text-overflow keyword to also be set).
+            if (need_ellipsis && (emitted + 1 == visible_lines)) {
+                line.append("\xe2\x80\xa6");
+            }
+            canvas.fill_text(line, x, y);
             y += lh;
             pos = nl + 1;
+            ++emitted;
         }
     }
 
     // Text decoration (underline, line-through, overline)
-    decoration:
     if (text_decoration_ != TextDecoration::none) {
         auto dec_color = has_decoration_color_ ? decoration_color_ : text_color;
         canvas.set_stroke_color(dec_color);
         canvas.set_line_width(1.0f);
-        float text_w = canvas.measure_text(display_text);
+        // pulp #1407 — measure the actually-drawn (possibly truncated)
+        // text so a decoration line on an ellipsised label doesn't
+        // escape past the visible glyphs.
+        float text_w = canvas.measure_text(draw_text);
         float draw_x = x;
         if (effective_text_align == LabelAlign::center) draw_x = x - text_w * 0.5f;
         else if (effective_text_align == LabelAlign::right) draw_x = x - text_w;

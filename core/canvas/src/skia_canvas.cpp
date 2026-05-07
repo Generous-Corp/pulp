@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
@@ -32,10 +33,13 @@
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkDashPathEffect.h"
+#include "include/effects/SkColorMatrix.h"
+#include "include/core/SkColorFilter.h"
 #include "runtime_effect_cache.hpp"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
 #include "include/effects/SkImageFilters.h"
+#include "include/core/SkColorFilter.h"
 #include "include/gpu/graphite/Image.h"
 #include "include/gpu/graphite/BackendTexture.h"
 #include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
@@ -346,8 +350,43 @@ SkPaint SkiaCanvas::current_fill_paint() const {
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     return paint;
 }
+
+// ── Canvas2D shadow* state (issue-1434 batch 7) ──────────────────────────────
+//
+// Sticky values set via `ctx.shadowColor` / `shadowBlur` /
+// `shadowOffsetX` / `shadowOffsetY`. Every subsequent fill/stroke draw
+// queries `apply_shadow_filter` and, when active, attaches an
+// `SkImageFilters::DropShadow` so the geometry emits both itself and a
+// blurred shadow underneath — mirroring WebKit / Blink. Sigma mapping is
+// the same `sigma = blur / 2` Chromium's Canvas2D implementation uses
+// (third_party/blink/.../canvas_rendering_context_2d.cc) and matches the
+// WebView reference within ~5px (same acceptance bar as #925).
+
+bool SkiaCanvas::shadow_is_active() const {
+    return shadow_color_.a > 0.0f &&
+           (shadow_blur_ > 0.0f || shadow_offset_x_ != 0.0f ||
+            shadow_offset_y_ != 0.0f);
+}
+
+void SkiaCanvas::apply_shadow_filter(SkPaint& paint) const {
+    if (!shadow_is_active()) return;
+    const float sigma = shadow_blur_ * 0.5f;
+    paint.setImageFilter(SkImageFilters::DropShadow(
+        shadow_offset_x_, shadow_offset_y_, sigma, sigma,
+        to_sk_color4f(shadow_color_), /*colorSpace=*/nullptr,
+        /*input=*/nullptr));
+}
+
+void SkiaCanvas::set_shadow_color(Color color) { shadow_color_ = color; }
+void SkiaCanvas::set_shadow_blur(float blur) {
+    shadow_blur_ = std::max(0.0f, blur);  // Spec: negative blur is invalid → ignored
+}
+void SkiaCanvas::set_shadow_offset_x(float dx) { shadow_offset_x_ = dx; }
+void SkiaCanvas::set_shadow_offset_y(float dy) { shadow_offset_y_ = dy; }
 
 void SkiaCanvas::set_fill_color(Color c) { fill_color_ = c; }
 void SkiaCanvas::set_stroke_color(Color c) { stroke_color_ = c; }
@@ -359,6 +398,388 @@ void SkiaCanvas::set_line_cap(LineCap cap) {
 
 void SkiaCanvas::set_line_join(LineJoin join) {
     line_join_ = join;
+}
+
+// pulp #1434 bridge-thin gap-fill — wire ctx.miterLimit through to
+// SkPaint::setStrokeMiter. The current stroke helpers build a fresh
+// SkPaint per draw via make_stroke_paint(); we apply the miter limit
+// at draw-time in stroke_current_path / stroke_rect / etc., so this
+// setter just stores the value and lets the apply_* helper read it.
+// Spec: non-positive / non-finite values are silently ignored.
+void SkiaCanvas::set_miter_limit(float limit) {
+    if (std::isfinite(limit) && limit > 0.0f) {
+        miter_limit_ = limit;
+    }
+}
+
+// pulp #1434 bridge-thin gap-fill — wire ctx.imageSmoothingEnabled and
+// ctx.imageSmoothingQuality through. The flag is read at drawImage
+// time by sampling_options_for_image_smoothing() below; we just store
+// the chosen state here so it sticks across draws.
+void SkiaCanvas::set_image_smoothing(bool enabled,
+                                     ImageSmoothingQuality quality) {
+    image_smoothing_enabled_ = enabled;
+    image_smoothing_quality_ = quality;
+}
+
+// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ─────────────────────
+// Direction is stored on the canvas state and read at fill_text() time
+// to choose the SkShaper leftToRight flag. RTL flips the flag, which is
+// the correct first step for proper Arabic / Hebrew shaping; full bidi
+// (mixed-script paragraphs requiring the Unicode Bidi Algorithm) needs
+// SkParagraph plumbing tracked under #1506. inherit currently behaves
+// as ltr until per-View writing-direction lookup lands.
+void SkiaCanvas::set_direction(TextDirection direction) {
+    direction_ = direction;
+}
+
+namespace {
+
+// Skim leading whitespace.
+inline void skip_ws(const std::string& s, size_t& i) {
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
+}
+
+// Parse a single CSS filter <length-or-number-or-percentage> argument.
+// Returns the numeric value coerced into the unit the caller expects:
+//   * `expect_px` → drops a trailing "px" or treats bare numbers as px
+//     (used by blur / drop-shadow).
+//   * `expect_angle` → converts deg/rad/turn into radians (hue-rotate).
+//   * default → unitless multiplier; "%" divides by 100. Used by
+//     brightness / contrast / saturate / opacity / invert / grayscale /
+//     sepia.
+//
+// Returns NaN on parse failure so callers can default to spec-neutral.
+enum class FilterArgKind { multiplier, pixels, angle };
+double parse_filter_arg(const std::string& body, FilterArgKind kind) {
+    // Find numeric prefix.
+    size_t end = 0;
+    while (end < body.size() &&
+           (std::isdigit(static_cast<unsigned char>(body[end])) ||
+            body[end] == '.' || body[end] == '-' || body[end] == '+' ||
+            body[end] == 'e' || body[end] == 'E')) {
+        ++end;
+    }
+    if (end == 0) return std::nan("");
+    double v = 0;
+    try { v = std::stod(body.substr(0, end)); }
+    catch (...) { return std::nan(""); }
+    std::string unit = body.substr(end);
+    // Strip whitespace from unit.
+    while (!unit.empty() && (unit.back() == ' ' || unit.back() == '\t')) unit.pop_back();
+    size_t us = 0;
+    while (us < unit.size() && (unit[us] == ' ' || unit[us] == '\t')) ++us;
+    unit = unit.substr(us);
+
+    switch (kind) {
+        case FilterArgKind::pixels:
+            // Bare numbers are px; "px" suffix is the canonical form.
+            return v;
+        case FilterArgKind::angle:
+            if (unit == "rad") return v;
+            if (unit == "turn") return v * (2.0 * 3.14159265358979323846);
+            // Default deg (or unrecognised → deg per CSS spec).
+            return v * (3.14159265358979323846 / 180.0);
+        case FilterArgKind::multiplier:
+            if (!unit.empty() && unit.back() == '%') return v * 0.01;
+            return v;
+    }
+    return v;
+}
+
+// Build a saturation SkColorMatrix. s=1 is identity, s=0 is grayscale,
+// s>1 boosts saturation. Standard luminance weights match the CSS spec.
+SkColorMatrix make_saturation_matrix(double s) {
+    const float r = 0.213f;
+    const float g = 0.715f;
+    const float b = 0.072f;
+    const float sf = static_cast<float>(s);
+    return SkColorMatrix(
+        r + (1 - r) * sf, g - g * sf,        b - b * sf,        0, 0,
+        r - r * sf,        g + (1 - g) * sf, b - b * sf,        0, 0,
+        r - r * sf,        g - g * sf,        b + (1 - b) * sf, 0, 0,
+        0,                 0,                 0,                 1, 0);
+}
+
+// Sepia per CSS spec. amount=0 identity, amount=1 full sepia.
+SkColorMatrix make_sepia_matrix(double amount) {
+    const float a = static_cast<float>(amount);
+    const float inv = 1.0f - a;
+    return SkColorMatrix(
+        0.393f * a + inv, 0.769f * a,        0.189f * a,        0, 0,
+        0.349f * a,        0.686f * a + inv, 0.168f * a,        0, 0,
+        0.272f * a,        0.534f * a,        0.131f * a + inv, 0, 0,
+        0,                 0,                 0,                 1, 0);
+}
+
+// Hue-rotate matrix (CSS spec). angle in radians.
+SkColorMatrix make_hue_rotate_matrix(double rad) {
+    const float c = static_cast<float>(std::cos(rad));
+    const float s = static_cast<float>(std::sin(rad));
+    return SkColorMatrix(
+        0.213f + c * 0.787f - s * 0.213f,
+        0.715f - c * 0.715f - s * 0.715f,
+        0.072f - c * 0.072f + s * 0.928f, 0, 0,
+        0.213f - c * 0.213f + s * 0.143f,
+        0.715f + c * 0.285f + s * 0.140f,
+        0.072f - c * 0.072f - s * 0.283f, 0, 0,
+        0.213f - c * 0.213f - s * 0.787f,
+        0.715f - c * 0.715f + s * 0.715f,
+        0.072f + c * 0.928f + s * 0.072f, 0, 0,
+        0, 0, 0, 1, 0);
+}
+
+// Linear contrast matrix: out = c * in + (0.5 * (1 - c)).
+SkColorMatrix make_contrast_matrix(double c) {
+    const float f = static_cast<float>(c);
+    const float t = 0.5f * (1.0f - f);
+    return SkColorMatrix(
+        f, 0, 0, 0, t,
+        0, f, 0, 0, t,
+        0, 0, f, 0, t,
+        0, 0, 0, 1, 0);
+}
+
+// Linear brightness matrix: scale RGB by `amount`.
+SkColorMatrix make_brightness_matrix(double amount) {
+    const float f = static_cast<float>(amount);
+    return SkColorMatrix(
+        f, 0, 0, 0, 0,
+        0, f, 0, 0, 0,
+        0, 0, f, 0, 0,
+        0, 0, 0, 1, 0);
+}
+
+// Invert matrix: out = (1 - 2*amount) * in + amount.
+SkColorMatrix make_invert_matrix(double amount) {
+    const float k = static_cast<float>(amount);
+    const float diag = 1.0f - 2.0f * k;
+    return SkColorMatrix(
+        diag, 0,    0,    0, k,
+        0,    diag, 0,    0, k,
+        0,    0,    diag, 0, k,
+        0,    0,    0,    1, 0);
+}
+
+// Grayscale matrix: amount=0 identity, amount=1 full luma. Matches the
+// CSS spec's interpolation of saturation toward 0 weighted by `amount`.
+SkColorMatrix make_grayscale_matrix(double amount) {
+    return make_saturation_matrix(1.0 - amount);
+}
+
+// Opacity = scale alpha. Identity at 1.
+SkColorMatrix make_opacity_matrix(double a) {
+    const float f = static_cast<float>(a);
+    return SkColorMatrix(
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, f, 0);
+}
+
+// Wrap an SkColorMatrix into an SkImageFilter, composing onto the
+// existing chain (inner). Caller passes the existing chain so we can
+// fold multiple color-matrix functions into a single ColorFilter
+// imagefilter where possible — but for simplicity we just compose.
+sk_sp<SkImageFilter> compose(sk_sp<SkImageFilter> outer,
+                              sk_sp<SkImageFilter> inner) {
+    if (!outer) return inner;
+    if (!inner) return outer;
+    return SkImageFilters::Compose(std::move(outer), std::move(inner));
+}
+
+sk_sp<SkImageFilter> color_matrix_filter(const SkColorMatrix& m) {
+    return SkImageFilters::ColorFilter(SkColorFilters::Matrix(m), nullptr, nullptr);
+}
+
+// Parse a CSS <filter-function-list> string into an SkImageFilter chain.
+// Supported functions (per Canvas2D spec subset):
+//   blur(<length>)            — SkImageFilters::Blur
+//   brightness(<num|%>)       — color matrix scale
+//   contrast(<num|%>)         — color matrix scale + bias
+//   grayscale(<num|%>)        — color matrix saturation→0
+//   hue-rotate(<angle>)       — color matrix rotation in YIQ-ish space
+//   invert(<num|%>)           — color matrix invert
+//   opacity(<num|%>)          — alpha scale
+//   saturate(<num|%>)         — color matrix saturation
+//   sepia(<num|%>)            — color matrix sepia interpolation
+// Unknown or malformed functions are silently dropped (per CSS spec for
+// invalid filter-function-list — the entire chain falls back to none).
+sk_sp<SkImageFilter> parse_filter_chain(const std::string& src) {
+    if (src.empty()) return nullptr;
+    // Skip purely "none" / whitespace.
+    size_t first = 0;
+    while (first < src.size() && (src[first] == ' ' || src[first] == '\t')) ++first;
+    if (first >= src.size()) return nullptr;
+    if (src.compare(first, 4, "none") == 0) return nullptr;
+
+    sk_sp<SkImageFilter> chain;
+    size_t i = first;
+    while (i < src.size()) {
+        skip_ws(src, i);
+        if (i >= src.size()) break;
+        // Read function name up to '('.
+        size_t name_start = i;
+        while (i < src.size() && src[i] != '(' && src[i] != ' ' && src[i] != '\t') ++i;
+        std::string name = src.substr(name_start, i - name_start);
+        skip_ws(src, i);
+        if (i >= src.size() || src[i] != '(') {
+            // Malformed token — abort parse, return whatever we built.
+            return chain;
+        }
+        ++i; // past '('
+        size_t body_start = i;
+        int depth = 1;
+        while (i < src.size() && depth > 0) {
+            if (src[i] == '(') ++depth;
+            else if (src[i] == ')') { if (--depth == 0) break; }
+            ++i;
+        }
+        if (i >= src.size()) return chain;
+        std::string body = src.substr(body_start, i - body_start);
+        ++i; // past ')'
+
+        // Trim body whitespace.
+        size_t bs = 0, be = body.size();
+        while (bs < be && (body[bs] == ' ' || body[bs] == '\t')) ++bs;
+        while (be > bs && (body[be - 1] == ' ' || body[be - 1] == '\t')) --be;
+        body = body.substr(bs, be - bs);
+
+        sk_sp<SkImageFilter> step;
+        if (name == "blur") {
+            double radius_px = parse_filter_arg(body, FilterArgKind::pixels);
+            if (std::isfinite(radius_px) && radius_px > 0) {
+                // CSS spec: blur radius is the standard deviation, NOT
+                // the diameter. Skia takes sigma directly.
+                float sigma = static_cast<float>(radius_px);
+                step = SkImageFilters::Blur(sigma, sigma, nullptr);
+            }
+        } else if (name == "brightness") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) step = color_matrix_filter(make_brightness_matrix(amt));
+        } else if (name == "contrast") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) step = color_matrix_filter(make_contrast_matrix(amt));
+        } else if (name == "grayscale") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_grayscale_matrix(amt));
+            }
+        } else if (name == "hue-rotate") {
+            double rad = parse_filter_arg(body, FilterArgKind::angle);
+            if (std::isfinite(rad)) step = color_matrix_filter(make_hue_rotate_matrix(rad));
+        } else if (name == "invert") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_invert_matrix(amt));
+            }
+        } else if (name == "opacity") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_opacity_matrix(amt));
+            }
+        } else if (name == "saturate") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt) && amt >= 0.0) {
+                step = color_matrix_filter(make_saturation_matrix(amt));
+            }
+        } else if (name == "sepia") {
+            double amt = parse_filter_arg(body, FilterArgKind::multiplier);
+            if (std::isfinite(amt)) {
+                if (amt > 1.0) amt = 1.0;
+                if (amt < 0.0) amt = 0.0;
+                step = color_matrix_filter(make_sepia_matrix(amt));
+            }
+        }
+        // drop-shadow could be added here as SkImageFilters::DropShadow
+        // — deferred to a follow-up since the parser would also need to
+        // consume up to four arguments (offset-x offset-y blur-radius color).
+        chain = compose(std::move(step), std::move(chain));
+        // Skip optional comma between functions (spec is whitespace-only,
+        // but tolerate ",").
+        skip_ws(src, i);
+        if (i < src.size() && src[i] == ',') { ++i; }
+    }
+    return chain;
+}
+
+} // namespace
+
+void SkiaCanvas::set_filter(const std::string& filter) {
+    filter_source_ = filter;
+    filter_image_filter_ = parse_filter_chain(filter);
+}
+
+void SkiaCanvas::apply_filter(SkPaint& paint) const {
+    if (!filter_image_filter_) return;
+    // If a shadow filter is already set on this paint, compose the user
+    // filter on top so the chain reads outer = filter(inner = shadow).
+    if (auto existing = paint.refImageFilter()) {
+        paint.setImageFilter(SkImageFilters::Compose(
+            filter_image_filter_, std::move(existing)));
+    } else {
+        paint.setImageFilter(filter_image_filter_);
+    }
+}
+
+// pulp #1434 bridge-thin gap-fill — apply sticky stroke-paint state. The
+// existing stroke paths constructed an SkPaint via make_stroke_paint()
+// but never propagated the JS-side line_join / miter_limit state. The
+// canvas2d harness flagged miterLimit as silently dropped; setStrokeJoin
+// and setStrokeMiter close that gap without touching every call site.
+// line_cap_ is plumbed here too so the existing line_cap_ field finally
+// reaches the GPU paint — matches Canvas2D ctx.lineCap semantics.
+void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
+    SkPaint::Cap sk_cap = SkPaint::kButt_Cap;
+    switch (line_cap_) {
+        case LineCap::butt:   sk_cap = SkPaint::kButt_Cap;   break;
+        case LineCap::round:  sk_cap = SkPaint::kRound_Cap;  break;
+        case LineCap::square: sk_cap = SkPaint::kSquare_Cap; break;
+    }
+    paint.setStrokeCap(sk_cap);
+
+    SkPaint::Join sk_join = SkPaint::kMiter_Join;
+    switch (line_join_) {
+        case LineJoin::miter: sk_join = SkPaint::kMiter_Join; break;
+        case LineJoin::round: sk_join = SkPaint::kRound_Join; break;
+        case LineJoin::bevel: sk_join = SkPaint::kBevel_Join; break;
+    }
+    paint.setStrokeJoin(sk_join);
+    paint.setStrokeMiter(miter_limit_);
+    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern on
+    // strokeStyle. Wins over the solid stroke colour when present.
+    if (stroke_shader_) {
+        paint.setShader(stroke_shader_);
+    }
+}
+
+// pulp #1434 bridge-thin gap-fill — translate Canvas2D
+// imageSmoothingEnabled / imageSmoothingQuality into Skia sampling.
+// `enabled = false` => nearest (pixel-art preservation). `enabled = true`
+// honours the quality enum: low = bilinear (matches the existing default),
+// medium = mipmap-aware bilinear, high = cubic Mitchell. Falls through
+// to kLinear so callers that haven't touched the flag get unchanged
+// behavior.
+SkSamplingOptions SkiaCanvas::sampling_options_for_image_smoothing() const {
+    if (!image_smoothing_enabled_) {
+        return SkSamplingOptions(SkFilterMode::kNearest);
+    }
+    switch (image_smoothing_quality_) {
+        case ImageSmoothingQuality::low:
+            return SkSamplingOptions(SkFilterMode::kLinear);
+        case ImageSmoothingQuality::medium:
+            return SkSamplingOptions(SkFilterMode::kLinear,
+                                     SkMipmapMode::kLinear);
+        case ImageSmoothingQuality::high:
+            return SkSamplingOptions(SkCubicResampler::Mitchell());
+    }
+    return SkSamplingOptions(SkFilterMode::kLinear);
 }
 
 void SkiaCanvas::fill_rect(float x, float y, float w, float h) {
@@ -395,7 +816,10 @@ static void apply_line_dash(SkPaint& paint,
 
 void SkiaCanvas::stroke_rect(float x, float y, float w, float h) {
     GUARD_CANVAS; auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
@@ -409,7 +833,10 @@ void SkiaCanvas::stroke_rounded_rect(float x, float y, float w, float h, float r
     GUARD_CANVAS; SkRRect rrect;
     rrect.setRectXY(SkRect::MakeXYWH(x, y, w, h), radius, radius);
     auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawRRect(rrect, paint);
 }
 
@@ -420,7 +847,10 @@ void SkiaCanvas::fill_circle(float cx, float cy, float radius) {
 void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
     GUARD_CANVAS;
     auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawCircle(cx, cy, radius, paint);
 }
 
@@ -432,7 +862,10 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
     SkPath path = SkPathBuilder().addArc(oval, start_deg, sweep_deg).detach();
     if (canvas_) {
         auto paint = make_stroke_paint(stroke_color_, line_width_);
+        apply_stroke_state(paint);
         apply_line_dash(paint, line_dash_, line_dash_phase_);
+        apply_shadow_filter(paint);
+        apply_filter(paint);
         canvas_->drawPath(path, paint);
     }
 }
@@ -440,7 +873,10 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
 void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
     GUARD_CANVAS;
     auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawLine(x0, y0, x1, y1, paint);
 }
 
@@ -482,6 +918,14 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // Text glyphs use solid color today; gradient text-fill is a separate
     // Canvas2D `fillText` path (#1350 scoped to shape fills only).
     auto paint = make_solid_fill_paint(fill_color_);
+    // issue-1434 batch 7 — Canvas2D shadow* applies to text fills too,
+    // matching the spec's "the shadow effect […] is applied to all
+    // [drawing] methods" language. Shape and stroke paths handle their
+    // own apply_shadow_filter call sites; text gets the same treatment
+    // here so `ctx.shadowBlur = 4; ctx.fillText(...)` produces a blurred
+    // text glow on the rasterised output.
+    apply_shadow_filter(paint);
+    apply_filter(paint);
 
 #ifdef PULP_HAS_TEXT_SHAPING
     // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
@@ -504,8 +948,14 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // Shape at origin {0,0}, then read the total shaped advance
             // from endPoint() for accurate text alignment.
             SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+            // pulp #1520 — Canvas2D ctx.direction. RTL flips the shaper
+            // direction so HarfBuzz emits glyphs in visual order for
+            // right-to-left scripts. inherit currently maps to the
+            // default ltr until per-View writing-direction lookup
+            // lands (#1506).
+            const bool ltr = (direction_ != TextDirection::rtl);
             shaper->shape(text.c_str(), text.size(), font,
-                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+                          /*leftToRight=*/ltr, SK_ScalarInfinity, &handler);
             float total_w = handler.endPoint().x();
 
             float draw_x = x;
@@ -809,8 +1259,9 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
 
+    // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
-                           SkSamplingOptions(SkFilterMode::kLinear));
+                           sampling_options_for_image_smoothing());
     return true;
 }
 
@@ -824,8 +1275,9 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
 
+    // pulp #1434 — honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
-                           SkSamplingOptions(SkFilterMode::kLinear));
+                           sampling_options_for_image_smoothing());
     return true;
 }
 
@@ -874,9 +1326,96 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)` two-circle
+// form. Skia renders the real two-point-conical gradient via
+// SkGradientShader::MakeTwoPointConical, honouring an offset / sized inner
+// circle (the existing single-circle path silently dropped (x0,y0,r0)).
+void SkiaCanvas::set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    gradient_shader_ = SkGradientShader::MakeTwoPointConical(
+        {x0, y0}, r0, {x1, y1}, r1,
+        sk_colors.data(), sk_pos.data(), count, SkTileMode::kClamp);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 void SkiaCanvas::clear_fill_gradient() {
     gradient_shader_ = nullptr;
     has_gradient_ = false;
+}
+
+// ── Patterns (pulp #1434 bridge-thin gap-fill) ──────────────────────────────
+//
+// Canvas2D `ctx.createPattern(image, repetition)` returns a CanvasPattern
+// the shim assigns to fillStyle / strokeStyle. The shim then invokes
+// `canvasSetFillPattern` / `canvasSetStrokePattern` which lands here as
+// `set_fill_pattern` / `set_stroke_pattern`. We decode the source via the
+// same `SkData` paths `draw_image_from_*` use, build an `SkShader::MakeImage`
+// with the requested tile mode per axis, and stash it on
+// `gradient_shader_` (for fills — already wired into `current_fill_paint`)
+// or `stroke_shader_` (for strokes — picked up by `apply_stroke_state`).
+//
+// Falling back: if the image fails to decode (missing file, malformed
+// data URI), we clear the active fill so the canvas degrades to the
+// previous solid colour rather than rendering garbage.
+
+namespace {
+
+SkTileMode to_sk_tile_mode(pulp::canvas::Canvas::PatternTileMode mode) {
+    using Tile = pulp::canvas::Canvas::PatternTileMode;
+    return mode == Tile::repeat ? SkTileMode::kRepeat : SkTileMode::kDecal;
+}
+
+// Decode a pattern image source (file path or "data:" URL). Returns
+// nullptr on failure; callers fall back to clearing the pattern.
+sk_sp<SkImage> decode_pattern_image(const std::string& src) {
+    if (src.empty()) return nullptr;
+    constexpr std::string_view kDataPrefix = "data:";
+    if (src.rfind(kDataPrefix, 0) == 0) {
+        // The bridge already validated and decoded data URIs before
+        // recording, so we don't see them here in practice — but keep
+        // a guard so we don't accidentally feed a base64 blob to
+        // SkData::MakeFromFileName.
+        return nullptr;
+    }
+    auto data = SkData::MakeFromFileName(src.c_str());
+    if (!data) return nullptr;
+    return SkImages::DeferredFromEncodedData(data);
+}
+
+} // namespace
+
+void SkiaCanvas::set_fill_pattern(const std::string& image_src,
+                                   PatternTileMode tile_x,
+                                   PatternTileMode tile_y) {
+    auto image = decode_pattern_image(image_src);
+    if (!image) {
+        clear_fill_gradient();
+        return;
+    }
+    gradient_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
+                                          to_sk_tile_mode(tile_y),
+                                          sampling_options_for_image_smoothing(),
+                                          nullptr);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
+void SkiaCanvas::set_stroke_pattern(const std::string& image_src,
+                                     PatternTileMode tile_x,
+                                     PatternTileMode tile_y) {
+    auto image = decode_pattern_image(image_src);
+    if (!image) {
+        stroke_shader_ = nullptr;
+        return;
+    }
+    stroke_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
+                                        to_sk_tile_mode(tile_y),
+                                        sampling_options_for_image_smoothing(),
+                                        nullptr);
 }
 
 // ── Blend modes ─────────────────────────────────────────────────────────────
@@ -940,6 +1479,124 @@ void SkiaCanvas::close_path() {
     if (path_builder_) path_builder_->close();
 }
 
+// ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──
+//
+// Replaces the JS shim's bezier approximation with Skia's native arc APIs.
+// Skia ships a closed-form arc-to-cubic implementation behind SkPath::arcTo;
+// we use the (oval, startDeg, sweepDeg, forceMoveTo=false) overload for
+// `arc` / `ellipse` and the (p1, p2, radius) overload for `arcTo`.
+// Per-corner roundRect uses SkRRect::MakeRectRadii.
+//
+// Angles arrive as radians (Canvas2D spec). Skia's arcTo wants degrees.
+// `anticlockwise` flips the sweep sign per the HTML5 spec: when false, the
+// arc is drawn clockwise from start to end; when true, anticlockwise. The
+// shim's normalization (already in JS) ensured `sweep` was in the right
+// direction; we re-normalize here so direct C++ callers (e.g. tests, AOT
+// paths) get the same behavior without going through JS.
+namespace {
+constexpr float kRadToDeg = 57.29577951308232f; // 180 / PI
+constexpr float kTwoPi = 6.283185307179586f;
+
+// Normalize (start, end, anticlockwise) into a (startDeg, sweepDeg) pair
+// matching Canvas2D semantics. Mirrors the JS shim:
+//   sweep = end - start
+//   if anticlockwise && sweep > 0  -> sweep -= 2π
+//   if !anticlockwise && sweep < 0 -> sweep += 2π
+// The full-circle case (|sweep| >= 2π) is clamped to 2π so SkPath::arcTo
+// produces a complete circle rather than wrapping multiple times.
+void normalize_arc_sweep(float start_rad, float end_rad,
+                         bool anticlockwise,
+                         float& start_deg_out, float& sweep_deg_out) {
+    float sweep_rad = end_rad - start_rad;
+    if (anticlockwise) {
+        if (sweep_rad > 0) sweep_rad -= kTwoPi;
+    } else {
+        if (sweep_rad < 0) sweep_rad += kTwoPi;
+    }
+    if (sweep_rad > kTwoPi) sweep_rad = kTwoPi;
+    if (sweep_rad < -kTwoPi) sweep_rad = -kTwoPi;
+    start_deg_out = start_rad * kRadToDeg;
+    sweep_deg_out = sweep_rad * kRadToDeg;
+}
+} // namespace
+
+void SkiaCanvas::arc(float cx, float cy, float radius,
+                     float start_angle, float end_angle,
+                     bool anticlockwise) {
+    if (!path_builder_) return;
+    if (radius <= 0.0f) return;
+    SkRect oval = SkRect::MakeLTRB(cx - radius, cy - radius,
+                                    cx + radius, cy + radius);
+    float start_deg = 0.0f, sweep_deg = 0.0f;
+    normalize_arc_sweep(start_angle, end_angle, anticlockwise,
+                        start_deg, sweep_deg);
+    // forceMoveTo=false so the arc connects to the current point with an
+    // implicit lineTo, matching the Canvas2D spec which says arc() adds
+    // an arc to the current subpath.
+    path_builder_->arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/false);
+}
+
+void SkiaCanvas::arc_to(float x1, float y1, float x2, float y2, float radius) {
+    if (!path_builder_) return;
+    if (radius <= 0.0f) {
+        // Spec: a non-positive radius collapses to a lineTo to (x1, y1).
+        path_builder_->lineTo(x1, y1);
+        return;
+    }
+    // The 5-arg SkPath::arcTo overload computes the tangent arc between
+    // the current point, (x1, y1), and (x2, y2). It internally handles
+    // the degenerate collinear case by emitting a lineTo to (x1, y1).
+    path_builder_->arcTo(SkPoint{x1, y1}, SkPoint{x2, y2}, radius);
+}
+
+void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
+                         float rotation,
+                         float start_angle, float end_angle,
+                         bool anticlockwise) {
+    if (!path_builder_) return;
+    if (rx <= 0.0f || ry <= 0.0f) return;
+    float start_deg = 0.0f, sweep_deg = 0.0f;
+    normalize_arc_sweep(start_angle, end_angle, anticlockwise,
+                        start_deg, sweep_deg);
+    if (rotation == 0.0f) {
+        SkRect oval = SkRect::MakeLTRB(cx - rx, cy - ry, cx + rx, cy + ry);
+        path_builder_->arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/false);
+        return;
+    }
+    // Rotated ellipse: build the arc into a temporary oval-aligned path,
+    // rotate it through SkMatrix around (cx, cy), and append. This keeps
+    // the arc geometry exact (still a real arc, not a bezier approx) but
+    // honours the CSS rotation parameter.
+    SkPathBuilder tmp;
+    SkRect oval = SkRect::MakeLTRB(-rx, -ry, rx, ry);
+    tmp.arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/true);
+    SkMatrix m = SkMatrix::I();
+    m.preTranslate(cx, cy);
+    m.preRotate(rotation * kRadToDeg);
+    SkPath rotated = tmp.detach();
+    rotated.transform(m);
+    // Append rotated path into the live builder, preserving the current
+    // subpath. addPath with kAppend_AddPathMode joins the new path to
+    // any existing pen position via a moveTo on the first verb.
+    path_builder_->addPath(rotated);
+}
+
+void SkiaCanvas::round_rect(float x, float y, float w, float h,
+                            float tl_x, float tl_y,
+                            float tr_x, float tr_y,
+                            float br_x, float br_y,
+                            float bl_x, float bl_y) {
+    if (!path_builder_) return;
+    if (w <= 0.0f || h <= 0.0f) return;
+    SkRect rect = SkRect::MakeXYWH(x, y, w, h);
+    SkVector radii[4] = {
+        {tl_x, tl_y}, {tr_x, tr_y}, {br_x, br_y}, {bl_x, bl_y}
+    };
+    SkRRect rr;
+    rr.setRectRadii(rect, radii);
+    path_builder_->addRRect(rr);
+}
+
 void SkiaCanvas::fill_current_path() {
     if (!canvas_ || !path_builder_) return;
     SkPaint paint;
@@ -950,6 +1607,8 @@ void SkiaCanvas::fill_current_path() {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
     paint.setBlendMode(blend_mode_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 
@@ -961,7 +1620,10 @@ void SkiaCanvas::stroke_current_path() {
     paint.setColor4f(to_sk_color4f(stroke_color_));
     paint.setStrokeWidth(line_width_);
     paint.setBlendMode(blend_mode_);
+    apply_stroke_state(paint);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
+    apply_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 
@@ -1431,6 +2093,219 @@ void SkiaCanvas::save_layer(float x, float y, float w, float h,
         layer_paint.setImageFilter(
             SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr));
     }
+
+    canvas_->saveLayer(&bounds, &layer_paint);
+}
+
+// pulp #1434 Phase A2-4 — full CSS filter chain composition.
+//
+// Builds an SkImageFilter chain from the structured FilterChainEntry
+// list. Color-matrix-based filters (brightness / contrast / grayscale
+// / hue-rotate / invert / saturate / sepia) all reduce to an
+// SkColorMatrix wrapped via SkImageFilters::ColorFilter, then composed
+// in order via SkImageFilters::Compose. Blur and drop-shadow are
+// independent SkImageFilter primitives composed into the same chain.
+// The `opacity()` filter function affects the layer alpha rather than
+// a color matrix (matches how CSS treats it — multiplicative on the
+// already-composited layer).
+void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
+                                          float opacity,
+                                          const FilterChainEntry* chain,
+                                          int count) {
+    if (!canvas_) { save(); return; }
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    SkPaint layer_paint;
+
+    // Walk the chain. Build a single composed image filter per CSS
+    // semantics: filters are applied in source order, so chain[0] is
+    // the inner-most input to chain[1], etc.
+    sk_sp<SkImageFilter> composed;
+    auto compose = [&composed](sk_sp<SkImageFilter> next) {
+        if (!next) return;
+        composed = composed
+            ? SkImageFilters::Compose(std::move(next), std::move(composed))
+            : std::move(next);
+    };
+
+    for (int i = 0; i < count; ++i) {
+        const FilterChainEntry& f = chain[i];
+        switch (f.kind) {
+            case FilterChainEntry::Kind::blur: {
+                if (f.amount > 0.0f) {
+                    compose(SkImageFilters::Blur(f.amount, f.amount,
+                                                 SkTileMode::kClamp, nullptr));
+                }
+                break;
+            }
+            case FilterChainEntry::Kind::opacity: {
+                // Per CSS — opacity(a) multiplies the alpha channel by
+                // a (0..1). Codex P2 #3195880608: this MUST remain in
+                // the composed chain at its original source-order
+                // position, because subsequent filters (e.g. drop-shadow)
+                // depend on the reduced alpha as their input. Folding
+                // it into the layer alpha would apply opacity AFTER the
+                // shadow was generated, which produces a different and
+                // incorrect result for `opacity(0.5) drop-shadow(...)`.
+                const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
+                float m[20] = {
+                    1, 0, 0, 0, 0,
+                    0, 1, 0, 0, 0,
+                    0, 0, 1, 0, 0,
+                    0, 0, 0, a, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::brightness: {
+                // Per CSS spec — RGB scaled, alpha untouched.
+                const float k = f.amount;
+                float m[20] = {
+                    k, 0, 0, 0, 0,
+                    0, k, 0, 0, 0,
+                    0, 0, k, 0, 0,
+                    0, 0, 0, 1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::contrast: {
+                // Per CSS — c=amount, slope=c, intercept=0.5*(1-c).
+                // SkColorFilters::Matrix expects the translation column
+                // in 0..255 space (Codex P1 #3195880597), so the bias
+                // term is multiplied by 255 to land at mid-gray for
+                // contrast(0). The slope multipliers stay normalized.
+                const float c = f.amount;
+                const float t = 0.5f * (1.0f - c) * 255.0f;
+                float m[20] = {
+                    c, 0, 0, 0, t,
+                    0, c, 0, 0, t,
+                    0, 0, c, 0, t,
+                    0, 0, 0, 1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::grayscale: {
+                // Per CSS spec table — blends towards luminance-weighted gray.
+                // amount=1 is fully gray; amount=0 is identity.
+                const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
+                const float r = 0.2126f, g = 0.7152f, b = 0.0722f;
+                float m[20] = {
+                    1 - a + a * r, a * g,         a * b,         0, 0,
+                    a * r,         1 - a + a * g, a * b,         0, 0,
+                    a * r,         a * g,         1 - a + a * b, 0, 0,
+                    0,             0,             0,             1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::saturate: {
+                // Per CSS spec — saturate(0) is fully gray, saturate(1) is identity.
+                // Same matrix family as grayscale but with amount inverted.
+                const float a = f.amount;
+                const float r = 0.2126f, g = 0.7152f, b = 0.0722f;
+                const float inv_a = 1.0f - a;
+                float m[20] = {
+                    a + inv_a * r, inv_a * g,    inv_a * b,    0, 0,
+                    inv_a * r,    a + inv_a * g, inv_a * b,    0, 0,
+                    inv_a * r,    inv_a * g,    a + inv_a * b, 0, 0,
+                    0,            0,            0,             1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::invert: {
+                // Per CSS spec — amount=1 fully inverts, amount=0 is identity.
+                // SkColorFilters::Matrix expects the translation column in
+                // 0..255 space (Codex P1 #3195880597), so the bias term `a`
+                // is multiplied by 255 to map black->white at invert(1).
+                const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
+                const float k = 1.0f - 2.0f * a;
+                const float t = a * 255.0f;
+                float m[20] = {
+                    k, 0, 0, 0, t,
+                    0, k, 0, 0, t,
+                    0, 0, k, 0, t,
+                    0, 0, 0, 1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::sepia: {
+                // Per CSS spec table — sepia(amount) blends with sepia tone.
+                const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
+                // Identity matrix interpolated towards the sepia matrix.
+                auto lerp = [a](float ident, float sepia_v) {
+                    return ident + a * (sepia_v - ident);
+                };
+                float m[20] = {
+                    lerp(1, 0.393f), lerp(0, 0.769f), lerp(0, 0.189f), 0, 0,
+                    lerp(0, 0.349f), lerp(1, 0.686f), lerp(0, 0.168f), 0, 0,
+                    lerp(0, 0.272f), lerp(0, 0.534f), lerp(1, 0.131f), 0, 0,
+                    0,               0,               0,                1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::hue_rotate: {
+                // Per CSS spec — rotation around the achromatic axis in YIQ.
+                // Standard 3x3 hue-rotation matrix expressed as 4x5 RGB.
+                const float deg = f.angle_deg;
+                const float rad = deg * 3.14159265358979323846f / 180.0f;
+                const float cos_h = std::cos(rad);
+                const float sin_h = std::sin(rad);
+                // Constants from the CSS Filter Effects spec, Appendix A.
+                float m[20] = {
+                    0.213f + cos_h * 0.787f - sin_h * 0.213f,
+                    0.715f - cos_h * 0.715f - sin_h * 0.715f,
+                    0.072f - cos_h * 0.072f + sin_h * 0.928f,
+                    0, 0,
+
+                    0.213f - cos_h * 0.213f + sin_h * 0.143f,
+                    0.715f + cos_h * 0.285f + sin_h * 0.140f,
+                    0.072f - cos_h * 0.072f - sin_h * 0.283f,
+                    0, 0,
+
+                    0.213f - cos_h * 0.213f - sin_h * 0.787f,
+                    0.715f - cos_h * 0.715f + sin_h * 0.715f,
+                    0.072f + cos_h * 0.928f + sin_h * 0.072f,
+                    0, 0,
+
+                    0, 0, 0, 1, 0,
+                };
+                compose(SkImageFilters::ColorFilter(
+                    SkColorFilters::Matrix(m), nullptr));
+                break;
+            }
+            case FilterChainEntry::Kind::drop_shadow: {
+                // Per CSS spec — drop-shadow renders an offset blurred
+                // copy of the layer alpha tinted to ds_color, composited
+                // BELOW the original. SkImageFilters::DropShadow wraps
+                // the input filter so we feed it the chain so far as
+                // input — composes naturally with prior color matrices.
+                SkColor color = SkColorSetARGB(
+                    f.ds_color.a8(), f.ds_color.r8(),
+                    f.ds_color.g8(), f.ds_color.b8());
+                sk_sp<SkImageFilter> input = composed; // chain so far as input
+                composed = SkImageFilters::DropShadow(
+                    f.ds_offset_x, f.ds_offset_y,
+                    f.ds_blur, f.ds_blur,
+                    color,
+                    std::move(input));
+                break;
+            }
+        }
+    }
+
+    if (composed) layer_paint.setImageFilter(composed);
+    if (opacity < 1.0f) layer_paint.setAlphaf(opacity);
 
     canvas_->saveLayer(&bounds, &layer_paint);
 }

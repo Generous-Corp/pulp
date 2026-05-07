@@ -396,6 +396,15 @@ public:
     }
 
     void tick() {
+        // pulp #1402 / #1387 gap #3 (iOS parity with macOS PR #1400) —
+        // pump JS rAF / setTimeout / async-result queues each vsync.
+        // Without this, requestAnimationFrame(cb) callbacks queue
+        // forever and only fire when an unrelated touch event triggers
+        // a poll. Run the idle callback first so any request_repaint
+        // it triggers arms needs_repaint_ for the same vsync tick.
+        if (idle_callback_) {
+            idle_callback_();
+        }
         if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
             render_frame();
         }
@@ -403,6 +412,16 @@ public:
 
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
+    }
+
+    void set_idle_callback(std::function<void()> cb) override {
+        // pulp #1402 — wire the host's idle callback into the
+        // CADisplayLink dispatch (see tick()). Mirrors the macOS GPU
+        // host fix in PR #1400; before the override existed the base
+        // class no-op silently dropped standalone's
+        // `scripted_ui->poll()`, so JS animation queues never
+        // got a vsync-paced pump.
+        idle_callback_ = std::move(cb);
     }
 
     void set_resize_callback(ResizeCallback cb) override {
@@ -489,6 +508,10 @@ private:
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     std::function<void()> close_callback_;
+    // pulp #1402 — idle callback wiring for iOS GPU host. tick() reads
+    // and invokes on the main thread (CADisplayLink fires on main
+    // run loop in NSRunLoopCommonModes), so no atomic is needed.
+    std::function<void()> idle_callback_;
     std::atomic<bool> needs_repaint_{false};
     CADisplayLink* display_link_ = nil;
     PulpIOSDisplayLinkTarget* display_link_target_ = nil;

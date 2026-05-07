@@ -1,0 +1,144 @@
+{
+  "schema_version": "visual-layout-snapshot-v1",
+  "surface": "yoga",
+  "fixture": "yoga/flex-grow-shrink",
+  "entry": "flex-grow-shrink",
+  "viewport": {
+    "w": 260,
+    "h": 64
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 260,
+        "h": 64
+      },
+      "z_order": {
+        "paint": 0,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 260,
+          "h": 64
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 260,
+            "h": 64
+          }
+        }
+      ]
+    },
+    {
+      "id": "fixed",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 80,
+        "h": 64
+      },
+      "z_order": {
+        "paint": 1,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 260,
+          "h": 64
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 80,
+            "h": 64
+          }
+        }
+      ]
+    },
+    {
+      "id": "growing",
+      "type": "View",
+      "rect": {
+        "x": 80,
+        "y": 0.0,
+        "w": 33,
+        "h": 64
+      },
+      "z_order": {
+        "paint": 2,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 260,
+          "h": 64
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 80,
+            "y": 0.0,
+            "w": 33,
+            "h": 64
+          }
+        }
+      ]
+    },
+    {
+      "id": "shrinking",
+      "type": "View",
+      "rect": {
+        "x": 113,
+        "y": 0.0,
+        "w": 147,
+        "h": 64
+      },
+      "z_order": {
+        "paint": 3,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 260,
+          "h": 64
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 113,
+            "y": 0.0,
+            "w": 147,
+            "h": 64
+          }
+        }
+      ]
+    }
+  ]
+}

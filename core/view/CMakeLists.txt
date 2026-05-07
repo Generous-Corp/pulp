@@ -19,27 +19,42 @@ set(PULP_JS_PRELUDES
 )
 set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
 
+# pulp #1382 — embed_js.cmake's `string(SUBSTRING)` chunker operates on
+# BYTES, so a 12000-byte chunk boundary that lands inside a UTF-8
+# multi-byte codepoint splits the codepoint mid-sequence. The result
+# is a generated header with invalid UTF-8 at chunk boundaries; MSVC
+# then mis-parses the trailing `)__JS__"` delimiter, walks past it
+# into the next R"__JS__()__JS__" header, and reports C2026 ("string
+# too big") on the runaway literal. Used to be a non-issue when the
+# JS preludes were ASCII-only; the css-colors / css-parser / canvas
+# files now contain UTF-8 (em-dashes, smart quotes) that can land on
+# any byte boundary.
+#
+# The Python implementation (embed_js.py) slices on Python str, which
+# is char-aware, so chunk boundaries always fall between codepoints.
+# Switch to that.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 add_custom_command(
     OUTPUT ${PULP_JS_EMBEDDED_HEADER}
-    COMMAND ${CMAKE_COMMAND}
-        -DOUTPUT_FILE=${PULP_JS_EMBEDDED_HEADER}
-        -DFILE1=${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
-        -DFILE2=${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
-        -DFILE3=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
-        -DFILE4=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
-        -DFILE5=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
-        -DFILE6=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
-        -DFILE7=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
-        -DFILE8=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
-        -DFILE9=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
-        -DFILE10=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-scheduler.js
-        -DFILE11=${CMAKE_CURRENT_SOURCE_DIR}/js/import-runtime.js
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py
+        ${PULP_JS_EMBEDDED_HEADER}
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-scheduler.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/import-runtime.js
     DEPENDS
         ${PULP_JS_PRELUDES}
-        ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.py
-    COMMENT "Embedding JS preludes into C++ header"
+    COMMENT "Embedding JS preludes into C++ header (UTF-8-safe Python chunker)"
 )
 add_custom_target(pulp-view-js-preludes DEPENDS ${PULP_JS_EMBEDDED_HEADER})
 
@@ -165,6 +180,8 @@ target_sources(pulp-view PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/svg_path_widget.cpp
+    src/widgets/svg_rect.cpp
+    src/widgets/svg_line.cpp
     src/visualization_bridge.cpp
     src/frame_clock.cpp
     src/window_manager.cpp

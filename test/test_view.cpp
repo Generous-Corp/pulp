@@ -1042,6 +1042,103 @@ TEST_CASE("Absolute child positioned outside parent's bounds still paints",
     REQUIRE_FALSE(saw_parent_clip);
 }
 
+// pulp #1409 paint-time probe series — empirical answer to the Spectr
+// [I] "preset items render outside overlay" report. The framework
+// already pushes a parent clip_rect before children paint when the
+// parent has overflow:hidden, so the symptom is consumer-side, not
+// framework-side. These tests stand as a regression guard — if any of
+// them flips to a fail, paint-time clipping has regressed.
+TEST_CASE("Probe: overflow:hidden parent clip-rect precedes child paint",
+          "[view][probe][issue-overlay-clip]") {
+    using namespace pulp::canvas;
+
+    View parent;
+    parent.set_bounds({0, 0, 100, 100});
+    parent.set_overflow(View::Overflow::hidden);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 200, 100});
+    child->set_background_color(Color::rgba8(0, 255, 0, 255));
+    parent.add_child(std::move(child));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    int parent_clip_idx = -1;
+    int child_fill_idx = -1;
+    Color last_fill{};
+    for (int i = 0; i < (int)rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 100.0f &&
+            parent_clip_idx == -1) {
+            parent_clip_idx = i;
+        }
+        if (cmd.type == DrawCommand::Type::set_fill_color) last_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::fill_rect &&
+            cmd.f[2] == 200.0f && cmd.f[3] == 100.0f &&
+            last_fill.g8() == 255 && last_fill.r8() == 0 &&
+            child_fill_idx == -1) {
+            child_fill_idx = i;
+        }
+    }
+    INFO("parent_clip_idx=" << parent_clip_idx << " child_fill_idx=" << child_fill_idx
+         << " total_cmds=" << rc.commands().size());
+    REQUIRE(parent_clip_idx >= 0);
+    REQUIRE(child_fill_idx >= 0);
+    REQUIRE(parent_clip_idx < child_fill_idx);
+}
+
+// pulp #1409 paint-time probe — absolutely-positioned child translated
+// past the parent's right edge. Mirrors a Spectr preset-menu item
+// scenario where a row's `position: absolute; left: 80px` puts it past
+// a 100×40 dropdown's content rect. The clip must STILL precede the
+// child's paint command in the recording — translates do not reset the
+// active clip.
+TEST_CASE("Probe: overflow:hidden parent clips translated absolute child too",
+          "[view][probe][issue-overlay-clip]") {
+    using namespace pulp::canvas;
+
+    View parent;
+    parent.set_bounds({0, 0, 100, 40});
+    parent.set_overflow(View::Overflow::hidden);
+
+    auto child = std::make_unique<View>();
+    // Bounds-x positions the child at parent-x=80, so its 60px width
+    // extends 40px past the parent's right edge.
+    child->set_bounds({80, 0, 60, 40});
+    child->set_position(View::Position::absolute);
+    child->set_background_color(Color::rgba8(0, 0, 255, 255));
+    parent.add_child(std::move(child));
+
+    RecordingCanvas rc;
+    parent.paint_all(rc);
+
+    int parent_clip_idx = -1;
+    int child_fill_idx = -1;
+    Color last_fill{};
+    for (int i = 0; i < (int)rc.commands().size(); ++i) {
+        const auto& cmd = rc.commands()[i];
+        if (cmd.type == DrawCommand::Type::clip_rect &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 100.0f && cmd.f[3] == 40.0f &&
+            parent_clip_idx == -1) {
+            parent_clip_idx = i;
+        }
+        if (cmd.type == DrawCommand::Type::set_fill_color) last_fill = cmd.color;
+        if (cmd.type == DrawCommand::Type::fill_rect &&
+            cmd.f[2] == 60.0f && cmd.f[3] == 40.0f &&
+            last_fill.b8() == 255 && last_fill.r8() == 0 && last_fill.g8() == 0 &&
+            child_fill_idx == -1) {
+            child_fill_idx = i;
+        }
+    }
+    REQUIRE(parent_clip_idx >= 0);
+    REQUIRE(child_fill_idx >= 0);
+    REQUIRE(parent_clip_idx < child_fill_idx);
+}
+
 // ── pulp #1026: React Native pointerEvents 4-valued enum ────────────────────
 
 TEST_CASE("View::hit_test honors pointerEvents == auto (default)",

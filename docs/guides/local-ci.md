@@ -13,35 +13,56 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
+./tools/install-shipyard.sh --status     # compare installed vs pinned
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard pr                               # create, track, validate, and merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
 ```
 
-### Shipping a PR: `pulp pr`
+Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
+global `shipyard` is newer. Use `shipyard pin bump --to vX.Y.Z` for pin
+updates instead of hand-editing the file; newer Rust Shipyard releases changed
+the macOS asset shape to a signed/notarized `.dmg`, and the bump command keeps
+the version and asset metadata in sync.
 
-`pulp pr` is the single "ship this" orchestrator. Agents and humans should
-route every normal ship cycle through it rather than running `gh pr create`
-+ `shipyard ship` separately. It:
+The public Pulp installer does not install Shipyard or GitHub CLI (`gh`).
+That is intentional: ordinary Pulp users do not need either tool to create,
+build, run, or upgrade projects. They are source-checkout contributor tools.
+`pulp pr` defaults to Shipyard and fails with install/switch guidance if
+Shipyard is missing; contributors who prefer their own PR flow can set
+`pulp config set pr.workflow github` or `manual`. The `github` workflow uses
+`gh` directly and requires it to be installed and authenticated. Run
+`pulp status` to see the effective workflow and local tool health.
+
+### Shipping a PR: `shipyard pr`
+
+`shipyard pr` is the single "ship this" orchestrator. Agents and humans should
+route every normal ship cycle through it rather than pairing `gh pr create`
+with `shipyard ship` manually. It:
 
 1. Runs `tools/scripts/skill_sync_check.py` (hard-fails on missing SKILL.md updates).
 2. Runs `tools/scripts/version_bump_check.py --mode=apply` to bump SDK / Claude plugin / marketplace versions consistently.
 3. Commits the bump (if any) as `chore: bump <surfaces>`.
-4. `gh pr create` with a generated body.
-5. `shipyard ship` for cross-platform validate + merge on green.
+4. Pushes the branch, creates the PR, and records Shipyard tracking state.
+5. Runs cross-platform validate + merge on green.
 6. The auto-release workflow tags and publishes binaries on merge.
 
 ```bash
-pulp pr                                  # primary ship path (delegates to shipyard pr)
-pulp pr --base develop/package-manager   # ship to a develop branch
-pulp pr --title "..."                    # override PR title
-pulp pr --no-ship                        # open the PR but skip shipyard ship
-pulp pr --dry-run                        # print the plan without executing
+shipyard pr                              # primary ship path
+shipyard pr --base develop/package-manager # ship to a develop branch
+shipyard pr --title "..."                # override PR title
+shipyard pr --dry-run                    # print the plan without executing
 ```
 
-If `pulp pr` itself is broken (for example, a dylib load failure after a
-release bump), the equivalent fallback is to invoke `shipyard pr` directly —
-it runs the same gates + PR + ship flow.
+`pulp pr` is a compatibility wrapper that delegates to `shipyard pr` by
+default; it is valid, but guidance should name `shipyard pr` directly so
+humans and agents understand where PR tracking state lives. Its `github` and
+`manual` workflows are explicit local opt-outs and do not create Shipyard
+tracking state.
+
+Direct `gh pr create` is an emergency/manual bypass only. If it is used, call
+out that the PR may not appear in Shipyard-managed state until it is reconciled
+or re-shipped through Shipyard.
 
 ### Shipyard v0.3.0 workflow surface
 
@@ -96,10 +117,10 @@ pack.
 Every change to `main` must go through this workflow — no exceptions:
 
 1. **Branch** — work on `feature/*` or `fix/*`, never directly on main
-2. **Ship** — run `pulp pr` (which wraps `shipyard ship`) to create the PR, validate on macOS + Ubuntu + Windows, and merge on green
+2. **Ship** — run `shipyard pr` to create and track the PR, validate on macOS + Ubuntu + Windows, and merge on green
 3. **GitHub Actions** — PR also triggers build+test CI on all 3 platforms (redundant safety net)
 
-The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative trigger list — natural-language phrases like "ship this", "push a PR", "we're done", and "run CI" all route through `pulp pr`.
+The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative trigger list — natural-language phrases like "ship this", "push a PR", "we're done", and "run CI" all route through `shipyard pr`.
 
 ## Legacy: pulp ci-local
 
@@ -277,6 +298,62 @@ Important constraints in the current phase:
   `targets.*` still configures local/SSH validation hosts, while Namespace
   provider routing lives under the GitHub Actions workflow/provider config and
   the `cloud namespace` helper commands
+
+## Fast-CI vs full-CI (`build.yml`)
+
+Issue #1589 split the `Build and Test` workflow into two test
+trajectories without forking the YAML:
+
+- **Fast-CI** runs on `pull_request` events. The ctest invocation
+  excludes BOTH the `validation` and `slow` CTest labels, dropping the
+  longest-running tests so PR cycle time stays tight. Examples that
+  carry `LABELS slow` today (defined in `test/CMakeLists.txt`):
+  - `cmake-ios-auv3-configure` — fresh-cache ~3 min iOS-leg configure
+  - `cmake-pulp-add-binary-data-encoder` / `cmake-pulp-install-layout`
+  - `pulp-test-hot-reload`, `pulp-test-scripted-ui`, `pulp-test-scan-cache`,
+    `pulp-test-scan-blacklist` (filesystem-mtime sleep loops)
+  - `pulp-test-sync`, `pulp-test-sync-race-hammer`,
+    `pulp-test-events-timer-helpers` (race + timer hammers; also covered
+    under sanitizer.yml's TSan lane)
+
+- **Full-CI** runs on `push` to `main`, the nightly schedule, and
+  `workflow_dispatch`. Only the `validation` label is excluded — every
+  `slow`-labelled test runs before code lands on the release lane.
+
+Both paths satisfy the branch-protection-required `macos` /
+advisory `linux` / advisory `windows` alias gates because the alias
+jobs read each matrix leg's outcome via the GitHub API.
+
+### Tagging a new test as slow
+
+Add `LABELS slow` either to a single test's `set_tests_properties`, or
+to a Catch2 binary's `catch_discover_tests(... PROPERTIES LABELS slow)`
+so every discovered test inherits the label:
+
+```cmake
+add_test(NAME my-expensive-cmake-smoke COMMAND ...)
+set_tests_properties(my-expensive-cmake-smoke PROPERTIES
+    LABELS "smoke;slow"
+    TIMEOUT 600)
+
+add_executable(pulp-test-my-suite test_my_suite.cpp)
+target_link_libraries(pulp-test-my-suite PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-my-suite PROPERTIES LABELS slow)
+```
+
+Rule of thumb for `slow`: a test consistently >5 sec on at least one
+platform, OR a sleep-bounded smoke (file-mtime, hammer race, message-loop
+bound) whose value lies in soak coverage rather than per-PR feedback.
+Anything covered by sanitizers.yml or another scheduled lane is a
+strong candidate.
+
+### Demoting a fast test to slow (or vice versa)
+
+`ctest --test-dir build -L slow -N` lists every test currently tagged
+`slow`. To move a test in or out of the fast-CI surface, add or remove
+the `slow` label in `test/CMakeLists.txt` (or the appropriate subdir
+CMakeLists) and reconfigure. There's no separate registry to keep in
+sync.
 
 ## Switching a job's runner without a code change
 

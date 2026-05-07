@@ -284,6 +284,23 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign in project without identity reports signing guidance",
+                 "[cli][shellout][ship][issue-643][issue-901]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("missing-identity", true);
+
+    auto r = run_pulp_in(root, {"ship", "sign"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "No signing identity specified"));
+    REQUIRE(contains(combined, "pulp ship sign --identity"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship Android validation paths fail before external tooling",
                  "[cli][shellout][ship][android][issue-643][issue-901]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }

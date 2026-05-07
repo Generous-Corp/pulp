@@ -8,6 +8,100 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0782"></a>
+## [0.78.2] - 2026-05-06
+
+- feat(import-ir): Phase 1 spike — IR types + Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1) ([#1499](https://github.com/danielraffel/pulp/pull/1499))
+- feat(view): yoga alignContent + width/height auto (sub-agent #12 followup, refs pulp #1434) ([#1494](https://github.com/danielraffel/pulp/pull/1494))
+- fix(rn): wire backfaceVisibility / cursor / filter / pointerEvents / textTransform / transformOrigin / userSelect (refs pulp #1434, sub-agent #27 finding) ([#1497](https://github.com/danielraffel/pulp/pull/1497))
+- feat(view): borderStyle dashed/dotted/double/groove/ridge renderer (refs pulp #1434, Triage #10/#13) ([#1490](https://github.com/danielraffel/pulp/pull/1490))
+- feat(view/css): parse oklch / oklab / lch / lab / color() (refs pulp #1434, Triage #8) ([#1481](https://github.com/danielraffel/pulp/pull/1481))
+- feat(view): yoga per-edge margin/padding accept percent + auto (cross-surface, refs pulp #1434) ([#1477](https://github.com/danielraffel/pulp/pull/1477))
+- feat(canvas2d): wire conicGradient + imageSmoothing + miterLimit bridge setters (refs pulp #1434) ([#1480](https://github.com/danielraffel/pulp/pull/1480))
+- feat(harness): add 'noop' catalog status — close css/animation* drift (closes pulp #1475) ([#1478](https://github.com/danielraffel/pulp/pull/1478))
+- fix(harness): html catalog cleanup — push surface to 100% (refs pulp #1434) ([#1479](https://github.com/danielraffel/pulp/pull/1479))
+- fix(harness): css catalog hygiene — 8 stale entries, drift 60 → 54 (refs pulp #1434) ([#1474](https://github.com/danielraffel/pulp/pull/1474))
+- fix(harness): canvas2d catalog hygiene — flip 5 over-claimed entries to partial (refs pulp #1434) ([#1472](https://github.com/danielraffel/pulp/pull/1472))
+- feat(rn): walk transform array → bridge translate/rotate/scale calls (refs pulp #1434, Triage #9) ([#1468](https://github.com/danielraffel/pulp/pull/1468))
+
+<a id="v0781"></a>
+## [0.78.1] - 2026-05-05
+
+- fix(cli): bake SDK version into Rust release binary ([#1466](https://github.com/danielraffel/pulp/pull/1466))
+- fix(view/text): textAlign 'auto' + 'justify' (refs pulp #1434 Triage #11) ([#1458](https://github.com/danielraffel/pulp/pull/1458))
+- fix(view/css): parse boxShadow shorthand → setBoxShadow bridge (refs pulp #1434, Triage #15) ([#1461](https://github.com/danielraffel/pulp/pull/1461))
+- fix(view): yoga value-aliasing for flex-start/flex-end + column/row-reverse + baseline (closes pulp #1434 rn batch B) ([#1452](https://github.com/danielraffel/pulp/pull/1452))
+
+<a id="v0780"></a>
+## [0.78.0] - 2026-05-05
+
+- feature/phase8 default flip prepped ([#1450](https://github.com/danielraffel/pulp/pull/1450))
+- fix(rn): wire display: flex / none to existing visible/yoga path (refs pulp #1434) ([#1456](https://github.com/danielraffel/pulp/pull/1456))
+- fix(rn): forward percent strings + 'auto' for width/height/min/max/flexBasis (rn Batch C, refs pulp #1434) ([#1455](https://github.com/danielraffel/pulp/pull/1455))
+- fix(view/css): yoga top/right/bottom/left percent (closes pulp #1434 batch 6) ([#1451](https://github.com/danielraffel/pulp/pull/1451))
+- fix(harness/rn): catalog hygiene for stale NOT-IMPL entries (refs pulp #1434) ([#1449](https://github.com/danielraffel/pulp/pull/1449))
+- feat(canvas2d): sticky shadow cluster — color/blur/offsetX/offsetY (closes pulp #1434 batch 7) ([#1446](https://github.com/danielraffel/pulp/pull/1446))
+- validate/phase8 integrated ([#1005](https://github.com/danielraffel/pulp/pull/1005))
+- fix(view/css): yoga RN-alias fan-out (closes pulp #1434 batch 4) ([#1445](https://github.com/danielraffel/pulp/pull/1445))
+- fix(view/css): wire backdropFilter, textDecoration longhands, and fontWeight keywords (pulp #1434 batch 3) ([#1444](https://github.com/danielraffel/pulp/pull/1444))
+
+<a id="v0770"></a>
+## [0.77.0] - 2026-05-05
+
+- fix(view/css): translate width/height percent values through to Yoga (closes pulp #1423) ([#1426](https://github.com/danielraffel/pulp/pull/1426))
+- codex/shipyard rust docs ([#1441](https://github.com/danielraffel/pulp/pull/1441))
+- feat(yoga): aspect-ratio support across FlexStyle, CSS shim, and @pulp/react (pulp #1434 batch 5) ([#1437](https://github.com/danielraffel/pulp/pull/1437))
+- feat(view/css): translate `white-space: nowrap` to native single-line layout (closes #1410) ([#1411](https://github.com/danielraffel/pulp/pull/1411))
+- fix(harness): catalog-hygiene sweep + css OOS reclassification (refs pulp #1434) ([#1436](https://github.com/danielraffel/pulp/pull/1436))
+- feat(harness): rn surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1396](https://github.com/danielraffel/pulp/pull/1396))
+- feat(@pulp/react): SvgRect + SvgLine intrinsics (closes pulp #1416) ([#1421](https://github.com/danielraffel/pulp/pull/1421))
+- fix(harness/yoga): claim display:flex+none, add inline-block/inline-flex routing (closes pulp #1420) ([#1422](https://github.com/danielraffel/pulp/pull/1422))
+- feat(harness): css surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1397](https://github.com/danielraffel/pulp/pull/1397))
+- feat(harness): canvas2d surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1399](https://github.com/danielraffel/pulp/pull/1399))
+- feat(harness): html surface adapter via auto-discover (closes #1392 partial, #1393 partial) ([#1398](https://github.com/danielraffel/pulp/pull/1398))
+- fix(view): host idle pumps must drain timers, not just rAF (pulp #1412) ([#1425](https://github.com/danielraffel/pulp/pull/1425))
+- feat(harness): auto-discover surface adapters via pkgutil + decorator (closes #1401) ([#1415](https://github.com/danielraffel/pulp/pull/1415))
+- test(view): regression guard for overflow:hidden parent clip-rect (refs pulp #1409) ([#1414](https://github.com/danielraffel/pulp/pull/1414))
+- fix(view/css): translate `text-overflow: ellipsis` to native truncation (closes #1407) ([#1408](https://github.com/danielraffel/pulp/pull/1408))
+- fix(harness/yoga): normalize annotated catalog values before exact-string match ([#1417](https://github.com/danielraffel/pulp/pull/1417))
+
+<a id="v0760"></a>
+## [0.76.0] - 2026-05-04
+
+- feat(hooks): pre-push detects shipyard-vs-direct push origin (pulp #1406) ([#1406](https://github.com/danielraffel/pulp/pull/1406))
+- fix(view/ios): wire IOSGpuWindowHost::set_idle_callback into CADisplayLink (closes pulp #1402 — iOS slice) ([#1405](https://github.com/danielraffel/pulp/pull/1405))
+- feat(harness): yoga surface adapter + first machine-derived coverage (closes #1391, #1392 partial, #1393 partial, #1394 partial) ([#1395](https://github.com/danielraffel/pulp/pull/1395))
+- fix(view/mac): wire MacGpuWindowHost::set_idle_callback into CVDisplayLink (closes pulp #1387 gap #3) ([#1400](https://github.com/danielraffel/pulp/pull/1400))
+- fix(view/android): pump WidgetBridge idle each vsync (closes pulp #1402 — Android slice) ([#1404](https://github.com/danielraffel/pulp/pull/1404))
+- fix(view): NaN/±Inf defense in CanvasWidget::add_command (closes pulp #1387 gap #2) ([#1389](https://github.com/danielraffel/pulp/pull/1389))
+
+<a id="v0756"></a>
+## [0.75.6] - 2026-05-04
+
+- fix(@pulp/react): prop-applier auto-arms registerPointer/Wheel + routes overflow (closes #1381, #1387 gaps #1+#4) ([#1388](https://github.com/danielraffel/pulp/pull/1388))
+
+<a id="v0755"></a>
+## [0.75.5] - 2026-05-04
+
+- fix(view/mac): PulpMetalView opaque + wantsUpdateLayer (closes pulp #1382) ([#1385](https://github.com/danielraffel/pulp/pull/1385))
+
+<a id="v0754"></a>
+## [0.75.4] - 2026-05-04
+
+- fix(canvas/mac): CoreGraphicsCanvas::set_blend_mode honors all BlendMode values (closes pulp #1371) ([#1377](https://github.com/danielraffel/pulp/pull/1377))
+
+<a id="v0752"></a>
+## [0.75.2] - 2026-05-04
+
+- fix(view): position:absolute children skip flex-line participation (closes pulp #1379, #998) ([#1380](https://github.com/danielraffel/pulp/pull/1380))
+
+<a id="v0751"></a>
+## [0.75.1] - 2026-05-04
+
+- fix(view): UTF-8-safe JS prelude embedding (closes pulp #1382) ([#1383](https://github.com/danielraffel/pulp/pull/1383))
+- fix(ci): retry-on-fail Yoga priming + asset watchdog for release-cli (closes #1375) ([#1378](https://github.com/danielraffel/pulp/pull/1378))
+- docs(skills): codify Canvas2D bridge gotchas for importer + shim authors ([#1376](https://github.com/danielraffel/pulp/pull/1376))
+
 <a id="v0750"></a>
 ## [0.75.0] - 2026-05-04
 
@@ -1223,6 +1317,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.2]: https://github.com/danielraffel/pulp/releases/tag/v0.78.2
+[0.78.1]: https://github.com/danielraffel/pulp/releases/tag/v0.78.1
+[0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0
+[0.77.0]: https://github.com/danielraffel/pulp/releases/tag/v0.77.0
+[0.76.0]: https://github.com/danielraffel/pulp/releases/tag/v0.76.0
+[0.75.6]: https://github.com/danielraffel/pulp/releases/tag/v0.75.6
+[0.75.5]: https://github.com/danielraffel/pulp/releases/tag/v0.75.5
+[0.75.4]: https://github.com/danielraffel/pulp/releases/tag/v0.75.4
+[0.75.2]: https://github.com/danielraffel/pulp/releases/tag/v0.75.2
+[0.75.1]: https://github.com/danielraffel/pulp/releases/tag/v0.75.1
 [0.75.0]: https://github.com/danielraffel/pulp/releases/tag/v0.75.0
 [0.74.1]: https://github.com/danielraffel/pulp/releases/tag/v0.74.1
 [0.74.0]: https://github.com/danielraffel/pulp/releases/tag/v0.74.0

@@ -228,8 +228,8 @@ After completing all the above steps:
 1. [ ] `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` -- configure succeeds
 2. [ ] `cmake --build build -j$(sysctl -n hw.ncpu)` -- build succeeds with no missing includes or undefined symbols
 3. [ ] `ctest --test-dir build --output-on-failure` -- all tests pass
-4. [ ] `./build/tools/cli/pulp doctor` -- no package-related checks appear
-5. [ ] `./build/tools/cli/pulp help` -- no `add`, `remove`, `list`, `search`, `update`, `suggest`, `target` commands shown
+4. [ ] `./build/pulp doctor` -- no package-related checks appear
+5. [ ] `./build/pulp help` -- no `add`, `remove`, `list`, `search`, `update`, `suggest`, `target` commands shown
 6. [ ] `python3 tools/deps/audit.py --strict` -- no references to package registry files
 7. [ ] `grep -r "package_commands\|package_registry\|pulp::cli::pkg" tools/cli/` -- no results
 

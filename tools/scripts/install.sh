@@ -33,7 +33,7 @@ case "$OS" in
 esac
 
 case "$ARCH" in
-    x86_64|amd64)  ARCH="x86_64" ;;
+    x86_64|amd64)  ARCH="x64" ;;
     arm64|aarch64) ARCH="arm64" ;;
     *)             error "Unsupported architecture: $ARCH" ;;
 esac
@@ -50,7 +50,7 @@ if [ "$VERSION" = "latest" ]; then
     fi
 fi
 
-TARBALL="pulp-${VERSION}-${PLATFORM}-${ARCH}.tar.gz"
+TARBALL="pulp-${PLATFORM}-${ARCH}.tar.gz"
 URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${TARBALL}"
 
 # ── Download and install ────────────────────────────────────────────────────
@@ -90,8 +90,17 @@ if [ ! -x "${INSTALL_DIR}/pulp" ]; then
     error "Installation failed — ${INSTALL_DIR}/pulp not found or not executable."
 fi
 
-INSTALLED_VERSION=$("${INSTALL_DIR}/pulp" --version 2>/dev/null || echo "unknown")
-info "Installed: pulp ${INSTALLED_VERSION}"
+INSTALLED_VERSION=$("${INSTALL_DIR}/pulp" version 2>/dev/null | head -n 1 || echo "unknown")
+if [ -z "$INSTALLED_VERSION" ]; then
+    INSTALLED_VERSION="unknown"
+fi
+info "Installed: ${INSTALLED_VERSION}"
+
+if [ -x "${INSTALL_DIR}/pulp-cpp" ]; then
+    info "Installed: pulp-cpp delegate"
+else
+    info "No pulp-cpp delegate found; this is expected only for pre-0.78.0 releases."
+fi
 
 # ── Add to PATH ─────────────────────────────────────────────────────────────
 

@@ -13,7 +13,10 @@ Claude plugin <plugin_version> · Pulp SDK/CLI <sdk_version>
 
 See `.claude/commands/version.md` for the exact parsing recipe. Reuse the same logic — do not reinvent it.
 
-Then run: `./build/tools/cli/pulp status`
+Then run: `pulp status` when the CLI is on PATH, or `./build/pulp status` from a source build.
+In a Pulp source checkout, include the PR workflow lines from `pulp status`
+when reporting status; they show whether this checkout is using Shipyard,
+direct `gh`, or manual PR handling.
 
 If the CLI binary doesn't exist, fall back to showing:
 1. `git status` — current branch and changes

@@ -15,8 +15,9 @@
 //!
 //! - The `cli` field prefers the `PULP_RS_CLI_VERSION` environment
 //!   override (so tests can pin a version without mutating the running
-//!   binary). Falling back to `CARGO_PKG_VERSION` keeps the prototype
-//!   self-describing outside tests.
+//!   binary). Falling back to the CMake-baked Pulp SDK version keeps
+//!   release binaries aligned with their tag; direct Cargo prototype
+//!   builds fall back to `CARGO_PKG_VERSION`.
 //! - The `plugin` probe walks `.claude-plugin/plugin.json` *from the
 //!   working directory or any ancestor that looks like a project root*
 //!   — identical to the C++ `locate_plugin_json` precedence, reused
@@ -28,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+use crate::build_info;
 use crate::diag::resolve_active_project_root;
 use crate::parse::{plugin_json, PluginJson, SemverCompat};
 
@@ -53,7 +55,7 @@ pub struct VersionSnapshot {
 /// triple, matching the C++ "diagnostic never critical" rule.
 #[must_use]
 pub fn collect(cwd: &Path) -> VersionSnapshot {
-    let cli = SemverCompat::parse(&cli_version_string());
+    let cli = SemverCompat::parse(&build_info::cli_version_string());
     let (root, is_standalone) = resolve_active_project_root(cwd);
 
     // Mirror the doctor-side quirk: when the active project is a
@@ -105,17 +107,6 @@ fn generic(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// CLI version string, honouring the `PULP_RS_CLI_VERSION` override so
-/// tests can pin a version without rebuilding the binary.
-fn cli_version_string() -> String {
-    if let Ok(v) = std::env::var("PULP_RS_CLI_VERSION") {
-        if !v.is_empty() {
-            return v;
-        }
-    }
-    env!("CARGO_PKG_VERSION").to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_version_defaults_to_cargo_pkg_when_env_unset() {
+    fn cli_version_defaults_to_baked_version_when_env_unset() {
         // Serialise every test that mutates process-wide env via
         // the shared `ENV_LOCK` in `crate::test_support` so
         // `cmd::upgrade` tests and this one don't collide.
@@ -146,7 +137,10 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var_os("PULP_RS_CLI_VERSION");
         std::env::remove_var("PULP_RS_CLI_VERSION");
-        assert_eq!(cli_version_string(), env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            build_info::cli_version_string(),
+            build_info::baked_cli_version()
+        );
         if let Some(v) = prev {
             std::env::set_var("PULP_RS_CLI_VERSION", v);
         }

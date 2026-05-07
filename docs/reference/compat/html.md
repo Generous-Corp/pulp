@@ -52,6 +52,11 @@ parser.
 
 ## Recently changed
 
+- `html/ARIA` (pulp #1434): catalog flipped `missing` → `partial` to
+  reflect that the storage half (round-trip through `setAttribute` /
+  `getAttribute`) works today; the platform-bridge routing half is
+  the actual gap and is tracked under #1476. No implementation
+  change.
 - `html/svg` (PR #1347, pulp #1147): inline `<svg>` is now a layout
   placeholder that honors the HTML `width` / `height` attributes.
   Previously it collapsed to height 0 and broke flex siblings.
@@ -79,9 +84,12 @@ change, focus, blur), `dispatchEvent`, `setPointerCapture` /
 
 ## Notable gaps
 
-1. **`html/ARIA`** (missing) — `aria-*` attributes are stored in
-   `_attributes` but NOT routed to platform accessibility APIs.
-   Major gap; needs dedicated work.
+1. **`html/ARIA`** (partial) — `aria-*` attributes round-trip through
+   `setAttribute` / `getAttribute` (storage works), but the html-compat
+   layer does NOT yet forward them onto the platform accessibility
+   bridge. The bridge itself is in good shape (macOS / iOS / Android
+   done, Windows UIA + Linux AT-SPI in flight under #217); the missing
+   piece is the html-side translation. Tracked under #1476.
 2. **`html/Element_disabled`** (partial) — re-applies stylesheets but
    does NOT call the bridge's `setEnabled`. Native widget disabled-
    state is not toggled.

@@ -41,7 +41,7 @@ fn fixture_root(category: &str, name: &str) -> PathBuf {
 }
 
 fn run_in(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::cargo_bin("pulp-rs")
+    Command::cargo_bin("pulp")
         .expect("binary")
         .current_dir(dir)
         .args(args)
@@ -228,7 +228,7 @@ fn tool_uninstall_missing_exits_nonzero() {
     // user install. Set it to a fresh tempdir — the target id doesn't
     // exist there so the uninstall returns "not installed".
     let home = tempfile::tempdir().unwrap();
-    let output = Command::cargo_bin("pulp-rs")
+    let output = Command::cargo_bin("pulp")
         .expect("binary")
         .current_dir(&root)
         .args(["tool", "uninstall", "uv"])

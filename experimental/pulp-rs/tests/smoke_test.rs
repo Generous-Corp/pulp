@@ -33,7 +33,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 
 #[test]
 fn doctor_versions_json_has_required_shape() {
-    let bin = env!("CARGO_BIN_EXE_pulp-rs");
+    let bin = env!("CARGO_BIN_EXE_pulp");
 
     let output = Command::new(bin)
         .args(["doctor", "--versions", "--json"])
@@ -65,7 +65,7 @@ fn doctor_versions_json_has_required_shape() {
 
 #[test]
 fn doctor_populates_project_sdk_from_fixture() {
-    let bin = env!("CARGO_BIN_EXE_pulp-rs");
+    let bin = env!("CARGO_BIN_EXE_pulp");
     let dir = fixture_dir("ok_plain");
     let tmp_home = tempfile::tempdir().expect("tempdir");
 

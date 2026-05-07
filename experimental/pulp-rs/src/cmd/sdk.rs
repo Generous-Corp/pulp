@@ -438,4 +438,109 @@ mod tests {
         let err = run_with_home(Sub::Install, td.path(), false, &mut buf).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }
+
+    // ── #45 coverage uplift slice 9 — sdk.rs parse + status edges ─
+
+    #[test]
+    fn parse_sub_no_args_returns_help() {
+        let s = parse_sub(&[]).unwrap();
+        assert!(matches!(s, Sub::Help));
+    }
+
+    #[test]
+    fn parse_sub_help_aliases() {
+        for alias in ["help", "--help", "-h"] {
+            let s = parse_sub(&[alias.to_owned()]).unwrap();
+            assert!(matches!(s, Sub::Help), "{alias} did not resolve to Help");
+        }
+    }
+
+    #[test]
+    fn parse_sub_status_clean_install_install() {
+        for (token, want) in [
+            ("status", Sub::Status),
+            ("clean", Sub::Clean),
+            ("install", Sub::Install),
+        ] {
+            let s = parse_sub(&[token.to_owned()]).unwrap();
+            assert_eq!(format!("{s:?}"), format!("{want:?}"));
+        }
+    }
+
+    #[test]
+    fn parse_sub_unknown_token_errors() {
+        let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
+        assert!(matches!(err, CliError::UnknownSubcommand)
+                || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn list_entries_returns_empty_for_empty_home() {
+        let td = tempfile::tempdir().unwrap();
+        let entries = list_entries(td.path());
+        assert!(entries.is_empty(), "expected no entries: {entries:?}");
+    }
+
+    #[test]
+    fn list_entries_picks_up_downloaded_with_version_txt() {
+        let td = tempfile::tempdir().unwrap();
+        let v = td.path().join("sdk").join("0.41.0");
+        std::fs::create_dir_all(&v).unwrap();
+        std::fs::write(v.join("version.txt"), "0.41.0\n").unwrap();
+        // No version.txt → skipped
+        std::fs::create_dir_all(td.path().join("sdk").join("0.40.0")).unwrap();
+        let entries = list_entries(td.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "downloaded");
+        assert_eq!(entries[0].version, "0.41.0");
+        assert!(entries[0].platform.is_none());
+    }
+
+    #[test]
+    fn list_entries_picks_up_local_with_pulp_config_cmake() {
+        let td = tempfile::tempdir().unwrap();
+        let local_root = td.path()
+            .join("sdk-local")
+            .join("darwin-arm64")
+            .join("0.41.0");
+        let cmake = local_root.join("lib").join("cmake").join("Pulp");
+        std::fs::create_dir_all(&cmake).unwrap();
+        std::fs::write(cmake.join("PulpConfig.cmake"), "set(Pulp_FOUND TRUE)\n").unwrap();
+        let entries = list_entries(td.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "local");
+        assert_eq!(entries[0].version, "0.41.0");
+        assert_eq!(entries[0].platform.as_deref(), Some("darwin-arm64"));
+    }
+
+    #[test]
+    fn list_entries_skips_local_dir_without_pulp_config() {
+        let td = tempfile::tempdir().unwrap();
+        // Plant a local-shape dir but WITHOUT PulpConfig.cmake.
+        std::fs::create_dir_all(
+            td.path().join("sdk-local").join("darwin-arm64").join("0.40.0")
+        ).unwrap();
+        assert!(list_entries(td.path()).is_empty());
+    }
+
+    #[test]
+    fn run_with_home_help_writes_usage() {
+        let td = tempfile::tempdir().unwrap();
+        let mut buf = Vec::new();
+        run_with_home(Sub::Help, td.path(), false, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("pulp-rs sdk"), "missing usage banner: {s:?}");
+        assert!(s.contains("status") && s.contains("clean") && s.contains("install"),
+                "missing subcommand list: {s:?}");
+    }
+
+    #[test]
+    fn run_with_home_clean_emits_message_for_empty_home() {
+        let td = tempfile::tempdir().unwrap();
+        let mut buf = Vec::new();
+        run_with_home(Sub::Clean, td.path(), false, &mut buf).unwrap();
+        // Clean over empty home shouldn't crash; output may be
+        // empty or a "nothing to clean" line — both are fine.
+        let _ = buf;
+    }
 }

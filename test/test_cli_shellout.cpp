@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -78,14 +79,17 @@ fs::path unique_temp_dir(const std::string& prefix) {
 }
 
 
-// The pulp CLI binary lands at <build>/tools/cli/pulp once `pulp-cli`
-// has been built. The test runner's working directory at invocation
-// time is <build>/test, so "../tools/cli/pulp" is the relative path.
-// Fall back to a PULP_CLI_PATH env override for adversarial CI setups.
+// After the Rust CLI cutover, the instrumented C++ delegate lands at
+// <build>/tools/cli/pulp-cpp. Older/pre-cutover builds used
+// <build>/tools/cli/pulp. Prefer pulp-cpp so coverage builds exercise
+// the C++ implementation directly, but keep the old fallback for
+// compatibility. PULP_CLI_PATH can still override either path.
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
+    auto cpp = fs::current_path() / ".." / "tools" / "cli" / "pulp-cpp";
+    if (fs::exists(cpp)) return cpp;
     return fs::current_path() / ".." / "tools" / "cli" / "pulp";
 }
 
@@ -119,6 +123,66 @@ void write_text(const fs::path& path, const std::string& text) {
     f << text;
     REQUIRE(f.good());
 }
+
+char path_separator() {
+#if defined(_WIN32)
+    return ';';
+#else
+    return ':';
+#endif
+}
+
+void prepend_to_path(const fs::path& dir) {
+    const char* old = std::getenv("PATH");
+    auto next = dir.string();
+    if (old && *old) {
+        next += path_separator();
+        next += old;
+    }
+    pulp_setenv("PATH", next.c_str(), 1);
+}
+
+#if !defined(_WIN32)
+std::string pinned_shipyard_version_for_test() {
+    auto toml = read_file(fs::current_path().parent_path().parent_path() /
+                          "tools" / "shipyard.toml");
+    std::istringstream lines(toml);
+    std::string line;
+    while (std::getline(lines, line)) {
+        auto pos = line.find("version");
+        if (pos == std::string::npos) continue;
+        auto eq = line.find('=', pos);
+        if (eq == std::string::npos) continue;
+        auto value = line.substr(eq + 1);
+        auto first = value.find('"');
+        auto last = value.find_last_of('"');
+        if (first != std::string::npos && last != std::string::npos && last > first) {
+            return value.substr(first + 1, last - first - 1);
+        }
+    }
+    return "v0.46.0";
+}
+
+fs::path write_fake_shipyard(const fs::path& dir, const std::string& version) {
+    auto path = dir / "shipyard";
+    write_text(path,
+               "#!/bin/sh\n"
+               "if [ \"$1\" = \"--version\" ]; then\n"
+               "  echo \"shipyard " + version + "\"\n"
+               "  exit 0\n"
+               "fi\n"
+               "if [ \"$1\" = \"pr\" ]; then\n"
+               "  echo \"fake shipyard pr $2\"\n"
+               "  exit 0\n"
+               "fi\n"
+               "echo \"fake shipyard\"\n");
+    fs::permissions(path,
+                    fs::perms::owner_exec | fs::perms::owner_read |
+                    fs::perms::owner_write,
+                    fs::perm_options::add);
+    return path;
+}
+#endif
 
 }  // namespace
 
@@ -183,6 +247,65 @@ TEST_CASE("pulp <unknown-command> exits non-zero with a diagnostic",
     REQUIRE(mentioned);
 }
 
+TEST_CASE("pulp audio usage and parser errors are deterministic",
+          "[cli][shellout][audio][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto usage = run_pulp({"audio"});
+    REQUIRE(usage.exit_code == 0);
+    REQUIRE_FALSE(usage.timed_out);
+    REQUIRE(usage.stdout_output.find("pulp audio") != std::string::npos);
+    REQUIRE(usage.stdout_output.find("excerpt-find") != std::string::npos);
+    REQUIRE(usage.stdout_output.find("read-bundle") != std::string::npos);
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string stderr_substring;
+        std::string stdout_substring;
+    };
+
+    const std::vector<Case> cases = {
+        {{"audio", "model"}, "Unknown audio model subcommand", "pulp audio"},
+        {{"audio", "model", "activate"}, "model id is required", "pulp audio"},
+        {{"audio", "model", "list", "--surprise"}, "Unknown option: --surprise", ""},
+        {{"audio", "model", "status", "--surprise"}, "Unknown option: --surprise", ""},
+        {{"audio", "excerpt-find", "--text", "kick", "--input"}, "--input requires a value", ""},
+        {{"audio", "excerpt-find", "--top", "many"}, "invalid value for --top", ""},
+        {{"audio", "excerpt-find", "--window-ms", "soon"}, "invalid value for --window-ms", ""},
+        {{"audio", "excerpt-find", "--hop-ms", "soon"}, "invalid value for --hop-ms", ""},
+        {{"audio", "excerpt-find", "--min-score", "loud"}, "invalid value for --min-score", ""},
+        {{"audio", "excerpt-find", "--max-candidates-per-file", "lots"}, "invalid value for --max-candidates-per-file", ""},
+        {{"audio", "excerpt-find", "--unknown"}, "Unknown option: --unknown", ""},
+        {{"audio", "read-bundle"}, "bundle path is required", "pulp audio"},
+        {{"audio", "read-bundle", "bundle-a", "bundle-b"}, "Unknown argument: bundle-b", ""},
+        {{"audio", "not-audio"}, "Unknown audio subcommand", "pulp audio"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("args size: " << c.args.size());
+        auto r = run_pulp(c.args);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code != 0);
+        REQUIRE(r.stderr_output.find(c.stderr_substring) != std::string::npos);
+        if (!c.stdout_substring.empty())
+            REQUIRE(r.stdout_output.find(c.stdout_substring) != std::string::npos);
+    }
+}
+
+TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
+          "[cli][shellout][audio][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto missing = unique_temp_dir("pulp-audio-missing-bundle");
+    fs::remove_all(missing);
+    auto r = run_pulp({"audio", "read-bundle", missing.string(), "--json"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(r.stdout_output.find("\"ok\": false") != std::string::npos);
+    REQUIRE(r.stdout_output.find("bundle path does not exist") != std::string::npos);
+}
+
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
           "[cli][shellout][codex-562]") {
     // Codex 2026-04-21 wave 2 P2 on #562: `pulp config foo` previously
@@ -196,6 +319,279 @@ TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
     REQUIRE(r.exit_code != 0);
     REQUIRE(r.stderr_output.find("Unknown config subcommand") != std::string::npos);
 }
+
+TEST_CASE("pulp config supports pr.workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-config");
+    fs::create_directories(tmp_home);
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    auto set = run_pulp({"config", "set", "pr.workflow", "github"});
+    auto get = run_pulp({"config", "get", "pr.workflow"});
+    auto list = run_pulp({"config", "list"});
+    auto bad = run_pulp({"config", "set", "pr.workflow", "svn"});
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(set.timed_out);
+    REQUIRE(set.exit_code == 0);
+    REQUIRE_FALSE(get.timed_out);
+    REQUIRE(get.exit_code == 0);
+    REQUIRE(get.stdout_output.find("github") != std::string::npos);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("pr.workflow = github") != std::string::npos);
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE(bad.exit_code != 0);
+    REQUIRE(bad.stderr_output.find("pr.workflow must be one of") != std::string::npos);
+}
+
+TEST_CASE("pulp status reports effective PR workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-status");
+    fs::create_directories(tmp_home);
+    {
+        std::ofstream cfg(tmp_home / "config.toml");
+        cfg << "[pr]\nworkflow = \"manual\"\n"
+            << "[update]\nmode = \"off\"\n";
+    }
+
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"status"});
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("PR workflow: manual (config:pr.workflow)") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Shipyard tracking: disabled by pr.workflow=manual") != std::string::npos);
+}
+
+TEST_CASE("pulp status reports invalid and github PR workflow modes",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    update_disabled.set("1");
+
+    auto invalid_home = unique_temp_dir("pulp-pr-workflow-status-invalid");
+    fs::create_directories(invalid_home);
+    home_env.set(invalid_home.string());
+    workflow_env.set("subversion");
+    auto invalid = run_pulp({"status"});
+    fs::remove_all(invalid_home);
+
+    REQUIRE_FALSE(invalid.timed_out);
+    REQUIRE(invalid.exit_code == 0);
+    REQUIRE(invalid.stdout_output.find("PR workflow: invalid (env:PULP_PR_WORKFLOW)")
+            != std::string::npos);
+    REQUIRE(invalid.stdout_output.find("pr.workflow must be one of")
+            != std::string::npos);
+
+    auto github_home = unique_temp_dir("pulp-pr-workflow-status-github");
+    fs::create_directories(github_home);
+    home_env.set(github_home.string());
+    workflow_env.set("github");
+    auto github = run_pulp({"status"});
+    fs::remove_all(github_home);
+
+    REQUIRE_FALSE(github.timed_out);
+    REQUIRE(github.exit_code == 0);
+    REQUIRE(github.stdout_output.find("PR workflow: github (env:PULP_PR_WORKFLOW)")
+            != std::string::npos);
+    REQUIRE(github.stdout_output.find("GitHub CLI:") != std::string::npos);
+    REQUIRE(github.stdout_output.find("Shipyard tracking: disabled by pr.workflow=github")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp pr validates workflow selection before shipping",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-pr");
+    fs::create_directories(home);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    auto missing_value = run_pulp({"pr", "--workflow"}, 10000);
+    REQUIRE_FALSE(missing_value.timed_out);
+    REQUIRE(missing_value.exit_code == 2);
+    REQUIRE(missing_value.stderr_output.find("--workflow requires a value")
+            != std::string::npos);
+
+    workflow_env.set("svn");
+    auto invalid_env = run_pulp({"pr", "--dry-run"}, 10000);
+    REQUIRE_FALSE(invalid_env.timed_out);
+    REQUIRE(invalid_env.exit_code == 2);
+    REQUIRE(invalid_env.stderr_output.find("invalid PR workflow 'svn' from env:PULP_PR_WORKFLOW")
+            != std::string::npos);
+    REQUIRE(invalid_env.stderr_output.find("pr.workflow must be one of")
+            != std::string::npos);
+
+    workflow_env.set("");
+    auto path_dir = home / "empty-path";
+    fs::create_directories(path_dir);
+    path_env.set(path_dir.string());
+    auto missing_shipyard = run_pulp({"pr", "--workflow", "shipyard"}, 10000);
+    REQUIRE_FALSE(missing_shipyard.timed_out);
+    REQUIRE(missing_shipyard.exit_code == 2);
+    REQUIRE(missing_shipyard.stderr_output.find("shipyard is not on PATH")
+            != std::string::npos);
+    REQUIRE(missing_shipyard.stderr_output.find("pulp config set pr.workflow github")
+            != std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-manual-github");
+    fs::create_directories(home);
+    home_env.set(home.string());
+
+    auto manual = run_pulp({"pr", "--workflow=manual", "--base", "origin/main",
+                            "--title", "Manual PR Plan"}, 10000);
+    REQUIRE_FALSE(manual.timed_out);
+    REQUIRE(manual.exit_code == 0);
+    REQUIRE(manual.stdout_output.find("manual PR workflow selected")
+            != std::string::npos);
+    REQUIRE(manual.stdout_output.find("gh pr create --title")
+            != std::string::npos);
+    REQUIRE(manual.stdout_output.find("Manual and GitHub workflows do not create Shipyard tracking state")
+            != std::string::npos);
+
+    auto github_dry_run = run_pulp({"pr", "--workflow", "github", "--dry-run",
+                                    "--title", "GitHub PR Plan"}, 10000);
+    REQUIRE_FALSE(github_dry_run.timed_out);
+    REQUIRE(github_dry_run.exit_code == 0);
+    REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
+            != std::string::npos);
+    REQUIRE(github_dry_run.stdout_output.find("[dry-run] Plan:")
+            != std::string::npos);
+    REQUIRE(github_dry_run.stdout_output.find("shipyard ship")
+            == std::string::npos);
+
+    fs::remove_all(home);
+}
+
+TEST_CASE("pulp pr github workflow requires gh for real PR creation",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-gh-missing");
+    auto path_dir = home / "empty-path";
+    fs::create_directories(path_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+    path_env.set(path_dir.string());
+
+    auto missing_gh = run_pulp({"pr", "--workflow", "github"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(missing_gh.timed_out);
+    REQUIRE(missing_gh.exit_code == 2);
+    REQUIRE(missing_gh.stderr_output.find("PR workflow is `github`, but the GitHub CLI (`gh`) is not on PATH")
+            != std::string::npos);
+    REQUIRE(missing_gh.stderr_output.find("`github` is Pulp's direct GitHub workflow name")
+            != std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-shipyard");
+    auto bin_dir = home / "bin";
+    fs::create_directories(bin_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    const std::string pinned = pinned_shipyard_version_for_test();
+    write_fake_shipyard(bin_dir, pinned);
+    prepend_to_path(bin_dir);
+
+    auto delegated = run_pulp({"pr", "--help"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(delegated.timed_out);
+    REQUIRE(delegated.exit_code == 0);
+    REQUIRE(delegated.stdout_output.find("Usage: pulp pr [--native]")
+            != std::string::npos);
+    REQUIRE(delegated.stdout_output.find("fake shipyard pr --help")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp status reports shipyard version and pin health",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar home_env("PULP_HOME");
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    ScopedEnvVar path_env("PATH");
+    ScopedEnvVar os_home_env("HOME");
+    update_disabled.set("1");
+
+    auto home = unique_temp_dir("pulp-pr-workflow-status-shipyard");
+    auto bin_dir = home / "bin";
+    fs::create_directories(bin_dir);
+    home_env.set(home.string());
+    os_home_env.set(home.string());
+
+    const std::string pinned = pinned_shipyard_version_for_test();
+    auto shipyard = write_fake_shipyard(bin_dir, pinned);
+    prepend_to_path(bin_dir);
+
+    auto status = run_pulp({"status"}, 10000);
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("PR workflow: shipyard (default)")
+            != std::string::npos);
+    REQUIRE(status.stdout_output.find("Shipyard: " + shipyard.string())
+            != std::string::npos);
+    REQUIRE(status.stdout_output.find("(" + pinned + ") pinned " + pinned)
+            != std::string::npos);
+}
+#endif
 
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
           "[cli][shellout][version]") {
@@ -1087,6 +1483,38 @@ TEST_CASE("pulp pr without shipyard prints install guidance",
     REQUIRE(combined.find("pulp pr --native") != std::string::npos);
 }
 
+TEST_CASE("pulp pr github workflow requires gh instead of falling back from shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    ScopedEnvVar workflow("PULP_PR_WORKFLOW");
+    path.set("");
+    workflow.set("github");
+
+    auto r = run_pulp({"pr"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("GitHub CLI (`gh`) is not on PATH") != std::string::npos);
+    REQUIRE(combined.find("shipyard is not on PATH") == std::string::npos);
+}
+
+TEST_CASE("pulp pr manual workflow does not require shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto r = run_pulp({"pr", "--workflow", "manual", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
+    REQUIRE(r.stderr_output.find("shipyard is not on PATH") == std::string::npos);
+}
+
 TEST_CASE("pulp pr native help stays available without shipyard",
           "[cli][shellout][pr][issue-643]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -1902,4 +2330,261 @@ TEST_CASE("pulp loop accepts --test, --validate, --target, --run flags via --no-
     pulp_unsetenv("PULP_HOME");
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     fs::remove_all(tmp_home);
+}
+
+// ── projects list --json (cmd_projects.cpp do_list JSON path) ─────
+//
+// The C++ binary's `pulp projects list --json` was added in this
+// branch to mirror what the Rust port already does — without these
+// tests, the diff-cover gate flags the new JSON-rendering branch as
+// uncovered (per `ci/coverage-targets.yaml`, `tools/cli/**` is the
+// "user-facing" tier with a 70% per-PR floor).
+
+TEST_CASE("pulp projects list --json emits valid JSON for empty registry",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // Isolated PULP_HOME so we don't read the user's real registry.
+    auto tmp = fs::temp_directory_path() / "pulp-projects-json-test";
+    fs::create_directories(tmp);
+    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
+    auto r = run_pulp({"projects", "list", "--json"});
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp);
+
+    REQUIRE(r.exit_code == 0);
+    // Must be parseable JSON with the documented top-level keys.
+    REQUIRE(r.stdout_output.find("\"registry\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"projects\"") != std::string::npos);
+    // Empty registry → empty array.
+    REQUIRE(r.stdout_output.find("[]") != std::string::npos);
+}
+
+TEST_CASE("pulp projects list (no --json) emits human text",
+          "[cli][shellout][projects]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() / "pulp-projects-text-test";
+    fs::create_directories(tmp);
+    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
+    auto r = run_pulp({"projects", "list"});
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp);
+
+    REQUIRE(r.exit_code == 0);
+    // Human text path should NOT emit JSON braces.
+    REQUIRE(r.stdout_output.find("Registry:") != std::string::npos);
+    REQUIRE(r.stdout_output.find("(no projects registered)") != std::string::npos);
+}
+
+// Non-empty registry path — exercises the cmd_projects::do_list JSON
+// loop body (lines ~78-92 of cmd_projects.cpp) that the empty-registry
+// test above can't reach. Adds a synthetic project root, registers it,
+// then asserts the JSON output contains the per-project record. Also
+// exercises json_escape via a project name containing a literal
+// double-quote (the most common escapable character).
+TEST_CASE("pulp projects list --json emits per-project JSON with non-empty registry",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto pulp_home = unique_temp_dir("pulp-projects-json-nonempty-home");
+    fs::create_directories(pulp_home);
+    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
+
+    // Synthetic project root — find_project_root walks ancestors looking
+    // for `CMakeLists.txt && core/`, so create both. pulp.toml carries
+    // the SDK pin; cmd_projects::do_add reads name from there if present.
+    auto project = unique_temp_dir("pulp-projects-json-fake-project");
+    fs::create_directories(project / "core");
+    {
+        std::ofstream ct(project / "CMakeLists.txt");
+        ct << "project(FakeJsonListProject VERSION 0.1.0 LANGUAGES CXX)\n";
+    }
+    {
+        std::ofstream pt(project / "pulp.toml");
+        pt << "sdk_version = \"0.40.0\"\n";
+    }
+
+    auto add = run_pulp({"projects", "add", project.string()}, 15000);
+    REQUIRE_FALSE(add.timed_out);
+    REQUIRE(add.exit_code == 0);
+
+    auto list = run_pulp({"projects", "list", "--json"}, 15000);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+
+    // Top-level shape preserved.
+    REQUIRE(list.stdout_output.find("\"registry\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"projects\"") != std::string::npos);
+    // Loop body must have emitted one project record with these fields.
+    REQUIRE(list.stdout_output.find("\"path\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"name\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"registered_at\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find(project.generic_string()) != std::string::npos);
+    // The synthetic project exists on disk → missing_on_disk false.
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\": false") != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(pulp_home);
+    fs::remove_all(project);
+}
+
+// Pairs with the above — exercises cmd_projects's missing-on-disk
+// branch by registering a project then deleting its directory. This
+// covers the `bool missing = !fs::exists(p.path)` true branch + the
+// `"missing_on_disk": true` JSON emission line.
+TEST_CASE("pulp projects list --json reports missing_on_disk=true for deleted project",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto pulp_home = unique_temp_dir("pulp-projects-json-missing-home");
+    fs::create_directories(pulp_home);
+    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
+
+    auto project = unique_temp_dir("pulp-projects-json-deleted-project");
+    fs::create_directories(project / "core");
+    {
+        std::ofstream ct(project / "CMakeLists.txt");
+        ct << "project(DeletedFakeProject VERSION 0.1.0 LANGUAGES CXX)\n";
+    }
+    {
+        std::ofstream pt(project / "pulp.toml");
+        pt << "sdk_version = \"0.40.0\"\n";
+    }
+
+    auto add = run_pulp({"projects", "add", project.string()}, 15000);
+    REQUIRE_FALSE(add.timed_out);
+    REQUIRE(add.exit_code == 0);
+
+    // Now delete the project directory but leave the registry entry.
+    fs::remove_all(project);
+
+    auto list = run_pulp({"projects", "list", "--json"}, 15000);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\": true") != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(pulp_home);
+}
+
+// ── pulp scan --help / --no-load (#812) ──────────────────────────
+//
+// `pulp scan --help` previously walked the system plug-in paths and
+// dlopen'd everything (which crashes on a malformed plugin). The
+// fix added an early --help gate; this test locks in that behavior
+// so a future refactor can't reintroduce the crash.
+
+TEST_CASE("pulp scan --help exits 0 with usage on stdout",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.stdout_output.find("Usage: pulp scan") != std::string::npos);
+    // The new --no-load flag must be advertised so users hitting #812
+    // can discover the safe-fast escape hatch.
+    REQUIRE(r.stdout_output.find("--no-load") != std::string::npos);
+}
+
+TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--no-load"}, /*timeout_ms=*/30000);
+    // The whole point of --no-load is "doesn't crash on bad plugins".
+    // If the host happens to have no plugins installed, that's also
+    // a clean rc=0 with "No plugins found." stdout — both are fine.
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    // No libc++abi termination message should appear in stderr —
+    // that's the regression --no-load specifically prevents.
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+}
+
+TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+#if defined(_WIN32)
+    SUCCEED("Windows CLAP defaults do not derive from HOME");
+    return;
+#else
+    auto home = unique_temp_dir("pulp-scan-noload-home");
+    ScopedEnvVar scoped_home("HOME");
+    scoped_home.set(home.string());
+
+#if defined(__APPLE__)
+    auto clap_dir = home / "Library" / "Audio" / "Plug-Ins" / "CLAP";
+#else
+    auto clap_dir = home / ".clap";
+#endif
+    auto alpha_path = clap_dir / "Phase8Alpha.clap";
+    auto beta_path = clap_dir / "Phase8Beta.clap";
+    fs::create_directories(beta_path);
+    fs::create_directories(alpha_path);
+
+    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
+                      /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+    REQUIRE(r.stdout_output.find("[CLAP]") != std::string::npos);
+    REQUIRE(r.stdout_output.find(alpha_path.string()) != std::string::npos);
+    REQUIRE(r.stdout_output.find(beta_path.string()) != std::string::npos);
+
+    auto alpha = r.stdout_output.find("Phase8Alpha");
+    auto beta = r.stdout_output.find("Phase8Beta");
+    REQUIRE(alpha != std::string::npos);
+    REQUIRE(beta != std::string::npos);
+    REQUIRE(alpha < beta);
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
+#endif
+}
+
+TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-scan-lv2-home");
+    ScopedEnvVar scoped_home("HOME");
+    scoped_home.set(home.string());
+
+#if defined(__linux__)
+    auto lv2_dir = home / ".lv2" / "Phase8Probe.lv2";
+    fs::create_directories(lv2_dir);
+    write_text(lv2_dir / "manifest.ttl",
+               "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+               "<http://example.org/phase8-probe> a lv2:Plugin .\n");
+#endif
+
+    auto r = run_pulp({"scan", "--format", "lv2"}, /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+#if defined(__linux__)
+    REQUIRE(r.stdout_output.find("Phase8Probe") != std::string::npos);
+#else
+    REQUIRE((r.stdout_output.find("[LV2]") != std::string::npos ||
+             r.stdout_output.find("No plugins found") != std::string::npos));
+#endif
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
+}
+
+TEST_CASE("pulp scan --no-load --format clap restricts to one bucket",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
+                      /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+    // When the filter narrows to CLAP and no CLAP plugins exist on
+    // the runner, the output should be the documented empty-state
+    // message rather than crashing or printing other-format buckets.
+    REQUIRE((r.stdout_output.find("[CLAP]") != std::string::npos ||
+             r.stdout_output.find("No plugins found") != std::string::npos));
 }

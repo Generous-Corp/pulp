@@ -241,37 +241,19 @@ pub fn test_with<S: Spawner>(
 
 // ── run ──────────────────────────────────────────────────────────────
 
-/// Flag surface for `pulp-rs run`.
-#[derive(Debug, Default, Clone)]
-pub struct RunArgs {
-    /// Target name or empty to auto-pick the first standalone binary.
-    pub target: Option<String>,
-    /// Args after `--` passed to the launched application.
-    pub passthrough: Vec<String>,
-}
+/// Flag surface for `pulp-rs run`. As of #914 this is the canonical
+/// parsed form — a re-export of the dependency-free parser in
+/// [`crate::cmd::run_parse::RunOptions`] so callers can construct it
+/// from either side without duplicating fields.
+pub type RunArgs = crate::cmd::run_parse::RunOptions;
 
-/// Parse `pulp-rs run` flags.
+/// Parse `pulp-rs run` flags. Thin wrapper over
+/// [`crate::cmd::run_parse::parse_run_options`] so existing call sites
+/// (main.rs, tests) keep working while the new flag surface is
+/// available everywhere through the same struct.
 #[must_use]
 pub fn parse_run_args(args: &[String]) -> RunArgs {
-    let mut out = RunArgs::default();
-    let mut saw_sep = false;
-    for a in args {
-        if saw_sep {
-            out.passthrough.push(a.clone());
-            continue;
-        }
-        if a == "--" {
-            saw_sep = true;
-            continue;
-        }
-        if a.starts_with('-') {
-            continue;
-        }
-        if out.target.is_none() {
-            out.target = Some(a.clone());
-        }
-    }
-    out
+    crate::cmd::run_parse::parse_run_options(args)
 }
 
 /// Locate a standalone binary under the project's build dir.
@@ -428,13 +410,31 @@ fn is_executable(p: &Path) -> bool {
 /// # Errors
 ///
 /// [`CliError::Other`] when the project isn't configured, the binary
-/// can't be found, or the child fails to spawn.
+/// can't be found, or the child fails to spawn. Returns `2` (without
+/// raising) for parse-level errors (`--screenshot` missing path, etc.)
+/// to match the C++ `cmd_run` exit-2 contract.
 pub fn run_cmd<S: Spawner>(
     cwd: &Path,
     args: &RunArgs,
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
+    use crate::cmd::run_parse::assemble_launch_args;
+
+    // RunArgs IS the parsed RunOptions now, so just clone (cheap —
+    // small struct) so we can fill the default screenshot path
+    // without mutating the caller's copy.
+    let mut opts = args.clone();
+
+    if !opts.error.is_empty() {
+        writeln!(out, "Error: {}", opts.error).map_err(io_err)?;
+        return Ok(2);
+    }
+    if opts.help {
+        write_run_help(out)?;
+        return Ok(0);
+    }
+
     let Some(proj) = project::resolve(cwd) else {
         return Err(CliError::Other(
             "not in a Pulp project directory".to_owned(),
@@ -445,23 +445,95 @@ pub fn run_cmd<S: Spawner>(
             "project not built yet. Run `pulp build` first.".to_owned(),
         ));
     }
-    let Some(binary) = find_run_binary(&proj, args.target.as_deref()) else {
+    let target_arg = if opts.target_name.is_empty() {
+        None
+    } else {
+        Some(opts.target_name.as_str())
+    };
+    let Some(binary) = find_run_binary(&proj, target_arg) else {
         return Err(CliError::Other(format!(
             "could not find a standalone binary under {}",
             proj.build_dir.display()
         )));
     };
+
+    // Default screenshot path so `pulp run --headless` still produces
+    // an artifact in CI without an explicit path. Mirrors C++
+    // `cmd_run.cpp` lines 95-100.
+    if opts.headless && opts.screenshot_path.is_empty() {
+        let base = if opts.target_name.is_empty() {
+            "pulp-run".to_owned()
+        } else {
+            opts.target_name.clone()
+        };
+        let path = proj.build_dir.join(format!("{base}.png"));
+        opts.screenshot_path = path.to_string_lossy().into_owned();
+    }
+
     let name = binary
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    writeln!(out, "Launching {name}...").map_err(io_err)?;
+    if opts.headless {
+        writeln!(out, "Launching {name} (headless) \u{2192} {}", opts.screenshot_path)
+            .map_err(io_err)?;
+    } else {
+        writeln!(out, "Launching {name}...").map_err(io_err)?;
+    }
+
+    // --watch isn't ported yet on the Rust side. Same graceful-
+    // degradation pattern as `pulp dev --watch`: tell the user, run
+    // once, and let the fallthrough delegate handle the live loop
+    // when pulp-cpp is on PATH (post-swap layout).
+    if opts.watch {
+        writeln!(
+            out,
+            "Note: pulp-rs run --watch is not ported yet \u{2014} running once. \
+             Use the C++ delegate (pulp-cpp run --watch) for the live loop."
+        )
+        .map_err(io_err)?;
+    }
+
     let mut inv = Invocation::new(binary.to_string_lossy().into_owned());
-    for a in &args.passthrough {
-        inv = inv.arg(a.clone());
+    if opts.headless {
+        inv = inv.env("PULP_HEADLESS", "1");
+    }
+    if !opts.screenshot_path.is_empty() {
+        inv = inv.env("PULP_SCREENSHOT", opts.screenshot_path.clone());
+    }
+    if opts.frames != 1 {
+        inv = inv.env("PULP_FRAMES", opts.frames.to_string());
+    }
+    for a in assemble_launch_args(&opts) {
+        inv = inv.arg(a);
     }
     spawner.run(&inv)
 }
+
+fn write_run_help(out: &mut impl Write) -> Result<()> {
+    writeln!(
+        out,
+        "pulp run — launch a standalone Pulp application\n\n\
+         Usage: pulp run [target] [--headless] [--screenshot <file>] [--frames <n>] [--watch] [-- args...]\n\n\
+         If no target is specified, finds the first standalone binary in the\n\
+         active project build. Arguments after `--` are passed to the launched\n\
+         application.\n\n\
+         Options:\n  \
+         --headless              Run without a window; render offscreen.\n                          \
+         (Forwarded as --headless and PULP_HEADLESS=1.)\n  \
+         --screenshot <file>     Save a PNG screenshot to <file> after rendering.\n                          \
+         (Forwarded as --screenshot <file> and\n                          \
+         PULP_SCREENSHOT=<file>. Implies --headless.)\n  \
+         --frames <n>            Number of frames to render before screenshot.\n                          \
+         Default 1. (Forwarded as --frames <n> and\n                          \
+         PULP_FRAMES=<n>.)\n  \
+         --watch                 Re-launch the binary on source changes.\n                          \
+         Composes with --headless / --screenshot.\n  \
+         -h, --help              Show this help and exit.\n"
+    )
+    .map_err(io_err)
+}
+
 
 // ── clean ────────────────────────────────────────────────────────────
 
@@ -1084,8 +1156,8 @@ mod tests {
             "--input".to_owned(),
             "sample.wav".to_owned(),
         ]);
-        assert_eq!(a.target.as_deref(), Some("pulp-gain-standalone"));
-        assert_eq!(a.passthrough, vec!["--input", "sample.wav"]);
+        assert_eq!(a.target_name, "pulp-gain-standalone");
+        assert_eq!(a.user_pass_through, vec!["--input", "sample.wav"]);
     }
 
     #[test]
@@ -1280,5 +1352,154 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
+    }
+
+    // ── #45 coverage uplift slice 12 — orchestrate parse + run_cmd ─
+
+    #[test]
+    fn parse_run_args_handles_no_args_returns_default() {
+        let r = parse_run_args(&[]);
+        assert!(r.target_name.is_empty());
+        assert!(r.user_pass_through.is_empty());
+        assert_eq!(r.frames, 1);
+        assert!(!r.headless);
+        assert!(!r.watch);
+    }
+
+    #[test]
+    fn parse_run_args_unknown_flags_route_to_pass_through() {
+        // #914 contract: unknown flags before `--` land in
+        // user_pass_through (the legacy parser dropped them, which
+        // silently mangled user invocations). The first non-flag
+        // positional still wins as the target; everything after `--`
+        // is verbatim.
+        let r = parse_run_args(&[
+            "--build-dir".to_owned(),
+            "build".to_owned(),
+            "--".to_owned(),
+            "--user-flag".to_owned(),
+            "argv".to_owned(),
+        ]);
+        assert_eq!(r.target_name, "build");
+        assert_eq!(
+            r.user_pass_through,
+            vec![
+                "--build-dir".to_owned(),
+                "--user-flag".to_owned(),
+                "argv".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_run_args_first_positional_wins() {
+        let r = parse_run_args(&[
+            "first".to_owned(),
+            "second".to_owned(),
+            "third".to_owned(),
+        ]);
+        // First positional wins as target; subsequent positionals
+        // (#914 contract, matches C++) land in user_pass_through.
+        assert_eq!(r.target_name, "first");
+        assert_eq!(
+            r.user_pass_through,
+            vec!["second".to_owned(), "third".to_owned()]
+        );
+    }
+
+    #[test]
+    fn parse_cache_sub_no_args_returns_help() {
+        assert!(matches!(parse_cache_sub(&[]).unwrap(), CacheSub::Help));
+    }
+
+    #[test]
+    fn parse_cache_sub_help_aliases() {
+        for h in &["help", "--help", "-h"] {
+            assert!(matches!(
+                parse_cache_sub(&[(*h).to_owned()]).unwrap(),
+                CacheSub::Help
+            ));
+        }
+    }
+
+    #[test]
+    fn parse_cache_sub_status_clean() {
+        assert!(matches!(
+            parse_cache_sub(&["status".to_owned()]).unwrap(),
+            CacheSub::Status
+        ));
+        assert!(matches!(
+            parse_cache_sub(&["clean".to_owned()]).unwrap(),
+            CacheSub::Clean
+        ));
+    }
+
+    #[test]
+    fn parse_cache_sub_fetch_with_and_without_asset() {
+        match parse_cache_sub(&["fetch".to_owned(), "skia".to_owned()]).unwrap() {
+            CacheSub::Fetch(a) => assert_eq!(a, "skia"),
+            other => panic!("expected Fetch, got {other:?}"),
+        }
+        match parse_cache_sub(&["fetch".to_owned()]).unwrap() {
+            CacheSub::Fetch(a) => assert!(a.is_empty()),
+            other => panic!("expected Fetch with empty asset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_sub_unknown_errors() {
+        let err = parse_cache_sub(&["nonsense".to_owned()]).unwrap_err();
+        assert!(matches!(err, CliError::UnknownSubcommand));
+    }
+
+    #[test]
+    fn parse_build_args_default_is_empty() {
+        let p = parse_build_args(&[]);
+        assert!(!p.test);
+        assert!(!p.watch);
+        assert!(p.passthrough.is_empty());
+    }
+
+    #[test]
+    fn count_sources_returns_zero_for_empty_root() {
+        let td = tempfile::tempdir().unwrap();
+        let (cpp, hpp) = count_sources(td.path());
+        assert_eq!(cpp, 0);
+        assert_eq!(hpp, 0);
+    }
+
+    #[test]
+    fn count_sources_finds_cpp_and_hpp_files() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("a.cpp"), "").unwrap();
+        std::fs::write(td.path().join("b.cc"), "").unwrap();
+        std::fs::write(td.path().join("c.h"), "").unwrap();
+        std::fs::write(td.path().join("d.hpp"), "").unwrap();
+        std::fs::write(td.path().join("ignored.txt"), "").unwrap();
+        let (cpp, hpp) = count_sources(td.path());
+        // Both .cpp + .cc should count toward "cpp"; .h + .hpp toward
+        // "hpp". The exact split isn't part of the contract — what
+        // matters is that the function returns positive counts and
+        // doesn't include unrelated extensions.
+        assert!(cpp >= 1);
+        assert!(hpp >= 1);
+        assert!(cpp + hpp <= 4, "should have ignored .txt");
+    }
+
+    #[test]
+    fn count_tests_returns_zero_for_empty_dir() {
+        let td = tempfile::tempdir().unwrap();
+        assert_eq!(count_tests(td.path()), 0);
+    }
+
+    #[test]
+    fn count_tests_counts_test_prefixed_files() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("test_one.cpp"), "").unwrap();
+        std::fs::write(td.path().join("test_two.cpp"), "").unwrap();
+        std::fs::write(td.path().join("not_a_test.cpp"), "").unwrap();
+        // Only files matching the `test_*` convention should count.
+        let n = count_tests(td.path());
+        assert!(n >= 2, "expected at least 2 test_* files, got {n}");
     }
 }

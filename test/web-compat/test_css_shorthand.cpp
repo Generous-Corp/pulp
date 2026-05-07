@@ -260,7 +260,7 @@ TEST_CASE("Shorthand: FlexStyle defaults", "[parser][shorthand]") {
     REQUIRE(fs.flex_basis == -1.0f);
     REQUIRE(fs.min_width == 0.0f);
     REQUIRE(fs.max_width == 0.0f);
-    REQUIRE(fs.flex_wrap == false);
+    REQUIRE(fs.flex_wrap == FlexWrap::no_wrap);
     REQUIRE(fs.order == 0);
 }
 

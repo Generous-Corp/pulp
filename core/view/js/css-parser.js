@@ -75,7 +75,252 @@ function parseCSSColor(str) {
         return "#" + _hex2(rgb[0]) + _hex2(rgb[1]) + _hex2(rgb[2]) + (a2 < 255 ? _hex2(a2) : "");
     }
 
+    // pulp #1434 Triage #8 — modern CSS color spaces. Figma copy-CSS
+    // emits oklch(...) since 2024; v0 / Tailwind ship lab() and lch();
+    // Claude Design transition states emit color-mix(...). Spike-quality
+    // conversion: oklch / oklab / lch / lab / color() → sRGB hex. Deep
+    // wide-gamut path (Skia SkColor4f) tracked separately; this slice
+    // keeps the existing hex pipeline for downstream consumers.
+    //
+    // CSS 4 syntax: space-separated components, optional `/ <alpha>`.
+    //   oklch(0.7 0.18 240 / 50%)
+    //   oklab(70% -0.05 0.15)
+    //   lch(50 80 240)
+    //   lab(50 -40 60 / 0.5)
+    //   color(srgb 0.5 0.7 0.9)
+    //   color(display-p3 1 0.5 0)
+    //   color(srgb-linear 0.215861 0.215861 0.215861)
+    var modernParsed = _parseModernColor(str);
+    if (modernParsed) {
+        var mr = Math.round(Math.min(255, Math.max(0, modernParsed.r * 255)));
+        var mg = Math.round(Math.min(255, Math.max(0, modernParsed.g * 255)));
+        var mb = Math.round(Math.min(255, Math.max(0, modernParsed.b * 255)));
+        var ma = Math.round(Math.min(255, Math.max(0, modernParsed.a * 255)));
+        return "#" + _hex2(mr) + _hex2(mg) + _hex2(mb) + (ma < 255 ? _hex2(ma) : "");
+    }
+
     return null;
+}
+
+// pulp #1434 Triage #8 — modern color-space dispatcher. Returns
+// `{ r, g, b, a }` in linear-output [0, 1] sRGB coordinates (gamma-
+// encoded), or null on parse failure. The conversion math mirrors the
+// CSS Color Module Level 4 reference algorithms (with D50→D65
+// chromatic adaptation for CIE Lab/Lch).
+function _parseModernColor(str) {
+    // Consume leading function name + interior; alpha isolated by `/`.
+    var fnMatch = str.match(/^(oklch|oklab|lch|lab|color)\(\s*(.+?)\s*\)$/);
+    if (!fnMatch) return null;
+    var fn = fnMatch[1];
+    var inner = fnMatch[2];
+
+    // Split at `/` for alpha. Alpha is optional.
+    var alphaParts = inner.split('/');
+    var compStr = alphaParts[0].trim();
+    var alpha = 1;
+    if (alphaParts.length === 2) {
+        alpha = _parseAlphaToken(alphaParts[1].trim());
+    }
+
+    var tokens = compStr.split(/\s+/);
+
+    if (fn === 'color') {
+        // color(<space> <c1> <c2> <c3>)
+        if (tokens.length < 4) return null;
+        var space = tokens[0];
+        var c1 = _parseNumericToken(tokens[1], 1.0);
+        var c2 = _parseNumericToken(tokens[2], 1.0);
+        var c3 = _parseNumericToken(tokens[3], 1.0);
+        if (c1 === null || c2 === null || c3 === null) return null;
+        var rgb;
+        if (space === 'srgb') {
+            // Components are gamma-encoded sRGB in [0,1].
+            rgb = [c1, c2, c3];
+        } else if (space === 'srgb-linear') {
+            // Linear-light sRGB → gamma-encode.
+            rgb = [_srgbGammaEncode(c1), _srgbGammaEncode(c2), _srgbGammaEncode(c3)];
+        } else if (space === 'display-p3') {
+            // Display-P3 (gamma-encoded) → linear → sRGB linear (matrix)
+            // → sRGB gamma. Out-of-gamut values are clamped at the hex
+            // boundary; HDR-aware paths can be added when SkColor4f
+            // plumbing lands.
+            var linP3R = _srgbGammaDecode(c1);
+            var linP3G = _srgbGammaDecode(c2);
+            var linP3B = _srgbGammaDecode(c3);
+            var lin = _displayP3ToLinearSrgb(linP3R, linP3G, linP3B);
+            rgb = [_srgbGammaEncode(lin[0]), _srgbGammaEncode(lin[1]), _srgbGammaEncode(lin[2])];
+        } else {
+            // Unknown / unsupported space — defer.
+            return null;
+        }
+        return { r: rgb[0], g: rgb[1], b: rgb[2], a: alpha };
+    }
+
+    if (tokens.length < 3) return null;
+
+    if (fn === 'oklch' || fn === 'oklab') {
+        // OKLab L is 0..1 (also accepts 0%..100%); a/b are typically
+        // ±0.4. OKLch chroma typically 0..0.4; hue 0..360 deg.
+        var L = _parseNumericToken(tokens[0], 1.0); // % maps to 0..1
+        if (L === null) return null;
+        var oa, ob;
+        if (fn === 'oklab') {
+            // a/b: % uses ±0.4 (CSS 4 spec); plain numbers pass through.
+            oa = _parseNumericToken(tokens[1], 0.4);
+            ob = _parseNumericToken(tokens[2], 0.4);
+        } else {
+            // oklch: chroma % uses 0..0.4; hue deg.
+            var C = _parseNumericToken(tokens[1], 0.4);
+            var H = _parseAngleDegrees(tokens[2]);
+            if (C === null || H === null) return null;
+            oa = C * Math.cos(H * Math.PI / 180);
+            ob = C * Math.sin(H * Math.PI / 180);
+        }
+        if (oa === null || ob === null) return null;
+        var lin1 = _oklabToLinearSrgb(L, oa, ob);
+        return {
+            r: _srgbGammaEncode(lin1[0]),
+            g: _srgbGammaEncode(lin1[1]),
+            b: _srgbGammaEncode(lin1[2]),
+            a: alpha,
+        };
+    }
+
+    if (fn === 'lch' || fn === 'lab') {
+        // CIE Lab L is 0..100; a/b ~ ±125; chroma 0..150 typical;
+        // hue 0..360.
+        var labL = _parseNumericToken(tokens[0], 100.0); // % → 0..100
+        if (labL === null) return null;
+        var la, lb;
+        if (fn === 'lab') {
+            la = _parseNumericToken(tokens[1], 125.0);
+            lb = _parseNumericToken(tokens[2], 125.0);
+        } else {
+            var Cc = _parseNumericToken(tokens[1], 150.0);
+            var Hh = _parseAngleDegrees(tokens[2]);
+            if (Cc === null || Hh === null) return null;
+            la = Cc * Math.cos(Hh * Math.PI / 180);
+            lb = Cc * Math.sin(Hh * Math.PI / 180);
+        }
+        if (la === null || lb === null) return null;
+        var lin2 = _cieLabToLinearSrgb(labL, la, lb);
+        return {
+            r: _srgbGammaEncode(lin2[0]),
+            g: _srgbGammaEncode(lin2[1]),
+            b: _srgbGammaEncode(lin2[2]),
+            a: alpha,
+        };
+    }
+
+    return null;
+}
+
+// Numeric component: bare number OR percentage. `pctRange` is the
+// 100% mapping (1.0 for OKLab L, 0.4 for OKLab a/b, 100 for CIE Lab L,
+// 125 for CIE Lab a/b, etc.). Returns null on parse failure.
+function _parseNumericToken(tok, pctRange) {
+    if (tok === undefined || tok === null) return null;
+    if (tok === 'none') return 0; // CSS 4 `none` → 0 (cheap fallback)
+    var t = String(tok).trim();
+    if (t.slice(-1) === '%') {
+        var pct = parseFloat(t.slice(0, -1));
+        return isNaN(pct) ? null : (pct / 100) * pctRange;
+    }
+    var n = parseFloat(t);
+    return isNaN(n) ? null : n;
+}
+
+// Alpha can be a bare number (0..1), a percentage (0%..100%), or `none`.
+function _parseAlphaToken(tok) {
+    if (!tok) return 1;
+    if (tok === 'none') return 1;
+    if (tok.slice(-1) === '%') {
+        var p = parseFloat(tok.slice(0, -1));
+        return isNaN(p) ? 1 : Math.max(0, Math.min(1, p / 100));
+    }
+    var a = parseFloat(tok);
+    if (isNaN(a)) return 1;
+    return Math.max(0, Math.min(1, a > 1 ? a / 255 : a));
+}
+
+// Angle: '240', '240deg', '4.18rad', '0.5turn', '267grad' → degrees.
+function _parseAngleDegrees(tok) {
+    if (!tok) return null;
+    var t = String(tok).trim();
+    var m = t.match(/^(-?[\d.]+)(deg|rad|turn|grad)?$/);
+    if (!m) return null;
+    var n = parseFloat(m[1]);
+    if (isNaN(n)) return null;
+    var unit = m[2] || 'deg';
+    if (unit === 'rad') return n * 180 / Math.PI;
+    if (unit === 'turn') return n * 360;
+    if (unit === 'grad') return n * 0.9;
+    return n;
+}
+
+// sRGB gamma encode/decode — CSS-spec piecewise transform.
+function _srgbGammaEncode(v) {
+    if (v <= 0.0031308) return 12.92 * v;
+    return 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+}
+function _srgbGammaDecode(v) {
+    if (v <= 0.04045) return v / 12.92;
+    return Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+// OKLab → linear sRGB (Björn Ottosson's published matrices).
+function _oklabToLinearSrgb(L, a, b) {
+    var l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    var m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    var s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    var l = l_ * l_ * l_;
+    var m = m_ * m_ * m_;
+    var s = s_ * s_ * s_;
+    return [
+        +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ];
+}
+
+// CIE Lab (D50) → linear sRGB. Lab → XYZ (D50) → XYZ (D65, Bradford
+// adaptation) → linear sRGB.
+function _cieLabToLinearSrgb(L, a, b) {
+    // Lab → XYZ (D50 reference white).
+    var fy = (L + 16) / 116;
+    var fx = a / 500 + fy;
+    var fz = fy - b / 200;
+    var delta = 6 / 29;
+    var d2 = delta * delta;
+    var d3 = delta * delta * delta;
+    function f1(t) { return t > delta ? t * t * t : 3 * d2 * (t - 4 / 29); }
+    var X50 = 0.96422 * f1(fx);
+    var Y50 = 1.00000 * f1(fy);
+    var Z50 = 0.82521 * f1(fz);
+    // D50 → D65 Bradford adaptation (CSS-spec matrix).
+    var X65 =  0.9555766 * X50 + -0.0230393 * Y50 +  0.0631636 * Z50;
+    var Y65 = -0.0282895 * X50 +  1.0099416 * Y50 +  0.0210077 * Z50;
+    var Z65 =  0.0122982 * X50 + -0.0204830 * Y50 +  1.3299098 * Z50;
+    // XYZ (D65) → linear sRGB.
+    return [
+         3.2404542 * X65 + -1.5371385 * Y65 + -0.4985314 * Z65,
+        -0.9692660 * X65 +  1.8760108 * Y65 +  0.0415560 * Z65,
+         0.0556434 * X65 + -0.2040259 * Y65 +  1.0572252 * Z65,
+    ];
+}
+
+// Display-P3 (linear) → linear sRGB. P3 → XYZ (D65) → linear sRGB.
+function _displayP3ToLinearSrgb(r, g, b) {
+    // P3 (D65) → XYZ.
+    var X =  0.4865709 * r + 0.2656677 * g + 0.1982173 * b;
+    var Y =  0.2289746 * r + 0.6917385 * g + 0.0792869 * b;
+    var Z =  0.0000000 * r + 0.0451134 * g + 1.0439443 * b;
+    // XYZ → linear sRGB.
+    return [
+         3.2404542 * X + -1.5371385 * Y + -0.4985314 * Z,
+        -0.9692660 * X +  1.8760108 * Y +  0.0415560 * Z,
+         0.0556434 * X + -0.2040259 * Y +  1.0572252 * Z,
+    ];
 }
 
 function _hex2(n) {
@@ -132,13 +377,34 @@ function parseTransform(str) {
         var fn = m[1];
         var rawArgs = m[2].split(",").map(function(s) { return s.trim(); });
         var args = rawArgs.map(function(a) {
-            if (a.indexOf("deg") >= 0) return parseFloat(a);
+            // pulp #1434 Triage #9 — handle rad / turn / grad alongside
+            // deg. Plain numbers in rotate-family functions are degrees;
+            // numeric scale-family / matrix args pass through.
+            var ang = _parseTransformAngle(a);
+            if (ang !== null) return ang;
             var l = parseCSSLength(a);
             return l ? l.value : parseFloat(a) || 0;
         });
         result.push({ fn: fn, args: args });
     }
     return result;
+}
+
+// Parse a CSS angle to degrees. Returns null if the token isn't an
+// angle (so callers can fall back to length / numeric parsing).
+function _parseTransformAngle(t) {
+    if (!t) return null;
+    var s = String(t).trim();
+    var m = s.match(/^(-?[\d.]+)(deg|rad|turn|grad)$/);
+    if (!m) return null;
+    var n = parseFloat(m[1]);
+    if (isNaN(n)) return null;
+    var u = m[2];
+    if (u === "deg") return n;
+    if (u === "rad") return n * 180 / Math.PI;
+    if (u === "turn") return n * 360;
+    if (u === "grad") return n * 0.9;
+    return null;
 }
 
 // Parse CSS transition shorthand: "all 0.3s ease-out 0.1s"

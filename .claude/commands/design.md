@@ -9,7 +9,7 @@ If $ARGUMENTS is provided, use it as the style description.
 
 Workflow:
 1. Build the design tool: `cmake --build build --target pulp-design-tool -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)`
-2. Launch: `./build/tools/cli/pulp design`
+2. Launch: `./build/pulp design`
 3. The user describes a look ("80s Macintosh", "neon cyberpunk", "minimal Dieter Rams")
 4. The design system transforms: colors, widget shapes, shadows, typography
 5. Changes are visible immediately via hot-reload

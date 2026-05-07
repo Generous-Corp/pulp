@@ -43,7 +43,7 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, help, projects, project
+audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, upgrade, prototype-loop
@@ -71,6 +71,16 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Changed args not reflected in `cli-commands.yaml`
 - Changed behavior not reflected in slash command `.md`
 - Skills calling the old invocation syntax
+
+### Rust CLI cutover path convention
+
+After the v0.78.1 cutover, the user-facing CLI is Rust `pulp`. Release
+archives install `pulp` plus sibling `pulp-cpp`, and source builds stage the
+Rust binary at `./build/pulp`. Slash-command examples should prefer `pulp`
+on PATH for installed users and `./build/pulp` for source-tree examples.
+Do not point new docs at `./build/tools/cli/pulp`; that path was the old
+C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
+debug comparisons.
 
 ### Adding a new value to an enum-like flag (e.g., `--from <source>`)
 
@@ -122,10 +132,13 @@ same tests pass on macOS/Linux.
 
 ## `pulp pr` — shim over `shipyard pr`
 
-By default `pulp pr` now delegates to `shipyard pr` (on PATH), forwarding
-argv. Shipyard owns skill-sync, version-bump, PR creation, and cross-host
-validation; `pulp pr` exists so the old invocation, the `/pr` slash command,
-and the natural-language triggers in the `ci` skill all continue to work.
+By default `pulp pr` delegates to `shipyard pr` (on PATH), forwarding argv.
+Shipyard owns skill-sync, version-bump, PR creation, tracking state, and
+cross-host validation; `pulp pr` exists so the old invocation, the `/pr`
+slash command, and natural-language triggers in the `ci` skill all continue
+to work. Users can explicitly opt out per checkout with
+`pulp config set pr.workflow github` or `manual`, or for one command with
+`--workflow` / `PULP_PR_WORKFLOW`.
 
 Invariants:
 
@@ -133,13 +146,19 @@ Invariants:
   with shipyard's status. Do NOT add pre/post-processing in `cmd_pr.cpp` —
   shipyard is the single source of truth.
 - When `shipyard` is NOT on PATH, `pulp pr` prints an install hint pointing
-  at `tools/install-shipyard.sh` and exits non-zero. Update the hint text
-  in `cmd_pr.cpp::print_install_shipyard_hint()` when the install path
-  changes.
-- `--native` keeps the legacy in-process orchestrator (skill-sync →
-  version-bump apply → commit → push → `gh pr create` → `shipyard ship`)
-  for forensic/debugging use. Do not use it as the default path and do not
-  document it as the primary surface — the shim IS the primary surface.
+  at `tools/install-shipyard.sh` and exits non-zero. It must NOT silently
+  fall back to `gh`; that is how Shipyard tracking gaps happen. Update the
+  hint text in `cmd_pr.cpp::print_install_shipyard_hint()` when the install
+  path changes.
+- `pr.workflow=github` is the explicit GitHub CLI path. It requires `gh` on
+  PATH, runs the native gate/bump/PR flow, and leaves Shipyard tracking
+  disabled by design.
+- `pr.workflow=manual` prints the suggested commands and exits before
+  pushing or creating a PR.
+- `pulp status` reports the effective PR workflow and selected tool health.
+- `--native` keeps the legacy in-process orchestrator for forensic/debugging
+  use. Do not use it as the default path and do not document it as the
+  primary surface — Shipyard-managed `shipyard pr` is the primary surface.
 - `pulp pr` (shim or `--native`) still refuses to run on `main`.
 
 Gotchas:
@@ -335,6 +354,35 @@ These commands live in `tools/cli/cmd_host.cpp` (scan + host share a
 file). When changing scanner.scan() signatures, update cmd_host.cpp's
 ScanOptions construction in lockstep — the cross-format loop builds an
 options struct per iteration.
+
+#### `pulp scan --no-load` (#812)
+
+Filesystem-only enumeration mode. The default `pulp scan` opens each
+discovered bundle via `dlopen` to read entry-point metadata; one
+malformed plugin throwing in static-init aborts the whole scan
+(`libc++abi: terminating`). `--no-load` lists bundles by path/format
+without dlopen — the safe escape hatch when a host plugin crashes
+the scanner. `pulp scan --help` short-circuits before plugin
+enumeration so users can discover the flag even when the underlying
+scan path is broken.
+
+#### Cross-binary `pulp project bump` ↔ `undo` parity (#244)
+
+C++ and Rust both serialize `bump-undo-*.json` records but with
+slightly different field sets — Rust writes a transient `notes:[...]`
+array that the C++ writer never emits. The C++ JSON parser was
+desync-prone on unknown ARRAY/OBJECT values; hardened in commit
+`8f29b1fd` to skip them cleanly. When extending the undo schema,
+keep both writers + the C++ parser in lockstep, and add a fixture-
+level test in `test/test_cli_project_bump.cpp` that round-trips both
+directions.
+
+#### `pulp projects list --json` (#244)
+
+The Rust binary always had a `--json` lane; the C++ port for parity
+landed via `70e94dd7`. `pulp projects` is the only `projects`
+subcommand with `--json` today — `add`/`remove` are write-only and
+report success via exit code.
 
 ### `pulp coverage diff` — local diff-coverage gate
 

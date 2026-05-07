@@ -1,0 +1,145 @@
+name: Visual Harness
+
+on:
+  pull_request:
+    branches: [main, 'develop/**']
+    paths:
+      - '.github/workflows/visual-harness.yml'
+      - 'ci/visual-harness.Dockerfile'
+      - 'docs/reference/text-shaping.md'
+      - 'external/fonts/**'
+      - 'external/skia-build/VERSION.md'
+      - 'tools/deps/manifest.json'
+      - 'tools/harness/verifier.py'
+      - 'tools/harness/visual/**'
+      - 'test/CMakeLists.txt'
+      - 'test/visual/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/visual-harness.yml'
+      - 'ci/visual-harness.Dockerfile'
+      - 'docs/reference/text-shaping.md'
+      - 'external/fonts/**'
+      - 'external/skia-build/VERSION.md'
+      - 'tools/deps/manifest.json'
+      - 'tools/harness/verifier.py'
+      - 'tools/harness/visual/**'
+      - 'test/CMakeLists.txt'
+      - 'test/visual/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-docker:
+    name: Linux Docker smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Cache visual harness Docker layers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pulp/visual-harness/buildx
+          key: visual-harness-linux-buildx-${{ hashFiles('ci/visual-harness.Dockerfile', 'tools/harness/visual/docker-build.sh', 'external/fonts/*.ttf', 'tools/deps/manifest.json') }}
+          restore-keys: |
+            visual-harness-linux-buildx-
+
+      - name: Set up cached Buildx builder
+        run: |
+          docker buildx create --name pulp-visual-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Build deterministic visual harness image
+        run: tools/harness/visual/docker-build.sh
+
+      - name: Run deterministic visual harness tests
+        run: docker run --rm --platform linux/amd64 -v "$PWD:/workspace" pulp-visual-harness
+
+  macos-local:
+    name: macOS local smoke
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install locked visual smoke dependencies
+        run: |
+          set -euo pipefail
+          if ! command -v python3.12 >/dev/null 2>&1; then
+            echo "python3.12 is required for the locked skia-python macOS wheel" >&2
+            exit 1
+          fi
+          python3.12 -m venv .visual-harness-venv
+          .visual-harness-venv/bin/python -m pip install --upgrade pip
+          .visual-harness-venv/bin/python -m pip install 'pytest>=8,<9' 'skia-python==144.0.post2'
+
+      - name: Run deterministic visual harness tests
+        env:
+          PULP_VISUAL_REQUIRE_SKIA: '1'
+        run: .visual-harness-venv/bin/python -m pytest tools/harness/visual/tests/ -q
+
+  layout-snapshots:
+    name: Yoga layout snapshots
+    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install ccache
+        run: brew install ccache
+
+      - name: Cache FetchContent sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cache/Pulp/fetchcontent-src
+          key: ${{ runner.os }}-visual-fetchcontent-${{ hashFiles('setup.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-visual-fetchcontent-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/ccache
+            ~/.cache/ccache
+          key: ${{ runner.os }}-visual-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-visual-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
+            ${{ runner.os }}-visual-ccache-
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure visual harness
+        run: cmake -S . -B build-visual -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build visual harness
+        run: cmake --build build-visual --config Release --target pulp-test-visual
+
+      - name: Verify Yoga layout goldens
+        run: python3 tools/harness/verifier.py visual --verify --all --build-dir build-visual
+
+      - name: Ccache stats
+        if: always()
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats
+          else
+            echo "ccache not available; skipping stats"
+          fi

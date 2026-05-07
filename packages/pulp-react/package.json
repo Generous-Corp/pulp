@@ -1,6 +1,6 @@
 {
   "name": "@pulp/react",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "React reconciler host config targeting pulp::view::WidgetBridge — render React JSX natively through Yoga + Skia + Dawn, no DOM, no browser",
   "license": "MIT",
   "type": "module",

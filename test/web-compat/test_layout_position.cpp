@@ -209,3 +209,160 @@ TEST_CASE("Position: Point arithmetic", "[layout][geometry]") {
     REQUIRE(diff.x == 5.0f);
     REQUIRE(diff.y == 5.0f);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Regression: pulp #1379 / #998 — absolute children must fill parent regardless
+// of flex siblings. Before the fix, flex_shrink:1 (the FlexStyle default) leaked
+// into Yoga for absolute children, so an absolute `inset:0` child was placed
+// AFTER preceding column-flow siblings and shrunk to fit the remainder.
+//
+// CSS spec: an out-of-flow box (position:absolute or fixed) is taken out of the
+// flex line — its grow/shrink/basis must not participate, and `top/left/right/
+// bottom` are interpreted against the containing block's content box (here,
+// the parent's full local rect since there's no padding).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("Yoga: absolute child with inset:0 fills parent regardless of flex siblings",
+          "[layout][yoga][absolute][issue-1379][issue-998]") {
+    View parent;
+    parent.set_bounds({0, 0, 1320, 860});
+    parent.flex().direction = FlexDirection::column;
+
+    auto wrap = std::make_unique<View>();
+    wrap->set_position(View::Position::absolute);
+    wrap->set_top(0);
+    wrap->set_left(0);
+    wrap->set_right(0);
+    wrap->set_bottom(0);
+    auto* wrapPtr = wrap.get();
+    parent.add_child(std::move(wrap));
+
+    // A normal flow header sibling — pre-fix this was eating the wrap's main
+    // axis space and pushing the absolute wrap to y=44, height=816.
+    auto header = std::make_unique<View>();
+    header->flex().preferred_height = 44;
+    parent.add_child(std::move(header));
+
+    parent.layout_children();
+
+    REQUIRE(wrapPtr->bounds().x == 0.0f);
+    REQUIRE(wrapPtr->bounds().y == 0.0f);
+    REQUIRE(wrapPtr->bounds().width == 1320.0f);
+    REQUIRE(wrapPtr->bounds().height == 860.0f);
+}
+
+TEST_CASE("Yoga: absolute child with explicit width/height + top:0/left:0 fills parent",
+          "[layout][yoga][absolute][issue-1379][issue-998]") {
+    // Variant for when the user uses preferred_width/height instead of inset
+    // edges. Spectr's dom-adapter currently sets BOTH (defensive) — verify
+    // either path lands at (0,0,W,H) without the flex sibling stealing space.
+    View parent;
+    parent.set_bounds({0, 0, 1320, 860});
+    parent.flex().direction = FlexDirection::column;
+
+    auto wrap = std::make_unique<View>();
+    wrap->set_position(View::Position::absolute);
+    wrap->set_top(0);
+    wrap->set_left(0);
+    wrap->flex().preferred_width = 1320;
+    wrap->flex().preferred_height = 860;
+    auto* wrapPtr = wrap.get();
+    parent.add_child(std::move(wrap));
+
+    auto header = std::make_unique<View>();
+    header->flex().preferred_height = 44;
+    parent.add_child(std::move(header));
+
+    auto tweaks = std::make_unique<View>();
+    tweaks->flex().preferred_height = 200;
+    parent.add_child(std::move(tweaks));
+
+    parent.layout_children();
+
+    REQUIRE(wrapPtr->bounds().x == 0.0f);
+    REQUIRE(wrapPtr->bounds().y == 0.0f);
+    REQUIRE(wrapPtr->bounds().width == 1320.0f);
+    REQUIRE(wrapPtr->bounds().height == 860.0f);
+}
+
+TEST_CASE("Yoga: layered absolute canvases (filterbank+overlay) both fill parent",
+          "[layout][yoga][absolute][issue-1379]") {
+    // FilterBank's structural shape: an absolute wrap with two absolute
+    // <canvas> children (main + overlay), both inset:0. The overlay sibling
+    // must not push the main canvas out of position even though they share
+    // a flex line conceptually.
+    View parent;
+    parent.set_bounds({0, 0, 1320, 860});
+
+    auto wrap = std::make_unique<View>();
+    wrap->set_position(View::Position::absolute);
+    wrap->set_top(0); wrap->set_left(0);
+    wrap->set_right(0); wrap->set_bottom(0);
+    auto* wrapPtr = wrap.get();
+
+    auto canvas = std::make_unique<View>();
+    canvas->set_position(View::Position::absolute);
+    canvas->set_top(0); canvas->set_left(0);
+    canvas->set_right(0); canvas->set_bottom(0);
+    auto* canvasPtr = canvas.get();
+    wrap->add_child(std::move(canvas));
+
+    auto overlay = std::make_unique<View>();
+    overlay->set_position(View::Position::absolute);
+    overlay->set_top(0); overlay->set_left(0);
+    overlay->set_right(0); overlay->set_bottom(0);
+    auto* overlayPtr = overlay.get();
+    wrap->add_child(std::move(overlay));
+
+    parent.add_child(std::move(wrap));
+    parent.layout_children();
+
+    REQUIRE(wrapPtr->bounds().width == 1320.0f);
+    REQUIRE(wrapPtr->bounds().height == 860.0f);
+
+    REQUIRE(canvasPtr->bounds().x == 0.0f);
+    REQUIRE(canvasPtr->bounds().y == 0.0f);
+    REQUIRE(canvasPtr->bounds().width == 1320.0f);
+    REQUIRE(canvasPtr->bounds().height == 860.0f);
+
+    REQUIRE(overlayPtr->bounds().x == 0.0f);
+    REQUIRE(overlayPtr->bounds().y == 0.0f);
+    REQUIRE(overlayPtr->bounds().width == 1320.0f);
+    REQUIRE(overlayPtr->bounds().height == 860.0f);
+}
+
+TEST_CASE("Yoga: absolute child does not consume flex-line space from siblings",
+          "[layout][yoga][absolute][issue-1379]") {
+    // Inverse check: if absolute children leak into the flex line, the
+    // remaining flex sibling will have its size reduced. Verify the in-flow
+    // sibling gets the FULL parent height it asked for.
+    View parent;
+    parent.set_bounds({0, 0, 1320, 860});
+    parent.flex().direction = FlexDirection::column;
+
+    auto abs = std::make_unique<View>();
+    abs->set_position(View::Position::absolute);
+    abs->set_top(0); abs->set_left(0);
+    abs->set_right(0); abs->set_bottom(0);
+    parent.add_child(std::move(abs));
+
+    auto header = std::make_unique<View>();
+    header->flex().preferred_height = 44;
+    auto* headerPtr = header.get();
+    parent.add_child(std::move(header));
+
+    auto body = std::make_unique<View>();
+    body->flex().flex_grow = 1;
+    auto* bodyPtr = body.get();
+    parent.add_child(std::move(body));
+
+    parent.layout_children();
+
+    // Header keeps its 44 px regardless of the absolute child.
+    REQUIRE(headerPtr->bounds().y == 0.0f);
+    REQUIRE(headerPtr->bounds().height == 44.0f);
+    // Body gets the remaining 816 px — proving the absolute child was NOT
+    // counted in the flex line.
+    REQUIRE(bodyPtr->bounds().y == 44.0f);
+    REQUIRE(bodyPtr->bounds().height == 816.0f);
+}

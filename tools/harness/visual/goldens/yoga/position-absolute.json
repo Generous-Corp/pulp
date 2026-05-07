@@ -1,0 +1,111 @@
+{
+  "schema_version": "visual-layout-snapshot-v1",
+  "surface": "yoga",
+  "fixture": "yoga/position-absolute",
+  "entry": "position-absolute",
+  "viewport": {
+    "w": 200,
+    "h": 160
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 200,
+        "h": 160
+      },
+      "z_order": {
+        "paint": 0,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 200,
+          "h": 160
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 200,
+            "h": 160
+          }
+        }
+      ]
+    },
+    {
+      "id": "flow-child",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 80,
+        "h": 40
+      },
+      "z_order": {
+        "paint": 1,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 200,
+          "h": 160
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 80,
+            "h": 40
+          }
+        }
+      ]
+    },
+    {
+      "id": "absolute-child",
+      "type": "View",
+      "rect": {
+        "x": 30,
+        "y": 20,
+        "w": 70,
+        "h": 50
+      },
+      "z_order": {
+        "paint": 2,
+        "z_index": 5
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 200,
+          "h": 160
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 30,
+            "y": 20,
+            "w": 70,
+            "h": 50
+          }
+        }
+      ]
+    }
+  ]
+}

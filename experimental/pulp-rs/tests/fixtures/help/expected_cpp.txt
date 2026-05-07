@@ -20,16 +20,19 @@ Commands:
   upgrade        Update the CLI to the latest version
   version        Show, bump, or check version info
   dev            Unified dev loop: watch, build, test, run
+  loop           Leveraged-prototype focus mode: single-platform watch + rebuild (#940)
+  inspect        Connect to a running plugin inspector
   scan           Scan system paths for VST3 / AU / CLAP / LV2 plug-ins
   host           Load a plug-in and run a synthetic audio block through it
   pr             One-shot push-a-PR: gates + bump + ship
   projects       Manage the ~/.pulp/projects.json registry
   project        Per-project SDK pin: bump, undo
   config         Read or write ~/.pulp/config.toml settings
+  coverage       Local coverage tooling (diff-cover gate mirror)
 
   ci-local       Local-first CI across configured hosts
+  harness        Catalog-driven coverage harness (compat.json verifier)
   design-debug   Headless design debug runner
-  inspect        Launch the component inspector
   import-design  Import designs from Figma/Stitch/v0/Pencil
   export-tokens  Export theme as W3C Design Tokens
   audit          License and clean-room audit

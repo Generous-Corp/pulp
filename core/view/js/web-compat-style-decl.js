@@ -85,7 +85,12 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // Display / flex direction
         case "display":
             if (resolved === "none") { setVisible(id, false); }
-            else if (resolved === "flex" || resolved === "block") {
+            else if (resolved === "flex" || resolved === "block" ||
+                     resolved === "inline-block" || resolved === "inline-flex") {
+                // pulp #1420 — `inline-block` ≡ `block` and `inline-flex`
+                // ≡ `flex` in pulp's non-text-flowing layout system. This
+                // matches react-native semantics and CSS spec for
+                // formatting contexts that don't have inline flow.
                 setVisible(id, true);
                 // CSS web-compat: `display: flex` defaults to flex-direction: row.
                 // Pulp's underlying widgets default to FlexDirection::column (RN
@@ -94,7 +99,7 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 // in which case the explicit declaration overrides this default
                 // either later in this flush (individual setters apply in order)
                 // or via _flushAll's iteration. See pulp #1147.
-                if (resolved === "flex") {
+                if (resolved === "flex" || resolved === "inline-flex") {
                     var hasExplicitDirection =
                         Object.prototype.hasOwnProperty.call(this._props, "flexDirection") ||
                         Object.prototype.hasOwnProperty.call(this._props, "flex-direction");
@@ -117,10 +122,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             break;
         case "flexDirection":
-            setFlex(id, "direction", resolved === "row" ? "row" : "col");
+            // pulp #1434 (rn batch B) — forward all four CSS values
+            // verbatim. Bridge dispatches to YGFlexDirectionRow /
+            // RowReverse / Column / ColumnReverse. Previously only
+            // "row" survived; "row-reverse"/"column-reverse" silently
+            // collapsed to "col".
+            setFlex(id, "direction",
+                resolved === "row" ? "row" :
+                resolved === "row-reverse" ? "row-reverse" :
+                resolved === "column-reverse" ? "column-reverse" :
+                "col");
             break;
         case "flexWrap":
-            setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);
+            // pulp #1434 Triage #14 — forward the keyword verbatim so the
+            // bridge can route `wrap-reverse` through Yoga's
+            // YGWrapWrapReverse path. Previous behavior coerced to 0/1
+            // and silently dropped wrap-reverse to plain wrap.
+            setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
             setFlex(id, "flex_grow", parseFloat(resolved) || 0);
@@ -169,14 +187,31 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         }
 
         // Dimensions
+        // pulp #1423 — pass the resolved string verbatim for width/height
+        // when it is a percent value. The bridge's setFlex(width|height,
+        // ...) inspects the third arg as a string and detects '%' suffix.
+        // This keeps the existing px path numeric (no JS-side regression)
+        // while letting "100%" survive through to Yoga's native
+        // YGNodeStyleSet{Width,Height}Percent path.
         case "width": {
+            // pulp #1434 (sub-agent #12 follow-up) — forward `'auto'`
+            // verbatim so the bridge can route to YGNodeStyleSetWidthAuto
+            // ("hug contents"). Mirrors the percent path.
+            if (resolved === "auto") { setFlex(id, "width", "auto"); break; }
             var w = parseCSSLength(resolved);
-            if (w) setFlex(id, "width", w.value);
+            if (!w) break;
+            if (w.unit === "auto") setFlex(id, "width", "auto");
+            else if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
+            if (resolved === "auto") { setFlex(id, "height", "auto"); break; }
             var h = parseCSSLength(resolved);
-            if (h) setFlex(id, "height", h.value);
+            if (!h) break;
+            if (h.unit === "auto") setFlex(id, "height", "auto");
+            else if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            else setFlex(id, "height", h.value);
             break;
         }
         case "minWidth": {
@@ -200,25 +235,42 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Margin (individual)
+        // Margin (individual) — pulp #1434 cross-surface mega-batch:
+        // forward `'NN%'` and `'auto'` strings verbatim so the bridge can
+        // route through Yoga's YGNodeStyleSetMargin{Percent,Auto} APIs.
+        // Numeric values flow through parseCSSLength as before. `auto`
+        // is the canonical centering idiom (e.g. `marginLeft: auto;
+        // marginRight: auto`) — Yoga supports it on margin only.
         case "marginTop": {
+            if (resolved === "auto") { setFlex(id, "margin_top", "auto"); break; }
             var mt = parseCSSLength(resolved);
-            if (mt) setFlex(id, "margin_top", mt.value);
+            if (!mt) break;
+            if (mt.unit === "%") setFlex(id, "margin_top", mt.value + "%");
+            else setFlex(id, "margin_top", mt.value);
             break;
         }
         case "marginRight": {
+            if (resolved === "auto") { setFlex(id, "margin_right", "auto"); break; }
             var mr = parseCSSLength(resolved);
-            if (mr) setFlex(id, "margin_right", mr.value);
+            if (!mr) break;
+            if (mr.unit === "%") setFlex(id, "margin_right", mr.value + "%");
+            else setFlex(id, "margin_right", mr.value);
             break;
         }
         case "marginBottom": {
+            if (resolved === "auto") { setFlex(id, "margin_bottom", "auto"); break; }
             var mb = parseCSSLength(resolved);
-            if (mb) setFlex(id, "margin_bottom", mb.value);
+            if (!mb) break;
+            if (mb.unit === "%") setFlex(id, "margin_bottom", mb.value + "%");
+            else setFlex(id, "margin_bottom", mb.value);
             break;
         }
         case "marginLeft": {
+            if (resolved === "auto") { setFlex(id, "margin_left", "auto"); break; }
             var ml = parseCSSLength(resolved);
-            if (ml) setFlex(id, "margin_left", ml.value);
+            if (!ml) break;
+            if (ml.unit === "%") setFlex(id, "margin_left", ml.value + "%");
+            else setFlex(id, "margin_left", ml.value);
             break;
         }
         // Margin shorthand
@@ -230,26 +282,77 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "margin_left", ms[3]);
             break;
         }
+        // pulp #1434 batch 4 — React Native shorthand aliases. RN code
+        // commonly writes `style={{ marginHorizontal: 8 }}` which CSS
+        // doesn't recognize, but the DOM-lite el.style adapter sees the
+        // raw key when consumers port RN snippets verbatim. Fan out to
+        // the same per-edge bridge calls the CSS marginInline / margin
+        // shorthand uses so the behavior is identical regardless of the
+        // entry surface. `auto` is a no-op for now (parseCSSLength returns
+        // null for non-numeric input); numeric and percent paths route
+        // through the same setFlex per-edge dispatch as marginLeft etc.
+        case "marginHorizontal": {
+            // pulp #1434 cross-surface mega-batch — forward %/auto through
+            // the per-edge fan-out so RN snippets like
+            // `style={{ marginHorizontal: '5%' }}` or
+            // `style={{ marginHorizontal: 'auto' }}` route correctly.
+            if (resolved === "auto") {
+                setFlex(id, "margin_left",  "auto");
+                setFlex(id, "margin_right", "auto");
+                break;
+            }
+            var mhv = parseCSSLength(resolved);
+            if (!mhv) break;
+            var mhArg = mhv.unit === "%" ? mhv.value + "%" : mhv.value;
+            setFlex(id, "margin_left",  mhArg);
+            setFlex(id, "margin_right", mhArg);
+            break;
+        }
+        case "marginVertical": {
+            if (resolved === "auto") {
+                setFlex(id, "margin_top",    "auto");
+                setFlex(id, "margin_bottom", "auto");
+                break;
+            }
+            var mvv = parseCSSLength(resolved);
+            if (!mvv) break;
+            var mvArg = mvv.unit === "%" ? mvv.value + "%" : mvv.value;
+            setFlex(id, "margin_top",    mvArg);
+            setFlex(id, "margin_bottom", mvArg);
+            break;
+        }
 
-        // Padding (individual)
+        // Padding (individual) — pulp #1434 cross-surface mega-batch:
+        // forward `'NN%'` strings verbatim (Yoga's
+        // YGNodeStyleSetPaddingPercent). Yoga's padding does NOT support
+        // `auto` (only margin does), so the keyword is silently dropped
+        // here.
         case "paddingTop": {
             var pt = parseCSSLength(resolved);
-            if (pt) setFlex(id, "padding_top", pt.value);
+            if (!pt) break;
+            if (pt.unit === "%") setFlex(id, "padding_top", pt.value + "%");
+            else setFlex(id, "padding_top", pt.value);
             break;
         }
         case "paddingRight": {
             var pr = parseCSSLength(resolved);
-            if (pr) setFlex(id, "padding_right", pr.value);
+            if (!pr) break;
+            if (pr.unit === "%") setFlex(id, "padding_right", pr.value + "%");
+            else setFlex(id, "padding_right", pr.value);
             break;
         }
         case "paddingBottom": {
             var pb = parseCSSLength(resolved);
-            if (pb) setFlex(id, "padding_bottom", pb.value);
+            if (!pb) break;
+            if (pb.unit === "%") setFlex(id, "padding_bottom", pb.value + "%");
+            else setFlex(id, "padding_bottom", pb.value);
             break;
         }
         case "paddingLeft": {
             var pl = parseCSSLength(resolved);
-            if (pl) setFlex(id, "padding_left", pl.value);
+            if (!pl) break;
+            if (pl.unit === "%") setFlex(id, "padding_left", pl.value + "%");
+            else setFlex(id, "padding_left", pl.value);
             break;
         }
         // Padding shorthand
@@ -259,6 +362,31 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "padding_right", ps[1]);
             setFlex(id, "padding_bottom", ps[2]);
             setFlex(id, "padding_left", ps[3]);
+            break;
+        }
+        // pulp #1434 batch 4 — React Native shorthand aliases for padding.
+        // Same fan-out pattern as marginHorizontal / marginVertical above
+        // — paddingHorizontal sets padding_left + padding_right to the
+        // same value, paddingVertical sets padding_top + padding_bottom.
+        case "paddingHorizontal": {
+            // pulp #1434 cross-surface mega-batch — forward percent through
+            // the per-edge fan-out so RN snippets like
+            // `style={{ paddingHorizontal: '5%' }}` route correctly.
+            // Yoga's padding does NOT support 'auto', so the keyword is
+            // a no-op (unlike the marginHorizontal alias).
+            var phv = parseCSSLength(resolved);
+            if (!phv) break;
+            var phArg = phv.unit === "%" ? phv.value + "%" : phv.value;
+            setFlex(id, "padding_left",  phArg);
+            setFlex(id, "padding_right", phArg);
+            break;
+        }
+        case "paddingVertical": {
+            var pvv = parseCSSLength(resolved);
+            if (!pvv) break;
+            var pvArg = pvv.unit === "%" ? pvv.value + "%" : pvv.value;
+            setFlex(id, "padding_top",    pvArg);
+            setFlex(id, "padding_bottom", pvArg);
             break;
         }
 
@@ -281,7 +409,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
         case "fontWeight":
-            setFontWeight(id, parseInt(resolved) || 400);
+            // pulp #1434 (batch 3) — translate CSS keyword forms to
+            // numeric weight before reaching the bridge. Numeric values
+            // ("400", "500") still flow through unchanged. The previous
+            // `parseInt` path returned NaN for keywords, which fell back
+            // to the `|| 400` default — silently mapping `"bold"` to
+            // `normal`. CSS spec values:
+            //   normal  → 400
+            //   bold    → 700
+            //   lighter → 300 (relative to inherited; pulp has no font
+            //                  inheritance cascade today, so a fixed
+            //                  "one step lighter than normal" is the
+            //                  closest safe default)
+            //   bolder  → 700 (likewise: "one step bolder than normal")
+            // Numeric keywords ("100".."900") parseInt cleanly.
+            var fwResolved = String(resolved).trim().toLowerCase();
+            var fwNumeric;
+            if (fwResolved === "normal") fwNumeric = 400;
+            else if (fwResolved === "bold") fwNumeric = 700;
+            else if (fwResolved === "lighter") fwNumeric = 300;
+            else if (fwResolved === "bolder") fwNumeric = 700;
+            else fwNumeric = parseInt(fwResolved, 10) || 400;
+            setFontWeight(id, fwNumeric);
             break;
         case "fontStyle":
             setFontStyle(id, resolved);
@@ -304,6 +453,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         case "textDecoration":
             setTextDecoration(id, resolved);
+            break;
+        // pulp #1434 (batch 3) — text-decoration longhands. CSS exposes
+        // the shorthand `text-decoration` plus three independent
+        // longhands: `-line` / `-color` / `-style`. Routing each to its
+        // own bridge setter (instead of coalescing into a shorthand
+        // string) means a previously-set sibling longhand is preserved
+        // — matching the per-attribute border-color/width fix from PR
+        // #1166 finding #4. Same pattern, same reasoning.
+        case "textDecorationLine":
+            // Reuse the shorthand setter — same line keyword surface
+            // (underline / line-through / overline / none).
+            setTextDecoration(id, resolved);
+            break;
+        case "textDecorationColor": {
+            var tdc = parseCSSColor(resolved);
+            if (tdc && typeof setTextDecorationColor === "function")
+                setTextDecorationColor(id, tdc);
+            break;
+        }
+        case "textDecorationStyle":
+            if (typeof setTextDecorationStyle === "function")
+                setTextDecorationStyle(id, resolved);
             break;
         case "textOverflow":
             setTextOverflow(id, resolved);
@@ -346,6 +517,73 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (bw) setBorderWidth(id, bw.value);
             break;
         }
+        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim to
+        // setBorderStyle. The bridge maps to View::BorderStyle. Skia
+        // installs SkDashPathEffect for dashed/dotted; other named
+        // styles currently degrade to solid (paint-side gap).
+        case "borderStyle": {
+            if (typeof setBorderStyle !== "undefined") {
+                setBorderStyle(id, resolved);
+            }
+            break;
+        }
+
+        // pulp #1514 — list-style cluster. Pulp doesn't model
+        // <li>/<ul>/<ol> semantics; the bridge stores the values
+        // verbatim. Marker glyph rendering is deferred — flipping
+        // the catalog from `missing` to `partial` documents the
+        // stored-but-not-painted state honestly.
+        //
+        // CSS spec: `list-style: <type> || <position> || <image>`
+        // (any order, space-separated). Detect each token by shape:
+        //   - matches the type keyword set → setListStyleType
+        //   - matches "inside" / "outside" → setListStylePosition
+        //   - starts with "url(" or "none" → setListStyleImage
+        case "listStyle": {
+            // Parse the space-separated shorthand into the 3 longhands.
+            var lsTokens = String(resolved).trim().split(/\s+/);
+            var lsTypes = { "none": 1, "disc": 1, "circle": 1, "square": 1, "decimal": 1 };
+            var lsPos = { "inside": 1, "outside": 1 };
+            var sawType = false;
+            var sawPos = false;
+            var sawImage = false;
+            for (var li = 0; li < lsTokens.length; li++) {
+                var tok = lsTokens[li];
+                if (tok.indexOf("url(") === 0) {
+                    if (typeof setListStyleImage !== "undefined") setListStyleImage(id, tok);
+                    sawImage = true;
+                } else if (lsPos[tok]) {
+                    if (typeof setListStylePosition !== "undefined") setListStylePosition(id, tok);
+                    sawPos = true;
+                } else if (lsTypes[tok]) {
+                    // "none" matches both type and image. CSS spec: "none"
+                    // applies to whichever is unset; if neither, type wins.
+                    // We bias to type — `list-style: none` is overwhelmingly
+                    // a type-reset, not an image-reset.
+                    if (tok === "none" && sawType && !sawImage) {
+                        if (typeof setListStyleImage !== "undefined") setListStyleImage(id, "none");
+                        sawImage = true;
+                    } else {
+                        if (typeof setListStyleType !== "undefined") setListStyleType(id, tok);
+                        sawType = true;
+                    }
+                }
+                // Unknown tokens silently dropped.
+            }
+            break;
+        }
+        case "listStyleType": {
+            if (typeof setListStyleType !== "undefined") setListStyleType(id, resolved);
+            break;
+        }
+        case "listStyleImage": {
+            if (typeof setListStyleImage !== "undefined") setListStyleImage(id, resolved);
+            break;
+        }
+        case "listStylePosition": {
+            if (typeof setListStylePosition !== "undefined") setListStylePosition(id, resolved);
+            break;
+        }
 
         // Opacity
         case "opacity":
@@ -372,14 +610,81 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // Transform
         case "transform": {
+            // pulp #1434 Triage #9 — full CSS transform-function fan-out.
+            // Walk-once accumulator (mirrors the @pulp/react prop-applier
+            // walker) so the within-string order produces a single set
+            // of consolidated bridge calls instead of multiple
+            // axis-clobbering ones. translateX(10) translateY(20)
+            // produces ONE setTranslate(10, 20). scaleX/scaleY share the
+            // uniform setScale slot (last-write-wins; bridge gap).
+            // skewX(α) skewY(β) → ONE setSkew(α, β).
+            //
+            // Deferred (silent no-op + TODO):
+            //   • rotateX / rotateY — pulp's 2D View has no 3D rotation
+            //     storage; rotateZ aliases to setRotation.
+            //   • matrix3d / perspective — ditto, no 3D model.
+            //   • matrix(a b c d tx ty) — 2D affine. Per Codex P1 audit,
+            //     dispatched directly to setTransform(id, a, b, c, d, e, f)
+            //     to preserve all 6 components verbatim. The earlier
+            //     decomposition to translate+uniform-scale+rotate dropped
+            //     the c/d skew components on rotation matrices like
+            //     `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)` and could
+            //     mask zero-scale collapses (a=b=0 was silently rounded
+            //     to scl=1).
             var transforms = parseTransform(resolved);
+            var tx = 0, ty = 0;
+            var rotZ = 0;
+            var scl = 1;
+            var skewX = 0, skewY = 0;
+            var haveT = false, haveR = false, haveS = false, haveK = false;
+            var matrixCall = null; // {a,b,c,d,e,f} for matrix() entries
             for (var i = 0; i < transforms.length; i++) {
                 var t = transforms[i];
-                if (t.fn === "scale") setScale(id, t.args[0] || 1);
-                else if (t.fn === "rotate") setRotation(id, t.args[0] || 0);
-                else if (t.fn === "translate") setTranslate(id, t.args[0] || 0, t.args[1] || 0);
-                else if (t.fn === "translateX") setTranslate(id, t.args[0] || 0, 0);
-                else if (t.fn === "translateY") setTranslate(id, 0, t.args[0] || 0);
+                var a0 = t.args[0] || 0;
+                var a1 = t.args[1] || 0;
+                if (t.fn === "translate")        { tx = a0; ty = a1; haveT = true; }
+                else if (t.fn === "translateX") { tx = a0;          haveT = true; }
+                else if (t.fn === "translateY") { ty = a0;          haveT = true; }
+                else if (t.fn === "rotate")     { rotZ = a0;        haveR = true; }
+                else if (t.fn === "rotateZ")    { rotZ = a0;        haveR = true; }
+                else if (t.fn === "scale")      { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleX")     { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleY")     { scl = a0;         haveS = true; }
+                else if (t.fn === "skewX")      { skewX = a0;       haveK = true; }
+                else if (t.fn === "skewY")      { skewY = a0;       haveK = true; }
+                else if (t.fn === "matrix") {
+                    // matrix(a b c d tx ty) — preserve full 6-component
+                    // 2D affine. The bridge already exposes setTransform
+                    // with the same 6-arg signature; we pass through
+                    // verbatim. Note: when matrix() coexists with
+                    // translate/scale/rotate ops in the same string,
+                    // matrix() takes precedence (its 6 components encode
+                    // the full affine — applying the others on top would
+                    // be ambiguous).
+                    matrixCall = {
+                        a: t.args[0] !== undefined ? t.args[0] : 1,
+                        b: t.args[1] !== undefined ? t.args[1] : 0,
+                        c: t.args[2] !== undefined ? t.args[2] : 0,
+                        d: t.args[3] !== undefined ? t.args[3] : 1,
+                        e: t.args[4] !== undefined ? t.args[4] : 0,
+                        f: t.args[5] !== undefined ? t.args[5] : 0,
+                    };
+                }
+                // rotateX / rotateY / matrix3d / perspective: 2D View has
+                // no 3D rotation storage; silently dropped. Tracked for
+                // a follow-up issue (3D model on View).
+            }
+            if (matrixCall && typeof setTransform !== "undefined") {
+                // Full-matrix path — 6-component bridge call. Skips the
+                // decomposed translate/rotate/scale dispatchers since
+                // matrix() already encodes them in a/b/c/d/e/f.
+                setTransform(id, matrixCall.a, matrixCall.b, matrixCall.c,
+                             matrixCall.d, matrixCall.e, matrixCall.f);
+            } else {
+                if (haveT) setTranslate(id, tx, ty);
+                if (haveR) setRotation(id, rotZ);
+                if (haveS) setScale(id, scl);
+                if (haveK && typeof setSkew !== "undefined") setSkew(id, skewX, skewY);
             }
             break;
         }
@@ -423,10 +728,32 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             // switching back to `static` / `relative` releases it.
             this._reevaluateOverlay();
             break;
-        case "top": { var tv = parseCSSLength(resolved); if (tv) setTop(id, tv.value); break; }
-        case "right": { var rv = parseCSSLength(resolved); if (rv) setRight(id, rv.value); break; }
-        case "bottom": { var bv = parseCSSLength(resolved); if (bv) setBottom(id, bv.value); break; }
-        case "left": { var lv = parseCSSLength(resolved); if (lv) setLeft(id, lv.value); break; }
+        // pulp #1434 batch 6 — pass the resolved string verbatim for
+        // top/right/bottom/left when the unit is %. The bridge's setTop /
+        // setRight / setBottom / setLeft inspect arg index 1 as a string
+        // and detect '%' suffix, routing the value through Yoga's native
+        // YGNodeStyleSetPositionPercent path. Mirrors PR #1426 for the
+        // View positional fields.
+        case "top": {
+            var tv = parseCSSLength(resolved); if (!tv) break;
+            if (tv.unit === "%") setTop(id, tv.value + "%"); else setTop(id, tv.value);
+            break;
+        }
+        case "right": {
+            var rv = parseCSSLength(resolved); if (!rv) break;
+            if (rv.unit === "%") setRight(id, rv.value + "%"); else setRight(id, rv.value);
+            break;
+        }
+        case "bottom": {
+            var bv = parseCSSLength(resolved); if (!bv) break;
+            if (bv.unit === "%") setBottom(id, bv.value + "%"); else setBottom(id, bv.value);
+            break;
+        }
+        case "left": {
+            var lv = parseCSSLength(resolved); if (!lv) break;
+            if (lv.unit === "%") setLeft(id, lv.value + "%"); else setLeft(id, lv.value);
+            break;
+        }
 
         // z-index
         case "zIndex":
@@ -466,6 +793,29 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFilter(id, resolved);
             break;
 
+        // pulp #1434 (batch 3) — backdrop-filter route. The bridge
+        // setter is numeric (`setBackdropFilter(id, blur_px)`), so we
+        // parse a `blur(Npx)` substring out of the CSS value. This
+        // matches what `setFilter` already does on the bridge side
+        // (see widget_bridge.cpp::setFilter — same blur-only surface).
+        // Any other filter function is intentionally ignored here;
+        // matching the `unsupportedValues: ["other filter functions"]`
+        // entry in compat.json. `none` / empty / 0 clears the slot.
+        case "backdropFilter": {
+            if (typeof setBackdropFilter !== "function") break;
+            var bdf = String(resolved).trim().toLowerCase();
+            if (bdf === "" || bdf === "none") {
+                setBackdropFilter(id, 0);
+                break;
+            }
+            // Match `blur(Npx)` or `blur(N)` (treat unitless as px).
+            var bdm = bdf.match(/blur\(\s*([\d.]+)\s*(px)?\s*\)/);
+            if (bdm) {
+                setBackdropFilter(id, parseFloat(bdm[1]) || 0);
+            }
+            break;
+        }
+
         // Background gradient
         case "backgroundImage":
         case "background": {
@@ -477,6 +827,38 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             }
             break;
         }
+
+        // pulp #1517 — background sub-props.
+        // - backgroundAttachment: only `scroll` is the conformant default in
+        //   pulp's non-scrolling layout model. `fixed` / `local` need a
+        //   scroll-context coupling we don't model — accept verbatim and
+        //   no-op so consumers don't crash. Catalog is `noop`.
+        // - backgroundClip: `text` is the only interesting form (paint-time
+        //   SkBlendMode::kSrcIn against text glyphs). Others are no-ops on
+        //   our solid-bg surface. The bridge slot stores the keyword so
+        //   future paint logic can honor it; catalog is `partial` because
+        //   `text` isn't fully wired through the paint chain yet.
+        // - backgroundOrigin: positions the bg-paint origin relative to the
+        //   border / padding / content box. Pulp paints bg edge-to-edge,
+        //   so all three keywords no-op for a solid color and matter only
+        //   for repeating gradients (deferred). Catalog is `noop`.
+        case "backgroundAttachment":
+            // Stored on the View's bg-attachment slot via a thin bridge
+            // setter that just records the keyword — no paint impact today.
+            if (typeof setBackgroundAttachment === "function") {
+                setBackgroundAttachment(id, resolved);
+            }
+            break;
+        case "backgroundClip":
+            if (typeof setBackgroundClip === "function") {
+                setBackgroundClip(id, resolved);
+            }
+            break;
+        case "backgroundOrigin":
+            if (typeof setBackgroundOrigin === "function") {
+                setBackgroundOrigin(id, resolved);
+            }
+            break;
 
         // Grid
         case "gridTemplateColumns":
@@ -497,14 +879,56 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (gr[1]) setGrid(id, "row_end", gr[1]);
             break;
         }
+        // pulp #1434 Phase A2-2 — extended grid surface
+        case "gridAutoColumns":
+            setGrid(id, "auto_columns", resolved);
+            break;
+        case "gridAutoRows":
+            setGrid(id, "auto_rows", resolved);
+            break;
+        case "gridAutoFlow":
+            setGrid(id, "auto_flow", resolved);
+            break;
+        case "gridTemplateAreas":
+            setGrid(id, "template_areas", resolved);
+            break;
+        case "gridArea":
+            // Pass through verbatim — bridge distinguishes name vs.
+            // numeric "row / col / row / col" form.
+            setGrid(id, "grid_area", resolved);
+            break;
 
         // ── P1: New CSS properties ──────────────────────────────────────
 
-        // aspect-ratio: "16/9" or "1"
+        // aspect-ratio: "16/9", "1.5", or "auto" (pulp #1434).
+        // Three value forms accepted — RN exports use the plain number form,
+        // CSS exports use the `width / height` form, "auto" clears the slot.
+        // Both `aspectRatio` (camelCase, set via `style.aspectRatio = ...`)
+        // and `aspect-ratio` (kebab-case via `style.setProperty(...)`) reach
+        // this branch — `setProperty` converts kebab to camel before
+        // dispatching through the descriptor setter.
         case "aspectRatio": {
-            var arParts = resolved.split("/");
-            var ratio = parseFloat(arParts[0]) || 1;
-            if (arParts[1]) ratio /= parseFloat(arParts[1]) || 1;
+            var trimmed = String(resolved).trim();
+            if (trimmed === "" || trimmed === "auto") {
+                // Clear: bridge interprets non-positive as "unset".
+                setFlex(id, "aspect_ratio", 0);
+                break;
+            }
+            var arParts = trimmed.split("/");
+            var num = parseFloat(arParts[0]);
+            if (!isFinite(num) || num <= 0) {
+                setFlex(id, "aspect_ratio", 0);
+                break;
+            }
+            var ratio = num;
+            if (arParts[1] !== undefined) {
+                var den = parseFloat(arParts[1]);
+                if (!isFinite(den) || den <= 0) {
+                    setFlex(id, "aspect_ratio", 0);
+                    break;
+                }
+                ratio = num / den;
+            }
             setFlex(id, "aspect_ratio", ratio);
             break;
         }
@@ -516,23 +940,50 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             else setOpacity(id, 1);
             break;
 
-        // outline: "2px solid blue"
+        // outline: "2px solid blue" — fan-out to the per-attribute
+        // bridge fns introduced in pulp #1519 (setOutlineColor /
+        // setOutlineStyle / setOutlineWidth). Falls back to legacy
+        // setOutline if the new ones aren't registered (older bridge).
         case "outline": {
-            var op = resolved.match(/([\d.]+)px\s+\w+\s+(.+)/);
+            var op = resolved.match(/([\d.]+)px\s+(\w+)\s+(.+)/);
             if (op) {
-                var oc = parseCSSColor(op[2].trim());
-                if (typeof setOutline === "function") setOutline(id, parseFloat(op[1]), oc || op[2].trim());
+                var oc = parseCSSColor(op[3].trim());
+                if (typeof setOutlineWidth === "function") {
+                    setOutlineWidth(id, parseFloat(op[1]));
+                    if (typeof setOutlineStyle === "function") setOutlineStyle(id, op[2]);
+                    if (typeof setOutlineColor === "function") setOutlineColor(id, oc || op[3].trim());
+                } else if (typeof setOutline === "function") {
+                    setOutline(id, parseFloat(op[1]), oc || op[3].trim());
+                }
             }
             break;
         }
         case "outlineWidth": {
             var ow = parseCSSLength(resolved);
-            if (ow && typeof setOutline === "function") setOutline(id, ow.value, "");
+            if (ow) {
+                if (typeof setOutlineWidth === "function") setOutlineWidth(id, ow.value);
+                else if (typeof setOutline === "function") setOutline(id, ow.value, "");
+            }
             break;
         }
         case "outlineColor": {
             var occ = parseCSSColor(resolved);
-            if (occ && typeof setOutline === "function") setOutline(id, 0, occ);
+            if (occ) {
+                if (typeof setOutlineColor === "function") setOutlineColor(id, occ);
+                else if (typeof setOutline === "function") setOutline(id, 0, occ);
+            }
+            break;
+        }
+        // pulp #1519 — outline-offset / outline-style now have dedicated
+        // bridge setters. Outline doesn't take Yoga layout space, so the
+        // CSS path mirrors borderStyle keyword set verbatim.
+        case "outlineOffset": {
+            var oo = parseCSSLength(resolved);
+            if (oo && typeof setOutlineOffset === "function") setOutlineOffset(id, oo.value);
+            break;
+        }
+        case "outlineStyle": {
+            if (typeof setOutlineStyle === "function") setOutlineStyle(id, resolved);
             break;
         }
 
@@ -696,12 +1147,21 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // flex-flow shorthand
         case "flexFlow": {
+            // pulp #1434 Triage #14 — recognize the full direction +
+            // wrap vocabulary including `row-reverse` / `column-reverse`
+            // (already-wired but missing from this shorthand path) and
+            // `wrap-reverse` (newly wired through the bridge).
             var ffp = resolved.split(/\s+/);
             for (var ffi = 0; ffi < ffp.length; ffi++) {
-                if (ffp[ffi] === "row" || ffp[ffi] === "column")
-                    setFlex(id, "direction", ffp[ffi] === "row" ? "row" : "col");
-                else if (ffp[ffi] === "wrap" || ffp[ffi] === "nowrap")
-                    setFlex(id, "flex_wrap", ffp[ffi] === "wrap" ? 1 : 0);
+                var tok = ffp[ffi];
+                if (tok === "row" || tok === "column"
+                        || tok === "row-reverse" || tok === "column-reverse") {
+                    setFlex(id, "direction", tok === "row" ? "row" : tok);
+                }
+                else if (tok === "wrap" || tok === "nowrap"
+                        || tok === "no-wrap" || tok === "wrap-reverse") {
+                    setFlex(id, "flex_wrap", tok);
+                }
             }
             break;
         }
@@ -838,18 +1298,24 @@ var __cssProperties__ = [
     "aspectRatio", "boxSizing",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "marginInline", "marginBlock",
+    // pulp #1434 batch 4 — React Native shorthand aliases.
+    "marginHorizontal", "marginVertical",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
     "paddingInline", "paddingBlock",
+    "paddingHorizontal", "paddingVertical",
     "backgroundColor", "color",
     "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
-    "textAlign", "textTransform", "textDecoration", "textOverflow", "textShadow",
+    "textAlign", "textTransform",
+    // pulp #1434 (batch 3) — text-decoration shorthand + 3 longhands.
+    "textDecoration", "textDecorationLine", "textDecorationColor", "textDecorationStyle",
+    "textOverflow", "textShadow",
     "whiteSpace", "wordBreak", "overflowWrap", "wordWrap",
     "border", "borderColor", "borderWidth", "borderRadius",
     "borderTop", "borderRight", "borderBottom", "borderLeft",
     "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
     "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor",
     "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
-    "outline", "outlineWidth", "outlineColor",
+    "outline", "outlineWidth", "outlineColor", "outlineOffset", "outlineStyle",
     "opacity", "overflow", "cursor", "visibility",
     "userSelect", "pointerEvents",
     "transform", "transformOrigin",
@@ -857,8 +1323,11 @@ var __cssProperties__ = [
     "animation", "animationName", "animationDuration", "animationTimingFunction",
     "animationDelay", "animationIterationCount", "animationDirection", "animationFillMode",
     "position", "top", "right", "bottom", "left", "zIndex", "inset",
-    "boxShadow", "filter", "background", "backgroundImage",
+    "boxShadow", "filter", "backdropFilter", "background", "backgroundImage",
     "backgroundSize", "backgroundPosition", "backgroundRepeat",
+    // pulp #1517 — background sub-props (mostly noop / partial in pulp's
+    // layout model; see _applyProperty for the per-prop semantics).
+    "backgroundAttachment", "backgroundClip", "backgroundOrigin",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
     "lineClamp", "webkitLineClamp"
 ];

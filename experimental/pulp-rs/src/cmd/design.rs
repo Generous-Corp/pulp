@@ -395,6 +395,129 @@ mod tests {
         assert!(err.to_string().contains("Auto-binding only works"));
     }
 
+    // ── run() integration paths (#45 coverage uplift) ───────────────────
+
+    #[test]
+    fn run_errors_when_resolved_script_missing() {
+        // plant_checkout creates `core/` + `CMakeLists.txt` but no
+        // `tools/design/design-tool.js`, so resolve_binding picks the
+        // default script path and run() bails with "script not found".
+        let td = tempfile::tempdir().unwrap();
+        plant_checkout(td.path());
+        let rec = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = DesignArgs::default();
+        let err = run(td.path(), &args, &rec, &mut buf).unwrap_err();
+        assert!(
+            err.to_string().contains("design tool script not found"),
+            "expected script-not-found error: {err}"
+        );
+        // No spawner calls because we bailed before configure/build.
+        assert!(rec.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn run_dispatches_cmake_configure_then_build_when_no_cache() {
+        // Plant a checkout with the design-tool script in place but no
+        // CMakeCache.txt under build/. run() should issue exactly two
+        // spawner calls: `cmake -B <build> -S <root>` then `cmake
+        // --build <build> --target pulp-design-tool`. After that the
+        // binary lookup fails (no produced bin), giving us a clean
+        // exit on the "not found" branch.
+        let td = tempfile::tempdir().unwrap();
+        plant_checkout(td.path());
+        // Plant the default design-tool script so resolve_binding's
+        // script-derived branch is satisfied.
+        fs::create_dir_all(td.path().join("examples").join("design-tool")).unwrap();
+        fs::write(
+            td.path()
+                .join("examples")
+                .join("design-tool")
+                .join("design-tool.js"),
+            "// stub\n",
+        )
+        .unwrap();
+
+        let rec = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = DesignArgs::default();
+        let err = run(td.path(), &args, &rec, &mut buf).unwrap_err();
+        assert!(
+            err.to_string().contains("pulp-design-tool not found"),
+            "expected binary-not-found error: {err}"
+        );
+
+        let calls = rec.calls.borrow();
+        assert_eq!(calls.len(), 2, "expected configure + build, got {calls:?}");
+        assert_eq!(calls[0].program, "cmake");
+        assert!(calls[0].args.iter().any(|a| a == "-B"));
+        assert!(calls[0].args.iter().any(|a| a == "-S"));
+        assert_eq!(calls[1].program, "cmake");
+        assert!(calls[1].args.iter().any(|a| a == "--build"));
+        assert!(calls[1]
+            .args
+            .iter()
+            .any(|a| a == "pulp-design-tool"));
+
+        // Breadcrumb header lines emitted before the spawn calls.
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("Design root:"));
+        assert!(s.contains("Build dir:"));
+        assert!(s.contains("Script:"));
+    }
+
+    #[test]
+    fn run_launches_design_binary_when_built_and_forwards_passthrough() {
+        // Fully-rigged fixture: checkout + script + a pre-existing
+        // CMakeCache.txt (skips the configure step) + a stub binary
+        // at the canonical produced-bin path. run() should NOT call
+        // configure, should call build once, then launch the binary
+        // with the script + passthrough args.
+        let td = tempfile::tempdir().unwrap();
+        plant_checkout(td.path());
+        fs::create_dir_all(td.path().join("examples").join("design-tool")).unwrap();
+        fs::write(
+            td.path()
+                .join("examples")
+                .join("design-tool")
+                .join("design-tool.js"),
+            "// stub\n",
+        )
+        .unwrap();
+
+        let build_dir = td.path().join("build");
+        fs::create_dir_all(build_dir.join("tools").join("design")).unwrap();
+        fs::write(build_dir.join("CMakeCache.txt"), "# cache\n").unwrap();
+        // Plant a stub binary at the FIRST candidate path
+        // (`build/tools/design/pulp-design[.exe]`).
+        let bin_path = build_dir
+            .join("tools")
+            .join("design")
+            .join(exe("pulp-design"));
+        fs::write(&bin_path, "#!/bin/sh\nexit 0\n").unwrap();
+
+        let rec = crate::proc::testing::RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = DesignArgs {
+            passthrough: vec!["--ui-flag".to_owned()],
+            ..DesignArgs::default()
+        };
+        let rc = run(td.path(), &args, &rec, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+
+        let calls = rec.calls.borrow();
+        // configure SKIPPED (CMakeCache.txt already present), so two
+        // calls: the build, then the launch.
+        assert_eq!(calls.len(), 2, "expected build + launch, got {calls:?}");
+        assert_eq!(calls[0].program, "cmake");
+        assert!(calls[0].args.iter().any(|a| a == "--build"));
+        assert!(calls[1].program.ends_with("pulp-design")
+            || calls[1].program.ends_with("pulp-design.exe"));
+        // First arg to the binary is the script; passthrough trails.
+        assert!(calls[1].args[0].ends_with("design-tool.js"));
+        assert!(calls[1].args.iter().any(|a| a == "--ui-flag"));
+    }
+
     fn to_vec(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_owned()).collect()
     }

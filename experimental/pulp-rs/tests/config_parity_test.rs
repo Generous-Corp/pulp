@@ -28,7 +28,7 @@ fn plant(name: &str) -> tempfile::TempDir {
 }
 
 fn run(args: &[&str], home: &std::path::Path) -> std::process::Output {
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").expect("binary");
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").expect("binary");
     cmd.args(args).env("PULP_HOME", home);
     cmd.output().expect("run pulp-rs")
 }

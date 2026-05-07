@@ -1101,4 +1101,173 @@ mod tests {
         // Missing char → 0.
         assert_eq!(fuzzy_score("render", "zzzz"), 0);
     }
+
+    // ── #45 coverage uplift slice 3 ────────────────────────────────
+    //
+    // docs.rs was at 58.15% line — 352 missing lines, second-largest
+    // gap after pkg.rs. Existing tests cover parse_sub for the simple
+    // cases plus a couple of run() integration paths. This block adds
+    // 11 small tests targeting parse_sub edge cases, the helper
+    // functions (yaml_value, trim_line, icontains, find_root,
+    // collect_md, read_text, docs_index empty-state), and the
+    // run() error paths to push docs.rs comfortably over 80%.
+
+    #[test]
+    fn parse_sub_no_args_returns_help() {
+        let s = parse_sub(&[]).unwrap();
+        assert!(matches!(s, Sub::Help));
+    }
+
+    #[test]
+    fn parse_sub_help_aliases_resolve_to_help() {
+        for h in &["help", "--help", "-h"] {
+            let s = parse_sub(&[(*h).to_owned()]).unwrap();
+            assert!(matches!(s, Sub::Help), "{h} did not resolve to Help");
+        }
+    }
+
+    #[test]
+    fn parse_sub_unknown_top_level_errors() {
+        let err = parse_sub(&["nonsense".to_owned()]).unwrap_err();
+        // Catch-all unknown lands in CliError::UnknownSubcommand.
+        assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn parse_sub_search_requires_query() {
+        let err = parse_sub(&["search".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp docs search"));
+    }
+
+    #[test]
+    fn parse_sub_open_requires_slug() {
+        let err = parse_sub(&["open".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp docs open"));
+    }
+
+    #[test]
+    fn parse_sub_show_without_kind_errors() {
+        let err = parse_sub(&["show".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("show"));
+    }
+
+    #[test]
+    fn parse_sub_show_style_no_extra_arg_needed() {
+        let s = parse_sub(&["show".to_owned(), "style".to_owned()]).unwrap();
+        assert!(matches!(s, Sub::ShowStyle));
+    }
+
+    #[test]
+    fn parse_sub_show_command_requires_name() {
+        let err = parse_sub(&["show".to_owned(), "command".to_owned()]).unwrap_err();
+        assert!(err.to_string().contains("Usage: pulp docs show command"));
+    }
+
+    #[test]
+    fn parse_sub_show_unknown_kind_errors() {
+        let err = parse_sub(&["show".to_owned(), "garbage".to_owned()]).unwrap_err();
+        assert!(matches!(err, CliError::UnknownSubcommand) || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn yaml_value_extracts_simple_keyed_value() {
+        assert_eq!(yaml_value("key: value", "key"), Some("value"));
+        assert_eq!(yaml_value("key:value", "key"), Some("value"));
+        assert_eq!(yaml_value("other: x", "key"), None);
+        assert_eq!(yaml_value("not yaml at all", "key"), None);
+        assert_eq!(yaml_value("  status: stable  ", "status"), Some("stable"));
+    }
+
+    #[test]
+    fn trim_line_strips_whitespace_both_sides() {
+        assert_eq!(trim_line("  hello  "), "hello");
+        assert_eq!(trim_line("\thello\n"), "hello");
+        assert_eq!(trim_line("clean"), "clean");
+        assert_eq!(trim_line(""), "");
+    }
+
+    #[test]
+    fn icontains_is_case_insensitive() {
+        assert!(icontains("Hello World", "HELLO"));
+        assert!(icontains("Hello World", "world"));
+        assert!(icontains("Foo Bar", "oo b"));
+        assert!(!icontains("Foo Bar", "baz"));
+        assert!(icontains("anything", ""));  // empty needle always found
+    }
+
+    #[test]
+    fn find_root_returns_some_when_pulp_project_in_ancestors() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "").unwrap();
+        let nested = td.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let root = find_root(&nested);
+        assert!(root.is_some(), "expected to find root via pulp.toml");
+    }
+
+    #[test]
+    fn find_root_returns_none_when_no_marker() {
+        let td = tempfile::tempdir().unwrap();
+        let nested = td.path().join("a/b");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert!(find_root(&nested).is_none());
+    }
+
+    #[test]
+    fn read_text_returns_some_for_existing_file() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("a.md");
+        std::fs::write(&path, "# Hi\n").unwrap();
+        let s = read_text(&path).unwrap();
+        assert!(s.contains("Hi"));
+        assert!(read_text(&td.path().join("nope.md")).is_none());
+    }
+
+    #[test]
+    fn collect_md_walks_recursively() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("a.md"), "x").unwrap();
+        std::fs::create_dir_all(td.path().join("sub")).unwrap();
+        std::fs::write(td.path().join("sub/b.md"), "x").unwrap();
+        std::fs::write(td.path().join("sub/c.txt"), "ignored").unwrap();
+        let mut out = Vec::new();
+        collect_md(td.path(), &mut out);
+        assert_eq!(out.len(), 2, "expected 2 .md files, got {}: {out:?}", out.len());
+    }
+
+    #[test]
+    fn docs_index_missing_status_yaml_errors() {
+        // docs_index requires `status/docs-index.yaml`; without it
+        // the function returns the documented "docs index not found"
+        // error so callers can surface a hint to bootstrap the tree.
+        let td = tempfile::tempdir().unwrap();
+        let mut buf = Vec::new();
+        let err = docs_index(td.path(), &mut buf).unwrap_err();
+        assert!(
+            err.to_string().contains("docs index not found"),
+            "expected docs-index-not-found error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_errors_when_not_in_pulp_project_for_non_help_sub() {
+        let td = tempfile::tempdir().unwrap();
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        // Index requires a project — should fail without one.
+        let err = run(td.path(), &Sub::Index, &rec, &mut buf).unwrap_err();
+        assert!(err.to_string().contains("not in a Pulp project"));
+    }
+
+    #[test]
+    fn run_help_short_circuits_without_project() {
+        // Help is the only subcommand that doesn't need a project root.
+        let td = tempfile::tempdir().unwrap();
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let rc = run(td.path(), &Sub::Help, &rec, &mut buf).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("docs"), "expected docs help in stdout: {s:?}");
+    }
 }

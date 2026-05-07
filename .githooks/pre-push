@@ -31,6 +31,53 @@ if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     exit 0
 fi
 
+# ── Shipyard-drift detection (pulp #1406) ──────────────────────────────────
+# Log whether this push originated from `shipyard pr` (which runs the full
+# local validation matrix BEFORE pushing) or from a direct `git push`
+# (which bypasses local validation and turns CI into the discovery
+# channel). Direct pushes are sometimes necessary (rate limits, shipyard
+# tool failure, SSH host unreachable) but should be tracked so we can
+# course-correct back to `shipyard pr` once the obstacle clears.
+#
+# The signal: `SHIPYARD_PR_RUNNING=1` is set by shipyard's wrapper when
+# it invokes git push internally. Until shipyard exposes that env var
+# upstream (feature request filed), `PULP_VIA_SHIPYARD=1` is the
+# user-settable fallback marker.
+#
+# State written to `.git/.shipyard-drift-log` (gitignored, local-only):
+#   <ISO-8601-UTC> <branch> <SHA> <origin: shipyard|direct>
+#
+# Doesn't BLOCK direct pushes — just makes them visible. Layer 2 (CI
+# gate that posts a comment) is a separate piece.
+DRIFT_LOG="$(git rev-parse --git-dir)/.shipyard-drift-log"
+if [ "${SHIPYARD_PR_RUNNING:-0}" = "1" ] || [ "${PULP_VIA_SHIPYARD:-0}" = "1" ]; then
+    _drift_origin="shipyard"
+else
+    _drift_origin="direct"
+fi
+_drift_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
+_drift_sha="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+_drift_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s\t%s\t%s\t%s\n' "$_drift_ts" "$_drift_branch" "$_drift_sha" "$_drift_origin" >> "$DRIFT_LOG" 2>/dev/null || true
+unset _drift_origin _drift_branch _drift_sha _drift_ts
+
+if [ "${SHIPYARD_PR_RUNNING:-0}" != "1" ] && [ "${PULP_VIA_SHIPYARD:-0}" != "1" ]; then
+    echo "" >&2
+    echo "⚠ Direct push detected (not via 'shipyard pr')." >&2
+    echo "   Local validation gates (skill-sync, version-bump, diff-cover, build/test on" >&2
+    echo "   macOS+Ubuntu+Windows VMs) get skipped, so CI becomes the discovery channel." >&2
+    echo "" >&2
+    echo "   Acceptable temporary fallbacks:" >&2
+    echo "   - GraphQL rate limit (run: gh api rate_limit --jq .resources.graphql)" >&2
+    echo "   - shipyard tool error (file issue at danielraffel/shipyard-cli, link in PR)" >&2
+    echo "   - SSH host unreachable (use shipyard pr --skip-target NAME instead)" >&2
+    echo "" >&2
+    echo "   To return to shipyard pr: just run it on the next PR." >&2
+    echo "   To suppress this warning when intentionally using direct push:" >&2
+    echo "     PULP_VIA_SHIPYARD=1 git push   # marks this push as supervised" >&2
+    echo "" >&2
+fi
+
 PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"

@@ -117,6 +117,14 @@ build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE 
 [targets.mac]
 backend  = "local"
 platform = "macos-arm64"
+# Phase 8 brings the Rust CLI crate into the build graph (Dawn,
+# Skia, mbedtls, plus a fresh `cargo build` of pulp-rs). On a cold
+# FetchContent cache the configure+build runs ~35–45 min on this
+# host, well past Shipyard's default 30 min budget. Two parallel
+# ships (#790, #791) both timed out at 30:02 / 30:10 in the same
+# CMake configure stage on the Phase 8 prep branch; bump matches
+# the windows lane that already exempts itself for the same reason.
+timeout_secs = 3600
 
 [targets.ubuntu]
 backend  = "ssh"

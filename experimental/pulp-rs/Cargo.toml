@@ -1,19 +1,16 @@
 # pulp-rs
 #
-# EXPERIMENTAL Rust prototype of the Pulp CLI.
+# Rust implementation of the Pulp CLI.
 #
-# This crate is NOT production code and is NOT shipped.
-# It exists to evaluate whether rewriting `tools/cli/*.cpp` in Rust
-# is worthwhile. See GitHub issue #686 for the decision framework.
-#
-# This crate is intentionally NOT wired into CMake. It runs only via cargo.
+# Release/install builds are driven by CMake so the binary can carry
+# the SDK version while Cargo keeps an internal crate version.
 
 [package]
 name        = "pulp-rs"
 version     = "0.0.1"
 edition     = "2021"
 rust-version = "1.79"
-description = "Experimental Rust prototype of the Pulp CLI (not for production)"
+description = "Rust implementation of the Pulp CLI"
 license     = "MIT"
 publish     = false
 
@@ -25,7 +22,13 @@ name = "pulp_rs"
 path = "src/lib.rs"
 
 [[bin]]
-name = "pulp-rs"
+# Phase 8 binary swap: this name was `pulp-rs` while the C++ binary
+# owned `pulp`. The default flip (PR #2 of #767) renames the Cargo
+# bin to `pulp` and renames the C++ output to `pulp-cpp` in the same
+# diff. Rollback for users: `PULP_USE_CPP=1 pulp …` execs into
+# `pulp-cpp` with full argv unchanged (handled at the top of
+# `src/main.rs`).
+name = "pulp"
 path = "src/main.rs"
 
 [dependencies]

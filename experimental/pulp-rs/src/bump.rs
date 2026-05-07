@@ -383,6 +383,34 @@ pub fn find_toml_pin_site(source: &str, key: &str, kind: PinKind) -> PinSite {
 /// `v` prefix preference via `new_pin_style_has_v`.
 ///
 /// Returns `None` when the site is [`PinKind::Unknown`] or when the
+/// Dispatch to the right pin-site finder based on [`PinKind`]. Mirrors
+/// the C++ `site_for_kind` helper used by the undo path. The two
+/// TOML-keyed variants ([`PinKind::PulpTomlSdkVersion`],
+/// [`PinKind::PulpTomlSdkPath`]) require a TOML source; the CMake
+/// variants require a CMakeLists.txt source. Callers pass whichever
+/// the edit's `path` points at.
+///
+/// Returns [`PinSite::default`] when the requested kind isn't present
+/// in the source. The [`PinKind::Unknown`] input is treated the same
+/// way (no-op).
+#[must_use]
+pub fn site_for_kind(source: &str, kind: PinKind) -> PinSite {
+    match kind {
+        PinKind::PulpTomlSdkVersion => find_toml_pin_site(source, "sdk_version", kind),
+        PinKind::PulpTomlSdkPath => find_toml_pin_site(source, "sdk_path", kind),
+        PinKind::CMakeFindPackagePulpVersion => find_find_package_pulp_version(source),
+        PinKind::FetchContentGitTag | PinKind::PulpAddProject | PinKind::ProjectVersion => {
+            let site = find_pin_site(source);
+            if site.kind == kind {
+                site
+            } else {
+                PinSite::default()
+            }
+        }
+        PinKind::Unknown => PinSite::default(),
+    }
+}
+
 /// byte span no longer matches the captured text (defensive — the
 /// caller might have mutated the source between scan and write).
 #[must_use]
@@ -578,7 +606,19 @@ pub struct UndoEntry {
     /// Transient report notes — surfaced to the user in the bump
     /// output, NOT required for undo correctness. Defaults to empty
     /// for legacy entries (pre-pulp#740) that predate the field.
-    #[serde(default)]
+    ///
+    /// Skipped during serialization to keep the on-disk format a
+    /// strict subset of the C++ writer's. C++ never wrote this field
+    /// (the equivalent struct member is `// transient report notes,
+    /// not required for undo`) and its hand-rolled JSON parser
+    /// can't skip unknown ARRAY-typed fields — the parse drift
+    /// caused C++ undo to mis-read the next field as garbage and
+    /// skip every Rust-written entry with "pin kind changed since
+    /// bump" (caught by sandbox-e2e cross-binary undo round-trip).
+    /// Reading `notes` back stays best-effort via `serde(default)`
+    /// so older Rust-written files (which DID serialize the field)
+    /// still parse cleanly.
+    #[serde(default, skip_serializing)]
     pub notes: Vec<String>,
     /// Precise per-file edits made by this bump, in apply order.
     /// Empty for legacy entries; callers fall back to the `old_pin`
@@ -918,7 +958,16 @@ mod tests {
             PinKind::CMakeFindPackagePulpVersion
         );
         assert_eq!(read.entries[0].edits[0].new_value, "0.41.0");
-        assert_eq!(read.entries[0].notes, vec!["mirrored find_package"]);
+        // `notes` is `serde(skip_serializing)` — present in-memory at
+        // bump time so the report can surface it, but intentionally
+        // NOT round-tripped to disk. The C++ writer never emits this
+        // field either; serializing it broke C++'s hand-rolled JSON
+        // parser when reading Rust-written batches (caught by the
+        // sandbox-e2e cross-binary undo round-trip). Reading legacy
+        // Rust-written files that DID contain `notes` still works
+        // (deserialize remains opt-in) — the field just won't be
+        // re-emitted on the next write.
+        assert_eq!(read.entries[0].notes, Vec::<String>::new());
     }
 
     #[test]

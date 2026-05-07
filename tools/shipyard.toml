@@ -3,6 +3,9 @@
 # Shipyard is the cross-platform CI controller Pulp uses for queue,
 # multi-platform validation, and merge gating. Pulp pins a specific
 # Shipyard release here so every checkout uses the same version.
+# This is a source-checkout contributor tool pin, not a public Pulp
+# runtime/build dependency and not something the Pulp CLI installer
+# installs automatically.
 #
 # To install or upgrade:
 #   ./tools/install-shipyard.sh
@@ -16,6 +19,11 @@
 #
 # That flow owns the pin edit and worktree-safety checks; keep the
 # lockstep doc skim below as part of the bump PR.
+#
+# Do not hand-edit the platform assets when moving to newer Shipyard
+# releases. Shipyard v0.50.0+ is Rust-backed, macOS is Apple-Silicon-only,
+# and the macOS asset is a signed/notarized/stapled `.dmg`; let
+# `shipyard pin bump` update the version/asset shape together.
 #
 # Lockstep docs:
 # When bumping the pin, also re-check that the following docs still

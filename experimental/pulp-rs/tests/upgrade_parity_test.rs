@@ -59,7 +59,7 @@ fn run(name: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     let home = tempfile::tempdir().expect("tempdir");
     plant_cache(name, home.path());
 
-    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").expect("binary");
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp").expect("binary");
     cmd.args(["upgrade", "--check-only", "--json"])
         .env("PULP_HOME", home.path())
         .env("PULP_RS_CLI_VERSION", "0.37.0");
@@ -120,7 +120,7 @@ fn upgrade_check_only_human_lane_reports_installed_and_latest() {
     let home = tempfile::tempdir().unwrap();
     plant_cache("fresh_cache", home.path());
 
-    let output = assert_cmd::Command::cargo_bin("pulp-rs")
+    let output = assert_cmd::Command::cargo_bin("pulp")
         .unwrap()
         .args(["upgrade", "--check-only"])
         .env("PULP_HOME", home.path())
@@ -139,7 +139,7 @@ fn upgrade_check_only_human_lane_reports_installed_and_latest() {
 fn upgrade_notes_lane_emits_from_to_json() {
     // No network needed for --notes with explicit --from/--to.
     let home = tempfile::tempdir().unwrap();
-    let output = assert_cmd::Command::cargo_bin("pulp-rs")
+    let output = assert_cmd::Command::cargo_bin("pulp")
         .unwrap()
         .args([
             "upgrade", "--notes", "--json", "--from", "0.30.0", "--to", "0.40.0",
@@ -159,17 +159,57 @@ fn upgrade_notes_lane_emits_from_to_json() {
 }
 
 #[test]
-fn upgrade_install_stub_plants_pending_marker() {
+fn upgrade_install_dry_run_plants_pending_marker() {
+    // Phase 8: the install path now downloads + replaces both
+    // binaries (Rust pulp + sibling pulp-cpp). Cargo runs us under
+    // `target/` so the build-artifact guard would refuse the swap
+    // anyway, but we set the explicit dry-run env var so the
+    // assertion pins the marker contract, not the guard error.
     let home = tempfile::tempdir().unwrap();
     plant_cache("fresh_cache", home.path());
 
-    let output = assert_cmd::Command::cargo_bin("pulp-rs")
+    let output = assert_cmd::Command::cargo_bin("pulp")
         .unwrap()
         .args(["upgrade", "--install", "--json"])
         .env("PULP_HOME", home.path())
         .env("PULP_RS_CLI_VERSION", "0.37.0")
+        .env("PULP_UPGRADE_INSTALL_DRY_RUN", "1")
         .output()
         .expect("run pulp-rs");
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(home.path().join("pending-upgrade").exists());
+}
+
+/// Phase 8: integration-level coverage for the build-artifact guard.
+/// `pulp upgrade --install` invoked from cargo's target/ tree
+/// must refuse to clobber the running binary unless the user opts
+/// into the live path explicitly.
+#[test]
+fn upgrade_install_refuses_when_running_under_cargo_target() {
+    let home = tempfile::tempdir().unwrap();
+    plant_cache("fresh_cache", home.path());
+
+    let output = assert_cmd::Command::cargo_bin("pulp")
+        .unwrap()
+        .args(["upgrade", "--install"])
+        .env("PULP_HOME", home.path())
+        .env("PULP_RS_CLI_VERSION", "0.37.0")
+        // No DRY_RUN, no LIVE — guard must catch the install attempt.
+        .env_remove("PULP_UPGRADE_INSTALL_DRY_RUN")
+        .env_remove("PULP_UPGRADE_INSTALL_LIVE")
+        .output()
+        .expect("run pulp-rs");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when running under target/"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cargo build artifact"),
+        "stderr should explain the guard. got: {stderr}"
+    );
 }
