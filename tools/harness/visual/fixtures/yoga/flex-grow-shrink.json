@@ -1,0 +1,41 @@
+{
+  "id": "yoga/flex-grow-shrink",
+  "surface": "yoga",
+  "kind": "layout",
+  "viewport": { "w": 260, "h": 64 },
+  "tolerance": { "rect": 0.001 },
+  "tree": {
+    "id": "root",
+    "type": "View",
+    "style": {
+      "direction": "row",
+      "align_items": "stretch"
+    },
+    "children": [
+      {
+        "id": "fixed",
+        "type": "View",
+        "style": {
+          "width": 80,
+          "flex_shrink": 0
+        }
+      },
+      {
+        "id": "growing",
+        "type": "View",
+        "style": {
+          "flex_grow": 1,
+          "flex_basis": 40
+        }
+      },
+      {
+        "id": "shrinking",
+        "type": "View",
+        "style": {
+          "width": 180,
+          "flex_shrink": 1
+        }
+      }
+    ]
+  }
+}
