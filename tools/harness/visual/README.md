@@ -73,6 +73,10 @@ BuildKit cache mounts for apt packages, the downloaded Skia zip, and pip
 wheels. Override with `PULP_VISUAL_IMAGE`, `PULP_VISUAL_DOCKER_PLATFORM`, or
 `PULP_VISUAL_DOCKER_CACHE` when validating on shared SSH machines.
 
+On GitHub-hosted Ubuntu, create a `docker-container` Buildx builder before
+running the wrapper. The hosted image's default `docker` driver rejects local
+cache export unless containerd image storage is enabled.
+
 When macOS rendering is the product risk, run the local pytest smoke on
 arm64-darwin as well. The Docker smoke proves the locked dependency recipe and
 fresh-worktree behavior; the local lane proves the platform that will own the

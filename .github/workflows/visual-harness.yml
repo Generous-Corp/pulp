@@ -48,6 +48,11 @@ jobs:
           restore-keys: |
             visual-harness-linux-buildx-
 
+      - name: Set up cached Buildx builder
+        run: |
+          docker buildx create --name pulp-visual-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
       - name: Build deterministic visual harness image
         run: tools/harness/visual/docker-build.sh
 

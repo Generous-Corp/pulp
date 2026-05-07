@@ -419,6 +419,10 @@ unless the lock or digest changes. Override with `PULP_VISUAL_IMAGE`,
 `PULP_VISUAL_DOCKER_PLATFORM`, or `PULP_VISUAL_DOCKER_CACHE` if a host needs a
 separate cache namespace.
 
+GitHub-hosted Ubuntu must create a `docker-container` Buildx builder before
+calling the wrapper; the default `docker` driver on that image rejects
+`type=local` cache export unless containerd image storage is enabled.
+
 The container is a reproducible smoke/developer environment. It does not
 replace the future canonical arm64-darwin raster-golden gate.
 
