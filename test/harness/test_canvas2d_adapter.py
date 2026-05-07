@@ -155,10 +155,14 @@ class Canvas2dAdapterClassifyTest(unittest.TestCase):
 
     def test_unimpl_mapsTo_is_NOT_IMPL(self):
         """An entry whose mapsTo says 'Not implemented' is NOT-IMPL even
-        if the oracle didn't pre-mark it missing."""
+        if the oracle didn't pre-mark it missing.
+
+        Uses canvas2d/globalAlpha as the entry name because it's an oracle
+        entry without an `expectedStatus` pin (filter / direction were
+        repinned to `partial` after pulp #1520 wired both)."""
         e = CatalogEntry(
             surface="canvas2d",
-            name="canvas2d/filter",
+            name="canvas2d/globalAlpha",
             status="missing",
             maps_to="Not implemented in shim or bridge.",
         )
@@ -247,17 +251,17 @@ class VerifierEndToEndTest(unittest.TestCase):
     def test_collects_all_canvas2d_entries(self):
         compat = load_compat(REPO_ROOT)
         entries = collect_entries(compat, "canvas2d")
-        # canvas2d has 63 real entries (the `_note` key is skipped by the
+        # canvas2d has 66 real entries (the `_note` key is skipped by the
         # entry collector since it's a string, not a dict payload).
         self.assertEqual(
             len(entries),
-            63,
-            f"compat.json canvas2d/ must have 63 real entries (got {len(entries)})",
+            66,
+            f"compat.json canvas2d/ must have 66 real entries (got {len(entries)})",
         )
 
     def test_runs_canvas2d_surface_end_to_end(self):
         results = run_surface(REPO_ROOT, "canvas2d")
-        self.assertEqual(len(results), 63)
+        self.assertEqual(len(results), 66)
         # Every result must have a Status enum (no exceptions / Nones)
         for r in results:
             self.assertIsInstance(r.status, Status)
@@ -272,14 +276,16 @@ class VerifierEndToEndTest(unittest.TestCase):
             self.assertIsInstance(r.status, Status, msg=e.name)
 
     def test_coverage_distribution_is_nonzero(self):
-        """Sanity: with the catalog as-is, we have at least some PASS, some
-        DIVERGE, and some NOT-IMPL. Otherwise the harness is broken."""
+        """Sanity: with the catalog as-is, we have at least some PASS and
+        some DIVERGE. Otherwise the harness is broken. (NOT-IMPL is no
+        longer required to be > 0 — pulp #1615 closed the last NOT-IMPL
+        canvas2d entries by repinning oracle expectedStatus for `filter`,
+        `direction`, and `getTransform`.)"""
         results = run_surface(REPO_ROOT, "canvas2d")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
         self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
         self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
-        self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
 
     def test_known_gotcha_entries_classified_DIVERGE(self):
         """The remaining oracle-pinned gotcha entries must always be DIVERGE.
@@ -302,8 +308,12 @@ class VerifierEndToEndTest(unittest.TestCase):
                     msg=f"{name} must be DIVERGE per oracle gotcha pin: {by_name[name].detail}",
                 )
 
-    def test_known_unimpl_entries_classified_NOT_IMPL(self):
-        """The filter and direction entries must remain NOT-IMPL.
+    def test_filter_and_direction_classified_DIVERGE(self):
+        """pulp #1520 wired both `filter` and `direction` (JS shim + bridge +
+        Skia / SkShaper). Oracle pins them at `expectedStatus: partial` —
+        full CSS <filter-function-list> and full bidi shaping are still
+        gaps. Adapter classifies oracle-`partial` as DIVERGE. (See
+        pulp #1615 — these used to be NOT-IMPL when the oracle was stale.)
 
         issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
         shadowOffsetY are now PASS — see
@@ -328,8 +338,8 @@ class VerifierEndToEndTest(unittest.TestCase):
                 self.assertIn(name, by_name)
                 self.assertEqual(
                     by_name[name].status,
-                    Status.NOT_IMPL,
-                    msg=f"{name} must be NOT-IMPL: {by_name[name].detail}",
+                    Status.DIVERGE,
+                    msg=f"{name} must be DIVERGE per oracle partial pin: {by_name[name].detail}",
                 )
 
     def test_bridge_thin_gap_fill_entries_classified_PASS(self):

@@ -55,6 +55,18 @@ NOT_IMPL_MARKERS = (
     "tracked as a js field; not pushed",
 )
 
+# Substrings that look like NOT-IMPL markers but actually appear in mapsTo
+# explanations of supported features (e.g. "no bridge round-trip" describing
+# a JS-only synchronous read like getTransform). When mapsTo contains both a
+# NOT_IMPL marker and one of these benign-context phrases, the marker hit is
+# treated as a false positive. See pulp #1615.
+NOT_IMPL_MARKER_BENIGN_CONTEXT = (
+    "no bridge round-trip",
+    "no bridge round trip",
+    "no bridge call needed",
+    "no bridge call required",
+)
+
 # Markers that imply "accepted but does nothing" — distinct from NOT-IMPL
 # because a JS-level shim entry exists, but no bridge call is made.
 NO_OP_MARKERS = (
@@ -152,6 +164,12 @@ class Canvas2dAdapter(AdapterBase):
         if not maps_to:
             return True
         m = maps_to.lower()
+        # Skip any NOT_IMPL marker hit when the mapsTo also contains one
+        # of the benign-context phrases (pulp #1615 — `getTransform` mentions
+        # "no bridge round-trip" to explain a synchronous JS-only read; that
+        # must not be misread as "no bridge").
+        if any(benign in m for benign in NOT_IMPL_MARKER_BENIGN_CONTEXT):
+            return False
         return any(marker in m for marker in NOT_IMPL_MARKERS)
 
     @staticmethod

@@ -294,13 +294,15 @@ class CssVerifierEndToEndTest(unittest.TestCase):
 
     def test_coverage_distribution_is_nonzero(self):
         """Sanity: with the catalog as-is, we have at least some entries
-        in every status bucket. Otherwise the harness is broken."""
+        in PASS / DIVERGE / OOS buckets. Otherwise the harness is broken.
+        (NOT-IMPL is no longer required to be > 0 — pulp #1615 closed
+        the last NOT-IMPL css entries by reconciling catalog claims with
+        the oracle.)"""
         results = run_surface(REPO_ROOT, "css")
         statuses = [r.status for r in results]
         counts = StatusCounts.from_results(statuses)
         self.assertGreater(counts.pass_, 0, "expected at least 1 PASS")
         self.assertGreater(counts.diverge, 0, "expected at least 1 DIVERGE")
-        self.assertGreater(counts.not_impl, 0, "expected at least 1 NOT-IMPL")
         self.assertGreater(counts.oos, 0, "expected at least 1 OOS")
 
     def test_wontfix_count_matches_catalog(self):

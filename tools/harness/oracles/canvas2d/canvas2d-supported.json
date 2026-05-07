@@ -63,8 +63,8 @@
     "shadowColor":          {"kind": "attribute", "bridge": ["canvasSetShadowColor"], "notes": "issue-1434 batch 7. CSS color string parsed via the shared parseColor helper."},
     "shadowOffsetX":        {"kind": "attribute", "bridge": ["canvasSetShadowOffsetX"], "notes": "issue-1434 batch 7. Sticky offset in CSS pixels; combines with shadowOffsetY."},
     "shadowOffsetY":        {"kind": "attribute", "bridge": ["canvasSetShadowOffsetY"], "notes": "issue-1434 batch 7. Sticky offset in CSS pixels; combines with shadowOffsetX."},
-    "filter":               {"kind": "attribute", "bridge": [], "expectedStatus": "missing", "notes": "Not implemented in shim or bridge."},
-    "direction":            {"kind": "attribute", "bridge": [], "expectedStatus": "missing", "notes": "Tracked locally; not pushed to bridge."},
+    "filter":               {"kind": "attribute", "bridge": ["canvasSetFilter"], "expectedStatus": "partial", "gotcha": "css-filter-list parser local to skia_canvas.cpp; pulp #1520 wired the JS shim + bridge + Skia chain.", "notes": "pulp #1520 — JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; full CSS <filter-function-list> not yet supported (subset only)."},
+    "direction":            {"kind": "attribute", "bridge": ["canvasSetDirection"], "expectedStatus": "partial", "gotcha": "real bidi (mixed LTR/RTL paragraphs) requires full SkShaper run-splitting; ltr/rtl uniform-direction works.", "notes": "pulp #1520 — JS shim + bridge + SkShaper direction flag. Real bidi (mixed LTR/RTL paragraphs) is not yet supported."},
 
     "getContext_2d":        {"kind": "context", "bridge": [], "notes": "HTMLCanvasElement.getContext('2d') — returns CanvasRenderingContext2D singleton."},
     "getContext_webgpu":    {"kind": "context", "bridge": [], "notes": "HTMLCanvasElement.getContext('webgpu') — returns GPUCanvasContext via __createGPUCanvasContext."},
