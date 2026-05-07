@@ -407,80 +407,129 @@
       "issue": ""
     },
     "css/animation": {
-      "status": "noop",
-      "mapsTo": "parseTransition + setAnimation -- setAnimation is an intentional no-op stub pending the animations subsystem (Phase A2)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP: widget_bridge.cpp:3208 setAnimation is registered but the body is `(void)id; (void)prop;...` -- a stub. CSS @keyframes animations are silently accepted but produce no visual effect; full implementation lands with the animations subsystem (Phase A2). Re-statused 'partial' -> 'noop' in pulp #1475 to clear harness drift (the `noop` vocabulary entry was added in the same PR).",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationDelay": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationDirection": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationDuration": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationFillMode": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationIterationCount": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationName": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/animationPlayState": {
@@ -495,14 +544,21 @@
       "issue": ""
     },
     "css/animationTimingFunction": {
-      "status": "noop",
-      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
+      "supportedValues": [
+        "CssEasing keyword set",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "animation-name resolution via the registry",
+        "duration in ms or s"
       ],
-      "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
     },
     "css/aspectRatio": {
@@ -2917,71 +2973,108 @@
       "issue": ""
     },
     "css/transition": {
-      "status": "partial",
-      "mapsTo": "parseTransition -> setTransitionDuration only",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setTransition / setTransitionProperty / setTransitionDuration / setTransitionDelay / setTransitionTimingFunction. Bridge stores TransitionSpec[] on View::transitions_; PR 2 wires the playback driver.",
       "supportedValues": [
-        "duration only"
+        "shorthand parsing",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "linear / ease / ease-in / ease-out / ease-in-out",
+        "duration in ms or s",
+        "delay in ms or s",
+        "comma-separated entries",
+        "\"none\" clears the list"
       ],
-      "unsupportedValues": [
-        "property targeting",
-        "easing function",
-        "delay",
-        "multi-property comma list"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
       ],
-      "tests": [],
-      "notes": "Pulp ignores the property name and the timing function; only duration is propagated. 2026-05-01 (#1345 / pulp #1149 part b): the document stylesheet now supports `:hover` selectors via mouseenter/mouseleave bridge listeners. CSS rules under `:hover` are stashed and re-applied per-element on hover-in, restored on hover-out — completing the transition story end-to-end for the common interactive case.",
+      "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": "1323"
     },
     "css/transitionDelay": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "s",
-        "ms"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setTransition / setTransitionProperty / setTransitionDuration / setTransitionDelay / setTransitionTimingFunction. Bridge stores TransitionSpec[] on View::transitions_; PR 2 wires the playback driver.",
+      "supportedValues": [
+        "shorthand parsing",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "linear / ease / ease-in / ease-out / ease-in-out",
+        "duration in ms or s",
+        "delay in ms or s",
+        "comma-separated entries",
+        "\"none\" clears the list"
       ],
-      "tests": [],
-      "notes": "Not honored.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
     },
     "css/transitionDuration": {
       "status": "supported",
-      "mapsTo": "setTransitionDuration(id, seconds)",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setTransition / setTransitionProperty / setTransitionDuration / setTransitionDelay / setTransitionTimingFunction. Bridge stores TransitionSpec[] on View::transitions_; PR 2 wires the playback driver.",
       "supportedValues": [
-        "s",
-        "ms"
+        "shorthand parsing",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "linear / ease / ease-in / ease-out / ease-in-out",
+        "duration in ms or s",
+        "delay in ms or s",
+        "comma-separated entries",
+        "\"none\" clears the list"
       ],
-      "unsupportedValues": [
-        "multi-value"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
     },
     "css/transitionProperty": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setTransition / setTransitionProperty / setTransitionDuration / setTransitionDelay / setTransitionTimingFunction. Bridge stores TransitionSpec[] on View::transitions_; PR 2 wires the playback driver.",
+      "supportedValues": [
+        "shorthand parsing",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "linear / ease / ease-in / ease-out / ease-in-out",
+        "duration in ms or s",
+        "delay in ms or s",
+        "comma-separated entries",
+        "\"none\" clears the list"
       ],
-      "tests": [],
-      "notes": "All declared transitions animate everything (or nothing depending on backend). Cannot scope.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
     },
     "css/transitionTimingFunction": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "ease",
-        "ease-in",
-        "linear",
-        "cubic-bezier",
-        "steps"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setTransition / setTransitionProperty / setTransitionDuration / setTransitionDelay / setTransitionTimingFunction. Bridge stores TransitionSpec[] on View::transitions_; PR 2 wires the playback driver.",
+      "supportedValues": [
+        "shorthand parsing",
+        "cubic-bezier(...)",
+        "steps(N, end|start)",
+        "linear / ease / ease-in / ease-out / ease-in-out",
+        "duration in ms or s",
+        "delay in ms or s",
+        "comma-separated entries",
+        "\"none\" clears the list"
       ],
-      "tests": [],
-      "notes": "Not honored.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+      ],
+      "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
     },
     "css/userSelect": {

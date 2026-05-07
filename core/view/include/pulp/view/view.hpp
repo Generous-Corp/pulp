@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
@@ -726,6 +727,59 @@ public:
     const std::vector<FilterOp>& filter_chain() const { return filter_chain_; }
     bool has_filter_chain() const { return !filter_chain_.empty(); }
 
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `set_transitions` accepts the parsed shorthand; `transitions()`
+    /// returns the slice for the dispatcher to consult when a property
+    /// changes. Per the CSS spec, the matching is a linear walk —
+    /// later entries win when properties overlap (CSS cascade order).
+    /// PR 2 of the ladder hooks the dispatcher to the rAF idle pump
+    /// and starts driving Animation instances; PR 1 establishes the
+    /// storage shape so downstream PRs can land independently.
+    void set_transitions(std::vector<TransitionSpec> ts) { transitions_ = std::move(ts); }
+    void clear_transitions() { transitions_.clear(); }
+    const std::vector<TransitionSpec>& transitions() const { return transitions_; }
+    bool has_transitions() const { return !transitions_.empty(); }
+
+    /// Find the matching transition for a given property name. Returns
+    /// nullptr if no transition applies (CSS spec: the snap path —
+    /// commit the new value immediately). `'all'` entries match any
+    /// property; named entries match only that exact property.
+    const TransitionSpec* find_transition_for(const std::string& property) const {
+        const TransitionSpec* match = nullptr;
+        for (const auto& t : transitions_) {
+            if (t.property_name == "all") match = &t;
+            if (t.property_name == property) { match = &t; }
+        }
+        return match;
+    }
+
+    /// Active running animations on this View. Owned here so the
+    /// per-View lifetime matches the View's. PR 2 wires the
+    /// dispatcher to mutate this list; PR 1 establishes ownership.
+    std::vector<CssAnimation>& active_animations() { return active_animations_; }
+    const std::vector<CssAnimation>& active_animations() const { return active_animations_; }
+
+    /// Staged CSS animation control tokens (pulp #1434 — Codex audit on
+    /// PR #1508). The web-compat-style-decl shim invokes
+    /// `setAnimation(id, "name"|"duration"|"easing"|..., value)` one
+    /// control-token at a time — one CSS longhand per call. We
+    /// accumulate that state here; when the `name` token resolves
+    /// against the keyframes registry, the bridge seeds entries into
+    /// `active_animations_` using these accumulated values. Without
+    /// this slot the legacy ABI silently drops every web-compat
+    /// animation property.
+    struct StagedAnimation {
+        std::string name;
+        float duration_seconds = 0.0f;
+        float delay_seconds = 0.0f;
+        CssEasing easing{};
+        float iterations = 1.0f;
+        std::string direction = "normal";
+        std::string fill_mode;
+    };
+    StagedAnimation& staged_animation() { return staged_animation_; }
+    const StagedAnimation& staged_animation() const { return staged_animation_; }
+
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints (issue-926). Zero == no backdrop
     /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
@@ -922,6 +976,10 @@ private:
     float filter_blur_ = 0;
     std::vector<FilterOp> filter_chain_{};
     float backdrop_blur_ = 0;
+    /// pulp #1434 Phase A2-1 — transition specs + active animations.
+    std::vector<TransitionSpec> transitions_{};
+    std::vector<CssAnimation> active_animations_{};
+    StagedAnimation staged_animation_{};
     std::string background_attachment_;  // pulp #1517 — noop today
     std::string background_clip_;        // pulp #1517 — partial (text deferred)
     std::string background_origin_;      // pulp #1517 — noop today

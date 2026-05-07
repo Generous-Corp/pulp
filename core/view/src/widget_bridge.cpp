@@ -4158,6 +4158,82 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 Phase A2-1 — setTransition(id, "opacity 200ms ease, transform 300ms")
+    // Parses the full CSS shorthand into View::transitions_. PR 2 of
+    // the ladder will hook the prop-applier dispatcher to consult
+    // these specs when a property changes. PR 1 ships parser + storage.
+    engine_.register_function("setTransition", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto css = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (css.empty() || css == "none") {
+            v->clear_transitions();
+            return choc::value::Value();
+        }
+        v->set_transitions(parse_transition_shorthand(css));
+        return choc::value::Value();
+    });
+
+    // setTransitionProperty(id, "opacity, transform")  — comma-separated
+    // property list. We synthesize TransitionSpecs with just the property
+    // name; durations are picked up from setTransitionDuration / the
+    // shorthand path. CSS spec: shorthand wins over longhand when both
+    // are set in the same rule; we treat them as additive at this layer.
+    engine_.register_function("setTransitionProperty", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto props = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        std::vector<TransitionSpec> ts;
+        std::string acc;
+        auto flush = [&]() {
+            while (!acc.empty() && std::isspace(static_cast<unsigned char>(acc.front()))) acc.erase(0, 1);
+            while (!acc.empty() && std::isspace(static_cast<unsigned char>(acc.back()))) acc.pop_back();
+            if (!acc.empty()) {
+                TransitionSpec s{};
+                s.property_name = acc;
+                s.property = animatable_property_from_css_name(acc);
+                ts.push_back(std::move(s));
+                acc.clear();
+            }
+        };
+        for (char c : props) {
+            if (c == ',') flush(); else acc += c;
+        }
+        flush();
+        v->set_transitions(std::move(ts));
+        return choc::value::Value();
+    });
+
+    // setTransitionTimingFunction(id, "ease-in-out") — applies to all
+    // existing TransitionSpecs on the View. CSS spec: longhand applies
+    // uniformly across the property list.
+    engine_.register_function("setTransitionTimingFunction", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto easing_str = args.get<std::string>(1, "ease");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        auto current = v->transitions();
+        for (auto& t : current) {
+            t.easing = CssEasing::from_keyword(easing_str);
+        }
+        v->set_transitions(std::move(current));
+        return choc::value::Value();
+    });
+
+    // setTransitionDelay(id, seconds)
+    engine_.register_function("setTransitionDelay", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto delay = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        auto current = v->transitions();
+        for (auto& t : current) t.delay_seconds = delay;
+        v->set_transitions(std::move(current));
+        return choc::value::Value();
+    });
+
     // setTranslate(id, x, y) — CSS transform: translate()
     engine_.register_function("setTranslate", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -4216,25 +4292,154 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // defineKeyframes(name, [{offset, value}...]) — CSS @keyframes
+    // pulp #1434 Phase A2-1 — defineKeyframes(name, stops_json_string).
+    // Stops are JSON-encoded for bridge simplicity:
+    //   defineKeyframes('fade', JSON.stringify([
+    //     { offset: 0,   properties: { opacity: '0' } },
+    //     { offset: 1.0, properties: { opacity: '1' } },
+    //   ]));
+    // The CSS shim's @keyframes parser produces this shape directly.
+    // Populates the application-wide registry. PR 4 wires the registry
+    // into setAnimation playback; PR 1 ships parser + storage so the
+    // registry is consultable today.
     engine_.register_function("defineKeyframes", [this](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
-        // Store keyframe definitions for later use by setAnimation
-        // For now just acknowledge — actual keyframe storage is per-animation
-        (void)name;
+        auto stops_json = args.get<std::string>(1, "[]");
+        if (name.empty()) return choc::value::Value();
+        CssKeyframesBlock block;
+        block.name = name;
+        // Parse the JSON via choc::json which already lives in the
+        // tree (see DEPENDENCIES.md). Walk the array structurally.
+        try {
+            auto parsed = choc::json::parse(stops_json);
+            if (parsed.isArray()) {
+                for (uint32_t i = 0; i < parsed.size(); ++i) {
+                    const auto& entry = parsed[i];
+                    CssKeyframe kf{};
+                    if (entry.hasObjectMember("offset")) {
+                        kf.offset = static_cast<float>(entry["offset"].getWithDefault<double>(0.0));
+                    }
+                    if (entry.hasObjectMember("properties") && entry["properties"].isObject()) {
+                        const auto& props = entry["properties"];
+                        for (uint32_t j = 0; j < props.size(); ++j) {
+                            std::string mn(props.getObjectMemberAt(j).name);
+                            std::string val(props[mn.c_str()].getWithDefault<std::string_view>(""));
+                            kf.properties.emplace_back(mn, val);
+                        }
+                    }
+                    block.stops.push_back(std::move(kf));
+                }
+            }
+        } catch (...) {
+            // Malformed input — silently drop (registry stays unchanged).
+            return choc::value::Value();
+        }
+        css_keyframes_registry_.define(std::move(block));
         return choc::value::Value();
     });
 
-    // setAnimation(id, property, duration, iterations, direction, keyframes_json)
-    // Simplified: animate a single property with keyframes
+    // pulp #1434 Phase A2-1 — setAnimation supports two ABIs.
+    //
+    //   Positional (new — @pulp/react direct callers):
+    //     setAnimation(id, animation_name, duration, iterations, direction)
+    //   Legacy control-token (web-compat-style-decl.js — one CSS longhand
+    //   per call — and prop-applier's animation* fan-out):
+    //     setAnimation(id, "name",       <animation-name>)
+    //     setAnimation(id, "duration",   <seconds>)
+    //     setAnimation(id, "delay",      <seconds>)
+    //     setAnimation(id, "easing",     <css-easing-keyword>)
+    //     setAnimation(id, "iterations", <number | -1 for infinite>)
+    //     setAnimation(id, "direction",  <"normal"|"reverse"|...>)
+    //     setAnimation(id, "fill",       <"none"|"forwards"|...>)
+    //
+    // Detection: if arg1 matches one of the control tokens, dispatch to
+    // the legacy path — otherwise treat as positional. The legacy path
+    // accumulates state in View::staged_animation(); when `name` arrives
+    // and resolves against the keyframes registry, we seed entries into
+    // active_animations() using the staged values. Codex audit on pulp
+    // #1508 caught the original handler dropping every web-compat call
+    // because "name"/"duration"/etc. were being treated as the
+    // animation_name token (registry lookup always missed).
     engine_.register_function("setAnimation", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto prop = args.get<std::string>(1, "");
-        auto duration = static_cast<float>(args.get<double>(2, 1.0));
-        auto iterations = static_cast<float>(args.get<double>(3, 1.0));
-        auto direction = args.get<std::string>(4, "normal");
-        (void)id; (void)prop; (void)duration; (void)iterations; (void)direction;
-        // TODO: create KeyframeAnimation, attach to view, drive in frame clock
+        auto arg1 = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+
+        // Legacy control-token dispatch.
+        const bool is_control_token =
+            arg1 == "name"      || arg1 == "duration"  || arg1 == "delay"
+         || arg1 == "easing"    || arg1 == "iterations"|| arg1 == "direction"
+         || arg1 == "fill";
+        if (is_control_token) {
+            auto& staged = v->staged_animation();
+            if (arg1 == "name") {
+                staged.name = args.get<std::string>(2, "");
+                // Re-resolve when the name token arrives (the typical
+                // call order is name → duration → easing → ..., but
+                // either order is valid; if duration arrives first we
+                // simply seed when name arrives, using whatever
+                // duration was previously staged).
+                const auto* block = css_keyframes_registry_.find(staged.name);
+                if (block && !block->stops.empty()) {
+                    const auto& first = block->stops.front();
+                    for (const auto& [prop, _val] : first.properties) {
+                        CssAnimation a{};
+                        a.property = animatable_property_from_css_name(prop);
+                        a.spec.property_name = prop;
+                        a.spec.property = a.property;
+                        a.spec.duration_seconds = staged.duration_seconds;
+                        a.spec.delay_seconds    = staged.delay_seconds;
+                        a.spec.easing           = staged.easing;
+                        v->active_animations().push_back(std::move(a));
+                    }
+                }
+            } else if (arg1 == "duration") {
+                staged.duration_seconds = static_cast<float>(args.get<double>(2, 0.0));
+                for (auto& a : v->active_animations()) {
+                    a.spec.duration_seconds = staged.duration_seconds;
+                }
+            } else if (arg1 == "delay") {
+                staged.delay_seconds = static_cast<float>(args.get<double>(2, 0.0));
+                for (auto& a : v->active_animations()) {
+                    a.spec.delay_seconds = staged.delay_seconds;
+                }
+            } else if (arg1 == "easing") {
+                staged.easing = CssEasing::from_keyword(args.get<std::string>(2, ""));
+                for (auto& a : v->active_animations()) {
+                    a.spec.easing = staged.easing;
+                }
+            } else if (arg1 == "iterations") {
+                staged.iterations = static_cast<float>(args.get<double>(2, 1.0));
+            } else if (arg1 == "direction") {
+                staged.direction = args.get<std::string>(2, "normal");
+            } else if (arg1 == "fill") {
+                staged.fill_mode = args.get<std::string>(2, "");
+            }
+            return choc::value::Value();
+        }
+
+        // Positional dispatch (new ABI).
+        const auto& anim_name = arg1;
+        auto duration = static_cast<float>(args.get<double>(2, 0.0));
+        (void)args.get<double>(3, 1.0);  // iterations — PR 4
+        (void)args.get<std::string>(4, "normal");  // direction — PR 4
+        const auto* block = css_keyframes_registry_.find(anim_name);
+        if (!block || block->stops.empty()) return choc::value::Value();
+        // Seed one Animation per property the first stop touches. PR 2
+        // specializes the value type per property and drives the
+        // tween via the frame clock.
+        const auto& first = block->stops.front();
+        for (const auto& [prop, _val] : first.properties) {
+            CssAnimation a{};
+            a.property = animatable_property_from_css_name(prop);
+            a.spec.property_name = prop;
+            a.spec.property = a.property;
+            a.spec.duration_seconds = duration;
+            a.spec.delay_seconds = 0.0f;
+            a.spec.easing = CssEasing{};
+            v->active_animations().push_back(std::move(a));
+        }
         return choc::value::Value();
     });
 

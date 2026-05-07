@@ -227,6 +227,18 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-1 — CSS transitions + animations.
+    /// `transition` accepts the full CSS shorthand string; longhand
+    /// fields apply uniformly across the parsed list.
+    transition?: string;
+    transitionProperty?: string;
+    transitionDuration?: number | string;
+    transitionDelay?: number | string;
+    transitionTimingFunction?:
+        | 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out'
+        | string; // also: 'cubic-bezier(...)', 'steps(N, end)'
+    animationName?: string;
+    animationDuration?: number | string;
     /// pulp #1516 — CSS box-sizing. Web designs almost universally
     /// reset to `border-box` via `* { box-sizing: border-box }`;
     /// Yoga 3.x honors the spec via YGNodeStyleSetBoxSizing.
