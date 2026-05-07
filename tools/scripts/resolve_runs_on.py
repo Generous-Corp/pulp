@@ -63,8 +63,9 @@ Usage (optional-namespace mode — previous macOS behavior):
         --explicit-env EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \\
         --namespace-env NAMESPACE_MACOS_RUNS_ON_JSON
 
-    # emits empty stdout if the provider is not `namespace` and no
-    # explicit selector is set. Caller decides what to do with empty.
+    # emits the explicit selector when set. Otherwise emits empty stdout
+    # if the provider is not `namespace`. Caller decides what to do with
+    # empty.
 
 Usage (default mode, used by sanitizers.yml):
 
@@ -172,11 +173,12 @@ def resolve_optional_namespace_mode(
 ) -> str:
     """Resolve runs-on when the target is only included if a Namespace
     selector is provided (current macOS behavior in build.yml)."""
+    raw = _env_nonempty(explicit_env)
+    if raw:
+        return _load_selector(raw, target_name)
     if requested != "namespace":
         return ""
-    raw = _env_nonempty(explicit_env)
-    if not raw:
-        raw = _env_nonempty(namespace_env)
+    raw = _env_nonempty(namespace_env)
     if not raw:
         return ""
     return _load_selector(raw, target_name)

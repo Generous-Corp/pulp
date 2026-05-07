@@ -43,6 +43,22 @@ pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
 
 ## Recent updates
 
+- **2026-05-06 (pulp #1543)** — `yoga/borderWidth` plus the four per-edge
+  variants (`yoga/borderTopWidth` / `borderRightWidth` / `borderBottomWidth`
+  / `borderLeftWidth`) flipped `missing` → `supported`. Pulp's borders
+  were already painted as a Skia stroke via `View::set_border_*`, but
+  Yoga never knew about them — `YGNodeStyleSetBorder` was never called.
+  With #1516 having wired box-sizing (default `border-box`), Yoga's
+  content-box math needs the actual border insets to subtract from the
+  declared dimensions; a 0-border view had its content area too large by
+  `2 * border_width` and children leaked under the painted stroke.
+  `core/view/src/yoga_layout.cpp` now calls `YGNodeStyleSetBorder(node,
+  YGEdge*, w)` per-edge in `build_yoga_subtree`. Per-side override (set
+  via `setBorderTopWidth(id, w)` etc., which routes to
+  `View::set_border_top` / right / bottom / left) wins over the uniform
+  `View::border_width()` fallback. `%` remains unsupported (Yoga has no
+  `YGNodeStyleSetBorderPercent` — matches CSS spec: percent values are
+  invalid for `border-width`). 5 yoga catalog flips. Refs umbrella #1434.
 - **2026-05-06 (pulp #1544)** — pure catalog promotion: `yoga/flex` and
   `yoga/flexFlow` now claim `supported`. Both shorthands have been
   wired through `core/view/js/web-compat-style-decl.js` for some time
@@ -61,18 +77,7 @@ pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
   `yoga_layout.cpp` dispatches each logical edge through Yoga's
   `YGEdgeStart` / `YGEdgeEnd` and pipes the writing direction to
   `YGNodeStyleSetDirection` (per-node) and the root's
-  `YGNodeCalculateLayout` direction argument (so the root's own
-  direction propagates instead of being hard-coded to LTR). The
-  bridge accepts the new sub-keys `margin_start` / `margin_end` /
-  `padding_start` / `padding_end` / `start` / `end` and a separate
-  `direction_writing` key (the existing `direction` key is taken by
-  flex-direction). Same value coverage as the per-side siblings: px
-  number, percent string, plus `auto` for margin only — Yoga's
-  padding and position have no `auto` API, matching the existing
-  per-side dispatch invariants. The pre-existing `@pulp/react`
-  shortcut wired in PR #1498 (LTR-only fan-out from `marginStart`
-  → `margin_left` etc.) remains as the fast path; an RN-side
-  migration to the new yoga route is a follow-up. Reclassified
+  `YGNodeCalculateLayout` direction argument. Reclassified
   NOT-IMPL → PASS for 7 entries (yoga drift_count: 18 → 11).
 - **2026-05-05 (pulp #1434 Triage #14)** — `yoga/flexWrap` now claims
   `wrap-reverse` alongside `wrap` and `nowrap`. `FlexStyle::flex_wrap`

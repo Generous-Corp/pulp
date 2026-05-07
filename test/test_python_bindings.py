@@ -44,6 +44,10 @@ def assert_param_range_bindings(pulp) -> None:
     assert math.isclose(equal_range.normalize(3.0), 0.0)
     assert math.isclose(equal_range.denormalize(0.75), 3.0)
 
+    clamped_range = pulp.ParamRange(-1.0, 1.0, 0.0)
+    assert math.isclose(clamped_range.normalize(-2.0), 0.0)
+    assert math.isclose(clamped_range.normalize(2.0), 1.0)
+
     info = pulp.ParamInfo()
     info.id = 101
     info.name = "Gain"
@@ -68,6 +72,21 @@ def assert_midi_bindings(pulp) -> None:
     midi = pulp.MidiBuffer()
     assert midi.empty()
     assert midi.size() == 0
+
+    note_on = pulp.MidiEvent.note_on(1, 60, 100)
+    note_on.sample_offset = 3
+    midi.add(note_on)
+    midi.add(pulp.MidiEvent.note_off(1, 60))
+    midi.add(pulp.MidiEvent.cc(1, 74, 64))
+    midi.add(pulp.MidiEvent.pitch_bend(1, 8192))
+    assert midi.size() == 4
+    midi.clear()
+    assert midi.empty()
+
+    midi.add(note_on)
+    midi.add(pulp.MidiEvent.note_off(1, 60))
+    assert midi.size() == 2
+    assert not midi.empty()
     midi.clear()
     assert midi.empty()
 

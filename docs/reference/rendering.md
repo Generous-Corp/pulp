@@ -190,4 +190,6 @@ auto* font = EmbeddedAsset::get("Inter.ttf");
 // font->data, font->size
 ```
 
-Bundled fonts: Inter Regular, JetBrains Mono Regular (SIL OFL 1.1).
+Bundled fonts: Inter Regular, JetBrains Mono Regular (SIL OFL 1.1). The
+exact versions, hashes, and fallback order are tracked in
+[Text Shaping Determinism](text-shaping.md).

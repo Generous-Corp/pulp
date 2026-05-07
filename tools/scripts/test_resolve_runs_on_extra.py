@@ -41,6 +41,25 @@ class ResolverEdgeTests(unittest.TestCase):
 
         self.assertEqual(out, "")
 
+    def test_optional_namespace_honors_explicit_for_non_namespace_provider(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON":
+                    '["self-hosted","sanitizer"]',
+                "NAMESPACE_MACOS_RUNS_ON_JSON": "",
+            },
+            clear=True,
+        ):
+            out = resolver.resolve_optional_namespace_mode(
+                target_name="macOS (ARM64)",
+                requested="github-hosted",
+                explicit_env="EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
+                namespace_env="NAMESPACE_MACOS_RUNS_ON_JSON",
+            )
+
+        self.assertEqual(out, '["self-hosted", "sanitizer"]')
+
     def test_provider_helper_rejects_unknown_provider_when_called_directly(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):

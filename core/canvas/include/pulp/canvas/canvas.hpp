@@ -541,6 +541,52 @@ public:
         (void)opacity; (void)blur_radius;
     }
 
+    /// pulp #1434 Phase A2-4 — full CSS filter-chain layer save.
+    /// Each entry in `chain` is one filter function; the canvas backend
+    /// composes them via `SkImageFilters::Compose` (Skia) or, for
+    /// CG-only paths, falls back to whichever entries the platform can
+    /// render natively. Default impl falls through to `save_layer` with
+    /// any blur entries collapsed to a single radius — preserves the
+    /// blur-only behavior that platforms without filter-chain support
+    /// already had.
+    struct FilterChainEntry {
+        enum class Kind {
+            blur,
+            brightness,
+            contrast,
+            grayscale,
+            hue_rotate,
+            invert,
+            opacity,
+            saturate,
+            sepia,
+            drop_shadow,
+        };
+        Kind kind = Kind::blur;
+        float amount = 0.0f;
+        float angle_deg = 0.0f;
+        float ds_offset_x = 0.0f;
+        float ds_offset_y = 0.0f;
+        float ds_blur = 0.0f;
+        Color ds_color{};
+    };
+    virtual void save_layer_with_filters(float x, float y, float w, float h,
+                                          float opacity,
+                                          const FilterChainEntry* chain,
+                                          int count) {
+        // Fallback: collapse to single-blur save_layer (prior behavior
+        // for platforms without filter-chain support).
+        float blur = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            if (chain[i].kind == FilterChainEntry::Kind::blur) {
+                blur += chain[i].amount;
+            } else if (chain[i].kind == FilterChainEntry::Kind::opacity) {
+                opacity *= chain[i].amount;
+            }
+        }
+        save_layer(x, y, w, h, opacity, blur);
+    }
+
     // ── Text ─────────────────────────────────────────────────────────────
     virtual void set_font(const std::string& family, float size) = 0;
     virtual void set_text_align(TextAlign align) = 0;

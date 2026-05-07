@@ -20,12 +20,12 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | CHOC | f0f5cdf5a938 | ISC | JS engine abstraction, MIDI utilities, audio helpers | multiple | 2026-03-24 |
 | CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | cpp-httplib | vendored-snapshot | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
-| Dawn | chrome/m144 | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-03-30 |
+| Dawn | chrome/m144 deps @ 6acf6ef3fe23 | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-03-30 |
 | DRACO | 1.5.7 | Apache-2.0 | Optional glTF mesh decompression; fetched via FetchContent only when `PULP_ENABLE_DRACO=ON` (default OFF) | pulp-render | 2026-04-21 |
 | dr_libs | vendored-snapshot | Public domain (Unlicense) / MIT-0 | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav) | pulp-audio | 2026-04-07 |
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
-| Inter | vendored-snapshot | SIL OFL 1.1 | Embedded UI font (Inter-Regular.ttf) | pulp-view | 2026-04-21 |
-| JetBrains Mono | vendored-snapshot | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf) | pulp-view | 2026-04-21 |
+| Inter | 4.001;git-9221beed3 | SIL OFL 1.1 | Embedded UI font (Inter-Regular.ttf, SHA-256 `40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82`) | pulp-view | 2026-04-21 |
+| JetBrains Mono | 2.304 | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf, SHA-256 `a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f`) | pulp-view | 2026-04-21 |
 | lcov_cobertura | 2.1.2 | Apache-2.0 | LCOV→Cobertura converter; vendored as `tools/scripts/lcov_cobertura.py` for the coverage pipeline (single-file Python script, no pip dependency in CI) | tooling | 2026-04-21 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | Material Design Icons | bundled-with-mkdocs-material | Apache-2.0 | Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site | docs | 2026-04-22 |
@@ -47,7 +47,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | react-reconciler | ^0.29.2 | MIT | Reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | scheduler | ^0.23.2 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
-| Skia | chrome/m144 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder). Call sites use the `SkSpan`-based `SkFont` API so Pulp compiles whether the Skia build defines `SK_SUPPORT_UNSPANNED_APIS` or not (#543). | pulp-canvas, pulp-render | 2026-03-25 |
+| Skia | chrome/m144 @ cd0c5f445516 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder). HarfBuzz (`08b52ae2e449`) and ICU (`364118a1d9da`) are locked through the Skia DEPS file for deterministic text shaping. Call sites use the `SkSpan`-based `SkFont` API so Pulp compiles whether the Skia build defines `SK_SUPPORT_UNSPANNED_APIS` or not (#543). | pulp-canvas, pulp-render | 2026-03-25 |
 | three.js | 077dd13c0e86 | MIT | Native WebGPU bridge demos and tests (optional, fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON) | pulp-render | 2026-04-21 |
 | VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |

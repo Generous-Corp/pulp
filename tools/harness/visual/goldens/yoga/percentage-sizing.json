@@ -1,0 +1,78 @@
+{
+  "schema_version": "visual-layout-snapshot-v1",
+  "surface": "yoga",
+  "fixture": "yoga/percentage-sizing",
+  "entry": "percentage-sizing",
+  "viewport": {
+    "w": 300,
+    "h": 200
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 300,
+        "h": 200
+      },
+      "z_order": {
+        "paint": 0,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 300,
+          "h": 200
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 300,
+            "h": 200
+          }
+        }
+      ]
+    },
+    {
+      "id": "percent-child",
+      "type": "View",
+      "rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 150,
+        "h": 50
+      },
+      "z_order": {
+        "paint": 1,
+        "z_index": 0
+      },
+      "clipping": {
+        "rect": {
+          "x": 0.0,
+          "y": 0.0,
+          "w": 300,
+          "h": 200
+        }
+      },
+      "measured_text_boxes": [],
+      "hit_regions": [
+        {
+          "rect": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 150,
+            "h": 50
+          }
+        }
+      ]
+    }
+  ]
+}

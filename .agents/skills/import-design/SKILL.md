@@ -213,6 +213,11 @@ pulp import-design --from claude --file design.html --no-emit-classnames
 
 Use `--dry-run` to preview without writing files.
 
+Detect-only directory inputs (`pulp import-design --detect-only --directory <dir>`) prefer
+`code.html`, then `index.html`, then the first sorted `.html` / `.htm` payload. Keep fixture
+tests on that deterministic order; raw `std::filesystem::directory_iterator` order differs
+between macOS and Linux.
+
 ## Bridge Handler Scaffold (Claude Design only)
 
 For `--from claude`, the CLI emits a starter C++ file demonstrating how to wire `pulp::view::EditorBridge` so the imported design's editor JS can `postMessage` into the C++ processor:
