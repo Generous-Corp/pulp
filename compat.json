@@ -1129,19 +1129,24 @@
       "issue": ""
     },
     "css/clipPath": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "setClipPath(id, svg_path_d) -> View::clip_path_ -> Canvas::clip_path_svg (SkPath::FromSVGString on Skia)",
+      "supportedValues": [
+        "path(\"M ... L ... Z\")",
+        "none"
+      ],
       "unsupportedValues": [
-        "polygon",
-        "circle",
-        "ellipse",
-        "inset",
+        "polygon()",
+        "circle()",
+        "ellipse()",
+        "inset()",
         "url(#clip)"
       ],
-      "tests": [],
-      "notes": "Custom clip paths not supported.",
-      "issue": ""
+      "tests": [
+        "test/test_widget_bridge.cpp"
+      ],
+      "notes": "pulp #1515 — `path(\"...\")` form only. Skia parses the SVG-path-d via SkPath::FromSVGString and installs it as the canvas clip before children paint; CG / recording-only backends silently no-op (path parsing is Skia-side). URL refs and named shape forms are deferred to a follow-up paint slice.",
+      "issue": "1515"
     },
     "css/color": {
       "status": "supported",
@@ -2134,26 +2139,48 @@
       "issue": ""
     },
     "css/mask": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "setMask(id, shorthand) -> View::mask_ + setMaskImage extracted longhand -> View::mask_image_",
+      "supportedValues": [
+        "none",
+        "url(...)",
+        "linear-gradient(...)",
+        "radial-gradient(...)"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [
+        "mask-mode",
+        "mask-position",
+        "mask-size",
+        "mask-repeat",
+        "mask-origin",
+        "mask-clip",
+        "mask-composite"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp"
+      ],
+      "notes": "pulp #1515 — storage-only; the value round-trips through View::mask() / View::mask_image() but the saveLayer + SkBlendMode::kDstIn shader composite is a follow-up paint slice. The shorthand parser in web-compat-style-decl.js extracts the first url() / *-gradient() substring and forwards to setMaskImage; remaining sub-properties (mode / position / size / repeat / origin / clip / composite) are deferred.",
+      "issue": "1515"
     },
     "css/maskImage": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "setMaskImage(id, value) -> View::mask_image_",
+      "supportedValues": [
+        "none",
+        "url(...)",
+        "linear-gradient(...)",
+        "radial-gradient(...)"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [
+        "image-set()",
+        "cross-fade()",
+        "paint(...)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp"
+      ],
+      "notes": "pulp #1515 — storage-only; the saveLayer + SkBlendMode::kDstIn shader composite that consumes this slot is a follow-up paint slice. The value round-trips through View::mask_image() so harness tests can assert the bridge accepts it.",
+      "issue": "1515"
     },
     "css/maxHeight": {
       "status": "partial",

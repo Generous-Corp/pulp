@@ -204,8 +204,25 @@ export interface StyleProps {
     /// actual bridge surface; broader CSS spec values are documented as
     /// over-claims in the catalog.)
     backfaceVisibility?: 'hidden' | 'visible';
+    /// CSS `clip-path` (pulp #1515). Only the `path("...")` form is
+    /// honored at paint time today — Skia parses the SVG-path-d
+    /// string via `SkPath::FromSVGString` and installs the clip
+    /// before children paint. URL refs (`url(#clip-id)`) and named
+    /// shape forms (`circle()`, `inset()`, `polygon()`, `ellipse()`)
+    /// are deferred and forwarded as an empty slot; `none` / empty
+    /// clears.
+    clipPath?: string;
     cursor?: string;
     filter?: string;
+    /// CSS `mask` shorthand (pulp #1515). Storage-only today; the
+    /// `mask-image` longhand is extracted from the shorthand value
+    /// and forwarded to the bridge alongside the shorthand itself.
+    /// The saveLayer + SkBlendMode::kDstIn shader composite is a
+    /// follow-up paint slice.
+    mask?: string;
+    /// CSS `mask-image` (pulp #1515). Storage-only today; the
+    /// shader composite is a follow-up paint slice.
+    maskImage?: string;
     /// pulp #1549 — RN `mixBlendMode` (New Architecture only).
     /// Forwards to `setMixBlendMode(id, kw)`; the bridge maps the W3C
     /// blend-mode keyword set onto the canvas `BlendMode` enum and the

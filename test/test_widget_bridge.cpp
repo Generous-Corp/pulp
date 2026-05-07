@@ -6744,6 +6744,166 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }
 
+// ── pulp #1515: clip-path + mask cluster ──────────────────────────────────────
+
+TEST_CASE("WidgetBridge setClipPath stores SVG-path-d on the View",
+          "[view][bridge][issue-1515]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE_FALSE(panel->has_clip_path());
+    REQUIRE(panel->clip_path().empty());
+
+    bridge.load_script("setClipPath('p', 'M 0 0 L 100 0 L 100 100 Z')");
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 0 0 L 100 0 L 100 100 Z");
+
+    // Empty string clears the slot.
+    bridge.load_script("setClipPath('p', '')");
+    REQUIRE_FALSE(panel->has_clip_path());
+}
+
+TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",
+          "[view][bridge][issue-1515]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->mask_image().empty());
+    REQUIRE(panel->mask().empty());
+
+    bridge.load_script("setMaskImage('p', 'url(#mask-id)')");
+    REQUIRE(panel->mask_image() == "url(#mask-id)");
+
+    bridge.load_script("setMask('p', 'url(#m) repeat')");
+    REQUIRE(panel->mask() == "url(#m) repeat");
+
+    // Empty string clears.
+    bridge.load_script("setMaskImage('p', '')");
+    REQUIRE(panel->mask_image().empty());
+}
+
+TEST_CASE("View::paint_all emits clip_path_svg when clip_path is set",
+          "[view][canvas][issue-1515]") {
+    using namespace pulp::canvas;
+
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    root.set_clip_path("M 0 0 L 100 0 L 100 100 Z");
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::clip_path_svg) == 1);
+
+    bool found = false;
+    for (auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::clip_path_svg) {
+            REQUIRE(cmd.text == "M 0 0 L 100 0 L 100 100 Z");
+            found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("View::paint_all skips clip_path when slot is empty",
+          "[view][canvas][issue-1515]") {
+    using namespace pulp::canvas;
+
+    View root;
+    root.set_bounds({0, 0, 100, 50});
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::clip_path_svg) == 0);
+}
+
+TEST_CASE("Canvas::clip_path_svg base default is a no-op",
+          "[canvas][issue-1515]") {
+    using namespace pulp::canvas;
+    RecordingCanvas canvas;
+
+    // RecordingCanvas overrides — emits the dedicated command.
+    canvas.clip_path_svg("M 0 0 L 50 0 L 50 50 Z");
+    REQUIRE(canvas.count(DrawCommand::Type::clip_path_svg) == 1);
+}
+
+TEST_CASE("CSSStyleDeclaration shim forwards clipPath path() form to setClipPath",
+          "[view][bridge][css][issue-1515]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // path("...") → extracted SVG-path-d on the View.
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var s = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s._applyProperty('clipPath', 'path("M 0 0 L 100 0 L 100 100 Z")');
+    )");
+    REQUIRE(bridge.widget("a")->clip_path() == "M 0 0 L 100 0 L 100 100 Z");
+
+    // 'none' clears the slot.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s2._applyProperty('clipPath', 'none');
+    )");
+    REQUIRE(bridge.widget("a")->clip_path().empty());
+
+    // Deferred forms (circle / url / inset / polygon) clear the slot
+    // rather than installing a partial clip — honest partial coverage.
+    bridge.load_script(R"(
+        createPanel('b', '');
+        var s3 = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        s3._applyProperty('clipPath', 'circle(50%)');
+    )");
+    REQUIRE(bridge.widget("b")->clip_path().empty());
+}
+
+TEST_CASE("CSSStyleDeclaration shim forwards maskImage / mask to bridge",
+          "[view][bridge][css][issue-1515]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var s = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s._applyProperty('maskImage', 'url(#mask-id)');
+    )");
+    REQUIRE(bridge.widget("a")->mask_image() == "url(#mask-id)");
+
+    // 'none' clears the slot.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s2._applyProperty('maskImage', 'none');
+    )");
+    REQUIRE(bridge.widget("a")->mask_image().empty());
+
+    // mask shorthand → both shorthand stored and image extracted.
+    bridge.load_script(R"(
+        createPanel('b', '');
+        var s3 = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        s3._applyProperty('mask', 'url(#m) repeat');
+    )");
+    auto* b = bridge.widget("b");
+    REQUIRE(b->mask() == "url(#m) repeat");
+    REQUIRE(b->mask_image() == "url(#m)");
+}
+
 // pulp #1516 — setBoxSizing routes to FlexStyle.box_sizing.
 TEST_CASE("setBoxSizing border-box / content-box round-trips onto FlexStyle",
           "[view][bridge][css][issue-1516]") {

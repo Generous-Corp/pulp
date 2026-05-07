@@ -4685,6 +4685,48 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // setClipPath(id, svg_path_d) — CSS `clip-path: path("...")` (pulp
+    // #1515). Stores the SVG-path-d string on the View; paint_all()
+    // installs it as a canvas clip via Canvas::clip_path_svg. Empty
+    // string clears the slot. URL refs (`url(#id)`) and named shapes
+    // (`circle()`, `inset()`, `polygon()`) are deferred — only
+    // `path("...")` form is honored today.
+    engine_.register_function("setClipPath",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_clip_path(value);
+            return choc::value::Value();
+        });
+
+    // setMaskImage(id, value) — CSS `mask-image` (pulp #1515).
+    // Storage-only today; the saveLayer + SkBlendMode::kDstIn shader
+    // composite is a follow-up paint slice. The slot round-trips
+    // through View::mask_image() so harness tests can assert the
+    // bridge accepted the value.
+    engine_.register_function("setMaskImage",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_mask_image(value);
+            return choc::value::Value();
+        });
+
+    // setMask(id, shorthand) — CSS `mask` shorthand (pulp #1515).
+    // Stores the verbatim shorthand on the View; the JS shim
+    // (web-compat-style-decl.js) is responsible for fanning out into
+    // the maskImage longhand. Storage-only today.
+    engine_.register_function("setMask",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_mask(value);
+            return choc::value::Value();
+        });
+
     // pulp #1549 — setMixBlendMode(id, "multiply") for CSS / RN
     // `mix-blend-mode`. Maps the W3C blend-mode keyword set to the
     // canvas BlendMode enum so the View paint path can pass it

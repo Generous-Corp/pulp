@@ -283,6 +283,18 @@ public:
     /// backends without a path builder remain unaffected.
     virtual void clip() {}
 
+    /// CSS `clip-path: path("...")` — intersect the current clip with
+    /// an SVG-path-d string (pulp #1515). Skia maps to
+    /// `SkPath::FromSVGString` + `SkCanvas::clipPath`. RecordingCanvas
+    /// captures a `clip_path_svg` command for tests; backends without a
+    /// path parser fall back to a no-op so callers can invoke it
+    /// unconditionally without breaking save/restore bookkeeping. The
+    /// caller is responsible for save()/restore() balancing — typical
+    /// usage is `save(); clip_path_svg("M..."); ...children...; restore();`.
+    virtual void clip_path_svg(const std::string& svg_path_d) {
+        (void)svg_path_d;
+    }
+
     // ── Fill and stroke style ────────────────────────────────────────────
     virtual void set_fill_color(Color c) = 0;
     virtual void set_stroke_color(Color c) = 0;
@@ -1016,6 +1028,13 @@ struct DrawCommand {
         set_stroke_pattern,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
+        // ── pulp #1515: CSS clip-path: path("...") ────────────────────
+        // Recording target captures the SVG-path-d string in `text` so
+        // tests can assert that View::paint_all installs the clip
+        // before painting children. Skia parses via SkParsePath /
+        // SkPath::FromSVGString; backends without a path parser
+        // degrade to a no-op (no clip applied).
+        clip_path_svg,         ///< SVG path data in `text`
         // ── issue-929: real clearRect that replaces pixels ────────────
         clear_rect,          ///< clear rect, x/y/w/h in f[0..3]
         // ── issue-965: Canvas2D path API recording ────────────────────
@@ -1082,6 +1101,7 @@ public:
     AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
+    void clip_path_svg(const std::string& svg_path_d) override;
     void set_blend_mode(BlendMode mode) override;
     void set_fill_color(Color c) override;
     void set_stroke_color(Color c) override;

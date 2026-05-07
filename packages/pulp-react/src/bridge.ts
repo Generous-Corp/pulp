@@ -219,6 +219,20 @@ declare global {
     /// Declared as a const so consumers can branch on `typeof layout`.
     const layout: (() => void) | undefined;
 
+    // ── pulp #1515 — CSS clip-path / mask cluster ──────────────────
+    /// CSS `clip-path: path("...")`. Bridge accepts the SVG-path-d
+    /// string; Skia parses via `SkPath::FromSVGString` and installs
+    /// it as the canvas clip before children paint. URL refs and
+    /// named shape forms are deferred. Optional at runtime so older
+    /// bridges still link.
+    const setClipPath: ((id: string, svgPathD: string) => void) | undefined;
+    /// CSS `mask-image`. Storage-only today; shader composite paint
+    /// slice is the follow-up. Optional at runtime.
+    const setMaskImage: ((id: string, value: string) => void) | undefined;
+    /// CSS `mask` shorthand. Stored verbatim alongside the
+    /// `maskImage` longhand the JS shim extracts. Optional at runtime.
+    const setMask: ((id: string, shorthand: string) => void) | undefined;
+
     // ── Overlay click routing (pulp #1148) ──────────────────────────
     /// Claim the view as the active click-eligible overlay so the
     /// platform window host short-circuits hit-testing for clicks that
@@ -339,6 +353,8 @@ export function createMockBridge(): MockBridge {
         'setBoxSizing',
         // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
         'setGrid',
+        // pulp #1515 — CSS clip-path / mask cluster.
+        'setClipPath', 'setMaskImage', 'setMask',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

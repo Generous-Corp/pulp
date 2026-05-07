@@ -229,6 +229,20 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
+    // CSS `clip-path: path("...")` (pulp #1515). The View's local
+    // coordinate space is (0,0)→(bounds_.width, bounds_.height) at
+    // this point — the SVG-path-d string is interpreted in that
+    // space, matching CSS where `clip-path` is anchored at the
+    // border-box origin. The Skia backend parses via
+    // SkPath::FromSVGString and intersects the canvas clip;
+    // RecordingCanvas captures a `clip_path_svg` command for tests;
+    // backends without a path parser silently no-op. The clip is
+    // released by the matching `canvas.restore()` at the end of
+    // paint_all (no separate save() needed — the outer
+    // `canvas.save()` at function entry already covers it).
+    if (!clip_path_.empty())
+        canvas.clip_path_svg(clip_path_);
+
     // Per-corner border-radius (issue-1026): when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
     // has been called we paint backgrounds and the border via a path
