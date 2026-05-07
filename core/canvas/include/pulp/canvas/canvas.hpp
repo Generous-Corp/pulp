@@ -377,6 +377,46 @@ public:
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
 
+    // ── Stroke gradients (pulp Wave 3 c2d.7) ─────────────────────────────
+    //
+    // Mirror of the fill-gradient surface for `ctx.strokeStyle =
+    // createLinearGradient(...) | createRadialGradient(...) |
+    // createConicGradient(...)`. Defaults degrade to the first-stop
+    // colour via `set_stroke_color`, matching the prior pre-Wave-3
+    // behavior; SkiaCanvas overrides with real `SkGradientShader`
+    // shaders stored on `stroke_shader_` so subsequent stroke paths
+    // (stroke_rect / stroke_current_path / stroke_text) pick the
+    // gradient up via `apply_stroke_state`.
+    virtual void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                             const Color* colors, const float* positions,
+                                             int count) {
+        if (count > 0) set_stroke_color(colors[0]); // fallback: first color
+    }
+
+    virtual void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                             const Color* colors, const float* positions,
+                                             int count) {
+        if (count > 0) set_stroke_color(colors[0]);
+    }
+
+    /// Two-circle radial gradient on stroke (mirrors fill counterpart).
+    virtual void set_stroke_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_stroke_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
+    virtual void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                            const Color* colors, const float* positions,
+                                            int count) {
+        if (count > 0) set_stroke_color(colors[0]);
+    }
+
+    /// Clear stroke gradient/pattern shader, restore solid stroke color.
+    virtual void clear_stroke_gradient() {}
+
     /// pulp #1434 bridge-thin gap-fill — Canvas2D `ctx.createPattern`.
     /// Tile mode per axis: `repeat` mirrors Skia's `SkTileMode::kRepeat`,
     /// `no_repeat` mirrors `SkTileMode::kDecal`. Spec values map as:
@@ -1078,6 +1118,22 @@ struct DrawCommand {
         // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
         set_fill_pattern,
         set_stroke_pattern,
+        // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle =
+        // createLinearGradient(...) | createRadialGradient(...) |
+        // createConicGradient(...)`. Mirrors the fill-side gradient cmds
+        // so canvas2d harness tests can assert that the bridge plumbed
+        // the stroke-gradient setter at the right point in the stream.
+        // Layout matches the fill counterparts: linear (x0,y0)→(x1,y1)
+        // packed as f[0..3]; radial (cx,cy,r) as (f[0],f[1],f[2]); conic
+        // (cx,cy,startAngle) as (f[0],f[1],f[2]); two-circle (x0,y0,r0,
+        // x1,y1,r1) as (f[0]..f[5]). Stops in `floats` interleaved as
+        // [pos0, r0, g0, b0, a0, pos1, r1, g1, b1, a1, ...] — same shape
+        // RecordingCanvas already uses for fill gradients.
+        set_stroke_gradient_linear,
+        set_stroke_gradient_radial,
+        set_stroke_gradient_radial_two_circles,
+        set_stroke_gradient_conic,
+        clear_stroke_gradient,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── pulp #1515: CSS clip-path: path("...") ────────────────────
@@ -1235,6 +1291,26 @@ public:
     void set_stroke_pattern(const std::string& image_src,
                             PatternTileMode tile_x,
                             PatternTileMode tile_y) override;
+
+    // pulp Wave 3 c2d.7 — capture stroke-gradient setter intents so the
+    // canvas2d harness can assert the bridge plumbed `ctx.strokeStyle =
+    // createLinearGradient(...)` (etc.) end-to-end. Stops are flattened
+    // into `floats` as [pos0, r0, g0, b0, a0, pos1, r1, g1, b1, a1, ...]
+    // — same shape as set_line_dash but per-stop instead of per-interval.
+    void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                    const Color* colors, const float* positions,
+                                    int count) override;
+    void clear_stroke_gradient() override;
 
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape

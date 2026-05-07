@@ -6664,16 +6664,14 @@
       "issue": "1346"
     },
     "canvas2d/arcTo": {
-      "status": "partial",
-      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> conservative lineTo(x1,y1) + lineTo(x2,y2). Radius is currently ignored.",
+      "status": "supported",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> Canvas::arc_to (Skia: SkPath::arcTo(p1,p2,r) — closed-form tangent-arc; CG: CGPathAddArcToPoint). Radius is honoured per HTML5 spec, including the degenerate radius<=0 -> lineTo(x1,y1) collapse.",
       "supportedValues": [
-        "any arcTo (radius ignored)"
+        "any arcTo with proper tangent-arc geometry"
       ],
-      "unsupportedValues": [
-        "geometrically-correct arcTo with the proper radius-tangent computation"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. Used by roundRect and FilterBank's marquee corners; fidelity loss is minimal for those use cases. File a follow-up if a plugin needs spec-compliant arcTo.",
+      "notes": "Wave 3 c2d.5 — pulp #1521 native arc path uses SkPath::arcTo's tangent-arc overload (skia_canvas.cpp:arc_to) and CGPathAddArcToPoint (cg_canvas.mm:arc_to). Radius is no longer dropped; the prior partial labelling reflected pre-#1521 behaviour.",
       "issue": "1346"
     },
     "canvas2d/bezierCurveTo": {
@@ -6871,15 +6869,16 @@
       "issue": "1346"
     },
     "canvas2d/fillText": {
-      "status": "partial",
-      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color). maxWidth is ignored; gradient fillStyle uses the first stop's color.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "maxWidth arg (ignored)",
-        "gradient fillStyle (degrades to first-stop color)"
+      "status": "supported",
+      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). maxWidth squeezes via fill_text_with_max_width (#1525). Gradient fillStyle propagates onto the glyph paint via current_fill_paint() (Wave 3 c2d.6) so SkGradientShader-backed text matches Blink/WebKit.",
+      "supportedValues": [
+        "all CSS color strings",
+        "linear / radial / two-circle / conic gradient fillStyle",
+        "maxWidth horizontal-scale squeeze (Skia + CG)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. canvasSetFont parses 'Npx Family' from the JS-side font string.",
+      "notes": "Wave 3 c2d.6 — replaced make_solid_fill_paint(fill_color_) with current_fill_paint() in SkiaCanvas::fill_text and SkiaCanvas::fill_text_sdf so an active gradient_shader_ flows onto the glyph paint. maxWidth was already wired via #1525.",
       "issue": "1346"
     },
     "canvas2d/strokeText": {
@@ -7065,16 +7064,15 @@
       "issue": ""
     },
     "canvas2d/strokeStyle": {
-      "status": "partial",
-      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient. Bridge has no stroke-gradient setter \u2014 gradient strokeStyle degrades to the first stop's color.",
+      "status": "supported",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient (linear / radial / two-circle / conic). Wave 3 c2d.7 added canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient bridge fns; the JS shim _applyStrokeStyle dispatches per-kind. SkiaCanvas stores the resulting SkShader on stroke_shader_, which apply_stroke_state attaches to every stroke paint (stroke_rect, stroke_current_path, stroke_text, stroke_circle, stroke_arc).",
       "supportedValues": [
-        "CSS color strings"
+        "CSS color strings",
+        "CanvasGradient (linear, radial, two-circle, conic) on stroke"
       ],
-      "unsupportedValues": [
-        "CanvasGradient on stroke (degrades to first-stop color)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Bridge could expose canvasSetStrokeLinearGradient if a plugin needs gradient strokes.",
+      "notes": "Wave 3 c2d.7 \u2014 bridge fns + Canvas::set_stroke_gradient_* virtual + SkiaCanvas SkGradientShader::Make* impl + RecordingCanvas capture overrides + JS shim _applyStrokeStyle gradient routing. Stroke pattern remains on the same stroke_shader_ field (mutually exclusive per spec).",
       "issue": ""
     },
     "canvas2d/lineWidth": {

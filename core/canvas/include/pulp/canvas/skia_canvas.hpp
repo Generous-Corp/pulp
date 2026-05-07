@@ -131,6 +131,25 @@ public:
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
 
+    // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle = createLinearGradient(...)`
+    // (and radial / two-circle / conic counterparts). Routes through
+    // SkGradientShader::Make* and stores the resulting shader on
+    // `stroke_shader_`, which `apply_stroke_state` already attaches to
+    // every stroke paint. Mirrors the fill-side surface so the bridge
+    // can expose `canvasSetStrokeLinearGradient` etc. without inventing
+    // a separate paint pipeline.
+    void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                     const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                     const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                    const Color* colors, const float* positions, int count) override;
+    void clear_stroke_gradient() override;
+
     // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
     // Routes through SkShader::MakeImage with SkTileMode per axis.
     // Stored on the same gradient_shader_ field used by gradient fills

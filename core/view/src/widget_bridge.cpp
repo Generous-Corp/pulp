@@ -5661,6 +5661,89 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp Wave 3 c2d.7 — `ctx.strokeStyle = createLinearGradient(...)`.
+    // Mirror of canvasSetLinearGradient targeting the new
+    // `Canvas::set_stroke_gradient_linear` virtual. The JS shim's
+    // _applyStrokeStyle dispatches here when the bridge fn is present;
+    // older binaries fall back to the first-stop solid colour without
+    // crashing. Stops are color/position pairs starting at arg index 5,
+    // matching the fill counterpart so the JS shim shares its packing
+    // logic.
+    engine_.register_function("canvasSetStrokeLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_linear;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.x2 = (float)args.get<double>(3, 0); cmd.y2 = (float)args.get<double>(4, 1);
+            for (int i = 5; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Single-circle radial. Args: (id, cx, cy, radius, color1, pos1, ...).
+    engine_.register_function("canvasSetStrokeRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_radial;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 50);
+            for (int i = 4; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Two-circle radial. Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, ...).
+    engine_.register_function("canvasSetStrokeRadialGradientTwoCircles",
+            [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd;
+            cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles;
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            cmd.x2 = (float)args.get<double>(4, 0);
+            cmd.y2 = (float)args.get<double>(5, 0);
+            cmd.w  = (float)args.get<double>(6, 50);
+            for (int i = 7; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Conic / sweep. Args: (id, cx, cy, startAngle, color1, pos1, ...).
+    engine_.register_function("canvasSetStrokeConicGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_gradient_conic;
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            for (int i = 4; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Reset stroke shader → solid stroke colour.
+    engine_.register_function("canvasClearStrokeGradient", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_stroke_gradient;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     // pulp #1434 bridge-thin gap-fill — ctx.createConicGradient. Skia
     // already exposes set_fill_gradient_conic via SkGradientShader::MakeSweep
     // (skia_canvas.cpp line ~917); CG degrades to the first-stop colour.

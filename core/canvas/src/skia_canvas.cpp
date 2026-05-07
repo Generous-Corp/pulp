@@ -938,17 +938,17 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
     if (!font.getTypeface()) return;
 
-    // Text glyphs use solid color today; gradient text-fill is a separate
-    // Canvas2D `fillText` path (#1350 scoped to shape fills only).
-    auto paint = make_solid_fill_paint(fill_color_);
-    // issue-1434 batch 7 — Canvas2D shadow* applies to text fills too,
-    // matching the spec's "the shadow effect […] is applied to all
-    // [drawing] methods" language. Shape and stroke paths handle their
-    // own apply_shadow_filter call sites; text gets the same treatment
-    // here so `ctx.shadowBlur = 4; ctx.fillText(...)` produces a blurred
-    // text glow on the rasterised output.
-    apply_shadow_filter(paint);
-    apply_filter(paint);
+    // pulp Wave 3 c2d.6 — gradient (and pattern) fillStyle on text. Route
+    // through current_fill_paint() so any active gradient_shader_ flows
+    // onto the glyph paint. Without this, ctx.fillStyle =
+    // createLinearGradient(...); ctx.fillText('Hi', x, y) silently
+    // degraded to the first stop colour. The shader's geometry maps in
+    // device space, so the gradient stretches across the rendered glyphs
+    // exactly like Blink / WebKit. current_fill_paint() also folds in
+    // the sticky Canvas2D shadow* state and the CSS filter chain (issue-
+    // 1434 batch 7 / pulp #1520) so text honors `ctx.shadowBlur` and
+    // `ctx.filter` in the same call.
+    auto paint = current_fill_paint();
 
 #ifdef PULP_HAS_TEXT_SHAPING
     // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
@@ -1231,9 +1231,14 @@ void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
     // Draw each glyph as a textured quad with the SDF alpha channel.
     // The smoothstep is applied per-pixel by Skia's shader pipeline
     // when we use kAlpha_8 — we just draw with the fill color's paint.
-    // Text glyphs use solid color today; gradient text-fill is a separate
-    // Canvas2D `fillText` path (#1350 scoped to shape fills only).
-    auto paint = make_solid_fill_paint(fill_color_);
+    //
+    // pulp Wave 3 c2d.6 — gradient/pattern fillStyle on SDF-drawn text.
+    // Mirror the fill_text() update: route through current_fill_paint()
+    // so an active gradient_shader_ tints the glyph quad consistently
+    // with the shape-fill paths. The SDF channel is sampled out of the
+    // alpha-only atlas image; the paint shader supplies the colour, so
+    // gradients composite identically to the Skia-shaped text path.
+    auto paint = current_fill_paint();
     for (auto& [g, x_off] : draws) {
         float gx = draw_x + x_off + g->bearing_x * scale;
         float gy = y - g->bearing_y * scale;
@@ -1505,6 +1510,63 @@ void SkiaCanvas::set_fill_gradient_radial_two_circles(
 void SkiaCanvas::clear_fill_gradient() {
     gradient_shader_ = nullptr;
     has_gradient_ = false;
+}
+
+// ── Stroke gradients (pulp Wave 3 c2d.7) ────────────────────────────────────
+//
+// Mirror of the fill-gradient setters above, targeting `stroke_shader_`.
+// `apply_stroke_state` already attaches `stroke_shader_` to the active
+// stroke paint, so every stroke path (stroke_rect, stroke_current_path,
+// stroke_text, stroke_circle, stroke_arc, ...) inherits the gradient
+// without per-call wiring. Sharing the field with the existing
+// `set_stroke_pattern` is intentional: the spec assigns one stroke
+// shader at a time — assigning a gradient replaces a prior pattern and
+// vice versa, which matches Blink / WebKit semantics.
+
+void SkiaCanvas::set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                             const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    SkPoint pts[2] = {{x0, y0}, {x1, y1}};
+    stroke_shader_ = SkGradientShader::MakeLinear(pts, sk_colors.data(), sk_pos.data(), count,
+                                                   SkTileMode::kClamp);
+}
+
+void SkiaCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
+                                             const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    stroke_shader_ = SkGradientShader::MakeRadial({cx, cy}, radius, sk_colors.data(),
+                                                   sk_pos.data(), count, SkTileMode::kClamp);
+}
+
+void SkiaCanvas::set_stroke_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    stroke_shader_ = SkGradientShader::MakeTwoPointConical(
+        {x0, y0}, r0, {x1, y1}, r1,
+        sk_colors.data(), sk_pos.data(), count, SkTileMode::kClamp);
+}
+
+void SkiaCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                            const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    float start_deg = start_angle * 180.0f / 3.14159265f;
+    stroke_shader_ = SkGradientShader::MakeSweep(cx, cy, sk_colors.data(), sk_pos.data(),
+                                                   count, SkTileMode::kClamp,
+                                                   start_deg, start_deg + 360.0f, 0, nullptr);
+}
+
+void SkiaCanvas::clear_stroke_gradient() {
+    stroke_shader_ = nullptr;
 }
 
 // ── Patterns (pulp #1434 bridge-thin gap-fill) ──────────────────────────────

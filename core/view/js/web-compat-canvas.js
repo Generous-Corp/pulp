@@ -230,12 +230,7 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
 };
 
 CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
-    // CanvasGradient on strokeStyle is rare in production code; the bridge
-    // doesn't currently expose a stroke-gradient setter, so we fall back to
-    // a solid colour pulled from the first stop. The common case (string
-    // colours) works exactly per spec.
     var ss = this.strokeStyle;
-    var colorStr = "";
     // pulp #1434 — CanvasPattern as strokeStyle. If the bridge exposes
     // canvasSetStrokePattern (Skia path), flush the pattern; otherwise
     // fall through to the solid-fallback below (CG path).
@@ -245,17 +240,68 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         this._activeStrokeKind = "pattern";
         return;
     }
+    // pulp Wave 3 c2d.7 — gradient on strokeStyle. Mirror of
+    // _applyFillStyle: prefer the per-kind stroke-gradient bridge fn
+    // when present (Skia / future CG impls); fall back to the
+    // first-stop solid colour for binaries without the bridge fn so JS
+    // hot-reload doesn't crash.
+    if (ss && ss._kind === "linear" && typeof canvasSetStrokeLinearGradient === "function") {
+        var lp = ss._params, ls = ss._stops;
+        var largs = [this._id, lp.x0, lp.y0, lp.x1, lp.y1];
+        for (var li = 0; li < ls.length; ++li) { largs.push(ls[li].color); largs.push(ls[li].offset); }
+        canvasSetStrokeLinearGradient.apply(null, largs);
+        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._activeStrokeKind = "gradient";
+        return;
+    }
+    if (ss && ss._kind === "radial") {
+        var rp = ss._params, rs = ss._stops;
+        if (typeof canvasSetStrokeRadialGradientTwoCircles === "function") {
+            var rargs = [this._id, rp.x0, rp.y0, rp.r0, rp.x1, rp.y1, rp.r1];
+            for (var ri = 0; ri < rs.length; ++ri) { rargs.push(rs[ri].color); rargs.push(rs[ri].offset); }
+            canvasSetStrokeRadialGradientTwoCircles.apply(null, rargs);
+            if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+            this._activeStrokeKind = "gradient";
+            return;
+        }
+        if (typeof canvasSetStrokeRadialGradient === "function") {
+            var sargs = [this._id, rp.x1, rp.y1, rp.r1];
+            for (var si = 0; si < rs.length; ++si) { sargs.push(rs[si].color); sargs.push(rs[si].offset); }
+            canvasSetStrokeRadialGradient.apply(null, sargs);
+            if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+            this._activeStrokeKind = "gradient";
+            return;
+        }
+    }
+    if (ss && ss._kind === "conic" && typeof canvasSetStrokeConicGradient === "function") {
+        var cp = ss._params, cs = ss._stops;
+        var cargs = [this._id, cp.cx, cp.cy, cp.startAngle];
+        for (var ci = 0; ci < cs.length; ++ci) { cargs.push(cs[ci].color); cargs.push(cs[ci].offset); }
+        canvasSetStrokeConicGradient.apply(null, cargs);
+        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._activeStrokeKind = "gradient";
+        return;
+    }
+    // Fallback: gradient bridge fn missing (older binary), or
+    // CanvasPattern with no stroke-pattern bridge. Pull a solid
+    // colour — first stop for gradients, neutral grey for unsupported
+    // patterns — so strokes still render visibly.
+    var colorStr = "";
     if (ss && (ss._kind === "linear" || ss._kind === "radial" || ss._kind === "conic")) {
         colorStr = (ss._stops && ss._stops.length > 0) ? ss._stops[0].color : "#fff";
         this._activeStrokeKind = "gradient";
     } else if (ss && ss._kind === "pattern") {
-        // No stroke-pattern bridge fn — degrade to a neutral fill colour
-        // so strokes still render visibly. Spec: the *pattern* attribute
-        // is technically supported, but visual fidelity falls back.
         colorStr = "#888";
         this._activeStrokeKind = "pattern";
     } else {
         colorStr = String(ss == null ? "" : ss);
+        // Solid-colour assignment after a gradient: clear any active
+        // stroke shader so the next stroke uses set_stroke_color cleanly
+        // (mirrors fillStyle's canvasClearGradient flush).
+        if (this._activeStrokeKind === "gradient" &&
+            typeof canvasClearStrokeGradient === "function") {
+            canvasClearStrokeGradient(this._id);
+        }
         this._activeStrokeKind = "color";
     }
     if (typeof canvasSetStrokeColor === "function") canvasSetStrokeColor(this._id, colorStr);
@@ -1081,9 +1127,13 @@ CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
     this._applyStrokeStyle();
     var color = this.strokeStyle;
     if (color && color._kind) {
-        // Colour gradients on strokeStyle aren't bridged (the
-        // ##stroke-no-gradient gotcha) — degrade to first-stop colour for
-        // parity with fillText's behaviour.
+        // pulp Wave 3 c2d.7 — strokeStyle gradient is bridged through
+        // _applyStrokeStyle's per-kind setter (canvasSetStrokeLinearGradient,
+        // etc.), which populates stroke_shader_ on the Skia canvas. The
+        // colour we pass to canvasStrokeText is only used as a solid
+        // fallback if stroke_shader_ is null at paint time, so we still
+        // pull the first stop here for backwards-compat / pattern
+        // fallback. apply_stroke_state will prefer the shader when set.
         color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
     }
     var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");

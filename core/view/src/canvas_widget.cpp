@@ -63,6 +63,11 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_fill_pattern: return "set_fill_pattern";
         case CanvasDrawCmd::Type::set_stroke_pattern: return "set_stroke_pattern";
         case CanvasDrawCmd::Type::clear_fill_gradient: return "clear_fill_gradient";
+        case CanvasDrawCmd::Type::set_stroke_gradient_linear: return "set_stroke_gradient_linear";
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial: return "set_stroke_gradient_radial";
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles: return "set_stroke_gradient_radial_two_circles";
+        case CanvasDrawCmd::Type::set_stroke_gradient_conic: return "set_stroke_gradient_conic";
+        case CanvasDrawCmd::Type::clear_stroke_gradient: return "clear_stroke_gradient";
         case CanvasDrawCmd::Type::begin_path: return "begin_path";
         case CanvasDrawCmd::Type::move_to: return "move_to";
         case CanvasDrawCmd::Type::line_to: return "line_to";
@@ -548,6 +553,40 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_stroke_pattern(cmd.text, tx, ty);
             break;
         }
+        // pulp Wave 3 c2d.7 — stroke gradients. Same dispatch shape as
+        // the fill counterparts, targeting the new
+        // `Canvas::set_stroke_gradient_*` virtuals. SkiaCanvas overrides
+        // populate `stroke_shader_`; the base default degrades to the
+        // first-stop colour via `set_stroke_color`.
+        case CanvasDrawCmd::Type::set_stroke_gradient_linear:
+            if (!cmd.gradient_colors.empty())
+                canvas.set_stroke_gradient_linear(cmd.x, cmd.y, cmd.x2, cmd.y2,
+                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
+                    static_cast<int>(cmd.gradient_colors.size()));
+            break;
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial:
+            if (!cmd.gradient_colors.empty())
+                canvas.set_stroke_gradient_radial(cmd.x, cmd.y, cmd.extra,
+                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
+                    static_cast<int>(cmd.gradient_colors.size()));
+            break;
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles:
+            if (!cmd.gradient_colors.empty())
+                canvas.set_stroke_gradient_radial_two_circles(
+                    cmd.x, cmd.y, cmd.extra,
+                    cmd.x2, cmd.y2, cmd.w,
+                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
+                    static_cast<int>(cmd.gradient_colors.size()));
+            break;
+        case CanvasDrawCmd::Type::set_stroke_gradient_conic:
+            if (!cmd.gradient_colors.empty())
+                canvas.set_stroke_gradient_conic(cmd.x, cmd.y, cmd.extra,
+                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
+                    static_cast<int>(cmd.gradient_colors.size()));
+            break;
+        case CanvasDrawCmd::Type::clear_stroke_gradient:
+            canvas.clear_stroke_gradient();
+            break;
 
         // Clear rect (pulp #929) — replace pixels with transparent black, do
         // not SrcOver-blend a transparent fill (which is a no-op). The

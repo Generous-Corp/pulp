@@ -514,6 +514,74 @@ void RecordingCanvas::set_stroke_pattern(const std::string& image_src,
     commands_.push_back(std::move(cmd));
 }
 
+// ── Stroke gradients (pulp Wave 3 c2d.7) ────────────────────────────────────
+//
+// Capture intent only — RecordingCanvas doesn't render. Tests assert on
+// the recorded command type + geometry to prove the bridge plumbed the
+// gradient assignment through. Stops are flattened into `floats` as
+// [pos0, r0, g0, b0, a0, pos1, r1, g1, b1, a1, ...] so the original
+// stop order survives a round-trip without inventing a new payload type.
+
+namespace {
+void pack_stops(const Color* colors, const float* positions, int count,
+                std::vector<float>& out) {
+    out.reserve(out.size() + static_cast<size_t>(count) * 5);
+    for (int i = 0; i < count; ++i) {
+        out.push_back(positions[i]);
+        out.push_back(colors[i].r);
+        out.push_back(colors[i].g);
+        out.push_back(colors[i].b);
+        out.push_back(colors[i].a);
+    }
+}
+} // namespace
+
+void RecordingCanvas::set_stroke_gradient_linear(float x0, float y0,
+                                                  float x1, float y1,
+                                                  const Color* colors,
+                                                  const float* positions,
+                                                  int count) {
+    DrawCommand cmd{DrawCommand::Type::set_stroke_gradient_linear};
+    cmd.f[0] = x0; cmd.f[1] = y0; cmd.f[2] = x1; cmd.f[3] = y1;
+    pack_stops(colors, positions, count, cmd.floats);
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_stroke_gradient_radial(float cx, float cy, float radius,
+                                                  const Color* colors,
+                                                  const float* positions,
+                                                  int count) {
+    DrawCommand cmd{DrawCommand::Type::set_stroke_gradient_radial};
+    cmd.f[0] = cx; cmd.f[1] = cy; cmd.f[2] = radius;
+    pack_stops(colors, positions, count, cmd.floats);
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_stroke_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    DrawCommand cmd{DrawCommand::Type::set_stroke_gradient_radial_two_circles};
+    cmd.f[0] = x0; cmd.f[1] = y0; cmd.f[2] = r0;
+    cmd.f[3] = x1; cmd.f[4] = y1; cmd.f[5] = r1;
+    pack_stops(colors, positions, count, cmd.floats);
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                                 const Color* colors,
+                                                 const float* positions,
+                                                 int count) {
+    DrawCommand cmd{DrawCommand::Type::set_stroke_gradient_conic};
+    cmd.f[0] = cx; cmd.f[1] = cy; cmd.f[2] = start_angle;
+    pack_stops(colors, positions, count, cmd.floats);
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::clear_stroke_gradient() {
+    commands_.push_back({DrawCommand::Type::clear_stroke_gradient});
+}
+
 // ── issue-965: Canvas2D path API recording ──────────────────────────────────
 void RecordingCanvas::begin_path() {
     commands_.push_back({DrawCommand::Type::begin_path});
