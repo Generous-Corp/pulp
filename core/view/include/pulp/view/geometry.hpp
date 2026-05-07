@@ -72,6 +72,16 @@ enum class FlexDirection { row, column, row_reverse, column_reverse };
 /// to plain wrap.
 enum class FlexWrap { no_wrap, wrap, wrap_reverse };
 
+/// pulp #1516 — CSS `box-sizing`. Yoga 3.x has `YGNodeStyleSetBoxSizing`
+/// which natively honors the spec: with `border-box`, the declared
+/// width/height includes padding + border (the inner content area
+/// shrinks); with `content-box` (CSS default), padding + border are
+/// outside the declared dimensions. Web designs almost universally
+/// reset `* { box-sizing: border-box }`, so this matters more than
+/// the +1 catalog entry suggests — many imports only lay out
+/// correctly under border-box.
+enum class BoxSizing { content_box, border_box };
+
 // Flex alignment (auto_ = inherit from parent's align_items).
 // pulp #1434 (rn batch B) — added `baseline`. Yoga has YGAlignBaseline
 // natively; before this batch, RN exports emitting
@@ -285,6 +295,16 @@ struct FlexStyle {
     /// for backward compat) and the CSS keyword strings ("wrap" /
     /// "wrap-reverse" / "nowrap" / "no-wrap").
     FlexWrap flex_wrap = FlexWrap::no_wrap;
+    /// pulp #1516 — CSS `box-sizing`. Default is `border_box` to match
+    /// Yoga 3.x's own default AND pulp's prior implicit behavior (no
+    /// existing fixture / consumer was prepared for content-box layout
+    /// math, even though that's the CSS spec default). Web designs
+    /// almost universally reset to `border-box` via
+    /// `* { box-sizing: border-box }`, so this matches what consumers
+    /// pasting JSX from Figma / v0 / Claude Design HTML expect.
+    /// Setting `content-box` opts in to CSS-spec behavior:
+    /// `width = 100; padding = 10` → outer width = 120 instead of 100.
+    BoxSizing box_sizing = BoxSizing::border_box;
     int order = 0;              ///< Layout order (lower values first, default 0)
 
     /// Aspect ratio (width / height). When set, Yoga sizes the cross axis

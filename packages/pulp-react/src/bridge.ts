@@ -299,6 +299,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1516 — CSS box-sizing keyword (content-box / border-box).
+        'setBoxSizing',
         // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
         'setGrid',
         // pulp #994 — SvgPath intrinsic surface

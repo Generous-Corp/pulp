@@ -119,6 +119,15 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     else if (f.flex_wrap == FlexWrap::wrap_reverse) yoga_wrap = YGWrapWrapReverse;
     YGNodeStyleSetFlexWrap(node, yoga_wrap);
 
+    // pulp #1516 — CSS box-sizing. Yoga 3.x's native
+    // `YGNodeStyleSetBoxSizing` does the spec-correct math so we don't
+    // have to subtract padding+border from declared dimensions
+    // ourselves. Default content_box matches the CSS spec.
+    YGNodeStyleSetBoxSizing(node,
+        f.box_sizing == BoxSizing::border_box
+            ? YGBoxSizingBorderBox
+            : YGBoxSizingContentBox);
+
     // Gap
     float gap = f.gap;
     float rg = f.row_gap >= 0 ? f.row_gap : gap;

@@ -217,6 +217,10 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1516 — CSS box-sizing. Web designs almost universally
+    /// reset to `border-box` via `* { box-sizing: border-box }`;
+    /// Yoga 3.x honors the spec via YGNodeStyleSetBoxSizing.
+    boxSizing?: 'content-box' | 'border-box';
     /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
     /// StyleProps so JSX can express `display: grid` layouts directly.
     /// Bridge handles template-track parsing, named-area parsing, and

@@ -1037,16 +1037,18 @@
       "issue": ""
     },
     "css/boxSizing": {
-      "status": "missing",
-      "mapsTo": "web-compat-style-decl.js calls setBoxSizing if defined -- but the bridge does NOT register setBoxSizing",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "border-box",
-        "content-box"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js + prop-applier.ts -> setBoxSizing(id, kw) -> FlexStyle.box_sizing -> YGNodeStyleSetBoxSizing(YGBoxSizingBorderBox|ContentBox). Yoga 3.x honors the spec natively, so padding+border are subtracted from declared dimensions when border-box is set.",
+      "supportedValues": [
+        "border-box (pulp default; declared width/height includes padding+border — matches Yoga 3.x's own default and what virtually every modern web design expects)",
+        "content-box (CSS spec default; padding+border are outside declared dimensions, so a 100px-wide box with 10px padding has 120px outer width)"
       ],
-      "tests": [],
-      "notes": "Silent no-op. typeof guard in JS prevents a runtime error but the value is never honored. Yoga's box model is content-box-equivalent.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1516]"
+      ],
+      "notes": "pulp #1516 — Yoga 3.2.1's native YGNodeStyleSetBoxSizing does the spec-correct math; previously the JS shim silently no-op'd because the bridge didn't register setBoxSizing. The default is `border-box` (matches Yoga 3.x's default + pulp's implicit pre-#1516 behavior + the de-facto `* { box-sizing: border-box }` web reset). Consumers that explicitly want CSS-spec content-box semantics can opt in via `boxSizing: 'content-box'`. High-leverage change for design imports — Figma / v0 / Claude Design HTML exports often emit explicit boxSizing declarations that previously dropped silently.",
+      "issue": "1516"
     },
     "css/captionSide": {
       "status": "wontfix",

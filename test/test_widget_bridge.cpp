@@ -6181,6 +6181,155 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }
 
+// pulp #1516 — setBoxSizing routes to FlexStyle.box_sizing.
+TEST_CASE("setBoxSizing border-box / content-box round-trips onto FlexStyle",
+          "[view][bridge][css][issue-1516]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        setBoxSizing('a', 'border-box');
+        setBoxSizing('b', 'content-box');
+    )");
+    REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::border_box);
+    REQUIRE(bridge.widget("b")->flex().box_sizing == BoxSizing::content_box);
+
+    // Unknown keyword falls back to content-box. The default for an
+    // unset slot is border-box (matches Yoga 3.x and pulp's implicit
+    // pre-#1516 behavior), but `setBoxSizing` with an explicit unknown
+    // keyword resolves to content-box rather than silently keeping the
+    // prior value — that way `setBoxSizing('id', 'wat')` is a clear
+    // observable rather than a quiet no-op.
+    bridge.load_script("setBoxSizing('a', 'wat')");
+    REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::content_box);
+}
+
+// pulp #1516 — CSSStyleDeclaration shim forwards camelCase boxSizing.
+TEST_CASE("CSSStyleDeclaration forwards box-sizing to bridge",
+          "[view][bridge][css][issue-1516]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var s = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s.boxSizing = 'border-box';
+    )");
+    REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::border_box);
+}
+
+// pulp #1516 — load-bearing test. Under border-box (pulp default),
+// declared width=100 + padding=10 yields outer-bounds width=100
+// (content area shrinks). Under content-box (CSS spec default), the
+// same declaration produces outer width=120 (padding adds outside).
+// Yoga 3.x's YGNodeStyleSetBoxSizing does the math.
+TEST_CASE("border-box vs content-box layout math via Yoga",
+          "[view][bridge][css][issue-1516]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('bb', '');
+        createPanel('cb', '');
+        setFlex('bb', 'width',  100);
+        setFlex('bb', 'height', 100);
+        setFlex('bb', 'padding', 10);
+        // bb stays default border-box (matches pulp's pre-#1516 implicit
+        // behavior and Yoga 3.x's own default).
+        setFlex('cb', 'width',  100);
+        setFlex('cb', 'height', 100);
+        setFlex('cb', 'padding', 10);
+        setBoxSizing('cb', 'content-box');
+    )");
+    root.layout_children();
+    auto* bb = bridge.widget("bb");
+    auto* cb = bridge.widget("cb");
+    REQUIRE(bb != nullptr);
+    REQUIRE(cb != nullptr);
+    // border-box: outer == declared (100); content area shrinks.
+    REQUIRE_THAT(bb->bounds().width,  WithinAbs(100.0f, 0.5f));
+    REQUIRE_THAT(bb->bounds().height, WithinAbs(100.0f, 0.5f));
+    // content-box: outer == declared + padding*2 (120).
+    REQUIRE_THAT(cb->bounds().width,  WithinAbs(120.0f, 0.5f));
+    REQUIRE_THAT(cb->bounds().height, WithinAbs(120.0f, 0.5f));
+}
+
+// ── pulp #1522 — Canvas2D fillRule arg threads through bridge fns ───────
+//
+// `canvasFillPath` and `canvasClip` accept an optional fillRule int
+// (0 = nonzero/winding, 1 = evenodd). The bridge stores it on
+// CanvasDrawCmd::int_val; the widget-level canvas2d shim tests in
+// test_canvas2d_shim.cpp drive ctx.fill('evenodd')/ctx.clip('evenodd')
+// end-to-end. This bridge-level test exercises the fns directly so a
+// regression in the int_val plumbing surfaces here independent of the
+// JS shim parser.
+TEST_CASE("WidgetBridge canvasFillPath / canvasClip thread fillRule int_val",
+          "[view][bridge][canvas][issue-1522]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'fillrule-canvas';
+        c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        // Drive the bridge fns directly so we exercise int_val plumbing
+        // without going through the JS shim arg parser.
+        canvasBeginPath(c._id);
+        canvasMoveTo(c._id, 0, 0);
+        canvasLineTo(c._id, 10, 0);
+        canvasLineTo(c._id, 10, 10);
+        canvasLineTo(c._id, 0, 10);
+        canvasClosePath(c._id);
+        canvasFillPath(c._id, 1);     // evenodd
+        canvasBeginPath(c._id);
+        canvasMoveTo(c._id, 0, 0);
+        canvasLineTo(c._id, 10, 0);
+        canvasLineTo(c._id, 10, 10);
+        canvasClosePath(c._id);
+        canvasFillPath(c._id);        // default (nonzero)
+        canvasBeginPath(c._id);
+        canvasMoveTo(c._id, 0, 0);
+        canvasLineTo(c._id, 10, 0);
+        canvasLineTo(c._id, 10, 10);
+        canvasClosePath(c._id);
+        canvasClip(c._id, 1);         // evenodd
+        canvasBeginPath(c._id);
+        canvasMoveTo(c._id, 0, 0);
+        canvasLineTo(c._id, 10, 0);
+        canvasLineTo(c._id, 10, 10);
+        canvasClosePath(c._id);
+        canvasClip(c._id);            // default (nonzero)
+    )");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "fillrule-canvas");
+    REQUIRE(canvas != nullptr);
+
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<int> fill_int_vals;
+    std::vector<int> clip_int_vals;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::fill_path) fill_int_vals.push_back(cmd.int_val);
+        if (cmd.type == T::clip)      clip_int_vals.push_back(cmd.int_val);
+    }
+    REQUIRE(fill_int_vals.size() == 2);
+    REQUIRE(fill_int_vals[0] == 1);   // explicit evenodd
+    REQUIRE(fill_int_vals[1] == 0);   // default nonzero
+    REQUIRE(clip_int_vals.size() == 2);
+    REQUIRE(clip_int_vals[0] == 1);   // explicit evenodd
+    REQUIRE(clip_int_vals[1] == 0);   // default nonzero
+}
+
 // ── pulp #1520 — canvasSetDirection / canvasSetFilter bridge fns ────────
 //
 // These two register_function entries are the only direct surface

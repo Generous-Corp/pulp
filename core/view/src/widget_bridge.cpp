@@ -3446,6 +3446,21 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1516 — CSS box-sizing keyword. Yoga 3.x's
+    // `YGNodeStyleSetBoxSizing` honors the spec, so we just record the
+    // enum on FlexStyle and let `build_yoga_subtree` route it through.
+    // Default `content-box` matches the CSS spec; web designs typically
+    // reset to `border-box` via `* { box-sizing: border-box }`.
+    engine_.register_function("setBoxSizing", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto kw = args.get<std::string>(1, "content-box");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        auto& f = v->flex();
+        f.box_sizing = (kw == "border-box") ? BoxSizing::border_box : BoxSizing::content_box;
+        return choc::value::Value();
+    });
+
     // Canvas drawing
     engine_.register_function("canvasClear", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, ""))))

@@ -664,6 +664,12 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Accepts the CSS keyword strings ('hidden' / 'visible' /
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
+        // pulp #1516 — CSS box-sizing. Yoga 3.x honors the spec via
+        // YGNodeStyleSetBoxSizing; consumers passing JSX
+        // `boxSizing: 'border-box'` get the standard
+        // "padding+border are inside declared dimensions" behavior.
+        // Web designs almost universally reset to `border-box`.
+        case 'boxSizing':    return call('setBoxSizing', id, value as string);
 
         // pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
         // RN's CSS-spec-equivalent logical-flow props. LTR-only fast
