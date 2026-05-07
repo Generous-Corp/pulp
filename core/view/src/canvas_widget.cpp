@@ -336,7 +336,12 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.close_path();
             break;
         case CanvasDrawCmd::Type::fill_path:
-            canvas.fill_current_path();
+            // pulp #1522 — int_val carries Canvas2D fillRule arg
+            // (0 = nonzero/winding, 1 = evenodd). Threaded from
+            // ctx.fill(rule) through canvasFillPath in widget_bridge.cpp.
+            canvas.fill_current_path(cmd.int_val == 1
+                                         ? canvas::FillRule::evenodd
+                                         : canvas::FillRule::nonzero);
             break;
         case CanvasDrawCmd::Type::stroke_path:
             canvas.stroke_current_path();
@@ -374,7 +379,11 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         case CanvasDrawCmd::Type::clip:
             // Intersect clip with current path (issue-896).
-            canvas.clip();
+            // pulp #1522 — int_val carries Canvas2D fillRule arg
+            // (0 = nonzero/winding, 1 = evenodd) from ctx.clip(rule).
+            canvas.clip(cmd.int_val == 1
+                            ? canvas::FillRule::evenodd
+                            : canvas::FillRule::nonzero);
             break;
 
         // Arc

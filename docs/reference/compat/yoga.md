@@ -22,6 +22,9 @@ which mirrors the upstream Yoga API.
 | supported | 36 |
 | partial | 6 |
 | missing | 12 |
+| supported | 37 |
+| partial | 7 |
+| missing | 11 |
 | wontfix | 0 |
 
 pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
@@ -56,6 +59,14 @@ pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
   pinned to pulp #1516 / PR #1538 (the PR that actually adds
   FlexStyle::box_sizing + YGNodeStyleSetBoxSizing wiring); the
   catalog will flip to `supported` automatically once #1538 merges.
+- **2026-05-06 (pulp #1544)** — pure catalog promotion: `yoga/flex` and
+  `yoga/flexFlow` now claim `supported`. Both shorthands have been
+  wired through `core/view/js/web-compat-style-decl.js` for some time
+  (the `flex` case fans out to `setFlex(flex_grow|flex_shrink|flex_basis,
+  ...)`; the `flexFlow` case tokenizes and dispatches
+  `setFlex(direction, ...)` + `setFlex(flex_wrap, ...)`), but neither
+  was listed in the yoga catalog. Mirrors the existing `css/flex` and
+  `css/flexFlow` entries. supported count: 35 → 37.
 - **2026-05-06 (pulp #1542)** — yoga logical-edge fan-out. The six
   logical edges (`marginStart` / `marginEnd` / `paddingStart` /
   `paddingEnd` / `start` / `end`) and the writing-direction prop
