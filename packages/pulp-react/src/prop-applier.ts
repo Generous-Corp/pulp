@@ -788,6 +788,58 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'pointerEvents':      return call('setPointerEvents', id, value as string);
         case 'textTransform':      return call('setTextTransform', id, value as string);
         case 'userSelect':         return call('setUserSelect', id, value as string);
+        // pulp #1547 — RN textDecoration cluster. Bridge has had the
+        // three setters (setTextDecoration / setTextDecorationColor /
+        // setTextDecorationStyle) registered for #1434; the gap was
+        // purely on the @pulp/react JSX dispatch.
+        //
+        // RN spec accepts compound multi-line values like
+        // 'underline line-through', 'underline overline',
+        // 'overline line-through', and 'underline overline line-through'.
+        // The C++ bridge setter only recognizes single tokens
+        // (underline | line-through | overline | none) and falls back
+        // to none for anything it does not recognize — so forwarding
+        // the raw compound string would render as no decoration.
+        //
+        // Codex post-merge audit (PR #1564, finding 3197006008):
+        // normalize the compound form on the JS side by picking the
+        // first single token in the supported set. The bridge today
+        // honors only one decoration line; this is the closest
+        // approximation that still renders something. When the bridge
+        // grows compound support this path can pass the raw value
+        // straight through.
+        case 'textDecorationLine': {
+            const v = String(value);
+            if (v === 'none' || v === 'underline' || v === 'line-through' || v === 'overline') {
+                return call('setTextDecoration', id, v);
+            }
+            // Compound RN form (e.g. 'underline line-through'). Split on
+            // whitespace and dispatch the first recognized single token;
+            // fall back to 'none' if the value is unrecognizable so the
+            // bridge clears any prior decoration deterministically.
+            const first = v.split(/\s+/).find(
+                (s) => s === 'underline' || s === 'line-through' || s === 'overline',
+            );
+            return call('setTextDecoration', id, first ?? 'none');
+        }
+        case 'textDecorationColor': return call('setTextDecorationColor', id, value as string);
+        case 'textDecorationStyle': return call('setTextDecorationStyle', id, value as string);
+        // pulp #1547 — RN textAlignVertical (Android-only in RN, no
+        // CSS analogue). RN's spec applies WITHIN a text container,
+        // but pulp's flex-only model has no inline text-block concept,
+        // so we map to the closest semantic — alignItems on the
+        // owning View. This gives a flex-container the same visual
+        // top/center/bottom alignment for its single text child.
+        // 'auto' clears the slot (Yoga inherits from align_items default).
+        case 'textAlignVertical': {
+            const v = value as string;
+            const mapped =
+                v === 'top'    ? 'flex-start' :
+                v === 'bottom' ? 'flex-end'   :
+                v === 'center' ? 'center'     :
+                v === 'auto'   ? 'auto'       : v;
+            return call('setFlex', id, 'align_items', mapped);
+        }
         // transformOrigin accepts CSS strings of the form `'NN% NN%'`,
         // `'NNpx NNpx'`, `'center'`, or two keyword tokens. The bridge
         // wants two numeric fractions (0..1). Defaults to 0.5/0.5

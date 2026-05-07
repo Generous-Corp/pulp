@@ -109,6 +109,27 @@ The `font` getter still returns the originally-assigned string verbatim,
 so the spec round-trip (`ctx.font = 'italic 14px Inter'; ctx.font`)
 returns the same string.
 
+## Recently wired — `fillRule` arg on `fill()` / `clip()` (pulp #1522)
+
+`ctx.fill('evenodd')` and `ctx.clip('evenodd')` now produce different
+rasterized output than the spec default. Previously the JS shim
+discarded the arg (`void fillRule;`), the bridge had no overload for
+it, and Skia / CG always painted with non-zero winding.
+
+Plumbing:
+
+- JS shim encodes the arg as an int (`0` = nonzero / spec default,
+  `1` = evenodd) and threads it through `canvasFillPath(id, rule)` /
+  `canvasClip(id, rule)`.
+- Bridge stores it on `CanvasDrawCmd::int_val`.
+- Skia: `SkPathBuilder::setFillType(kEvenOdd | kWinding)` immediately
+  before `drawPath` / `clipPath`.
+- CG: `CGContextEOFillPath` / `CGContextEOClip` for evenodd, default
+  `CGContextFillPath` / `CGContextClip` otherwise.
+
+`compat.json`: `canvas2d/fill` and `canvas2d/clip` are now `supported`
+(both promoted from `partial` by this change).
+
 ## Recently wired (pulp #1434 bridge-thin gap-fill)
 
 The 2026-05-05 bridge-thin gap-fill PR closed four NOT-IMPL entries
