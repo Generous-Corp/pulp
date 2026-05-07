@@ -6622,16 +6622,20 @@
       "issue": "1346"
     },
     "canvas2d/roundRect": {
-      "status": "partial",
-      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> moveTo + lineTos + arcTos. Uniform-corner case only.",
+      "status": "supported",
+      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> canvasPathRoundRect(id, x, y, w, h, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y) -> SkRRect::setRectRadii (Skia) / per-corner CGPath layout (CG). All five spec radii forms (number / [r] / [r1,r2] / [r1,r2,r3] / [r1,r2,r3,r4]) and elliptical {x,y} corners are normalized to 8 floats in the JS shim.",
       "supportedValues": [
-        "uniform radius (number, or array[1])"
+        "uniform radius (number, or array[1])",
+        "two-value [horizontal, vertical] (array[2])",
+        "three-value [tl, tr=bl, br] (array[3])",
+        "four-value [tl, tr, br, bl] (array[4])",
+        "elliptical {x, y} corner objects in any slot"
       ],
-      "unsupportedValues": [
-        "non-uniform radii (4 distinct corners) \u2014 falls back to largest single value"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "PR #1348. arcTo approximation is conservative \u2014 see canvas2d/arcTo.",
+      "notes": "PR #1348 + Wave 2 cheap wiring \u2014 confirmed all five radii forms thread through to SkRRect::setRectRadii with 4 distinct SkVector corners.",
       "issue": "1346"
     },
     "canvas2d/arc": {
@@ -6683,27 +6687,32 @@
       "issue": ""
     },
     "canvas2d/ellipse": {
-      "status": "partial",
-      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> rotation IGNORED; if rx===ry falls through to arc; otherwise emits a 4-segment cubic approximation.",
+      "status": "supported",
+      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> canvasPathEllipse(id, cx, cy, rx, ry, rotation, start, end, anticlockwise) -> SkPathBuilder::arcTo + SkMatrix::preRotate (Skia) / CGPathAddArc + CGAffineTransform (CG). PR #1521 wired native arc geometry; rotation is honoured via a temporary oval-aligned arc rotated through (cx, cy).",
       "supportedValues": [
-        "axis-aligned ellipses (rotation ignored)"
+        "axis-aligned ellipses",
+        "non-zero rotation",
+        "anticlockwise sweep"
       ],
-      "unsupportedValues": [
-        "non-zero rotation"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "PR #1348. FilterBank doesn't use ellipse \u2014 this is a thin parity shim.",
+      "notes": "PR #1521 + Wave 2 cheap wiring \u2014 confirmed rotation threads through SkMatrix and CGAffineTransform.",
       "issue": "1346"
     },
     "canvas2d/fill": {
-      "status": "partial",
-      "mapsTo": "ctx.fill -> _syncGlobalState + _applyFillStyle + canvasFillPath.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fill rule arg ('evenodd' / 'nonzero') \u2014 accepted but ignored"
+      "status": "supported",
+      "mapsTo": "ctx.fill(fillRule?) -> _syncGlobalState + _applyFillStyle + canvasFillPath(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::fill_current_path(FillRule) -> SkPath::setFillType (Skia) / CGContextEOFillPath vs CGContextFillPath (CG).",
+      "supportedValues": [
+        "default (nonzero) fill",
+        "evenodd fill rule"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOFillPath) backends. Pre-Wave-2 the rule was read by widget_bridge but discarded by canvas_widget.",
       "issue": ""
     },
     "canvas2d/stroke": {
@@ -6716,14 +6725,17 @@
       "issue": ""
     },
     "canvas2d/clip": {
-      "status": "partial",
-      "mapsTo": "ctx.clip(fillRule) -> canvasClip (intersects current clip with current path). Falls back to no-op if canvasClip absent.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fillRule arg \u2014 bridge always uses non-zero today"
+      "status": "supported",
+      "mapsTo": "ctx.clip(fillRule?) -> canvasClip(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::clip(FillRule) -> SkPath::setFillType + SkCanvas::clipPath (Skia) / CGContextEOClip vs CGContextClip (CG).",
+      "supportedValues": [
+        "default (nonzero) clip",
+        "evenodd clip rule"
       ],
-      "tests": [],
-      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.) Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOClip) backends.",
       "issue": ""
     },
     "canvas2d/isPointInPath": {
@@ -6859,16 +6871,19 @@
       "issue": "1346"
     },
     "canvas2d/strokeText": {
-      "status": "partial",
-      "mapsTo": "ctx.strokeText -> falls back to fillText with the strokeStyle color (bridge has no stroke-text command).",
+      "status": "supported",
+      "mapsTo": "ctx.strokeText(text, x, y, maxWidth?) -> canvasStrokeText -> SkiaCanvas::stroke_text builds an SkPaint via make_stroke_paint() (which sets SkPaint::kStroke_Style) and draws the SkShaper / per-glyph SkTextBlob with that paint. Honors line_width, lineJoin, lineCap, miterLimit, strokeStyle (incl. patterns/gradients), and shadow filter.",
       "supportedValues": [
-        "visual approximation of stroked text via solid fill"
+        "true stroked-glyph rendering (kStroke_Style)",
+        "maxWidth squeeze",
+        "lineWidth, lineJoin, lineCap, miterLimit",
+        "stroke patterns / gradients via _applyStrokeStyle"
       ],
-      "unsupportedValues": [
-        "true stroked-glyph rendering"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "Visually close enough for FilterBank/HUD use; file a follow-up if a plugin needs outlined typography.",
+      "notes": "PR #1525 + Codex P2 follow-up — make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring — confirmed end-to-end and bumped from partial -> supported.",
       "issue": ""
     },
     "canvas2d/measureText": {

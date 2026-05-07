@@ -35,7 +35,7 @@ public:
     void capture_paint_baseline_transform() override;
     AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
-    void clip() override;
+    void clip(FillRule rule = FillRule::nonzero) override;
 
     void set_fill_color(Color c) override;
     void set_stroke_color(Color c) override;
@@ -105,7 +105,7 @@ public:
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                   float x, float y) override;
     void close_path() override;
-    void fill_current_path() override;
+    void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
     // pulp #1521 — native arc subpaths via CGPath APIs.

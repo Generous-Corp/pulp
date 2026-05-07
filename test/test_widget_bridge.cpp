@@ -8226,3 +8226,259 @@ TEST_CASE("CSS logical-edge longhands route to LTR physical edges",
     auto pb = bridge.widget("p")->bounds();
     REQUIRE_THAT(cb.x - pb.x, WithinAbs(10.0f, 0.5f));
 }
+
+// ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
+//
+// These tests close the loop on the five compat.json entries that flipped
+// from partial → supported in the Wave 2 sweep. Each test goes JS → bridge
+// → CanvasWidget::paint(RecordingCanvas) → assert on the recorded Canvas
+// API call so a regression anywhere in the chain surfaces here.
+//
+// Scope:
+//   1. canvas2d/fill   — `ctx.fill('evenodd')` reaches Canvas::fill_current_path
+//                        with FillRule::evenodd (replayed via cmd.f[0] == 1).
+//   2. canvas2d/clip   — `ctx.clip('evenodd')` reaches Canvas::clip with
+//                        FillRule::evenodd.
+//   3. canvas2d/roundRect — 4-corner non-uniform radii thread through to
+//                           canvasPathRoundRect with 8 distinct floats so
+//                           SkRRect::setRectRadii sees per-corner geometry.
+//   4. canvas2d/ellipse — non-zero rotation reaches the bridge and produces a
+//                         single-contour replay (path_ellipse on the
+//                         RecordingCanvas; tests confirm one moveTo follows).
+//   5. canvas2d/strokeText — strokeText routes to the dedicated stroke_text
+//                            command (not fillText with strokeStyle as fill).
+//
+// The Skia / CG paint-side honouring of FillRule and kStroke_Style is unit-
+// tested at the Canvas backend layer; here we focus on the bridge ↔ Canvas
+// API contract that the harness adapter scores.
+
+TEST_CASE("Wave 2 canvas2d — ctx.fill('evenodd') reaches Canvas::fill_current_path with FillRule::evenodd",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'evenodd-fill';
+        c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Self-overlapping path — the only paths where nonzero vs evenodd
+        // differ. Outer square + reverse-wound inner square: nonzero fills
+        // both squares, evenodd leaves a hole in the middle.
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
+        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
+        ctx.fill('evenodd');
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
+        ctx.fill();  // default = nonzero
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-fill");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    std::vector<float> rules;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_current_path) {
+            rules.push_back(cmd.f[0]);
+        }
+    }
+    REQUIRE(rules.size() == 2);
+    REQUIRE(rules[0] == 1.0f);  // evenodd
+    REQUIRE(rules[1] == 0.0f);  // nonzero default
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'evenodd-clip';
+        c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
+        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
+        ctx.clip('evenodd');
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
+        ctx.clip();  // default = nonzero
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-clip");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    std::vector<float> rules;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::clip) {
+            rules.push_back(cmd.f[0]);
+        }
+    }
+    REQUIRE(rules.size() == 2);
+    REQUIRE(rules[0] == 1.0f);  // evenodd
+    REQUIRE(rules[1] == 0.0f);  // nonzero default
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'roundrect-4';
+        c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        // CSS spec [tl, tr, br, bl] — four distinct corner radii.
+        ctx.roundRect(0, 0, 100, 100, [4, 8, 12, 16]);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "roundrect-4");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int rrCount = 0;
+    pulp::canvas::DrawCommand rrCmd{};
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::round_rect) {
+            rrCount++;
+            rrCmd = cmd;
+        }
+    }
+    REQUIRE(rrCount == 1);
+    // f[0..3] = x, y, w, h; f[4..5] = tl_x, tl_y; floats[0..5] = tr_x, tr_y, br_x, br_y, bl_x, bl_y
+    REQUIRE_THAT(rrCmd.f[0], WithinAbs(0.0f, 1e-5f));   // x
+    REQUIRE_THAT(rrCmd.f[1], WithinAbs(0.0f, 1e-5f));   // y
+    REQUIRE_THAT(rrCmd.f[2], WithinAbs(100.0f, 1e-5f)); // w
+    REQUIRE_THAT(rrCmd.f[3], WithinAbs(100.0f, 1e-5f)); // h
+    REQUIRE_THAT(rrCmd.f[4], WithinAbs(4.0f, 1e-5f));   // tl_x
+    REQUIRE_THAT(rrCmd.f[5], WithinAbs(4.0f, 1e-5f));   // tl_y
+    REQUIRE(rrCmd.floats.size() >= 6);
+    REQUIRE_THAT(rrCmd.floats[0], WithinAbs(8.0f,  1e-5f));  // tr_x
+    REQUIRE_THAT(rrCmd.floats[1], WithinAbs(8.0f,  1e-5f));  // tr_y
+    REQUIRE_THAT(rrCmd.floats[2], WithinAbs(12.0f, 1e-5f));  // br_x
+    REQUIRE_THAT(rrCmd.floats[3], WithinAbs(12.0f, 1e-5f));  // br_y
+    REQUIRE_THAT(rrCmd.floats[4], WithinAbs(16.0f, 1e-5f));  // bl_x
+    REQUIRE_THAT(rrCmd.floats[5], WithinAbs(16.0f, 1e-5f));  // bl_y
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'ellipse-rot';
+        c.width = 100; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        // 45 degrees in radians, full sweep.
+        ctx.ellipse(50, 50, 30, 15, Math.PI / 4, 0, Math.PI * 2, false);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "ellipse-rot");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int ellipseCount = 0;
+    pulp::canvas::DrawCommand eCmd{};
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::ellipse) {
+            ellipseCount++;
+            eCmd = cmd;
+        }
+    }
+    // Single ellipse command — the JS shim must NOT decompose into multiple
+    // arc segments when rotation is non-zero (pre-Wave-2 the rotation arg
+    // was ignored entirely, which would have collapsed the call to either
+    // `arc` or a no-op).
+    REQUIRE(ellipseCount == 1);
+    REQUIRE_THAT(eCmd.f[0], WithinAbs(50.0f, 1e-5f));   // cx
+    REQUIRE_THAT(eCmd.f[1], WithinAbs(50.0f, 1e-5f));   // cy
+    REQUIRE_THAT(eCmd.f[2], WithinAbs(30.0f, 1e-5f));   // rx
+    REQUIRE_THAT(eCmd.f[3], WithinAbs(15.0f, 1e-5f));   // ry
+    // f[4] = rotation (radians) — confirm it was forwarded, not zeroed.
+    REQUIRE_THAT(eCmd.f[4], WithinAbs(static_cast<float>(M_PI / 4.0), 1e-4f));
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
+          "[view][bridge][canvas][wave2-canvas2d]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'stroke-text';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 2;
+        ctx.strokeText('OK', 10, 30);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "stroke-text");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int strokeTextCount = 0;
+    int fillTextCount = 0;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_text) {
+            strokeTextCount++;
+        } else if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text) {
+            fillTextCount++;
+        }
+    }
+    // Wave 2 cheap wiring confirmation: strokeText must produce a real
+    // stroke_text command (true stroked-glyph rendering with kStroke_Style),
+    // NOT a fill_text command using strokeStyle as the fill colour
+    // (the pre-#1525 approximation).
+    REQUIRE(strokeTextCount == 1);
+    REQUIRE(fillTextCount == 0);
+}

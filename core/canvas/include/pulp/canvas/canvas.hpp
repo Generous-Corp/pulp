@@ -170,6 +170,12 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
+// pulp Wave 2 canvas2d cheap wiring — Canvas2D fill rule for fill() / clip().
+// Mirrors the spec's ('nonzero' | 'evenodd') string enum. Default 'nonzero'
+// matches CSS behaviour and the JS shim's fillRule==='evenodd'?1:0 mapping in
+// `core/view/js/web-compat-canvas.js` so existing call sites remain
+// behaviourally identical.
+enum class FillRule { nonzero, evenodd };
 // pulp #1434 — added `justify` for CSS / RN `text-align: justify`.
 // SkiaCanvas dispatches `kJustify` via SkParagraph when the backend
 // supports it; CG / RecordingCanvas back-ends approximate as `left`
@@ -281,7 +287,8 @@ public:
     /// Intersect the current clip region with the current path.
     /// Mirrors CanvasRenderingContext2D.clip(). Default no-op so
     /// backends without a path builder remain unaffected.
-    virtual void clip() {}
+    /// `rule` selects nonzero vs evenodd winding (Wave 2 cheap wiring).
+    virtual void clip(FillRule rule = FillRule::nonzero) { (void)rule; }
 
     /// CSS `clip-path: path("...")` — intersect the current clip with
     /// an SVG-path-d string (pulp #1515). Skia maps to
@@ -493,8 +500,11 @@ public:
     }
     /// Close the current path subpath.
     virtual void close_path() {}
-    /// Fill the current path.
-    virtual void fill_current_path() {}
+    /// Fill the current path. `rule` selects nonzero vs evenodd winding
+    /// (Wave 2 cheap wiring; matches Canvas2D `ctx.fill('evenodd')`).
+    virtual void fill_current_path(FillRule rule = FillRule::nonzero) {
+        (void)rule;
+    }
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
@@ -1142,7 +1152,7 @@ public:
                           float d, float e, float f) override;
     AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
-    void clip() override;
+    void clip(FillRule rule = FillRule::nonzero) override;
     void clip_path_svg(const std::string& svg_path_d) override;
     void set_blend_mode(BlendMode mode) override;
     void set_fill_color(Color c) override;
@@ -1237,7 +1247,7 @@ public:
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                   float x, float y) override;
     void close_path() override;
-    void fill_current_path() override;
+    void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
     // pulp #1521 — native arc subpaths (recorded as DrawCommands so

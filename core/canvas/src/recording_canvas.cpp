@@ -125,8 +125,13 @@ void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
     commands_.push_back(cmd);
 }
 
-void RecordingCanvas::clip() {
-    commands_.push_back({DrawCommand::Type::clip});
+void RecordingCanvas::clip(FillRule rule) {
+    // pulp Wave 2 cheap wiring — capture the JS-supplied fillRule arg in
+    // f[0] (0 = nonzero, 1 = evenodd) so [wave2-canvas2d] band tests can
+    // assert the bridge plumbed `ctx.clip('evenodd')` end-to-end.
+    DrawCommand cmd{DrawCommand::Type::clip};
+    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
 }
 
 void RecordingCanvas::clip_path_svg(const std::string& svg_path_d) {
@@ -546,8 +551,13 @@ void RecordingCanvas::close_path() {
     commands_.push_back({DrawCommand::Type::close_path});
 }
 
-void RecordingCanvas::fill_current_path() {
-    commands_.push_back({DrawCommand::Type::fill_current_path});
+void RecordingCanvas::fill_current_path(FillRule rule) {
+    // pulp Wave 2 cheap wiring — capture the JS-supplied fillRule arg in
+    // f[0] (0 = nonzero, 1 = evenodd) so [wave2-canvas2d] band tests can
+    // assert the bridge plumbed `ctx.fill('evenodd')` end-to-end.
+    DrawCommand cmd{DrawCommand::Type::fill_current_path};
+    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
 }
 
 void RecordingCanvas::stroke_current_path() {

@@ -368,7 +368,13 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.close_path();
             break;
         case CanvasDrawCmd::Type::fill_path:
-            canvas.fill_current_path();
+            // pulp Wave 2 cheap wiring — thread the JS-supplied fillRule
+            // (0 = nonzero, 1 = evenodd) recorded in cmd.int_val by
+            // widget_bridge.cpp's `canvasFillPath` reader. Pre-Wave-2
+            // the rule was always discarded here.
+            canvas.fill_current_path(cmd.int_val == 1
+                                         ? canvas::FillRule::evenodd
+                                         : canvas::FillRule::nonzero);
             break;
         case CanvasDrawCmd::Type::stroke_path:
             canvas.stroke_current_path();
@@ -406,7 +412,13 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         case CanvasDrawCmd::Type::clip:
             // Intersect clip with current path (issue-896).
-            canvas.clip();
+            // pulp Wave 2 cheap wiring — thread the JS-supplied fillRule
+            // (0 = nonzero, 1 = evenodd) recorded in cmd.int_val by
+            // widget_bridge.cpp's `canvasClip` reader. Pre-Wave-2 the
+            // rule was always discarded here.
+            canvas.clip(cmd.int_val == 1
+                            ? canvas::FillRule::evenodd
+                            : canvas::FillRule::nonzero);
             break;
 
         // Arc

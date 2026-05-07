@@ -327,12 +327,20 @@ void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));
 }
 
-void SkiaCanvas::clip() {
+void SkiaCanvas::clip(FillRule rule) {
     GUARD_CANVAS;
     if (!path_builder_) return;
     // Snapshot the path (don't detach — Canvas2D allows continued use of
     // the same path after clip()) and intersect with the current clip.
-    canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
+    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
+    // (`ctx.clip('evenodd')`) by stamping the path's fill type before
+    // SkCanvas::clipPath consumes it. Default 'nonzero' matches the
+    // pre-Wave-2 behaviour (SkPathFillType::kWinding).
+    SkPath p = path_builder_->snapshot();
+    p.setFillType(rule == FillRule::evenodd
+                      ? SkPathFillType::kEvenOdd
+                      : SkPathFillType::kWinding);
+    canvas_->clipPath(p, /*doAntiAlias=*/true);
 }
 
 void SkiaCanvas::clip_path_svg(const std::string& svg_path_d) {
@@ -1752,7 +1760,7 @@ void SkiaCanvas::round_rect(float x, float y, float w, float h,
     path_builder_->addRRect(rr);
 }
 
-void SkiaCanvas::fill_current_path() {
+void SkiaCanvas::fill_current_path(FillRule rule) {
     if (!canvas_ || !path_builder_) return;
     SkPaint paint;
     paint.setAntiAlias(true);
@@ -1764,7 +1772,15 @@ void SkiaCanvas::fill_current_path() {
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    canvas_->drawPath(path_builder_->detach(), paint);
+    // pulp Wave 2 cheap wiring — stamp the JS-supplied fillRule
+    // (`ctx.fill('evenodd')`) onto the detached path so Skia honours it
+    // when computing the filled area. Default 'nonzero' keeps the
+    // historical SkPathFillType::kWinding behaviour.
+    SkPath p = path_builder_->detach();
+    p.setFillType(rule == FillRule::evenodd
+                      ? SkPathFillType::kEvenOdd
+                      : SkPathFillType::kWinding);
+    canvas_->drawPath(p, paint);
 }
 
 void SkiaCanvas::stroke_current_path() {
