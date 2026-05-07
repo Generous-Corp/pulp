@@ -616,9 +616,46 @@ public:
         d = transform_matrix_d_; e = transform_matrix_e_; f = transform_matrix_f_;
     }
 
-    /// CSS filter: blur(px) — per-element blur
+    /// CSS filter: blur(px) — per-element blur. Legacy single-blur slot
+    /// kept for API compatibility; the richer filter chain (Phase A2-4)
+    /// lives in `filter_chain_` below and supersedes this when non-empty.
     void set_filter_blur(float radius) { filter_blur_ = radius; }
     float filter_blur() const { return filter_blur_; }
+
+    /// pulp #1434 Phase A2-4 — full CSS filter chain. Each entry is one
+    /// filter function (blur / brightness / contrast / grayscale /
+    /// hue-rotate / invert / opacity / saturate / sepia / drop-shadow).
+    /// The Skia path walks the chain and composes via
+    /// `SkImageFilters::Compose` + color-matrix wraps; CG falls back to
+    /// blur-only. When the chain is empty, the legacy `filter_blur_`
+    /// path stays in effect (back-compat for callers still using
+    /// `set_filter_blur` directly).
+    struct FilterOp {
+        enum class Kind {
+            blur,
+            brightness,
+            contrast,
+            grayscale,
+            hue_rotate,
+            invert,
+            opacity,
+            saturate,
+            sepia,
+            drop_shadow,
+        };
+        Kind kind = Kind::blur;
+        float amount = 0.0f;       ///< blur radius in px (blur), 0..1+ amount otherwise
+        float angle_deg = 0.0f;    ///< hue-rotate only
+        // drop-shadow extras
+        float ds_offset_x = 0.0f;
+        float ds_offset_y = 0.0f;
+        float ds_blur = 0.0f;
+        Color ds_color{};
+    };
+    void set_filter_chain(std::vector<FilterOp> chain) { filter_chain_ = std::move(chain); }
+    void clear_filter_chain() { filter_chain_.clear(); }
+    const std::vector<FilterOp>& filter_chain() const { return filter_chain_; }
+    bool has_filter_chain() const { return !filter_chain_.empty(); }
 
     /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
     /// is behind this View when it paints (issue-926). Zero == no backdrop
@@ -799,6 +836,7 @@ private:
           transform_matrix_e_ = 0.0f, transform_matrix_f_ = 0.0f;
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
+    std::vector<FilterOp> filter_chain_{};
     float backdrop_blur_ = 0;
     std::string background_attachment_;  // pulp #1517 — noop today
     std::string background_clip_;        // pulp #1517 — partial (text deferred)

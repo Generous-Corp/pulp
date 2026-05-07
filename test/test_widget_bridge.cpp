@@ -5264,6 +5264,177 @@ TEST_CASE("border-style: none short-circuits the stroke",
     }
 }
 
+// ── pulp #1434 Phase A2-4 — CSS filter chain ─────────────────────────
+//
+// setFilter walks the function-chain string (e.g. "blur(4px)
+// brightness(0.8) saturate(1.2) drop-shadow(2px 2px 4px black)")
+// and produces a structured View::FilterOp vector. View::paint hands
+// the chain to canvas.save_layer_with_filters which composes via
+// SkImageFilters on the Skia backend; CG falls back to blur-only.
+
+TEST_CASE("setFilter parses single blur(Npx)",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFilter('a', 'blur(8px)');
+    )");
+    const auto& chain = bridge.widget("a")->filter_chain();
+    REQUIRE(chain.size() == 1);
+    REQUIRE(chain[0].kind == View::FilterOp::Kind::blur);
+    REQUIRE_THAT(chain[0].amount, WithinAbs(8.0f, 0.001f));
+    // Legacy slot kept for back-compat.
+    REQUIRE_THAT(bridge.widget("a")->filter_blur(), WithinAbs(8.0f, 0.001f));
+}
+
+TEST_CASE("setFilter parses brightness/contrast/grayscale/etc",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setFilter('a', 'brightness(0.8)');
+        createPanel('b', '');  setFilter('b', 'contrast(1.5)');
+        createPanel('c', '');  setFilter('c', 'grayscale(1)');
+        createPanel('d', '');  setFilter('d', 'invert(0.5)');
+        createPanel('e', '');  setFilter('e', 'opacity(0.7)');
+        createPanel('f', '');  setFilter('f', 'saturate(2)');
+        createPanel('g', '');  setFilter('g', 'sepia(0.4)');
+    )");
+    REQUIRE(bridge.widget("a")->filter_chain()[0].kind == View::FilterOp::Kind::brightness);
+    REQUIRE_THAT(bridge.widget("a")->filter_chain()[0].amount, WithinAbs(0.8f, 0.001f));
+    REQUIRE(bridge.widget("b")->filter_chain()[0].kind == View::FilterOp::Kind::contrast);
+    REQUIRE_THAT(bridge.widget("b")->filter_chain()[0].amount, WithinAbs(1.5f, 0.001f));
+    REQUIRE(bridge.widget("c")->filter_chain()[0].kind == View::FilterOp::Kind::grayscale);
+    REQUIRE(bridge.widget("d")->filter_chain()[0].kind == View::FilterOp::Kind::invert);
+    REQUIRE(bridge.widget("e")->filter_chain()[0].kind == View::FilterOp::Kind::opacity);
+    REQUIRE(bridge.widget("f")->filter_chain()[0].kind == View::FilterOp::Kind::saturate);
+    REQUIRE(bridge.widget("g")->filter_chain()[0].kind == View::FilterOp::Kind::sepia);
+}
+
+TEST_CASE("setFilter parses hue-rotate with deg/rad/turn/grad units",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', ''); setFilter('a', 'hue-rotate(90deg)');
+        createPanel('b', ''); setFilter('b', 'hue-rotate(0.5turn)');
+        createPanel('c', ''); setFilter('c', 'hue-rotate(100grad)');
+    )");
+    REQUIRE(bridge.widget("a")->filter_chain()[0].kind == View::FilterOp::Kind::hue_rotate);
+    REQUIRE_THAT(bridge.widget("a")->filter_chain()[0].angle_deg, WithinAbs(90.0f, 0.001f));
+    REQUIRE_THAT(bridge.widget("b")->filter_chain()[0].angle_deg, WithinAbs(180.0f, 0.001f));
+    REQUIRE_THAT(bridge.widget("c")->filter_chain()[0].angle_deg, WithinAbs(90.0f, 0.001f));
+}
+
+TEST_CASE("setFilter parses chained functions in source order",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFilter('a', 'blur(4px) brightness(0.8) saturate(1.2)');
+    )");
+    const auto& chain = bridge.widget("a")->filter_chain();
+    REQUIRE(chain.size() == 3);
+    REQUIRE(chain[0].kind == View::FilterOp::Kind::blur);
+    REQUIRE(chain[1].kind == View::FilterOp::Kind::brightness);
+    REQUIRE(chain[2].kind == View::FilterOp::Kind::saturate);
+}
+
+TEST_CASE("setFilter parses drop-shadow(<dx> <dy> <blur> <color>)",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFilter('a', 'drop-shadow(2px 4px 6px #ff0000)');
+    )");
+    const auto& chain = bridge.widget("a")->filter_chain();
+    REQUIRE(chain.size() == 1);
+    REQUIRE(chain[0].kind == View::FilterOp::Kind::drop_shadow);
+    REQUIRE_THAT(chain[0].ds_offset_x, WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(chain[0].ds_offset_y, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(chain[0].ds_blur, WithinAbs(6.0f, 0.001f));
+    // Color: #ff0000 → r=1, g=0, b=0, a=1
+    REQUIRE_THAT(chain[0].ds_color.r, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(chain[0].ds_color.g, WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(chain[0].ds_color.b, WithinAbs(0.0f, 0.01f));
+}
+
+TEST_CASE("setFilter('none') clears the chain",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFilter('a', 'blur(4px)');
+        setFilter('a', 'none');
+    )");
+    REQUIRE(bridge.widget("a")->filter_chain().empty());
+    REQUIRE_THAT(bridge.widget("a")->filter_blur(), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("setFilter unknown function silently drops",
+          "[view][bridge][css][issue-1434-filter-chain]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFilter('a', 'parchment-curl(99) blur(2px)');
+    )");
+    const auto& chain = bridge.widget("a")->filter_chain();
+    // The blur survives; the unknown function is silently dropped.
+    REQUIRE(chain.size() == 1);
+    REQUIRE(chain[0].kind == View::FilterOp::Kind::blur);
+    REQUIRE_THAT(chain[0].amount, WithinAbs(2.0f, 0.001f));
+}
+
+TEST_CASE("filter chain triggers save_layer_with_filters at paint",
+          "[view][widget][issue-1434-filter-chain]") {
+    // Smoke test: a View with a non-empty filter chain emits a layer
+    // save during paint. The base RecordingCanvas's default
+    // save_layer_with_filters falls through to save_layer, but we
+    // verify the call shape (a save_layer with the collapsed-blur
+    // amount) lands on the canvas.
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    std::vector<View::FilterOp> chain;
+    View::FilterOp blur{};
+    blur.kind = View::FilterOp::Kind::blur;
+    blur.amount = 5.0f;
+    chain.push_back(blur);
+    v.set_filter_chain(std::move(chain));
+
+    // RecordingCanvas's default save_layer_with_filters falls through
+    // to save() (no native layer recording in RecordingCanvas yet);
+    // we verify at least one save command is emitted, confirming the
+    // chain reaches the canvas API.
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    int save_count = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::save) ++save_count;
+    }
+    REQUIRE(save_count > 0);
+}
+
 // ── pulp #1519 — RN outline cluster (Color/Offset/Style/Width) ────────────
 //
 // Outline differs from border: it doesn't take Yoga layout space and

@@ -1062,24 +1062,27 @@
     },
     "css/filter": {
       "status": "supported",
-      "mapsTo": "setFilter(id, value)",
+      "mapsTo": "web-compat-style-decl.js forwards `filter` keyword string verbatim to setFilter (widget_bridge.cpp); bridge parses the function chain into View::FilterOp[]; view.cpp paint dispatches via canvas.save_layer_with_filters; Skia backend composes the chain via SkImageFilters::Compose + SkColorFilters::Matrix.",
       "supportedValues": [
-        "blur(<px>)"
+        "blur(<px>)",
+        "brightness(<number>)",
+        "contrast(<number>)",
+        "grayscale(<number>)",
+        "hue-rotate(<deg|rad|turn|grad>)",
+        "invert(<number>)",
+        "opacity(<number>)",
+        "saturate(<number>)",
+        "sepia(<number>)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order",
+        "\"none\" clears the chain"
       ],
-      "unsupportedValues": [
-        "brightness",
-        "contrast",
-        "drop-shadow",
-        "grayscale",
-        "hue-rotate",
-        "invert",
-        "opacity",
-        "saturate",
-        "sepia",
-        "multi-function chain"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFilter parses chained functions in source order\"",
+        "test/test_widget_bridge.cpp::\"setFilter parses brightness/contrast/grayscale/etc\""
       ],
-      "tests": [],
-      "notes": "Bridge parses 'blur(Npx)'. Other filter functions pass through verbatim.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow. CG canvas backend currently degrades the chain to blur-only collapse (color-matrix filters silently no-op); SkColorFilter-equivalent for CG is a follow-up.",
       "issue": ""
     },
     "css/flex": {
@@ -3461,15 +3464,18 @@
     },
     "rn/filter": {
       "status": "supported",
-      "mapsTo": "@pulp/react prop-applier forwards CSS string to setFilter (widget_bridge.cpp:3767). Bridge currently parses only `blur(Npx)`.",
+      "mapsTo": "@pulp/react prop-applier forwards CSS-string verbatim to setFilter (post sub-agent #27 wiring; widget_bridge.cpp parses the full function chain since this PR).",
       "supportedValues": [
-        "blur(Npx)"
+        "blur(<px>)",
+        "brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia (each with numeric or angle args)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "chained functions in source order"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR. Bridge parser today recognizes only blur(); other CSS filter functions (brightness, contrast, drop-shadow, grayscale, invert, opacity, saturate, sepia, hue-rotate) are a follow-up.",
+      "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow.",
       "issue": ""
     },
     "rn/flex": {
