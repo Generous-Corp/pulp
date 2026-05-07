@@ -372,10 +372,34 @@ public:
     float outline_width() const { return outline_width_; }
 
     /// Per-side borders (CSS border-top, border-right, etc.)
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; has_border_sides_ = true; }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; has_border_sides_ = true; }
+    /// pulp #1566 (Codex P2 follow-up to #1543) — track an explicit
+    /// per-edge "set" flag so a width of 0 on one edge can override
+    /// the uniform shorthand. CSS / RN semantics: `borderWidth: 10`
+    /// followed by `borderTopWidth: 0` must yield a 0-px top border,
+    /// not the 10-px shorthand. Without a per-edge `set` bit, the
+    /// stored 0 was indistinguishable from "unset" in
+    /// `apply_border_widths` and the shorthand leaked through.
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; }
+    /// Color-only setters (pulp #1566). Setting `borderTopColor` alone
+    /// must NOT mark the top edge's WIDTH as explicitly set — that
+    /// would let a stale 0 override the uniform `borderWidth` shorthand.
+    /// Mirrors CSS, where `border-top-color` and `border-top-width` are
+    /// independent longhands.
+    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; }
+    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; }
+    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; }
+    /// Width-only setters (pulp #1566). Setting `borderTopWidth` alone
+    /// preserves the existing per-edge color and explicitly marks the
+    /// width as set — including a width of 0, which then overrides any
+    /// uniform shorthand on that edge.
+    void set_border_top_width(float w)    { border_top_.width = w;    border_top_set_ = true;    has_border_sides_ = true; }
+    void set_border_right_width(float w)  { border_right_.width = w;  border_right_set_ = true;  has_border_sides_ = true; }
+    void set_border_bottom_width(float w) { border_bottom_.width = w; border_bottom_set_ = true; has_border_sides_ = true; }
+    void set_border_left_width(float w)   { border_left_.width = w;   border_left_set_ = true;   has_border_sides_ = true; }
     /// Per-side getters (issue-1026). The standalone setBorderTop/Right/...
     /// {Color,Width} bridge calls need to preserve the unrelated attribute
     /// when only one is being changed by a JSX prop diff.
@@ -388,6 +412,14 @@ public:
     Color border_left_color() const { return border_left_.color; }
     float border_left_width() const { return border_left_.width; }
     bool has_border_sides() const { return has_border_sides_; }
+    /// pulp #1566 — per-edge "explicitly set" probes. Yoga wiring uses
+    /// these to distinguish "not set on this edge" (fall back to uniform
+    /// `border_width()`) from "explicitly set to 0" (zero wins, even if
+    /// the shorthand says 10).
+    bool has_border_top_set() const { return border_top_set_; }
+    bool has_border_right_set() const { return border_right_set_; }
+    bool has_border_bottom_set() const { return border_bottom_set_; }
+    bool has_border_left_set() const { return border_left_set_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.)
     /// pulp #1171 (Codex P2 on #1044) — when transitioning from uniform
@@ -798,6 +830,15 @@ private:
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};
     bool has_border_sides_ = false;
+    // pulp #1566 — per-edge "explicitly set" flags, parallel to has_top_
+    // / has_right_ / etc. for inset edges. Required so an explicit
+    // borderTopWidth=0 overrides the uniform borderWidth=10 shorthand
+    // (CSS / RN semantics). Plain `width == 0` is ambiguous because the
+    // BorderSide default-initializes to 0.
+    bool border_top_set_ = false;
+    bool border_right_set_ = false;
+    bool border_bottom_set_ = false;
+    bool border_left_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     bool has_corner_radii_ = false;

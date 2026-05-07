@@ -5121,58 +5121,68 @@
       "issue": ""
     },
     "yoga/borderWidth": {
-      "status": "missing",
-      "mapsTo": "no FlexStyle field -- Pulp handles border purely as a paint overlay (View::set_border_*).",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdge*, view.border_*_width). Per-side override (set_border_top/right/bottom/left, reached via setBorderTopWidth etc.) wins; otherwise the uniform View::border_width() is forwarded to all four edges. Couples with #1516 box-sizing so Yoga's content-box / border-box math gets accurate border insets (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all (in layout sense)"
+        "%"
       ],
       "tests": [],
-      "notes": "Yoga's BORDER edges contribute to content-box sizing. Pulp's borders are paint-only, not measured by layout. This breaks parity with Yoga measurement when borders are large.",
+      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. Yoga has no YGNodeStyleSetBorderPercent (matches CSS spec: % is invalid for border-width).",
       "issue": ""
     },
     "yoga/borderTopWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeTop, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same as borderWidth.",
+      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w).",
       "issue": ""
     },
     "yoga/borderRightWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeRight, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderRightWidth(id, w).",
       "issue": ""
     },
     "yoga/borderBottomWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeBottom, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderBottomWidth(id, w).",
       "issue": ""
     },
     "yoga/borderLeftWidth": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp::apply_border_widths -> YGNodeStyleSetBorder(node, YGEdgeLeft, ...). Per-side wins over the uniform border_width() (pulp #1543).",
+      "supportedValues": [
+        "px"
+      ],
       "unsupportedValues": [
-        "all"
+        "%"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. Reached via setBorderLeftWidth(id, w).",
       "issue": ""
     },
     "yoga/position": {

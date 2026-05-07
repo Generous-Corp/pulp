@@ -3274,18 +3274,24 @@ void WidgetBridge::register_api() {
         // pulp #1026 — preserve the unrelated attribute when a per-side
         // setter is called for only color OR only width, matching how
         // RN's JSX prop-applier emits property updates one at a time.
-        canvas::Color cur_color{};
-        float cur_width = 0.0f;
-        if (side == "top")    { cur_color = v->border_top_color();    cur_width = v->border_top_width(); }
-        else if (side == "right") { cur_color = v->border_right_color();  cur_width = v->border_right_width(); }
-        else if (side == "bottom"){ cur_color = v->border_bottom_color(); cur_width = v->border_bottom_width(); }
-        else if (side == "left")  { cur_color = v->border_left_color();   cur_width = v->border_left_width(); }
-        canvas::Color c = color.value_or(cur_color);
-        float w = width.value_or(cur_width);
-        if (side == "top") v->set_border_top(c, w);
-        else if (side == "right") v->set_border_right(c, w);
-        else if (side == "bottom") v->set_border_bottom(c, w);
-        else if (side == "left") v->set_border_left(c, w);
+        // pulp #1566 — route through the split color-only / width-only
+        // setters so that `setBorderTopColor` does NOT mark the per-edge
+        // WIDTH as explicitly set (which would let a stale 0 override
+        // the uniform `borderWidth` shorthand). Symmetrically,
+        // `setBorderTopWidth(0)` MUST mark the edge as explicitly set so
+        // it overrides the shorthand on that edge per CSS / RN semantics.
+        if (color.has_value()) {
+            if (side == "top")         v->set_border_top_color(*color);
+            else if (side == "right")  v->set_border_right_color(*color);
+            else if (side == "bottom") v->set_border_bottom_color(*color);
+            else if (side == "left")   v->set_border_left_color(*color);
+        }
+        if (width.has_value()) {
+            if (side == "top")         v->set_border_top_width(*width);
+            else if (side == "right")  v->set_border_right_width(*width);
+            else if (side == "bottom") v->set_border_bottom_width(*width);
+            else if (side == "left")   v->set_border_left_width(*width);
+        }
     };
     engine_.register_function("setBorderTopColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
