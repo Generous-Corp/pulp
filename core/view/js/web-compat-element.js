@@ -56,6 +56,15 @@ Element.prototype._ensureNative = function() {
         createCol(id, "");
     } else if (tag === "span" || tag === "p" || tag === "label") {
         createLabel(id, "", "");
+        if (tag === "label") {
+            // pulp DIVERGE→PASS sweep — wire `<label for="x">` click
+            // routing to focus / toggle the labeled input. Note: this
+            // branch only runs in the createElement+later-mount path;
+            // the appendChild fast path goes through __domAppend on the
+            // C++ side and never re-enters JS, so we ALSO install the
+            // routing in `setAttribute("for", ...)` below. Idempotent.
+            this._installLabelForRouting();
+        }
     } else if (tag === "svg") {
         // pulp #1147 — inline SVGs in web-compat code (Spectr's mode-icon
         // popover rows, React-rendered icons) are leaf containers. We
@@ -334,10 +343,139 @@ Object.defineProperty(Element.prototype, "hidden", {
 Object.defineProperty(Element.prototype, "disabled", {
     get: function() { return this._disabled; },
     set: function(v) {
+        // pulp DIVERGE→PASS sweep — wire the actual native widget
+        // disabled-state through `setEnabled` so the View::enabled_
+        // flag flips. Before, only the stylesheet flag changed
+        // (`:disabled` selectors picked it up) but the underlying
+        // widget kept handling pointer events / dispatching change.
         this._disabled = !!v;
+        if (this._nativeCreated && typeof setEnabled === "function") {
+            setEnabled(this._id, this._disabled ? 0 : 1);
+        }
         this._reapplyStylesheets();
     }
 });
+
+// ── <dialog> showModal / close / show ─────────────────────────────────────
+// pulp DIVERGE→PASS sweep — `<dialog>` previously created a hidden
+// Panel and exposed no JS surface for opening / closing. The DOM
+// `HTMLDialogElement` interface defines:
+//   show()      — non-modal open (no backdrop, no input trap)
+//   showModal() — modal open (backdrop, input trap, focus pull)
+//   close()     — close the dialog and dispatch 'close'
+// Pulp doesn't have a native modal-input-trap layer yet, so showModal
+// degrades to show() + the open attribute. The `::backdrop` pseudo-
+// element remains a roadmap item (separate paint-side concern). The
+// behavioral gap was that `dialog.show()` was a TypeError; this slice
+// exposes the methods so `addEventListener('close', ...)` consumers
+// can drive the open state and round-trip the open attribute.
+
+Element.prototype.show = function() {
+    if (this.tagName !== "DIALOG") return;
+    this._dialogOpen = true;
+    this.setAttribute("open", "");
+    if (this._nativeCreated && typeof setVisible === "function") {
+        setVisible(this._id, true);
+    }
+};
+Element.prototype.showModal = function() {
+    if (this.tagName !== "DIALOG") return;
+    // No native modal-input-trap yet — same effect as show() plus a
+    // `_dialogModal` flag so consumers / future paint code can read
+    // back whether modal semantics were requested.
+    this._dialogModal = true;
+    this.show();
+};
+Element.prototype.close = function(returnValue) {
+    if (this.tagName !== "DIALOG") return;
+    this._dialogOpen = false;
+    this._dialogModal = false;
+    this._dialogReturnValue = (returnValue !== undefined) ? String(returnValue) : "";
+    this.removeAttribute("open");
+    if (this._nativeCreated && typeof setVisible === "function") {
+        setVisible(this._id, false);
+    }
+    var evt = (typeof Event === "function")
+        ? new Event("close", { bubbles: false, cancelable: false })
+        : { type: "close", target: this, bubbles: false, cancelable: false,
+            _stopped: false, _defaultPrevented: false, _noBubble: true,
+            stopPropagation: function() { this._stopped = true; },
+            preventDefault: function() {} };
+    this.dispatchEvent(evt);
+};
+Object.defineProperty(Element.prototype, "open", {
+    // Reflects the `open` attribute for <dialog> AND <details>.
+    get: function() {
+        if (this.tagName === "DIALOG") return !!this._dialogOpen;
+        if (this.tagName === "DETAILS") return !!this._detailsOpen;
+        return this._attributes && (this._attributes.open !== undefined);
+    },
+    set: function(v) {
+        var willOpen = !!v;
+        if (this.tagName === "DIALOG") {
+            if (willOpen) this.show(); else this.close();
+            return;
+        }
+        if (this.tagName === "DETAILS") {
+            this._detailsOpen = willOpen;
+            if (willOpen) this.setAttribute("open", "");
+            else this.removeAttribute("open");
+            // Toggle visibility of children (other than the first
+            // <summary>, which always shows). Roadmap: when <summary>
+            // semantics land, hide children[1..] under closed details.
+            this._reapplyStylesheets();
+            var tevt = (typeof Event === "function")
+                ? new Event("toggle", { bubbles: false, cancelable: false })
+                : { type: "toggle", target: this, _stopped: false,
+                    _defaultPrevented: false, _noBubble: true,
+                    stopPropagation: function() { this._stopped = true; },
+                    preventDefault: function() {} };
+            this.dispatchEvent(tevt);
+            return;
+        }
+    }
+});
+Object.defineProperty(Element.prototype, "returnValue", {
+    get: function() { return this._dialogReturnValue || ""; },
+    set: function(v) { this._dialogReturnValue = String(v || ""); }
+});
+
+// ── <label> for-attribute focus routing ─────────────────────────────────
+// pulp DIVERGE→PASS sweep — clicking a <label> with a `for` attribute
+// transfers focus / activation to the labeled element. We don't yet
+// have a unified focus layer but the bridge has setFocus() — wire the
+// click handler so the harness gap is closed at the JS layer.
+
+Element.prototype._labelForRoutingInstalled = false;
+Element.prototype._installLabelForRouting = function() {
+    if (this.tagName !== "LABEL") return;
+    if (this._labelForRoutingInstalled) return;
+    this._labelForRoutingInstalled = true;
+    var self = this;
+    this.addEventListener("click", function(evt) {
+        var forId = self.getAttribute("for");
+        if (!forId || typeof document === "undefined") return;
+        var target = document.getElementById(forId);
+        if (!target) return;
+        // Focus the labeled element. For checkbox/radio inputs the
+        // standard behavior is to also toggle/activate; if we have a
+        // bridge setFocus, prefer it; fall back to dispatchEvent.
+        if (typeof setFocus === "function" && target._nativeCreated) {
+            setFocus(target._id);
+        }
+        if (target.tagName === "INPUT" &&
+            (target._type === "checkbox" || target._type === "radio")) {
+            target.checked = !target._checked;
+            var ievt = (typeof Event === "function")
+                ? new Event("input", { bubbles: true })
+                : { type: "input", target: target, _stopped: false,
+                    _defaultPrevented: false, _noBubble: false,
+                    stopPropagation: function() { this._stopped = true; },
+                    preventDefault: function() {} };
+            target.dispatchEvent(ievt);
+        }
+    });
+};
 
 // ── Input-specific properties ────────────────────────────────────────────────
 
@@ -467,6 +605,15 @@ Element.prototype.setAttribute = function(name, value) {
         if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(this);
         }
+    }
+    // pulp DIVERGE→PASS sweep — `<label for="x">` click routing. The
+    // appendChild fast path goes through C++ `__domAppend` and skips
+    // JS-side `_ensureNative`, so the install hook in _ensureNative
+    // alone misses the React-style commit path. Install when the
+    // `for` attribute lands on a LABEL element — idempotent because
+    // `_installLabelForRouting` early-returns if already installed.
+    else if (name === "for" && this.tagName === "LABEL") {
+        this._installLabelForRouting();
     }
 };
 
@@ -652,6 +799,48 @@ Element.prototype._registerNativeEvent = function(type) {
         on(id, "blur", function() {
             self.dispatchEvent(_makeEvent("blur", self));
         });
+    } else if (type === "wheel") {
+        // pulp DIVERGE→PASS sweep — `el.addEventListener('wheel', fn)`
+        // routes through the bridge `registerWheel` / `__dispatch__`
+        // path. Before, only the explicit `registerWheel(id)` API was
+        // accessible from JS — DOM consumers got no surface at all.
+        if (typeof registerWheel === "function") registerWheel(id);
+        on(id, "wheel", function(dx, dy) {
+            var evt = _makeEvent("wheel", self, {});
+            evt.deltaX = dx || 0;
+            evt.deltaY = dy || 0;
+            evt.deltaZ = 0;
+            evt.deltaMode = 0;  // DOM_DELTA_PIXEL
+            self.dispatchEvent(evt);
+        });
+    } else if (type === "dragstart" || type === "drag" || type === "dragend" ||
+               type === "dragenter" || type === "dragover" || type === "dragleave" ||
+               type === "drop") {
+        // pulp DIVERGE→PASS sweep — DOM-style drag/drop event types
+        // are surfaced through the existing bridge `registerDrop` API.
+        // The native side fires a single `drop` callback with type +
+        // payload data when a drop completes; we synthesize a
+        // DragEvent-shaped object so CSS-style consumers' handlers
+        // receive an event with .dataTransfer-like `_dropData`. Full
+        // multi-stage dragstart/drag/dragend lifecycle (with native
+        // drag-image rendering) remains a roadmap item — this slice
+        // covers the common "register me as a drop target" usage so
+        // `addEventListener('drop', fn)` is no longer a silent no-op.
+        if (typeof registerDrop === "function") {
+            // The bridge expects a callback NAME (not a function); pin
+            // a synthetic per-element callback that fires our DOM
+            // listeners. Idempotent because `_registerNativeEvent` is
+            // called once per (id, type) pair from addEventListener.
+            var cbName = "__drop_cb_" + id.replace(/[^a-zA-Z0-9_]/g, "_");
+            globalThis[cbName] = function(dropType, data, x, y) {
+                var evt = _makeEvent("drop", self, {});
+                evt.clientX = x || 0;
+                evt.clientY = y || 0;
+                evt._dropData = { type: dropType, data: data };
+                self.dispatchEvent(evt);
+            };
+            registerDrop(id, cbName);
+        }
     }
 };
 
@@ -707,6 +896,46 @@ function _makeEvent(type, target, data) {
         preventDefault: function() { this._defaultPrevented = true; }
     };
 }
+
+// pulp DIVERGE→PASS sweep — `new Event(name, init)` constructor surface.
+// Userland `new Event('foo')` produces an object that round-trips
+// through `Element.dispatchEvent`. Mirrors the DOM Event interface
+// minimally — type / bubbles / cancelable / stopPropagation /
+// preventDefault — which is what the harness gap was about. The
+// `_makeEvent` factory above stays the canonical path for events
+// SYNTHESIZED by the bridge (it includes all the position / pointer /
+// gesture fields a native event needs); user-constructed Events are
+// shaped like `_makeEvent` but only carry the fields the user passes.
+function Event(type, eventInitDict) {
+    var init = eventInitDict || {};
+    this.type = String(type || "");
+    this.bubbles = !!init.bubbles;
+    this.cancelable = !!init.cancelable;
+    this.composed = !!init.composed;
+    this.target = null;
+    this.currentTarget = null;
+    this.timeStamp = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+    this._stopped = false;
+    this._defaultPrevented = false;
+    this._noBubble = !this.bubbles;
+}
+Event.prototype.stopPropagation = function() { this._stopped = true; };
+Event.prototype.stopImmediatePropagation = function() { this._stopped = true; };
+Event.prototype.preventDefault = function() {
+    if (this.cancelable) this._defaultPrevented = true;
+};
+Object.defineProperty(Event.prototype, "defaultPrevented", {
+    get: function() { return this._defaultPrevented; }
+});
+// Minimal CustomEvent for `new CustomEvent('foo', { detail })` parity
+// with userland code that targets the standard browser surface.
+function CustomEvent(type, eventInitDict) {
+    Event.call(this, type, eventInitDict);
+    this.detail = (eventInitDict && eventInitDict.detail !== undefined)
+        ? eventInitDict.detail : null;
+}
+CustomEvent.prototype = Object.create(Event.prototype);
+CustomEvent.prototype.constructor = CustomEvent;
 
 function _fireListeners(el, event) {
     var id = el._id;

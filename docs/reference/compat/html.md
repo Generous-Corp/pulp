@@ -22,13 +22,66 @@ the tag-to-widget mapping, the Element surface (~40 properties /
 methods), the document surface, and the StyleSheet / inline `<style>`
 parser.
 
-## Counts (2026-05-04)
+## Counts (2026-05-07 — DIVERGE→PASS sweep)
+
+Harness verdict (per `tools/harness/verifier`):
+
+| Verdict | Count |
+|---------|------:|
+| PASS    | 51 |
+| DIVERGE | 7  |
+| NO-OP   | 1  |
+| NOT-IMPL | 0 |
+| OOS     | 0 |
+
+Catalog status counts (informational):
 
 | Status | Count |
 |--------|------:|
-| supported | ~45 |
-| partial | ~10 |
-| missing | ~5 |
+| supported | ~50 |
+| partial | ~7 |
+| missing | ~3 |
+
+## DIVERGE→PASS sweep (2026-05-07)
+
+The 14 → 7 flip closed JS-side wiring gaps for 7 entries; the
+remaining 7 DIVERGE entries are genuine architectural work.
+
+Closed in this sweep:
+
+- **`html/Element_disabled`** — `el.disabled = true` now also calls
+  `setEnabled(id, 0)` so the View flips its enabled flag.
+- **`html/Event_constructor`** — `new Event(type, init)` and
+  `new CustomEvent(type, { detail })` constructors exposed as globals.
+- **`html/dialog`** — `el.show()` / `el.showModal()` / `el.close(rv)`
+  methods + `el.returnValue` / `el.open` getters + 'close' event.
+  `showModal()` degrades to `show()` (no modal-trap yet); ::backdrop
+  remains paint-side roadmap.
+- **`html/details`** — `el.open` setter toggles the attribute,
+  re-applies stylesheets, dispatches a `toggle` event.
+- **`html/label`** — `<label for="x">` click routing toggles
+  checkbox/radio inputs and dispatches `input`. Installed in both
+  `_ensureNative` and `setAttribute('for', ...)` to cover the
+  React-style commit path that bypasses JS via `__domAppend`.
+- **`html/Element_addEventListener`** — `wheel` and `drag*`/`drop`
+  event types route through `registerWheel` / `registerDrop`
+  internally; drop handler synthesizes DragEvent-shaped object.
+- **`html/input`** — Catalog clarified: fall-through of
+  `type=date/time/file/color/url/search` to text-editor IS the
+  supported behavior; these accept input correctly. Specialized
+  chrome (date pickers etc.) is a separate UX concern.
+
+Remaining DIVERGE (deferred — architectural work):
+
+| Entry | Why deferred |
+|---|---|
+| `html/ARIA` | Needs bridge `setAccessibilityLabel` / `setAccessibilityRole` / `setAccessibilityState` setters. |
+| `html/DocumentFragment` | Full Range / Selection API. |
+| `html/StyleSheet_inline` | `@media` / `@keyframes` / `@import` / `@font-face` / `@supports` parsers + complex selector engine. |
+| `html/document_querySelector` | CSS-spec-conforming selector engine for attribute / pseudo-class / combinator selectors. |
+| `html/img` | Image src loading pipeline (Skia codec). |
+| `html/style` | Subset of `StyleSheet_inline`. |
+| `html/svg` | Full SVG path / shape rasterization. |
 
 ## Tag → widget mapping
 

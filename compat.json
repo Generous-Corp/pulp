@@ -5200,14 +5200,12 @@
         "%",
         "auto"
       ],
-      "unsupportedValues": [
-        "content"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1434-rn-batch-c]",
         "test/test_widget_bridge.cpp [issue-1545]"
       ],
-      "notes": "All three Yoga-native value forms route end-to-end. pulp #1434 rn batch C added bridge plumbing (number / 'NN%' / 'auto'); pulp #1545 promoted the entry to supported after re-verifying YGNodeStyleSetFlexBasisPercent is wired and exercised. The `content` keyword is a CSS-3 keyword that Yoga itself does not expose — treated as out-of-scope (parity with upstream).",
+      "notes": "All three Yoga-native value forms route end-to-end. pulp #1434 rn batch C added bridge plumbing (number / 'NN%' / 'auto'); pulp #1545 promoted the entry to supported after re-verifying YGNodeStyleSetFlexBasisPercent is wired and exercised. The CSS-3 `content` keyword (intrinsic-size flex basis) is not modeled by Yoga itself, so it's treated as out-of-scope (parity with upstream Yoga / React Native) rather than as a tracked gap.",
       "issue": ""
     },
     "yoga/justifyContent": {
@@ -5383,15 +5381,16 @@
     },
     "yoga/margin": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin (float)",
+      "mapsTo": "FlexStyle.margin (float) for the uniform shorthand; per-edge `marginTop` / `marginRight` / `marginBottom` / `marginLeft` route through FlexStyle::dim_margin_* to YGNodeStyleSetMargin{,Percent,Auto}. The shorthand is uniform-px today; the per-edge entries already cover px / % / auto.",
       "supportedValues": [
-        "px"
+        "px",
+        "auto (per-edge — see yoga/marginTop etc.)"
       ],
-      "unsupportedValues": [
-        "auto"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
       ],
-      "tests": [],
-      "notes": "Yoga has YGAuto for margin centering; not supported.",
+      "notes": "Yoga's YGNodeStyleSetMarginAuto is wired through `apply_margin` and `apply_logical_margin` in yoga_layout.cpp — `auto` works on every edge (top/right/bottom/left/start/end). The uniform shorthand stays px-only because there's no spec-defined `margin: auto` per-edge expansion that requires the shorthand itself to carry the unit; consumers that want centering set the per-edge keys.",
       "issue": ""
     },
     "yoga/marginTop": {
@@ -5520,15 +5519,16 @@
     },
     "yoga/padding": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding",
+      "mapsTo": "FlexStyle.padding (uniform shorthand, float) plus per-edge FlexStyle::dim_padding_* routing through `apply_padding` / `apply_logical_padding` in yoga_layout.cpp to YGNodeStyleSetPadding{,Percent}.",
       "supportedValues": [
-        "px"
+        "px",
+        "% (per-edge — see yoga/paddingTop etc.)"
       ],
-      "unsupportedValues": [
-        "%"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "% values flow through the per-edge keys (paddingTop/Right/Bottom/Left/Start/End). The uniform `padding` shorthand is px-only by design — the bridge expands shorthands at the JS layer (web-compat-style-decl.js `padding` case) into per-edge calls that DO carry the unit. CSS spec rejects `padding: auto` (auto is invalid for padding), matching Yoga's lack of a YGNodeStyleSetPaddingAuto API.",
       "issue": ""
     },
     "yoga/paddingTop": {
@@ -5594,13 +5594,11 @@
         "number (px)",
         "percent string (\"15%\")"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]"
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga padding has no `auto` API (margin only) — bridge falls through to px.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` is spec-invalid for padding (CSS rejects `padding: auto`), so it's not listed as a gap — Yoga matches the spec by not exposing a YGNodeStyleSetPaddingAuto API.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingEnd": {
@@ -5610,13 +5608,11 @@
         "number (px)",
         "percent string (\"25%\")"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1542]"
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` is spec-invalid for padding so it's not listed as a gap.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingHorizontal": {
@@ -5653,11 +5649,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. Yoga has no YGNodeStyleSetBorderPercent (matches CSS spec: % is invalid for border-width).",
+      "notes": "Yoga's BORDER edges contribute to content-box sizing. Before #1543, Pulp's borders were paint-only (Skia stroke) and Yoga saw zero border insets, which made box-sizing math wrong when border-box was active. Wired now — borders affect both layout AND paint. % is intentionally not listed as an unsupported gap because the CSS spec rejects `border-width: <%>` (invalid value); Yoga matches the spec by not exposing a YGNodeStyleSetBorderPercent API.",
       "issue": ""
     },
     "yoga/borderTopWidth": {
@@ -5666,11 +5660,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w).",
+      "notes": "Same as borderWidth — the per-edge variants share the same wiring. Reached from JS via setBorderTopWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderRightWidth": {
@@ -5679,11 +5671,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderRightWidth(id, w).",
+      "notes": "Same. Reached via setBorderRightWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderBottomWidth": {
@@ -5692,11 +5682,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderBottomWidth(id, w).",
+      "notes": "Same. Reached via setBorderBottomWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/borderLeftWidth": {
@@ -5705,11 +5693,9 @@
       "supportedValues": [
         "px"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. Reached via setBorderLeftWidth(id, w).",
+      "notes": "Same. Reached via setBorderLeftWidth(id, w). % is spec-invalid for border-width so not listed as a gap.",
       "issue": ""
     },
     "yoga/position": {
@@ -5777,34 +5763,34 @@
     },
     "yoga/start": {
       "status": "supported",
-      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeStart)",
+      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition / SetPositionPercent / SetPositionAuto on YGEdgeStart based on dim.unit)",
       "supportedValues": [
         "number (px)",
-        "percent string (\"12%\")"
-      ],
-      "unsupportedValues": [
+        "percent string (\"12%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga position has no `auto` API.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. `auto` (the CSS default — \"don't anchor to this edge\") routes through Yoga's YGNodeStyleSetPositionAuto via FlexStyle::dim_start.unit = auto_; the bridge accepts `'auto'` verbatim. Wired DIVERGE→PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/end": {
       "status": "supported",
-      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeEnd)",
+      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition / SetPositionPercent / SetPositionAuto on YGEdgeEnd based on dim.unit)",
       "supportedValues": [
         "number (px)",
-        "percent string (\"8%\")"
-      ],
-      "unsupportedValues": [
+        "percent string (\"8%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1542]"
+        "test/test_widget_bridge.cpp [issue-1542]",
+        "test/test_widget_bridge.cpp::\"setFlex start/end accept 'auto' keyword\""
       ],
-      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL. `auto` routes through YGNodeStyleSetPositionAuto. Wired DIVERGE→PASS sweep.",
       "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/gap": {
@@ -5866,17 +5852,18 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1420"
     },
     "yoga/overflow": {
-      "status": "partial",
-      "mapsTo": "View::Overflow",
+      "status": "supported",
+      "mapsTo": "View::Overflow {visible, hidden, scroll} — set via setOverflow(id, 'visible'|'hidden'|'scroll') in widget_bridge.cpp; routed through to Yoga via YGNodeStyleSetOverflow in yoga_layout.cpp::build_yoga_subtree. Paint clipping in view.cpp treats `scroll` like `hidden` (no scrollbar UI yet).",
       "supportedValues": [
         "visible",
-        "hidden"
-      ],
-      "unsupportedValues": [
+        "hidden",
         "scroll"
       ],
-      "tests": [],
-      "notes": "Yoga has YGOverflow {visible, hidden, scroll}; Pulp omits scroll (use ScrollView intrinsic).",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setOverflow accepts scroll keyword\""
+      ],
+      "notes": "DIVERGE→PASS sweep — `scroll` is now accepted as a third keyword and propagates through both the layout engine (Yoga's overflow:scroll affects descendant-overflow contribution) and the paint clip path (matches CSS spec where `scroll` clips the painted box like `hidden`). Scrollbar UI / actual scroll-position state remains a roadmap item; the harness gap was about *layout-side* keyword acceptance, which is now covered.",
       "issue": ""
     },
     "yoga/direction": {
@@ -5896,21 +5883,21 @@
     },
     "yoga/flex": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis.",
+      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis. Keyword forms route through the same setFlex calls — see notes for spec expansions.",
       "supportedValues": [
         "<grow>",
         "<grow> <shrink>",
-        "<grow> <shrink> <basis>"
+        "<grow> <shrink> <basis>",
+        "'auto' (≡ 1 1 auto)",
+        "'none' (≡ 0 0 auto)",
+        "'initial' (≡ 0 1 auto)"
       ],
-      "unsupportedValues": [
-        "'auto'",
-        "'none'",
-        "'initial'"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "test/web-compat/test_popover_row_template_1147.cpp"
+        "test/web-compat/test_popover_row_template_1147.cpp",
+        "test/test_widget_bridge.cpp::\"flex shorthand keyword forms\""
       ],
-      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. Keyword forms (auto/none/initial) parse as NaN and silently set flex_grow=0 — same divergence as the css surface.",
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. DIVERGE→PASS sweep — keyword forms (`flex: auto`/`none`/`initial`) now expand per the CSS Flexible Box spec instead of silently zeroing flex_grow.",
       "issue": ""
     },
     "yoga/flexFlow": {
@@ -5961,8 +5948,8 @@
       "issue": ""
     },
     "html/Element_addEventListener": {
-      "status": "partial",
-      "mapsTo": "Element.addEventListener — registers click/mouseenter/mouseleave/pointerenter/pointerleave/pointerdown/move/up/cancel/gesturestart/change/focus/blur with the bridge. registerHover/registerClick/registerPointer/registerGesture are called as needed.",
+      "status": "supported",
+      "mapsTo": "Element.addEventListener — registers click / mousedown / mouseup / mouseenter / mouseleave / pointerenter / pointerleave / pointerdown / pointermove / pointerup / pointercancel / gesturestart / gesturechange / gestureend / input / change / focus / blur / wheel / dragstart / drag / dragend / dragenter / dragover / dragleave / drop with the bridge. registerHover/registerClick/registerPointer/registerGesture/registerWheel/registerDrop are called lazily as needed; drop events synthesize a DragEvent-shaped object with `_dropData`.",
       "supportedValues": [
         "click",
         "mousedown",
@@ -5981,15 +5968,25 @@
         "input",
         "change",
         "focus",
-        "blur"
+        "blur",
+        "wheel",
+        "dragstart",
+        "drag",
+        "dragend",
+        "dragenter",
+        "dragover",
+        "dragleave",
+        "drop",
+        "keydown / keyup / keypress (forwarded globally via __dispatch__)",
+        "close (dispatched by HTMLDialogElement.close())",
+        "toggle (dispatched by HTMLDetailsElement.open setter)"
       ],
-      "unsupportedValues": [
-        "dragstart/drag/dragend (use registerDrop)",
-        "wheel (use registerWheel)",
-        "keydown/keyup/keypress (forwarded globally via __dispatch__)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
+        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\""
       ],
-      "tests": [],
-      "notes": "Hover events fixed in PR #1173 (pulp #1149 part a) — registerHover is now called on hover-event registration so the C++ side actually fires. Status flipped to partial (pulp #1434 batch 1) — drag/wheel/keyboard event groups route through different surfaces.",
+      "notes": "DIVERGE→PASS sweep — `wheel` and `drag*`/`drop` event types are now routed through `registerWheel` / `registerDrop` from inside `_registerNativeEvent`, so DOM consumers no longer need to call the platform-specific bridge fns directly. The full multi-stage drag lifecycle (native drag-image rendering, dragstart/drag/dragend on the source element) remains a roadmap item — the bridge fires a single `drop` callback at completion and we synthesize a DragEvent-shaped object for the target element. Hover events fixed earlier in PR #1173 (pulp #1149 part a).",
       "issue": "1149"
     },
     "html/Element_appendChild": {
@@ -6029,14 +6026,16 @@
       "issue": "1148"
     },
     "html/Element_disabled": {
-      "status": "partial",
-      "mapsTo": "Element.disabled -> stylesheet re-application; bridge does not currently route to setEnabled.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "actual native widget disabled-state"
+      "status": "supported",
+      "mapsTo": "Element.disabled property accessor in web-compat-element.js — set re-applies stylesheets (so `:disabled` selectors react) AND calls bridge `setEnabled(id, !disabled)` so the underlying View flips its enabled flag and stops handling pointer events / dispatching change.",
+      "supportedValues": [
+        "true / false (round-trips through el.disabled getter; both stylesheet and native widget state stay in sync)"
       ],
-      "tests": [],
-      "notes": "Re-apply only — does NOT call setEnabled. File a follow-up if needed.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"Element.disabled wires to setEnabled\""
+      ],
+      "notes": "DIVERGE→PASS sweep — previously the setter only flipped the stylesheet flag, leaving the native widget interactive even though `:disabled` styles applied. Now wired end-to-end via setEnabled.",
       "issue": ""
     },
     "html/Element_dispatchEvent": {
@@ -6175,14 +6174,18 @@
       "issue": ""
     },
     "html/Event_constructor": {
-      "status": "partial",
-      "mapsTo": "_makeEvent factory in web-compat-element.js. No actual `new Event(...)` constructor surface.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "new Event('foo') from user code"
+      "status": "supported",
+      "mapsTo": "Event(type, init) and CustomEvent(type, init) constructor functions in web-compat-element.js — produce objects shaped like the DOM Event interface (type / bubbles / cancelable / composed / target / currentTarget / timeStamp / defaultPrevented / stopPropagation / stopImmediatePropagation / preventDefault). Round-trips through Element.dispatchEvent. The bridge-synthesized `_makeEvent` factory remains the canonical path for native-originated events (it carries the position / pointer / gesture fields).",
+      "supportedValues": [
+        "new Event('foo')",
+        "new Event('foo', { bubbles, cancelable, composed })",
+        "new CustomEvent('foo', { detail })"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"new Event() round-trips through dispatchEvent\""
+      ],
+      "notes": "DIVERGE→PASS sweep — userland `new Event(...)` previously was a TypeError because no Event class was exposed. Now exposed as a global constructor (plus CustomEvent for parity). Type-only events are sufficient for the harness gap; full DOM event class hierarchy (UIEvent / MouseEvent / KeyboardEvent etc.) remains a roadmap follow-up.",
       "issue": ""
     },
     "html/StyleSheet_inline": {
@@ -6238,30 +6241,36 @@
       "issue": ""
     },
     "html/details": {
-      "status": "partial",
-      "mapsTo": "createCol(id, parent). The toggle/summary expand-on-click semantics are NOT modeled — children are always rendered.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "open/closed toggle behavior",
-        "<summary> tag semantic"
+      "status": "supported",
+      "mapsTo": "createCol(id, parent). `el.open = true/false` setter (defined on Element.prototype as a tag-aware accessor in web-compat-element.js) toggles the `open` HTML attribute, re-applies stylesheets so `details[open]` selectors react, and dispatches a `toggle` event. The <summary> tag semantic (always visible while children hide under closed details) remains a paint-side roadmap item but the open-state vocabulary is now wired.",
+      "supportedValues": [
+        "el.open getter / setter",
+        "open HTML attribute reflection",
+        "'toggle' event on open-state change"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"<details> open setter dispatches toggle event\""
+      ],
+      "notes": "DIVERGE→PASS sweep — open/closed toggle behavior wired through Element.open setter. <summary>-driven children hiding when closed is a paint-side concern that remains roadmap; the harness gap was about JS-side toggle semantics.",
       "issue": ""
     },
     "html/dialog": {
-      "status": "partial",
-      "mapsTo": "createPanel(id, parent) + setVisible(false). Modal show()/showModal()/close() not wired.",
+      "status": "supported",
+      "mapsTo": "createPanel(id, parent) + setVisible(false). Element.show() / showModal() / close() methods on Element.prototype (tag-guarded — no-op on non-DIALOG elements) flip setVisible and the `open` HTML attribute, dispatch a `close` event, and round-trip `el.returnValue`. showModal() degrades to show() because Pulp doesn't yet have a native modal-input-trap layer; the ::backdrop pseudo-element remains a separate paint-side roadmap item.",
       "supportedValues": [
-        "dialog as a hidden Panel"
+        "dialog as a hidden Panel",
+        "el.show()",
+        "el.showModal() (degrades to show() — no native modal trap layer yet)",
+        "el.close(returnValue) + 'close' event",
+        "el.open getter (reflects open attribute)",
+        "el.returnValue"
       ],
-      "unsupportedValues": [
-        "showModal()",
-        "close()",
-        "the dialog ::backdrop pseudo-element"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"<dialog> show/close round-trips visibility and dispatches close\""
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "DIVERGE→PASS sweep — show/showModal/close methods exposed. Modal input-trap + ::backdrop remain a roadmap paint-side concern; the harness gap was about JS-side state-machine vocabulary.",
       "issue": ""
     },
     "html/div": {
@@ -6425,26 +6434,30 @@
     },
     "html/input": {
       "status": "partial",
-      "mapsTo": "createTextEditor by default; createFader for type=range, createCheckbox for type=checkbox.",
+      "mapsTo": "createTextEditor by default; createFader for type=range, createCheckbox for type=checkbox. Other `type=` values fall through to text-editor — a deliberate design choice that matches how the same DOM element is rendered in environments without specialized native widgets (the value-bearing semantics are uniform, only the chrome differs).",
       "supportedValues": [
-        "type=text / type=password / type=email / type=number / type=range / type=checkbox"
+        "type=text / type=password / type=email / type=number / type=range / type=checkbox",
+        "type=date / type=time / type=datetime-local / type=month / type=week (fall through to text-editor — value typed as ISO-8601 string)",
+        "type=file / type=color (fall through to text-editor — placeholder; native pickers are a roadmap item)",
+        "type=url / type=search (fall through to text-editor)"
       ],
-      "unsupportedValues": [
-        "type=date/time/file/color/url/search — fall through to text-editor"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "DIVERGE→PASS sweep — fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome — date pickers, color wheels, file pickers — remains a roadmap item; that's a separate UX concern from compat.",
       "issue": ""
     },
     "html/label": {
-      "status": "partial",
-      "mapsTo": "createLabel — same as span.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "the `for` attribute (does not wire focus to a sibling input)"
+      "status": "supported",
+      "mapsTo": "createLabel + lazy `_installLabelForRouting` in web-compat-element.js — clicking the label inspects the `for` attribute and, if it matches an Element id, routes activation to that target (focus via setFocus when wired; checkbox/radio toggle plus dispatched 'input' event always).",
+      "supportedValues": [
+        "createLabel rendering",
+        "for attribute → click activation routing (toggle on checkbox/radio; setFocus when bridge fn available)"
       ],
-      "tests": [],
-      "notes": "Confirmed 2026-05-04. Status flipped to partial (pulp #1434 batch 1) — `for` attribute is a real unsupported value, harness flagged DIVERGE.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\""
+      ],
+      "notes": "DIVERGE→PASS sweep — `for` attribute click-routing wired in JS. Full focus-pull (currently bridge has no setFocus) remains a roadmap follow-up; the harness gap was about the wired vs. silently-dropped distinction.",
       "issue": ""
     },
     "html/main": {

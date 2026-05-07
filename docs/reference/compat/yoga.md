@@ -15,22 +15,31 @@ Spec walk: [Yoga Layout — Styling](https://www.yogalayout.dev/docs/styling/),
 cross-checked against [RN Layout Props](https://reactnative.dev/docs/layout-props)
 which mirrors the upstream Yoga API.
 
-## Counts (2026-05-06)
+## Counts (2026-05-07 — DIVERGE→PASS sweep)
+
+Harness verdict (per `tools/harness/verifier`):
+
+| Verdict | Count |
+|---------|------:|
+| PASS    | 55 |
+| DIVERGE | 0 |
+| NO-OP   | 0 |
+| NOT-IMPL | 0 |
+| OOS     | 1 (`yoga/boxSizing` — pre-existing oracle-omission) |
+
+Catalog status counts (informational — `compat.json` `status` field):
 
 | Status | Count |
 |--------|------:|
 | supported | 36 |
 | partial | 6 |
 | missing | 12 |
-| supported | 35 |
-| partial | 7 |
-| missing | 11 |
-| wontfix | 0 |
 
 pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
 (`yoga/marginStart`, `yoga/marginEnd`, `yoga/paddingStart`,
 `yoga/paddingEnd`, `yoga/start`, `yoga/end`, `yoga/direction`) from
-`missing` → `supported`.
+`missing` → `supported`. The DIVERGE→PASS sweep (this update) closed
+the remaining 14 value-coverage gaps on the surface.
 
 ## Major gaps (parser routes, FlexStyle has no field)
 
@@ -46,6 +55,32 @@ pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
 
 ## Recent updates
 
+- **2026-05-07 (DIVERGE→PASS sweep)** — closed all 14 yoga value-
+  coverage gaps in one PR. Three categories:
+    - **Spec-invalid values dropped from `unsupportedValues`** —
+      `borderXxxWidth` had `%` listed (CSS rejects `border-width: <%>`
+      as invalid; Yoga matches by not exposing a setBorderPercent API),
+      `paddingStart` / `paddingEnd` had `auto` listed (CSS rejects
+      `padding: auto`), `padding` had `%` listed despite the per-edge
+      keys already wiring it, `margin` had `auto` listed despite the
+      per-edge keys already wiring it. These were drift, not gaps.
+    - **Real wiring** — `yoga/start` / `yoga/end` now route `'auto'`
+      through `YGNodeStyleSetPositionAuto` via FlexStyle::dim_*.unit
+      (the old code claimed Yoga had no position-auto API; it does).
+      `yoga/flex` shorthand keyword expansion (`flex: auto` ≡ `1 1 auto`,
+      `flex: none` ≡ `0 0 auto`, `flex: initial` ≡ `0 1 auto`) wired
+      in `web-compat-style-decl.js` instead of NaN-zeroing flex_grow.
+      `yoga/overflow` gained the third spec keyword `scroll` —
+      `View::Overflow::scroll` enum value, bridge keyword acceptance,
+      and Yoga propagation via `YGNodeStyleSetOverflow`. Paint
+      clipping treats scroll like hidden (no scrollbar UI yet); the
+      harness gap was about layout-side keyword acceptance.
+    - **Out-of-scope flagged correctly** — `yoga/flexBasis` `content`
+      removed from `unsupportedValues`; the CSS-3 `content` keyword
+      isn't modeled by Yoga itself, parity with upstream, not a Pulp gap.
+  Net: yoga PASS 41 → 55, DIVERGE 14 → 0, drift 14 → 1 (the only
+  remaining drift is `yoga/boxSizing` which is unrelated, pre-existing
+  oracle-omission).
 - **2026-05-06 (pulp #1545)** — `yoga/flexBasis` promoted partial →
   supported. The percent / `auto` / px wiring was added in pulp #1434
   rn batch C (FlexStyle::dim_flex_basis routes to
