@@ -198,6 +198,19 @@ export interface StyleProps {
     filter?: string;
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum
+    /// number of visible text lines on a multi-line Label; setting >0
+    /// implicitly enables wrap on the bridge side. `0` disables clamp
+    /// (CSS spec uses `none`; `0` is the numeric equivalent here).
+    /// Both keys funnel through the same `setLineClamp` bridge fn.
+    lineClamp?: number;
+    webkitLineClamp?: number;
+    /// CSS `background-repeat` keyword (pulp #1552). Storage-only at
+    /// the View level today — paint-time honoring requires
+    /// `background-image: url(...)` / repeating-gradient backgrounds
+    /// which haven't landed yet. Accepts the standard CSS keyword set.
+    backgroundRepeat?: 'repeat' | 'repeat-x' | 'repeat-y' | 'no-repeat'
+                     | 'space' | 'round';
     /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
     /// or two-keyword combos (`'left top'`). Bridge expects fractional
     /// 0..1 coordinates; the prop-applier parses the string before

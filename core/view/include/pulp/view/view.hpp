@@ -313,6 +313,19 @@ public:
     bool has_background_color() const { return has_bg_; }
     Color background_color() const { return bg_color_; }
 
+    /// CSS `background-repeat` keyword (pulp #1552). Storage-only at the
+    /// View level: paint() of solid-color backgrounds (the only currently
+    /// rendered case) is a no-op for repeat semantics, but the value is
+    /// preserved so future paint logic for `background-image: url(...)` /
+    /// repeating gradients can honor it without an API break. Mirrors
+    /// the strategy used for `text-decoration-style` (pulp #1434 batch 3)
+    /// which also stores the keyword and currently degrades to solid in
+    /// paint. Accepted CSS keywords: `repeat`, `repeat-x`, `repeat-y`,
+    /// `no-repeat`, `space`, `round`. Unknown / empty = `repeat` (CSS
+    /// initial value).
+    void set_background_repeat(std::string kw) { background_repeat_ = std::move(kw); }
+    const std::string& background_repeat() const { return background_repeat_; }
+
     /// Border (optional — painted on top of background)
     void set_border(Color c, float width, float radius = 0) {
         border_color_ = c; border_width_ = width; corner_radius_ = radius; has_border_ = true;
@@ -890,6 +903,7 @@ private:
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
     std::vector<Color> bg_gradient_colors_;
     std::vector<float> bg_gradient_positions_;
+    std::string background_repeat_;  ///< pulp #1552: CSS background-repeat keyword (storage-only)
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;

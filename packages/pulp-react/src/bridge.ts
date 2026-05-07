@@ -172,6 +172,15 @@ declare global {
     function setTextColor(id: string, hexColor: string): void;
     function setTextAlign(id: string, align: 'left' | 'center' | 'right'): void;
 
+    // pulp #1552 — line-clamp + background-repeat. setLineClamp clamps
+    // a multi-line Label to N visible lines (0 disables; >=1 enables
+    // wrap implicitly on the bridge side). setBackgroundRepeat is
+    // storage-only on the View; paint-time honoring lands with the
+    // background-image / repeating-gradient work. Optional at runtime
+    // so older bridges still link.
+    const setLineClamp: ((id: string, n: number) => void) | undefined;
+    const setBackgroundRepeat: ((id: string, kw: string) => void) | undefined;
+
     // ── Widget-specific data ────────────────────────────────────────
     function setSpectrumData(id: string, samples: number[] | Float32Array): void;
     function setWaveformData(id: string, samples: number[] | Float32Array): void;
@@ -253,6 +262,11 @@ export function createMockBridge(): MockBridge {
         // can assert on the bridge call shape.
         'setTop', 'setRight', 'setBottom', 'setLeft', 'setZIndex',
         'setText', 'setTextColor', 'setTextAlign',
+        // pulp #1552 — line-clamp + webkit-line-clamp + background-repeat.
+        // CSS shim and prop-applier both route through these two setters;
+        // mock-bridge captures the round-trip so vitest can assert dispatch
+        // shape (numeric line count + keyword string).
+        'setLineClamp', 'setBackgroundRepeat',
         // pulp #1434 batch 3 — typography keyword translation needs the
         // mock bridge to capture setFontWeight calls so the prop-applier
         // fontWeight test can assert on the numeric value handed off

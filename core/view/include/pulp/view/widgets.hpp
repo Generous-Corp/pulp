@@ -78,6 +78,19 @@ public:
     void set_multi_line(bool ml) { multi_line_ = ml; }
     bool multi_line() const { return multi_line_; }
 
+    /// CSS `line-clamp` / `-webkit-line-clamp` (pulp #1552). Maximum number
+    /// of visible text lines for a multi-line label; 0 disables clamping.
+    /// When set on a `multi_line_` Label, paint() emits at most N
+    /// newline-separated lines and replaces the trailing visible line with
+    /// the U+2026 ellipsis if any source lines were dropped. Matches the
+    /// CSS spec's "block-axis line clamp" behavior at the keyword level
+    /// (no `none` token — set 0 to clear). Wiring is shared between
+    /// `line-clamp` and `-webkit-line-clamp` in the JS shim and the
+    /// @pulp/react prop-applier (pulp #1434 catalog: both keys funnel
+    /// through the same case).
+    void set_line_clamp(int n) { line_clamp_ = (n < 0) ? 0 : n; }
+    int line_clamp() const { return line_clamp_; }
+
     /// CSS text-transform: uppercase, lowercase, capitalize, none
     enum class TextTransform { none, uppercase, lowercase, capitalize };
     void set_text_transform(TextTransform t) { text_transform_ = t; }
@@ -127,6 +140,7 @@ private:
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
     bool multi_line_ = false;
+    int line_clamp_ = 0;          ///< pulp #1552: 0=no clamp, >=1=max lines
     TextTransform text_transform_ = TextTransform::none;
     TextDecoration text_decoration_ = TextDecoration::none;
     canvas::Color decoration_color_{};

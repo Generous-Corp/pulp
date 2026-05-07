@@ -45,6 +45,21 @@ specifics are out of scope.
   `content-box` is opt-in for CSS-spec semantics. High-leverage for
   design imports — Figma / v0 / Claude Design HTML often emit
   explicit `boxSizing` declarations that previously vanished.
+- **2026-05-06 (pulp #1552)** — `line-clamp` / `-webkit-line-clamp` /
+  `background-repeat` wired end-to-end. `setLineClamp` and
+  `setBackgroundRepeat` now register in `widget_bridge.cpp`; the JS
+  shim cases that already routed through them (and the matching
+  `@pulp/react` prop-applier dispatch) now reach C++. Label grew a
+  `line_clamp_` slot; `paint()` emits at most N lines and appends
+  U+2026 to the last visible line if any source lines were dropped.
+  Setting `line-clamp >= 1` implicitly enables `multi_line_` so the
+  paint path takes the multi-line branch (without that, the
+  single-line path runs and the clamp is a no-op). View grew
+  `background_repeat_` (storage-only — paint-time honoring lands
+  with the `background-image: url(...)` / repeating-gradient work).
+  Reclassified `css/lineClamp` and `css/webkitLineClamp` to
+  `supported`; `css/backgroundRepeat` stays `partial` with the
+  honest "storage-only" caveat.
 - **2026-05-06 (pulp #1551)** — Phase A3 Bundle 3 inside the
   `pulp #1434` umbrella: 13 already-implemented CSS features
   promoted to first-class catalog entries. Pure catalog add — no

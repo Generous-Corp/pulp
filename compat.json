@@ -668,9 +668,8 @@
     },
     "css/backgroundRepeat": {
       "status": "partial",
-      "mapsTo": "web-compat calls setBackgroundRepeat if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "mapsTo": "setBackgroundRepeat(id, kw) — storage-only on the View; paint-time honoring deferred",
+      "supportedValues": [
         "repeat",
         "no-repeat",
         "repeat-x",
@@ -678,9 +677,12 @@
         "space",
         "round"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:994 routes through setBackgroundRepeat. Bridge function is not yet registered, so values are silently dropped at runtime.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat stores keyword on View (issue-1552)"
+      ],
+      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat — the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3).",
+      "issue": "1552"
     },
     "css/backgroundSize": {
       "status": "partial",
@@ -1797,15 +1799,20 @@
       "issue": ""
     },
     "css/lineClamp": {
-      "status": "partial",
-      "mapsTo": "web-compat calls setLineClamp if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "parseInt -> setLineClamp(id, n) — Label paint emits at most N lines + U+2026 ellipsis on the last visible line if source lines were dropped",
+      "supportedValues": [
         "integer"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:988-990 parses an integer via parseInt and routes through setLineClamp. Both 'line-clamp' and '-webkit-line-clamp' funnel through the same shared case. Bridge function is not yet registered, so values are silently dropped at runtime.",
-      "issue": ""
+      "unsupportedValues": [
+        "none"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)"
+      ],
+      "notes": "pulp #1552: bridge fn registered. Setting a non-zero clamp implicitly enables `multi_line_` on the Label so paint takes the multi-line branch (without that, the single-line path runs and the clamp is a no-op). Last-visible line gets U+2026 appended if source lines were dropped. CSS spec uses `none` to disable; pulp accepts numeric `0` for the same effect.",
+      "issue": "1552"
     },
     "css/lineHeight": {
       "status": "supported",
@@ -2988,15 +2995,20 @@
       "issue": ""
     },
     "css/webkitLineClamp": {
-      "status": "partial",
-      "mapsTo": "same as lineClamp",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "same as lineClamp — both keys funnel through setLineClamp(id, n)",
+      "supportedValues": [
         "integer"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:988 funnels '-webkit-line-clamp' through the same setLineClamp case as 'line-clamp'. Bridge function is not yet registered, so values are silently dropped at runtime.",
-      "issue": ""
+      "unsupportedValues": [
+        "none"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)"
+      ],
+      "notes": "pulp #1552: shares the lineClamp wiring. The CSS shim case routes both `line-clamp` and `-webkit-line-clamp` to the same setLineClamp bridge fn; the @pulp/react prop-applier dispatches both `lineClamp` and `webkitLineClamp` keys through the same branch.",
+      "issue": "1552"
     },
     "css/whiteSpace": {
       "status": "partial",
@@ -3997,16 +4009,16 @@
       "issue": ""
     },
     "rn/isolation": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "noop",
+      "mapsTo": "no-op accept — RN models isolation as enum auto|isolate (rn-viewstyle.json:134, RN New Architecture only). Pulp's box composition doesn't currently honor stacking-context isolation, so the value is accepted silently with no rendered effect (same shape as css/willChange / css/animation noop pattern).",
       "supportedValues": [],
       "unsupportedValues": [
         "auto",
         "isolate"
       ],
       "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "notes": "RN's ViewStyle DOES model isolation (oracle defines enum auto|isolate, flagged 'RN New Architecture only'). The earlier wontfix premise ('no RN model') was factually wrong — corrected per Codex P2 review on PR #1565. Pulp accepts the value but the underlying box composition isn't isolated, which matches the noop vocabulary (consumer can pass, no visual effect; same pattern as css/animation, css/willChange). Reclassified missing → noop per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/justifyContent": {
       "status": "supported",
@@ -4550,48 +4562,48 @@
       "issue": ""
     },
     "rn/shadowColor": {
-      "status": "missing",
-      "mapsTo": "no branch -- would route to setShadow / setBoxShadow",
+      "status": "wontfix",
+      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "iOS shadow* family -- superseded by boxShadow in modern RN.",
-      "issue": ""
+      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowOffset": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "wontfix",
+      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "iOS-only.",
-      "issue": ""
+      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowOpacity": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "wontfix",
+      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "iOS-only.",
-      "issue": ""
+      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowRadius": {
-      "status": "missing",
-      "mapsTo": "no branch",
+      "status": "wontfix",
+      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "iOS-only.",
-      "issue": ""
+      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/start": {
       "status": "partial",
