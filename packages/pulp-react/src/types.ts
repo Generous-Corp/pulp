@@ -198,6 +198,24 @@ export interface StyleProps {
     filter?: string;
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+    /// pulp #1547 — RN-canonical text-decoration longhands. The bridge
+    /// already accepts these via setTextDecoration / setTextDecorationColor /
+    /// setTextDecorationStyle (registered in widget_bridge.cpp for
+    /// #1434); the gap was purely the @pulp/react JSX dispatch.
+    /// `textDecorationLine` accepts the four CSS values plus the RN
+    /// multi-line form (`'underline line-through'`); the C++ side
+    /// parses both spellings.
+    textDecorationLine?: 'none' | 'underline' | 'line-through' | 'overline'
+                       | 'underline line-through';
+    textDecorationColor?: string;
+    textDecorationStyle?: 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy';
+    /// pulp #1547 — RN's `textAlignVertical` is Android-only and has
+    /// no CSS analogue. RN's spec applies WITHIN a text container, but
+    /// pulp's flex-only View model has no inline text-block concept,
+    /// so we map to the closest semantic — `alignItems` on the owning
+    /// View (top → flex-start, center → center, bottom → flex-end).
+    /// `auto` clears the slot.
+    textAlignVertical?: 'auto' | 'top' | 'bottom' | 'center';
     /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
     /// or two-keyword combos (`'left top'`). Bridge expects fractional
     /// 0..1 coordinates; the prop-applier parses the string before
