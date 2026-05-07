@@ -704,24 +704,43 @@ commands:
 
   - name: harness
     status: experimental
-    summary: Catalog-driven coverage harness. Delegates to tools/harness/verifier.py to compare compat.json support claims against machine-derived oracles, starting with the Yoga surface.
+    summary: Catalog and visual regression harness. Delegates to tools/harness/verifier.py for compat coverage and tools/harness/visual/runner.py for semantic Yoga layout snapshots.
     args:
       - name: coverage
         kind: positional
         required: false
         description: Optional compatibility subcommand; accepted for the documented `pulp harness coverage` form and stripped before verifier argument parsing.
+      - name: visual
+        kind: positional
+        required: false
+        description: Run the deterministic visual snapshot harness (`pulp harness visual --verify --all`).
       - name: --surface
         kind: option
-        description: Run one surface adapter, such as yoga. May be repeated.
+        description: Run one surface adapter or visual fixture surface, such as yoga. May be repeated.
       - name: --all
         kind: flag
-        description: Run every wired surface adapter.
+        description: Run every wired coverage adapter, or all visual fixtures for the selected visual surface.
       - name: --json
         kind: flag
         description: Print the JSON report to stdout instead of writing build/docs report files.
       - name: --no-docs
         kind: flag
         description: Skip writing docs/reports/harness-coverage.md.
+      - name: --verify
+        kind: flag
+        description: Visual subcommand only; verify fixtures against checked-in semantic goldens.
+      - name: --generate
+        kind: flag
+        description: Visual subcommand only; regenerate checked-in semantic goldens.
+      - name: --entry
+        kind: option
+        description: Visual subcommand only; run one fixture entry, such as yoga/box-sizing. May be repeated.
+      - name: --binary
+        kind: option
+        description: Visual subcommand only; override the pulp-test-visual binary path.
+      - name: --build-dir
+        kind: option
+        description: Visual subcommand only; CMake build directory used to locate pulp-test-visual.
       - name: --repo-root
         kind: option
         description: Override repo-root discovery.

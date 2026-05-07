@@ -50,6 +50,21 @@ if(NOT CARGO_EXECUTABLE)
     return()
 endif()
 
+execute_process(
+    COMMAND "${CARGO_EXECUTABLE}" --version
+    RESULT_VARIABLE _pulp_rs_cargo_version_result
+    OUTPUT_VARIABLE _pulp_rs_cargo_version_output
+    ERROR_VARIABLE _pulp_rs_cargo_version_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+
+if(NOT _pulp_rs_cargo_version_result EQUAL 0)
+    message(STATUS
+        "pulp-rs: skipped (cargo at ${CARGO_EXECUTABLE} is not runnable; "
+        "set PULP_SKIP_RUST_CLI=1 to silence this message)")
+    return()
+endif()
+
 # Pick the Cargo profile. Default to release for installable
 # artifacts; let the build matrix override via PULP_RUST_CLI_PROFILE
 # (e.g. "debug" for faster CI iteration where binary speed doesn't

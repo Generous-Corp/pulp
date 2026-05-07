@@ -32,8 +32,8 @@ Embedded at build time for deterministic text rendering. Both fonts are redistri
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **Inter** | SIL OFL 1.1 | Embedded UI font (`Inter-Regular.ttf`) | [github.com/rsms/inter](https://github.com/rsms/inter) |
-| **JetBrains Mono** | SIL OFL 1.1 | Embedded monospace font (`JetBrainsMono-Regular.ttf`) | [github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
+| **Inter** | SIL OFL 1.1 | Embedded UI font (`Inter-Regular.ttf`, version `4.001;git-9221beed3`) | [github.com/rsms/inter](https://github.com/rsms/inter) |
+| **JetBrains Mono** | SIL OFL 1.1 | Embedded monospace font (`JetBrainsMono-Regular.ttf`, version `2.304`) | [github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
 
 ### Plugin Format SDKs
 
@@ -81,9 +81,9 @@ See [AAX Setup](../guides/aax.md) for the supported local workflow.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan) | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
+| **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan), pinned via Skia `chrome/m144` DEPS at `6acf6ef3fe23` | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
-| **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend) | [skia.org](https://skia.org) |
+| **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m144 @ cd0c5f445516` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 
 ### Optional Dependencies

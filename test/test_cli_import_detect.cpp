@@ -20,8 +20,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 namespace det = pulp::import_detect;
@@ -261,17 +264,26 @@ void run_fixture(const fs::path& fixture_dir,
     REQUIRE(fs::exists(expected_path));
     auto exp = load_expected(expected_path);
 
-    // Choose the input target: prefer the directory itself when it has
-    // a `code.html` (Stitch-shape), otherwise the first non-expected
-    // payload file in the directory.
+    // Choose the input target deterministically. Prefer directory scans
+    // for fixtures that model directory exports; otherwise scan the
+    // first HTML payload by sorted path so Linux/macOS directory order
+    // cannot change the expected detector result.
     fs::path scan_target = fixture_dir;
     if (!fs::exists(fixture_dir / "code.html")) {
+        std::vector<fs::path> html_payloads;
         for (auto& entry : fs::directory_iterator(fixture_dir)) {
             auto fname = entry.path().filename().string();
             if (fname == "expected.json") continue;
-            scan_target = entry.path();
-            break;
+            auto ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (entry.is_regular_file() && (ext == ".html" || ext == ".htm"))
+                html_payloads.push_back(entry.path());
         }
+        std::sort(html_payloads.begin(), html_payloads.end());
+        if (!html_payloads.empty())
+            scan_target = html_payloads.front();
     }
 
     auto snap = det::snapshot_input(scan_target);

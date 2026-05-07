@@ -212,6 +212,11 @@ public:
     void set_opacity(float alpha) override;
     void save_layer(float x, float y, float w, float h,
                     float opacity, float blur_radius) override;
+    // pulp #1434 Phase A2-4 — full CSS filter chain.
+    void save_layer_with_filters(float x, float y, float w, float h,
+                                  float opacity,
+                                  const FilterChainEntry* chain,
+                                  int count) override;
 
 private:
     // Build the active fill paint, honoring `gradient_shader_` when set
