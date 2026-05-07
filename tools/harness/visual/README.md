@@ -66,6 +66,18 @@ cmake --build build --target pulp-test-visual
 pulp harness visual --verify --all
 ```
 
+When a verification failure needs inspection, write actual captures beside the
+normal build outputs:
+
+```bash
+pulp harness visual --verify --all --actuals-dir build/visual-actuals
+```
+
+The runner writes failed actuals to
+`build/visual-actuals/<surface>/<fixture>.<json|png>`. Semantic JSON fixtures
+use the tolerance-aware differ; raster PNG fixtures use exact-byte comparison
+on the canonical macOS arm64 lane.
+
 Regenerate one golden after an intentional layout contract change:
 
 ```bash

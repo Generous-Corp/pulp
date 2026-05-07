@@ -633,7 +633,7 @@ Namespace profile setup note:
 
 ### harness
 
-Run the catalog coverage harness and deterministic visual snapshot harness. Coverage mode delegates to `tools/harness/verifier.py` and compares `compat.json` support claims against machine-derived oracles. Visual mode delegates to `tools/harness/visual/runner.py` and compares semantic Yoga layout snapshots against checked-in goldens.
+Run the catalog coverage harness and deterministic visual snapshot harness. Coverage mode delegates to `tools/harness/verifier.py` and compares `compat.json` support claims against machine-derived oracles. Visual mode delegates to `tools/harness/visual/runner.py` and compares fixture-declared JSON or PNG captures against checked-in goldens.
 
 ```bash
 pulp harness --surface=yoga
@@ -642,12 +642,13 @@ pulp harness --all
 pulp harness --surface=yoga --json
 pulp harness --surface=yoga --no-docs
 pulp harness visual --verify --all
+pulp harness visual --verify --all --actuals-dir build/visual-actuals
 pulp harness visual --generate --surface=yoga --entry=yoga/box-sizing
 ```
 
 By default, coverage mode writes `build/harness-coverage-<sha>.json`, `build/harness-coverage.md`, and `docs/reports/harness-coverage.md`. Use `--json` for stdout-only machine output. Coverage JSON includes `validation_routes` per surface for supported entries with a typed validation route, legacy test reference, or explicit exclusion. It also includes `visual_coverage`, counted from typed runtime fixture refs that resolve to checked-in goldens; `visual_pass` remains as a compatibility alias.
 
-Visual mode requires the `pulp-test-visual` target to be built first. Use `--build-dir` or `--binary` when the binary is not under the default `build/` or `build-visual/` directories.
+Visual mode requires the `pulp-test-visual` target to be built first. Use `--build-dir` or `--binary` when the binary is not under the default `build/` or `build-visual/` directories. Fixture metadata decides whether a golden is semantic JSON or raster PNG. JSON snapshots use tolerance-aware semantic diffs; PNG snapshots use exact-byte comparison on the canonical raster lane. When verification fails, pass `--actuals-dir build/visual-actuals` to write failed actual JSON/PNG captures under `build/visual-actuals/<surface>/<fixture>.<json|png>` for inspection or artifact upload.
 
 ### ship
 

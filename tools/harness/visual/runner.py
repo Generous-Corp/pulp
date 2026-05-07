@@ -83,6 +83,15 @@ def golden_path_for(repo_root: Path, surface: str, fixture_path: Path) -> Path:
     return visual_spec.golden_path(repo_root, fixture)
 
 
+def actual_path_for(
+    repo_root: Path,
+    actuals_dir: Path,
+    fixture: visual_spec.VisualFixtureSpec,
+) -> Path:
+    base = actuals_dir if actuals_dir.is_absolute() else repo_root / actuals_dir
+    return base / fixture.surface / f"{fixture.entry}{fixture.golden_suffix}"
+
+
 def locate_binary(repo_root: Path, build_dir: Path | None, override: Path | None) -> Path:
     suffix = ".exe" if os.name == "nt" else ""
     if override:
@@ -118,20 +127,25 @@ def locate_binary(repo_root: Path, build_dir: Path | None, override: Path | None
     )
 
 
-def run_snapshot(binary: Path, fixture_path: Path) -> dict[str, Any]:
+def run_capture(binary: Path, fixture_path: Path) -> bytes:
     proc = subprocess.run(
         [str(binary), "--fixture", str(fixture_path)],
         check=False,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(
             f"{binary} failed for {fixture_path} with exit {proc.returncode}\n"
-            f"{proc.stderr.strip()}"
+            f"{stderr}"
         )
-    return json.loads(proc.stdout)
+    return proc.stdout
+
+
+def run_snapshot(binary: Path, fixture_path: Path) -> dict[str, Any]:
+    payload = run_capture(binary, fixture_path)
+    return json.loads(payload.decode("utf-8"))
 
 
 def load_fixture(path: Path) -> dict[str, Any]:
@@ -143,36 +157,115 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def _capture_fixture(
+    binary: Path,
+    fixture: visual_spec.VisualFixtureSpec,
+) -> dict[str, Any] | bytes:
+    payload = run_capture(binary, fixture.source_path)
+    if fixture.capture_format == "json":
+        return json.loads(payload.decode("utf-8"))
+    if fixture.capture_format == "png":
+        return payload
+    raise ValueError(f"unsupported visual capture format {fixture.capture_format!r}")
+
+
+def _write_capture(
+    path: Path,
+    fixture: visual_spec.VisualFixtureSpec,
+    payload: dict[str, Any] | bytes,
+) -> None:
+    if fixture.capture_format == "json":
+        if not isinstance(payload, dict):
+            raise TypeError(f"expected JSON object payload for {fixture.id}")
+        write_json(path, payload)
+        return
+    if fixture.capture_format == "png":
+        if not isinstance(payload, bytes):
+            raise TypeError(f"expected byte payload for {fixture.id}")
+        write_bytes(path, payload)
+        return
+    raise ValueError(f"unsupported visual capture format {fixture.capture_format!r}")
+
+
+def _write_actual(
+    repo_root: Path,
+    actuals_dir: Path | None,
+    fixture: visual_spec.VisualFixtureSpec,
+    payload: dict[str, Any] | bytes,
+) -> Path | None:
+    if actuals_dir is None:
+        return None
+    out = actual_path_for(repo_root, actuals_dir, fixture)
+    _write_capture(out, fixture, payload)
+    return out
+
+
 def generate(binary: Path, repo_root: Path, surface: str, fixtures: list[Path]) -> int:
-    for fixture in fixtures:
-        payload = run_snapshot(binary, fixture)
-        out = golden_path_for(repo_root, surface, fixture)
-        write_json(out, payload)
+    for fixture_path in fixtures:
+        fixture = visual_spec.fixture_spec_from_file(fixture_path, default_surface=surface)
+        payload = _capture_fixture(binary, fixture)
+        out = visual_spec.golden_path(repo_root, fixture)
+        _write_capture(out, fixture, payload)
         print(f"generated {out.relative_to(repo_root)}")
     return 0
 
 
-def verify(binary: Path, repo_root: Path, surface: str, fixtures: list[Path]) -> int:
+def verify(
+    binary: Path,
+    repo_root: Path,
+    surface: str,
+    fixtures: list[Path],
+    *,
+    actuals_dir: Path | None = None,
+) -> int:
     failures: list[str] = []
-    for fixture in fixtures:
-        golden = golden_path_for(repo_root, surface, fixture)
+    for fixture_path in fixtures:
+        fixture = visual_spec.fixture_spec_from_file(fixture_path, default_surface=surface)
+        golden = visual_spec.golden_path(repo_root, fixture)
+        actual = _capture_fixture(binary, fixture)
         if not golden.exists():
+            actual_path = _write_actual(repo_root, actuals_dir, fixture, actual)
+            actual_note = f"\nactual written to {actual_path}" if actual_path else ""
             failures.append(
-                f"{surface}/{entry_name(fixture)}: missing golden {golden.relative_to(repo_root)}"
+                f"{fixture.id}: missing golden {golden.relative_to(repo_root)}"
+                f"{actual_note}"
             )
             continue
 
-        actual = run_snapshot(binary, fixture)
-        expected = json.loads(golden.read_text(encoding="utf-8"))
-        tolerance = differ.tolerance_from_fixture(load_fixture(fixture))
-        diffs = differ.compare(expected, actual, tolerance=tolerance)
-        if diffs:
-            failures.append(
-                f"{surface}/{entry_name(fixture)} failed semantic diff:\n"
-                f"{differ.format_differences(diffs)}"
-            )
+        if fixture.capture_format == "json":
+            if not isinstance(actual, dict):
+                raise TypeError(f"expected JSON object payload for {fixture.id}")
+            expected = json.loads(golden.read_text(encoding="utf-8"))
+            tolerance = differ.tolerance_from_fixture(load_fixture(fixture_path))
+            diffs = differ.compare(expected, actual, tolerance=tolerance)
+            if diffs:
+                actual_path = _write_actual(repo_root, actuals_dir, fixture, actual)
+                actual_note = f"\nactual written to {actual_path}" if actual_path else ""
+                failures.append(
+                    f"{fixture.id} failed semantic diff:\n"
+                    f"{differ.format_differences(diffs)}"
+                    f"{actual_note}"
+                )
+            else:
+                print(f"ok {fixture.id}")
+        elif fixture.capture_format == "png":
+            if not isinstance(actual, bytes):
+                raise TypeError(f"expected byte payload for {fixture.id}")
+            expected_bytes = golden.read_bytes()
+            byte_diff = differ.format_byte_difference(expected_bytes, actual)
+            if byte_diff:
+                actual_path = _write_actual(repo_root, actuals_dir, fixture, actual)
+                actual_note = f"\nactual written to {actual_path}" if actual_path else ""
+                failures.append(f"{fixture.id} failed PNG byte diff: {byte_diff}{actual_note}")
+            else:
+                print(f"ok {fixture.id}")
         else:
-            print(f"ok {surface}/{entry_name(fixture)}")
+            raise ValueError(f"unsupported visual capture format {fixture.capture_format!r}")
 
     if failures:
         print("\n\n".join(failures), file=sys.stderr)
@@ -296,17 +389,23 @@ def _is_catalog_note(entry_name: str) -> bool:
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="pulp harness visual",
-        description="Generate or verify deterministic semantic visual snapshots.",
+        description="Generate or verify deterministic JSON/PNG visual snapshots.",
     )
     mode = p.add_mutually_exclusive_group()
-    mode.add_argument("--generate", action="store_true", help="Regenerate checked-in goldens.")
-    mode.add_argument("--verify", action="store_true", help="Verify fixtures against checked-in goldens.")
+    mode.add_argument("--generate", action="store_true", help="Regenerate checked-in JSON/PNG goldens.")
+    mode.add_argument("--verify", action="store_true", help="Verify fixtures against checked-in JSON/PNG goldens.")
     p.add_argument("--surface", action="append", default=None, help="Surface to run, default: yoga.")
     p.add_argument("--entry", action="append", default=None, help="Fixture entry name. May be repeated.")
     p.add_argument("--all", action="store_true", help="Run all fixtures for the selected surface.")
     p.add_argument("--binary", type=Path, default=None, help="Path to pulp-test-visual.")
     p.add_argument("--build-dir", type=Path, default=None, help="CMake build directory.")
     p.add_argument("--repo-root", type=Path, default=None, help="Override repo root discovery.")
+    p.add_argument(
+        "--actuals-dir",
+        type=Path,
+        default=None,
+        help="Directory for failed actual JSON/PNG captures, relative to repo root unless absolute.",
+    )
     return p.parse_args(argv)
 
 
@@ -336,12 +435,18 @@ def main(argv: Optional[list[str]] = None) -> int:
             if mode_generate:
                 rc = generate(binary, repo_root, surface, fixtures)
             elif mode_verify:
-                rc = verify(binary, repo_root, surface, fixtures)
+                rc = verify(binary, repo_root, surface, fixtures, actuals_dir=args.actuals_dir)
             else:
                 rc = 2
             if rc != 0:
                 return rc
-    except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        FileNotFoundError,
+        RuntimeError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0

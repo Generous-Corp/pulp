@@ -124,6 +124,85 @@ class RunnerTests(unittest.TestCase):
 
             self.assertEqual(spec.orphaned_golden_paths(root, ["yoga"]), [orphan])
 
+    def test_verify_json_writes_actual_on_semantic_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = self._write_fake_visual_binary(root)
+            fixture = self._write_fixture(
+                root,
+                "yoga",
+                "diff",
+                {"id": "yoga/diff", "actual": {"value": 2}},
+            )
+            golden = root / "tools" / "harness" / "visual" / "goldens" / "yoga" / "diff.json"
+            golden.parent.mkdir(parents=True, exist_ok=True)
+            golden.write_text(json.dumps({"value": 1}), encoding="utf-8")
+
+            rc = runner.verify(
+                binary,
+                root,
+                "yoga",
+                [fixture],
+                actuals_dir=Path("build/visual-actuals"),
+            )
+
+            self.assertEqual(rc, 1)
+            actual = root / "build" / "visual-actuals" / "yoga" / "diff.json"
+            self.assertEqual(json.loads(actual.read_text(encoding="utf-8")), {"value": 2})
+
+    def test_generate_png_writes_png_golden_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = self._write_fake_visual_binary(root)
+            fixture = self._write_fixture(
+                root,
+                "canvas2d",
+                "paint",
+                {
+                    "id": "canvas2d/paint",
+                    "kind": "render",
+                    "capture_format": "png",
+                    "actual_hex": "89504e470d0a1a0a",
+                },
+            )
+
+            rc = runner.generate(binary, root, "canvas2d", [fixture])
+
+            self.assertEqual(rc, 0)
+            golden = root / "tools" / "harness" / "visual" / "goldens" / "canvas2d" / "paint.png"
+            self.assertEqual(golden.read_bytes(), bytes.fromhex("89504e470d0a1a0a"))
+
+    def test_verify_png_uses_exact_bytes_and_writes_actual_on_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = self._write_fake_visual_binary(root)
+            fixture = self._write_fixture(
+                root,
+                "canvas2d",
+                "paint",
+                {
+                    "id": "canvas2d/paint",
+                    "kind": "render",
+                    "capture_format": "png",
+                    "actual_hex": "89504e470d0a1a0a",
+                },
+            )
+            golden = root / "tools" / "harness" / "visual" / "goldens" / "canvas2d" / "paint.png"
+            golden.parent.mkdir(parents=True, exist_ok=True)
+            golden.write_bytes(b"not-png")
+
+            rc = runner.verify(
+                binary,
+                root,
+                "canvas2d",
+                [fixture],
+                actuals_dir=root / "actuals",
+            )
+
+            self.assertEqual(rc, 1)
+            actual = root / "actuals" / "canvas2d" / "paint.png"
+            self.assertEqual(actual.read_bytes(), bytes.fromhex("89504e470d0a1a0a"))
+
     def _write_fixture_with_golden(self, root: Path, surface: str, name: str) -> None:
         fixture_dir = root / "tools" / "harness" / "visual" / "fixtures" / surface
         golden_dir = root / "tools" / "harness" / "visual" / "goldens" / surface
@@ -134,6 +213,47 @@ class RunnerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (golden_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+
+    def _write_fixture(
+        self,
+        root: Path,
+        surface: str,
+        name: str,
+        payload: dict[str, object],
+    ) -> Path:
+        fixture_dir = root / "tools" / "harness" / "visual" / "fixtures" / surface
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        fixture = fixture_dir / f"{name}.json"
+        fixture.write_text(json.dumps(payload), encoding="utf-8")
+        return fixture
+
+    def _write_fake_visual_binary(self, root: Path) -> Path:
+        binary = root / "fake-pulp-test-visual"
+        binary.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "from pathlib import Path",
+                    "fixture = Path(sys.argv[sys.argv.index('--fixture') + 1])",
+                    "data = json.loads(fixture.read_text(encoding='utf-8'))",
+                    "fmt = data.get('capture_format') or data.get('captureFormat')",
+                    "capture = data.get('capture')",
+                    "if isinstance(capture, dict):",
+                    "    fmt = fmt or capture.get('format')",
+                    "fmt = (fmt or ('png' if data.get('kind') == 'render' else 'json')).lower()",
+                    "if fmt == 'png':",
+                    "    sys.stdout.buffer.write(bytes.fromhex(data.get('actual_hex', '89504e47')))",
+                    "else:",
+                    "    json.dump(data.get('actual', {}), sys.stdout)",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+        return binary
 
 
 if __name__ == "__main__":

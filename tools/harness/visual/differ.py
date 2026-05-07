@@ -59,6 +59,23 @@ def format_differences(differences: list[Difference], *, limit: int = 20) -> str
     return "\n".join(lines)
 
 
+def format_byte_difference(expected: bytes, actual: bytes) -> str:
+    """Return a compact exact-byte mismatch summary for raster goldens."""
+    if expected == actual:
+        return ""
+    limit = min(len(expected), len(actual))
+    for i in range(limit):
+        if expected[i] != actual[i]:
+            return (
+                f"byte mismatch at offset {i}: "
+                f"expected=0x{expected[i]:02x} actual=0x{actual[i]:02x}; "
+                f"expected_len={len(expected)} actual_len={len(actual)}"
+            )
+    if len(expected) != len(actual):
+        return f"length mismatch: expected_len={len(expected)} actual_len={len(actual)}"
+    return "byte mismatch"
+
+
 def _compare_value(
     expected: Any,
     actual: Any,

@@ -43,6 +43,17 @@ class DifferTests(unittest.TestCase):
             0.25,
         )
 
+    def test_byte_difference_summarizes_exact_mismatch(self) -> None:
+        self.assertEqual(differ.format_byte_difference(b"abc", b"abc"), "")
+        self.assertIn(
+            "byte mismatch at offset 1",
+            differ.format_byte_difference(b"abc", b"axc"),
+        )
+        self.assertEqual(
+            differ.format_byte_difference(b"abc", b"abcd"),
+            "length mismatch: expected_len=3 actual_len=4",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -728,10 +728,13 @@ commands:
         description: Skip writing docs/reports/harness-coverage.md.
       - name: --verify
         kind: flag
-        description: Visual subcommand only; verify fixtures against checked-in semantic goldens.
+        description: Visual subcommand only; verify fixtures against checked-in JSON/PNG goldens.
       - name: --generate
         kind: flag
-        description: Visual subcommand only; regenerate checked-in semantic goldens.
+        description: Visual subcommand only; regenerate checked-in JSON/PNG goldens.
+      - name: --actuals-dir
+        kind: option
+        description: Visual subcommand only; write failed actual JSON/PNG captures to this directory, relative to the repo root unless absolute.
       - name: --entry
         kind: option
         description: Visual subcommand only; run one fixture entry, such as yoga/box-sizing. May be repeated.
