@@ -20,11 +20,11 @@ across layout, box-model, typography, color, transforms, transitions,
 animations, gradients, flex, grid, and basic SVG. Print and paged-media
 specifics are out of scope.
 
-## Counts (2026-05-04)
+## Counts (2026-05-06)
 
 | Status | Count |
 |--------|------:|
-| supported | ~75 |
+| supported | ~88 |
 | partial | ~30 |
 | missing | ~60 |
 | wontfix | ~30 |
@@ -33,6 +33,40 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1551)** — Phase A3 Bundle 3 inside the
+  `pulp #1434` umbrella: 13 already-implemented CSS features
+  promoted to first-class catalog entries. Pure catalog add — no
+  code changes — documenting the existing wiring in
+  `core/view/js/web-compat-document.js`,
+  `core/view/js/web-compat-style-decl.js`,
+  `core/view/js/css-parser.js`, and
+  `core/view/js/web-compat.js`. New entries:
+  * Pseudo-classes (4): `css/__pseudo_hover`,
+    `css/__pseudo_focus`, `css/__pseudo_active`,
+    `css/__pseudo_disabled` — wired via
+    `_setupPseudoHover` / `_setupPseudoFocus` /
+    `_setupPseudoActive` and the `:disabled` branch in
+    `StyleSheet._applyTo` (web-compat-document.js).
+  * Structural selectors (5): `css/__selector_tag`,
+    `css/__selector_id`, `css/__selector_class`,
+    `css/__selector_descendant`, `css/__selector_child` —
+    `_parseSelector` and `_matchesSelector` cover tag, id,
+    class, descendant ` `, and child `>` combinators.
+  * `css/__matchMedia` — `window.matchMedia()` returning a
+    MediaQueryList shim, evaluated by `_matchMediaQuery`
+    (min/max-width, min/max-height, orientation).
+  * `css/__var` and `css/__setProperty_var` — `var(--name)`
+    resolution via `_resolveVar` against the bridge motion-token
+    namespace; `style.setProperty('--name', value)` writes
+    through to the same namespace via `setMotionToken` /
+    `applyTokenDiff`.
+  * `css/__StyleSheet` — full attach/detach engine covering both
+    JS-API (`new StyleSheet(...)`) and `<style>` text input
+    (parsed via `_parseCssText`).
+  Counts: `css` raw entries `199 → 212` (+13 instant supported);
+  the existing partial `css/__hover_pseudo` and missing
+  `css/__pseudo_classes_note` triage notes are kept in place but
+  superseded by the per-pseudo-class entries.
 - **2026-05-06 (pulp #1434 Phase A2-4)** — `css/filter` extended from
   `blur(Npx)`-only to the full CSS Filter Effects function set:
   `blur` / `brightness` / `contrast` / `grayscale` / `hue-rotate` /

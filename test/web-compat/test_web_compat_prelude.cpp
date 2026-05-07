@@ -1103,3 +1103,225 @@ TEST_CASE("WebCompat: matrix() with zero scale (a=b=0) preserves the collapse",
     REQUIRE_THAT(c, Catch::Matchers::WithinAbs(0.0, 0.001));
     REQUIRE_THAT(d, Catch::Matchers::WithinAbs(0.0, 0.001));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// pulp #1551 — CSS catalog Bundle 3: 13 already-implemented features
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// One Catch2 case per catalog entry. Each one drives the existing
+// implementation through the same path a consumer (Spectr's editor.js
+// or @pulp/react JSX) would hit, so the assertions double as a
+// regression net for the catalog entries.
+//
+// Scope deliberately narrow: smoke-level "does the existing
+// implementation actually do what the catalog claims". Edge-case
+// behaviour (multi-rule layering, focus/blur snapshot restore, var()
+// nested fallbacks, etc.) is covered by neighbouring tests
+// (test_css_hover_translation.cpp, test_selector_matching.cpp) — see
+// the `tests` field on each compat.json entry.
+
+TEST_CASE("WebCompat: :hover pseudo wires mouseenter/mouseleave (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __sheet = new StyleSheet({ '.h': { backgroundColor: 'red' } });
+        // _setupPseudoHover only matches when parsed.pseudo === 'hover'.
+        __sheet._parsedRules[0].parsed.pseudo = 'hover';
+        __sheet.attach();
+        var __hEl = document.createElement('div');
+        __hEl.className = 'h';
+        document.body.appendChild(__hEl);
+    )JS");
+    auto wired = env.engine.evaluate(
+        "!!__hEl._hoverState && __hEl._hoverState.propsList.length === 1");
+    REQUIRE(wired.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :focus pseudo wires focus/blur listeners (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __fEl = document.createElement('input');
+        __fEl.className = 'f';
+        document.body.appendChild(__fEl);
+        _setupPseudoFocus(__fEl, { backgroundColor: 'red' });
+    )JS");
+    auto setup = env.engine.evaluate("__fEl._focusSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :active pseudo wires mousedown/mouseup listeners (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __aEl = document.createElement('button');
+        __aEl.className = 'a';
+        document.body.appendChild(__aEl);
+        _setupPseudoActive(__aEl, { backgroundColor: 'red' });
+    )JS");
+    auto setup = env.engine.evaluate("__aEl._activeSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: :disabled pseudo applies styles when el.disabled is set (issue-1551)",
+          "[webcompat][css-pseudo][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __dEl = document.createElement('button');
+        __dEl.className = 'd';
+        __dEl.disabled = true;
+        var __dSheet = new StyleSheet({ '.d': { width: '42px' } });
+        // Force the parsed pseudo to 'disabled' so _applyTo routes
+        // through the :disabled branch.
+        __dSheet._parsedRules[0].parsed.pseudo = 'disabled';
+        __dSheet.attach();
+        document.body.appendChild(__dEl);
+    )JS");
+    auto applied = env.engine.evaluate("__dEl.style._props.width");
+    REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "42px");
+}
+
+TEST_CASE("WebCompat: tag selector matches by lowercase tagName (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __tEl = document.createElement('button');
+    )JS");
+    auto matched = env.engine.evaluate(
+        "_matchesSelector(__tEl, _parseSelector('button'))");
+    auto rejected = env.engine.evaluate(
+        "_matchesSelector(__tEl, _parseSelector('input'))");
+    REQUIRE(matched.getWithDefault<bool>(false) == true);
+    REQUIRE(rejected.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: id selector matches via getAttribute('id') (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __iEl = document.createElement('div');
+        __iEl.id = 'unique';
+    )JS");
+    auto matched = env.engine.evaluate(
+        "_matchesSelector(__iEl, _parseSelector('#unique'))");
+    auto rejected = env.engine.evaluate(
+        "_matchesSelector(__iEl, _parseSelector('#other'))");
+    REQUIRE(matched.getWithDefault<bool>(false) == true);
+    REQUIRE(rejected.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: class selector requires every class in classList (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __cEl = document.createElement('div');
+        __cEl.className = 'foo bar';
+    )JS");
+    auto onlyFoo = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo'))");
+    auto compound = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo.bar'))");
+    auto missing = env.engine.evaluate(
+        "_matchesSelector(__cEl, _parseSelector('.foo.baz'))");
+    REQUIRE(onlyFoo.getWithDefault<bool>(false) == true);
+    REQUIRE(compound.getWithDefault<bool>(false) == true);
+    REQUIRE(missing.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: descendant combinator walks ancestor chain (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __gp = document.createElement('section');
+        var __p = document.createElement('div');
+        var __c = document.createElement('span');
+        __gp._children.push(__p);
+        __p._parentElement = __gp;
+        __p._children.push(__c);
+        __c._parentElement = __p;
+    )JS");
+    auto descendant = env.engine.evaluate(
+        "_matchesSelector(__c, _parseSelector('section span'))");
+    REQUIRE(descendant.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: child combinator requires immediate parent (issue-1551)",
+          "[webcompat][css-selector][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __gp2 = document.createElement('section');
+        var __p2 = document.createElement('div');
+        var __c2 = document.createElement('span');
+        __gp2._children.push(__p2);
+        __p2._parentElement = __gp2;
+        __p2._children.push(__c2);
+        __c2._parentElement = __p2;
+    )JS");
+    auto direct = env.engine.evaluate(
+        "_matchesSelector(__c2, _parseSelector('div > span'))");
+    auto skip = env.engine.evaluate(
+        "_matchesSelector(__c2, _parseSelector('section > span'))");
+    REQUIRE(direct.getWithDefault<bool>(false) == true);
+    REQUIRE(skip.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("WebCompat: _matchMediaQuery resolves @media-style queries (issue-1551)",
+          "[webcompat][matchmedia][issue-1551]") {
+    // The catalog tracks `_matchMediaQuery()` (loaded with css-parser prelude),
+    // not `window.matchMedia()` — the latter lives in core/view/js/web-compat.js
+    // which is not part of the WidgetBridge prelude chain. Stylesheets and
+    // matched-media @rules go through `_matchMediaQuery` directly. The shape
+    // tested here is what the engine actually exposes today.
+    TestEnvironment env(800, 600);
+    auto match_min = env.engine.evaluate(
+        "_matchMediaQuery('(min-width: 600px)')");
+    auto miss_min = env.engine.evaluate(
+        "_matchMediaQuery('(min-width: 1200px)')");
+    auto orient = env.engine.evaluate(
+        "_matchMediaQuery('(orientation: landscape)')");
+    REQUIRE(match_min.getWithDefault<bool>(false) == true);
+    REQUIRE(miss_min.getWithDefault<bool>(true) == false);
+    REQUIRE(orient.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: var(--name) resolves through motion-token bridge (issue-1551)",
+          "[webcompat][css-var][issue-1551]") {
+    TestEnvironment env;
+    env.eval("setMotionToken('v1551-w', 64);");
+    auto resolved = env.engine.evaluate("_resolveVar('var(--v1551-w)')");
+    auto withFallback = env.engine.evaluate("_resolveVar('var(--v1551-missing, 12)')");
+    REQUIRE(std::string(resolved.getWithDefault<std::string_view>("")) == "64");
+    REQUIRE(std::string(withFallback.getWithDefault<std::string_view>("")) == "12");
+}
+
+TEST_CASE("WebCompat: setProperty('--name') routes to motion-token bridge (issue-1551)",
+          "[webcompat][css-var][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __spEl = document.createElement('div');
+        __spEl.style.setProperty('--v1551-h', '128px');
+    )JS");
+    auto roundTrip = env.engine.evaluate("getMotionToken('v1551-h')");
+    REQUIRE(roundTrip.getWithDefault<double>(-1.0) == 128.0);
+}
+
+TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issue-1551)",
+          "[webcompat][stylesheet][issue-1551]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __ssEl = document.createElement('div');
+        __ssEl.className = 'ss-1551';
+        document.body.appendChild(__ssEl);
+        var __ssSheet = new StyleSheet({ '.ss-1551': { width: '99px' } });
+        __ssSheet.attach();
+    )JS");
+    auto applied = env.engine.evaluate("__ssEl.style._props.width");
+    auto attached = env.engine.evaluate("__ssSheet._attached");
+    REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "99px");
+    REQUIRE(attached.getWithDefault<bool>(false) == true);
+
+    // Detach is the second half of the catalog claim.
+    env.eval("__ssSheet.detach();");
+    auto detached = env.engine.evaluate("__ssSheet._attached");
+    REQUIRE(detached.getWithDefault<bool>(true) == false);
+}
