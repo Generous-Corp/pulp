@@ -3429,11 +3429,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderBottomRightRadius": {
@@ -3443,26 +3444,23 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderBottomWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderBottomWidth` to `setBorderBottomWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderColor": {
@@ -3537,18 +3535,14 @@
       "issue": ""
     },
     "rn/borderLeftWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderLeftWidth` to `setBorderLeftWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderRadius": {
@@ -3558,11 +3552,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full elliptical rrect rendering is a deferred paint-side gap).",
       "issue": ""
     },
     "rn/borderRightColor": {
@@ -3589,18 +3584,14 @@
       "issue": ""
     },
     "rn/borderRightWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderRightWidth` to `setBorderRightWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderStartWidth": {
@@ -3668,11 +3659,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderTopRightRadius": {
@@ -3682,41 +3674,34 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderTopWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderTopWidth` to `setBorderTopWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderWidth` to `setBorderWidth(id, ...)` (prop-applier.ts:300-302).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. Wave 2 rn \u2014 dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only \u2014 em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/bottom": {
@@ -3735,18 +3720,19 @@
       "status": "partial",
       "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:600+). String parser mirrors web-compat-style-decl.js.",
       "supportedValues": [
-        "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
+        "'none' (clears)",
         "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
-        "'none' (clears)"
+        "multi-shadow comma-separated string (one setBoxShadow dispatch per parsed shadow; paren-depth-aware split)",
+        "object form { offsetX, offsetY, blur?, spread?, color, inset? }"
       ],
       "unsupportedValues": [
-        "multi-shadow comma-separated lists",
         "BoxShadowValue array"
       ],
       "tests": [
-        "packages/pulp-react/test/prop-applier-box-shadow.test.ts"
+        "packages/pulp-react/test/prop-applier-box-shadow.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions). Wave 1 drift cleanup \u2014 supported \u2192 partial (multi-shadow comma-list and BoxShadowValue array form are real gaps).",
+      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions). Wave 1 drift cleanup \u2014 supported \u2192 partial (multi-shadow comma-list and BoxShadowValue array form are real gaps). Wave 2 rn \u2014 multi-shadow comma-separated string lists now dispatch one setBoxShadow call per parsed shadow. The split respects paren depth so `rgba(0,0,0,0.3)` color literals don't get cut. Dispatch order matches input string order, which (combined with the bridge's last-write-wins View slot) approximates the CSS layering stack \u2014 full multi-slot compositing remains a separate paint-side follow-up.",
       "issue": ""
     },
     "rn/boxSizing": {
@@ -3842,9 +3828,10 @@
         "context-menu"
       ],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` \u2014 they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup \u2014 `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot.",
+      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` \u2014 they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup \u2014 `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot. Wave 2 rn \u2014 added 'auto' regression coverage in the wave2 test bundle.",
       "issue": ""
     },
     "rn/d": {
@@ -4127,8 +4114,10 @@
         "black"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "Keyword aliasing not done in prop-applier. Wave 1 drift cleanup \u2014 populated supportedValues with the RN standard weight set (normal / bold / 100..900); wired through prop-applier 'fontWeight' case.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Keyword aliasing not done in prop-applier. Wave 1 drift cleanup \u2014 populated supportedValues with the RN standard weight set (normal / bold / 100..900); wired through prop-applier 'fontWeight' case. Wave 2 rn \u2014 added regression coverage for numeric weights '100'..'900'.",
       "issue": ""
     },
     "rn/gap": {
@@ -4265,30 +4254,33 @@
       "issue": ""
     },
     "rn/lineHeight": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setLineHeight",
       "supportedValues": [
-        "number (px)"
-      ],
-      "unsupportedValues": [
+        "number (px)",
         "unitless multiplier"
       ],
-      "tests": [],
-      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (unitless multiplier form is a real deferred gap; absolute-px works end-to-end).",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (unitless multiplier form is a real deferred gap; absolute-px works end-to-end). Wave 2 rn \u2014 unitless-multiplier semantics now resolved at dispatch time. Values <= 8 are treated as a multiplier of the live `fontSize` from props (default 14 if absent); larger values flow through as absolute pixels. Px-suffix strings strip the suffix and treat as absolute.",
       "issue": ""
     },
     "rn/margin": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'margin', n)",
       "supportedValues": [
-        "number"
+        "'auto' keyword",
+        "1-4 token shorthand string",
+        "number",
+        "percent string"
       ],
-      "unsupportedValues": [
-        "auto",
-        "string"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (auto + string-form margins are real deferred gaps).",
+      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (auto + string-form margins are real deferred gaps). Wave 2 rn \u2014 string margin shorthands (`'auto'`, `'5%'`, `'0 auto'`) now fan out to the per-edge bridge keys (which honor Yoga's YGNodeStyleSetMarginAuto for centering and the percent path).",
       "issue": ""
     },
     "rn/marginBottom": {
@@ -4595,16 +4587,18 @@
       "issue": "1148"
     },
     "rn/padding": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'padding', n)",
       "supportedValues": [
-        "number"
+        "1-4 token shorthand string",
+        "number",
+        "percent string"
       ],
-      "unsupportedValues": [
-        "%"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (% form on padding edges is deferred).",
+      "notes": "Wave 1 drift cleanup \u2014 supported \u2192 partial (% form on padding edges is deferred). Wave 2 rn \u2014 string padding shorthands (`'5%'`, `'10px 20px'`, etc.) now fan out to the per-edge bridge keys (which already accept percent via Yoga's YGNodeStyleSetPaddingPercent). Numeric values still take the single-call shorthand path.",
       "issue": ""
     },
     "rn/paddingBottom": {
@@ -4906,9 +4900,10 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface aliases RN's `textDecorationLine` to the existing setTextDecoration bridge fn. Single-keyword form is honored by Label::TextDecoration; the RN compound form `'underline line-through'` is forwarded verbatim but only the first keyword takes effect today (same partial gap noted on css/textDecoration). `overline` is a pulp extension over RN spec. Wave 1 drift cleanup \u2014 added 'underline line-through' combined keyword to supportedValues (the prop-applier passes the keyword to the bridge verbatim).",
+      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface aliases RN's `textDecorationLine` to the existing setTextDecoration bridge fn. Single-keyword form is honored by Label::TextDecoration; the RN compound form `'underline line-through'` is forwarded verbatim but only the first keyword takes effect today (same partial gap noted on css/textDecoration). `overline` is a pulp extension over RN spec. Wave 1 drift cleanup \u2014 added 'underline line-through' combined keyword to supportedValues (the prop-applier passes the keyword to the bridge verbatim). Wave 2 rn \u2014 added 'underline line-through' compound regression coverage.",
       "issue": ""
     },
     "rn/textDecorationStyle": {
@@ -5052,16 +5047,17 @@
       "issue": ""
     },
     "rn/viewBox": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "prop-applier.ts: 'viewBox' -> setSvgViewBox(id, w, h). Expected as [number, number] tuple.",
       "supportedValues": [
+        "SVG-style 'min-x min-y w h' string (trailing w/h consumed; min-x/min-y origin offset is a paint-side gap)",
         "[number, number] (width, height)"
       ],
-      "unsupportedValues": [
-        "SVG-style 'min-x min-y w h' string (only the [w,h] tuple form is wired)"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "RN doesn't have a native SVG surface; this is a Pulp-specific @pulp/react intrinsic. CSS-shim consumers don't see this prop today. Wave 1 drift cleanup \u2014 supported \u2192 partial (only the [w,h] tuple is consumed; min-x/min-y prefix is parsed but ignored).",
+      "notes": "RN doesn't have a native SVG surface; this is a Pulp-specific @pulp/react intrinsic. CSS-shim consumers don't see this prop today. Wave 1 drift cleanup \u2014 supported \u2192 partial (only the [w,h] tuple is consumed; min-x/min-y prefix is parsed but ignored). Wave 2 rn \u2014 SVG-spec string form `'min-x min-y w h'` (or `'w h'`) now parses at dispatch time. The bridge consumes the trailing two tokens as (width, height); the min-x / min-y origin offset is not yet honored by the SvgPathWidget paint side (separate paint-side follow-up).",
       "issue": "994"
     },
     "rn/width": {

@@ -33,7 +33,12 @@ export interface FlexProps {
     gap?: number;
     rowGap?: number;
     columnGap?: number;
-    padding?: number;
+    /// Wave 2 rn — `padding` shorthand accepts either a number (px) or
+    /// a CSS-spec string with 1-4 space-separated tokens (`'5%'`,
+    /// `'10px 20px'`, `'10 20 30 40'`). String values fan out to the
+    /// per-edge bridge keys; numeric values flow through the bridge
+    /// `padding` shorthand key as a single call (no behavior change).
+    padding?: number | string;
     /// pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
     /// either a number (px) or a percent string ('5%' → percent of parent
     /// main-axis size). Yoga padding does NOT support 'auto'.
@@ -49,7 +54,12 @@ export interface FlexProps {
     /// pulp #1434 batch 4 — `paddingVertical` fans out to `paddingTop` +
     /// `paddingBottom`.
     paddingVertical?: number | string;
-    margin?: number;
+    /// Wave 2 rn — `margin` shorthand accepts either a number (px) or
+    /// a CSS-spec string. String values fan out to the per-edge bridge
+    /// keys (which support `'5%'` percent and the `'auto'` keyword
+    /// for centering via Yoga's YGNodeStyleSetMarginAuto). 1-4 tokens
+    /// follow the standard CSS expansion rules.
+    margin?: number | string;
     /// pulp #1434 (cross-surface mega-batch) — per-edge margin accepts a
     /// number (px), percent string ('5%' → percent of parent main-axis
     /// size), or the keyword 'auto' (Yoga YGNodeStyleSetMarginAuto —
@@ -152,7 +162,12 @@ export interface StyleProps {
     // unlike `border:` which sets all three at once.
     borderColor?: string;
     borderWidth?: number;
-    borderRadius?: number;
+    /// Wave 2 rn — `borderRadius` accepts a uniform number (px) or
+    /// the RN Fabric elliptical `{ x, y }` form. The Skia paint side
+    /// currently honors a single uniform radius per corner, so the
+    /// elliptical input is degraded to the average of x and y; full
+    /// rrect rendering (SkRRect::setRectXY) is a deferred gap.
+    borderRadius?: number | { x: number; y: number };
     /// pulp #1434 Triage #10 — CSS / RN border-style keyword. Skia
     /// installs SkDashPathEffect for `'dashed'` / `'dotted'`; other
     /// named styles (`'double'`, `'groove'`, `'ridge'`, `'inset'`,
@@ -178,10 +193,13 @@ export interface StyleProps {
     borderRightWidth?: number;
     borderBottomWidth?: number;
     borderLeftWidth?: number;
-    borderTopLeftRadius?: number;
-    borderTopRightRadius?: number;
-    borderBottomLeftRadius?: number;
-    borderBottomRightRadius?: number;
+    /// Wave 2 rn — per-corner radii also accept the RN Fabric
+    /// elliptical `{ x, y }` form (degraded to averaged uniform; see
+    /// `borderRadius` for the Skia rrect rationale).
+    borderTopLeftRadius?: number | { x: number; y: number };
+    borderTopRightRadius?: number | { x: number; y: number };
+    borderBottomLeftRadius?: number | { x: number; y: number };
+    borderBottomRightRadius?: number | { x: number; y: number };
     /// pulp #1519 — CSS / RN outline cluster. Outline is paint-only:
     /// it draws OUTSIDE the border-box and does NOT take up Yoga
     /// layout space. Style keyword set mirrors borderStyle (CSS spec
@@ -497,7 +515,15 @@ export interface SvgPathProps extends BaseProps {
     /// viewbox's coordinate space and scaled into the widget's bounds
     /// at paint time. Defaults to (0, 0) — i.e. the bridge will not
     /// scale and the path's native units determine size.
-    viewBox?: [number, number];
+    ///
+    /// Wave 2 rn — also accepts the SVG-spec string form
+    /// `'min-x min-y w h'` (or `'w h'`). Common with Lucide /
+    /// Heroicons / Figma SVG exports. The bridge consumes width +
+    /// height only today (the SvgPathWidget doesn't yet honor the
+    /// min-x / min-y origin offset — paint-side gap), so the trailing
+    /// two tokens become the (w, h) tuple. Tokens may be space- or
+    /// comma-separated.
+    viewBox?: [number, number] | string;
     /// Fill color as hex (`#rrggbb` / `#rrggbbaa`) or `"none"`. Defaults
     /// to the SvgPathWidget's internal default (transparent + no stroke
     /// = invisible). Pass `"none"` to clear an inherited fill.
