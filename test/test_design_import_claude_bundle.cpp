@@ -206,6 +206,66 @@ TEST_CASE("parse_claude_bundle returns nullopt when the manifest is malformed JS
     REQUIRE_FALSE(bundle.has_value());
 }
 
+TEST_CASE("parse_claude_bundle returns nullopt for malformed template JSON or non-object manifest",
+          "[view][import][issue-468]") {
+    SECTION("template tag is not valid JSON") {
+        auto bundle = parse_claude_bundle(
+            "<html><script type=\"__bundler/manifest\">{}</script>"
+            "<script type=\"__bundler/template\"><div></div></script></html>");
+        REQUIRE_FALSE(bundle.has_value());
+    }
+
+    SECTION("template JSON is not a string") {
+        auto bundle = parse_claude_bundle(
+            "<html><script type=\"__bundler/manifest\">{}</script>"
+            "<script type=\"__bundler/template\">{\"html\":\"<div></div>\"}</script></html>");
+        REQUIRE_FALSE(bundle.has_value());
+    }
+
+    SECTION("manifest JSON is not an object") {
+        auto bundle = parse_claude_bundle(build_envelope("[1,2,3]", "<div id=\"root\"></div>"));
+        REQUIRE_FALSE(bundle.has_value());
+    }
+}
+
+TEST_CASE("parse_claude_bundle skips malformed assets and indexes only referenced JavaScript",
+          "[view][import][issue-468]") {
+    const std::string referenced_js = "globalThis.referenced = true;";
+    const std::string unreferenced_js = "globalThis.unreferenced = true;";
+    const std::string invalid_gzip = "not gzip";
+    const std::string font = "font bytes";
+
+    std::ostringstream manifest;
+    manifest << "{"
+             << "\"non-object\":\"ignored\","
+             << "\"missing-data\":{\"mime\":\"text/javascript\",\"compressed\":false},"
+             << "\"non-string-data\":{\"mime\":\"text/javascript\",\"compressed\":false,\"data\":42},"
+             << "\"bad-base64\":{\"mime\":\"text/javascript\",\"compressed\":false,\"data\":\"%%%\"},"
+             << "\"bad-compressed\":{\"mime\":\"text/javascript\",\"compressed\":true,"
+             << "\"data\":\"" << pulp::runtime::base64_encode(invalid_gzip) << "\"},"
+             << manifest_entry("referenced-js", "text/javascript", referenced_js, false) << ","
+             << manifest_entry("unreferenced-js", "text/javascript", unreferenced_js, false) << ","
+             << manifest_entry("referenced-font", "font/woff2", font, false)
+             << "}";
+
+    const std::string body =
+        R"(<div id="root"></div>)"
+        R"(<script src="missing-data"></script>)"
+        R"(<script src="referenced-font"></script>)"
+        R"(<script src="referenced-js"></script>)";
+
+    auto bundle = parse_claude_bundle(build_envelope(manifest.str(), body));
+    REQUIRE(bundle.has_value());
+
+    REQUIRE(bundle->assets.size() == 3);
+    REQUIRE(bundle->assets[0].uuid == "referenced-js");
+    REQUIRE(bundle->assets[1].uuid == "unreferenced-js");
+    REQUIRE(bundle->assets[2].uuid == "referenced-font");
+
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->assets[bundle->javascript_indices[0]].uuid == "referenced-js");
+}
+
 TEST_CASE("parse_claude_bundle accepts a real Spectr editor.html fixture "
           "when PULP_CLAUDE_BUNDLE_FIXTURE is set",
           "[view][import][issue-468][.fixture]") {
@@ -252,4 +312,28 @@ TEST_CASE("parse_claude_bundle order: javascript_indices reflects template order
     REQUIRE(bundle->javascript_indices.size() == 2);
     REQUIRE(bundle->assets[bundle->javascript_indices[0]].uuid == "uuid-a");
     REQUIRE(bundle->assets[bundle->javascript_indices[1]].uuid == "uuid-b");
+}
+
+TEST_CASE("extract_claude_classnames reads bundled template styles and skips leading font-face blocks",
+          "[view][import][issue-468][issue-1035]") {
+    std::ostringstream manifest;
+    manifest << "{"
+             << manifest_entry("uuid-js", "text/javascript", "globalThis.ready = true;", false)
+             << "}";
+
+    const std::string body =
+        R"(<style>@font-face { font-family: BundleFont; src: url(font.woff2); })"
+        R"(.font-block-leak { color: red; }</style>)"
+        R"(<style>.panel { font-size: 14px; background-color: #123456; })"
+        R"(.knob { border-radius: 8px; }</style>)"
+        R"(<div id="root" class="panel knob"></div>)"
+        R"(<script src="uuid-js"></script>)";
+
+    const auto rules = extract_claude_classnames(build_envelope(manifest.str(), body));
+
+    REQUIRE(rules.size() == 2);
+    REQUIRE(rules.at("panel").at("fontSize") == "14px");
+    REQUIRE(rules.at("panel").at("backgroundColor") == "#123456");
+    REQUIRE(rules.at("knob").at("borderRadius") == "8px");
+    REQUIRE(rules.count("font-block-leak") == 0);
 }
