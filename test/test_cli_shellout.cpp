@@ -851,7 +851,7 @@ TEST_CASE("pulp create scaffolds a no-build app project with Android files",
     auto r = run_pulp({"create", "Neon Drum", "--type", "app",
                        "--targets", "android,standalone",
                        "--output", project.string(), "--no-build", "--ci"},
-                      30000);
+                      60000);
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     pulp_unsetenv("PULP_HOME");
 

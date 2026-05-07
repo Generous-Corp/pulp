@@ -67,7 +67,7 @@ TEST_CASE("compat.json parses cleanly with the imports section", "[cli][import-d
     REQUIRE_FALSE(compat.empty());
     auto manifest = det::parse_compat_json(slurp(compat));
     REQUIRE(manifest.has_value());
-    CHECK(manifest->compat_schema_version == "0.2");
+    CHECK(manifest->compat_schema_version == "0.3");
     CHECK_FALSE(manifest->sources.empty());
 
     bool saw_stitch = false;

@@ -618,12 +618,13 @@ CanvasRenderingContext2D.prototype.closePath = function() {
     }
 };
 
-CanvasRenderingContext2D.prototype.fill = function() {
+CanvasRenderingContext2D.prototype.fill = function(fillRule) {
     this._syncGlobalState();
     this._syncShadowState();
     this._syncFilterState();
     this._applyFillStyle();
-    if (typeof canvasFillPath === "function") canvasFillPath(this._id);
+    var rule = (fillRule === "evenodd") ? 1 : 0;
+    if (typeof canvasFillPath === "function") canvasFillPath(this._id, rule);
 };
 
 CanvasRenderingContext2D.prototype.stroke = function() {
@@ -938,8 +939,8 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
     // clip region with the current path. The bridge's canvasClip
     // (issue-896) calls SkCanvas::clipPath; canvasClipRect is the older
     // rect-only path. Prefer canvasClip when available.
-    void fillRule;
-    if (typeof canvasClip === "function") canvasClip(this._id);
+    var rule = (fillRule === "evenodd") ? 1 : 0;
+    if (typeof canvasClip === "function") canvasClip(this._id, rule);
 };
 
 // ── pulp #1527 — isPointInPath / isPointInStroke ─────────────────────────
