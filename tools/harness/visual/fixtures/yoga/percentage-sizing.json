@@ -1,0 +1,25 @@
+{
+  "id": "yoga/percentage-sizing",
+  "surface": "yoga",
+  "kind": "layout",
+  "viewport": { "w": 300, "h": 200 },
+  "tolerance": { "rect": 0.001 },
+  "tree": {
+    "id": "root",
+    "type": "View",
+    "style": {
+      "direction": "row",
+      "align_items": "start"
+    },
+    "children": [
+      {
+        "id": "percent-child",
+        "type": "View",
+        "style": {
+          "width": "50%",
+          "height": "25%"
+        }
+      }
+    ]
+  }
+}

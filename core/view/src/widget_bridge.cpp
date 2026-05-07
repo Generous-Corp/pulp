@@ -3274,18 +3274,24 @@ void WidgetBridge::register_api() {
         // pulp #1026 — preserve the unrelated attribute when a per-side
         // setter is called for only color OR only width, matching how
         // RN's JSX prop-applier emits property updates one at a time.
-        canvas::Color cur_color{};
-        float cur_width = 0.0f;
-        if (side == "top")    { cur_color = v->border_top_color();    cur_width = v->border_top_width(); }
-        else if (side == "right") { cur_color = v->border_right_color();  cur_width = v->border_right_width(); }
-        else if (side == "bottom"){ cur_color = v->border_bottom_color(); cur_width = v->border_bottom_width(); }
-        else if (side == "left")  { cur_color = v->border_left_color();   cur_width = v->border_left_width(); }
-        canvas::Color c = color.value_or(cur_color);
-        float w = width.value_or(cur_width);
-        if (side == "top") v->set_border_top(c, w);
-        else if (side == "right") v->set_border_right(c, w);
-        else if (side == "bottom") v->set_border_bottom(c, w);
-        else if (side == "left") v->set_border_left(c, w);
+        // pulp #1566 — route through the split color-only / width-only
+        // setters so that `setBorderTopColor` does NOT mark the per-edge
+        // WIDTH as explicitly set (which would let a stale 0 override
+        // the uniform `borderWidth` shorthand). Symmetrically,
+        // `setBorderTopWidth(0)` MUST mark the edge as explicitly set so
+        // it overrides the shorthand on that edge per CSS / RN semantics.
+        if (color.has_value()) {
+            if (side == "top")         v->set_border_top_color(*color);
+            else if (side == "right")  v->set_border_right_color(*color);
+            else if (side == "bottom") v->set_border_bottom_color(*color);
+            else if (side == "left")   v->set_border_left_color(*color);
+        }
+        if (width.has_value()) {
+            if (side == "top")         v->set_border_top_width(*width);
+            else if (side == "right")  v->set_border_right_width(*width);
+            else if (side == "bottom") v->set_border_bottom_width(*width);
+            else if (side == "left")   v->set_border_left_width(*width);
+        }
     };
     engine_.register_function("setBorderTopColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -4155,17 +4161,127 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setFilter(id, "blur(4px)") — CSS filter property
-    engine_.register_function("setFilter", [this](choc::javascript::ArgumentList args) {
+    // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
+    //   — pulp #1434 Phase A2-4 CSS filter chain. Walks the function
+    //   sequence and builds View::FilterOp entries; the View paint
+    //   path passes the chain to canvas.save_layer_with_filters which
+    //   composes via SkImageFilters on the Skia backend (CG falls
+    //   through to blur-only for now).
+    engine_.register_function("setFilter", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto filter = args.get<std::string>(1, "");
+        auto filter_str = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        // Parse "blur(Npx)"
-        if (filter.substr(0, 5) == "blur(") {
-            auto inner = filter.substr(5, filter.find(')') - 5);
-            v->set_filter_blur(std::stof(inner));
+
+        if (filter_str == "none" || filter_str.empty()) {
+            v->clear_filter_chain();
+            v->set_filter_blur(0.0f);
+            return choc::value::Value();
         }
+
+        // Walk function-call sequence: `name(args)` repeated.
+        std::vector<View::FilterOp> chain;
+        size_t i = 0;
+        while (i < filter_str.size()) {
+            // Skip whitespace
+            while (i < filter_str.size() && std::isspace(static_cast<unsigned char>(filter_str[i]))) ++i;
+            if (i >= filter_str.size()) break;
+            // Parse name up to '('
+            size_t name_start = i;
+            while (i < filter_str.size() && filter_str[i] != '(') ++i;
+            if (i >= filter_str.size()) break;
+            std::string name = filter_str.substr(name_start, i - name_start);
+            // Trim trailing whitespace from name
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+            ++i; // skip '('
+            // Parse args up to ')'
+            size_t args_start = i;
+            int depth = 1;
+            while (i < filter_str.size() && depth > 0) {
+                if (filter_str[i] == '(') ++depth;
+                else if (filter_str[i] == ')') --depth;
+                if (depth > 0) ++i;
+            }
+            std::string args_str = filter_str.substr(args_start, i - args_start);
+            if (i < filter_str.size()) ++i; // skip ')'
+
+            View::FilterOp op{};
+            // Strip 'px' / '%' suffix and parse numeric.
+            auto parse_amount = [](const std::string& s) -> float {
+                std::string t = s;
+                while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+                if (t.size() >= 2 && t.substr(t.size() - 2) == "px") t.erase(t.size() - 2);
+                bool pct = false;
+                if (!t.empty() && t.back() == '%') { pct = true; t.pop_back(); }
+                try {
+                    float v = std::stof(t);
+                    return pct ? v / 100.0f : v;
+                } catch (...) { return 0.0f; }
+            };
+            auto parse_angle_deg = [](const std::string& s) -> float {
+                std::string t = s;
+                while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+                float scale = 1.0f;
+                // Check 4-char suffixes first so "grad" doesn't get
+                // matched as "rad" with a stray 'g' prefix.
+                if (t.size() >= 4 && t.substr(t.size() - 4) == "grad") { t.erase(t.size() - 4); scale = 0.9f; }
+                else if (t.size() >= 4 && t.substr(t.size() - 4) == "turn") { t.erase(t.size() - 4); scale = 360.0f; }
+                else if (t.size() >= 3 && t.substr(t.size() - 3) == "deg") { t.erase(t.size() - 3); }
+                else if (t.size() >= 3 && t.substr(t.size() - 3) == "rad") { t.erase(t.size() - 3); scale = 180.0f / 3.14159265358979323846f; }
+                try { return std::stof(t) * scale; } catch (...) { return 0.0f; }
+            };
+            if      (name == "blur")       { op.kind = View::FilterOp::Kind::blur;       op.amount = parse_amount(args_str); }
+            else if (name == "brightness") { op.kind = View::FilterOp::Kind::brightness; op.amount = parse_amount(args_str); }
+            else if (name == "contrast")   { op.kind = View::FilterOp::Kind::contrast;   op.amount = parse_amount(args_str); }
+            else if (name == "grayscale")  { op.kind = View::FilterOp::Kind::grayscale;  op.amount = parse_amount(args_str); }
+            else if (name == "invert")     { op.kind = View::FilterOp::Kind::invert;     op.amount = parse_amount(args_str); }
+            else if (name == "opacity")    { op.kind = View::FilterOp::Kind::opacity;    op.amount = parse_amount(args_str); }
+            else if (name == "saturate")   { op.kind = View::FilterOp::Kind::saturate;   op.amount = parse_amount(args_str); }
+            else if (name == "sepia")      { op.kind = View::FilterOp::Kind::sepia;      op.amount = parse_amount(args_str); }
+            else if (name == "hue-rotate") { op.kind = View::FilterOp::Kind::hue_rotate; op.angle_deg = parse_angle_deg(args_str); }
+            else if (name == "drop-shadow") {
+                // drop-shadow(<dx> <dy> <blur> <color>) — space-separated
+                op.kind = View::FilterOp::Kind::drop_shadow;
+                std::vector<std::string> tokens;
+                std::string tok;
+                int paren = 0;
+                for (char c : args_str) {
+                    if (c == '(') { ++paren; tok += c; continue; }
+                    if (c == ')') { --paren; tok += c; continue; }
+                    if (paren == 0 && std::isspace(static_cast<unsigned char>(c))) {
+                        if (!tok.empty()) { tokens.push_back(tok); tok.clear(); }
+                        continue;
+                    }
+                    tok += c;
+                }
+                if (!tok.empty()) tokens.push_back(tok);
+                if (tokens.size() >= 3) {
+                    op.ds_offset_x = parse_amount(tokens[0]);
+                    op.ds_offset_y = parse_amount(tokens[1]);
+                    op.ds_blur     = parse_amount(tokens[2]);
+                    if (tokens.size() >= 4) {
+                        // tokens[3..] is the color (may be space-separated rgb()).
+                        std::string color_str = tokens[3];
+                        for (size_t k = 4; k < tokens.size(); ++k) color_str += " " + tokens[k];
+                        // Lean on the existing Color::from_string parser.
+                        op.ds_color = parseColor(color_str);
+                    } else {
+                        op.ds_color = canvas::Color::rgba(0.0f, 0.0f, 0.0f, 1.0f);
+                    }
+                }
+            }
+            else { continue; } // unknown filter function — silently drop
+            chain.push_back(op);
+        }
+
+        // Maintain the legacy filter_blur_ slot for backward compat
+        // with paths that haven't migrated to the chain API yet.
+        float total_blur = 0.0f;
+        for (const auto& op : chain) {
+            if (op.kind == View::FilterOp::Kind::blur) total_blur += op.amount;
+        }
+        v->set_filter_blur(total_blur);
+        v->set_filter_chain(std::move(chain));
         return choc::value::Value();
     });
 

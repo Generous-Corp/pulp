@@ -95,16 +95,19 @@
       "name": "Dawn",
       "category": "render",
       "license": "BSD-3-Clause",
-      "version": "chrome/m144",
+      "version": "chrome/m144 deps @ 6acf6ef3fe23",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://dawn.googlesource.com/dawn",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Bundled through the Skia chrome/m144 prebuilt toolchain. Exact revision is read from Skia DEPS at cd0c5f445516ea4e90e02b5f634cbc5ca23b5a44.",
       "source_files": [
         "CMakeLists.txt",
         "tools/build-skia.sh",
-        "tools/cmake/FindSkia.cmake"
+        "tools/cmake/FindSkia.cmake",
+        "external/skia-build/VERSION.md",
+        "ci/visual-harness.Dockerfile"
       ]
     },
     {
@@ -160,30 +163,36 @@
       "name": "Inter",
       "category": "fonts",
       "license": "SIL OFL 1.1",
-      "version": "vendored-snapshot",
+      "version": "4.001;git-9221beed3",
       "source_kind": "vendored",
       "repository": "https://github.com/rsms/inter",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Vendored deterministic text-shaping font. SHA-256: 40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82.",
       "source_files": [
         "external/fonts/Inter-Regular.ttf",
-        "external/fonts/README.md"
+        "external/fonts/README.md",
+        "docs/reference/text-shaping.md",
+        "ci/visual-harness.Dockerfile"
       ]
     },
     {
       "name": "JetBrains Mono",
       "category": "fonts",
       "license": "SIL OFL 1.1",
-      "version": "vendored-snapshot",
+      "version": "2.304",
       "source_kind": "vendored",
       "repository": "https://github.com/JetBrains/JetBrainsMono",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Vendored deterministic monospace text-shaping font. SHA-256: a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f.",
       "source_files": [
         "external/fonts/JetBrainsMono-Regular.ttf",
-        "external/fonts/README.md"
+        "external/fonts/README.md",
+        "docs/reference/text-shaping.md",
+        "ci/visual-harness.Dockerfile"
       ]
     },
     {
@@ -501,16 +510,64 @@
       "name": "Skia",
       "category": "canvas",
       "license": "BSD-3-Clause",
-      "version": "chrome/m144",
+      "version": "chrome/m144 @ cd0c5f445516",
       "source_kind": "prebuilt-toolchain",
       "repository": "https://skia.googlesource.com/skia.git",
       "upstream": { "kind": "none" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "Prebuilt via skia-builder for Pulp rendering. Visual harness determinism locks Skia plus its bundled HarfBuzz and ICU DEPS revisions; regenerate raster goldens only when any pinned Skia asset, bundled text dependency, font file, or sampler/render configuration changes.",
+      "determinism": {
+        "skia_branch": "chrome/m144",
+        "skia_commit": "cd0c5f445516ea4e90e02b5f634cbc5ca23b5a44",
+        "skia_builder_ref": "7eecb8abf1f77b2a8bac2e81c38e20708cb79c24",
+        "skia_python_smoke_version": "144.0.post2",
+        "bundled_pins": {
+          "dawn": {
+            "repository": "https://dawn.googlesource.com/dawn.git",
+            "commit": "6acf6ef3fe237cd4be7b825389602c93a1f16f2f"
+          },
+          "harfbuzz": {
+            "repository": "https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git",
+            "commit": "08b52ae2e44931eef163dbad71697f911fadc323"
+          },
+          "icu": {
+            "repository": "https://chromium.googlesource.com/chromium/deps/icu.git",
+            "commit": "364118a1d9da24bb5b770ac3d762ac144d6da5a4"
+          }
+        },
+        "release_assets": {
+          "linux-x64": {
+            "url": "https://github.com/olilarkin/skia-builder/releases/download/chrome/m144/skia-build-linux-x64-gpu-release.zip",
+            "sha256": "bde9977efb2c796e22a71b0086e2b15961b0ccc7dc4de8559b369229e922ce34"
+          },
+          "mac-arm64": {
+            "url": "https://github.com/olilarkin/skia-builder/releases/download/chrome/m144/skia-build-mac-arm64-gpu-release.zip",
+            "sha256": "d495bc4b77fba29e055d9275852401d02998dd5fda0e628050fb72c4c9fce87a"
+          },
+          "mac-universal": {
+            "url": "https://github.com/olilarkin/skia-builder/releases/download/chrome/m144/skia-build-mac-universal-gpu-release.zip",
+            "sha256": "7990695504abf0e4b5b05d42616812845d9e72d41b243f347f261ab5fe8cb478"
+          }
+        },
+        "rebuild_triggers": [
+          "Skia branch or commit changes",
+          "Dawn, HarfBuzz, or ICU DEPS revision changes",
+          "skia-builder ref or release asset digest changes",
+          "Bundled font file, version, or fallback order changes",
+          "Visual harness sampler, color type, alpha type, DPI, or surface backend changes"
+        ]
+      },
       "source_files": [
         "CMakeLists.txt",
         "tools/build-skia.sh",
-        "tools/cmake/FindSkia.cmake"
+        "tools/cmake/FindSkia.cmake",
+        "external/skia-build/VERSION.md",
+        "docs/reference/text-shaping.md",
+        "tools/harness/visual/README.md",
+        "tools/harness/visual/docker-build.sh",
+        "ci/visual-harness.Dockerfile",
+        ".github/workflows/visual-harness.yml"
       ]
     },
     {

@@ -33,6 +33,22 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-4)** — `css/filter` extended from
+  `blur(Npx)`-only to the full CSS Filter Effects function set:
+  `blur` / `brightness` / `contrast` / `grayscale` / `hue-rotate` /
+  `invert` / `opacity` / `saturate` / `sepia` / `drop-shadow`, plus
+  chained functions in source order and `'none'` to clear. `setFilter`
+  parses the function-call sequence into `View::FilterOp[]`;
+  `view.cpp` paint dispatches via the new
+  `canvas.save_layer_with_filters(...)` API; Skia composes the chain
+  via `SkImageFilters::Compose` + `SkColorFilters::Matrix` (color
+  matrices for brightness/contrast/grayscale/hue-rotate/invert/
+  saturate/sepia, native `Blur` / `DropShadow` for those). Angle
+  units `deg` / `rad` / `turn` / `grad` all parsed. CG canvas backend
+  currently degrades the chain to blur-only collapse (color-matrix
+  equivalents on CIFilter are a follow-up). Reclassified DIVERGE →
+  PASS. The Skia ImageFilter chain is the same primitive Pulp uses
+  for `boxShadow` (#925), so reusing rather than reinventing.
 - **2026-05-06 (pulp #1528)** — Eight CSS entries reclassified `wontfix` /
   `missing` → `noop` (silently accepted, no paint impact in pulp's
   non-scrolling / hint-free model). The entries split into two clusters:
