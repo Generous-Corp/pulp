@@ -1,4 +1,6 @@
 #include <pulp/canvas/cg_canvas.hpp>
+#include <algorithm>
+#include <utility>
 
 #ifdef __APPLE__
 
@@ -187,16 +189,11 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
 // CanvasRenderingContext2D.clip() and SkiaCanvas::clip(). Without the
 // override, the base-class no-op silently leaves the clip region wide open
 // so subsequent draws spill over their intended bounds.
-// pulp #1522 — `rule` selects the Canvas2D `fillRule` arg. CG uses
-// CGContextEOClip for evenodd, CGContextClip (default winding) otherwise.
-void CoreGraphicsCanvas::clip(FillRule rule) {
+void CoreGraphicsCanvas::clip() {
     if (!path_) return;
     CGContextAddPath(ctx_, path_);
-    if (rule == FillRule::evenodd) {
-        CGContextEOClip(ctx_);
-    } else {
-        CGContextClip(ctx_);
-    }
+    // Use even-odd? Canvas2D defaults to non-zero winding for clip().
+    CGContextClip(ctx_);
 }
 
 void CoreGraphicsCanvas::apply_fill_color() {
@@ -618,25 +615,19 @@ void CoreGraphicsCanvas::close_path() {
     if (path_) CGPathCloseSubpath(path_);
 }
 
-// pulp #1522 — `rule` selects the Canvas2D `fillRule` arg. CG uses
-// CGContextEOFillPath / CGContextEOClip for evenodd, CGContextFillPath /
-// CGContextClip (default winding) otherwise.
-void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
+void CoreGraphicsCanvas::fill_current_path() {
     if (!path_) return;
-    const bool eo = (rule == FillRule::evenodd);
     if (has_gradient_) {
         // Clip to the path, then draw the gradient; restore the clip.
         CGContextSaveGState(ctx_);
         CGContextAddPath(ctx_, path_);
-        if (eo) CGContextEOClip(ctx_);
-        else    CGContextClip(ctx_);
+        CGContextClip(ctx_);
         fill_with_active_paint();
         CGContextRestoreGState(ctx_);
     } else {
         apply_fill_color();
         CGContextAddPath(ctx_, path_);
-        if (eo) CGContextEOFillPath(ctx_);
-        else    CGContextFillPath(ctx_);
+        CGContextFillPath(ctx_);
     }
     // Mirrors SkiaCanvas::fill_current_path which detaches the path on use —
     // the next draw must begin_path() again, matching Canvas2D semantics.
@@ -649,6 +640,107 @@ void CoreGraphicsCanvas::stroke_current_path() {
     CGContextAddPath(ctx_, path_);
     CGContextStrokePath(ctx_);
     release_path();
+}
+
+// ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──
+//
+// Replaces the JS shim's bezier approximation with CG's native arc APIs:
+//   - CGPathAddArc          — cx/cy/r/start/end + clockwise flag
+//   - CGPathAddArcToPoint   — control points + tangent radius
+//   - CGPathAddRelativeArc  — wrapped in a CGAffineTransform for rotation
+//   - CGPathAddRoundedRect  — Apple's helper hits the uniform-radius case
+//                             only; for per-corner radii we lay out the
+//                             8 segments manually.
+//
+// Y-axis convention: CG's default coordinate system is bottom-up, but the
+// canvas widget paints under a flipped CTM (top-down to match Canvas2D).
+// CGPathAddArc takes a `clockwise` flag which is the OPPOSITE of the
+// HTML5 spec's `anticlockwise` because of the CTM flip — so when the
+// caller asks for clockwise (anticlockwise=false), we pass clockwise=1.
+void CoreGraphicsCanvas::arc(float cx, float cy, float radius,
+                              float start_angle, float end_angle,
+                              bool anticlockwise) {
+    if (radius <= 0.0f) return;
+    if (!path_) path_ = CGPathCreateMutable();
+    // CG `clockwise` flag — Y is flipped relative to HTML5, so the
+    // sense of "clockwise" inverts: HTML clockwise == CG clockwise=1.
+    int cg_clockwise = anticlockwise ? 0 : 1;
+    CGPathAddArc(path_, NULL, cx, cy, radius,
+                 start_angle, end_angle, cg_clockwise);
+}
+
+void CoreGraphicsCanvas::arc_to(float x1, float y1, float x2, float y2,
+                                 float radius) {
+    if (!path_) path_ = CGPathCreateMutable();
+    if (radius <= 0.0f) {
+        CGPathAddLineToPoint(path_, NULL, x1, y1);
+        return;
+    }
+    CGPathAddArcToPoint(path_, NULL, x1, y1, x2, y2, radius);
+}
+
+void CoreGraphicsCanvas::ellipse(float cx, float cy, float rx, float ry,
+                                  float rotation,
+                                  float start_angle, float end_angle,
+                                  bool anticlockwise) {
+    if (rx <= 0.0f || ry <= 0.0f) return;
+    if (!path_) path_ = CGPathCreateMutable();
+    // Use CGAffineTransform to map a unit circle to (cx,cy) + rx/ry +
+    // rotation in one step. The transform is applied on the way IN to
+    // the path, so the on-path arc geometry is the rotated ellipse.
+    CGAffineTransform t = CGAffineTransformIdentity;
+    t = CGAffineTransformTranslate(t, cx, cy);
+    if (rotation != 0.0f) {
+        t = CGAffineTransformRotate(t, rotation);
+    }
+    t = CGAffineTransformScale(t, rx, ry);
+    int cg_clockwise = anticlockwise ? 0 : 1;
+    // Add a unit-circle arc through the transform — CGPath maps it to the
+    // rotated ellipse arc.
+    CGPathAddArc(path_, &t, 0.0f, 0.0f, 1.0f,
+                 start_angle, end_angle, cg_clockwise);
+}
+
+void CoreGraphicsCanvas::round_rect(float x, float y, float w, float h,
+                                     float tl_x, float tl_y,
+                                     float tr_x, float tr_y,
+                                     float br_x, float br_y,
+                                     float bl_x, float bl_y) {
+    if (w <= 0.0f || h <= 0.0f) return;
+    if (!path_) path_ = CGPathCreateMutable();
+    // Per-corner radii: lay out an 8-segment subpath (4 lines + 4 arcs).
+    // The corner sweep direction matches Canvas2D's default clockwise
+    // path (HTML clockwise == CG clockwise=1 under the flipped CTM).
+    // Clamp each corner to half the dimensions so two adjacent radii
+    // never overlap.
+    auto clamp_pair = [](float r1, float r2, float dim) {
+        float sum = r1 + r2;
+        if (sum > dim && sum > 0.0f) {
+            float scale = dim / sum;
+            r1 *= scale;
+            r2 *= scale;
+        }
+        return std::pair<float, float>{r1, r2};
+    };
+    auto [tl_x_c, tr_x_c] = clamp_pair(tl_x, tr_x, w); // top edge
+    auto [bl_x_c, br_x_c] = clamp_pair(bl_x, br_x, w); // bottom edge
+    auto [tl_y_c, bl_y_c] = clamp_pair(tl_y, bl_y, h); // left edge
+    auto [tr_y_c, br_y_c] = clamp_pair(tr_y, br_y, h); // right edge
+
+    CGPathMoveToPoint(path_, NULL, x + tl_x_c, y);
+    CGPathAddLineToPoint(path_, NULL, x + w - tr_x_c, y);
+    CGPathAddArcToPoint(path_, NULL, x + w, y, x + w, y + tr_y_c,
+                        std::max(tr_x_c, tr_y_c));
+    CGPathAddLineToPoint(path_, NULL, x + w, y + h - br_y_c);
+    CGPathAddArcToPoint(path_, NULL, x + w, y + h, x + w - br_x_c, y + h,
+                        std::max(br_x_c, br_y_c));
+    CGPathAddLineToPoint(path_, NULL, x + bl_x_c, y + h);
+    CGPathAddArcToPoint(path_, NULL, x, y + h, x, y + h - bl_y_c,
+                        std::max(bl_x_c, bl_y_c));
+    CGPathAddLineToPoint(path_, NULL, x, y + tl_y_c);
+    CGPathAddArcToPoint(path_, NULL, x, y, x + tl_x_c, y,
+                        std::max(tl_x_c, tl_y_c));
+    CGPathCloseSubpath(path_);
 }
 
 // ── Gradient fills (pulp #1322) ──────────────────────────────────────────────

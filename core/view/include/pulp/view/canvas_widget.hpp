@@ -64,6 +64,22 @@ struct CanvasDrawCmd {
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
         fill_path, stroke_path, clip_path,
+        // pulp #1521 — native arc subpaths (replace JS bezier approx).
+        // Layout in CanvasDrawCmd:
+        //   path_arc:        x=cx, y=cy, extra=radius,
+        //                    x2=startAngle, y2=endAngle,
+        //                    int_val=anticlockwise (0/1)
+        //   path_arc_to:     x=x1, y=y1, x2=x2, y2=y2, extra=radius
+        //   path_ellipse:    x=cx, y=cy, w=rx, h=ry, extra=rotation,
+        //                    x2=startAngle, y2=endAngle,
+        //                    int_val=anticlockwise (0/1)
+        //   path_round_rect: x=x, y=y, w=w, h=h,
+        //                    gradient_positions packed [tl_x,tl_y,
+        //                    tr_x,tr_y, br_x,br_y, bl_x,bl_y]
+        path_arc,
+        path_arc_to,
+        path_ellipse,
+        path_round_rect,
         // State
         save, restore,
         // Transform

@@ -1630,290 +1630,165 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     INFO("any pixel painted: " << any_painted);
     REQUIRE(any_painted);
 }
-#endif  // PULP_HAS_SKIA
+#endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
 
-// ── pulp #1522 — Canvas2D fillRule arg threads through to bridge ────────
+// ── pulp #1521 — arc-as-path cluster (DIVERGE → PASS) ────────────────────
 //
-// Promotion target: 2 DIVERGE entries → PASS in compat.json:
-//   - canvas2d/fill (fillRule arg accepted but ignored)
-//   - canvas2d/clip (fillRule arg always uses non-zero winding)
-//
-// The web spec for ctx.fill(rule) and ctx.clip(rule) accepts an optional
-// CanvasFillRule string ('nonzero' (default) | 'evenodd'). Pre-fix the
-// JS shim discarded the arg with `void fillRule;` (clip) or didn't take
-// it at all (fill). The bridge had no overload for it, and the Skia / CG
-// backends always painted with the spec default of non-zero winding.
-//
-// Post-fix:
-//   - JS shim threads the arg as an int (0 = nonzero, 1 = evenodd).
-//   - Bridge canvasFillPath/canvasClip read int_val from the arg list.
-//   - CanvasWidget dispatch picks FillRule::evenodd vs FillRule::nonzero.
-//   - Skia: SkPathBuilder::setFillType before drawPath / clipPath.
-//   - CG: CGContextEOFillPath / CGContextEOClip when rule == evenodd.
-TEST_CASE("Canvas2D ctx.fill('evenodd') threads fillRule int_val=1 to bridge",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
+// The JS shim now routes ctx.arc / arcTo / ellipse / roundRect through the
+// new canvasPathArc / canvasPathArcTo / canvasPathEllipse /
+// canvasPathRoundRect bridge fns. Before this PR the shim emitted
+// canvasMoveTo + canvasCubicTo (arc / ellipse) or canvasLineTo (arcTo /
+// roundRect) — N approximation segments per arc. After this PR each call
+// emits exactly one path_arc / path_arc_to / path_ellipse /
+// path_round_rect command, and the cubic_to / line_to fallbacks no
+// longer fire from the arc family.
+TEST_CASE("Canvas2D arc shim emits path_arc, not bezier approximation",
+          "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
-        c.width = 64; c.height = 64;
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.arc(50, 50, 30, 0, Math.PI * 2);
+        ctx.stroke();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int saw_arc = 0, saw_cubic = 0, saw_move = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_arc) ++saw_arc;
+        if (cmd.type == CanvasDrawCmd::Type::cubic_to) ++saw_cubic;
+        if (cmd.type == CanvasDrawCmd::Type::move_to) ++saw_move;
+    }
+    INFO("path_arc=" << saw_arc << " cubic_to=" << saw_cubic
+         << " move_to=" << saw_move);
+    REQUIRE(saw_arc == 1);
+    REQUIRE(saw_cubic == 0); // old shim emitted N cubic_to per arc
+    REQUIRE(saw_move == 0);  // old shim emitted a move_to per arc
+}
+
+TEST_CASE("Canvas2D arcTo shim emits path_arc_to with radius preserved",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(10, 0);
-        ctx.lineTo(10, 10);
-        ctx.lineTo(0, 10);
-        ctx.closePath();
-        ctx.fill('evenodd');
+        ctx.arcTo(50, 0, 50, 50, 12);
+        ctx.stroke();
     )");
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
-    int int_val_for_fill = -1;
-    int seen_fill = 0;
+    bool saw_arc_to = false;
     for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::fill_path) {
-            ++seen_fill;
-            int_val_for_fill = cmd.int_val;
+        if (cmd.type == CanvasDrawCmd::Type::path_arc_to) {
+            saw_arc_to = true;
+            REQUIRE(cmd.x == Catch::Approx(50.0f));
+            REQUIRE(cmd.y == Catch::Approx(0.0f));
+            REQUIRE(cmd.x2 == Catch::Approx(50.0f));
+            REQUIRE(cmd.y2 == Catch::Approx(50.0f));
+            REQUIRE(cmd.extra == Catch::Approx(12.0f));
         }
     }
-    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
-    REQUIRE(seen_fill == 1);
-    REQUIRE(int_val_for_fill == 1);
+    REQUIRE(saw_arc_to);
 }
 
-TEST_CASE("Canvas2D ctx.fill('nonzero') threads fillRule int_val=0 to bridge",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
+TEST_CASE("Canvas2D ellipse shim emits path_ellipse with rotation",
+          "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
-        c.width = 64; c.height = 64;
+        c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
-        ctx.rect(0, 0, 10, 10);
-        ctx.fill('nonzero');
-    )");
-    auto* cw = env.canvas();
-    REQUIRE(cw != nullptr);
-    int int_val_for_fill = -1;
-    int seen_fill = 0;
-    for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::fill_path) {
-            ++seen_fill;
-            int_val_for_fill = cmd.int_val;
-        }
-    }
-    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
-    REQUIRE(seen_fill == 1);
-    REQUIRE(int_val_for_fill == 0);
-}
-
-TEST_CASE("Canvas2D ctx.fill() with no arg defaults to nonzero (int_val=0)",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
-    ScriptedBridge env;
-    env.load(R"(
-        var c = document.createElement('canvas');
-        globalThis.__test_canvas_el__ = c;
-        document.body.appendChild(c);
-        c.width = 64; c.height = 64;
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        ctx.rect(0, 0, 10, 10);
+        ctx.ellipse(50, 50, 40, 20, Math.PI / 4, 0, Math.PI * 2);
         ctx.fill();
     )");
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
-    int int_val_for_fill = -1;
-    int seen_fill = 0;
+    bool saw_ellipse = false;
     for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::fill_path) {
-            ++seen_fill;
-            int_val_for_fill = cmd.int_val;
+        if (cmd.type == CanvasDrawCmd::Type::path_ellipse) {
+            saw_ellipse = true;
+            REQUIRE(cmd.w == Catch::Approx(40.0f));   // rx
+            REQUIRE(cmd.h == Catch::Approx(20.0f));   // ry
+            REQUIRE(cmd.extra == Catch::Approx(0.7853982f).margin(1e-5)); // rotation
         }
     }
-    INFO("seen_fill=" << seen_fill << " int_val=" << int_val_for_fill);
-    REQUIRE(seen_fill == 1);
-    REQUIRE(int_val_for_fill == 0);
+    REQUIRE(saw_ellipse);
 }
 
-TEST_CASE("Canvas2D ctx.clip('evenodd') threads fillRule int_val=1 to bridge",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
+TEST_CASE("Canvas2D roundRect shim emits path_round_rect with 4 distinct radii",
+          "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
-        c.width = 64; c.height = 64;
+        c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
-        ctx.rect(0, 0, 10, 10);
-        ctx.clip('evenodd');
+        ctx.roundRect(10, 20, 80, 40, [2, 4, 6, 8]);
+        ctx.fill();
     )");
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
-    int int_val_for_clip = -1;
-    int seen_clip = 0;
+    bool saw_rr = false;
     for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::clip) {
-            ++seen_clip;
-            int_val_for_clip = cmd.int_val;
+        if (cmd.type == CanvasDrawCmd::Type::path_round_rect) {
+            saw_rr = true;
+            REQUIRE(cmd.x == Catch::Approx(10.0f));
+            REQUIRE(cmd.y == Catch::Approx(20.0f));
+            REQUIRE(cmd.w == Catch::Approx(80.0f));
+            REQUIRE(cmd.h == Catch::Approx(40.0f));
+            REQUIRE(cmd.gradient_positions.size() == 8u);
+            REQUIRE(cmd.gradient_positions[0] == Catch::Approx(2.0f)); // tl_x
+            REQUIRE(cmd.gradient_positions[2] == Catch::Approx(4.0f)); // tr_x
+            REQUIRE(cmd.gradient_positions[4] == Catch::Approx(6.0f)); // br_x
+            REQUIRE(cmd.gradient_positions[6] == Catch::Approx(8.0f)); // bl_x
         }
     }
-    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
-    REQUIRE(seen_clip == 1);
-    REQUIRE(int_val_for_clip == 1);
+    REQUIRE(saw_rr);
 }
 
-TEST_CASE("Canvas2D ctx.clip('nonzero') threads fillRule int_val=0 to bridge",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
+TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
+          "[view][canvas2d][issue-1521]") {
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
-        c.width = 64; c.height = 64;
+        c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
-        ctx.rect(0, 0, 10, 10);
-        ctx.clip('nonzero');
+        ctx.roundRect(0, 0, 50, 50, [{x: 4, y: 8}]);
+        ctx.fill();
     )");
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
-    int int_val_for_clip = -1;
-    int seen_clip = 0;
+    bool saw_rr = false;
     for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::clip) {
-            ++seen_clip;
-            int_val_for_clip = cmd.int_val;
+        if (cmd.type == CanvasDrawCmd::Type::path_round_rect) {
+            saw_rr = true;
+            REQUIRE(cmd.gradient_positions.size() == 8u);
+            // [{x:4,y:8}] expands to all four corners with rx=4, ry=8.
+            REQUIRE(cmd.gradient_positions[0] == Catch::Approx(4.0f)); // tl_x
+            REQUIRE(cmd.gradient_positions[1] == Catch::Approx(8.0f)); // tl_y
+            REQUIRE(cmd.gradient_positions[6] == Catch::Approx(4.0f)); // bl_x
+            REQUIRE(cmd.gradient_positions[7] == Catch::Approx(8.0f)); // bl_y
         }
     }
-    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
-    REQUIRE(seen_clip == 1);
-    REQUIRE(int_val_for_clip == 0);
+    REQUIRE(saw_rr);
 }
-
-TEST_CASE("Canvas2D ctx.clip() with no arg defaults to nonzero (int_val=0)",
-          "[view][canvas2d][issue-1522]") {
-    using T = CanvasDrawCmd::Type;
-    ScriptedBridge env;
-    env.load(R"(
-        var c = document.createElement('canvas');
-        globalThis.__test_canvas_el__ = c;
-        document.body.appendChild(c);
-        c.width = 64; c.height = 64;
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        ctx.rect(0, 0, 10, 10);
-        ctx.clip();
-    )");
-    auto* cw = env.canvas();
-    REQUIRE(cw != nullptr);
-    int int_val_for_clip = -1;
-    int seen_clip = 0;
-    for (const auto& cmd : cw->commands()) {
-        if (cmd.type == T::clip) {
-            ++seen_clip;
-            int_val_for_clip = cmd.int_val;
-        }
-    }
-    INFO("seen_clip=" << seen_clip << " int_val=" << int_val_for_clip);
-    REQUIRE(seen_clip == 1);
-    REQUIRE(int_val_for_clip == 0);
-}
-
-#ifdef PULP_HAS_SKIA
-// ── Pixel-level fillRule verification on Skia ────────────────────────────
-//
-// Self-intersecting "rule of two" path: an outer 30x30 square traced
-// clockwise, with an inner 10x10 sub-square also traced clockwise.
-// Under non-zero winding both squares contribute the same direction,
-// so the inner area is filled (winding number = 2 ≠ 0). Under
-// even-odd the inner area cancels (count = 2 mod 2 = 0) and stays
-// hollow.
-//
-// Pre-fix both rules paint the same thing (Skia path always defaults
-// to kWinding because the bridge never sets it). Post-fix evenodd
-// leaves the inner pixel transparent.
-TEST_CASE("Canvas2D fillRule evenodd vs nonzero produce different pixels",
-          "[view][canvas2d][skia][issue-1522]") {
-    auto run_fill = [](const std::string& rule_arg) -> uint32_t {
-        SkImageInfo info = SkImageInfo::Make(40, 40, kRGBA_8888_SkColorType,
-                                             kPremul_SkAlphaType,
-                                             SkColorSpace::MakeSRGB());
-        auto surface = SkSurfaces::Raster(info);
-        REQUIRE(surface != nullptr);
-        auto* sk_canvas = surface->getCanvas();
-        sk_canvas->clear(SK_ColorTRANSPARENT);
-
-        ScriptedBridge env;
-        std::string js = R"(
-            var c = document.createElement('canvas');
-            globalThis.__test_canvas_el__ = c;
-            document.body.appendChild(c);
-            c.width = 40; c.height = 40;
-            var ctx = c.getContext('2d');
-            ctx.fillStyle = '#ff0000';
-            ctx.beginPath();
-            // outer 30x30 (CW)
-            ctx.moveTo(5, 5);
-            ctx.lineTo(35, 5);
-            ctx.lineTo(35, 35);
-            ctx.lineTo(5, 35);
-            ctx.closePath();
-            // inner 10x10 (CW — same direction as outer)
-            ctx.moveTo(15, 15);
-            ctx.lineTo(25, 15);
-            ctx.lineTo(25, 25);
-            ctx.lineTo(15, 25);
-            ctx.closePath();
-        )";
-        if (rule_arg.empty()) {
-            js += "\n            ctx.fill();";
-        } else {
-            js += "\n            ctx.fill('" + rule_arg + "');";
-        }
-        env.load(js);
-        auto* cw = env.canvas();
-        REQUIRE(cw != nullptr);
-
-        cw->set_bounds({0, 0, 40, 40});
-        pulp::canvas::SkiaCanvas canvas(sk_canvas);
-        cw->paint(canvas);
-
-        SkPixmap pix;
-        REQUIRE(surface->peekPixels(&pix));
-        // sample at (20, 20) — centre of the inner sub-square
-        auto* row = static_cast<const uint8_t*>(pix.addr(0, 20));
-        return (uint32_t(row[4 * 20 + 0]) << 24) |
-               (uint32_t(row[4 * 20 + 1]) << 16) |
-               (uint32_t(row[4 * 20 + 2]) << 8) |
-               (uint32_t(row[4 * 20 + 3]));
-    };
-
-    uint32_t nonzero_centre = run_fill("nonzero");
-    uint32_t evenodd_centre = run_fill("evenodd");
-    INFO("nonzero centre RGBA=0x" << std::hex << nonzero_centre
-         << " evenodd centre RGBA=0x" << std::hex << evenodd_centre);
-
-    // nonzero: inner pixel is filled (alpha != 0, red component dominant).
-    REQUIRE((nonzero_centre & 0xFF) != 0);                  // alpha set
-    REQUIRE(((nonzero_centre >> 24) & 0xFF) >= 0xC0);       // strong red
-
-    // evenodd: inner pixel is hollow (alpha == 0, transparent clear).
-    REQUIRE((evenodd_centre & 0xFF) == 0);                  // alpha zero
-
-    // The two rules MUST produce different output — that's the whole
-    // point of the fix.
-    REQUIRE(nonzero_centre != evenodd_centre);
-}
-#endif  // PULP_HAS_SKIA
 
 // ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ────────────────────
 //

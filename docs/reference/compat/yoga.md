@@ -19,7 +19,7 @@ which mirrors the upstream Yoga API.
 
 | Status | Count |
 |--------|------:|
-| supported | 37 |
+| supported | 35 |
 | partial | 7 |
 | missing | 11 |
 | wontfix | 0 |

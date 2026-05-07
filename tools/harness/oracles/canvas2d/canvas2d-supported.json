@@ -13,10 +13,10 @@
     "bezierCurveTo":        {"kind": "method", "bridge": ["canvasCubicTo"]},
     "quadraticCurveTo":     {"kind": "method", "bridge": ["canvasQuadTo"]},
     "rect":                 {"kind": "method", "bridge": ["canvasMoveTo", "canvasLineTo"], "notes": "shim composes via moveTo + 4× lineTo"},
-    "arc":                  {"kind": "method", "bridge": ["canvasMoveTo", "canvasCubicTo"], "gotcha": "arc-as-path", "expectedStatus": "partial", "notes": "Bridge canvasArc is immediate-mode stroke; shim must synthesize as cubic-bezier path. SKILL gotcha #1."},
-    "arcTo":                {"kind": "method", "bridge": ["canvasLineTo"], "gotcha": "arc-as-path", "expectedStatus": "partial", "notes": "Conservative lineTo-only fallback; radius IGNORED. SKILL gotcha #1."},
-    "ellipse":              {"kind": "method", "bridge": ["canvasMoveTo", "canvasCubicTo"], "gotcha": "arc-as-path", "expectedStatus": "partial", "notes": "rotation IGNORED. SKILL gotcha #1."},
-    "roundRect":            {"kind": "method", "bridge": ["canvasMoveTo", "canvasLineTo"], "expectedStatus": "partial", "notes": "Uniform-corner only; per-corner radii degrade."},
+    "arc":                  {"kind": "method", "bridge": ["canvasPathArc"], "notes": "pulp #1521 — native SkPath::arcTo (Skia) / CGPathAddArc (CG). Replaces the bezier approximation."},
+    "arcTo":                {"kind": "method", "bridge": ["canvasPathArcTo"], "notes": "pulp #1521 — native SkPath::arcTo(p1,p2,r) (Skia) / CGPathAddArcToPoint (CG). Replaces lineTo-only fallback."},
+    "ellipse":              {"kind": "method", "bridge": ["canvasPathEllipse"], "notes": "pulp #1521 — native SkPath::arcTo through SkMatrix rotation (Skia) / CGPathAddArc through CGAffineTransform (CG). Honours rotation."},
+    "roundRect":            {"kind": "method", "bridge": ["canvasPathRoundRect"], "notes": "pulp #1521 — native SkRRect::MakeRectRadii (Skia) / per-corner CGPath layout (CG). Supports number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], and {x,y} elliptical corners."},
     "fill":                 {"kind": "method", "bridge": ["canvasFillPath"], "needsState": ["fillStyle", "globalAlpha"]},
     "stroke":               {"kind": "method", "bridge": ["canvasStrokePath"], "needsState": ["strokeStyle", "lineWidth", "lineCap", "lineJoin"]},
     "clip":                 {"kind": "method", "bridge": ["canvasClip"], "notes": "Falls back to canvasClipRect bounds when path-mode unsupported."},
@@ -74,7 +74,6 @@
     "_native_canvasStrokeLine":      {"kind": "extension", "bridge": ["canvasStrokeLine"], "notes": "Pulp-specific; equivalent to moveTo()+lineTo()+stroke()."}
   },
   "gotchas": {
-    "arc-as-path": "ctx.arc/arcTo/ellipse/roundRect: bridge canvasArc strokes immediately; shim synthesizes path via cubic-bezier or polyline approximation. SKILL gotcha #1.",
     "no-pattern-bridge": "createPattern: not implemented; shim returns null. SKILL gotcha #5.",
     "stroke-no-gradient": "strokeStyle gradient: bridge has no stroke-gradient setter; degrades to first-stop color.",
     "transform-no-concat": "ctx.transform(a,b,c,d,e,f): bridge only exposes replace (setTransform); pure-translation falls through, rotate/scale/skew is no-op.",

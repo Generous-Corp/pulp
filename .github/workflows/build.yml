@@ -120,22 +120,38 @@ jobs:
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
           ])
           windows_provider = REQUESTED
+          # macOS leg uses `mode=provider` (same as Linux + Windows) so the
+          # explicit selector env (EXPLICIT_MACOS_RUNNER_SELECTOR_JSON, which
+          # falls back to the PULP_LOCAL_MACOS_RUNS_ON_JSON repo var) is
+          # honored regardless of REQUESTED_PROVIDER.
+          #
+          # Previously this used `mode=optional-namespace` which has a hard
+          # early-return when REQUESTED_PROVIDER != "namespace", silently
+          # ignoring the explicit env. With DEFAULT_RUNNER_PROVIDER set to
+          # "github-hosted" (current operator policy — Namespace decommissioned)
+          # that meant the macOS leg always fell through to macos-15 GH-hosted
+          # even when PULP_LOCAL_MACOS_RUNS_ON_JSON pointed at the local
+          # self-hosted runner. Switching to provider mode wires the
+          # repo-var fallback through correctly.
+          #
+          # Provider mode emits the github-hosted-label fallback ("macos-15")
+          # when no explicit / namespace selector resolves, so the resolver
+          # output is always non-empty and the matrix entry is always present.
           macos_runs_on = run([
               "--target-name", "macOS (ARM64)",
-              "--mode", "optional-namespace",
+              "--mode", "provider",
+              "--github-hosted-label", "macos-15",
               "--explicit-env", "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
               "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+              "--namespace-setting-name", "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
           ])
-
-          # Always include macOS on GitHub-hosted runners unless Namespace provides one
-          macos_final = macos_runs_on if macos_runs_on else json.dumps("macos-15")
 
           include = [
               {
                   "key": "macos",
                   "name": "macOS (ARM64)",
-                  "runs_on_json": macos_final,
-                  "provider": "namespace" if macos_runs_on else "github-hosted",
+                  "runs_on_json": macos_runs_on,
+                  "provider": REQUESTED,
               },
               {
                   "key": "windows",
@@ -169,11 +185,17 @@ jobs:
     name: ${{ matrix.name }} [${{ matrix.provider }}]
 
     steps:
+      # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
+      # setup.sh / install-githooks.sh per the repo's hook convention)
+      # conflicts with checkout@v5's internal `git lfs install` on
+      # self-hosted runners that retain prior workspace state. Symptom:
+      # `git failed with exit code 2` followed by "run git lfs update
+      # --force" advice in the runner log. Skia binaries are NOT in LFS
+      # for this repo — they're downloaded from a mirror by setup.sh's
+      # bootstrap step (`./setup.sh --ci --deps-only` below). Skipping
+      # checkout's LFS pull is therefore safe.
       - uses: actions/checkout@v5
         with:
-          # No current CI input is stored as an LFS object. Keep this false so
-          # self-hosted workspaces with Pulp's pre-push hook do not fail when
-          # git-lfs tries to install its own hook during checkout.
           lfs: false
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
@@ -296,22 +318,7 @@ jobs:
         # GH-hosted ubuntu/macos-15 runners also have ≥4 cores so this
         # doesn't regress their previous behavior. Higher parallelism
         # roughly halves test phase wall-time on multi-core hosts.
-        #
-        # Fast-CI / full-CI split (#1589). On `pull_request` events, the
-        # `slow` label is added to the existing `validation` exclusion so
-        # PRs skip wall-time-heavy tests (cmake-ios-auv3-configure ~3 min,
-        # filesystem-mtime sleep loops, Timer hammers, etc — see
-        # docs/guides/local-ci.md > Fast-CI vs full-CI). On push to main /
-        # nightly schedule / workflow_dispatch the full suite still runs
-        # so slow tests gate landing into the release lane.
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            LABELS_EXCLUDE="validation|slow"
-          else
-            LABELS_EXCLUDE="validation"
-          fi
-          ctest --output-on-failure -C Release -LE "$LABELS_EXCLUDE" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        run: ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -328,15 +335,9 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: build
         shell: cmd
-        # Fast-CI / full-CI split (#1589): same conditional as the
-        # non-Windows step above. cmd doesn't have bash conditionals so
-        # we lean on the GitHub Actions expression to pick the value
-        # before the cmd shell ever sees it.
-        env:
-          PULP_CTEST_LABELS_EXCLUDE: ${{ github.event_name == 'pull_request' && 'validation|slow' || 'validation' }}
         run: |
           chcp 65001
-          ctest --output-on-failure -C Release -LE "%PULP_CTEST_LABELS_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+          ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's

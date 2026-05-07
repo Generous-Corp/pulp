@@ -129,6 +129,91 @@ TEST_CASE("FileDialog non-Apple: backend routes through",
     REQUIRE_FALSE(FileDialog::open_file("", {}, "").has_value());
     REQUIRE(open_calls == 1); // not called again
 }
+
+TEST_CASE("FileDialog non-Apple: backend replacement forwards arguments",
+          "[platform][file-dialog][issue-640][issue-641]") {
+    FileDialog::clear_backend();
+
+    FileDialog::Backend first;
+    int first_open_calls = 0;
+    first.open_file = [&](const std::string&, const std::vector<FileFilter>&,
+                          const std::string&) {
+        first_open_calls++;
+        return std::optional<std::string>("/tmp/first.wav");
+    };
+    FileDialog::set_backend(first);
+
+    FileDialog::Backend replacement;
+    int replacement_open_calls = 0;
+    int save_calls = 0;
+    int folder_calls = 0;
+
+    replacement.open_file = [&](const std::string& title,
+                                const std::vector<FileFilter>& filters,
+                                const std::string& default_path) {
+        replacement_open_calls++;
+        REQUIRE(title == "replacement-open");
+        REQUIRE(filters.size() == 2);
+        REQUIRE(filters[0].description == "Audio");
+        REQUIRE(filters[0].extensions == "wav;flac");
+        REQUIRE(filters[1].description == "Preset");
+        REQUIRE(filters[1].extensions == "pulp");
+        REQUIRE(default_path == "/sessions");
+        return std::optional<std::string>("/tmp/replacement.wav");
+    };
+    replacement.save_file = [&](const std::string& title,
+                                const std::vector<FileFilter>& filters,
+                                const std::string& default_path,
+                                const std::string& default_name) {
+        save_calls++;
+        REQUIRE(title == "replacement-save");
+        REQUIRE(filters.size() == 1);
+        REQUIRE(filters[0].description == "Preset");
+        REQUIRE(filters[0].extensions == "pulp");
+        REQUIRE(default_path == "/presets");
+        REQUIRE(default_name == "lead.pulp");
+        return std::optional<std::string>("/tmp/lead.pulp");
+    };
+    replacement.choose_folder = [&](const std::string& title,
+                                    const std::string& default_path) {
+        folder_calls++;
+        REQUIRE(title == "replacement-folder");
+        REQUIRE(default_path == "/exports");
+        return std::optional<std::string>("/tmp/exports");
+    };
+    FileDialog::set_backend(replacement);
+    REQUIRE(FileDialog::has_backend());
+
+    const std::vector<FileFilter> open_filters{
+        {"Audio", "wav;flac"},
+        {"Preset", "pulp"},
+    };
+    auto open = FileDialog::open_file("replacement-open", open_filters, "/sessions");
+    REQUIRE(open.has_value());
+    REQUIRE(*open == "/tmp/replacement.wav");
+    REQUIRE(first_open_calls == 0);
+    REQUIRE(replacement_open_calls == 1);
+
+    auto many = FileDialog::open_files("replacement-many", open_filters, "/sessions");
+    REQUIRE(many.empty());
+
+    const std::vector<FileFilter> save_filters{{"Preset", "pulp"}};
+    auto save = FileDialog::save_file("replacement-save", save_filters, "/presets", "lead.pulp");
+    REQUIRE(save.has_value());
+    REQUIRE(*save == "/tmp/lead.pulp");
+    REQUIRE(save_calls == 1);
+
+    auto folder = FileDialog::choose_folder("replacement-folder", "/exports");
+    REQUIRE(folder.has_value());
+    REQUIRE(*folder == "/tmp/exports");
+    REQUIRE(folder_calls == 1);
+
+    FileDialog::clear_backend();
+    FileDialog::clear_backend();
+    REQUIRE_FALSE(FileDialog::has_backend());
+    REQUIRE_FALSE(FileDialog::choose_folder("replacement-folder", "/exports").has_value());
+    REQUIRE(folder_calls == 1);
+}
 #endif // !defined(__APPLE__)
 
 TEST_CASE("PopupMenu stores item metadata without showing native UI",
