@@ -707,6 +707,14 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Web designs almost universally reset to `border-box`.
         case 'boxSizing':    return call('setBoxSizing', id, value as string);
 
+        // pulp #1434 Phase A2-3 — writing direction (RN ViewStyle uses
+        // `writingDirection` for this — CSS uses `direction`, but the
+        // pulp prop name `direction` already routes to FlexProps via
+        // setFlex above. The CSS-string-form `style.direction = 'rtl'`
+        // path goes through the el.style adapter's `direction` case
+        // which calls setDirection directly).
+        case 'writingDirection': return call('setDirection', id, value as string);
+
         // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
         // the full shorthand into a list of TransitionSpecs that the
         // dispatcher (PR 2 of the ladder) consults when a property
@@ -896,6 +904,16 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'backfaceVisibility': return call('setBackfaceVisibility', id, value as string);
         case 'cursor':             return call('setCursor', id, value as string);
         case 'filter':             return call('setFilter', id, value as string);
+        // pulp #1515 — CSS clip-path / mask cluster. The bridge fns
+        // store the value on the View; Skia paint side honors
+        // `clip-path: path("...")` via SkPath::FromSVGString. Other
+        // clip-path forms (URL refs, named shapes) and mask painting
+        // (saveLayer + SkBlendMode::kDstIn) are deferred. The
+        // prop-applier dispatches verbatim — keyword normalization
+        // and shorthand expansion live in the bridge / JS shim.
+        case 'clipPath':           return call('setClipPath', id, value as string);
+        case 'mask':               return call('setMask', id, value as string);
+        case 'maskImage':          return call('setMaskImage', id, value as string);
         // pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture).
         // Forwards the W3C blend-mode keyword string to
         // `setMixBlendMode`; the bridge keyword→enum table lives at

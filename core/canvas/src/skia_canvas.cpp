@@ -11,6 +11,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
+#include "include/utils/SkParsePath.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkFontMgr.h"
@@ -332,6 +333,20 @@ void SkiaCanvas::clip() {
     // Snapshot the path (don't detach — Canvas2D allows continued use of
     // the same path after clip()) and intersect with the current clip.
     canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
+}
+
+void SkiaCanvas::clip_path_svg(const std::string& svg_path_d) {
+    // CSS `clip-path: path("...")` (pulp #1515). Parse the SVG-path-d
+    // string via Skia's SVG path parser and install it as the canvas
+    // clip. Caller owns save()/restore() balancing; we install the
+    // clip on the current Skia clip stack so a paired restore() lifts
+    // it. Unparseable / empty strings are silently ignored — same
+    // graceful-degrade contract as the other paint-time clip helpers.
+    GUARD_CANVAS;
+    if (svg_path_d.empty()) return;
+    SkPath path;
+    if (!SkParsePath::FromSVGString(svg_path_d.c_str(), &path)) return;
+    canvas_->clipPath(path, /*doAntiAlias=*/true);
 }
 
 // pulp #1350 — single source of truth for shape-fill paints. Mirrors
@@ -1006,6 +1021,142 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     }
 
     canvas_->drawTextBlob(builder.make(), 0, 0, paint);
+}
+
+void SkiaCanvas::fill_text_with_max_width(const std::string& text,
+                                           float x, float y, float max_width) {
+    // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. When the
+    // measured advance exceeds `max_width` the spec requires the user
+    // agent to either pick a narrower font OR scale the text horizontally
+    // so the resulting run is exactly `max_width` px wide. We take the
+    // scaling path: it preserves the active typeface (no fallback font
+    // surprises), preserves vertical metrics, and matches HarfBuzz's
+    // per-cluster shape / draw model — each glyph cluster shrinks as a
+    // rigid unit, keeping cluster boundaries spec-compliant.
+    //
+    // Sentinel: `max_width <= 0` means "no constraint" — fall through
+    // to the unconstrained `fill_text` path bit-for-bit.
+    if (max_width <= 0.0f || text.empty()) {
+        fill_text(text, x, y);
+        return;
+    }
+    GUARD_CANVAS;
+    const float measured = measure_text(text);
+    if (measured <= max_width || measured <= 0.0f) {
+        // Already fits (or zero-width edge case) — no scale needed.
+        fill_text(text, x, y);
+        return;
+    }
+    const float scale = max_width / measured;
+    // Scale around the text origin (x, y). Save/restore so the caller's
+    // device matrix is unaffected — the spec says only the rendering of
+    // this single fillText is squeezed; subsequent draws revert to
+    // natural metrics.
+    canvas_->save();
+    canvas_->translate(x, y);
+    canvas_->scale(scale, 1.0f);
+    canvas_->translate(-x, -y);
+    fill_text(text, x, y);
+    canvas_->restore();
+}
+
+void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
+                              float max_width) {
+    // pulp #1525 — true stroked-glyph rendering. Build a paint with
+    // SkPaint::kStroke_Style so each glyph outline is honoured at the
+    // active line width / stroke colour, rather than the pre-#1525
+    // approximation that re-routed through fillText with strokeStyle as
+    // the fill colour. HarfBuzz / SkShaper still handles cluster shaping
+    // — we only swap the paint's style flag.
+    GUARD_CANVAS;
+    if (text.empty()) return;
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
+    if (!font.getTypeface()) return;
+
+    auto stroke_paint = make_stroke_paint(stroke_color_, line_width_);
+    stroke_paint.setAntiAlias(true);
+    // Codex P2 (PR #1555): propagate sticky stroke state — lineJoin,
+    // lineCap, miterLimit, and any stroke pattern shader — onto the
+    // text-stroke paint. Without this, ctx.lineJoin / ctx.lineCap /
+    // ctx.miterLimit / ctx.strokeStyle=createPattern(...) are silently
+    // dropped on strokeText, even though every other stroke primitive
+    // (stroke_rect, stroke_path, stroke_circle, …) honours them.
+    apply_stroke_state(stroke_paint);
+    apply_shadow_filter(stroke_paint);
+
+    // pulp #1525 — apply maxWidth squeeze around (x, y) before drawing.
+    bool needs_restore = false;
+    if (max_width > 0.0f) {
+        const float measured = measure_text(text);
+        if (measured > max_width && measured > 0.0f) {
+            const float scale = max_width / measured;
+            canvas_->save();
+            canvas_->translate(x, y);
+            canvas_->scale(scale, 1.0f);
+            canvas_->translate(-x, -y);
+            needs_restore = true;
+        }
+    }
+
+#ifdef PULP_HAS_TEXT_SHAPING
+    if (letter_spacing_ == 0.0f) {
+        auto shaper = SkShaper::Make();
+        if (shaper) {
+            SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+            shaper->shape(text.c_str(), text.size(), font,
+                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            float total_w = handler.endPoint().x();
+
+            float draw_x = x;
+            if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
+            else if (text_align_ == TextAlign::right) draw_x -= total_w;
+
+            auto blob = handler.makeBlob();
+            if (blob) {
+                canvas_->drawTextBlob(blob, draw_x, y, stroke_paint);
+                if (needs_restore) canvas_->restore();
+                return;
+            }
+        }
+    }
+#endif
+
+    // Fallback: per-glyph blob, mirrors fill_text's non-shaper path so
+    // the stroke pass tracks the fill pass exactly.
+    int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
+    if (glyph_count <= 0) {
+        if (needs_restore) canvas_->restore();
+        return;
+    }
+
+    std::vector<SkGlyphID> glyphs(glyph_count);
+    font.textToGlyphs(text.c_str(), text.size(), SkTextEncoding::kUTF8,
+                      SkSpan<SkGlyphID>(glyphs.data(), glyph_count));
+
+    std::vector<SkScalar> widths(glyph_count);
+    font.getWidths(SkSpan<const SkGlyphID>(glyphs.data(), glyph_count),
+                   SkSpan<SkScalar>(widths.data(), glyph_count));
+
+    float total_w = 0;
+    for (int i = 0; i < glyph_count; ++i) total_w += widths[i];
+    if (glyph_count > 1) total_w += letter_spacing_ * static_cast<float>(glyph_count - 1);
+
+    float draw_x = x;
+    if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
+    else if (text_align_ == TextAlign::right) draw_x -= total_w;
+
+    SkTextBlobBuilder builder;
+    const auto& run = builder.allocRunPosH(font, glyph_count, y);
+    float cursor = draw_x;
+    for (int i = 0; i < glyph_count; ++i) {
+        run.glyphs[i] = glyphs[i];
+        run.pos[i] = cursor;
+        cursor += widths[i];
+        if (i + 1 < glyph_count) cursor += letter_spacing_;
+    }
+
+    canvas_->drawTextBlob(builder.make(), 0, 0, stroke_paint);
+    if (needs_restore) canvas_->restore();
 }
 
 void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,

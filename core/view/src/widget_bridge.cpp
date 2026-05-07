@@ -3608,6 +3608,37 @@ void WidgetBridge::register_api() {
             cmd.x=(float)args.get<double>(2,0); cmd.y=(float)args.get<double>(3,0);
             cmd.extra=(float)args.get<double>(4, 14);
             cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. The
+            // JS shim threads the optional maxWidth through as the 7th
+            // arg (px). `<= 0` (or absent) is the spec sentinel for "no
+            // constraint" and routes through the legacy fill_text path
+            // unchanged. Stored on `cmd.w` (which fill_text otherwise
+            // does not consume) so we don't have to grow CanvasDrawCmd.
+            cmd.w = (float)args.get<double>(6, 0.0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1525 — dedicated stroke_text bridge entry. Pre-#1525 the JS
+    // shim's `ctx.strokeText` path re-routed through `canvasFillText`
+    // with the strokeStyle as the fill colour — visually approximate
+    // but spec-incompatible (no real outlined glyphs, lineWidth ignored).
+    // canvasStrokeText records a distinct stroke_text cmd so the paint
+    // loop can route it through `Canvas::stroke_text` for true outlined
+    // rendering on backends that override it (Skia, CG).
+    //
+    // Args: (id, text, x, y, fontSize, color, maxWidth?). Color carries
+    // strokeStyle; lineWidth is set ahead of the call by the JS shim's
+    // _syncStrokeState path (canvasSetLineWidth + canvasSetStrokeColor).
+    engine_.register_function("canvasStrokeText", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_text;
+            cmd.text = args.get<std::string>(1, "");
+            cmd.x=(float)args.get<double>(2,0); cmd.y=(float)args.get<double>(3,0);
+            cmd.extra=(float)args.get<double>(4, 14);
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            cmd.w = (float)args.get<double>(6, 0.0);
             c->add_command(cmd);
         }
         return choc::value::Value();
@@ -4530,6 +4561,24 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 Phase A2-3 — writing direction. Maps the CSS keyword
+    // to View::WritingDirection. Yoga's flow honors direction for
+    // flexDirection 'row' (which visually reverses under RTL); Skia's
+    // paragraph_style.setTextDirection picks up the same value at
+    // shape time. Logical-edge mapping in the @pulp/react prop-applier
+    // currently stays LTR-only (per #1497 fast-path note); a future
+    // slice will make it direction-aware via a shared resolver.
+    engine_.register_function("setDirection", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto d = args.get<std::string>(1, "ltr");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (d == "rtl")        v->set_direction(View::WritingDirection::rtl);
+        else if (d == "ltr")   v->set_direction(View::WritingDirection::ltr);
+        else                   v->set_direction(View::WritingDirection::auto_);
+        return choc::value::Value();
+    });
+
     // setFilter(id, "blur(4px) brightness(0.8) saturate(1.2) drop-shadow(...)")
     //   — pulp #1434 Phase A2-4 CSS filter chain. Walks the function
     //   sequence and builds View::FilterOp entries; the View paint
@@ -4664,6 +4713,48 @@ void WidgetBridge::register_api() {
             auto blur_px = args.get<double>(1, 0.0);
             auto* v = id.empty() ? &root_ : widget(id);
             if (v) v->set_backdrop_blur(static_cast<float>(blur_px));
+            return choc::value::Value();
+        });
+
+    // setClipPath(id, svg_path_d) — CSS `clip-path: path("...")` (pulp
+    // #1515). Stores the SVG-path-d string on the View; paint_all()
+    // installs it as a canvas clip via Canvas::clip_path_svg. Empty
+    // string clears the slot. URL refs (`url(#id)`) and named shapes
+    // (`circle()`, `inset()`, `polygon()`) are deferred — only
+    // `path("...")` form is honored today.
+    engine_.register_function("setClipPath",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_clip_path(value);
+            return choc::value::Value();
+        });
+
+    // setMaskImage(id, value) — CSS `mask-image` (pulp #1515).
+    // Storage-only today; the saveLayer + SkBlendMode::kDstIn shader
+    // composite is a follow-up paint slice. The slot round-trips
+    // through View::mask_image() so harness tests can assert the
+    // bridge accepted the value.
+    engine_.register_function("setMaskImage",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_mask_image(value);
+            return choc::value::Value();
+        });
+
+    // setMask(id, shorthand) — CSS `mask` shorthand (pulp #1515).
+    // Stores the verbatim shorthand on the View; the JS shim
+    // (web-compat-style-decl.js) is responsible for fanning out into
+    // the maskImage longhand. Storage-only today.
+    engine_.register_function("setMask",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_mask(value);
             return choc::value::Value();
         });
 

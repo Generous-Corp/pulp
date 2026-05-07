@@ -528,6 +528,16 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // pulp #1434 Phase A2-3 — CSS `direction: ltr | rtl`. Maps to
+        // View::WritingDirection via setDirection bridge fn; Yoga
+        // honors at layout, Skia paragraph_style at text shape.
+        case "direction": {
+            if (typeof setDirection !== "undefined") {
+                setDirection(id, resolved);
+            }
+            break;
+        }
+
         // pulp #1514 — list-style cluster. Pulp doesn't model
         // <li>/<ul>/<ol> semantics; the bridge stores the values
         // verbatim. Marker glyph rendering is deferred — flipping
@@ -841,6 +851,74 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             var bdm = bdf.match(/blur\(\s*([\d.]+)\s*(px)?\s*\)/);
             if (bdm) {
                 setBackdropFilter(id, parseFloat(bdm[1]) || 0);
+            }
+            break;
+        }
+
+        // pulp #1515 — CSS `clip-path` cluster. The bridge only honors
+        // the `path("...")` form (Skia parses via SkPath::FromSVGString
+        // and installs the clip on paint). URL refs (`url(#id)`) and
+        // named shape forms (`circle()`, `inset()`, `polygon()`,
+        // `ellipse()`) are deferred — for those we set an empty slot
+        // so the partial coverage is honest. `none` / empty clears.
+        case "clipPath": {
+            if (typeof setClipPath !== "function") break;
+            var cpv = String(resolved).trim();
+            if (cpv === "" || cpv === "none") {
+                setClipPath(id, "");
+                break;
+            }
+            // path("M 0 0 L 100 0 ...") or path('M 0 0 ...').
+            var cpm = cpv.match(/^path\(\s*['"]([^'"]+)['"]\s*\)$/);
+            if (cpm) {
+                setClipPath(id, cpm[1]);
+            } else {
+                // url() / circle() / inset() / polygon() — deferred;
+                // clear the slot so a previous path() doesn't linger.
+                setClipPath(id, "");
+            }
+            break;
+        }
+
+        // pulp #1515 — CSS `mask-image`. Storage-only today; the
+        // paint pipeline does not yet composite a shader mask onto a
+        // saveLayer. Forwarding the value through to the bridge keeps
+        // the slot round-trippable so harness tests can assert the
+        // shim accepts the value, and so a future paint slice can
+        // honor it without a JS-side change.
+        case "maskImage": {
+            if (typeof setMaskImage !== "function") break;
+            var miv = String(resolved).trim();
+            if (miv === "none") miv = "";
+            setMaskImage(id, miv);
+            break;
+        }
+
+        // pulp #1515 — CSS `mask` shorthand. Parse the image
+        // sub-property out (it's the only longhand we support today)
+        // and forward both the shorthand verbatim (so View::mask()
+        // round-trips) and the extracted image to setMaskImage.
+        // The remaining longhands (mode / repeat / position / size /
+        // origin / clip / composite) are deferred — the saveLayer +
+        // SkBlendMode::kDstIn paint slice is the follow-up.
+        case "mask": {
+            if (typeof setMask === "function") {
+                setMask(id, String(resolved));
+            }
+            if (typeof setMaskImage === "function") {
+                var mv = String(resolved).trim();
+                if (mv === "" || mv === "none") {
+                    setMaskImage(id, "");
+                } else {
+                    // Pull the first url(...) / linear-gradient(...) /
+                    // radial-gradient(...) substring out and treat the
+                    // rest as deferred sub-properties. Solid-color
+                    // masks (`mask: black`) flow through verbatim too;
+                    // the bridge stores the value but doesn't paint it
+                    // yet.
+                    var imgm = mv.match(/(url\([^)]*\)|(?:linear|radial|conic)-gradient\([^)]*\))/);
+                    setMaskImage(id, imgm ? imgm[1] : mv);
+                }
             }
             break;
         }

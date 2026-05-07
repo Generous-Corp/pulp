@@ -55,6 +55,7 @@ public:
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
+    void clip_path_svg(const std::string& svg_path_d) override;
 
     // ── Fill and stroke ──────────────────────────────────────────────────
     void set_fill_color(Color c) override;
@@ -92,6 +93,11 @@ public:
                        int weight, int slant, float letter_spacing) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
+    // pulp #1525 — Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
+    void fill_text_with_max_width(const std::string& text,
+                                  float x, float y, float max_width) override;
+    void stroke_text(const std::string& text, float x, float y,
+                     float max_width = 0.0f) override;
     void fill_text_sdf(const std::string& text, float x, float y,
                        const SdfAtlas& atlas) override;
     float measure_text(const std::string& text) override;

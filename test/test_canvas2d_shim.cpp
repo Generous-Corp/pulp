@@ -1632,6 +1632,25 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
 }
 #endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
 
+// ── pulp #1525 — fillText / strokeText maxWidth + glyph cluster handling ──
+//
+// Promotion target: 2 DIVERGE → PASS for canvas2d/fillText and
+// canvas2d/strokeText. Pre-#1525 the JS shim accepted `maxWidth` as a
+// 4th arg but discarded it (`void maxWidth;`) and `strokeText` re-routed
+// through `fillText` with the strokeStyle as the fill colour — visually
+// approximate but spec-incompatible (no real outlined glyphs, no
+// horizontal squeeze).
+//
+// These tests cover the full JS → bridge → CanvasDrawCmd surface so the
+// catalog can flip from `partial` to `supported`.
+
+TEST_CASE("Canvas2D fillText threads maxWidth through to bridge",
+          "[view][canvas2d][issue-1525]") {
+    // Spec: `ctx.fillText(text, x, y, maxWidth)` records a fill_text cmd
+    // carrying maxWidth on the bridge-side payload (cmd.w). The 3-arg
+    // form (no maxWidth) records cmd.w == 0 — the "no constraint"
+    // sentinel that the paint loop uses to fall through to the legacy
+    // unconstrained path.
 // ── pulp #1521 — arc-as-path cluster (DIVERGE → PASS) ────────────────────
 //
 // The JS shim now routes ctx.arc / arcTo / ellipse / roundRect through the
@@ -1649,6 +1668,38 @@ TEST_CASE("Canvas2D arc shim emits path_arc, not bezier approximation",
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
+        c.width = 200; c.height = 50;
+        var ctx = c.getContext('2d');
+        ctx.font = '14px Inter';
+        ctx.fillText('hello world', 10, 20, 50);
+        ctx.fillText('no limit',    10, 40);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = CanvasDrawCmd::Type;
+    int with_max = 0, without_max = 0;
+    float observed_max_width = -1.0f;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type != T::fill_text) continue;
+        if (cmd.text == "hello world") {
+            with_max++;
+            observed_max_width = cmd.w;
+        } else if (cmd.text == "no limit") {
+            without_max++;
+            REQUIRE(cmd.w == 0.0f);
+        }
+    }
+    REQUIRE(with_max == 1);
+    REQUIRE(without_max == 1);
+    REQUIRE(observed_max_width == Catch::Approx(50.0f));
+}
+
+TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentinel",
+          "[view][canvas2d][issue-1525]") {
+    // Spec: NaN / Infinity / negative / zero / null / undefined all
+    // collapse to "no constraint" — the bridge sees cmd.w == 0 and the
+    // paint loop falls through to the legacy unconstrained fill_text.
         c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
@@ -1707,6 +1758,80 @@ TEST_CASE("Canvas2D ellipse shim emits path_ellipse with rotation",
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
+        c.width = 200; c.height = 50;
+        var ctx = c.getContext('2d');
+        ctx.font = '14px Inter';
+        ctx.fillText('a', 0, 10, NaN);
+        ctx.fillText('b', 0, 20, Infinity);
+        ctx.fillText('c', 0, 30, -10);
+        ctx.fillText('d', 0, 40, 0);
+        ctx.fillText('e', 0, 50, null);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = CanvasDrawCmd::Type;
+    int seen = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type != T::fill_text) continue;
+        if (cmd.text.size() == 1 && cmd.text[0] >= 'a' && cmd.text[0] <= 'e') {
+            INFO("text=" << cmd.text << " observed cmd.w=" << cmd.w);
+            REQUIRE(cmd.w == 0.0f);
+            seen++;
+        }
+    }
+    REQUIRE(seen == 5);
+}
+
+TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
+          "[view][canvas2d][issue-1525]") {
+    // Pre-#1525: strokeText re-routed through canvasFillText with
+    // strokeStyle as the fill colour, recording a fill_text cmd. Post-
+    // #1525: strokeText records a dedicated stroke_text cmd carrying
+    // the strokeStyle in cmd.color and the optional maxWidth in cmd.w
+    // — the paint loop dispatches to Canvas::stroke_text for true
+    // outlined-glyph rendering (Skia / CG override).
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 200; c.height = 50;
+        var ctx = c.getContext('2d');
+        ctx.font = '14px Inter';
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 2;
+        ctx.strokeText('outline', 10, 20, 80);
+        ctx.strokeText('plain',   10, 40);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = CanvasDrawCmd::Type;
+    int stroke_count = 0, fill_text_count = 0;
+    float seen_max_width = -1.0f;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::stroke_text) {
+            stroke_count++;
+            if (cmd.text == "outline") seen_max_width = cmd.w;
+            if (cmd.text == "plain") REQUIRE(cmd.w == 0.0f);
+        } else if (cmd.type == T::fill_text) {
+            fill_text_count++;
+        }
+    }
+    REQUIRE(stroke_count == 2);
+    // strokeText must NOT have leaked into fill_text — that's the
+    // pre-#1525 approximation we're explicitly replacing.
+    REQUIRE(fill_text_count == 0);
+    REQUIRE(seen_max_width == Catch::Approx(80.0f));
+}
+
+TEST_CASE("Canvas2D ctx.measureText is unaffected by a subsequent maxWidth fillText",
+          "[view][canvas2d][issue-1525]") {
+    // measureText reports the natural advance of the current text +
+    // font; the maxWidth-squeeze on fillText is rendering-only and
+    // must not retroactively alter the metrics returned to JS.
+    auto result = run_in_bridge(R"(
         c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
@@ -1732,8 +1857,27 @@ TEST_CASE("Canvas2D roundRect shim emits path_round_rect with 4 distinct radii",
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
-        globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.font = '14px Inter';
+        var natural = ctx.measureText('squeeze me').width;
+        ctx.fillText('squeeze me', 0, 20, 5);  // tiny maxWidth
+        var after   = ctx.measureText('squeeze me').width;
+        // Round to integer so font-fallback fuzz between hosts doesn't
+        // make this brittle — the contract is "before == after", not a
+        // specific advance value.
+        return Math.round(natural * 100) === Math.round(after * 100) ? 'stable' : 'drifted';
+    )");
+    REQUIRE(result == "stable");
+}
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("Canvas2D fillText with maxWidth horizontally squeezes raster output",
+          "[view][canvas2d][issue-1525][skia]") {
+    // End-to-end: render the same text twice — once unconstrained, once
+    // with a maxWidth narrower than the natural advance. Assert the
+    // constrained raster has its right edge at (x + maxWidth), not at
+    // (x + natural advance).
         c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();
@@ -1767,6 +1911,122 @@ TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
+        c.width = 200; c.height = 40;
+        var ctx = c.getContext('2d');
+        ctx.font = '20px Inter';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Hello there friends', 5, 25, 60);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    SkImageInfo info = SkImageInfo::Make(200, 40,
+                                         kBGRA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    pulp::canvas::SkiaCanvas skia(surface->getCanvas());
+    cw->set_bounds({0, 0, 200, 40});
+    cw->paint(skia);
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    auto sample = [&](int x, int y) {
+        return *static_cast<const uint32_t*>(pm.addr(x, y));
+    };
+    auto is_lit = [&](int x, int y) {
+        uint32_t px = sample(x, y);
+        // BGRA: any non-trivial luminance counts as "text drawn here".
+        uint8_t b = (px >>  0) & 0xff;
+        uint8_t g = (px >>  8) & 0xff;
+        uint8_t r = (px >> 16) & 0xff;
+        return (r + g + b) > 60;
+    };
+    // Find the rightmost lit column. With maxWidth=60 starting at x=5,
+    // the squeezed run must end no further than x ≈ 65 + a small
+    // anti-alias tolerance. Without the squeeze the natural advance of
+    // "Hello there friends" at 20px would extend well past x=120.
+    int rightmost = 0;
+    for (int x = 199; x >= 0; --x) {
+        bool lit = false;
+        for (int y = 0; y < 40; ++y) {
+            if (is_lit(x, y)) { lit = true; break; }
+        }
+        if (lit) { rightmost = x; break; }
+    }
+    INFO("rightmost lit column: " << rightmost);
+    // Allow a 6px AA fringe on the right edge of the last glyph.
+    REQUIRE(rightmost >= 5);
+    REQUIRE(rightmost <= 5 + 60 + 6);
+}
+
+// Codex P2 (PR #1555): SkiaCanvas::stroke_text built its stroke paint
+// via make_stroke_paint() but never called apply_stroke_state(), so
+// ctx.lineJoin / ctx.lineCap / ctx.miterLimit / ctx.strokeStyle pattern
+// shaders were silently dropped on strokeText only — every other stroke
+// primitive honoured them. This test renders a heavy-stroke glyph twice
+// against identical surfaces, once with the default (miter) line join
+// and once with LineJoin::round, and asserts the rasters differ. With
+// the apply_stroke_state call missing, both paths would resolve to the
+// same default-join SkPaint and produce identical pixels.
+TEST_CASE("SkiaCanvas::stroke_text honors sticky line_join state",
+          "[canvas][skia][issue-1525-fix]") {
+    using pulp::canvas::SkiaCanvas;
+    using pulp::canvas::Color;
+    using pulp::canvas::LineJoin;
+
+    auto render = [](LineJoin join) {
+        SkImageInfo info = SkImageInfo::Make(120, 60,
+                                             kBGRA_8888_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        auto surface = SkSurfaces::Raster(info);
+        REQUIRE(surface);
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(surface->getCanvas());
+        canvas.set_font("Inter", 36.0f);
+        canvas.set_stroke_color(Color::rgba(1.0f, 1.0f, 1.0f, 1.0f));
+        // Heavy stroke so corner-shape differences (round vs miter) are
+        // pixel-visible at the glyph junctions.
+        canvas.set_line_width(6.0f);
+        canvas.set_line_join(join);
+        canvas.stroke_text("M", 10.0f, 45.0f);
+        return surface;
+    };
+
+    auto surface_miter = render(LineJoin::miter);
+    auto surface_round = render(LineJoin::round);
+
+    SkPixmap pm_miter, pm_round;
+    REQUIRE(surface_miter->peekPixels(&pm_miter));
+    REQUIRE(surface_round->peekPixels(&pm_round));
+    REQUIRE(pm_miter.width()  == pm_round.width());
+    REQUIRE(pm_miter.height() == pm_round.height());
+
+    // Count pixels that differ. If apply_stroke_state never reaches the
+    // text-stroke paint, both passes draw with the default miter join
+    // and the buffers are byte-identical (diff_count == 0). With the
+    // fix, the round-join junction shape produces a non-trivial pixel
+    // delta around the corners of 'M'.
+    int diff_count = 0;
+    for (int y = 0; y < pm_miter.height(); ++y) {
+        for (int x = 0; x < pm_miter.width(); ++x) {
+            uint32_t a = *static_cast<const uint32_t*>(pm_miter.addr(x, y));
+            uint32_t b = *static_cast<const uint32_t*>(pm_round.addr(x, y));
+            if (a != b) ++diff_count;
+        }
+    }
+    INFO("differing pixels between miter and round join rasters: "
+         << diff_count);
+    // Threshold is a sanity floor — miter vs round on a 36px 'M' stroked
+    // at width=6 produces hundreds of differing AA pixels at the four
+    // corner junctions. Anything above ~10 proves apply_stroke_state
+    // propagated the setStrokeJoin call into the text-stroke paint.
+    REQUIRE(diff_count > 10);
+}
+#endif  // PULP_HAS_SKIA
         c.width = 100; c.height = 100;
         var ctx = c.getContext('2d');
         ctx.beginPath();

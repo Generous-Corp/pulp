@@ -786,6 +786,30 @@ public:
     void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
     float backdrop_blur() const { return backdrop_blur_; }
 
+    /// CSS `clip-path: path("...")` (pulp #1515). Stores an SVG-path-d
+    /// string; paint_all() installs it as a canvas clip via
+    /// `Canvas::clip_path_svg` before painting children. Empty string
+    /// clears the slot. URL refs (`url(#id)`) and named shape forms
+    /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
+    /// `path("...")` form is honored today.
+    void set_clip_path(const std::string& svg_path_d) { clip_path_ = svg_path_d; }
+    const std::string& clip_path() const { return clip_path_; }
+    bool has_clip_path() const { return !clip_path_.empty(); }
+
+    /// CSS `mask-image: ...` (pulp #1515). Storage-only today; the
+    /// paint pipeline does not yet composite a shader mask onto a
+    /// saveLayer (image-URL fetch + SkBlendMode::kDstIn is the
+    /// follow-up paint slice). Solid-color and `none` are tracked so
+    /// the value round-trips through View slots and the bridge.
+    void set_mask_image(const std::string& value) { mask_image_ = value; }
+    const std::string& mask_image() const { return mask_image_; }
+
+    /// CSS `mask` shorthand (pulp #1515). Stored verbatim alongside
+    /// `mask_image_`; the longhand fan-out in the JS shim populates
+    /// the image slot from this string. Storage-only today.
+    void set_mask(const std::string& value) { mask_ = value; }
+    const std::string& mask() const { return mask_; }
+
     /// CSS background sub-properties (pulp #1517). These slots store the
     /// keyword for round-tripping; paint impact is partial — see notes:
     ///   • background-attachment: only `scroll` is conformant in pulp's
@@ -802,6 +826,7 @@ public:
     const std::string& background_clip() const     { return background_clip_; }
     void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
     const std::string& background_origin() const   { return background_origin_; }
+
 
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
@@ -838,6 +863,25 @@ public:
     /// Text overflow: ellipsis (CSS text-overflow: ellipsis)
     void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }
     bool text_overflow_ellipsis() const { return text_ellipsis_; }
+
+    /// pulp #1434 Phase A2-3 — writing direction (CSS `direction` /
+    /// RN `writingDirection`). LTR is the default; RTL flips text
+    /// shaping (Skia paragraph_style.setTextDirection), Yoga's flow
+    /// (YGDirectionRTL — flexDirection 'row' visually reverses), and
+    /// textAlign 'auto' resolution at paint time. The View::direction_
+    /// state propagates inheritance only when the caller plumbs it
+    /// through the tree (Phase A2-3 keeps inheritance opt-in;
+    /// automatic-cascade is a follow-up). Enum is tri-state — `auto_`
+    /// defers to parent / first-strong-character heuristic.
+    enum class WritingDirection { ltr, rtl, auto_ };
+    void set_direction(WritingDirection d) { direction_ = d; }
+    WritingDirection direction() const { return direction_; }
+    /// Resolve `auto_` → ltr (LTR fallback, until first-strong-character
+    /// detection is wired). Use this at paint time when you need a
+    /// concrete direction.
+    WritingDirection resolved_direction() const {
+        return direction_ == WritingDirection::auto_ ? WritingDirection::ltr : direction_;
+    }
 
     /// White-space: nowrap (CSS `white-space: nowrap`). Pulp #1410. Generic
     /// flag so non-Label widgets (Button, custom text-bearing views) and
@@ -990,6 +1034,14 @@ private:
     float filter_blur_ = 0;
     std::vector<FilterOp> filter_chain_{};
     float backdrop_blur_ = 0;
+    // pulp #1515 — CSS clip-path / mask storage. Paint-time consumption
+    // for clip_path_ via Canvas::clip_path_svg (SkPath::FromSVGString
+    // on Skia, no-op fallback elsewhere). mask_image_ / mask_ are
+    // storage-only today; the saveLayer + SkBlendMode::kDstIn shader
+    // composite is a follow-up paint slice.
+    std::string clip_path_;
+    std::string mask_image_;
+    std::string mask_;
     /// pulp #1434 Phase A2-1 — transition specs + active animations.
     std::vector<TransitionSpec> transitions_{};
     std::vector<CssAnimation> active_animations_{};
@@ -1009,6 +1061,7 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
+    WritingDirection direction_ = WritingDirection::auto_;  // pulp #1434 A2-3
     // pulp #1549 — CSS / RN mix-blend-mode. Default kSrcOver (canvas
     // BlendMode::normal) is a paint-time no-op; any non-default value
     // forces a saveLayer() at paint time so the subtree composites back

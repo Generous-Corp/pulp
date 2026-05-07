@@ -33,6 +33,44 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1515)** — CSS `clip-path` + `mask` cluster.
+  Three catalog items flipped `missing` → `partial`.
+  * **`css/clipPath`** — bridge fn `setClipPath(id, svg_path_d)`
+    stores the value on `View::clip_path_`; `View::paint_all` calls
+    `Canvas::clip_path_svg` after the overflow clip and before
+    children paint. `SkiaCanvas` parses via
+    `SkPath::FromSVGString` and intersects the canvas clip;
+    `RecordingCanvas` captures a `clip_path_svg` command for tests;
+    other backends silently no-op (path parsing is Skia-side).
+    Only the `path("...")` form is honored — URL refs (`url(#id)`)
+    and named shape forms (`circle()`, `inset()`, `polygon()`,
+    `ellipse()`) are deferred to a follow-up paint slice.
+  * **`css/mask`** + **`css/maskImage`** — bridge fns `setMask` /
+    `setMaskImage` round-trip the value through `View::mask_` /
+    `View::mask_image_`. The shorthand parser in
+    `web-compat-style-decl.js` extracts the first `url(...)` or
+    `*-gradient(...)` substring and forwards it to
+    `setMaskImage` alongside the verbatim shorthand. Storage-only
+    today — the saveLayer + `SkBlendMode::kDstIn` shader composite
+    that consumes `mask_image_` is the follow-up paint slice.
+- **2026-05-06 (pulp #1434 Phase A2-3)** — `css/direction` (and matching
+  `yoga/direction`, `rn/direction`) wired through a new
+  `View::WritingDirection` enum + `setDirection(id, "ltr"|"rtl"|
+  "inherit")` bridge fn. `yoga_layout.cpp` dispatches via
+  `YGNodeStyleSetDirection` so `direction: rtl` flips Yoga's row-axis
+  flow (flexDirection 'row' visually reverses under RTL). The CSS
+  shim's `direction` case forwards the keyword verbatim; the
+  `@pulp/react` JSX layer exposes `writingDirection` (CSS spec
+  `direction` clashes with `FlexProps.direction` in the pulp prop
+  surface; the el.style adapter route still works for raw CSS).
+  Reclassified missing → supported on css + yoga; rn/direction stays
+  partial pending the prop-applier's logical-edge resolver
+  (#1497's `*Start`/`*End` mapping is currently LTR-only fast-path —
+  RTL-aware mapping is a follow-up). `rn/writingDirection` flagged
+  `wontfix` per the harness oracle (iOS-only RN spec).
+  Skia paragraph_style.setTextDirection at text shape is the
+  remaining piece — landing alongside the SkParagraph integration
+  in a follow-up.
 - **2026-05-06 (pulp #1434 Phase A2-1 PR 1)** — CSS animations +
   transitions infrastructure landed. New
   `core/view/include/pulp/view/css_animation.hpp` ships the type

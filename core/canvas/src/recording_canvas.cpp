@@ -129,6 +129,12 @@ void RecordingCanvas::clip() {
     commands_.push_back({DrawCommand::Type::clip});
 }
 
+void RecordingCanvas::clip_path_svg(const std::string& svg_path_d) {
+    DrawCommand cmd{DrawCommand::Type::clip_path_svg};
+    cmd.text = svg_path_d;
+    commands_.push_back(cmd);
+}
+
 void RecordingCanvas::set_blend_mode(BlendMode mode) {
     DrawCommand cmd{DrawCommand::Type::set_blend_mode};
     cmd.f[0] = static_cast<float>(static_cast<int>(mode));
@@ -262,6 +268,30 @@ void RecordingCanvas::fill_text(const std::string& text, float x, float y) {
     DrawCommand cmd{DrawCommand::Type::fill_text};
     cmd.text = text;
     cmd.f[0] = x; cmd.f[1] = y;
+    // pulp #1525 — legacy 3-arg form: f[2]=0 means "no maxWidth constraint".
+    cmd.f[2] = 0.0f;
+    commands_.push_back(cmd);
+}
+
+void RecordingCanvas::fill_text_with_max_width(const std::string& text,
+                                                float x, float y, float max_width) {
+    // pulp #1525 — capture the maxWidth so harness tests can assert the
+    // bridge plumbed the optional fourth arg through. Negative / zero is
+    // the "no constraint" sentinel; f[2] preserves the raw value as
+    // received from the bridge.
+    DrawCommand cmd{DrawCommand::Type::fill_text};
+    cmd.text = text;
+    cmd.f[0] = x; cmd.f[1] = y;
+    cmd.f[2] = max_width;
+    commands_.push_back(cmd);
+}
+
+void RecordingCanvas::stroke_text(const std::string& text, float x, float y,
+                                   float max_width) {
+    DrawCommand cmd{DrawCommand::Type::stroke_text};
+    cmd.text = text;
+    cmd.f[0] = x; cmd.f[1] = y;
+    cmd.f[2] = max_width;
     commands_.push_back(cmd);
 }
 

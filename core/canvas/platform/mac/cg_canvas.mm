@@ -506,6 +506,99 @@ void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
     }
 }
 
+void CoreGraphicsCanvas::fill_text_with_max_width(const std::string& text,
+                                                   float x, float y,
+                                                   float max_width) {
+    // pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)`. Same
+    // horizontal-squeeze approach as SkiaCanvas: measure naturally, and
+    // if the advance exceeds `max_width`, scale around the text origin
+    // before delegating to the unconstrained `fill_text` path. CoreText's
+    // glyph clusters are atomic CTRun units, so horizontal scaling
+    // preserves cluster integrity (matches the spec's HarfBuzz contract).
+    if (max_width <= 0.0f || text.empty()) {
+        fill_text(text, x, y);
+        return;
+    }
+    const float measured = measure_text(text);
+    if (measured <= max_width || measured <= 0.0f) {
+        fill_text(text, x, y);
+        return;
+    }
+    const float scale = max_width / measured;
+    CGContextSaveGState(ctx_);
+    CGContextTranslateCTM(ctx_, x, y);
+    CGContextScaleCTM(ctx_, scale, 1.0);
+    CGContextTranslateCTM(ctx_, -x, -y);
+    fill_text(text, x, y);
+    CGContextRestoreGState(ctx_);
+}
+
+void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
+                                      float max_width) {
+    // pulp #1525 — true outlined-glyph rendering via CoreText. We swap
+    // the text drawing mode to `kCGTextStroke` so each glyph outline is
+    // honoured with the active stroke colour + line width, instead of
+    // the pre-#1525 approximation that re-routed through fillText with
+    // strokeStyle as the fill colour.
+    @autoreleasepool {
+        if (text.empty()) return;
+        NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
+
+        CTFontRef font = create_font_with_fallback(font_family_, font_size_);
+        if (!font) return;
+
+        NSDictionary* attrs = @{
+            (__bridge id)kCTFontAttributeName: (__bridge id)font,
+            (__bridge id)kCTForegroundColorFromContextAttributeName: @YES
+        };
+
+        NSAttributedString* attr_str = [[NSAttributedString alloc]
+            initWithString:ns_text attributes:attrs];
+
+        CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)attr_str);
+
+        CGFloat text_width = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+        float draw_x = x;
+        switch (text_align_) {
+            case TextAlign::center: draw_x = x - text_width * 0.5f; break;
+            case TextAlign::right: draw_x = x - text_width; break;
+            case TextAlign::left: break;
+        }
+
+        CGContextSaveGState(ctx_);
+
+        // pulp #1525 — apply maxWidth squeeze around (x, y).
+        if (max_width > 0.0f && text_width > max_width && text_width > 0) {
+            const CGFloat scale = max_width / static_cast<CGFloat>(text_width);
+            CGContextTranslateCTM(ctx_, x, y);
+            CGContextScaleCTM(ctx_, scale, 1.0);
+            CGContextTranslateCTM(ctx_, -x, -y);
+        }
+
+        // Stroke mode + active stroke colour. The line width was set by
+        // a prior set_line_width() call and is preserved by the GState
+        // we just saved — no need to mirror it here.
+        CGContextSetRGBStrokeColor(ctx_,
+                                   stroke_color_.r, stroke_color_.g,
+                                   stroke_color_.b, stroke_color_.a);
+        CGContextSetTextDrawingMode(ctx_, kCGTextStroke);
+
+        CGContextTranslateCTM(ctx_, draw_x, y);
+        CGContextScaleCTM(ctx_, 1.0, -1.0);
+        CGContextSetTextPosition(ctx_, 0, 0);
+        CTLineDraw(line, ctx_);
+
+        // Reset to fill mode for subsequent draws — fill_text doesn't
+        // re-set the mode and would otherwise leak our stroke setting
+        // into the next text call.
+        CGContextSetTextDrawingMode(ctx_, kCGTextFill);
+        CGContextRestoreGState(ctx_);
+
+        CFRelease(line);
+        CFRelease(font);
+    }
+}
+
 float CoreGraphicsCanvas::measure_text(const std::string& text) {
     @autoreleasepool {
         NSString* ns_text = [NSString stringWithUTF8String:text.c_str()];
