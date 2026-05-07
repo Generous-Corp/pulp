@@ -3683,12 +3683,7 @@ void WidgetBridge::register_api() {
 
     engine_.register_function("canvasFillPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
-            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path;
-            // pulp #1522 — optional Canvas2D fillRule arg threaded as
-            // an int (0 = nonzero/winding, 1 = evenodd). Older callers
-            // pass no arg and pick up the spec default of nonzero.
-            cmd.int_val = static_cast<int>(args.get<double>(1, 0));
-            c->add_command(cmd);
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path; c->add_command(cmd);
         }
         return choc::value::Value();
     });
@@ -3696,6 +3691,77 @@ void WidgetBridge::register_api() {
     engine_.register_function("canvasStrokePath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1521 — native arc subpaths. Each replaces the JS shim's
+    // bezier approximation so Skia / CG see real arc geometry. Args:
+    //   canvasPathArc(id, cx, cy, radius, startAngle, endAngle,
+    //                 anticlockwise:0/1)
+    //   canvasPathArcTo(id, x1, y1, x2, y2, radius)
+    //   canvasPathEllipse(id, cx, cy, rx, ry, rotation, startAngle,
+    //                     endAngle, anticlockwise:0/1)
+    //   canvasPathRoundRect(id, x, y, w, h,
+    //                       tl_x, tl_y, tr_x, tr_y,
+    //                       br_x, br_y, bl_x, bl_y)
+    engine_.register_function("canvasPathArc", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc;
+            cmd.x     = (float)args.get<double>(1, 0);
+            cmd.y     = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            cmd.x2    = (float)args.get<double>(4, 0);
+            cmd.y2    = (float)args.get<double>(5, 0);
+            cmd.int_val = args.get<double>(6, 0) != 0.0 ? 1 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathArcTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_arc_to;
+            cmd.x     = (float)args.get<double>(1, 0);
+            cmd.y     = (float)args.get<double>(2, 0);
+            cmd.x2    = (float)args.get<double>(3, 0);
+            cmd.y2    = (float)args.get<double>(4, 0);
+            cmd.extra = (float)args.get<double>(5, 0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathEllipse", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_ellipse;
+            cmd.x     = (float)args.get<double>(1, 0);   // cx
+            cmd.y     = (float)args.get<double>(2, 0);   // cy
+            cmd.w     = (float)args.get<double>(3, 0);   // rx
+            cmd.h     = (float)args.get<double>(4, 0);   // ry
+            cmd.extra = (float)args.get<double>(5, 0);   // rotation
+            cmd.x2    = (float)args.get<double>(6, 0);   // startAngle
+            cmd.y2    = (float)args.get<double>(7, 0);   // endAngle
+            cmd.int_val = args.get<double>(8, 0) != 0.0 ? 1 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasPathRoundRect", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::path_round_rect;
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.w = (float)args.get<double>(3, 0);
+            cmd.h = (float)args.get<double>(4, 0);
+            cmd.gradient_positions = {
+                (float)args.get<double>(5, 0),  (float)args.get<double>(6, 0),
+                (float)args.get<double>(7, 0),  (float)args.get<double>(8, 0),
+                (float)args.get<double>(9, 0),  (float)args.get<double>(10, 0),
+                (float)args.get<double>(11, 0), (float)args.get<double>(12, 0),
+            };
+            c->add_command(cmd);
         }
         return choc::value::Value();
     });
@@ -5378,14 +5444,10 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // canvasClip(id, fillRule?) — intersect clip region with current path
-    // (issue-896). pulp #1522 added the optional fillRule int (0 =
-    // nonzero/winding, 1 = evenodd). Older callers pass no arg and pick
-    // up the spec default of nonzero.
+    // canvasClip(id) — intersect clip region with current path (issue-896).
     engine_.register_function("canvasClip", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip;
-            cmd.int_val = static_cast<int>(args.get<double>(1, 0));
             c->add_command(cmd);
         }
         return choc::value::Value();

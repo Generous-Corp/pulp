@@ -326,17 +326,11 @@ void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));
 }
 
-void SkiaCanvas::clip(FillRule rule) {
+void SkiaCanvas::clip() {
     GUARD_CANVAS;
     if (!path_builder_) return;
-    // pulp #1522 — apply the requested fill rule before snapshotting.
-    // setFillType is sticky on the builder, so re-set on every clip()
-    // call (subsequent fills using the same path may want a different
-    // rule). Snapshot (don't detach) — Canvas2D allows continued use
-    // of the same path after clip().
-    path_builder_->setFillType(rule == FillRule::evenodd
-                                   ? SkPathFillType::kEvenOdd
-                                   : SkPathFillType::kWinding);
+    // Snapshot the path (don't detach — Canvas2D allows continued use of
+    // the same path after clip()) and intersect with the current clip.
     canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
 }
 
@@ -1485,7 +1479,125 @@ void SkiaCanvas::close_path() {
     if (path_builder_) path_builder_->close();
 }
 
-void SkiaCanvas::fill_current_path(FillRule rule) {
+// ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──
+//
+// Replaces the JS shim's bezier approximation with Skia's native arc APIs.
+// Skia ships a closed-form arc-to-cubic implementation behind SkPath::arcTo;
+// we use the (oval, startDeg, sweepDeg, forceMoveTo=false) overload for
+// `arc` / `ellipse` and the (p1, p2, radius) overload for `arcTo`.
+// Per-corner roundRect uses SkRRect::MakeRectRadii.
+//
+// Angles arrive as radians (Canvas2D spec). Skia's arcTo wants degrees.
+// `anticlockwise` flips the sweep sign per the HTML5 spec: when false, the
+// arc is drawn clockwise from start to end; when true, anticlockwise. The
+// shim's normalization (already in JS) ensured `sweep` was in the right
+// direction; we re-normalize here so direct C++ callers (e.g. tests, AOT
+// paths) get the same behavior without going through JS.
+namespace {
+constexpr float kRadToDeg = 57.29577951308232f; // 180 / PI
+constexpr float kTwoPi = 6.283185307179586f;
+
+// Normalize (start, end, anticlockwise) into a (startDeg, sweepDeg) pair
+// matching Canvas2D semantics. Mirrors the JS shim:
+//   sweep = end - start
+//   if anticlockwise && sweep > 0  -> sweep -= 2π
+//   if !anticlockwise && sweep < 0 -> sweep += 2π
+// The full-circle case (|sweep| >= 2π) is clamped to 2π so SkPath::arcTo
+// produces a complete circle rather than wrapping multiple times.
+void normalize_arc_sweep(float start_rad, float end_rad,
+                         bool anticlockwise,
+                         float& start_deg_out, float& sweep_deg_out) {
+    float sweep_rad = end_rad - start_rad;
+    if (anticlockwise) {
+        if (sweep_rad > 0) sweep_rad -= kTwoPi;
+    } else {
+        if (sweep_rad < 0) sweep_rad += kTwoPi;
+    }
+    if (sweep_rad > kTwoPi) sweep_rad = kTwoPi;
+    if (sweep_rad < -kTwoPi) sweep_rad = -kTwoPi;
+    start_deg_out = start_rad * kRadToDeg;
+    sweep_deg_out = sweep_rad * kRadToDeg;
+}
+} // namespace
+
+void SkiaCanvas::arc(float cx, float cy, float radius,
+                     float start_angle, float end_angle,
+                     bool anticlockwise) {
+    if (!path_builder_) return;
+    if (radius <= 0.0f) return;
+    SkRect oval = SkRect::MakeLTRB(cx - radius, cy - radius,
+                                    cx + radius, cy + radius);
+    float start_deg = 0.0f, sweep_deg = 0.0f;
+    normalize_arc_sweep(start_angle, end_angle, anticlockwise,
+                        start_deg, sweep_deg);
+    // forceMoveTo=false so the arc connects to the current point with an
+    // implicit lineTo, matching the Canvas2D spec which says arc() adds
+    // an arc to the current subpath.
+    path_builder_->arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/false);
+}
+
+void SkiaCanvas::arc_to(float x1, float y1, float x2, float y2, float radius) {
+    if (!path_builder_) return;
+    if (radius <= 0.0f) {
+        // Spec: a non-positive radius collapses to a lineTo to (x1, y1).
+        path_builder_->lineTo(x1, y1);
+        return;
+    }
+    // The 5-arg SkPath::arcTo overload computes the tangent arc between
+    // the current point, (x1, y1), and (x2, y2). It internally handles
+    // the degenerate collinear case by emitting a lineTo to (x1, y1).
+    path_builder_->arcTo(SkPoint{x1, y1}, SkPoint{x2, y2}, radius);
+}
+
+void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
+                         float rotation,
+                         float start_angle, float end_angle,
+                         bool anticlockwise) {
+    if (!path_builder_) return;
+    if (rx <= 0.0f || ry <= 0.0f) return;
+    float start_deg = 0.0f, sweep_deg = 0.0f;
+    normalize_arc_sweep(start_angle, end_angle, anticlockwise,
+                        start_deg, sweep_deg);
+    if (rotation == 0.0f) {
+        SkRect oval = SkRect::MakeLTRB(cx - rx, cy - ry, cx + rx, cy + ry);
+        path_builder_->arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/false);
+        return;
+    }
+    // Rotated ellipse: build the arc into a temporary oval-aligned path,
+    // rotate it through SkMatrix around (cx, cy), and append. This keeps
+    // the arc geometry exact (still a real arc, not a bezier approx) but
+    // honours the CSS rotation parameter.
+    SkPathBuilder tmp;
+    SkRect oval = SkRect::MakeLTRB(-rx, -ry, rx, ry);
+    tmp.arcTo(oval, start_deg, sweep_deg, /*forceMoveTo=*/true);
+    SkMatrix m = SkMatrix::I();
+    m.preTranslate(cx, cy);
+    m.preRotate(rotation * kRadToDeg);
+    SkPath rotated = tmp.detach();
+    rotated.transform(m);
+    // Append rotated path into the live builder, preserving the current
+    // subpath. addPath with kAppend_AddPathMode joins the new path to
+    // any existing pen position via a moveTo on the first verb.
+    path_builder_->addPath(rotated);
+}
+
+void SkiaCanvas::round_rect(float x, float y, float w, float h,
+                            float tl_x, float tl_y,
+                            float tr_x, float tr_y,
+                            float br_x, float br_y,
+                            float bl_x, float bl_y) {
+    if (!path_builder_) return;
+    if (w <= 0.0f || h <= 0.0f) return;
+    SkRect rect = SkRect::MakeXYWH(x, y, w, h);
+    SkVector radii[4] = {
+        {tl_x, tl_y}, {tr_x, tr_y}, {br_x, br_y}, {bl_x, bl_y}
+    };
+    SkRRect rr;
+    rr.setRectRadii(rect, radii);
+    path_builder_->addRRect(rr);
+}
+
+void SkiaCanvas::fill_current_path() {
     if (!canvas_ || !path_builder_) return;
     SkPaint paint;
     paint.setAntiAlias(true);
@@ -1497,12 +1609,6 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    // pulp #1522 — apply the requested Canvas2D fill rule. The path is
-    // detached on draw (Canvas2D fill semantics), so the fill type only
-    // affects this single draw and resets with the next begin_path.
-    path_builder_->setFillType(rule == FillRule::evenodd
-                                   ? SkPathFillType::kEvenOdd
-                                   : SkPathFillType::kWinding);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 

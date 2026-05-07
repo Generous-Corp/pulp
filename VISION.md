@@ -11,7 +11,7 @@ It provides GPU-rendered UIs with hot reload, an extensible DSP layer supporting
 1. **Permissive licensing** — MIT. No royalties, no revenue thresholds, no copyleft.
 2. **Modular architecture** — use what you need, ignore the rest.
 3. **Native platform experiences** — Swift on Apple, C++ everywhere, GPU rendering on every platform.
-4. **Flexible rendering** — GPU-native UI without a browser, but WebView is there if you want it.
+4. **Flexible rendering** — GPU-native UI without a browser, but WebView is there if you want it. Layout is **Flexbox + Grid via Yoga** — the same primitives React Native and modern design tools use. Block flow, tables, multi-column, floats, and print pagination are deliberately out of scope; that's what makes the framework coherent and the design-import contract clean. (Details: [`docs/reference/layout-model.md`](docs/reference/layout-model.md).)
 5. **Modern workflows** — AI agents, design tools, hot-reload, and fast iteration from the start.
 
 ---

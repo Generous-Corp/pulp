@@ -167,6 +167,22 @@ Pulp uses a PreText-inspired text layout architecture (measure once, reflow fore
 - HarfBuzz, ICU, and SkParagraph are bundled in the Skia pre-built binaries — no separate vendoring needed
 - Fallback to character-width estimation when Skia unavailable
 
+### Layout Model — Flex + Grid only (deliberate)
+
+Pulp's layout engine is **Yoga** (`external/yoga/`), so the layout primitives are exactly what Yoga supports: **CSS Flexbox + CSS Grid** (Grid landed in Yoga 3.0, wired in PR #1509). CSS block flow, table layout, multi-column, floats, and print pagination are **out of scope by design**.
+
+When implementing a feature or assessing a compat gap, **don't reach for non-Yoga layout primitives**. If a property in `compat.json` is marked `wontfix` because it requires block/inline/table/multi-column/float/print primitives, that's the architectural ceiling — not a bug to fix. Reasons:
+
+1. **Yoga is the engine.** Adding non-Yoga layout means either a parallel layout engine (double maintenance) or block/table/columns reimplemented over Yoga (massive refactor).
+2. **React Native parity.** RN is also flex+grid-only. `@pulp/react` and the JS bridge depend on this contract.
+3. **GPU-first render pipeline.** Skia/Dawn favor a single tree-walk layout pass; multi-pass sequential algorithms (block flow, table cell auto-sizing, multi-column balancing, float wrap, paginated layout) don't compose with the render pipeline cleanly.
+4. **Use case is structured panels.** Pulp targets audio plugin UIs + cross-platform apps — knobs, faders, side panels, popovers. Newspaper columns and complex tables are not real Pulp use cases.
+5. **Modern design tools output flex/grid.** Figma, Stitch, v0, Pencil all produce flex containers + grid as their default layout primitives. Tooling alignment matters for the design-import path (#1434).
+
+The honest tradeoff: Pulp will never be a general-purpose web browser. It IS the right shape for cross-platform native UI. CSS coverage at ~95% raw / ~100% on non-OOS denominator IS the architectural ceiling, not a goal to push past by adding layout primitives.
+
+For the user-facing version of this rationale, see `docs/reference/layout-model.md`.
+
 ---
 
 ## Repo Standards

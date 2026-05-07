@@ -16,17 +16,41 @@ Spec walk:
 - [RN Layout Props](https://reactnative.dev/docs/layout-props)
 - [RN Transforms](https://reactnative.dev/docs/transforms)
 
-## Counts (2026-05-04)
+## Counts (2026-05-06)
 
 | Status | Count |
 |--------|------:|
-| supported | ~45 |
-| partial | ~3 |
-| missing | ~70 |
-| wontfix | ~3 |
+| supported | 73 |
+| partial | 24 |
+| missing | 20 |
+| wontfix | 3 |
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1550)** — RN catalog hygiene partial → supported
+  promotion pass. `rn/boxShadow`, `rn/cursor`, and `rn/overflow` flipped
+  `partial` → `supported` after auditing the prop-applier dispatch path
+  against the C++ bridge. All three are end-to-end wired: the prop-applier
+  forwards values verbatim, the bridge fns mutate the matching View
+  slots, and Skia / hit-testing honor them. Each got a `tests` reference
+  added (`prop-applier-box-shadow.test.ts`,
+  `prop-applier-rn-wires.test.ts`, `prop-applier-pointer.test.ts`) —
+  these tests already exist; the catalog just wasn't claiming them.
+  `unsupportedValues` cleaned up where over-broad: boxShadow keeps the
+  honest multi-shadow / array-form gap; overflow keeps `scroll`
+  (View::Overflow has no scroll mode — that's a ScrollView-intrinsic
+  concern). `rn/userSelect` was audited in the same pass but
+  intentionally stays `partial`: `setUserSelect` is registered as a
+  no-op stash in `widget_bridge.cpp` (the prop-applier dispatches but
+  the View has no UserSelect storage yet), so promotion is blocked
+  until the bridge actually applies the mode. `rn/tintColor` and
+  `rn/objectFit` (called out in #1550's issue body) are not in the
+  catalog and not wired in prop-applier — Image bridge has the
+  underlying Skia capability but no JSX → bridge dispatch — so they're
+  out of scope here and stay tracked as a future Image-prop wire-up.
+  Net catalog effect: 3 entries promoted partial → supported. PASS+DIV
+  ratio is unchanged (DIVERGE entries still count toward effective
+  coverage), but the surface report is more honest.
 - **2026-05-06 (pulp #1434 Phase A2-4)** — `rn/filter` extended from
   `blur(Npx)`-only to the full CSS Filter Effects function set
   (`brightness` / `contrast` / `grayscale` / `hue-rotate` / `invert` /

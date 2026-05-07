@@ -125,13 +125,8 @@ void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
     commands_.push_back(cmd);
 }
 
-void RecordingCanvas::clip(FillRule rule) {
-    DrawCommand cmd{DrawCommand::Type::clip};
-    // pulp #1522 — capture the Canvas2D fillRule (0 = nonzero/winding,
-    // 1 = evenodd). Tests assert on cmd.f[0] when verifying that ctx.clip()
-    // and ctx.clip('evenodd') flush distinct values through the stack.
-    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
-    commands_.push_back(cmd);
+void RecordingCanvas::clip() {
+    commands_.push_back({DrawCommand::Type::clip});
 }
 
 void RecordingCanvas::set_blend_mode(BlendMode mode) {
@@ -521,17 +516,66 @@ void RecordingCanvas::close_path() {
     commands_.push_back({DrawCommand::Type::close_path});
 }
 
-void RecordingCanvas::fill_current_path(FillRule rule) {
-    DrawCommand cmd{DrawCommand::Type::fill_current_path};
-    // pulp #1522 — capture the Canvas2D fillRule (0 = nonzero/winding,
-    // 1 = evenodd). Tests assert on cmd.f[0] when verifying ctx.fill()
-    // vs ctx.fill('evenodd') flushes the right value through.
-    cmd.f[0] = (rule == FillRule::evenodd) ? 1.0f : 0.0f;
-    commands_.push_back(cmd);
+void RecordingCanvas::fill_current_path() {
+    commands_.push_back({DrawCommand::Type::fill_current_path});
 }
 
 void RecordingCanvas::stroke_current_path() {
     commands_.push_back({DrawCommand::Type::stroke_current_path});
+}
+
+// ── pulp #1521: native arc subpath recording ────────────────────────────────
+//
+// These mirror the Skia / CG implementations as a pure capture so widget
+// tests can assert on the emitted command stream without a raster surface.
+// The legacy bezier/lineTo approximations are gone — the arc commands are
+// preserved verbatim so consumers see the developer's intent (an arc, not
+// N cubic-bezier segments).
+void RecordingCanvas::arc(float cx, float cy, float radius,
+                          float start_angle, float end_angle,
+                          bool anticlockwise) {
+    DrawCommand cmd{DrawCommand::Type::arc};
+    cmd.f[0] = cx;          cmd.f[1] = cy;
+    cmd.f[2] = radius;
+    cmd.f[3] = start_angle; cmd.f[4] = end_angle;
+    cmd.f[5] = anticlockwise ? 1.0f : 0.0f;
+    commands_.push_back(cmd);
+}
+
+void RecordingCanvas::arc_to(float x1, float y1, float x2, float y2,
+                             float radius) {
+    DrawCommand cmd{DrawCommand::Type::arc_to};
+    cmd.f[0] = x1; cmd.f[1] = y1;
+    cmd.f[2] = x2; cmd.f[3] = y2;
+    cmd.f[4] = radius;
+    commands_.push_back(cmd);
+}
+
+void RecordingCanvas::ellipse(float cx, float cy, float rx, float ry,
+                              float rotation,
+                              float start_angle, float end_angle,
+                              bool anticlockwise) {
+    DrawCommand cmd{DrawCommand::Type::ellipse};
+    cmd.f[0] = cx;       cmd.f[1] = cy;
+    cmd.f[2] = rx;       cmd.f[3] = ry;
+    cmd.f[4] = rotation;
+    cmd.f[5] = start_angle;
+    cmd.floats.push_back(end_angle);
+    cmd.floats.push_back(anticlockwise ? 1.0f : 0.0f);
+    commands_.push_back(cmd);
+}
+
+void RecordingCanvas::round_rect(float x, float y, float w, float h,
+                                  float tl_x, float tl_y,
+                                  float tr_x, float tr_y,
+                                  float br_x, float br_y,
+                                  float bl_x, float bl_y) {
+    DrawCommand cmd{DrawCommand::Type::round_rect};
+    cmd.f[0] = x;    cmd.f[1] = y;
+    cmd.f[2] = w;    cmd.f[3] = h;
+    cmd.f[4] = tl_x; cmd.f[5] = tl_y;
+    cmd.floats = {tr_x, tr_y, br_x, br_y, bl_x, bl_y};
+    commands_.push_back(cmd);
 }
 
 // ── compile_sksl fallback for non-Skia builds ────────────────────────────────

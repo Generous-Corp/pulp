@@ -821,6 +821,10 @@ add_executable(pulp-test-ipc test_ipc.cpp)
 target_link_libraries(pulp-test-ipc PRIVATE pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ipc)
 
+add_executable(pulp-test-ipc-endpoints test_ipc_endpoints.cpp)
+target_link_libraries(pulp-test-ipc-endpoints PRIVATE pulp::events pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ipc-endpoints)
+
 # AttributedString and TextLayout tests
 add_executable(pulp-test-attributed-string test_attributed_string.cpp)
 target_link_libraries(pulp-test-attributed-string PRIVATE pulp::canvas Catch2::Catch2WithMain)
@@ -1612,14 +1616,6 @@ catch_discover_tests(pulp-test-overlay-routing)
 add_executable(pulp-test-web-compat-overlay test_web_compat_overlay.cpp)
 target_link_libraries(pulp-test-web-compat-overlay PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-web-compat-overlay)
-
-# pulp #1528 — eight CSS entries reclassified wontfix/missing → noop.
-# Asserts each property is silently accepted by the JS shim without
-# throwing or corrupting unrelated View state. Pure runtime invariant
-# the catalog flip relies on.
-add_executable(pulp-test-web-compat-css-noop test_web_compat_css_noop.cpp)
-target_link_libraries(pulp-test-web-compat-css-noop PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-web-compat-css-noop)
 
 # Panel widget tests (styled containers)
 add_executable(pulp-test-panel test_panel.cpp)

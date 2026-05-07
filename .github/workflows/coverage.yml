@@ -518,8 +518,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
-        run: sdkmanager "ndk;30.0.14904198"
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if sdkmanager \
+              "platforms;android-35" \
+              "build-tools;34.0.0" \
+              "ndk;30.0.14904198"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
 
       - name: Cache Gradle
         uses: actions/cache@v5

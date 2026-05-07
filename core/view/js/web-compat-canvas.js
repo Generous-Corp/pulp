@@ -618,16 +618,12 @@ CanvasRenderingContext2D.prototype.closePath = function() {
     }
 };
 
-CanvasRenderingContext2D.prototype.fill = function(fillRule) {
-    // pulp #1522 — thread Canvas2D fillRule arg through to the bridge.
-    // The HTML5 spec accepts 'nonzero' (default) or 'evenodd'. Encoded
-    // as int (0/1) so canvasFillPath can pass it via cmd.int_val.
+CanvasRenderingContext2D.prototype.fill = function() {
     this._syncGlobalState();
     this._syncShadowState();
     this._syncFilterState();
     this._applyFillStyle();
-    var rule = (fillRule === "evenodd") ? 1 : 0;
-    if (typeof canvasFillPath === "function") canvasFillPath(this._id, rule);
+    if (typeof canvasFillPath === "function") canvasFillPath(this._id);
 };
 
 CanvasRenderingContext2D.prototype.stroke = function() {
@@ -830,46 +826,20 @@ CanvasRenderingContext2D.prototype._pathMirrorQuad = function(cx, cy, x, y) {
 };
 
 // ── pulp #964 — Path methods (arc / rect / curves) ────────────────────────
+// pulp #1521 — replace bezier/lineTo approximations with native bridge calls
+// that map to SkPath::arcTo (Skia) and CGPathAddArc (CG). The native arc is
+// closed-form correct for full circles, half circles, and the
+// 3-collinear-points degenerate case — bezier approximations were ~1px off
+// at large radii and lost the exact-tangent property completely.
 CanvasRenderingContext2D.prototype.arc = function(cx, cy, radius, startAngle, endAngle, anticlockwise) {
-    // The bridge has canvasArc (immediate-mode stroke) but no path-mode
-    // arc primitive. Approximate as cubic-bezier segments so the
-    // resulting path participates in fill() / stroke() / clip().
-    if (typeof canvasMoveTo !== "function" || typeof canvasCubicTo !== "function") return;
-    var sweep = endAngle - startAngle;
-    if (anticlockwise) { if (sweep > 0) sweep -= 2 * Math.PI; }
-    else               { if (sweep < 0) sweep += 2 * Math.PI; }
-    var segments = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
-    var segAngle = sweep / segments;
-    var k = (4 / 3) * Math.tan(segAngle / 4);
-    var theta = startAngle;
-    var x0 = cx + Math.cos(theta) * radius;
-    var y0 = cy + Math.sin(theta) * radius;
-    canvasMoveTo(this._id, x0, y0);
-    this._pathMirrorMoveTo(x0, y0);
-    for (var i = 0; i < segments; ++i) {
-        var t1 = theta + segAngle;
-        var x1 = cx + Math.cos(t1) * radius;
-        var y1 = cy + Math.sin(t1) * radius;
-        var c1x = x0 - Math.sin(theta) * radius * k;
-        var c1y = y0 + Math.cos(theta) * radius * k;
-        var c2x = x1 + Math.sin(t1) * radius * k;
-        var c2y = y1 - Math.cos(t1) * radius * k;
-        canvasCubicTo(this._id, c1x, c1y, c2x, c2y, x1, y1);
-        this._pathMirrorCubic(c1x, c1y, c2x, c2y, x1, y1);
-        theta = t1; x0 = x1; y0 = y1;
-    }
+    if (typeof canvasPathArc !== "function") return;
+    canvasPathArc(this._id, cx, cy, radius, startAngle, endAngle,
+                  anticlockwise ? 1 : 0);
 };
 
 CanvasRenderingContext2D.prototype.arcTo = function(x1, y1, x2, y2, radius) {
-    // Conservative approximation: emit a lineTo to the corner, then a
-    // lineTo to the end-of-arc point. FilterBank uses arcTo only for
-    // rounded-rect corners on the marquee; the fidelity loss is minimal.
-    void radius;
-    if (typeof canvasLineTo !== "function") return;
-    canvasLineTo(this._id, x1, y1);
-    canvasLineTo(this._id, x2, y2);
-    this._pathMirrorLineTo(x1, y1);
-    this._pathMirrorLineTo(x2, y2);
+    if (typeof canvasPathArcTo !== "function") return;
+    canvasPathArcTo(this._id, x1, y1, x2, y2, radius);
 };
 
 CanvasRenderingContext2D.prototype.bezierCurveTo = function(c1x, c1y, c2x, c2y, x, y) {
@@ -900,55 +870,67 @@ CanvasRenderingContext2D.prototype.rect = function(x, y, w, h) {
 };
 
 CanvasRenderingContext2D.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, anticlockwise) {
-    // Best-effort: when rx === ry fall through to arc; otherwise emit a
-    // cheap 4-segment approximation. FilterBank doesn't use ellipse, so
-    // this is a thin shim for parity rather than a precise sweep.
-    void rotation;
-    if (rx === ry) { this.arc(cx, cy, rx, startAngle, endAngle, anticlockwise); return; }
-    if (typeof canvasMoveTo !== "function" || typeof canvasCubicTo !== "function") return;
-    var sweep = endAngle - startAngle;
-    if (anticlockwise) { if (sweep > 0) sweep -= 2 * Math.PI; }
-    else               { if (sweep < 0) sweep += 2 * Math.PI; }
-    var segments = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
-    var segAngle = sweep / segments;
-    var theta = startAngle;
-    var x0 = cx + Math.cos(theta) * rx;
-    var y0 = cy + Math.sin(theta) * ry;
-    canvasMoveTo(this._id, x0, y0);
-    this._pathMirrorMoveTo(x0, y0);
-    for (var i = 0; i < segments; ++i) {
-        var t1 = theta + segAngle;
-        var x1 = cx + Math.cos(t1) * rx;
-        var y1 = cy + Math.sin(t1) * ry;
-        canvasCubicTo(this._id, x0, y0, x1, y1, x1, y1);
-        this._pathMirrorCubic(x0, y0, x1, y1, x1, y1);
-        theta = t1; x0 = x1; y0 = y1;
-    }
+    // pulp #1521 — native ellipse via SkPath::arcTo + SkMatrix rotation
+    // (Skia) or CGPathAddArc through a CGAffineTransform (CG). Honours
+    // `rotation` correctly; the previous shim ignored it entirely.
+    if (typeof canvasPathEllipse !== "function") return;
+    canvasPathEllipse(this._id, cx, cy, rx, ry, rotation || 0,
+                      startAngle, endAngle, anticlockwise ? 1 : 0);
 };
 
 CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, radii) {
-    // CSS Canvas API: radii can be a number or an array of 1/2/3/4 numbers.
-    // We honour the simple uniform case; non-uniform radii fall back to
-    // the largest single value.
-    var r = 0;
-    if (typeof radii === "number") r = radii;
-    else if (Array.isArray(radii) && radii.length > 0) r = Number(radii[0]) || 0;
-    if (typeof canvasMoveTo !== "function" || typeof canvasLineTo !== "function") return;
-    r = Math.min(r, w * 0.5, h * 0.5);
-    canvasMoveTo(this._id, x + r, y);
-    this._pathMirrorMoveTo(x + r, y);
-    canvasLineTo(this._id, x + w - r, y);
-    this._pathMirrorLineTo(x + w - r, y);
-    this.arcTo(x + w, y, x + w, y + r, r);
-    canvasLineTo(this._id, x + w, y + h - r);
-    this._pathMirrorLineTo(x + w, y + h - r);
-    this.arcTo(x + w, y + h, x + w - r, y + h, r);
-    canvasLineTo(this._id, x + r, y + h);
-    this._pathMirrorLineTo(x + r, y + h);
-    this.arcTo(x, y + h, x, y + h - r, r);
-    canvasLineTo(this._id, x, y + r);
-    this._pathMirrorLineTo(x, y + r);
-    this.arcTo(x, y, x + r, y, r);
+    // pulp #1521 — native per-corner roundRect via SkRRect::MakeRectRadii
+    // (Skia) or 8-segment CGPath layout (CG). The CSS spec accepts radii
+    // in five forms — number, [r], [r1, r2], [r1, r2, r3], [r1, r2, r3,
+    // r4] — and each can independently be a number (x==y) or an
+    // {x, y} object for an elliptical corner. Normalize all forms to
+    // 8 floats (tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y) before
+    // crossing the bridge so the C++ side stays narrow.
+    if (typeof canvasPathRoundRect !== "function") return;
+    function radiusXY(r) {
+        if (r == null) return [0, 0];
+        if (typeof r === "number") return [r, r];
+        if (typeof r === "object") {
+            var rx = Number(r.x) || 0;
+            var ry = Number(r.y) || 0;
+            return [rx, ry];
+        }
+        return [0, 0];
+    }
+    var tl, tr, br, bl;
+    if (radii == null) {
+        tl = tr = br = bl = [0, 0];
+    } else if (typeof radii === "number" || (typeof radii === "object" && !Array.isArray(radii))) {
+        tl = tr = br = bl = radiusXY(radii);
+    } else if (Array.isArray(radii)) {
+        if (radii.length === 0) {
+            tl = tr = br = bl = [0, 0];
+        } else if (radii.length === 1) {
+            tl = tr = br = bl = radiusXY(radii[0]);
+        } else if (radii.length === 2) {
+            // [horizontal, vertical] — corners alternate; per CSS spec
+            // [r1, r2] sets top-left/bottom-right to r1, top-right/
+            // bottom-left to r2.
+            tl = br = radiusXY(radii[0]);
+            tr = bl = radiusXY(radii[1]);
+        } else if (radii.length === 3) {
+            tl = radiusXY(radii[0]);
+            tr = bl = radiusXY(radii[1]);
+            br = radiusXY(radii[2]);
+        } else { // 4+
+            tl = radiusXY(radii[0]);
+            tr = radiusXY(radii[1]);
+            br = radiusXY(radii[2]);
+            bl = radiusXY(radii[3]);
+        }
+    } else {
+        tl = tr = br = bl = [0, 0];
+    }
+    canvasPathRoundRect(this._id, x, y, w, h,
+                        tl[0], tl[1],
+                        tr[0], tr[1],
+                        br[0], br[1],
+                        bl[0], bl[1]);
 };
 
 CanvasRenderingContext2D.prototype.clip = function(fillRule) {
@@ -956,10 +938,8 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
     // clip region with the current path. The bridge's canvasClip
     // (issue-896) calls SkCanvas::clipPath; canvasClipRect is the older
     // rect-only path. Prefer canvasClip when available.
-    // pulp #1522 — thread the optional Canvas2D fillRule arg through to
-    // the bridge as an int (0 = nonzero/winding (default), 1 = evenodd).
-    var rule = (fillRule === "evenodd") ? 1 : 0;
-    if (typeof canvasClip === "function") canvasClip(this._id, rule);
+    void fillRule;
+    if (typeof canvasClip === "function") canvasClip(this._id);
 };
 
 // ── pulp #1527 — isPointInPath / isPointInStroke ─────────────────────────

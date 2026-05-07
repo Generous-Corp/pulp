@@ -33,10 +33,11 @@
       "2026-04-30": "Initial population — 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
       "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
       "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
-      "2026-05-06": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563."
+      "2026-05-06_1551": "pulp #1551 (Phase A3 Bundle 3 inside pulp #1434 umbrella): pure catalog add of 13 already-implemented css/* meta entries — `__StyleSheet`, `__matchMedia`, `__pseudo_active` / `__pseudo_disabled` / `__pseudo_focus` / `__pseudo_hover`, `__selector_child` / `__selector_class` / `__selector_descendant` / `__selector_id` / `__selector_tag`, `__setProperty_var`, `__var`. Documents existing wiring in `core/view/js/web-compat-document.js`, `web-compat-style-decl.js`, `css-parser.js` and `web-compat.js`. No code changes; +13 instant supported entries. css count 199 -> 212.",
+      "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563."
     },
     "counts": {
-      "css": 199,
+      "css": 212,
       "rn": 120,
       "yoga": 55,
       "react": 0,
@@ -46,6 +47,27 @@
     }
   },
   "css": {
+    "css/__StyleSheet": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js StyleSheet class (lines 5-72): constructor parses `{ selector: { props } }` rule maps via `_parseSelector`, attach() registers the sheet in `__stylesheets__` and applies rules to every existing element via `_applyTo`, detach() removes it. Pseudo-classes (`:hover`, `:focus`, `:active`, `:disabled`) route to dedicated `_setupPseudo*` wirers; ordinary rules call `_applyStyles` to assign each property through the existing CSSStyleDeclaration setter trap so the bridge-routing path stays the same as inline `el.style.X = ...`.",
+      "supportedValues": [
+        "new StyleSheet({ '.box': { width: '100px' } }).attach()",
+        "sheet.detach()",
+        "rules with simple selectors (tag / id / class) plus optional pseudo-class suffix",
+        "<style> elements (translated via `_parseCssText` to a StyleSheet on appendChild)"
+      ],
+      "unsupportedValues": [
+        "@media / @keyframes / @supports / @import at-rules",
+        ":focus-within / :focus-visible / :checked / :nth-child / :not(...)",
+        "attribute selectors in rule keys (`[data-role='x']`)",
+        "rule reordering (StyleSheets layer in attach order — no specificity-based sort)"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented (StyleSheet has been available since the DOM-lite shim landed and was extended for `:hover` support in pulp #1149 / #1345). The same engine drives both JS-API consumers (`new StyleSheet(...)`) and HTML-input consumers (parsed `<style>` tags via `_parseCssText`).",
+      "issue": "1551"
+    },
     "css/__hover_pseudo": {
       "status": "supported",
       "mapsTo": "web-compat-document.js (#1345 / pulp #1149 part b): `:hover` rules are parsed out of the inline <style> element, stashed per-element, and the document installs mouseenter/mouseleave listeners that swap the styles on the fly.",
@@ -65,6 +87,47 @@
       "notes": "Pseudo-class support is intentionally narrow. `:hover` is the highest-impact CSS selector in interactive UIs and the most-requested by Spectr/FilterBank consumers. The other interactive pseudo-classes (`:focus`, `:active`) require additional bridge plumbing and are not yet wired.",
       "issue": "1149"
     },
+    "css/__matchMedia": {
+      "status": "partial",
+      "mapsTo": "core/view/js/css-parser.js `_matchMediaQuery` (lines 593-617) evaluates a media-query string against the current root size obtained from `getRootSize()`. Stylesheets and matched-media @rules consume this directly. The `window.matchMedia(query)` wrapper that returns a MediaQueryList shim lives in core/view/js/web-compat.js (lines 2101-2114) but that file is NOT loaded by the WidgetBridge prelude chain — the wrapper is reachable only when web-compat.js is loaded explicitly.",
+      "supportedValues": [
+        "(min-width: <px>)",
+        "(max-width: <px>)",
+        "(min-height: <px>)",
+        "(max-height: <px>)",
+        "(orientation: landscape | portrait)"
+      ],
+      "unsupportedValues": [
+        "live re-evaluation on resize (the returned MediaQueryList does not currently fire `onchange` when the root size changes — query is one-shot at call time)",
+        "(prefers-color-scheme: ...) / (prefers-reduced-motion: ...) / (hover: ...) / (pointer: ...) and other UA-feature queries",
+        "comma-separated query lists (`(min-width: 600px), (orientation: landscape)`)",
+        "`only screen and (...)` / media-type prefixes",
+        "`not` / `and` operators"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Existing `WebCompat: matchMedia min-width` and `WebCompat: matchMedia orientation landscape` cases in test_web_compat_prelude.cpp exercise the parser; pulp #1551 adds an end-to-end case that walks through `window.matchMedia()` and asserts the returned MediaQueryList shape.",
+      "issue": "1551"
+    },
+    "css/__pseudo_active": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _setupPseudoActive (lines 277-290): on `:active` rule match, registers `mousedown` (snapshot-current-style + apply rule props) and `mouseup` (restore snapshot) listeners. Idempotent via `el._activeSetup`.",
+      "supportedValues": [
+        "element:active { ... }",
+        "tag/id/class qualified `:active` selectors",
+        "ordinary CSS properties inside the `:active` rule body (anything the inline-setter trap routes)"
+      ],
+      "unsupportedValues": [
+        "`:active` combined with descendant / child combinators in the `<style>` text parser (the underlying `_parseSelector` handles them but the text parser is conservative — see #1323)",
+        "key + mouse `:active` (synthesized only on mousedown/mouseup; no keyboard activation today)"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` but uses mousedown/mouseup edges instead of mouseenter/mouseleave.",
+      "issue": "1551"
+    },
     "css/__pseudo_classes_note": {
       "status": "missing",
       "mapsTo": "no CSS pseudo-class system today",
@@ -82,8 +145,197 @@
         "etc."
       ],
       "tests": [],
-      "notes": "Pulp routes hover/click/etc. through bridge event registrations (registerHover, registerClick) rather than through CSS pseudo-classes. JSX consumers wire interactivity via on* event props, not via CSS.",
+      "notes": "Pulp routes hover/click/etc. through bridge event registrations (registerHover, registerClick) rather than through CSS pseudo-classes. JSX consumers wire interactivity via on* event props, not via CSS. Superseded in part by the per-pseudo-class catalog entries (`css/__pseudo_hover`, `css/__pseudo_focus`, `css/__pseudo_active`, `css/__pseudo_disabled`) added in pulp #1551 — kept in place for now to document the original triage decision.",
       "issue": ""
+    },
+    "css/__pseudo_disabled": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js StyleSheet._applyTo `:disabled` branch (lines 56-59): when a rule's parsed pseudo is `disabled` and `_matchesSelector(el, parsed) && el._disabled` both hold, the rule's properties are applied via `_applyStyles(el, props)`. The element's `disabled` getter/setter (web-compat-element.js lines 334-339) writes through to `el._disabled`.",
+      "supportedValues": [
+        "element:disabled { ... }",
+        "rules apply on attach / appendChild when `el.disabled === true`"
+      ],
+      "unsupportedValues": [
+        "live re-application when `disabled` is toggled at runtime (StyleSheet._applyTo runs at attach / appendChild time only — toggling `el.disabled` after attach does not currently re-invoke the disabled-branch — tracked separately if it bites a consumer)",
+        "snapshot-restore symmetry (unlike `:hover` / `:focus` / `:active`, the disabled branch does not snapshot pre-disabled values to restore on re-enable; consumers should treat it as one-way styling)"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. The pseudo branch is wired distinctly from `:hover` / `:focus` / `:active` because `:disabled` is not interaction-driven — it gates on element state.",
+      "issue": "1551"
+    },
+    "css/__pseudo_focus": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _setupPseudoFocus (lines 262-275): on `:focus` rule match, registers `focus` (snapshot-current-style + apply rule props) and `blur` (restore snapshot) listeners. Idempotent via `el._focusSetup`.",
+      "supportedValues": [
+        "element:focus { ... }",
+        "tag/id/class qualified `:focus` selectors",
+        "ordinary CSS properties inside the `:focus` rule body"
+      ],
+      "unsupportedValues": [
+        "`:focus-within` (focus inside any descendant)",
+        "`:focus-visible` (keyboard-only focus)",
+        "rule selectors that combine `:focus` with combinators in the `<style>` text parser (see #1323)"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` / `:active` and routes through the same `addEventListener` channel so it coexists with JSX `onFocus` / `onBlur` handlers.",
+      "issue": "1551"
+    },
+    "css/__pseudo_hover": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _setupPseudoHover (lines 74-145): on `:hover` rule match, registers `mouseenter` (snapshot-current-style for the union of properties across all hover rules + apply each rule's props in source order) and `mouseleave` (restore snapshot, drop snapshot map). Multi-rule layering tracked per-element via `el._hoverState.propsList`. Idempotent via `el._hoverState.wired` and per-rule object-identity checks. registerHover() is armed lazily on `_nativeCreated`.",
+      "supportedValues": [
+        "element:hover { ... }",
+        "multiple hover rules layered on the same element (last write wins per property)",
+        "tag/id/class qualified `:hover` selectors",
+        "ordinary CSS properties inside the `:hover` rule body"
+      ],
+      "unsupportedValues": [
+        "`:hover` combinators in the `<style>` text parser (e.g. `.a:hover .b`) — see #1323",
+        "synthesized hover from touch / pen input (relies on native mouseenter / mouseleave from registerHover)"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]",
+        "test/web-compat/test_css_hover_translation.cpp"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Companion to the original `css/__hover_pseudo` entry, with full multi-rule + idempotency + native-arming details captured. Hover rules originate either from the JS-API (`new StyleSheet({...})`) or from `<style>` text parsed via `_parseCssText`.",
+      "issue": "1551"
+    },
+    "css/__selector_child": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335): splits on ` > ` and recurses with `direct=true`. _matchesSelector (lines 337-367): when `parsed.direct` is set, the element's immediate `_parentElement` must match the parent selector — descendant ancestors do NOT count.",
+      "supportedValues": [
+        "<parent> > <child> (chained: `div > section > .item` — left-associative reduction in `_parseSelector`)"
+      ],
+      "unsupportedValues": [
+        "adjacent-sibling combinator `+` (not parsed today)",
+        "general-sibling combinator `~` (not parsed today)"
+      ],
+      "tests": [
+        "test/web-compat/test_selector_matching.cpp",
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Existing `Selector: JS parser distinguishes child and descendant combinators` test exercises this; the issue-1551 case adds a structural-selector smoke that runs alongside the others.",
+      "issue": "1551"
+    },
+    "css/__selector_class": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335) tokenises `.foo.bar` into `parsed.classes = ['foo', 'bar']`. _matchesSelector (lines 344-347) requires every class to be present in `el.classList` (Element.classList is the standard contains/add/remove API).",
+      "supportedValues": [
+        ".foo",
+        ".foo.bar (compound — every listed class must match)",
+        "tag.class compounds (`button.primary`)"
+      ],
+      "unsupportedValues": [
+        "namespace-qualified class selectors",
+        "case-insensitive class matching (matching is case-sensitive — matches CSS spec for non-quirks-mode HTML)"
+      ],
+      "tests": [
+        "test/web-compat/test_selector_matching.cpp",
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Class selectors are the most common StyleSheet rule shape in Pulp consumers (Spectr's editor.js, FilterBank, react renderer's className-driven styling).",
+      "issue": "1551"
+    },
+    "css/__selector_descendant": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335): splits on whitespace and recurses with `direct=false`. _matchesSelector (lines 350-363): when `parsed.parent` is set without `parsed.direct`, walks `_parentElement` chain looking for any ancestor that matches the parent selector.",
+      "supportedValues": [
+        "<ancestor> <descendant>",
+        "chained descendant combinators (`section .row .item`)"
+      ],
+      "unsupportedValues": [
+        "interleaved descendant + child combinators in the `<style>` text parser (the underlying `_parseSelector` handles them but the inline `<style>` text parser deliberately limits to flat selectors — see #1323)"
+      ],
+      "tests": [
+        "test/web-compat/test_selector_matching.cpp",
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented.",
+      "issue": "1551"
+    },
+    "css/__selector_id": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335) tokenises `#foo` into `parsed.id = 'foo'`. _matchesSelector (lines 341-342) compares against `el.getAttribute('id')`.",
+      "supportedValues": [
+        "#foo",
+        "tag#id and class#id compounds (`button#bypass.primary`)"
+      ],
+      "unsupportedValues": [
+        "multiple `#id` tokens in one selector (a CSS spec edge case; not parsed)",
+        "`[id='foo']` attribute-selector form (attribute selectors are not parsed by `_parseSelector`)"
+      ],
+      "tests": [
+        "test/web-compat/test_selector_matching.cpp",
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Note that `document.getElementById` uses a separate `#id`-prefixed lookup table in `__elements__` — the selector path here goes through `_findMatch` via `querySelector` / `querySelectorAll` and StyleSheet `_applyTo`.",
+      "issue": "1551"
+    },
+    "css/__selector_tag": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335) tokenises a leading identifier into `parsed.tag` (lower-cased). _matchesSelector (lines 339) compares against `el.tagName.toLowerCase()`.",
+      "supportedValues": [
+        "button",
+        "div",
+        "span",
+        "h1 / h2 / ... / h6",
+        "any HTML element name the consumer creates via `document.createElement`"
+      ],
+      "unsupportedValues": [
+        "namespace-qualified tag names (`svg|circle`)",
+        "universal selector `*` (not parsed)",
+        "case-sensitive tag matching (matching is case-insensitive — both sides lower-cased — matches HTML quirks)"
+      ],
+      "tests": [
+        "test/web-compat/test_selector_matching.cpp",
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented.",
+      "issue": "1551"
+    },
+    "css/__setProperty_var": {
+      "status": "supported",
+      "mapsTo": "core/view/js/web-compat-style-decl.js CSSStyleDeclaration.prototype.setProperty (lines 1259-1279): when `name` starts with `--`, slices the prefix and tries `parseCSSLength(value)` first — on success calls `setMotionToken(tokenName, parsed.value)` so the bridge motion-token system picks up the new value. On length-parse failure, tries `parseCSSColor(value)` and on success routes through `applyTokenDiff` as a theme color override. getPropertyValue routes back through `getMotionToken` for `--` names.",
+      "supportedValues": [
+        "el.style.setProperty('--accent', '12px')",
+        "el.style.setProperty('--accent', '#ff0000')",
+        "el.style.setProperty('--accent', 'cornflowerblue')",
+        "el.style.getPropertyValue('--accent')",
+        "el.style.removeProperty('--accent')"
+      ],
+      "unsupportedValues": [
+        "scoped (per-element) custom property cascading — the bridge motion-token namespace is shared across the document; `--name` is effectively a global token, not a CSS-cascade scoped variable",
+        "string / list / shadow / gradient values (only length and color tokens are routed)",
+        "the `!important` flag on the third argument"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. Pairs with `css/__var` — `setProperty('--name', value)` writes the token, `var(--name)` reads it back through `_resolveVar`. Both share the motion-token bridge so JS-driven token mutation immediately affects the next layout/paint pass.",
+      "issue": "1551"
+    },
+    "css/__var": {
+      "status": "supported",
+      "mapsTo": "core/view/js/css-parser.js _resolveVar (lines 433-441): regex-replaces every `var(--<name>[, <fallback>])` in a CSS value string with `getMotionToken(name)` when defined, falling back to the inline literal or `0`. Applied by web-compat-style-decl.js inline-setter routing on every property assignment (e.g. lines 51, 53, 82) so `el.style.X = 'var(--accent)'` resolves at the moment the bridge call is made.",
+      "supportedValues": [
+        "var(--name)",
+        "var(--name, <fallback>)",
+        "any CSS property assignment (`width`, `color`, `margin`, etc.) whose string value contains a `var(...)` call"
+      ],
+      "unsupportedValues": [
+        "nested var inside a fallback (`var(--a, var(--b, 0))`) — the regex is single-pass; nested fallbacks are not re-resolved",
+        "var() inside more elaborate function calls where the captured group breaks on inner commas (`var()` inside `linear-gradient(...)` etc. — works as long as the fallback does not itself contain a comma)",
+        "scoped (per-element) cascading — see notes in `css/__setProperty_var`"
+      ],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+      ],
+      "notes": "pulp #1551 catalog add — already implemented. `var(--name)` is the read side of the bridge motion-token system; `setProperty('--name', value)` is the write side. Together they let consumers parameterise inline styles with named tokens without going through the full CSS-cascade engine.",
+      "issue": "1551"
     },
     "css/alignContent": {
       "status": "supported",
@@ -3295,8 +3547,8 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/boxShadow": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:323+). String parser mirrors web-compat-style-decl.js.",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:600+). String parser mirrors web-compat-style-decl.js.",
       "supportedValues": [
         "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
         "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
@@ -3306,8 +3558,10 @@
         "multi-shadow comma-separated lists",
         "BoxShadowValue array"
       ],
-      "tests": [],
-      "notes": "Could be exposed analogously to `border={...}` shape. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-box-shadow.test.ts"
+      ],
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
       "issue": ""
     },
     "rn/boxSizing": {
@@ -3357,22 +3611,52 @@
       "issue": ""
     },
     "rn/cursor": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier forwards keyword to setCursor (widget_bridge.cpp:3753); bridge maps the CSS keyword set to View::CursorStyle.",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier forwards keyword to setCursor (prop-applier.ts:749 → widget_bridge.cpp:4007); bridge maps CSS keywords onto View::CursorStyle slots.",
       "supportedValues": [
         "default",
         "pointer",
         "crosshair",
         "text",
+        "vertical-text",
         "grab",
         "grabbing",
-        "not-allowed"
+        "not-allowed",
+        "no-drop",
+        "none",
+        "hidden",
+        "col-resize",
+        "row-resize",
+        "ew-resize",
+        "ns-resize",
+        "nwse-resize",
+        "nesw-resize",
+        "n-resize",
+        "s-resize",
+        "e-resize",
+        "w-resize",
+        "nw-resize",
+        "ne-resize",
+        "sw-resize",
+        "se-resize",
+        "move",
+        "all-scroll"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "wait",
+        "help",
+        "progress",
+        "alias",
+        "copy",
+        "zoom-in",
+        "zoom-out",
+        "cell",
+        "context-menu"
+      ],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR. Status `partial` because CursorStyle does not yet have slots for every CSS keyword (see Triage #7 follow-up).",
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` — they're listed in unsupportedValues for catalog accuracy.",
       "issue": ""
     },
     "rn/d": {
@@ -4054,8 +4338,8 @@
       "issue": ""
     },
     "rn/overflow": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:333 since #1388).",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:629 since #1388).",
       "supportedValues": [
         "visible",
         "hidden"
@@ -4063,8 +4347,10 @@
       "unsupportedValues": [
         "scroll"
       ],
-      "tests": [],
-      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll. pulp #1434: catalog hygiene — flipped missing → supported. View::Overflow has only {visible, hidden}; scroll is a separate ScrollView container concern.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-pointer.test.ts"
+      ],
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. The two RN ViewStyle keywords that View::Overflow models — `visible` and `hidden` — both round-trip through the prop-applier and the C++ bridge. `scroll` is intentionally excluded: ScrollView is a separate container intrinsic, not a View::Overflow mode. Spectr dropdowns + Figma overflow:hidden cards now port verbatim (#1387 gap #1).",
       "issue": ""
     },
     "rn/overlay": {
@@ -4523,17 +4809,19 @@
     },
     "rn/userSelect": {
       "status": "partial",
-      "mapsTo": "@pulp/react prop-applier forwards keyword to setUserSelect (widget_bridge.cpp:2176); bridge maps to View::UserSelect.",
-      "supportedValues": [
+      "mapsTo": "@pulp/react prop-applier forwards keyword to setUserSelect (prop-applier.ts:753); the bridge currently registers setUserSelect as a no-op stash (widget_bridge.cpp:2267) — the JSX → prop-applier → bridge round-trip is wired but no semantic effect lands until the View::UserSelect path is implemented.",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "auto",
         "none",
         "text",
-        "all"
+        "all",
+        "contain"
       ],
-      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
+      "notes": "pulp #1550 catalog hygiene: kept partial (does NOT meet the catalog-hygiene supported bar). Bridge fn is a registered no-op — accepts the value to keep prop-applier dispatch quiet, but there is no View::UserSelect storage and no native text-selection suppression path. Promotion blocked until the bridge actually applies the mode. Tests cover prop-applier dispatch only.",
       "issue": ""
     },
     "rn/verticalAlign": {
