@@ -120,22 +120,38 @@ jobs:
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
           ])
           windows_provider = REQUESTED
+          # macOS leg uses `mode=provider` (same as Linux + Windows) so the
+          # explicit selector env (EXPLICIT_MACOS_RUNNER_SELECTOR_JSON, which
+          # falls back to the PULP_LOCAL_MACOS_RUNS_ON_JSON repo var) is
+          # honored regardless of REQUESTED_PROVIDER.
+          #
+          # Previously this used `mode=optional-namespace` which has a hard
+          # early-return when REQUESTED_PROVIDER != "namespace", silently
+          # ignoring the explicit env. With DEFAULT_RUNNER_PROVIDER set to
+          # "github-hosted" (current operator policy — Namespace decommissioned)
+          # that meant the macOS leg always fell through to macos-15 GH-hosted
+          # even when PULP_LOCAL_MACOS_RUNS_ON_JSON pointed at the local
+          # self-hosted runner. Switching to provider mode wires the
+          # repo-var fallback through correctly.
+          #
+          # Provider mode emits the github-hosted-label fallback ("macos-15")
+          # when no explicit / namespace selector resolves, so the resolver
+          # output is always non-empty and the matrix entry is always present.
           macos_runs_on = run([
               "--target-name", "macOS (ARM64)",
-              "--mode", "optional-namespace",
+              "--mode", "provider",
+              "--github-hosted-label", "macos-15",
               "--explicit-env", "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
               "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+              "--namespace-setting-name", "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
           ])
-
-          # Always include macOS on GitHub-hosted runners unless Namespace provides one
-          macos_final = macos_runs_on if macos_runs_on else json.dumps("macos-15")
 
           include = [
               {
                   "key": "macos",
                   "name": "macOS (ARM64)",
-                  "runs_on_json": macos_final,
-                  "provider": "namespace" if macos_runs_on else "github-hosted",
+                  "runs_on_json": macos_runs_on,
+                  "provider": REQUESTED,
               },
               {
                   "key": "windows",
@@ -169,9 +185,18 @@ jobs:
     name: ${{ matrix.name }} [${{ matrix.provider }}]
 
     steps:
+      # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
+      # setup.sh / install-githooks.sh per the repo's hook convention)
+      # conflicts with checkout@v5's internal `git lfs install` on
+      # self-hosted runners that retain prior workspace state. Symptom:
+      # `git failed with exit code 2` followed by "run git lfs update
+      # --force" advice in the runner log. Skia binaries are NOT in LFS
+      # for this repo — they're downloaded from a mirror by setup.sh's
+      # bootstrap step (`./setup.sh --ci --deps-only` below). Skipping
+      # checkout's LFS pull is therefore safe.
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          lfs: false
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.
           # GitHub-hosted runners get a fresh VM each run anyway, so the
