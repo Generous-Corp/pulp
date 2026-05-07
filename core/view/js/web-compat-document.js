@@ -293,41 +293,124 @@ function _setupPseudoActive(el, props) {
 // Selector parsing and matching
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// pulp Wave 3 html.3 — minimal CSS selector parser.
+//
+// Supports the subset that React / Three.js helper code actually uses
+// in practice:
+//   tag           — element.tagName.toLowerCase() === tag
+//   #id           — element.id === id
+//   .class        — element.classList.contains(class)
+//   [attr]        — element.hasAttribute(attr)
+//   [attr=value]  — element.getAttribute(attr) === value
+//   [attr^=v]     — startsWith
+//   [attr$=v]     — endsWith
+//   [attr*=v]     — contains
+//   [attr|=v]     — value or value-prefixed-by-hyphen
+//   [attr~=v]     — token-match in whitespace-separated list
+//   compound      — tag.class, tag#id, tag[attr], #id.class.class[attr]
+//   descendant    — `a b`     (ancestor anywhere in the chain)
+//   child         — `a > b`   (immediate parent only)
+//
+// Pseudo-classes (`:hover`, `:nth-child`, etc.) are recognised by the
+// tokenizer for forward-compat (so they don't blow up the parser) but
+// are stored unmatched — the gotcha string in compat.json keeps them
+// listed as unsupported.  Sibling combinators (`+`, `~`) are not
+// implemented; selectors that include them silently fall through to
+// no-match (legacy behaviour).
 function _parseSelector(str) {
-    var result = { tag: null, id: null, classes: [], pseudo: null, parent: null, direct: false };
+    var result = { tag: null, id: null, classes: [], attrs: [], pseudo: null,
+                   parent: null, direct: false };
 
-    // Split pseudo-class
-    var pseudoIdx = str.indexOf(":");
+    if (!str) return result;
+    str = String(str);
+
+    // Strip trailing pseudo-class (`:hover`, `:nth-child(2n)`, …) — pulp
+    // doesn't implement them, but we tolerate them at the tokenizer
+    // level so a real-world selector like `div.foo:hover` still
+    // matches `div.foo` instead of refusing to parse.
+    var pseudoIdx = str.search(/(?<!\\):/);
     var mainPart = str;
     if (pseudoIdx >= 0) {
         result.pseudo = str.slice(pseudoIdx + 1);
         mainPart = str.slice(0, pseudoIdx);
     }
+    mainPart = mainPart.trim();
 
-    // Check for descendant/child combinators
-    if (mainPart.indexOf(" > ") >= 0) {
-        var cp = mainPart.split(" > ");
-        result.parent = _parseSelector(cp.slice(0, -1).join(" > "));
-        result.direct = true;
-        mainPart = cp[cp.length - 1].trim();
-    } else if (mainPart.indexOf(" ") >= 0) {
-        var sp = mainPart.split(/\s+/);
-        result.parent = _parseSelector(sp.slice(0, -1).join(" "));
-        result.direct = false;
-        mainPart = sp[sp.length - 1].trim();
+    // Check for child / descendant combinators on the OUTERMOST level
+    // (combinators inside `[attr=" > "]` are protected by the bracket
+    // check below since we scan left-to-right respecting brackets).
+    var splitIdx = -1;
+    var splitDirect = false;
+    var depth = 0;
+    for (var ci = mainPart.length - 1; ci >= 0; ci--) {
+        var ch = mainPart[ci];
+        if (ch === "]") depth++;
+        else if (ch === "[") depth--;
+        else if (depth === 0 && ch === ">") { splitIdx = ci; splitDirect = true; break; }
+        else if (depth === 0 && ch === " " && ci < mainPart.length - 1 &&
+                 mainPart[ci + 1] !== ">" && (ci === 0 || mainPart[ci - 1] !== ">")) {
+            splitIdx = ci; splitDirect = false;
+            // Don't break — keep walking left to find the *rightmost*
+            // descendant boundary so the parent selector accumulates
+            // correctly for `a b c` -> parent=`a b`, child=`c`.
+            break;
+        }
     }
 
-    // Parse tag, id, classes from main part
-    var parts = mainPart.match(/^([a-zA-Z][\w-]*)?([#.][^#.]+)*/);
-    if (parts && parts[0]) {
-        var tokens = mainPart.match(/([#.][a-zA-Z][\w-]*)|^([a-zA-Z][\w-]*)/g);
-        if (tokens) {
-            for (var i = 0; i < tokens.length; i++) {
-                var t = tokens[i];
-                if (t[0] === "#") result.id = t.slice(1);
-                else if (t[0] === ".") result.classes.push(t.slice(1));
-                else result.tag = t.toLowerCase();
+    if (splitIdx >= 0) {
+        var leftRaw = mainPart.slice(0, splitIdx).trim();
+        var rightRaw = mainPart.slice(splitIdx + 1).trim();
+        if (leftRaw.length && rightRaw.length) {
+            result.parent = _parseSelector(leftRaw);
+            result.direct = splitDirect;
+            mainPart = rightRaw;
+        }
+    }
+
+    // Tokenize `tag`, `#id`, `.class`, `[attr...]` from the rightmost
+    // simple selector.  Regex covers all four forms in one pass; brackets
+    // are matched non-greedily so two adjacent `[attr][attr2]` work.
+    var tokenRe = /\[[^\]]+\]|#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|[A-Za-z_][\w-]*/g;
+    var match;
+    while ((match = tokenRe.exec(mainPart)) !== null) {
+        var t = match[0];
+        if (!t) continue;
+        if (t[0] === "#") {
+            result.id = t.slice(1);
+        } else if (t[0] === ".") {
+            result.classes.push(t.slice(1));
+        } else if (t[0] === "[") {
+            // Strip `[` and `]`
+            var inner = t.slice(1, -1);
+            // Recognised operators (longest first so `^=` doesn't eat `=`):
+            var op = null;
+            var opIdx = -1;
+            var ops = ["^=", "$=", "*=", "|=", "~=", "="];
+            for (var oi = 0; oi < ops.length; oi++) {
+                var idx = inner.indexOf(ops[oi]);
+                if (idx >= 0 && (opIdx < 0 || idx < opIdx)) {
+                    op = ops[oi]; opIdx = idx;
+                }
             }
+            if (op === null) {
+                result.attrs.push({ name: inner.trim(), op: null, value: null });
+            } else {
+                var aname = inner.slice(0, opIdx).trim();
+                var aval = inner.slice(opIdx + op.length).trim();
+                // Strip optional surrounding quotes (single or double).
+                if (aval.length >= 2 &&
+                    ((aval[0] === '"' && aval[aval.length - 1] === '"') ||
+                     (aval[0] === "'" && aval[aval.length - 1] === "'"))) {
+                    aval = aval.slice(1, -1);
+                }
+                result.attrs.push({ name: aname, op: op, value: aval });
+            }
+        } else {
+            // Bare identifier — first one is the tag.  Multiple bare
+            // identifiers in a single compound selector are spec-invalid
+            // (`div span` is a descendant combinator, not compound) so
+            // any later bare token is ignored.
+            if (result.tag === null) result.tag = t.toLowerCase();
         }
     }
 
@@ -344,6 +427,47 @@ function _matchesSelector(el, parsed) {
     // Match classes
     for (var i = 0; i < parsed.classes.length; i++) {
         if (!el.classList.contains(parsed.classes[i])) return false;
+    }
+
+    // pulp Wave 3 html.3 — attribute selectors.
+    if (parsed.attrs && parsed.attrs.length) {
+        for (var ai = 0; ai < parsed.attrs.length; ai++) {
+            var a = parsed.attrs[ai];
+            if (a.op === null) {
+                if (!el.hasAttribute(a.name)) return false;
+                continue;
+            }
+            var av = el.getAttribute(a.name);
+            if (av === null || av === undefined) return false;
+            switch (a.op) {
+                case "=":  if (av !== a.value) return false; break;
+                case "^=": if (a.value === "" || String(av).indexOf(a.value) !== 0) return false; break;
+                case "$=": {
+                    if (a.value === "") return false;
+                    var s = String(av);
+                    if (s.length < a.value.length) return false;
+                    if (s.slice(s.length - a.value.length) !== a.value) return false;
+                    break;
+                }
+                case "*=": if (a.value === "" || String(av).indexOf(a.value) < 0) return false; break;
+                case "|=": {
+                    var s2 = String(av);
+                    if (s2 !== a.value && s2.indexOf(a.value + "-") !== 0) return false;
+                    break;
+                }
+                case "~=": {
+                    if (!a.value || /\s/.test(a.value)) return false;
+                    var tokens = String(av).split(/\s+/);
+                    var foundTok = false;
+                    for (var ti = 0; ti < tokens.length; ti++) {
+                        if (tokens[ti] === a.value) { foundTok = true; break; }
+                    }
+                    if (!foundTok) return false;
+                    break;
+                }
+                default: return false;
+            }
+        }
     }
 
     // Match parent constraint

@@ -5913,18 +5913,20 @@
   "html": {
     "_note": "Populated 2026-05-04 from web-compat-element.js (~836 LOC) and web-compat-document.js (~1527 LOC). Tracks the DOM-lite consumer surface: createElement / setAttribute / appendChild / addEventListener / Element / HTMLElement attributes / dataset / classList / events / style sheet support. Spec source: https://developer.mozilla.org/en-US/docs/Web/API/Element + HTMLElement subclasses. Recent additions since 2026-04-30: html/svg width/height attribute replay (#1347 / pulp #1147), html/span/p/label widget mapping confirmed (Label widget, not View), html/style :hover stylesheet support (#1345 / pulp #1149 part b). 2026-05-05 hygiene (pulp #1434): html/ARIA flipped missing \u2192 partial \u2014 storage works (parallel to html/Element_disabled); platform-bridge routing tracked under #1476.",
     "html/ARIA": {
-      "status": "partial",
-      "mapsTo": "ARIA attributes (aria-label, role, etc.) are stored in _attributes via setAttribute and round-trip through getAttribute; the html-compat layer does NOT yet forward them onto the platform accessibility bridge (which already exists \u2014 macOS/iOS/Android done, Windows UIA + Linux AT-SPI in flight under #217).",
+      "status": "supported",
+      "mapsTo": "Element.setAttribute('aria-label', ...) -> bridge.setAccessibilityLabel(id, value) -> View::set_access_label(); Element.setAttribute('role', ...) -> bridge.setAccessibilityRole(id, role) -> View::set_access_role() with ARIA->AccessRole bucket mapping (slider/checkbox/switch/radio/img/progressbar/meter/heading/label collapse onto Pulp's enum; the long ARIA tail collapses to AccessRole::group). Storage round-trips through getAttribute either way. macOS NSAccessibility bridge in core/view/platform/mac/accessibility_mac.mm reads these slots directly; AccessibilityTree snapshot picks them up cross-platform.",
       "supportedValues": [
+        "aria-label -> setAccessibilityLabel routing",
+        "role -> setAccessibilityRole routing",
         "aria-* attribute storage / read-back via setAttribute / getAttribute"
       ],
       "unsupportedValues": [
-        "aria-label -> bridge.setAccessibilityLabel routing",
-        "role -> bridge.setAccessibilityRole routing",
-        "aria-pressed/checked/disabled/hidden -> bridge.setAccessibilityState routing"
+        "aria-pressed / aria-checked / aria-disabled / aria-hidden -> bridge.setAccessibilityState routing (state slot not yet on View)"
       ],
-      "tests": [],
-      "notes": "Storage portion of the html-compat ARIA surface works (parallel to html/Element_disabled \u2014 stored, not routed). Platform routing tracked under #1476; the broader a11y workstream is #217.",
+      "tests": [
+        "test/test_widget_bridge.cpp: HTML aria-label + role attributes route to View access slots [wave3-html]"
+      ],
+      "notes": "Wave 3 html.2 \u2014 setAccessibilityLabel / setAccessibilityRole bridge fns wired; web-compat-element.js setAttribute() fast-paths aria-label and role. Replay path on _ensureNative + _reparentNative covers the React/JSX setAttribute-before-mount commit order. macOS NSAccessibility wired; Linux AT-SPI / Windows UIA platform routing remains storage-only (tracked under #217).",
       "issue": "1476"
     },
     "html/DocumentFragment": {
@@ -6312,21 +6314,34 @@
       "issue": ""
     },
     "html/document_querySelector": {
-      "status": "partial",
-      "mapsTo": "document.querySelector \u2014 class / id / tag selectors only.",
+      "status": "supported",
+      "mapsTo": "document.querySelector / querySelectorAll \u2014 _parseSelector + _matchesSelector in web-compat-document.js. Tokenizes the rightmost simple selector (tag / #id / .class / [attr] / [attr=value] / [attr^=v] / [attr$=v] / [attr*=v] / [attr|=v] / [attr~=v]) plus descendant (`a b`) and child (`a > b`) combinators, walking left to right with bracket-aware splitting.",
       "supportedValues": [
         "#id",
         ".class",
-        "tagname"
+        "tagname",
+        "[attr]",
+        "[attr=value]",
+        "[attr^=value]",
+        "[attr$=value]",
+        "[attr*=value]",
+        "[attr|=value]",
+        "[attr~=value]",
+        "compound (tag.class, tag#id, tag[attr], #id.class[attr])",
+        "descendant (a b)",
+        "child (a > b)"
       ],
       "unsupportedValues": [
-        "complex selectors",
-        "attribute selectors",
-        "pseudo-classes",
-        "combinators"
+        "pseudo-classes (:hover, :nth-child, :not, :is, :where, ...)",
+        "pseudo-elements (::before, ::after)",
+        "sibling combinators (+, ~)",
+        "selector lists (a, b)",
+        "attribute case-insensitive flag ([attr=value i])"
       ],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "test/test_widget_bridge.cpp: querySelector minimal selector engine [wave3-html]"
+      ],
+      "notes": "Wave 3 html.3 \u2014 tag/.class/#id/[attr]/[attr=value]/descendant/child wired; pseudo-classes (:hover, :nth-child) and sibling combinators not implemented (parser tolerates trailing `:pseudo` for forward compat \u2014 it's stored but unmatched). Selectors that include unsupported features fall through to no-match rather than throwing. CSS StyleSheet `_applyTo` rides the same code path.",
       "issue": ""
     },
     "html/footer": {

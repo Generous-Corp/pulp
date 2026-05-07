@@ -49,6 +49,13 @@ if (!Element.prototype.appendChild ||
         if (typeof __replayMediaAttributes__ === "function") {
             __replayMediaAttributes__(child);
         }
+        // pulp Wave 3 html.2 / #1476 — same flush for ARIA attributes
+        // (`aria-label` / `role`) captured before mount. Without this
+        // the React commit order (setAttribute -> appendChild) leaves
+        // the access slots empty even though _attributes carries them.
+        if (typeof __replayAriaAttributes__ === "function") {
+            __replayAriaAttributes__(child);
+        }
         child.style._flushAll();
         child._reapplyStylesheets();
         // pulp #1323 — `<style>` elements receive CSS via either direct
@@ -104,6 +111,14 @@ if (!Element.prototype.appendChild ||
         __domAppend(this._id, newChild._id, newChild.tagName.toLowerCase());
         newChild._nativeCreated = true;
         if (newChild._textContent) setText(newChild._id, newChild._textContent);
+        // pulp #1147 / Wave 3 html.2 — same pre-mount attribute replay
+        // path as appendChild, including ARIA attributes.
+        if (typeof __replayMediaAttributes__ === "function") {
+            __replayMediaAttributes__(newChild);
+        }
+        if (typeof __replayAriaAttributes__ === "function") {
+            __replayAriaAttributes__(newChild);
+        }
         newChild.style._flushAll();
         newChild._reapplyStylesheets();
         return newChild;
