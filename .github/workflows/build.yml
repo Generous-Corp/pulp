@@ -183,6 +183,11 @@ jobs:
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     name: ${{ matrix.name }} [${{ matrix.provider }}]
+    env:
+      # Self-hosted macOS keeps the workspace warm between workflows.
+      # Keep the ordinary build matrix out of sanitizer-owned build dirs so
+      # cached CMake flags such as -fsanitize=address cannot bleed into it.
+      PULP_BUILD_DIR: build-${{ matrix.key }}
 
     steps:
       # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
@@ -298,14 +303,15 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+            cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
           else
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
           fi
         shell: bash
 
       - name: Build
-        run: cmake --build build --config Release
+        shell: bash
+        run: cmake --build "$PULP_BUILD_DIR" --config Release
 
       - name: Ccache stats
         if: always()
@@ -329,7 +335,6 @@ jobs:
 
       - name: Test (non-Windows)
         if: runner.os != 'Windows'
-        working-directory: build
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
         # Long-running tests that need more time set their own CTest TIMEOUT.
@@ -337,7 +342,7 @@ jobs:
         # GH-hosted ubuntu/macos-15 runners also have ≥4 cores so this
         # doesn't regress their previous behavior. Higher parallelism
         # roughly halves test phase wall-time on multi-core hosts.
-        run: ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -352,11 +357,10 @@ jobs:
         # Shipyard dispatches via ssh-windows; GH Actions ctest
         # calls don't go through that path.
         if: runner.os == 'Windows'
-        working-directory: build
         shell: cmd
         run: |
           chcp 65001
-          ctest --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+          ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request
       # events skip example plugin builds (see Configure step's
@@ -367,9 +371,9 @@ jobs:
         with:
           name: plugins-${{ matrix.key }}
           path: |
-            build/VST3/*.vst3
-            build/CLAP/*.clap
-            build/AU/*.component
+            ${{ env.PULP_BUILD_DIR }}/VST3/*.vst3
+            ${{ env.PULP_BUILD_DIR }}/CLAP/*.clap
+            ${{ env.PULP_BUILD_DIR }}/AU/*.component
           retention-days: 7
 
       - name: Upload plugin bundles (Windows)
@@ -378,8 +382,8 @@ jobs:
         with:
           name: plugins-${{ matrix.key }}
           path: |
-            build/VST3/**/*.vst3
-            build/CLAP/**/*.clap
+            ${{ env.PULP_BUILD_DIR }}/VST3/**/*.vst3
+            ${{ env.PULP_BUILD_DIR }}/CLAP/**/*.clap
           retention-days: 7
 
       - name: Upload plugin bundles (Linux)
@@ -388,8 +392,8 @@ jobs:
         with:
           name: plugins-${{ matrix.key }}
           path: |
-            build/VST3/**/*.so
-            build/CLAP/**/*.so
+            ${{ env.PULP_BUILD_DIR }}/VST3/**/*.so
+            ${{ env.PULP_BUILD_DIR }}/CLAP/**/*.so
           retention-days: 7
 
   # ── Windows MSVC release-path PR gate ────────────────────────────────────

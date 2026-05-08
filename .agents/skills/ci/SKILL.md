@@ -485,6 +485,15 @@ tracked LFS object; enabling checkout LFS on the reused self-hosted workspace
 causes `git lfs install --local` to fail because Pulp already owns the
 `pre-push` hook.
 
+**Self-hosted macOS build dirs must stay isolated.** The local runner keeps
+`build-*` directories between workflows. The ordinary `build.yml` matrix uses
+`build-${{ matrix.key }}`, and `sanitizers.yml` uses `build-asan`,
+`build-tsan`, `build-ubsan`, and `build-rtsan`. Do not collapse these back to
+plain `build/`: a stale sanitizer `CMakeCache.txt` can leak flags such as
+`-fsanitize=address` into the required macOS build and make unrelated
+JavaScriptCore/host tests abort under ASan. `tools/scripts/test_workflow_build_dirs.py`
+is wired into workflow-lint to keep this invariant machine-checked.
+
 ### Overrides when you need them
 
 - **Dispatch a specific run on github-hosted** (normal Linux/Windows path, or comparing hosted macOS behaviour):

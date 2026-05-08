@@ -158,7 +158,7 @@ jobs:
 
       - name: Configure with ASan
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build-asan \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
             -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
@@ -168,7 +168,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build -j$(sysctl -n hw.ncpu)
+        run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
 
       - name: Test with ASan
         env:
@@ -178,7 +178,7 @@ jobs:
         # anything that can't complete in 2 minutes under ASan is a
         # flake or a real hang worth separate investigation (#412).
         run: |
-          ctest --test-dir build --output-on-failure \
+          ctest --test-dir build-asan --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120
 
@@ -197,7 +197,7 @@ jobs:
 
       - name: Configure with TSan
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build-tsan \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
             -DCMAKE_C_FLAGS="-fsanitize=thread" \
@@ -207,7 +207,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build -j$(sysctl -n hw.ncpu)
+        run: cmake --build build-tsan -j$(sysctl -n hw.ncpu)
 
       - name: Test with TSan
         env:
@@ -226,7 +226,7 @@ jobs:
         # Full hardening (#412 steps 2/4/5): suppressions file,
         # audio-race hammer, path-gated trigger.
         run: |
-          ctest --test-dir build --output-on-failure -j1 \
+          ctest --test-dir build-tsan --output-on-failure -j1 \
             --timeout 120 \
             --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
             --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
@@ -246,7 +246,7 @@ jobs:
 
       - name: Configure with UBSan
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build-ubsan \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
             -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-sanitize-recover=all" \
@@ -256,7 +256,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build -j$(sysctl -n hw.ncpu)
+        run: cmake --build build-ubsan -j$(sysctl -n hw.ncpu)
 
       - name: Test with UBSan
         # Skip "Toolbar add items" — pre-existing UBSan-only failure
@@ -265,7 +265,7 @@ jobs:
         # job can gate everything else. 120s timeout prevents a single
         # hung test from stalling the matrix.
         run: |
-          ctest --test-dir build --output-on-failure \
+          ctest --test-dir build-ubsan --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
             --exclude-regex 'Toolbar add items'
@@ -321,7 +321,7 @@ jobs:
 
       - name: Configure with RTSan
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build-rtsan \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
@@ -333,7 +333,7 @@ jobs:
             -DPULP_ENABLE_GPU=OFF
 
       - name: Build
-        run: cmake --build build -j$(nproc)
+        run: cmake --build build-rtsan -j$(nproc)
 
       - name: Test with RTSan
-        run: ctest --test-dir build --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"
+        run: ctest --test-dir build-rtsan --output-on-failure -j$(nproc) --exclude-regex "GpuSurface|compileShader"

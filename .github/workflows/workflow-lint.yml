@@ -97,6 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          python3 tools/scripts/test_workflow_build_dirs.py
 
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated
