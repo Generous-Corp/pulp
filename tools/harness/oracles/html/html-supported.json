@@ -92,7 +92,7 @@
     "html/h6":       {"category": "html_tag", "tag": "h6",       "expected_bridge_calls": ["createLabel", "setFontSize", "setFontWeight"]},
     "html/header":   {"category": "html_tag", "tag": "header",   "expected_bridge_calls": ["createCol"]},
     "html/hr":       {"category": "html_tag", "tag": "hr",       "expected_bridge_calls": ["createCol", "setFlex", "setBackground"]},
-    "html/img":      {"category": "html_tag", "tag": "img",      "expected_bridge_calls": ["createLabel"]},
+    "html/img":      {"category": "html_tag", "tag": "img",      "expected_bridge_calls": ["createImage", "setImageSource"]},
     "html/input":    {"category": "html_tag", "tag": "input",    "expected_bridge_calls": ["createTextEditor", "createFader", "createCheckbox"]},
     "html/label":    {"category": "html_tag", "tag": "label",    "expected_bridge_calls": ["createLabel"]},
     "html/main":     {"category": "html_tag", "tag": "main",     "expected_bridge_calls": ["createCol"]},

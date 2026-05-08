@@ -1176,8 +1176,29 @@ void ImageView::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // TODO: Load image via Skia SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
-    // For now render path as text placeholder
+    // pulp #1658 — decode-on-paint via the canvas's draw_image_from_file
+    // primitive. Skia's implementation uses SkData::MakeFromFileName +
+    // SkImages::DeferredFromEncodedData (deferred decode through SkCodec).
+    // Backends that don't implement this primitive (some headless tests)
+    // return false and we fall through to the filename-as-text placeholder
+    // so authors can still see what URL is set.
+    //
+    // Strip a `file://` prefix if present (set_image_path normalises file
+    // paths to that form so the cache layer above can keep URI-keyed
+    // entries; the canvas primitive expects a bare filesystem path).
+    auto fs_path = path_;
+    static const std::string kFileScheme = "file://";
+    if (fs_path.compare(0, kFileScheme.size(), kFileScheme) == 0) {
+        fs_path = fs_path.substr(kFileScheme.size());
+    }
+    if (!fs_path.empty() && canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
+        loaded_ = true;
+        return;
+    }
+
+    // Decode failed (file missing, unsupported codec, or backend doesn't
+    // implement draw_image_from_file). Fall through to the filename
+    // placeholder so authors can debug src wiring without a blank rect.
     canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
     canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(120, 120, 140)));

@@ -118,7 +118,11 @@ Element.prototype._ensureNative = function() {
         setFlex(id, "height", 1);
         setBackground(id, "#666666");
     } else if (tag === "img") {
-        createLabel(id, "", ""); // placeholder until image loading
+        // pulp #1658 — wire <img> to ImageView via createImage (was: createLabel
+        // placeholder). ImageView::paint shows an "IMG" placeholder when path
+        // is empty, then decodes via Skia draw_image_from_file once
+        // setImageSource is called from setAttribute('src', …).
+        createImage(id, "");
     } else if (tag === "details") {
         createCol(id, "");
     } else if (tag === "dialog") {
@@ -163,14 +167,23 @@ function __replayMediaAttributes__(el) {
     if (!el || !el._nativeCreated || !el._attributes) return;
     var tag = el.tagName.toLowerCase();
     if (tag !== "svg" && tag !== "img" && tag !== "canvas" && tag !== "video") return;
-    if (typeof setFlex !== "function") return;
-    var w = el._attributes.width;
-    var h = el._attributes.height;
-    if (w !== undefined) {
-        var pw = parseFloat(w); if (pw === pw) setFlex(el._id, "width", pw);
+    if (typeof setFlex === "function") {
+        var w = el._attributes.width;
+        var h = el._attributes.height;
+        if (w !== undefined) {
+            var pw = parseFloat(w); if (pw === pw) setFlex(el._id, "width", pw);
+        }
+        if (h !== undefined) {
+            var ph = parseFloat(h); if (ph === ph) setFlex(el._id, "height", ph);
+        }
     }
-    if (h !== undefined) {
-        var ph = parseFloat(h); if (ph === ph) setFlex(el._id, "height", ph);
+    // pulp #1658 — replay src for <img> elements through to setImageSource
+    // so the React/JSX setAttribute-before-mount path works (attributes
+    // captured pre-mount in _attributes, flushed once the native widget
+    // is created via _ensureNative or a later appendChild).
+    if (tag === "img" && typeof setImageSource === "function") {
+        var src = el._attributes.src;
+        if (src !== undefined) setImageSource(el._id, String(src));
     }
 }
 
@@ -640,6 +653,18 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "for" && this.tagName === "LABEL") {
         this._installLabelForRouting();
     }
+    // pulp #1658 — `<img src="...">` routes to setImageSource on the
+    // ImageView native widget. ImageView::paint then decodes via
+    // SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
+    // (Skia draw_image_from_file path). Idempotent: also replayed by
+    // __replayMediaAttributes__ in the appendChild-after-setAttribute
+    // path. Only file:// and bare-path forms are wired today; data:
+    // URLs and http(s) fetch are deferred follow-ups (see #1658).
+    else if (name === "src" && this.tagName === "IMG") {
+        if (this._nativeCreated && typeof setImageSource === "function") {
+            setImageSource(this._id, String(value));
+        }
+    }
     // pulp Wave 3 html.2 / #1476 — ARIA accessibility setters.
     // `aria-label` / `role` round-trip through native View::access_label_
     // and View::access_role_ so the macOS NSAccessibility bridge (and
@@ -1082,7 +1107,11 @@ function _reparentNative(child, parentId) {
         setFlex(id, "height", 1);
         setBackground(id, "#666666");
     } else if (tag === "img") {
-        createLabel(id, "", parentId);
+        // pulp #1658 — see initial-mount img branch above. _reparentNative
+        // here covers the late-mount case (e.g. detached DOM that's later
+        // appended); same createImage routing so the bridge fn matches
+        // the harness oracle's `expected_bridge_calls: ["createImage"]`.
+        createImage(id, parentId);
     } else if (tag === "dialog") {
         createPanel(id, parentId);
         setVisible(id, false);

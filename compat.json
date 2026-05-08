@@ -6381,17 +6381,20 @@
       "issue": ""
     },
     "html/img": {
-      "status": "partial",
-      "mapsTo": "createLabel(id, '', parent) \u2014 placeholder until image loading. <img width/height> attributes are honored via __replayMediaAttributes__ (PR #1347).",
+      "status": "supported",
+      "mapsTo": "createImage(id, parent) -> ImageView; setAttribute('src', ...) -> setImageSource(id, src) -> ImageView::set_image_path; ImageView::paint decodes via canvas.draw_image_from_file (Skia: SkData::MakeFromFileName + SkImages::DeferredFromEncodedData via SkCodec). <img width/height> attributes honored via __replayMediaAttributes__ (PR #1347).",
       "supportedValues": [
-        "width/height HTML attributes for layout"
+        "src as filesystem path (decoded via Skia SkCodec)",
+        "src as file:// URL (path stripped before decode)",
+        "width/height HTML attributes for layout",
+        "placeholder shown when src is empty or decode fails"
       ],
-      "unsupportedValues": [
-        "actual image src loading (placeholder Label is shown)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_image_view_cache.cpp"
       ],
-      "tests": [],
-      "notes": "Image loading not yet wired through this surface; use <Image> from @pulp/react or the canvas drawImage path instead. Status: partial \u2014 placeholder Label created via createLabel() keeps the layout slot, and <img width/height> attributes are honored via __replayMediaAttributes__ (PR #1347). Actual SkCodec wiring tracked at pulp #1658 (was previously misreferenced as #1147/#932 \u2014 neither tracked image loading). Status remains partial until #1658 ships.",
-      "issue": "1658"
+      "notes": "Wired via pulp #1658: <img> creates an ImageView (was: createLabel placeholder), src attribute routes through setImageSource to ImageView::set_image_path, and ImageView::paint calls canvas.draw_image_from_file which Skia implements via SkImages::DeferredFromEncodedData (SkCodec under the hood). Both _ensureNative and the React/JSX setAttribute-before-mount path replay src through __replayMediaAttributes__. data: URLs and http(s) fetch are deferred follow-ups (file:// + bare paths cover the common static-asset case).",
+      "issue": ""
     },
     "html/input": {
       "status": "supported",
