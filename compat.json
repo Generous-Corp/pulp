@@ -7170,7 +7170,7 @@
         "font-variant 'small-caps' (parsed and tracked, but Skia/CG fonts in the canvas pipeline don't honour it \u2014 Canvas::set_font_full has no variant field)"
       ],
       "tests": [],
-      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim. Wave 1 architectural reclassification \u2014 font-variant 'small-caps' is arch-pipeline-limit (Canvas::set_font_full has no variant field; Skia/CG fonts in the canvas pipeline don't expose OpenType features at this layer).",
+      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim. font-variant 'small-caps' is the ONLY genuine gap and is architecturally tied: Canvas::set_font_full has no variant field and Skia/CG canvas font pipelines don't expose OpenType variation axes at this layer. Per #1657 discipline this stays as DIVERGE (honest signal of a real value-gap) rather than being moved to notes \u2014 the gap IS real and consumers should know. Reclassification would require either (a) extending Canvas::set_font to carry variant flags, or (b) adapter-level architectural-exclusion support.",
       "issue": "1434"
     },
     "canvas2d/textAlign": {
