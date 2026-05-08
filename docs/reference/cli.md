@@ -1130,7 +1130,7 @@ pulp upgrade --notes --json                       # same, stable-shape JSON (age
 pulp upgrade --notes --from 0.25.0 --to 0.29.0    # explicit hop override
 ```
 
-Downloads the release from GitHub, replaces the current binary, and verifies. Requires `curl`.
+Downloads the release from GitHub, installs the archive's top-level companion payloads next to the current binary, replaces the current binary, and verifies. Phase 8+ archives install Rust `pulp` plus the `pulp-cpp` fallthrough delegate together. Requires `curl`.
 
 `--check-only` reads the on-disk cache written by the on-every-invocation background refresh (release-discovery #547 Slice 2) and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
 

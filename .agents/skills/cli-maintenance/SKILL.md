@@ -333,6 +333,12 @@ Gotchas:
   version and every upgrade 404'd. `test_cli_upgrade_url.cpp` explicitly
   fails if the version reappears in the filename.
 - **Use `x64`, not `x86_64`.** The release workflow uploads under `x64`.
+- **Install sibling payloads before replacing `pulp`.** Phase 8+
+  archives contain Rust `pulp`, `pulp-cpp`, and the runtime library.
+  Pre-cutover C++ CLIs still run `cmd_upgrade.cpp` during that hop, so
+  the helper in `upgrade_install.hpp` must copy `pulp-cpp` and other
+  top-level payload files next to the current binary before self-replace
+  (#1673).
 - **If you change `upgrade_url.hpp`, update the regression test in the
   same PR.** Both live at HEAD; drift between them is the whole reason
   the header exists.

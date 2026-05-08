@@ -54,6 +54,10 @@ as the C++ fallthrough delegate. A healthy install has both
 `~/.pulp/bin/pulp` and `~/.pulp/bin/pulp-cpp`; use `PULP_USE_CPP=1
 pulp <args>` or direct `pulp-cpp <args>` only for rollback/debug
 comparisons. Do not hand-swap binaries in user/system locations.
+The C++ `cmd_upgrade.cpp` path still matters for pre-cutover users
+upgrading into a Rust release: it must copy the archive's sibling
+payloads, including `pulp-cpp`, before replacing the running `pulp`
+binary (#1673).
 
 `pulp upgrade --notes` prints migration notes for the hop without
 downloading anything. `pulp upgrade --notes --json` emits the same data

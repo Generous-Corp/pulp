@@ -18,6 +18,7 @@
 #include "cli_common.hpp"
 #include "migration_index.hpp"
 #include "update_check.hpp"
+#include "upgrade_install.hpp"
 #include "upgrade_url.hpp"
 
 #include <atomic>
@@ -234,26 +235,40 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         return 1;
     }
 
-    std::string new_binary = tmp_dir + "/pulp";
+    fs::path tmp_path = tmp_dir;
+    fs::path archive_path = tmp_path / tarball;
+    fs::path new_binary = tmp_path / pulp::cli::upgrade_install::primary_binary_name();
     if (!fs::exists(new_binary)) {
-        std::cerr << "Error: extracted archive does not contain 'pulp' binary.\n";
+        std::cerr << "Error: extracted archive does not contain '"
+                  << pulp::cli::upgrade_install::primary_binary_name()
+                  << "' binary.\n";
         run("rm -rf " + tmp_dir);
         return 1;
     }
 
+    fs::path self = self_path;
+    fs::path install_dir = self.parent_path();
+    if (install_dir.empty()) install_dir = fs::current_path();
     std::string backup = self_path + ".bak";
+    std::vector<fs::path> installed_payloads;
     try {
+        // Copy sibling payloads first. If this fails, leave the current
+        // `pulp` binary untouched; after self-replace, Rust needs the
+        // sibling `pulp-cpp` delegate to service unported commands.
+        installed_payloads = pulp::cli::upgrade_install::install_sibling_payloads(
+            tmp_path, install_dir, new_binary, archive_path);
+
         if (fs::exists(backup)) fs::remove(backup);
-        fs::rename(self_path, backup);
-        fs::copy_file(new_binary, self_path);
-        fs::permissions(self_path, fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write
+        fs::rename(self, backup);
+        fs::copy_file(new_binary, self);
+        fs::permissions(self, fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write
                                  | fs::perms::group_exec | fs::perms::group_read
                                  | fs::perms::others_exec | fs::perms::others_read);
         fs::remove(backup);
     } catch (const std::exception& e) {
-        std::cerr << "Error replacing binary: " << e.what() << "\n";
-        if (fs::exists(backup) && !fs::exists(self_path)) {
-            fs::rename(backup, self_path);
+        std::cerr << "Error installing upgrade payload: " << e.what() << "\n";
+        if (fs::exists(backup) && !fs::exists(self)) {
+            fs::rename(backup, self);
         }
         run("rm -rf " + tmp_dir);
         return 1;
@@ -262,6 +277,9 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     run("rm -rf " + tmp_dir);
 
     std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
+    if (pulp::cli::upgrade_install::installed_cpp_delegate(installed_payloads)) {
+        std::cout << "    Installed pulp-cpp delegate alongside pulp.\n";
+    }
 
     // Hint about the embedded migration notes — the `--notes` surface
     // lives in this same binary so the just-installed CLI can replay

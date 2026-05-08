@@ -221,6 +221,14 @@ target_include_directories(pulp-test-cli-upgrade-url PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(pulp-test-cli-upgrade-url PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-url)
 
+# CLI upgrade install regression (#1673): a pre-cutover C++ CLI
+# upgrading into a Rust archive must install sibling payloads such as
+# pulp-cpp before replacing the user-facing pulp binary.
+add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
+target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-upgrade-install)
+
 # CLI version diagnostics (#499 Slice 1): pure-logic tests for the
 # semver parser, plugin.json scraper, and skew analyzer that sit
 # behind `pulp doctor --versions`. version_diag is deliberately free

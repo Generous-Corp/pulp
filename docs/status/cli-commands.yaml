@@ -329,7 +329,7 @@ commands:
 
   - name: upgrade
     status: usable
-    summary: Update the Pulp CLI binary to the latest or a specific version. `--check-only` reports the cached latest release without downloading. `--notes` prints embedded migration notes for the upgrade hop.
+    summary: Update the Pulp CLI install to the latest or a specific version, including companion artifacts such as `pulp-cpp`. `--check-only` reports the cached latest release without downloading. `--notes` prints embedded migration notes for the upgrade hop.
     args:
       - name: version
         kind: positional
