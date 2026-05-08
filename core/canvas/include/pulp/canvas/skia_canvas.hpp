@@ -16,6 +16,7 @@ class SkPathBuilder;
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkSamplingOptions.h"
 #include <vector>
 class SkShader;
 class SkPathEffect;

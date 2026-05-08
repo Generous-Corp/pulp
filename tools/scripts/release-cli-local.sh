@@ -34,6 +34,7 @@ step "Building macOS arm64"
 cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DPULP_BUILD_TESTS=OFF \
+    -DPULP_ENABLE_GPU=ON \
     -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5
 cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release 2>&1 | tail -3
 if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
@@ -58,9 +59,11 @@ if [ -f "$SDK_STAGING/version.txt" ]; then
 from pathlib import Path
 import os
 data = Path(os.environ["SDK_WEBVIEW_LIB"]).read_bytes()
-assert b"WebViewPanel" in data
-assert b"make_webview_embedded_resource_fetcher" in data
+    assert b"WebViewPanel" in data
+    assert b"make_webview_embedded_resource_fetcher" in data
 PY
+    test -f "$SDK_STAGING/external/skia-build/build/mac-gpu/lib/Release/libskia.a"
+    nm "$SDK_STAGING/lib/libpulp-view.a" | grep MacGpuWindowHost >/dev/null
     (cd "$DIST_DIR" && mv pulp-sdk-staging pulp-sdk && tar czf "pulp-sdk-darwin-arm64.tar.gz" pulp-sdk && rm -rf pulp-sdk)
     info "pulp-sdk-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-sdk-darwin-arm64.tar.gz" | cut -f1))"
 else

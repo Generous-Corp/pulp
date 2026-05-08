@@ -971,7 +971,21 @@ if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
 endif()
 
 if(PULP_HAS_SKIA)
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
-        DESTINATION external
-    )
+    set(_pulp_skia_install_dir "")
+    if(DEFINED SKIA_DIR AND EXISTS "${SKIA_DIR}")
+        set(_pulp_skia_install_dir "${SKIA_DIR}")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build")
+        set(_pulp_skia_install_dir "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build")
+    endif()
+
+    if(_pulp_skia_install_dir)
+        install(DIRECTORY "${_pulp_skia_install_dir}/"
+            DESTINATION external/skia-build
+        )
+    else()
+        message(WARNING
+            "PULP_HAS_SKIA is enabled, but no Skia install directory was found. "
+            "The installed SDK will not be able to link GPU-native consumers.")
+    endif()
+    unset(_pulp_skia_install_dir)
 endif()

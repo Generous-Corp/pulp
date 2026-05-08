@@ -312,7 +312,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     window->show();
 
-    detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
+    detail::log_standalone_window_open(w, h, window->is_gpu(), bridge->uses_script_ui(), chrome);
 
     // Blocks until the window is closed. The close callback above has
     // already fired bridge->close() (before stop() reset processor_),

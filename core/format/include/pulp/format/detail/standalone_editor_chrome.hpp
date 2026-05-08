@@ -255,14 +255,14 @@ inline void install_standalone_idle_callback(
 inline void log_standalone_window_open(
     uint32_t width,
     uint32_t height,
-    bool use_gpu,
+    bool resolved_gpu,
     bool uses_script_ui,
     const StandaloneEditorChrome& chrome) {
     runtime::log_info(
         "Standalone: editor window open ({}x{}, gpu={}, mode={}, chrome={}, inspector=ready)",
         width,
         height,
-        use_gpu,
+        resolved_gpu,
         uses_script_ui ? "scripted" : "autoui",
         chrome.chrome_label());
 }

@@ -96,6 +96,20 @@ if(NOT _installed_size EQUAL _source_size)
         "publishing a stale or different file.")
 endif()
 
+set(_import_design_bin "${_prefix}/bin/pulp-import-design")
+if(WIN32)
+    set(_import_design_bin "${_prefix}/bin/pulp-import-design.exe")
+endif()
+if(NOT EXISTS "${_import_design_bin}")
+    message(FATAL_ERROR
+        "pulp-import-design was not bundled with the installed Pulp SDK.\n"
+        "Expected: ${_import_design_bin}\n"
+        "The install rule in tools/import-design/CMakeLists.txt must publish "
+        "the CLI under bin/ so installed SDK users can run `pulp import-design` "
+        "without a source checkout.")
+endif()
+
 message(STATUS
     "Install layout: PulpUtils.cmake at ${_pulp_utils}, encoder at "
-    "${_installed_encoder} (${_installed_size} bytes). All present.")
+    "${_installed_encoder} (${_installed_size} bytes), import tool at "
+    "${_import_design_bin}. All present.")

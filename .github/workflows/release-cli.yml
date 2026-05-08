@@ -188,6 +188,11 @@ jobs:
           # WebView=ON there).
           cmake --install build-sdk --prefix sdk-staging --config Release
           test -f sdk-staging/lib/libpulp-view.a
+          test -x sdk-staging/bin/pulp-import-design
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            test -f sdk-staging/external/skia-build/build/mac-gpu/lib/Release/libskia.a
+            nm sdk-staging/lib/libpulp-view.a | grep MacGpuWindowHost
+          fi
           python3 - <<'PY'
           from pathlib import Path
           data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()
@@ -205,6 +210,9 @@ jobs:
           cmake --install build --prefix sdk-staging --config Release
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
+          }
+          if (!(Test-Path sdk-staging/bin/pulp-import-design.exe)) {
+            throw "sdk-staging/bin/pulp-import-design.exe missing"
           }
           python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
           Rename-Item sdk-staging pulp-sdk

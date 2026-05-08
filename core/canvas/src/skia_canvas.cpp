@@ -1798,8 +1798,7 @@ void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
     SkMatrix m = SkMatrix::I();
     m.preTranslate(cx, cy);
     m.preRotate(rotation * kRadToDeg);
-    SkPath rotated = tmp.detach();
-    rotated.transform(m);
+    SkPath rotated = tmp.detach().makeTransform(m);
     // Append rotated path into the live builder, preserving the current
     // subpath. addPath with kAppend_AddPathMode joins the new path to
     // any existing pen position via a moveTo on the first verb.
