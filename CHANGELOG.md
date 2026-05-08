@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0783"></a>
+## [0.78.3] - 2026-05-08
+
+- fix(cli): install upgrade sibling payloads so `pulp upgrade` installs the bundled `pulp-cpp` payload from release archives ([#1676](https://github.com/danielraffel/pulp/pull/1676))
+
 <a id="v0782"></a>
 ## [0.78.2] - 2026-05-06
 
@@ -1319,6 +1324,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.3]: https://github.com/danielraffel/pulp/releases/tag/v0.78.3
 [0.78.2]: https://github.com/danielraffel/pulp/releases/tag/v0.78.2
 [0.78.1]: https://github.com/danielraffel/pulp/releases/tag/v0.78.1
 [0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0

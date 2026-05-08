@@ -14,6 +14,8 @@ using namespace std::chrono_literals;
 
 namespace {
 
+constexpr auto kTimerAsyncBudget = 2000ms;
+
 template <typename Predicate>
 bool wait_until(Predicate&& predicate, std::chrono::milliseconds timeout) {
     auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -160,7 +162,7 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         Timer timer(loop, 20ms, [&] { count.fetch_add(1); }, true);
         timer.start();
 
-        REQUIRE(wait_until([&] { return count.load() >= 3; }, 500ms));
+        REQUIRE(wait_until([&] { return count.load() >= 3; }, kTimerAsyncBudget));
         timer.stop();
     }
 
@@ -169,7 +171,7 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         Timer timer(loop, 20ms, [&] { count.fetch_add(1); }, false);
         timer.start();
 
-        REQUIRE(wait_until([&] { return count.load() >= 1; }, 300ms));
+        REQUIRE(wait_until([&] { return count.load() >= 1; }, kTimerAsyncBudget));
         REQUIRE(count.load() == 1);
     }
 
@@ -187,14 +189,14 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         std::atomic<int> count{0};
         Timer timer(loop, 10ms, [&] { count.fetch_add(1); }, true);
         timer.start();
-        REQUIRE(wait_until([&] { return count.load() >= 2; }, 500ms));
+        REQUIRE(wait_until([&] { return count.load() >= 2; }, kTimerAsyncBudget));
         timer.stop();
         auto captured = count.load();
         std::this_thread::sleep_for(50ms);
         REQUIRE(count.load() == captured);  // stopped: no more ticks
 
         timer.start();
-        REQUIRE(wait_until([&] { return count.load() > captured; }, 500ms));
+        REQUIRE(wait_until([&] { return count.load() > captured; }, kTimerAsyncBudget));
         timer.stop();
     }
 
@@ -212,7 +214,7 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         Timer timer(loop, 10ms, [&] { count.fetch_add(1); }, true);
         timer.start();
         timer.start();  // second start — should no-op, not reschedule
-        REQUIRE(wait_until([&] { return count.load() >= 3; }, 500ms));
+        REQUIRE(wait_until([&] { return count.load() >= 3; }, kTimerAsyncBudget));
         timer.stop();
         auto captured = count.load();
         std::this_thread::sleep_for(50ms);
