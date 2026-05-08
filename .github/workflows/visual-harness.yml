@@ -110,8 +110,13 @@ jobs:
       - name: Install ccache
         run: brew install ccache
 
-      - name: Cache FetchContent sources
-        uses: actions/cache@v4
+      # Self-hosted macOS keeps these caches on local disk between jobs.
+      # Only GitHub-hosted fallback runners use GitHub's cloud cache, and
+      # only main pushes publish fresh cache entries.
+      - name: Restore FetchContent sources (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: fetchcontent-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
@@ -120,8 +125,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-visual-fetchcontent-
 
-      - name: Cache ccache
-        uses: actions/cache@v4
+      - name: Restore ccache (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: ccache-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/ccache
@@ -133,6 +140,15 @@ jobs:
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
+
+      - name: Save FetchContent sources (main GitHub-hosted)
+        if: runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cache/Pulp/fetchcontent-src
+          key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
       - name: Configure visual harness
         run: cmake -S . -B build-visual -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
@@ -151,3 +167,12 @@ jobs:
           else
             echo "ccache not available; skipping stats"
           fi
+
+      - name: Save ccache (main GitHub-hosted)
+        if: runner.environment == 'github-hosted' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/ccache
+            ~/.cache/ccache
+          key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
