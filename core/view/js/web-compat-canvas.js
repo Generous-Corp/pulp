@@ -33,6 +33,21 @@ function CanvasPattern(src, tileX, tileY) {
     this._tileY = String(tileY || "repeat");
 }
 
+function __pulpCanvasPositiveFiniteOrZero(value) {
+    if (typeof value === "number") {
+        return (value > 0 && value !== Infinity) ? value : 0;
+    }
+    if (typeof value === "string") {
+        var s = value.trim();
+        if (/^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?$/.test(s)) {
+            var n = parseFloat(s);
+            return (n > 0 && n !== Infinity) ? n : 0;
+        }
+    }
+    if (value === true) return 1;
+    return 0;
+}
+
 function CanvasRenderingContext2D(canvasEl) {
     this.canvas = canvasEl;
     this._id = canvasEl._id;
@@ -1111,8 +1126,7 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     // optional maxWidth through to the bridge as a 7th arg in CSS px.
     // Spec: `<= 0`, NaN, Infinity, or undefined all mean "no constraint",
     // so we coerce to a finite positive number or 0 (the bridge sentinel).
-    var mw = +maxWidth;
-    if (!(mw > 0) || !isFinite(mw)) mw = 0;
+    var mw = __pulpCanvasPositiveFiniteOrZero(maxWidth);
     if (typeof canvasFillText === "function") {
         canvasFillText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color), mw);
     }
@@ -1143,8 +1157,7 @@ CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
         color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
     }
     var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
-    var mw = +maxWidth;
-    if (!(mw > 0) || !isFinite(mw)) mw = 0;
+    var mw = __pulpCanvasPositiveFiniteOrZero(maxWidth);
     if (typeof canvasStrokeText === "function") {
         canvasStrokeText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color), mw);
         return;

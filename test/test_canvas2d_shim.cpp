@@ -1685,15 +1685,17 @@ TEST_CASE("Canvas2D fillText threads maxWidth through to bridge",
 
 TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentinel",
           "[view][canvas2d][issue-1525]") {
-    // Spec: NaN / Infinity / negative / zero / null / undefined all
-    // collapse to "no constraint" — the bridge sees cmd.w == 0 and the
-    // paint loop falls through to the legacy unconstrained fill_text.
+    // Spec: NaN / Infinity / negative / zero / null / undefined /
+    // non-numeric string / false all collapse to "no constraint" — the
+    // bridge sees cmd.w == 0 and the paint loop falls through to the
+    // legacy unconstrained fill_text. Keep this path free of newly-created
+    // JS NaN values: QuickJS trips UBSan while boxing them in sanitizer CI.
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
         globalThis.__test_canvas_el__ = c;
         document.body.appendChild(c);
-        c.width = 200; c.height = 60;
+        c.width = 200; c.height = 80;
         var ctx = c.getContext('2d');
         ctx.font = '14px Inter';
         ctx.fillText('a', 0, 10, NaN);
@@ -1702,6 +1704,8 @@ TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentin
         ctx.fillText('d', 0, 40, 0);
         ctx.fillText('e', 0, 50, null);
         ctx.fillText('f', 0, 60, undefined);
+        ctx.fillText('g', 0, 70, 'not-a-number');
+        ctx.fillText('h', 0, 80, false);
     )");
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
@@ -1710,13 +1714,13 @@ TEST_CASE("Canvas2D fillText coerces non-finite maxWidth to no-constraint sentin
     int seen = 0;
     for (const auto& cmd : cw->commands()) {
         if (cmd.type != T::fill_text) continue;
-        if (cmd.text.size() == 1 && cmd.text[0] >= 'a' && cmd.text[0] <= 'f') {
+        if (cmd.text.size() == 1 && cmd.text[0] >= 'a' && cmd.text[0] <= 'h') {
             INFO("text=" << cmd.text << " observed cmd.w=" << cmd.w);
             REQUIRE(cmd.w == 0.0f);
             seen++;
         }
     }
-    REQUIRE(seen == 6);
+    REQUIRE(seen == 8);
 }
 
 TEST_CASE("Canvas2D strokeText routes through canvasStrokeText with maxWidth",
