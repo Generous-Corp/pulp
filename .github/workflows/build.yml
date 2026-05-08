@@ -243,7 +243,7 @@ jobs:
       # The local macOS runner keeps these paths on disk between jobs.
       # Avoid round-tripping multi-GB compiler/source caches through
       # GitHub's cloud cache there; GitHub-hosted runners restore main's
-      # cache and only main pushes publish fresh cache entries.
+      # cache and only non-PR main runs publish fresh cache entries.
       - name: Restore FetchContent sources (GitHub-hosted)
         if: runner.os != 'macOS' || runner.environment == 'github-hosted'
         id: fetchcontent-cache
@@ -275,8 +275,8 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
-      - name: Save FetchContent sources (main GitHub-hosted)
-        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
+      - name: Save FetchContent sources (main non-PR GitHub-hosted)
+        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -293,8 +293,8 @@ jobs:
         # example-plugin product bundles. Trades ~10-20 min per PR
         # for a deferred validation that examples still compile —
         # which runs in full on push to main / schedule.
-        # On push to main + scheduled nightly + workflow_dispatch:
-        # the full build runs (PULP_BUILD_EXAMPLES default = ON).
+        # On workflow_dispatch, the full build runs
+        # (PULP_BUILD_EXAMPLES default = ON).
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -317,8 +317,8 @@ jobs:
           fi
         shell: bash
 
-      - name: Save ccache (main GitHub-hosted)
-        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
+      - name: Save ccache (main non-PR GitHub-hosted)
+        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |

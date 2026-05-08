@@ -435,8 +435,10 @@ for `ccache` or FetchContent on the local self-hosted runner. Its home
 directory persists between jobs, so GitHub cloud-cache saves can spend
 20+ minutes uploading multi-GB compiler caches that the runner already has
 locally. Use `actions/cache/restore` for GitHub-hosted fallback runners and
-`actions/cache/save` only on `push` to `main`; PRs should restore existing
-remote caches at most, not publish PR-scoped ccache blobs.
+`actions/cache/save` only on non-PR `main` runs (`push` where the workflow has
+a push trigger, or `workflow_dispatch` on `main` for manual cache seeding).
+PRs should restore existing remote caches at most, not publish PR-scoped
+ccache blobs.
 
 The container is a reproducible smoke/developer environment. It does not
 replace the future canonical arm64-darwin raster-golden gate.
