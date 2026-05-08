@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0784"></a>
+## [0.78.4] - 2026-05-08
+
+- fix(cli): refresh explicit upgrade discovery so plain `pulp upgrade` bypasses a fresh stale release cache and sees newly published releases immediately (closes [#1685](https://github.com/danielraffel/pulp/issues/1685))
+- fix(release): include Rust CLI sources in SDK/CLI version-surface detection so future Rust upgrade fixes cannot land without an SDK/CLI release bump
+
 <a id="v0783"></a>
 ## [0.78.3] - 2026-05-08
 
