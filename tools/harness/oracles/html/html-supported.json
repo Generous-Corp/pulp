@@ -109,12 +109,12 @@
     "html/ARIA": {
       "category": "feature",
       "spec": "https://www.w3.org/TR/wai-aria-1.2/",
-      "evidence": "ARIA attributes stored in _attributes but no platform accessibility routing today"
+      "evidence": "aria-label / role route through bridge.setAccessibilityLabel / setAccessibilityRole to View::access_label_/role_ (PR #1641); state routing (aria-pressed/checked/disabled/hidden) is partial-deferred-access-state — the View has no state slot today"
     },
     "html/DocumentFragment": {
       "category": "feature",
       "spec": "https://dom.spec.whatwg.org/#documentfragment",
-      "evidence": "Minimal shim — appendChild/removeChild only; full Range/Selection API absent"
+      "evidence": "createDocumentFragment + appendChild/removeChild covers the React reconciler hot path; full Range/Selection API is arch-text-editor-owns-selection by design"
     },
     "html/Event_constructor": {
       "category": "feature",
@@ -124,7 +124,7 @@
     "html/StyleSheet_inline": {
       "category": "feature",
       "spec": "https://html.spec.whatwg.org/multipage/semantics.html#the-style-element",
-      "evidence": "Inline <style> parsed and applied via _processStyleElement; selectors limited to tag/.class/#id"
+      "evidence": "Inline <style> parsed and applied via _processStyleElement; selectors cover tag/.class/#id/[attr]/descendant/child/:hover (PRs #1345 + #1641); at-rules + cascade engine are arch-no-cascade-engine"
     }
   }
 }
