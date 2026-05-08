@@ -3698,22 +3698,22 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/boxShadow": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:600+). String parser mirrors web-compat-style-decl.js.",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object OR BoxShadowValue[] array) to clearBoxShadow + setBoxShadow per shadow (prop-applier.ts:865-915). String parser mirrors web-compat-style-decl.js.",
       "supportedValues": [
         "'none' (clears)",
         "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
         "multi-shadow comma-separated string (one setBoxShadow dispatch per parsed shadow; paren-depth-aware split)",
-        "object form { offsetX, offsetY, blur?, spread?, color, inset? }"
+        "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
+        "BoxShadowValue array (RN Fabric: [{offsetX,offsetY,color,blurRadius?,spreadDistance?,inset?}])"
       ],
-      "unsupportedValues": [
-        "BoxShadowValue array"
-      ],
+      "unsupportedValues": [],
       "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
         "packages/pulp-react/test/prop-applier-box-shadow.test.ts",
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave4.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions). Wave 1 drift cleanup \u2014 supported \u2192 partial (multi-shadow comma-list and BoxShadowValue array form are real gaps). Wave 2 rn \u2014 multi-shadow comma-separated string lists now dispatch one setBoxShadow call per parsed shadow. The split respects paren depth so `rgba(0,0,0,0.3)` color literals don't get cut. Dispatch order matches input string order, which (combined with the bridge's last-write-wins View slot) approximates the CSS layering stack \u2014 full multi-slot compositing remains a separate paint-side follow-up.",
+      "notes": "All forms wired: 'none' (clears), CSS string (single + multi-shadow paren-aware split), object form { offsetX, offsetY, blur?, spread?, color, inset? }, AND RN Fabric BoxShadowValue[] array form (prop-applier.ts:877-894 \u2014 clears first, dispatches one setBoxShadow per shadow with blurRadius/spreadDistance preferred over blur/spread). All 4 forms tested in prop-applier-wave4.test.ts. Closes pulp #1664 \u2014 catalog was stale citing array form as gap when it was actually wired by Wave 4 #1651.",
       "issue": ""
     },
     "rn/boxSizing": {
