@@ -453,11 +453,15 @@ fn real_main() -> Result<(), ExitCode> {
                 install: args.install,
                 from_override: args.from,
                 to_override: args.to,
+                force_refresh: false,
             };
             // If no action flag is set, default to --check-only —
             // matches the C++ "fall through to discovery" semantics.
+            // Because this is an explicit user invocation, bypass the
+            // 24h cache TTL so a just-published release is visible.
             if !ua.check_only && !ua.notes && !ua.install {
                 ua.check_only = true;
+                ua.force_refresh = true;
             }
             cmd::upgrade::run(&ua, &mut out).map_err(|e| map_err(&e))
         }

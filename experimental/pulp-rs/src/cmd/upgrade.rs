@@ -56,7 +56,7 @@ use serde_json::{json, Value};
 
 use crate::error::{CliError, Result};
 use crate::parse::SemverCompat;
-use crate::update::{self, is_cache_stale, is_newer, now_epoch_sec, refresh_cache, Fetcher};
+use crate::update::{self, is_cache_stale, is_newer, now_epoch_sec, Fetcher};
 
 /// Default GitHub owner/repo for the release feed. Matches the
 /// `PULP_GITHUB_REPO` macro in the C++ CLI.
@@ -86,6 +86,10 @@ pub struct UpgradeArgs {
     pub from_override: Option<String>,
     /// `--to Y` — override cached-latest probe.
     pub to_override: Option<String>,
+    /// Internal dispatch flag: bypass the 24h TTL and synchronously
+    /// ask GitHub. Used for user-invoked `pulp upgrade` / `--install`
+    /// so a just-published release is visible immediately.
+    pub force_refresh: bool,
 }
 
 /// Parse the post-`upgrade` argument slice into [`UpgradeArgs`].
@@ -212,19 +216,51 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
         .unwrap_or_default()
         .unwrap_or_default();
 
-    // Decide whether to hit the fetcher at all. Cache must exist,
-    // not be stale, and have a real `latest_version`.
+    // Decide whether to hit the fetcher at all. User-invoked upgrade
+    // checks force a refresh so releases published inside the 24h TTL
+    // are discoverable immediately. Also refresh impossible cache
+    // states, e.g. "latest" older than the running binary.
     let now = now_epoch_sec();
-    let should_refresh = previous.latest_version.is_empty() || is_cache_stale(&previous, now, 24);
+    let has_target_override = args.to_override.as_deref().is_some_and(|v| !v.is_empty());
+    let cache_behind_installed =
+        !previous.latest_version.is_empty() && is_newer(&previous.latest_version, &installed);
+    let should_refresh = !has_target_override
+        && (args.force_refresh
+            || previous.latest_version.is_empty()
+            || is_cache_stale(&previous, now, 24)
+            || cache_behind_installed);
 
     let (cache_entry, source) = if should_refresh {
-        let next = refresh_cache(fetcher, &previous, &owner_repo, now);
-        if let Some(ref path) = cache_path_opt {
-            // Cache failures are non-fatal here — the user still
-            // gets an answer.
-            let _ = update::write_cache(path, &next);
+        let mut next = previous.clone();
+        next.schema = update::CACHE_SCHEMA_VERSION;
+        next.last_check_epoch_sec = now;
+        match fetcher.fetch_latest_release(&owner_repo) {
+            Ok(r) => {
+                next.latest_version = r.latest_version;
+                next.release_notes_url = r.release_notes_url;
+                if let Some(ref path) = cache_path_opt {
+                    // Cache failures are non-fatal here — the user still
+                    // gets an answer.
+                    let _ = update::write_cache(path, &next);
+                }
+                (next, "fetch")
+            }
+            Err(e) => {
+                // On explicit refresh paths, do not silently report an
+                // old cached release as "latest"; that was the v0.78.3
+                // verification failure. If this was only a TTL refresh
+                // and we have a prior value, keep the old resilience.
+                if args.force_refresh
+                    || cache_behind_installed
+                    || previous.latest_version.is_empty()
+                {
+                    return Err(CliError::Other(format!(
+                        "could not refresh latest version: {e}"
+                    )));
+                }
+                (previous, "cache")
+            }
         }
-        (next, "fetch")
     } else {
         (previous, "cache")
     };
@@ -248,7 +284,7 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
             "installed": installed,
             "latest":    latest,
             "is_newer":  newer,
-            "release_notes_url": cache_entry.release_notes_url,
+            "release_notes_url": release_notes_url_for(&owner_repo, &latest, &cache_entry),
             "source":    source,
         });
         let s = serde_json::to_string_pretty(&obj).unwrap_or_else(|_| "{}".to_owned());
@@ -258,9 +294,9 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
 
     writeln!(out, "Installed: v{installed}").map_err(|e| CliError::io("<stdout>", e))?;
     writeln!(out, "Latest:    v{latest}").map_err(|e| CliError::io("<stdout>", e))?;
-    if !cache_entry.release_notes_url.is_empty() {
-        writeln!(out, "Notes:     {}", cache_entry.release_notes_url)
-            .map_err(|e| CliError::io("<stdout>", e))?;
+    let notes_url = release_notes_url_for(&owner_repo, &latest, &cache_entry);
+    if !notes_url.is_empty() {
+        writeln!(out, "Notes:     {notes_url}").map_err(|e| CliError::io("<stdout>", e))?;
     }
     if newer {
         // Suppress the "Run --install" hint when we're already on the
@@ -304,21 +340,35 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
 ///   no extraction. Combined with a custom `--from` / `--to`, this
 ///   lets the integration test plant fake binaries and assert they
 ///   land at the planned destinations.
-fn do_install<F: Fetcher>(
-    args: &UpgradeArgs,
-    fetcher: &F,
-    out: &mut impl Write,
-) -> Result<()> {
-    // Resolve target version via the discovery path. Side effect:
-    // refreshes the 24h cache, so a follow-up `--check-only` doesn't
-    // pay another round-trip.
-    do_check_only(args, fetcher, out)?;
+fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write) -> Result<()> {
+    let dry_run = std::env::var("PULP_UPGRADE_INSTALL_DRY_RUN")
+        .ok()
+        .as_deref()
+        == Some("1");
+    if !dry_run {
+        // Fail before any network request when someone invokes the
+        // live install path from cargo's target/ tree. The version is
+        // irrelevant for this guard; it only needs the current exe.
+        let guard_plan = crate::install::InstallPlan::from_version(
+            args.to_override.as_deref().unwrap_or("0.0.0"),
+        )?;
+        crate::install::check_build_artifact_guard(&guard_plan)?;
+    }
+
+    // Resolve target version via the discovery path. For real installs,
+    // if the user did not provide an explicit `--to`, bypass the 24h TTL
+    // so a freshly published release is visible immediately. Keep dry-run
+    // installs hermetic for tests and sandbox probes.
+    let mut discovery_args = args.clone();
+    discovery_args.force_refresh =
+        !dry_run && args.to_override.as_deref().map_or(true, str::is_empty);
+    do_check_only(&discovery_args, fetcher, out)?;
 
     let target = resolve_target_version(args)?;
 
     // Test / sandbox short-circuit. Leaves the legacy
     // pending-upgrade marker so existing test contracts still pass.
-    if std::env::var("PULP_UPGRADE_INSTALL_DRY_RUN").ok().as_deref() == Some("1") {
+    if dry_run {
         return write_pending_marker(args, out);
     }
 
@@ -346,6 +396,7 @@ fn do_install<F: Fetcher>(
     };
 
     let report = crate::install::install_extracted(&plan, &archive)?;
+    persist_successful_install_cache(&target);
     // Best-effort cleanup of our own download dir; leave caller-
     // provided fixtures alone.
     if tarball_dir_override.is_none() {
@@ -356,8 +407,7 @@ fn do_install<F: Fetcher>(
         writeln!(out, "  \u{2713} Pulp CLI upgraded to v{target}")
             .map_err(|e| CliError::io("<stdout>", e))?;
         if report.cpp_replaced {
-            writeln!(out, "    (pulp-cpp replaced)")
-                .map_err(|e| CliError::io("<stdout>", e))?;
+            writeln!(out, "    (pulp-cpp replaced)").map_err(|e| CliError::io("<stdout>", e))?;
         } else if report.cpp_created {
             writeln!(out, "    (pulp-cpp installed alongside)")
                 .map_err(|e| CliError::io("<stdout>", e))?;
@@ -384,6 +434,35 @@ fn resolve_target_version(args: &UpgradeArgs) -> Result<String> {
         ));
     }
     Ok(cache.latest_version)
+}
+
+fn release_notes_url_for(owner_repo: &str, version: &str, cache: &update::CacheEntry) -> String {
+    if !version.is_empty() && cache.latest_version == version && !cache.release_notes_url.is_empty()
+    {
+        return cache.release_notes_url.clone();
+    }
+    if version.is_empty() {
+        String::new()
+    } else {
+        format!("https://github.com/{owner_repo}/releases/tag/v{version}")
+    }
+}
+
+fn persist_successful_install_cache(version: &str) {
+    let Some(path) = update::cache_path() else {
+        return;
+    };
+    let owner_repo =
+        std::env::var("PULP_RS_UPGRADE_REPO").unwrap_or_else(|_| DEFAULT_REPO.to_owned());
+    let previous = update::read_cache(&path).ok().flatten().unwrap_or_default();
+    let entry = update::CacheEntry {
+        schema: update::CACHE_SCHEMA_VERSION,
+        last_check_epoch_sec: now_epoch_sec(),
+        latest_version: version.to_owned(),
+        release_notes_url: release_notes_url_for(&owner_repo, version, &previous),
+        banner_shown_for_version: version.to_owned(),
+    };
+    let _ = update::write_cache(&path, &entry);
 }
 
 fn write_pending_marker(args: &UpgradeArgs, out: &mut impl Write) -> Result<()> {
@@ -478,6 +557,7 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         std::env::set_var("PULP_HOME", td.path());
         std::env::remove_var("PULP_UPDATE_CHECK_DISABLED");
+        std::env::remove_var("PULP_RS_UPGRADE_REPO");
         std::env::set_var("PULP_RS_CLI_VERSION", "0.37.0");
         // Critical safety net: default every test to the dry-run
         // install path so a stray `args.install = true` never
@@ -572,6 +652,111 @@ mod tests {
     }
 
     #[test]
+    fn check_only_force_refresh_hits_fetcher_even_when_cache_fresh() {
+        let (_td, _g) = isolated_env();
+        std::env::set_var("PULP_RS_CLI_VERSION", "0.78.2");
+        let now = now_epoch_sec();
+        let cache = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: now,
+            latest_version: "0.78.2".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.2"
+                .to_owned(),
+            banner_shown_for_version: "0.78.2".to_owned(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &cache).unwrap();
+
+        let fake = OkFetcher::new(
+            "0.78.3",
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3",
+        );
+        let args = UpgradeArgs {
+            check_only: true,
+            json: true,
+            force_refresh: true,
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        run_with(&args, &fake, &mut buf).unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["installed"], "0.78.2");
+        assert_eq!(v["latest"], "0.78.3");
+        assert_eq!(
+            v["release_notes_url"],
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+        );
+        assert_eq!(v["source"], "fetch");
+        assert_eq!(fake.calls.get(), 1);
+        let refreshed = update::read_cache(&update::cache_path().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(refreshed.latest_version, "0.78.3");
+    }
+
+    #[test]
+    fn check_only_refreshes_cache_that_is_older_than_installed() {
+        let (_td, _g) = isolated_env();
+        std::env::set_var("PULP_RS_CLI_VERSION", "0.78.3");
+        let cache = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: now_epoch_sec(),
+            latest_version: "0.78.2".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.2"
+                .to_owned(),
+            banner_shown_for_version: "0.78.2".to_owned(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &cache).unwrap();
+
+        let fake = OkFetcher::new(
+            "0.78.3",
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3",
+        );
+        let args = UpgradeArgs {
+            check_only: true,
+            json: true,
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        run_with(&args, &fake, &mut buf).unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["latest"], "0.78.3");
+        assert_eq!(v["source"], "fetch");
+        assert_eq!(fake.calls.get(), 1);
+    }
+
+    #[test]
+    fn check_only_to_override_reports_matching_notes_url_without_fetch() {
+        let (_td, _g) = isolated_env();
+        let cache = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: now_epoch_sec(),
+            latest_version: "0.78.2".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.2"
+                .to_owned(),
+            banner_shown_for_version: "0.78.2".to_owned(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &cache).unwrap();
+
+        let fake = OkFetcher::new("0.99.0", "https://unused");
+        let args = UpgradeArgs {
+            check_only: true,
+            json: true,
+            to_override: Some("0.78.3".to_owned()),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        run_with(&args, &fake, &mut buf).unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["latest"], "0.78.3");
+        assert_eq!(
+            v["release_notes_url"],
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+        );
+        assert_eq!(v["source"], "cache");
+        assert_eq!(fake.calls.get(), 0);
+    }
+
+    #[test]
     fn check_only_surfaces_error_when_cache_empty_and_fetch_fails() {
         let (_td, _g) = isolated_env();
         let args = UpgradeArgs {
@@ -580,7 +765,7 @@ mod tests {
         };
         let mut buf = Vec::new();
         let err = run_with(&args, &ErrFetcher, &mut buf).unwrap_err();
-        assert!(err.to_string().contains("could not determine latest"));
+        assert!(err.to_string().contains("could not refresh latest"));
     }
 
     #[test]
@@ -695,6 +880,33 @@ mod tests {
         assert!(err.to_string().contains("could not resolve target version"));
     }
 
+    #[test]
+    fn persist_successful_install_cache_records_target_release() {
+        let (_td, _g) = isolated_env();
+        let old = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: 1,
+            latest_version: "0.78.2".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.2"
+                .to_owned(),
+            banner_shown_for_version: "0.78.2".to_owned(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &old).unwrap();
+
+        persist_successful_install_cache("0.78.3");
+
+        let cache = update::read_cache(&update::cache_path().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache.latest_version, "0.78.3");
+        assert_eq!(
+            cache.release_notes_url,
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+        );
+        assert_eq!(cache.banner_shown_for_version, "0.78.3");
+        assert!(cache.last_check_epoch_sec >= 1);
+    }
+
     // ── #45 coverage uplift slice 10 — upgrade.rs parse + helpers ─
 
     #[test]
@@ -704,6 +916,7 @@ mod tests {
         assert!(!a.notes);
         assert!(!a.json);
         assert!(!a.install);
+        assert!(!a.force_refresh);
         assert!(a.from_override.is_none());
         assert!(a.to_override.is_none());
     }

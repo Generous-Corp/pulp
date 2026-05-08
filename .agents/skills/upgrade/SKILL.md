@@ -119,14 +119,14 @@ source of truth.
 
 3. **Fetch applicable migration notes** for the current hop.
 
-   **Important:** `pulp upgrade --check-only` does NOT persist its
-   fetched result into the update cache (see
-   `tools/cli/cmd_upgrade.cpp`). On a first-run / empty-cache machine,
-   `pulp upgrade --notes --json` without an explicit `--to` therefore
-   falls back to `to == from` and reports "no migration notes" even
-   when a real upgrade hop (including breaking notes) exists. The
-   slash command must capture the `Latest:` value from `--check-only`
-   and forward it as `--to "$LATEST"` (#583 Codex P1 / wave-4 sweep).
+   **Important:** user-invoked `pulp upgrade` and `pulp upgrade
+   --install` force a synchronous release refresh instead of trusting
+   the 24h cache. This is deliberate: v0.78.3 showed that a cache
+   written minutes before a release can make a just-published version
+   invisible. `pulp upgrade --check-only` remains the lightweight
+   cache-aware probe; if you need release-fresh notes, capture the
+   `Latest:` value from a refreshed/default `pulp upgrade` run and
+   forward it as `--to "$LATEST"`.
 
    In CI / sandbox lanes, `PULP_UPDATE_CHECK_DISABLED=1` makes
    `--check-only` network-free. If the cache is empty in that mode, the
@@ -135,9 +135,27 @@ source of truth.
 
    ```bash
    pulp upgrade --notes --json                  # defaults: from = installed CLI, to = cached latest
-   pulp upgrade --notes --json --to "$LATEST"   # recommended — use value captured from --check-only
+   pulp upgrade --notes --json --to "$LATEST"   # recommended — use value captured from refreshed upgrade check
    pulp upgrade --notes --json --from X --to Y  # explicit hop
    ```
+
+## Release verification gotcha
+
+When verifying a newly published release, test from the previously
+published CLI with a deliberately fresh cache that still names the old
+release:
+
+```bash
+PULP_HOME="$(mktemp -d)" pulp upgrade --check-only --json
+# seed/update-cache.json to latest_version=<previous> with a current timestamp
+pulp upgrade
+```
+
+The default `pulp upgrade` path must refresh through GitHub and report
+the new tag immediately. Then run `pulp upgrade --install --to X.Y.Z`
+in an isolated install directory and confirm a follow-up `pulp upgrade`
+reports both `Installed` and `Latest` as the new version. This catches
+the stale-cache failure from #1685 before the release is announced.
 
    Stable-shape output (do NOT rename these keys — they are a public
    surface the skill depends on, see `tools/cli/migration_index.hpp`):
