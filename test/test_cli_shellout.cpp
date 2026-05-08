@@ -653,6 +653,8 @@ TEST_CASE("pulp import-design --from claude writes JS + bridge handler scaffold"
                        "--bridge-output", bridge_path.string()},
                        30000);
     REQUIRE_FALSE(r.timed_out);
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(js_path));
     REQUIRE(fs::exists(bridge_path));
@@ -697,6 +699,8 @@ TEST_CASE("pulp import-design --from claude --no-bridge-scaffold writes only the
                        "--no-bridge-scaffold"},
                       30000);
     REQUIRE_FALSE(r.timed_out);
+    INFO(r.stderr_output);
+    INFO(r.stdout_output);
     REQUIRE(r.exit_code == 0);
     REQUIRE(fs::exists(js_path));
     REQUIRE_FALSE(fs::exists(bridge_path));

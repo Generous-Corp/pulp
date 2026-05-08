@@ -161,6 +161,9 @@ endif()
 if(TARGET pulp-test-cli-run-fixture)
     add_dependencies(pulp-test-cli-shellout pulp-test-cli-run-fixture)
 endif()
+if(TARGET pulp-import-design)
+    add_dependencies(pulp-test-cli-shellout pulp-import-design)
+endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
 # pulp #776 — pin shell_quote's per-platform contract so it can't

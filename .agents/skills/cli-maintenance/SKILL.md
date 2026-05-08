@@ -82,6 +82,18 @@ Do not point new docs at `./build/tools/cli/pulp`; that path was the old
 C++ default. Use `pulp-cpp` only when documenting fallthrough, rollback, or
 debug comparisons.
 
+### Binary subcommand delegation
+
+`BinaryCommand` entries in `tools/cli/pulp_cli.cpp` delegate to helper binaries
+inside the active build tree, e.g. `pulp import-design` launches
+`tools/import-design/pulp-import-design`. Do not hard-code `build/` for these
+lookups: CI uses matrix-scoped directories such as `build-linux`,
+`build-macos`, and `build-windows`, and self-hosted macOS can mask mistakes
+with stale warm `build/` artifacts. Resolve helpers from the running CLI's
+sibling build tree first, honor `PULP_BUILD_DIR` when present, and keep
+`test/test_cli_shellout.cpp` subprocess-output `INFO(...)` diagnostics so
+future failures show the delegated binary's stderr.
+
 ### Adding a new value to an enum-like flag (e.g., `--from <source>`)
 
 When extending a flag that takes one of a fixed set of values

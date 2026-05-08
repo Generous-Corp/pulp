@@ -2337,8 +2337,46 @@ int delegate_to_build_binary(const fs::path& relative_binary,
     auto root = require_project_root();
     if (!root) return 1;
 
-    auto binary = *root / "build" / relative_binary;
-    if (!fs::exists(binary)) {
+    std::vector<fs::path> candidates;
+    auto add_candidate = [&](fs::path path) {
+        path = platform_executable(std::move(path));
+        for (const auto& existing : candidates) {
+            if (existing == path) return;
+        }
+        candidates.push_back(std::move(path));
+    };
+
+    // Dev/CI builds can use matrix-scoped build directories such as
+    // build-linux or build-macos. Resolve sibling helper binaries from the
+    // running CLI's build tree before falling back to the legacy build/ path.
+    auto self = current_executable_path();
+    if (!self.empty()) {
+        auto cli_dir = self.parent_path();
+        auto tools_dir = cli_dir.parent_path();
+        auto build_dir = tools_dir.parent_path();
+        if (cli_dir.filename() == "cli" && tools_dir.filename() == "tools" &&
+            !build_dir.empty()) {
+            add_candidate(build_dir / relative_binary);
+        }
+    }
+
+    if (const char* env = std::getenv("PULP_BUILD_DIR"); env && *env) {
+        fs::path build_dir(env);
+        if (build_dir.is_relative()) build_dir = *root / build_dir;
+        add_candidate(build_dir / relative_binary);
+    }
+
+    add_candidate(*root / "build" / relative_binary);
+
+    fs::path binary;
+    for (const auto& candidate : candidates) {
+        if (fs::exists(candidate)) {
+            binary = candidate;
+            break;
+        }
+    }
+
+    if (binary.empty()) {
         std::cerr << "Error: " << fs::path(relative_binary).filename().string()
                   << " not built. Run `pulp build` first.\n";
         return 1;

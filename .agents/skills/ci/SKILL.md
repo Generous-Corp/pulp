@@ -492,7 +492,11 @@ causes `git lfs install --local` to fail because Pulp already owns the
 plain `build/`: a stale sanitizer `CMakeCache.txt` can leak flags such as
 `-fsanitize=address` into the required macOS build and make unrelated
 JavaScriptCore/host tests abort under ASan. `tools/scripts/test_workflow_build_dirs.py`
-is wired into workflow-lint to keep this invariant machine-checked.
+is wired into workflow-lint to keep this invariant machine-checked. CLI
+delegation to helper binaries must resolve from the active build directory
+(`build-${{ matrix.key }}` or the running CLI's sibling build tree), not a
+hard-coded `build/` path; otherwise Linux catches missing helpers while warm
+self-hosted macOS workspaces can mask the bug.
 
 ### Overrides when you need them
 
