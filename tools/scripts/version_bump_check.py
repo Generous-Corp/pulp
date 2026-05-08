@@ -16,9 +16,12 @@ Additional flag:
     --require-bump-for-fix-feat
         When set, asserts that PRs whose title carries a Conventional
         Commits `fix:` or `feat:` prefix (parsed from $GITHUB_PR_TITLE
-        or --pr-title) include either a `chore: bump versions` commit
-        in the diff range OR a `Version-Bump: skip reason="..."` trailer
-        on the tip commit. This is the structural fix for the 2026-04-30
+        or --pr-title) include either an accepted bump-marker commit
+        subject prefix (`chore: bump versions` canonical, or legacy
+        `chore(versions): bump`) in the diff range OR a
+        `Version-Bump: skip reason="..."` trailer on the tip commit.
+        Near-misses like `chore: bump SDK to vX.Y.Z` deliberately do
+        not count. This is the structural fix for the 2026-04-30
         incident where PR #1008 (a `fix(view):` user-facing fix) merged
         without an accompanying bump and consumers got stuck on an
         un-released main. Runs additively — the existing per-surface
@@ -836,6 +839,10 @@ def apply_bumps(
 # user-facing release events. `feat!:` and `fix!:` are still caught
 # (the `!` lives between `feat`/`fix` and the colon).
 _FIX_FEAT_TITLE_RE = re.compile(r"^(fix|feat)(\([^)]*\))?!?:\s")
+BUMP_COMMIT_SUBJECT_PREFIXES = (
+    "chore: bump versions",
+    "chore(versions): bump",
+)
 
 
 def _is_fix_or_feat_title(title: str) -> bool:
@@ -843,15 +850,15 @@ def _is_fix_or_feat_title(title: str) -> bool:
 
 
 def _range_has_bump_commit(base: str, head: str) -> bool:
-    """True iff any commit in base..head has a subject starting with
-    `chore: bump versions`. This is the canonical subject `pulp pr`
-    writes when `version_bump_check.py --mode=apply` rewrote a version
-    file. Using subject prefix instead of trailer matching keeps the
-    check robust against squash-merge subject mangling.
+    """True iff any commit in base..head has an accepted bump-marker
+    subject prefix. `chore: bump versions` is the canonical subject
+    `pulp pr` writes when `version_bump_check.py --mode=apply` rewrote
+    a version file. Using subject prefix instead of trailer matching
+    keeps the check robust against squash-merge subject mangling.
     """
     for _sha, subject, _body in git_log_subjects_and_bodies(base, head):
         s = subject.strip().lower()
-        if s.startswith("chore: bump versions") or s.startswith("chore(versions): bump"):
+        if any(s.startswith(prefix) for prefix in BUMP_COMMIT_SUBJECT_PREFIXES):
             return True
     return False
 
@@ -930,8 +937,10 @@ def check_fix_feat_requires_bump(
     return False, (
         f"fix/feat-needs-bump: PR title {pr_title!r} is a user-facing "
         "`fix:` / `feat:` change but the diff range contains NO commit "
-        "with subject `chore: bump versions` AND no top-level "
-        '`Version-Bump: skip reason="..."` trailer.\n'
+        "with subject `chore: bump versions` (canonical; legacy "
+        "`chore(versions): bump` is also accepted) AND no top-level "
+        '`Version-Bump: skip reason="..."` trailer. Commit subjects like '
+        "`chore: bump SDK to vX.Y.Z` do not satisfy this guard.\n"
         "\n"
         "User-facing fixes/features that land without a version bump "
         "are stranded on main — `auto-release.yml` will not tag, and "

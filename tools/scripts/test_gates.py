@@ -806,6 +806,52 @@ class GateFixtureTests(unittest.TestCase):
         self.assertIn("fix/feat-needs-bump", out)
         self.assertIn("OK", out)
 
+    def test_fixfeat_with_legacy_bump_commit_prefix_passes(self) -> None:
+        """The legacy scoped bump marker remains accepted."""
+        self.f.write(
+            "core/runtime/include/pulp/runtime/foo.hpp",
+            "#pragma once\nint foo();\nint bar();\n",
+        )
+        self.f.commit("fix(runtime): wire bar() into foo() codepath")
+
+        cmake = (self.tmp / "CMakeLists.txt").read_text()
+        (self.tmp / "CMakeLists.txt").write_text(
+            cmake.replace("VERSION 0.1.0", "VERSION 0.1.1")
+        )
+        self.f.commit("chore(versions): bump SDK")
+
+        code, out = self._run_vbc_fixfeat(
+            "fix(cli): refresh explicit upgrade discovery",
+        )
+        self.assertEqual(code, 0, msg=out)
+        self.assertIn("fix/feat-needs-bump", out)
+        self.assertIn("OK", out)
+
+    def test_fixfeat_with_near_miss_bump_subject_fails(self) -> None:
+        """Only the precise bump-marker subjects count.
+
+        `chore: bump SDK to vX.Y.Z` sounds reasonable to a human, but it
+        is not the release-guard marker and must fail loudly.
+        """
+        self.f.write(
+            "core/runtime/include/pulp/runtime/foo.hpp",
+            "#pragma once\nint foo();\nint bar();\n",
+        )
+        self.f.commit("fix(runtime): wire bar() into foo() codepath")
+
+        cmake = (self.tmp / "CMakeLists.txt").read_text()
+        (self.tmp / "CMakeLists.txt").write_text(
+            cmake.replace("VERSION 0.1.0", "VERSION 0.1.1")
+        )
+        self.f.commit("chore: bump SDK to v0.1.1")
+
+        code, out = self._run_vbc_fixfeat(
+            "fix(cli): refresh explicit upgrade discovery",
+        )
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("NO commit with subject `chore: bump versions`", out)
+        self.assertIn("chore: bump SDK to vX.Y.Z", out)
+
     def test_fixfeat_without_bump_commit_fails(self) -> None:
         """A `fix:` PR that lacks a bump commit AND lacks a skip trailer
         must fail the fix/feat-needs-bump check. This is the structural

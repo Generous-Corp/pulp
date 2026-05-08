@@ -822,6 +822,14 @@ Locally:
 
 **fix/feat-needs-bump (issue #1009):** the version-skill-check workflow ALSO runs `version_bump_check.py --require-bump-for-fix-feat` on `pull_request` events. If the PR title matches `^(fix|feat)(\([^)]*\))?!?:\s` (Conventional Commits user-facing prefix), the diff range MUST contain either a commit subject `chore: bump versions` OR a top-level `Version-Bump: skip reason="..."` trailer (with non-empty reason — bare `skip` is rejected). This is the structural fix for the 2026-04-30 incident (PR #1008) where a `fix(view):` merged via `gh pr merge` after a force-push race with `shipyard pr` and stranded the change on main. Auto-release.yml has a matching backstop step (`Stranded fix/feat detector`) that emits a `::warning::` annotation and opens a `release-stuck`-labelled tracking issue when the merge slips through to push. Branch protection on `main` requiring the `Enforce version & skill sync` check would close the loop entirely — see `docs/guides/release-watchdog.md` for the recommended setup. Bypass the check on a one-off basis with `Version-Bump: skip reason="..."` on any commit in the range; this is intentionally a different trailer from `Release: skip` so a "don't tag this release" decision doesn't silently imply "this fix doesn't need a bump."
 
+**Exact bump-marker format:** for `fix:` / `feat:` PR titles, the accepted
+commit subject prefixes are exactly `chore: bump versions` (canonical) and
+`chore(versions): bump` (legacy). A manually authored subject such as
+`chore: bump SDK to v0.78.4` does not satisfy the gate, even if the
+version files and changelog are correctly edited. Let `shipyard pr` create
+the bump commit when possible; if you need to repair it manually, use the
+canonical subject `chore: bump versions`.
+
 **Release-workflow VST3 pin:** `sign-and-release.yml` must clone the same Steinberg tag pinned everywhere else in the repo: `v3.7.12_build_20`. The shorthand `v3.7.12` does not exist upstream and will make tag-time macOS release jobs fail before configure/build even start.
 
 **Release-workflow ctest must skip the `validation` label (#720):** the `Test` step in `sign-and-release.yml` MUST pass `-LE validation` to ctest. Without it, the suite includes the `auval-Pulp*` tests that copy a fresh `.component` to `~/Library/Audio/Plug-Ins/Components/` and immediately call `auval`. Hosted GitHub macOS runners' `AudioComponentRegistrar` does not pick up the new bundle reliably, so auval returns `Cannot get Component's Name strings / Error -50`, the Test step exits non-zero, and the entire sign / notarize / publish pipeline silently fails. This was the failure mode of the 30+ consecutive sign-and-release runs preceding v0.41.0. The validation gates are owned by `validate.yml` on PR; do not duplicate them into the release workflow. `tools/scripts/test_release_workflow_test_step.py` (wired into `workflow-lint.yml`) is the regression test that prevents reintroduction.

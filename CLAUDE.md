@@ -548,6 +548,15 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 3. Branch push, PR creation, Shipyard state recording, and cross-platform validation — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
+**Exact fix/feat release marker:** `.github/workflows/version-skill-check.yml`
+adds `--require-bump-for-fix-feat` on PRs. If the PR title starts with
+`fix:` / `fix(scope):` / `feat:` / `feat(scope):`, the diff range must
+contain a bump-marker commit whose subject starts with exactly
+`chore: bump versions` (canonical) or `chore(versions): bump` (legacy),
+unless the tip commit has a top-level `Version-Bump: skip reason="..."`
+trailer. Near-misses such as `chore: bump SDK to vX.Y.Z` do not count.
+When manually repairing a release bump, use the exact canonical subject.
+
 Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.
 
 `pulp pr` defaults to the same Shipyard path. A human can opt out in their
