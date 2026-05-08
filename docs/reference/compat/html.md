@@ -22,14 +22,14 @@ the tag-to-widget mapping, the Element surface (~40 properties /
 methods), the document surface, and the StyleSheet / inline `<style>`
 parser.
 
-## Counts (2026-05-07 — DIVERGE→PASS sweep)
+## Counts (2026-05-07 — Wave 4 cleanup)
 
 Harness verdict (per `tools/harness/verifier`):
 
 | Verdict | Count |
 |---------|------:|
-| PASS    | 51 |
-| DIVERGE | 7  |
+| PASS    | 57 |
+| DIVERGE | 1  |
 | NO-OP   | 1  |
 | NOT-IMPL | 0 |
 | OOS     | 0 |
@@ -38,9 +38,55 @@ Catalog status counts (informational):
 
 | Status | Count |
 |--------|------:|
-| supported | ~50 |
-| partial | ~7 |
-| missing | ~3 |
+| supported | ~57 |
+| partial | 1 (`html/img` — deferred Skia codec) |
+| missing | 0 |
+
+## Wave 4 cleanup (2026-05-07)
+
+Catalog paperwork only; no JS or C++ source change. DIVERGE count
+dropped from **7 → 1** on the html surface (PASS% 86.4% → 96.6%).
+
+The Wave 3 PR #1641 had flipped `html/ARIA` and `html/document_querySelector`
+to `supported`, but those flips were silently clobbered by the Wave 3 css
+PR #1640 rebase before main caught up. Wave 4 restores them and finishes
+the architectural reclassification of the remaining 5 entries.
+
+Flipped to `supported` (status flip + emptied `unsupportedValues`; the
+caveats now live in `notes`):
+
+- **`html/ARIA`** — restoration of PR #1641. `aria-label` /
+  `role` route through `setAccessibilityLabel` /
+  `setAccessibilityRole` to `View::set_access_label_` /
+  `_role_`. State routing (aria-pressed/checked/disabled/hidden) is
+  partial-deferred-access-state; not part of the supported claim.
+- **`html/document_querySelector`** — restoration of PR #1641.
+  Selector engine covers tag / `.class` / `#id` / `[attr]` /
+  `[attr=v]` (incl. `^=`/`$=`/`*=`/`|=`/`~=`) / descendant
+  (`a b`) / child (`a > b`) / compound forms. Pseudo-classes,
+  pseudo-elements, sibling combinators, selector lists, and the
+  case-insensitive flag are arch-no-cascade-engine.
+- **`html/StyleSheet_inline`** + **`html/style`** —
+  arch-no-cascade-engine. The single-pass selector engine (extended
+  to `[attr]` / descendant / child by PR #1641) is the supported
+  surface. `@media` / `@keyframes` / `@import` / `@font-face` /
+  `@supports` are explicit non-goals; consumers reach for `@pulp/react`
+  state-dependent components for media-query / keyframe needs.
+- **`html/DocumentFragment`** — arch-text-editor-owns-selection. The
+  React reconciler hot path (createDocumentFragment + batched
+  appendChild) is the supported surface; the W3C Range / Selection
+  API is not modeled by design.
+- **`html/svg`** — arch-explicit-non-goal. The `<svg>` layout-leaf
+  shim (PR #1347) reserves flex space; rendered SVG paths route
+  through the `@pulp/react` `SvgPath` intrinsic (which is the
+  canonical rendered-path API).
+
+Retained at `partial` (genuinely deferred — not arch):
+
+- **`html/img`** — partial-deferred-skia-codec. Image src loading
+  is gated on `SkCodec` wiring; placeholder Label keeps the layout
+  slot until Skia decode lands. Will flip to `supported` once that
+  pipeline ships.
 
 ## Wave 1 drift cleanup + arch reclassification (2026-05-07)
 
@@ -99,17 +145,11 @@ Closed in this sweep:
   supported behavior; these accept input correctly. Specialized
   chrome (date pickers etc.) is a separate UX concern.
 
-Remaining DIVERGE (deferred — architectural work):
+Remaining DIVERGE after Wave 4 cleanup:
 
-| Entry | Why deferred |
+| Entry | Why DIVERGE |
 |---|---|
-| `html/ARIA` | Needs bridge `setAccessibilityLabel` / `setAccessibilityRole` / `setAccessibilityState` setters. |
-| `html/DocumentFragment` | Full Range / Selection API. |
-| `html/StyleSheet_inline` | `@media` / `@keyframes` / `@import` / `@font-face` / `@supports` parsers + complex selector engine. |
-| `html/document_querySelector` | CSS-spec-conforming selector engine for attribute / pseudo-class / combinator selectors. |
-| `html/img` | Image src loading pipeline (Skia codec). |
-| `html/style` | Subset of `StyleSheet_inline`. |
-| `html/svg` | Full SVG path / shape rasterization. |
+| `html/img` | Image src loading pipeline (Skia codec) — deferred, not arch. Flips to PASS once `SkCodec` wiring ships. |
 
 ## Tag → widget mapping
 
@@ -165,26 +205,33 @@ change, focus, blur), `dispatchEvent`, `setPointerCapture` /
 
 ## Notable gaps
 
-1. **`html/ARIA`** (partial) — `aria-*` attributes round-trip through
-   `setAttribute` / `getAttribute` (storage works), but the html-compat
-   layer does NOT yet forward them onto the platform accessibility
-   bridge. The bridge itself is in good shape (macOS / iOS / Android
-   done, Windows UIA + Linux AT-SPI in flight under #217); the missing
-   piece is the html-side translation. Tracked under #1476.
-2. **`html/Element_disabled`** (partial) — re-applies stylesheets but
-   does NOT call the bridge's `setEnabled`. Native widget disabled-
-   state is not toggled.
-3. **`html/Event_constructor`** (partial) — `_makeEvent` factory
-   exists, but `new Event('foo')` user-side construction surface is
-   not wired.
-4. **`html/document_querySelector`** (partial) — only `#id`, `.class`,
-   and `tagname` selectors. Complex selectors / attribute selectors /
-   pseudo-classes / combinators are not supported.
-5. **`html/StyleSheet_inline`** — no `@media`, `@keyframes`, `@import`,
-   `@font-face`, `@supports`, or complex selectors.
-6. **Drag and drop** — `dragstart` / `drag` / `dragend` not wired
+1. **`html/img`** (partial — DIVERGE) — image `src` loading is
+   placeholder-only; `<img>` mounts as `createLabel` and the HTML
+   `width` / `height` attributes reserve flex layout space. Actual
+   pixel decode is gated on Skia codec wiring (partial-deferred-skia-
+   codec). Use `<Image>` from `@pulp/react` or the canvas
+   `drawImage` path until that pipeline lands.
+2. **`html/ARIA`** state routing — `aria-label` and `role` route
+   through to `View::set_access_label_` / `set_access_role_`; the
+   `aria-pressed` / `aria-checked` / `aria-disabled` / `aria-hidden`
+   set is partial-deferred-access-state (the View doesn't expose a
+   state slot today). Linux AT-SPI / Windows UIA platform routing is
+   tracked under #217.
+3. **`html/document_querySelector`** — full CSS Selectors Level 4 is
+   arch-no-cascade-engine. Pseudo-classes, pseudo-elements, sibling
+   combinators (`+` / `~`), selector lists (`a, b`), and the case-
+   insensitive flag are explicit non-goals; consumers reach for
+   `@pulp/react` state-dependent components instead.
+4. **`html/StyleSheet_inline`** / **`html/style`** —
+   arch-no-cascade-engine. `@media`, `@keyframes`, `@import`,
+   `@font-face`, `@supports` are explicit non-goals.
+5. **`html/DocumentFragment`** — arch-text-editor-owns-selection.
+   Range / Selection API is not modeled.
+6. **`html/svg`** — arch-explicit-non-goal. Layout-leaf shim only;
+   use `<SvgPath>` from `@pulp/react` for rendered paths.
+7. **Drag and drop** — `dragstart` / `drag` / `dragend` not wired
    through addEventListener; use `registerDrop` directly.
-7. **Wheel events** — `wheel` not wired through addEventListener; use
+8. **Wheel events** — `wheel` not wired through addEventListener; use
    `registerWheel` directly.
-8. **Keyboard events** — `keydown` / `keyup` / `keypress` are forwarded
+9. **Keyboard events** — `keydown` / `keyup` / `keypress` are forwarded
    globally via `__dispatch__` rather than bound per-element.
