@@ -6381,31 +6381,29 @@ void WidgetBridge::register_api() {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_dash;
             cmd.extra = static_cast<float>(args.get<double>(2, 0.0)); // phase
-            // Pattern: pulled from arg[1] — choc passes JS arrays as
-            // ValueView. Reuse cmd.gradient_positions to avoid expanding
-            // CanvasDrawCmd footprint.
+            // Pattern: pulled from arg[1]. Choc exposes JS arrays as
+            // indexable ValueViews here, matching other bridge array handlers.
+            // Reuse cmd.gradient_positions to avoid expanding CanvasDrawCmd.
             if (args.numArgs > 1 && args[1]) {
                 auto& pattern = *args[1];
-                if (pattern.isArray()) {
-                    cmd.gradient_positions.reserve(pattern.size());
-                    for (uint32_t i = 0; i < pattern.size(); ++i) {
-                        cmd.gradient_positions.push_back(
-                            static_cast<float>(pattern[i].getWithDefault<double>(0.0)));
-                    }
-                    // HTML5: drop the entire pattern if any value is negative
-                    // or non-finite — spec says behavior is implementation-
-                    // defined; we choose graceful "solid stroke".
-                    bool valid = true;
-                    for (float v : cmd.gradient_positions) {
-                        if (!(v >= 0.0f) || !std::isfinite(v)) { valid = false; break; }
-                    }
-                    if (!valid) cmd.gradient_positions.clear();
-                    // HTML5 spec: odd-length patterns are duplicated.
-                    if (cmd.gradient_positions.size() % 2 == 1) {
-                        auto orig = cmd.gradient_positions;
-                        cmd.gradient_positions.insert(cmd.gradient_positions.end(),
-                                                      orig.begin(), orig.end());
-                    }
+                cmd.gradient_positions.reserve(pattern.size());
+                for (uint32_t i = 0; i < pattern.size(); ++i) {
+                    cmd.gradient_positions.push_back(
+                        static_cast<float>(pattern[i].getWithDefault<double>(0.0)));
+                }
+                // HTML5: drop the entire pattern if any value is negative
+                // or non-finite — spec says behavior is implementation-
+                // defined; we choose graceful "solid stroke".
+                bool valid = true;
+                for (float v : cmd.gradient_positions) {
+                    if (!(v >= 0.0f) || !std::isfinite(v)) { valid = false; break; }
+                }
+                if (!valid) cmd.gradient_positions.clear();
+                // HTML5 spec: odd-length patterns are duplicated.
+                if (cmd.gradient_positions.size() % 2 == 1) {
+                    auto orig = cmd.gradient_positions;
+                    cmd.gradient_positions.insert(cmd.gradient_positions.end(),
+                                                  orig.begin(), orig.end());
                 }
             }
             c->add_command(cmd);

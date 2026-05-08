@@ -6,15 +6,16 @@ target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
 # iOS AUv3 helper configure smoke (macOS host only; skipped when iOS SDK absent).
-# A fresh checkout pays the FetchContent bootstrap cost (~5–7 min on CI macs),
-# so the timeout is generous. Warm runs finish in well under a minute.
+# A fresh checkout pays the FetchContent bootstrap cost (~5–7 min on CI macs).
+# Local self-hosted runners can exceed that during cache churn, so leave
+# enough headroom for the Xcode configure to finish instead of racing CTest.
 if(APPLE AND NOT PULP_IOS)
     add_test(NAME cmake-ios-auv3-configure
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_configure.sh
                 ${CMAKE_SOURCE_DIR})
     set_tests_properties(cmake-ios-auv3-configure PROPERTIES
         SKIP_RETURN_CODE 77
-        TIMEOUT 900
+        TIMEOUT 1800
         # Tagged `slow` for fast-CI exclusion (#1589): a fresh-cache
         # configure spends ~3 minutes downloading + unpacking iOS-leg
         # FetchContent sources before the actual smoke fires. Full-CI

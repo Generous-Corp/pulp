@@ -1049,7 +1049,7 @@ TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
     REQUIRE(p->has_non_default_blend_mode());
 
     // Unknown keyword -> normal (paint-time no-op fallback).
-    bridge.load_script("setMixBlendMode('p', 'plus-lighter');");
+    bridge.load_script("setMixBlendMode('p', 'not-a-blend-mode');");
     REQUIRE(p->mix_blend_mode() == BM::normal);
     REQUIRE_FALSE(p->has_non_default_blend_mode());
 }
@@ -2739,8 +2739,13 @@ TEST_CASE("WidgetBridge canvasSetLineDash records pattern + phase, "
     int idx = 0;
     for (auto& cmd : rec.commands()) {
         if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            // The lineDashOffset setter may flush the current empty pattern
+            // before setLineDash() records the requested dash array.
+            if (cmd.floats.size() != 6) {
+                ++idx;
+                continue;
+            }
             dashIndex = idx;
-            REQUIRE(cmd.floats.size() == 6); // 3 → 6 (duplicated)
             REQUIRE_THAT(cmd.floats[0], WithinAbs(5.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[1], WithinAbs(3.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[2], WithinAbs(2.0f, 1e-5f));
@@ -10273,4 +10278,3 @@ TEST_CASE("Wave5 css/wordWrap stores break-word/anywhere on word_break slot",
     auto* p = bridge.widget("p");
     REQUIRE(p->word_break() == "break-word");
 }
-

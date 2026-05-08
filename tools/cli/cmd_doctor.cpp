@@ -300,11 +300,15 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return 0;
     }
 
-    if (!ci_mode) {
-        std::cout << color::bold();
+    auto print_title = [&]() {
         if (mode == "android")    std::cout << "Pulp Doctor — Android";
         else if (mode == "ios")   std::cout << "Pulp Doctor — iOS";
         else                      std::cout << "Pulp Doctor";
+    };
+
+    if (!ci_mode) {
+        std::cout << color::bold();
+        print_title();
         std::cout << color::reset() << "\n";
         std::cout << "===========\n\n";
         if (mode.empty()) {
@@ -320,6 +324,9 @@ int cmd_doctor(const std::vector<std::string>& args) {
                       << "(mobile dev-env check — install hints follow each fail)"
                       << color::reset() << "\n\n";
         }
+    } else {
+        print_title();
+        std::cout << "\n";
     }
 
     std::vector<DoctorCheck> checks;
