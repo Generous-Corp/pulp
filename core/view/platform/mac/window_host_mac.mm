@@ -5,6 +5,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/modal.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -257,6 +258,8 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
     return {static_cast<float>(p.x), viewHeight - static_cast<float>(p.y)};
 }
 
+static uint16_t modifiersFromNSFlags(NSEventModifierFlags flags);
+
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
@@ -265,6 +268,8 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 
     pulp::view::MouseEvent me;
     me.position = pt;
+    me.window_position = pt;
+    me.modifiers = modifiersFromNSFlags(event.modifierFlags);
     me.is_wheel = true;
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
     me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
@@ -587,6 +592,14 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                 // bubbled-to ancestor).
                 auto clicked_id = _dragTarget->id();
                 auto modifiers = modifiersFromNSFlags(event.modifierFlags);
+                pulp::view::MouseEvent me;
+                me.position = local;
+                me.window_position = pt;
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = modifiers;
+                me.is_down = false;
+                me.click_count = static_cast<int>(event.clickCount);
+                _dragTarget->on_mouse_event(me);
                 _dragTarget->on_mouse_up(local);
                 if (released_target == _dragTarget && (click_handler || global_click)) {
                     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1624,6 +1637,7 @@ public:
         return gpu_surface_ ? gpu_surface_->dawn_instance_handle() : nullptr;
     }
     render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
+    bool is_gpu() const override { return gpu_surface_ && skia_surface_; }
     bool attach_native_child_view(void* child_view,
                                   float x,
                                   float y,
@@ -2054,6 +2068,16 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root, const WindowOptions& 
         auto host = std::make_unique<MacGpuWindowHost>(root, options);
         root.set_window_host(host.get());
         return host;
+    }
+#else
+    if (options.use_gpu) {
+        static std::atomic<bool> warned{false};
+        bool expected = false;
+        if (warned.compare_exchange_strong(expected, true)) {
+            runtime::log_warn(
+                "WindowHost: use_gpu=true requested but PULP_HAS_SKIA is not built; "
+                "falling back to CoreGraphics");
+        }
     }
 #endif
     auto host = std::make_unique<MacWindowHost>(root, options);

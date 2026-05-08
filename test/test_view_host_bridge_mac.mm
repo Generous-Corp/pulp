@@ -32,6 +32,7 @@ TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",
 
         auto host = WindowHost::create(root, opts);
         REQUIRE(host != nullptr);
+        REQUIRE_FALSE(host->is_gpu());
         REQUIRE(root.window_host() == host.get());
         REQUIRE(host->native_window_handle() != nullptr);
         REQUIRE(host->native_content_view_handle() != nullptr);
@@ -103,6 +104,7 @@ TEST_CASE("macOS GPU WindowHost accepts set_idle_callback (pulp #1387 gap #3)",
             SUCCEED("GPU host unavailable in this build");
             return;
         }
+        REQUIRE(host->is_gpu());
 
         // Install + clear must both be no-throw and idempotent. Before
         // the fix, set_idle_callback dispatched to the base class no-op
@@ -317,6 +319,93 @@ TEST_CASE("PulpView NSEvent click dispatches JS on(id,'click') subscriber",
         }
 
         REQUIRE(clicks == 1);
+
+        host->hide();
+    }
+}
+
+// Spectr native bridge regression: drawing gestures depend on the DOM-style
+// pointerup paired with pointerdown/pointermove. macOS previously called only
+// View::on_mouse_up on release, so bridge subscribers never saw pointerup.
+TEST_CASE("PulpView NSEvent mouseUp dispatches JS pointerup subscriber",
+          "[view][hosts][bridge][events][spectr]") {
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+
+        View root;
+        WindowOptions opts;
+        opts.title = "PulpView pointerup";
+        opts.width = 200.0f;
+        opts.height = 100.0f;
+        opts.resizable = false;
+        opts.use_gpu = false;
+
+        auto host = WindowHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        root.set_bounds({0, 0, 200, 100});
+
+        pulp::state::StateStore store;
+        pulp::view::ScriptEngine engine;
+        pulp::view::WidgetBridge bridge(engine, root, store);
+
+        bridge.load_script(R"(
+            var pointer_downs = 0;
+            var pointer_ups = 0;
+            var pointer_up_client_x = 0;
+            createCol('surface', '');
+            setFlex('surface', 'width', 200);
+            setFlex('surface', 'height', 100);
+            on('surface', 'pointerdown', function() { pointer_downs += 1; });
+            on('surface', 'pointerup', function(e) {
+                pointer_ups += 1;
+                pointer_up_client_x = e.clientX;
+            });
+        )");
+
+        auto* surface = bridge.widget("surface");
+        REQUIRE(surface != nullptr);
+        surface->set_bounds({0, 0, 200, 100});
+
+        host->show();
+        auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
+        REQUIRE(nswindow != nil);
+        auto* contentView = nswindow.contentView;
+        REQUIRE(contentView != nil);
+
+        for (int i = 0; i < 20; ++i) {
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+
+        const NSPoint local = NSMakePoint(40.0, 50.0);
+        const NSPoint window_pt = [contentView convertPoint:local toView:nil];
+
+        NSEvent* down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                                           location:window_pt
+                                      modifierFlags:0
+                                          timestamp:0
+                                       windowNumber:nswindow.windowNumber
+                                            context:nil
+                                        eventNumber:0
+                                         clickCount:1
+                                           pressure:1.0];
+        NSEvent* up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
+                                         location:window_pt
+                                    modifierFlags:0
+                                        timestamp:0
+                                     windowNumber:nswindow.windowNumber
+                                          context:nil
+                                      eventNumber:0
+                                       clickCount:1
+                                         pressure:0.0];
+
+        [contentView mouseDown:down];
+        [contentView mouseUp:up];
+
+        REQUIRE(engine.evaluate("pointer_downs").getWithDefault<int>(0) == 1);
+        REQUIRE(engine.evaluate("pointer_ups").getWithDefault<int>(0) == 1);
+        auto pointer_up_client_x = engine.evaluate("pointer_up_client_x").getWithDefault<double>(0.0);
+        REQUIRE(pointer_up_client_x > 39.99);
+        REQUIRE(pointer_up_client_x < 40.01);
 
         host->hide();
     }

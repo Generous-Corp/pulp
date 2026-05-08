@@ -638,8 +638,17 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
         var pointer_cancel_id = -1;
         var pointer_move_x = -1;
         var pointer_move_y = -1;
+        var pointer_move_client_x = -1;
+        var pointer_move_client_y = -1;
         var wheel_x = 0;
         var wheel_y = 0;
+        var wheel_client_x = 0;
+        var wheel_client_y = 0;
+        var wheel_offset_x = 0;
+        var wheel_mods = '';
+        var wheel_event_delta_y = 0;
+        var wheel_event_client_x = 0;
+        var wheel_event_prevented = false;
         var gesture_log = [];
         var capture_log = [];
         var shortcut_count = 0;
@@ -648,6 +657,7 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
         function shortcutHit() { shortcut_count++; }
 
         createLabel('surface', 'Surface', '');
+        createLabel('surface_event', 'Surface event', '');
         on('surface', 'pointerdown', function(e) {
             pointer_down_id = e.pointerId;
             pointer_down_type = e.pointerType;
@@ -663,10 +673,22 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
         on('surface', 'pointermove', function(e) {
             pointer_move_x = e.offsetX;
             pointer_move_y = e.offsetY;
+            pointer_move_client_x = e.clientX;
+            pointer_move_client_y = e.clientY;
         });
-        on('surface', 'wheel', function(dx, dy) {
+        on('surface', 'wheel', function(dx, dy, clientX, clientY, offsetX, offsetY, ctrlKey, shiftKey, altKey, metaKey) {
             wheel_x = dx;
             wheel_y = dy;
+            wheel_client_x = clientX;
+            wheel_client_y = clientY;
+            wheel_offset_x = offsetX;
+            wheel_mods = [ctrlKey, shiftKey, altKey, metaKey].join(':');
+        });
+        on('surface_event', 'wheel', function(e) {
+            wheel_event_delta_y = e.deltaY;
+            wheel_event_client_x = e.clientX;
+            e.preventDefault();
+            wheel_event_prevented = e._defaultPrevented;
         });
         on('surface', 'gesturestart', function(e) { gesture_log.push('start:' + e.scale); });
         on('surface', 'gesturechange', function(e) { gesture_log.push('change:' + e.rotation); });
@@ -680,14 +702,18 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
 
         registerPointer('surface');
         registerWheel('surface');
+        registerWheel('surface_event');
         registerGesture('surface');
         registerShortcut(65, 18, 'shortcutHit');
     )");
 
     auto* surface = bridge.widget("surface");
     REQUIRE(surface != nullptr);
+    auto* surface_event = bridge.widget("surface_event");
+    REQUIRE(surface_event != nullptr);
     REQUIRE(surface->on_pointer_event);
     REQUIRE(surface->on_drag);
+    REQUIRE(surface_event->on_pointer_event);
     REQUIRE(surface->on_gesture_cb);
 
     MouseEvent down{};
@@ -725,14 +751,31 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     surface->on_drag({13.0f, 17.0f});
     REQUIRE_THAT(engine.evaluate("pointer_move_x").getWithDefault<double>(0.0), WithinAbs(13.0, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_move_y").getWithDefault<double>(0.0), WithinAbs(17.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("pointer_move_client_x").getWithDefault<double>(0.0), WithinAbs(13.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("pointer_move_client_y").getWithDefault<double>(0.0), WithinAbs(17.0, 0.001));
 
     MouseEvent wheel{};
     wheel.is_wheel = true;
+    wheel.position = {3.0f, 4.0f};
+    wheel.window_position = {103.0f, 104.0f};
+    wheel.modifiers = static_cast<uint16_t>(kModCtrl | kModAlt);
     wheel.scroll_delta_x = 2.5f;
     wheel.scroll_delta_y = -7.0f;
     surface->on_mouse_event(wheel);
     REQUIRE_THAT(engine.evaluate("wheel_x").getWithDefault<double>(0.0), WithinAbs(2.5, 0.001));
     REQUIRE_THAT(engine.evaluate("wheel_y").getWithDefault<double>(0.0), WithinAbs(-7.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("wheel_client_x").getWithDefault<double>(0.0), WithinAbs(103.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("wheel_client_y").getWithDefault<double>(0.0), WithinAbs(104.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("wheel_offset_x").getWithDefault<double>(0.0), WithinAbs(3.0, 0.001));
+    REQUIRE(engine.evaluate("wheel_mods").toString() == "true:false:true:false");
+
+    MouseEvent wheel_event = wheel;
+    wheel_event.scroll_delta_y = -11.0f;
+    wheel_event.window_position = {207.0f, 208.0f};
+    surface_event->on_mouse_event(wheel_event);
+    REQUIRE_THAT(engine.evaluate("wheel_event_delta_y").getWithDefault<double>(0.0), WithinAbs(-11.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("wheel_event_client_x").getWithDefault<double>(0.0), WithinAbs(207.0, 0.001));
+    REQUIRE(engine.evaluate("wheel_event_prevented").getWithDefault<bool>(false));
 
     GestureEvent gesture{};
     gesture.phase = GesturePhase::began;
@@ -5513,20 +5556,24 @@ TEST_CASE("addEventListener('wheel', fn) routes through registerWheel",
         var el = document.createElement('div');
         document.body.appendChild(el);
         var fired = false;
+        var payload = '';
         el.addEventListener('wheel', function(e) {
             fired = true;
+            payload = [e.deltaX, e.deltaY, e.clientX, e.clientY, e.offsetX, e.offsetY, e.ctrlKey, e.altKey].join(':');
         });
         // Manually invoke the bridge's __dispatch__ for 'wheel' to
         // simulate a native wheel event delivery — that's the path
         // _registerNativeEvent wires up via on(id, 'wheel', ...).
         if (typeof __dispatch__ === 'function') {
-            __dispatch__(el._id, 'wheel', 5, -7);
+            __dispatch__(el._id, 'wheel', 5, -7, 91, 92, 3, 4, true, false, true, false);
         }
         globalThis.__test_wheel_fired__ = fired;
+        globalThis.__test_wheel_payload__ = payload;
     )");
 
     auto fired = engine.evaluate("globalThis.__test_wheel_fired__").getWithDefault<bool>(false);
     REQUIRE(fired);
+    REQUIRE(engine.evaluate("globalThis.__test_wheel_payload__").toString() == "5:-7:91:92:3:4:true:true");
 }
 
 TEST_CASE("addEventListener('drop', fn) routes through registerDrop",

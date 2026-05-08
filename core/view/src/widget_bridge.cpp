@@ -482,10 +482,40 @@ struct WidgetBridge::NativeGpuBridgeState {
 static const char* kJSPreamble = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
+function __makeWheelDispatchEvent(args) {
+    return {
+        type: 'wheel',
+        target: null,
+        currentTarget: null,
+        deltaX: args[0] || 0,
+        deltaY: args[1] || 0,
+        deltaZ: 0,
+        deltaMode: 0,
+        clientX: args[2] || 0,
+        clientY: args[3] || 0,
+        offsetX: args[4] || 0,
+        offsetY: args[5] || 0,
+        ctrlKey: !!args[6],
+        shiftKey: !!args[7],
+        altKey: !!args[8],
+        metaKey: !!args[9],
+        _defaultPrevented: false,
+        preventDefault: function() { this._defaultPrevented = true; },
+        stopPropagation: function() {}
+    };
+}
 function __dispatch__(id, eventName) {
     var key = id + ':' + eventName;
     if (__callbacks__[key]) {
-        __callbacks__[key].apply(null, Array.prototype.slice.call(arguments, 2));
+        var args = Array.prototype.slice.call(arguments, 2);
+        if (eventName === 'wheel' &&
+            args.length >= 2 &&
+            typeof args[0] === 'number' &&
+            __callbacks__[key].length <= 1) {
+            __callbacks__[key](__makeWheelDispatchEvent(args));
+        } else {
+            __callbacks__[key].apply(null, args);
+        }
     }
 }
 function __ensureNativeRegistered__(id, group) {
@@ -1630,6 +1660,8 @@ void WidgetBridge::register_api() {
             // W3C PointerEvents: forward drag as pointermove
             w->on_drag = [alive, engine, id](Point pos) {
                 std::string data = "{"
+                    "clientX:" + std::to_string(pos.x) + ","
+                    "clientY:" + std::to_string(pos.y) + ","
                     "offsetX:" + std::to_string(pos.x) + ","
                     "offsetY:" + std::to_string(pos.y) + ","
                     "pointerId:0,pointerType:'mouse',isPrimary:true}";
@@ -3545,7 +3577,16 @@ void WidgetBridge::register_api() {
                 if (!me.is_wheel) {
                     return;
                 }
-                std::string data = std::to_string(me.scroll_delta_x) + "," + std::to_string(me.scroll_delta_y);
+                std::string data = std::to_string(me.scroll_delta_x) + "," +
+                    std::to_string(me.scroll_delta_y) + "," +
+                    std::to_string(me.window_position.x) + "," +
+                    std::to_string(me.window_position.y) + "," +
+                    std::to_string(me.position.x) + "," +
+                    std::to_string(me.position.y) + "," +
+                    (me.isCtrlDown() ? "true" : "false") + "," +
+                    (me.isShiftDown() ? "true" : "false") + "," +
+                    (me.isAltDown() ? "true" : "false") + "," +
+                    (me.isCmdDown() ? "true" : "false");
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'wheel', " + data + ")", "wheel");
             };
         }

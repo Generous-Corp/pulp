@@ -86,6 +86,7 @@ public:
     virtual void* dawn_queue_handle() const { return nullptr; }
     virtual void* dawn_instance_handle() const { return nullptr; }
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
+    virtual bool is_gpu() const { return false; }
     virtual ContentSize get_content_size() const;
 
     // Attach/detach a platform-native child view inside this host. Coordinates

@@ -2,6 +2,7 @@
 // Mirrors window_host_mac.mm but uses UIKit instead of AppKit.
 
 #include <pulp/view/window_host.hpp>
+#include <pulp/runtime/log.hpp>
 
 #if TARGET_OS_IOS
 
@@ -383,6 +384,7 @@ public:
     void hide() override {}
     bool is_visible() const override { return window_ != nil && !window_.isHidden; }
     render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
+    bool is_gpu() const override { return gpu_surface_ && skia_surface_; }
     ContentSize get_content_size() const override {
         CGRect bounds = metal_view_ ? metal_view_.bounds : UIScreen.mainScreen.bounds;
         return {
