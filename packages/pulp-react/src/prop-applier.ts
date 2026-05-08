@@ -866,10 +866,40 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (value == null || value === 'none' || value === '') {
                 return call('clearBoxShadow', id);
             }
+            // Wave 4 rn — RN Fabric `BoxShadowValue[]` array form. Each
+            // element is `{ offsetX, offsetY, color, blurRadius?,
+            // spreadDistance?, inset? }` (RN spec field names; CSS
+            // box-shadow uses `blur` / `spread`). The bridge takes one
+            // dispatch per shadow; we clear first to avoid append-only
+            // accumulation across re-renders, then dispatch in order
+            // (CSS layers the first shadow on top — paint order matches
+            // input order, same as the multi-shadow string path above).
+            if (Array.isArray(value)) {
+                call('clearBoxShadow', id);
+                for (const s of value as ReadonlyArray<{
+                    offsetX: number; offsetY: number;
+                    blurRadius?: number; spreadDistance?: number;
+                    blur?: number; spread?: number;
+                    color: string; inset?: boolean;
+                }>) {
+                    if (!s) continue;
+                    const blur   = typeof s.blurRadius     === 'number' ? s.blurRadius
+                                 : typeof s.blur           === 'number' ? s.blur   : 4;
+                    const spread = typeof s.spreadDistance === 'number' ? s.spreadDistance
+                                 : typeof s.spread         === 'number' ? s.spread : 0;
+                    call('setBoxShadow', id, s.offsetX, s.offsetY, blur, spread,
+                         s.color, !!s.inset);
+                }
+                return;
+            }
             if (typeof value === 'object') {
-                const s = value as { offsetX: number; offsetY: number; blur?: number; spread?: number; color: string; inset?: boolean };
+                const s = value as { offsetX: number; offsetY: number; blur?: number; spread?: number; blurRadius?: number; spreadDistance?: number; color: string; inset?: boolean };
+                const blur   = typeof s.blurRadius     === 'number' ? s.blurRadius
+                             : typeof s.blur           === 'number' ? s.blur   : 4;
+                const spread = typeof s.spreadDistance === 'number' ? s.spreadDistance
+                             : typeof s.spread         === 'number' ? s.spread : 0;
                 return call('setBoxShadow', id, s.offsetX, s.offsetY,
-                            s.blur ?? 4, s.spread ?? 0,
+                            blur, spread,
                             s.color, !!s.inset);
             }
             if (typeof value === 'string') {

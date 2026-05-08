@@ -5001,6 +5001,38 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1548 — RN textShadow* per-attribute setters. Storage-only;
+    // SkPaint shadow integration is the deferred paint-time slice. Each
+    // setter writes ONE slot in isolation so a JSX prop diff that touches
+    // one prop doesn't clobber the others (mirrors the per-side border
+    // pattern). The catalog mapsTo cites these names; harness verifier
+    // checks they are registered.
+    engine_.register_function("setTextShadowColor",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto c  = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_text_shadow_color(c);
+            return choc::value::Value();
+        });
+    engine_.register_function("setTextShadowOffset",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto dx = static_cast<float>(args.get<double>(1, 0.0));
+            auto dy = static_cast<float>(args.get<double>(2, 0.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_text_shadow_offset(dx, dy);
+            return choc::value::Value();
+        });
+    engine_.register_function("setTextShadowRadius",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto r  = static_cast<float>(args.get<double>(1, 0.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_text_shadow_radius(r);
+            return choc::value::Value();
+        });
+
     // pulp #1517 — background sub-property setters. Storage-only today;
     // see View::set_background_{attachment,clip,origin}() doc for the
     // partial-vs-noop semantics. Wiring them here unblocks the JS shim

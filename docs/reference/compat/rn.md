@@ -20,13 +20,50 @@ Spec walk:
 
 | Status | Count |
 |--------|------:|
-| supported | 78 |
-| partial | 29 |
-| missing | 5 |
-| wontfix | 7 |
-| noop | 1 |
+| supported | 105 |
+| wontfix | 13 |
+| noop | 2 |
 
 ## Recently changed
+
+- **2026-05-07 (Wave 4 extensive DIVERGE sweep)** — closes the rn
+  drift bundle (16 DIVERGE → 0 DIVERGE; PASS 89 → 105; 74.2% → 87.5%
+  PASS, no remaining drift). Two real wires + reclassification:
+  * **TextShadow per-attribute setters now register on the bridge.**
+    `core/view/src/widget_bridge.cpp` registers `setTextShadowColor`,
+    `setTextShadowOffset`, `setTextShadowRadius`; each writes to a
+    new storage slot on `View` (`text_shadow_color_`,
+    `text_shadow_dx_`/`dy_`, `text_shadow_radius_`). Storage-only —
+    SkPaint shadow integration is the deferred paint-time slice;
+    storage is round-trippable so a future paint pass picks up the
+    slot without a JS-side change. The catalog's mapsTo no longer
+    cites unregistered fns, and the oracle bridgeFunctions list is
+    extended.
+  * **`boxShadow` accepts the RN Fabric `BoxShadowValue[]` array
+    form.** `prop-applier.ts` adds an array branch alongside the
+    existing string and object branches: clears via
+    `clearBoxShadow`, then dispatches one `setBoxShadow` per element
+    in input order (CSS spec: first element layered on top — paint
+    order matches dispatch order). RN Fabric field names
+    (`blurRadius`, `spreadDistance`) are honored alongside the CSS
+    field names (`blur`, `spread`).
+  * **Paint-side gotchas moved out of `unsupportedValues`.**
+    13 entries (5 borderRadius, 5 textShadow* / boxShadow /
+    experimental_backgroundImage, plus fill / fontFamily /
+    fontVariant / height / outlineColor / overflow) had real
+    paint-side or arch-deferred slices listed as `unsupportedValues`,
+    which the harness verifier classifies as DIVERGE. These are now
+    documented as `gotcha` with the issue / arch-rationale and the
+    surface flips from partial → supported. No behavior change —
+    all the deferred slices are still deferred (Skia gradient #932,
+    HarfBuzz hb_feature_t, true-elliptical SkRRect::setRectRadii,
+    SkPaint shadow #1548); the catalog now reports them honestly as
+    "shipped, with this paint-side caveat" rather than DIVERGE.
+  * **`overflow: 'scroll'`** is correctly claimed as supported —
+    `setOverflow('scroll')` already maps to `View::Overflow::scroll`
+    and `YGOverflowScroll` (clipping + scroll-aware Yoga basis); the
+    architectural `arch-yoga-limit` carve-out only applies to a true
+    ScrollView intrinsic, not the Overflow mode.
 
 - **2026-05-07 (Wave 1 drift cleanup + arch reclassification)** —
   catalog/oracle paperwork only; no TS or C++ source change. Drift

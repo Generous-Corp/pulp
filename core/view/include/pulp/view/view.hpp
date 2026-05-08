@@ -878,6 +878,21 @@ public:
     void set_animation_play_state(std::string kw)  { animation_play_state_ = std::move(kw); }
     const std::string& animation_play_state() const { return animation_play_state_; }
 
+    /// pulp #1548 — RN textShadow per-attribute storage. Storage-only;
+    /// SkPaint shadow integration is the deferred paint-time slice.
+    /// Each slot is round-trippable so a commitUpdate that touches only
+    /// one of the three preserves the others (mirrors the per-side
+    /// border slot pattern). A future combined `set_text_shadow`
+    /// helper for the CSS shorthand path can write all three slots
+    /// atomically.
+    void set_text_shadow_color(std::string c)      { text_shadow_color_ = std::move(c); }
+    const std::string& text_shadow_color() const   { return text_shadow_color_; }
+    void set_text_shadow_offset(float dx, float dy){ text_shadow_dx_ = dx; text_shadow_dy_ = dy; }
+    float text_shadow_offset_x() const             { return text_shadow_dx_; }
+    float text_shadow_offset_y() const             { return text_shadow_dy_; }
+    void set_text_shadow_radius(float r)           { text_shadow_radius_ = r; }
+    float text_shadow_radius() const               { return text_shadow_radius_; }
+
 
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
@@ -1109,6 +1124,12 @@ private:
     std::string isolation_;                // wontfix (no z-buffer)
     std::string resize_;                   // noop (no resize handles)
     std::string animation_play_state_;     // partial (storage only)
+    // pulp #1548 — RN textShadow* per-attribute storage slots. SkPaint
+    // shadow integration deferred; storage path is round-trippable.
+    std::string text_shadow_color_;
+    float       text_shadow_dx_ = 0.0f;
+    float       text_shadow_dy_ = 0.0f;
+    float       text_shadow_radius_ = 0.0f;
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
