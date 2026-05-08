@@ -534,9 +534,10 @@ TEST_CASE("pump_message_loop is bounded against a self-rearming microtask",
     )");
 
     // 1M JS_ExecutePendingJob calls of a 2-statement microtask finish
-    // in a few seconds on every supported host. A wedged regression
-    // would hang and trip CTest's TIMEOUT line, which is the loud
-    // signal we want.
+    // well inside this test's 180s CTest timeout on supported hosts.
+    // Sanitizer builds can be much slower than release/debug hosts; a
+    // wedged regression would hang and trip CTest's TIMEOUT line, which
+    // is the loud signal we want.
     auto t0 = std::chrono::steady_clock::now();
     engine.pump_message_loop();
     auto elapsed = std::chrono::steady_clock::now() - t0;
@@ -544,7 +545,7 @@ TEST_CASE("pump_message_loop is bounded against a self-rearming microtask",
     // Generous upper bound — sanitizer builds and slow CI runners are
     // real. The point is to catch a multi-minute hang, not benchmark.
     using namespace std::chrono_literals;
-    REQUIRE(elapsed < 120s);
+    REQUIRE(elapsed < 170s);
 
     // Prove we actually exercised the cap (not just returned early on
     // rc==0). The JS-side counter must be well past the 5K used by
