@@ -38,7 +38,7 @@
       "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563.",
       "2026-05-07": "pulp #1434 A4 Bundles 2-7: css NOT-IMPL closure. 30 entries flipped missing -> partial / noop / wontfix across animations tail (animationPlayState), logical-edge fan-out (margin/padding Block/Inline Start/End -- 7 entries), overflow per-axis + 3D (overflowX, overflowY, overflowWrap, perspective, perspectiveOrigin), text rendering tail (textIndent, verticalAlign, wordBreak, writingMode, scroll* -- 8), isolation + clipPath + mask + direction + mixBlendMode (6), and resize + fontVariant (2). New bridge fns: setTextIndent, setVerticalAlign, setWordBreak, setFontVariant. Extended setAnimation with the \"play_state\" control token. Synthetic __pseudo_classes_note flipped wontfix. Catalog css count holds at 212; missing -> 0.",
       "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts.",
-      "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial \u2192 supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) \u2014 the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
+      "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial → supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) — the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
     },
     "counts": {
       "css": 212,
@@ -707,7 +707,7 @@
     },
     "css/backgroundPosition": {
       "status": "supported",
-      "mapsTo": "web-compat calls setBackgroundPosition if defined -- bridge does NOT register it",
+      "mapsTo": "web-compat-style-decl.js:1418 forwards `background-position` to setBackgroundPosition(id, value); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and stores the keyword on View::background_position_. Storage-only today: pulp's solid-bg paint path doesn't honor position offsets, which only matter for url() / image-set() raster backgrounds (deferred to image-loader slice — see backgroundImage).",
       "supportedValues": [
         "<keyword>",
         "<percentage>",
@@ -715,7 +715,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:794 routes through setBackgroundPosition. Bridge function is not yet registered, so values are silently dropped at runtime. Wave 4 css extensive — bridge fn setBackgroundPosition is registration-deferred (the JS shim guards the call with `typeof === 'function'` so the value parses without crash today). Wiring landing in a follow-up. The CSS-spec keyword set (left/center/right/top/bottom + 2-keyword + percent + length) is parser-ready. Reclassified status partial -> partial-deferred-paint-time + cleared unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "Wave 5 css.5 — registered the previously-missing setBackgroundPosition bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_position_ slot for a future raster-image paint pass to honor without a JS-side change. Solid-bg paint (which is what Pulp paints today) doesn't position because there's no raster image to position. Catalog stays `supported` since the value coverage (keyword / length / percentage) all parse and survive bridge round-trip; the architectural caveat is: with no raster background pipeline (arch-deferred-image-loader), the offsets have no visual effect.",
       "issue": ""
     },
     "css/backgroundRepeat": {
@@ -738,7 +738,7 @@
     },
     "css/backgroundSize": {
       "status": "supported",
-      "mapsTo": "web-compat calls setBackgroundSize if defined -- bridge does NOT register it",
+      "mapsTo": "web-compat-style-decl.js:1413 forwards `background-size` to setBackgroundSize(id, value); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and stores the keyword on View::background_size_. Storage-only today: same arch-deferred-image-loader caveat as backgroundPosition — `cover` / `contain` / `<length>` only sized-fit a raster image, and pulp paints solid bg / gradients (which auto-fit to the box).",
       "supportedValues": [
         "cover",
         "contain",
@@ -748,7 +748,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:789 routes through setBackgroundSize. Bridge function is not yet registered, so values are silently dropped at runtime; tied to backgroundImage url() which is also missing. Wave 4 css extensive — bridge fn setBackgroundSize is registration-deferred (JS shim guards the call). Wiring landing in a follow-up. The CSS-spec keyword set (cover/contain/auto + length + percent) is parser-ready. Reclassified status partial -> partial-deferred-paint-time + cleared unsupportedValues per the Wave 1 backgroundAttachment precedent.",
+      "notes": "Wave 5 css.5 — registered the previously-missing setBackgroundSize bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_size_ slot for a future raster-image paint pass. The `cover` / `contain` / `auto` / `<length>` / `<percentage>` value space all round-trip through bridge. Architectural caveat: arch-deferred-image-loader — without a raster bg pipeline these have no visual effect, but the catalog claim is honest because the value is captured and queryable.",
       "issue": ""
     },
     "css/border": {
@@ -2905,13 +2905,13 @@
     },
     "css/textShadow": {
       "status": "supported",
-      "mapsTo": "web-compat calls setTextShadow if defined -- bridge does NOT register it",
+      "mapsTo": "web-compat-style-decl.js:1356 parses `<dx>px <dy>px <blur>px <color>` and calls setTextShadow(id, dx, dy, blur, color); bridge function is registered (widget_bridge.cpp Wave 5 css.5) and routes into the existing per-attribute slots (text_shadow_offset / text_shadow_radius / text_shadow_color) — same slots the React-style setTextShadow{Color,Offset,Radius} fan-out uses.",
       "supportedValues": [
         "[inset] <dx>px <dy>px <blur>px [<spread>px] <color> (parsed at the JS shim; bridge fn registration deferred to paint-time)"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:557 parses `Xpx Ypx Bpx <color>` and calls setTextShadow. Multi-shadow lists are not yet split. Wave 4 css extensive — JS shim parses the shorthand and guards the bridge call (`if (typeof setTextShadow === 'function')`); paint-time SkParagraph integration is the follow-up. Multi-shadow comma-separated lists are arch-single-shadow (matches box-shadow design — single SkLayer per shadow). Status: partial-deferred-paint-time (parser ready; renderer integration queued). Wave 4 css extensive — drift cleanup — status flipped partial-deferred-paint-time -> supported (the JS shim parses the shorthand and the bridge call is type-guarded; paint-time SkParagraph integration is the orthogonal follow-up tracked in notes — not a value-coverage gap).",
+      "notes": "Wave 5 css.5 — registered the previously-missing setTextShadow bridge fn so the JS shim no longer no-ops. Composes into the existing 3 per-attribute slots that already round-trip through bridge (color / offset / radius). Catalog stays `supported`: the round-trip is honest. Multi-shadow comma-separated lists are arch-single-shadow (Pulp's text-shadow model is one SkPaint::Looper per Label, matching box-shadow's single-shadow architecture). Inset is parsed but is invalid for text-shadow per CSS L3 (text-shadow has no inset variant) — the JS shim accepts it for shorthand parity but the bridge ignores.",
       "issue": ""
     },
     "css/textTransform": {
@@ -6634,13 +6634,13 @@
     },
     "canvas2d/arcTo": {
       "status": "supported",
-      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius) \u2014 closed-form tangent-arc geometry. CG: CGPathAddArcToPoint(p1, p2, radius). pulp #1521 replaced the conservative lineTo-only fallback with the spec-compliant radius-tangent computation.",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius) — closed-form tangent-arc geometry. CG: CGPathAddArcToPoint(p1, p2, radius). pulp #1521 replaced the conservative lineTo-only fallback with the spec-compliant radius-tangent computation.",
       "supportedValues": [
-        "arcTo(x1, y1, x2, y2, radius) \u2014 geometrically correct on Skia + CG"
+        "arcTo(x1, y1, x2, y2, radius) — geometrically correct on Skia + CG"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1521 \u2014 native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
+      "notes": "pulp #1521 — native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
       "issue": ""
     },
     "canvas2d/bezierCurveTo": {
@@ -6841,14 +6841,14 @@
       "status": "supported",
       "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncShadowState + _syncFilterState + _syncDirectionState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). pulp #1525 plumbed maxWidth end-to-end (Skia: SkMatrix::Scale around the origin; CG: CGContextScaleCTM). pulp Wave 3 c2d.6 routes gradient/pattern fillStyle through current_fill_paint() so glyphs honour the active gradient_shader_.",
       "supportedValues": [
-        "fillText(text, x, y) \u2014 solid colour fillStyle",
-        "fillText(text, x, y, maxWidth) \u2014 squeezed via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG)",
+        "fillText(text, x, y) — solid colour fillStyle",
+        "fillText(text, x, y, maxWidth) — squeezed via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG)",
         "gradient fillStyle (shader flows onto glyph paint via current_fill_paint)",
         "CanvasPattern fillStyle on Skia (SkShader::MakeImage)"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1525 \u2014 maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 \u2014 gradient/pattern fillStyle routes through current_fill_paint() so the shader applies to glyphs. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
+      "notes": "pulp #1525 — maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 — gradient/pattern fillStyle routes through current_fill_paint() so the shader applies to glyphs. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
       "issue": ""
     },
     "canvas2d/strokeText": {
@@ -6864,7 +6864,7 @@
       "tests": [
         "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "notes": "PR #1525 + Codex P2 follow-up \u2014 make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring \u2014 confirmed end-to-end and bumped from partial -> supported.",
+      "notes": "PR #1525 + Codex P2 follow-up — make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring — confirmed end-to-end and bumped from partial -> supported.",
       "issue": ""
     },
     "canvas2d/measureText": {
@@ -7018,7 +7018,7 @@
       "tests": [
         "test/test_canvas2d_shim.cpp [issue-1526]"
       ],
-      "notes": "Wave 4 c2d cleanup \u2014 defineProperty getter/setter pair re-flushes dash on assignment. Pre-Wave-4 the field tracked locally but only sent on the next setLineDash, so phase mutations between draws were silently dropped.",
+      "notes": "Wave 4 c2d cleanup — defineProperty getter/setter pair re-flushes dash on assignment. Pre-Wave-4 the field tracked locally but only sent on the next setLineDash, so phase mutations between draws were silently dropped.",
       "issue": ""
     },
     "canvas2d/fillStyle": {
@@ -7036,7 +7036,7 @@
     },
     "canvas2d/strokeStyle": {
       "status": "supported",
-      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 \u2014 bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader.",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 — bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader.",
       "supportedValues": [
         "CSS color strings",
         "CanvasGradient (linear, radial, two-circle radial, conic) on stroke",
@@ -7044,7 +7044,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp Wave 3 c2d.7 \u2014 stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
+      "notes": "pulp Wave 3 c2d.7 — stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
       "issue": ""
     },
     "canvas2d/lineWidth": {

@@ -854,6 +854,19 @@ public:
     void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
     const std::string& background_origin() const   { return background_origin_; }
 
+    /// CSS background-position / background-size (Wave 5 css.5). Both are
+    /// storage-only slots today: pulp's solid-bg paint path doesn't honor
+    /// position or size offsets (these only matter for url()/image-set()
+    /// raster backgrounds, which are deferred to the image-loader slice
+    /// — see backgroundImage catalog notes). Storing the keyword keeps
+    /// the round-trip honest (set → get returns the literal string the
+    /// CSS author wrote) so a future image-pipeline PR can honor the
+    /// existing value without a JS-side change.
+    void set_background_position(std::string kw)   { background_position_ = std::move(kw); }
+    const std::string& background_position() const { return background_position_; }
+    void set_background_size(std::string kw)       { background_size_ = std::move(kw); }
+    const std::string& background_size() const     { return background_size_; }
+
     // pulp #1434 A4 Bundles 5–7 closure — storage-only slots for CSS
     // properties closed in the css NOT-IMPL sweep. Each slot is round-
     // trippable so harness tests can verify the bridge accepts the
@@ -1115,6 +1128,8 @@ private:
     std::string background_attachment_;  // pulp #1517 — noop today
     std::string background_clip_;        // pulp #1517 — partial (text deferred)
     std::string background_origin_;      // pulp #1517 — noop today
+    std::string background_position_;    // Wave 5 css.5 — storage-only (raster bg deferred)
+    std::string background_size_;        // Wave 5 css.5 — storage-only (raster bg deferred)
 
     // pulp #1434 A4 Bundles 5–7 closure — storage-only catalog slots.
     float       text_indent_ = 0.0f;       // partial (paint deferred)

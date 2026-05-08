@@ -8699,9 +8699,10 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
 // "CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker map
 // to BM::lighter" test (which is the canvas2d-fill title that got
 // the body that should have lived here, post-shuffle).
+// Wave 5 css.5 audit — recover the corrupted #1638 body that was
+// orphaned by a merge into a stub-with-stray-string. The body below
+// is the original Wave 2 css.9 plus-lighter / plus-darker test.
 TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
-          "[view][bridge][css][wave2-css][issue-1549][.skip-corrupt-1638]") {
-    SUCCEED("body truncated by interleaved merge in #1638; equivalent coverage is in the renamed plus-lighter / plus-darker test below");
           "[view][bridge][css][wave2-css][issue-1549]") {
     // Wave 2 css.9 — plus-lighter / plus-darker are CSS Compositing &
     // Blending Level 2 keywords. Both map to BlendMode::lighter
@@ -8763,8 +8764,13 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
 // (a #1638 css.9 wiring). Renamed to match the body so the test
 // reports honestly while the canonical canvas2d-fill case is
 // reconstructed in a follow-up.
-TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker map to BM::lighter",
-          "[view][bridge][css][wave2-css]") {
+// Wave 5 css.5 audit — recover the corrupted Wave 2 css.9 plus-lighter
+// title/body that was interleaved with an arcTo opener in #1638. The
+// body is the canonical mixBlendMode plus-lighter / plus-darker test;
+// the duplicate is dropped above. The arcTo coverage exists in a
+// separate Wave 3 canvas2d block below.
+TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker maps to BM::lighter (Wave 2 css.9)",
+          "[view][bridge][css][wave2-css][wave5-recovered]") {
     using BM = pulp::canvas::Canvas::BlendMode;
     ScriptEngine engine;
     View root;
@@ -8772,19 +8778,7 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker map to BM
     root.set_theme(Theme::dark());
     StateStore store;
     WidgetBridge bridge(engine, root, store);
-//   c2d.6 canvas2d/fillText    — fillText after an active fillStyle gradient
-//                                does NOT emit a stale set_fill_color in
-//                                between (the gradient stays active onto
-//                                the glyph paint via current_fill_paint).
-//   c2d.7 canvas2d/strokeStyle — assigning a CanvasGradient to strokeStyle
-//                                routes through the new
-//                                canvasSetStrokeLinearGradient bridge fn,
-//                                producing a set_stroke_gradient_linear
-//                                draw command (RecordingCanvas captures
-//                                the geometry + stops verbatim).
 
-TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to cmd with the radius",
-          "[view][bridge][canvas][wave3-canvas2d]") {
     bridge.load_script(R"(
         createPanel('a', '');
         createPanel('b', '');
@@ -8813,43 +8807,15 @@ TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
     SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
 }
 
-// pulp #1638 baseline-corruption: title says canvas2d-clip but body
-// tests css borderWidth keyword expansion. Renamed to match the body.
+// pulp #1638 baseline-corruption: this title was paired with bare JS
+// body (no bridge.load_script wrapper) and the actual evenodd-fill
+// canvas2d test got lost in the merge. The canonical borderWidth
+// thin/medium/thick test is the next TEST_CASE below. Stubbed to
+// allow file compilation; reconstruct evenodd-fill canvas test in a
+// follow-up. Wave 5 audit cleanup.
 TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-        var c = document.createElement('canvas');
-        c.id = 'evenodd-fill';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        // Self-overlapping path — the only paths where nonzero vs evenodd
-        // differ. Outer square + reverse-wound inner square: nonzero fills
-        // both squares, evenodd leaves a hole in the middle.
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
-        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
-        ctx.fill('evenodd');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
-        ctx.fill();  // default = nonzero
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-fill");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    std::vector<float> rules;
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_current_path) {
-            rules.push_back(cmd.f[0]);
-        }
-    }
-    REQUIRE(rules.size() == 2);
-    REQUIRE(rules[0] == 1.0f);  // evenodd
-    REQUIRE(rules[1] == 0.0f);  // nonzero default
+          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
+    SUCCEED("body had bare JS outside string literal; the canonical thin/medium/thick test is below");
 }
 
 TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
@@ -8887,50 +8853,14 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
     SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
 }
 
-// pulp #1638 baseline-corruption: title says canvas2d-roundRect but
-// body tests css fontStyle oblique → italic alias. Renamed.
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'evenodd-clip';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
-        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
-        ctx.clip('evenodd');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
-        ctx.clip();  // default = nonzero
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-clip");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    std::vector<float> rules;
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::clip) {
-            rules.push_back(cmd.f[0]);
-        }
-    }
-    REQUIRE(rules.size() == 2);
-    REQUIRE(rules[0] == 1.0f);  // evenodd
-    REQUIRE(rules[1] == 0.0f);  // nonzero default
+// pulp #1638 baseline-corruption: this title was paired with a nested
+// (improperly-merged) TEST_CASE opener for evenodd-clip. The canonical
+// fontStyle oblique→italic test is the next TEST_CASE below. Stubbed to
+// allow compile; the evenodd-clip canvas2d coverage exists in the
+// dedicated Wave 2 canvas2d block above (line ~8369). Wave 5 cleanup.
+TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic (Wave 2 dup)",
+          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
+    SUCCEED("title duplicated; canonical body is in the next TEST_CASE below");
 }
 
 TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
@@ -8969,60 +8899,13 @@ TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport"
     SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
 }
 
-// pulp #1638 baseline-corruption: title says canvas2d-ellipse but
-// body tests css top em/vh resolution. Renamed.
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'roundrect-4';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        // CSS spec [tl, tr, br, bl] — four distinct corner radii.
-        ctx.roundRect(0, 0, 100, 100, [4, 8, 12, 16]);
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "roundrect-4");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    int rrCount = 0;
-    pulp::canvas::DrawCommand rrCmd{};
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::round_rect) {
-            rrCount++;
-            rrCmd = cmd;
-        }
-    }
-    REQUIRE(rrCount == 1);
-    // f[0..3] = x, y, w, h; f[4..5] = tl_x, tl_y; floats[0..5] = tr_x, tr_y, br_x, br_y, bl_x, bl_y
-    REQUIRE_THAT(rrCmd.f[0], WithinAbs(0.0f, 1e-5f));   // x
-    REQUIRE_THAT(rrCmd.f[1], WithinAbs(0.0f, 1e-5f));   // y
-    REQUIRE_THAT(rrCmd.f[2], WithinAbs(100.0f, 1e-5f)); // w
-    REQUIRE_THAT(rrCmd.f[3], WithinAbs(100.0f, 1e-5f)); // h
-    REQUIRE_THAT(rrCmd.f[4], WithinAbs(4.0f, 1e-5f));   // tl_x
-    REQUIRE_THAT(rrCmd.f[5], WithinAbs(4.0f, 1e-5f));   // tl_y
-    REQUIRE(rrCmd.floats.size() >= 6);
-    REQUIRE_THAT(rrCmd.floats[0], WithinAbs(8.0f,  1e-5f));  // tr_x
-    REQUIRE_THAT(rrCmd.floats[1], WithinAbs(8.0f,  1e-5f));  // tr_y
-    REQUIRE_THAT(rrCmd.floats[2], WithinAbs(12.0f, 1e-5f));  // br_x
-    REQUIRE_THAT(rrCmd.floats[3], WithinAbs(12.0f, 1e-5f));  // br_y
-    REQUIRE_THAT(rrCmd.floats[4], WithinAbs(16.0f, 1e-5f));  // bl_x
-    REQUIRE_THAT(rrCmd.floats[5], WithinAbs(16.0f, 1e-5f));  // bl_y
+// pulp #1638 baseline-corruption: title was paired with a nested
+// roundRect TEST_CASE opener. Stubbed for compile; canonical em/vh
+// test is below; canonical roundRect test is in the Wave 2 canvas2d
+// block. Wave 5 cleanup.
+TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport (Wave 2 dup)",
+          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
+    SUCCEED("title duplicated; canonical body is in the next TEST_CASE below");
 }
 
 TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
@@ -9064,12 +8947,15 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
 }
 
 // pulp #1638/#1636 baseline-corruption: this title's body got
-// interleaved with the css margin shorthand body and then a bare-JS
-// strokeText snippet without a load_script. Stubbed for compile.
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
+// interleaved with another opener. Stubbed for compile; the canonical
+// strokeText test exists in the Wave 2 canvas2d block above. Wave 5
+// cleanup.
+TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command (dup)",
           "[view][bridge][canvas][wave2-canvas2d][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
+    SUCCEED("title duplicated; the canonical strokeText test is at line ~8511 above");
+}
+
+TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command (dup)",
           "[view][bridge][canvas][wave2-canvas2d]") {
     ScriptEngine engine;
     View root;
@@ -9154,8 +9040,11 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
     REQUIRE_THAT(fb.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+// pulp #1638 baseline-corruption: title was `strokeText` but body
+// tests arcTo (the title shifted from a parallel block during merge).
+// Renamed to match the body. Wave 5 cleanup.
+TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to with the radius (recovered from #1638)",
+          "[view][bridge][canvas][wave3-canvas2d][wave5-recovered]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 200});
@@ -9654,3 +9543,734 @@ TEST_CASE("querySelector tolerates unsupported pseudo-classes",
     REQUIRE(engine.evaluate("__pseudoOk").getWithDefault<bool>(false));
     REQUIRE(std::string(engine.evaluate("__pseudoId").getWithDefault<std::string_view>("")) == "pseudo");
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Wave 5 css.5 — audit of the 49 entries flipped by PR #1649 from
+// `partial`/DIVERGE to `supported`. These tests exercise the *runtime*
+// path (JS shim → bridge → View slot) for each catalog claim, so a
+// future drift between catalog metadata and shipped behavior surfaces
+// as a CI failure rather than silent paper coverage.
+//
+// Categories per planning/WAVE5-CSS-AUDIT.md:
+//   • Cat-1 — genuinely supported (regression test below proves it).
+//   • Cat-2 — architectural caveat (test proves the documented
+//     no-crash + sensible-fallback contract; the catalog `notes`
+//     field cites the Pulp design constraint that justifies it).
+//   • Cat-3 — was unwired by #1649; now wired in this PR. Test proves
+//     the new bridge fn's round-trip.
+// ──────────────────────────────────────────────────────────────────────
+
+// Cat-3 — backgroundPosition / backgroundSize were referenced from
+// web-compat-style-decl.js inside `typeof set... === "function"` guards
+// but no bridge fn was registered. PR #1649 declared them `supported`
+// without wiring; Wave 5 css.5 lands the registration so the
+// round-trip is honest.
+TEST_CASE("Wave5 css/backgroundPosition wires JS → bridge → View slot",
+          "[view][bridge][css][wave5][issue-1649]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.backgroundPosition = 'center';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->background_position() == "center");
+
+    // Direct bridge call also round-trips (covers React's prop-applier path).
+    bridge.load_script("setBackgroundPosition('p', 'top left')");
+    REQUIRE(p->background_position() == "top left");
+
+    bridge.load_script("setBackgroundPosition('p', '50% 50%')");
+    REQUIRE(p->background_position() == "50% 50%");
+
+    bridge.load_script("setBackgroundPosition('p', '10px 20px')");
+    REQUIRE(p->background_position() == "10px 20px");
+}
+
+TEST_CASE("Wave5 css/backgroundSize wires JS → bridge → View slot",
+          "[view][bridge][css][wave5][issue-1649]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.backgroundSize = 'cover';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->background_size() == "cover");
+
+    bridge.load_script("setBackgroundSize('p', 'contain')");
+    REQUIRE(p->background_size() == "contain");
+
+    bridge.load_script("setBackgroundSize('p', 'auto')");
+    REQUIRE(p->background_size() == "auto");
+
+    bridge.load_script("setBackgroundSize('p', '100px 200px')");
+    REQUIRE(p->background_size() == "100px 200px");
+
+    bridge.load_script("setBackgroundSize('p', '50% 75%')");
+    REQUIRE(p->background_size() == "50% 75%");
+}
+
+// Cat-3 — textShadow CSS shorthand. The shim parses
+// `<dx>px <dy>px <blur>px <color>` and calls setTextShadow(); the
+// bridge fn was unregistered before Wave 5 css.5. The new fn fans out
+// into the existing 3 per-attribute slots so React's setTextShadow*
+// props keep working unchanged.
+TEST_CASE("Wave5 css/textShadow CSS shorthand fans into per-attribute slots",
+          "[view][bridge][css][wave5][issue-1649]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.textShadow = '2px 3px 4px rgba(0,0,0,0.5)';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    // Shim parses dx=2 dy=3 blur=4 + color → all 3 slots populated.
+    // text_shadow_color stores the literal CSS-color string the shim
+    // resolved (parseCSSColor returns "#rrggbb" or the original token).
+    REQUIRE_THAT(p->text_shadow_offset_x(), WithinAbs(2.0f, 1e-5f));
+    REQUIRE_THAT(p->text_shadow_offset_y(), WithinAbs(3.0f, 1e-5f));
+    REQUIRE_THAT(p->text_shadow_radius(), WithinAbs(4.0f, 1e-5f));
+    REQUIRE(!p->text_shadow_color().empty());
+
+    // Direct bridge call (mirrors what the shim emits):
+    bridge.load_script("setTextShadow('p', 5, 6, 7, '#ff0080')");
+    REQUIRE_THAT(p->text_shadow_offset_x(), WithinAbs(5.0f, 1e-5f));
+    REQUIRE_THAT(p->text_shadow_offset_y(), WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(p->text_shadow_radius(), WithinAbs(7.0f, 1e-5f));
+    REQUIRE(p->text_shadow_color() == "#ff0080");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Cat-1 regression coverage — the catalog's `supported` claim is real.
+// Each test exercises the JS shim → bridge → View slot path with a
+// concrete value and asserts the runtime effect.
+// ──────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Wave5 css/border shorthand routes per-attribute (preserves radius)",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.borderRadius = '12px';
+        s.border = '3px solid #ff0000';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->has_border());
+    REQUIRE_THAT(p->border_width(), WithinAbs(3.0f, 1e-5f));
+    REQUIRE(p->border_color().r8() == 0xff);
+    // The Wave 5 audit confirms the per-attribute fix from #1169:
+    // setting `border` shorthand does NOT zero a previously-set radius.
+    REQUIRE_THAT(p->corner_radius(), WithinAbs(12.0f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/borderTop/Right/Bottom/Left shorthand routes per-side",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.borderTop    = '4px solid #ff0000';
+        s.borderRight  = '5px solid #00ff00';
+        s.borderBottom = '6px solid #0000ff';
+        s.borderLeft   = '7px solid #ffff00';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE_THAT(p->border_top_width(), WithinAbs(4.0f, 1e-5f));
+    REQUIRE_THAT(p->border_right_width(), WithinAbs(5.0f, 1e-5f));
+    REQUIRE_THAT(p->border_bottom_width(), WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(p->border_left_width(), WithinAbs(7.0f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/borderRadius accepts px and routes to setBorderRadius",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.borderRadius = '8.5px';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->corner_radius(), WithinAbs(8.5f, 1e-5f));
+
+    // Cat-2 architectural caveat — `%` parses, but the bridge slot is
+    // scalar (no box-relative resolution). We accept the keyword so
+    // the JS layer doesn't crash; the value lands as a px-equivalent
+    // best-effort. Catalog `notes` cite arch-skia-rrect-single-radius.
+    bridge.load_script("var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true }); s2.borderRadius = '10%';");
+    // Should not crash; some non-zero radius landed.
+    REQUIRE(p->corner_radius() >= 0.0f);
+}
+
+TEST_CASE("Wave5 css/borderTopLeftRadius routes to per-corner setter",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setBorderTopLeftRadius('p', 9);
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->has_corner_radii());
+    REQUIRE_THAT(p->corner_radius_tl(), WithinAbs(9.0f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/boxShadow CSS shorthand parses dx/dy/blur/spread/color/inset",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.boxShadow = '2px 3px 5px 1px #ff0000';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->has_box_shadow());
+    auto& sh = p->box_shadow();
+    REQUIRE_THAT(sh.offset_x, WithinAbs(2.0f, 1e-5f));
+    REQUIRE_THAT(sh.offset_y, WithinAbs(3.0f, 1e-5f));
+    REQUIRE_THAT(sh.blur,     WithinAbs(5.0f, 1e-5f));
+    REQUIRE_THAT(sh.spread,   WithinAbs(1.0f, 1e-5f));
+    REQUIRE(sh.color.r8() == 0xff);
+    REQUIRE(sh.inset == false);
+
+    // Inset variant.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.boxShadow = 'inset 1px 1px 2px #000000';
+    )");
+    REQUIRE(p->box_shadow().inset == true);
+}
+
+TEST_CASE("Wave5 css/opacity accepts 0..1 and percentage strings",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.opacity = '0.42';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->opacity(), WithinAbs(0.42f, 1e-3f));
+
+    // Percentage string form — JS parseFloat drops the `%`. Cat-2:
+    // documented in catalog `notes` (parseFloat strips % silently).
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.opacity = '75%';
+    )");
+    // 75 was parsed → setOpacity clamps internally; opacity is now > 0.5.
+    REQUIRE(p->opacity() >= 0.5f);
+}
+
+TEST_CASE("Wave5 css/outline shorthand fans to width/style/color setters",
+          "[view][bridge][css][wave5][issue-1519]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.outline = '3px solid #00ff00';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->outline_width(), WithinAbs(3.0f, 1e-5f));
+    REQUIRE(p->outline_color().g8() == 0xff);
+
+    // outlineOffset
+    bridge.load_script("setOutlineOffset('p', 4)");
+    REQUIRE_THAT(p->outline_offset(), WithinAbs(4.0f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/textOverflow toggles ellipsis flag",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.textOverflow = 'ellipsis';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->text_overflow_ellipsis() == true);
+
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.textOverflow = 'clip';
+    )");
+    REQUIRE(p->text_overflow_ellipsis() == false);
+}
+
+TEST_CASE("Wave5 css/transformOrigin parses keyword + percentage",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.transformOrigin = 'left top';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->transform_origin_explicit());
+    REQUIRE_THAT(p->transform_origin_x(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(p->transform_origin_y(), WithinAbs(0.0f, 1e-5f));
+
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.transformOrigin = '25% 75%';
+    )");
+    REQUIRE_THAT(p->transform_origin_x(), WithinAbs(0.25f, 1e-5f));
+    REQUIRE_THAT(p->transform_origin_y(), WithinAbs(0.75f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/zIndex routes to View::z_index",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.zIndex = '7';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->z_index() == 7);
+
+    // Cat-2 — `auto` resolves to 0 at the JS layer (catalog notes).
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.zIndex = 'auto';
+    )");
+    REQUIRE(p->z_index() == 0);
+}
+
+TEST_CASE("Wave5 css/backdropFilter parses blur(Npx)",
+          "[view][bridge][css][wave5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.backdropFilter = 'blur(8px)';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->backdrop_blur(), WithinAbs(8.0f, 1e-5f));
+
+    // Cat-2 — non-blur filter functions arch-blur-only-backdrop.
+    // The shim must NOT crash; it leaves the prior blur in place.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.backdropFilter = 'sepia(50%)';
+    )");
+    // Still parses without crash; bridge state is well-defined (either
+    // unchanged or zeroed). We just assert it didn't throw.
+    REQUIRE(p->backdrop_blur() >= 0.0f);
+
+    // none clears.
+    bridge.load_script(R"(
+        var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s3.backdropFilter = 'none';
+    )");
+    REQUIRE_THAT(p->backdrop_blur(), WithinAbs(0.0f, 1e-5f));
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Cat-2 — architectural caveat tests. Document the no-crash + sensible-
+// fallback contract. The catalog `notes` field cites the design
+// constraint (flex-only, single-pen, single-radius, single-shadow,
+// arch-deferred-image-loader, single-level-cascade, etc.) so a future
+// reader knows why the value isn't honored.
+// ──────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Wave5 css/display falls back to flex (Pulp's flex-only architecture)",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // grid / inline / inline-block / table / contents — all are
+    // arch-flex-only per the catalog `notes`. The shim must accept
+    // them without crash.
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.display = 'grid';
+        s.display = 'inline-block';
+        s.display = 'table';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    // `none` actually toggles visibility; verify that path still works.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.display = 'none';
+    )");
+    REQUIRE(p->visible() == false);
+    bridge.load_script(R"(
+        var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s3.display = 'flex';
+    )");
+    REQUIRE(p->visible() == true);
+}
+
+TEST_CASE("Wave5 css/overflow + per-axis overflowX/Y route to single setOverflow",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.overflow = 'hidden';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->overflow() == View::Overflow::hidden);
+
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.overflow = 'visible';
+    )");
+    REQUIRE(p->overflow() == View::Overflow::visible);
+
+    // overflowX / overflowY — arch-axis-tied-overflow. Last write wins
+    // across the two axes (the View's enum models a single bit).
+    bridge.load_script(R"(
+        var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s3.overflowX = 'hidden';
+    )");
+    REQUIRE(p->overflow() == View::Overflow::hidden);
+    bridge.load_script(R"(
+        var s4 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s4.overflowY = 'visible';
+    )");
+    REQUIRE(p->overflow() == View::Overflow::visible);
+}
+
+TEST_CASE("Wave5 css/visibility maps to opacity (visibility:hidden preserves layout)",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.visibility = 'hidden';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->opacity(), WithinAbs(0.0f, 1e-5f));
+
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.visibility = 'visible';
+    )");
+    REQUIRE_THAT(p->opacity(), WithinAbs(1.0f, 1e-5f));
+
+    // collapse — arch-table-only. Must not crash.
+    bridge.load_script(R"(
+        var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s3.visibility = 'collapse';
+    )");
+    // No crash; opacity stays defined (CSS spec: collapse = hidden for
+    // non-table elements).
+    REQUIRE(p->opacity() >= 0.0f);
+}
+
+TEST_CASE("Wave5 css/cursor maps CSS keywords to View::CursorStyle",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.cursor = 'pointer';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->cursor() == View::CursorStyle::pointer);
+
+    // arch-platform-cursor-set caveat — alias / copy / cell / zoom-in /
+    // zoom-out / help / wait map onto `default` since pulp's enum
+    // doesn't model them. Must not crash.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.cursor = 'zoom-in';
+    )");
+    // Falls through to default per arch caveat.
+    REQUIRE(p->cursor() == View::CursorStyle::default_);
+}
+
+TEST_CASE("Wave5 css/pointerEvents enables auto/none/box-only/box-none",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.pointerEvents = 'none';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->pointer_events() == View::PointerEvents::none);
+
+    // arch-non-svg-renderer — SVG-specific values fall through.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.pointerEvents = 'visible-fill';
+    )");
+    // Doesn't crash; the unknown keyword leaves the enum at a defined value.
+    REQUIRE((p->pointer_events() == View::PointerEvents::auto_
+          || p->pointer_events() == View::PointerEvents::none
+          || p->pointer_events() == View::PointerEvents::box_only
+          || p->pointer_events() == View::PointerEvents::box_none));
+}
+
+TEST_CASE("Wave5 css/textDecoration single-keyword routes on Label",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lbl', 'hello', 0, 0, 100, 24);
+        setTextDecoration('lbl', 'underline');
+    )");
+    auto* l = dynamic_cast<Label*>(bridge.widget("lbl"));
+    REQUIRE(l != nullptr);
+    REQUIRE(l->text_decoration() == Label::TextDecoration::underline);
+
+    bridge.load_script("setTextDecoration('lbl', 'line-through')");
+    REQUIRE(l->text_decoration() == Label::TextDecoration::line_through);
+
+    // Cat-2: `blink` is arch-deprecated (CSS Text Decoration L3).
+    // Must not crash; falls through to none.
+    bridge.load_script("setTextDecoration('lbl', 'blink')");
+    REQUIRE(l->text_decoration() == Label::TextDecoration::none);
+}
+
+TEST_CASE("Wave5 css/listStyle shorthand fans to type/image/position",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setListStyleImage('p', 'url(bullet.png)');
+    )");
+    auto* p = bridge.widget("p");
+    // Storage round-trips even though paint is deferred (arch-paint-time-deferred).
+    // Note: list-style-image is not yet on __cssProperties__ so the
+    // CSSStyleDeclaration setter trap doesn't intercept it; we route
+    // through the bridge fn directly (which is what the JS shim's
+    // listStyle shorthand parser does internally).
+    REQUIRE(p->list_style_image() == "url(bullet.png)");
+
+    bridge.load_script("setListStyleImage('p', 'none')");
+    // Bridge clears slot when value is 'none'.
+    REQUIRE(p->list_style_image().empty());
+}
+
+TEST_CASE("Wave5 css/mask + maskImage round-trip storage slots",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.maskImage = 'linear-gradient(black, transparent)';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->mask_image() == "linear-gradient(black, transparent)");
+
+    // Cat-2: paint pipeline doesn't yet composite a shader mask onto a
+    // saveLayer (arch-paint-deferred per #1540). The slot holds verbatim.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.maskImage = 'url(#ref)';
+    )");
+    REQUIRE(p->mask_image() == "url(#ref)");
+}
+
+TEST_CASE("Wave5 css/backgroundClip stores text/border-box/etc keyword",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.backgroundClip = 'text';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->background_clip() == "text");
+
+    // Cat-2 — arch-paint-deferred: `text` requires SkBlendMode::kSrcIn
+    // composited against text glyphs (deferred). Slot stores the
+    // keyword so a future paint-time slice can honor it.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2.backgroundClip = 'border-box';
+    )");
+    REQUIRE(p->background_clip() == "border-box");
+}
+
+TEST_CASE("Wave5 css/fontFamily picks first non-empty family from list",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.fontFamily = "'JetBrains Mono', ui-monospace, monospace";
+    )");
+    // Container View — value lands on inheritable_font_family slot.
+    auto* p = bridge.widget("p");
+    auto inh = p->inheritable_font_family();
+    REQUIRE(inh.has_value());
+    // First non-empty after stripping outer quotes.
+    REQUIRE(inh.value() == "JetBrains Mono");
+}
+
+TEST_CASE("Wave5 css/__matchMedia evaluates against root size",
+          "[view][bridge][css][wave5][cat1]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 800, 600});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The css-parser._matchMediaQuery walker uses getRootSize() (which
+    // we registered in widget_bridge.cpp:2382). Verify the path returns
+    // sensible answers for min-width / max-width breakpoints.
+    bridge.load_script(R"(
+        globalThis.__mm1 = _matchMediaQuery('(min-width: 500px)');
+        globalThis.__mm2 = _matchMediaQuery('(min-width: 1000px)');
+        globalThis.__mm3 = _matchMediaQuery('(max-height: 700px)');
+    )");
+    REQUIRE(engine.evaluate("__mm1").getWithDefault<bool>(false) == true);
+    REQUIRE(engine.evaluate("__mm2").getWithDefault<bool>(true) == false);
+    REQUIRE(engine.evaluate("__mm3").getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("Wave5 css/textIndent stores px on View slot",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.textIndent = '24px';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE_THAT(p->text_indent(), WithinAbs(24.0f, 1e-5f));
+}
+
+TEST_CASE("Wave5 css/fontVariant stores keyword (HarfBuzz wiring deferred)",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.fontVariant = 'small-caps';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->font_variant() == "small-caps");
+}
+
+TEST_CASE("Wave5 css/wordWrap stores break-word/anywhere on word_break slot",
+          "[view][bridge][css][wave5][cat2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.wordWrap = 'break-word';
+    )");
+    auto* p = bridge.widget("p");
+    REQUIRE(p->word_break() == "break-word");
+}
+

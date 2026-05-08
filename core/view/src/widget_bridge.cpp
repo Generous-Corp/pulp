@@ -5033,6 +5033,30 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // Wave 5 css.5 — CSS-shorthand setTextShadow(id, dx, dy, blur, color).
+    // The JS shim (web-compat-style-decl.js case textShadow) parses
+    // `<dx>px <dy>px <blur>px <color>` and calls this with 4 packed args.
+    // Pre-Wave-5 the shim's `typeof setTextShadow === "function"` guard
+    // skipped the call because no bridge fn was registered; CSS authors
+    // got a silent no-op. We compose the three existing per-attribute
+    // slots (text_shadow_offset / text_shadow_radius / text_shadow_color)
+    // so React's setTextShadow* fan-out still works unchanged.
+    engine_.register_function("setTextShadow",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto dx = static_cast<float>(args.get<double>(1, 0.0));
+            auto dy = static_cast<float>(args.get<double>(2, 0.0));
+            auto r  = static_cast<float>(args.get<double>(3, 0.0));
+            auto c  = args.get<std::string>(4, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) {
+                v->set_text_shadow_offset(dx, dy);
+                v->set_text_shadow_radius(r);
+                v->set_text_shadow_color(c);
+            }
+            return choc::value::Value();
+        });
+
     // pulp #1517 — background sub-property setters. Storage-only today;
     // see View::set_background_{attachment,clip,origin}() doc for the
     // partial-vs-noop semantics. Wiring them here unblocks the JS shim
@@ -5060,6 +5084,32 @@ void WidgetBridge::register_api() {
             auto kw = args.get<std::string>(1, "");
             auto* v = id.empty() ? &root_ : widget(id);
             if (v) v->set_background_origin(kw);
+            return choc::value::Value();
+        });
+
+    // Wave 5 css.5 — setBackgroundPosition / setBackgroundSize. The JS
+    // shim (web-compat-style-decl.js cases backgroundPosition /
+    // backgroundSize) was already calling these as `typeof set... ===
+    // "function"` guards; without a registered bridge fn the calls were
+    // silent no-ops and the catalog claim of `supported` was a fiction.
+    // Storage-only landing here makes the round-trip honest (JS → bridge
+    // → View slot → get_attribute pulls it back) and unblocks a future
+    // raster background-image paint slice — see View::set_background_*
+    // doc for the architectural caveat.
+    engine_.register_function("setBackgroundPosition",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_position(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundSize",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_size(kw);
             return choc::value::Value();
         });
 
