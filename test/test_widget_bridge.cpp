@@ -14,6 +14,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
 #include <thread>
 
 using namespace pulp::view;
@@ -8510,7 +8511,7 @@ TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads throug
     REQUIRE_THAT(eCmd.f[2], WithinAbs(30.0f, 1e-5f));   // rx
     REQUIRE_THAT(eCmd.f[3], WithinAbs(15.0f, 1e-5f));   // ry
     // f[4] = rotation (radians) — confirm it was forwarded, not zeroed.
-    REQUIRE_THAT(eCmd.f[4], WithinAbs(static_cast<float>(M_PI / 4.0), 1e-4f));
+    REQUIRE_THAT(eCmd.f[4], WithinAbs(std::numbers::pi_v<float> / 4.0f, 1e-4f));
 }
 
 TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
@@ -9005,7 +9006,7 @@ TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads throug
     REQUIRE_THAT(eCmd.f[2], WithinAbs(30.0f, 1e-5f));   // rx
     REQUIRE_THAT(eCmd.f[3], WithinAbs(15.0f, 1e-5f));   // ry
     // f[4] = rotation (radians) — confirm it was forwarded, not zeroed.
-    REQUIRE_THAT(eCmd.f[4], WithinAbs(static_cast<float>(M_PI / 4.0), 1e-4f));
+    REQUIRE_THAT(eCmd.f[4], WithinAbs(std::numbers::pi_v<float> / 4.0f, 1e-4f));
 }
 
 TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
