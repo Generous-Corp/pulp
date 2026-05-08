@@ -37,7 +37,8 @@
       "2026-05-06_1551": "pulp #1551 (Phase A3 Bundle 3 inside pulp #1434 umbrella): pure catalog add of 13 already-implemented css/* meta entries \u2014 `__StyleSheet`, `__matchMedia`, `__pseudo_active` / `__pseudo_disabled` / `__pseudo_focus` / `__pseudo_hover`, `__selector_child` / `__selector_class` / `__selector_descendant` / `__selector_id` / `__selector_tag`, `__setProperty_var`, `__var`. Documents existing wiring in `core/view/js/web-compat-document.js`, `web-compat-style-decl.js`, `css-parser.js` and `web-compat.js`. No code changes; +13 instant supported entries. css count 199 -> 212.",
       "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563.",
       "2026-05-07": "pulp #1434 A4 Bundles 2-7: css NOT-IMPL closure. 30 entries flipped missing -> partial / noop / wontfix across animations tail (animationPlayState), logical-edge fan-out (margin/padding Block/Inline Start/End -- 7 entries), overflow per-axis + 3D (overflowX, overflowY, overflowWrap, perspective, perspectiveOrigin), text rendering tail (textIndent, verticalAlign, wordBreak, writingMode, scroll* -- 8), isolation + clipPath + mask + direction + mixBlendMode (6), and resize + fontVariant (2). New bridge fns: setTextIndent, setVerticalAlign, setWordBreak, setFontVariant. Extended setAnimation with the \"play_state\" control token. Synthetic __pseudo_classes_note flipped wontfix. Catalog css count holds at 212; missing -> 0.",
-      "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts."
+      "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts.",
+      "2026-05-07_codex_p2_isolation": "Codex P2 on PR #1565 — `css/isolation` reclassified wontfix → partial. Original A4 Bundle 6 flip used the (incorrect) premise that no platform models the property; in fact the RN oracle (`tools/harness/oracles/rn/rn-viewstyle.json`) defines `isolation` as an enum (auto/isolate, RN New Architecture only). The catalog now matches the oracle: `auto` is honored by default, `isolate` parses-but-noops pending a stacking-context layer in the paint pipeline, with the gotcha recorded explicitly. css count holds at 212 (status flip only)."
     },
     "counts": {
       "css": 212,
@@ -1791,14 +1792,19 @@
       "issue": ""
     },
     "css/isolation": {
-      "status": "wontfix",
+      "status": "partial",
       "mapsTo": "web-compat-style-decl.js has a `case \"isolation\":` that intentionally no-ops. Pulp paints into a single canvas without per-View stacking-context isolation; mix-blend-mode's saveLayer already gives layer-local compositing where needed.",
-      "supportedValues": [],
+      "supportedValues": [
+        "auto"
+      ],
       "unsupportedValues": [
         "isolate"
       ],
+      "gotchas": [
+        "`isolate` is accepted but does NOT create a new stacking context \u2014 Pulp's render pipeline doesn't implement CSS stacking contexts (z-index is a paint-order hint only). When a child uses `mix-blend-mode`, the saveLayer it triggers gives layer-local compositing without a parent isolation barrier; this matches Skia's intermediate layer semantics but not the CSS spec's stacking-context-isolation guarantee."
+      ],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing \u2192 wontfix. CSS isolation creates a new stacking context to contain blend modes; Pulp's render pipeline doesn't implement CSS stacking contexts (z-index is a paint-order hint only).",
+      "notes": "Codex P2 on PR #1565 \u2014 reclassified wontfix \u2192 partial. The RN oracle (`tools/harness/oracles/rn/rn-viewstyle.json`) DOES model `isolation` as an enum (auto/isolate, RN New Architecture only), so claiming \"no RN model\" hid a real compatibility gap. `auto` is honored by default; `isolate` is parsed-but-noop pending a stacking-context layer in the paint pipeline. Pulp #1434 A4 Bundle 6 originally flipped this missing \u2192 wontfix on the (incorrect) premise that no platform models the property.",
       "issue": ""
     },
     "css/justifyContent": {

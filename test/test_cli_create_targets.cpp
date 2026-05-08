@@ -59,7 +59,24 @@ TEST_CASE("CLI create targets skip empty standalone app targets",
           "[cli][create][issue-643]") {
     const auto targets = create_default_build_targets("", "app", "Standalone");
 
-    CHECK(targets == std::vector<std::string>{
-        "-test",
-    });
+    // Codex P2 on PR #1271 — an empty class_name (the slug
+    // sanitizer can collapse names made only of separators to "")
+    // must NOT produce the malformed target `"-test"`. That string
+    // looks like a CMake CLI option to `cmake --build --target ...`
+    // and can either fail confusingly or get mistaken for an
+    // unknown option. Empty class_name → empty target list (caller's
+    // contract: "no buildable targets" rather than a guaranteed-broken
+    // build invocation).
+    CHECK(targets == std::vector<std::string>{});
+}
+
+TEST_CASE("CLI create targets skip malformed targets when class_name is empty across formats",
+          "[cli][create][issue-643]") {
+    // Same Codex P2 case as above, generalised — none of the format
+    // suffixes should produce a "_VST3" / "_CLAP" / "_Standalone"
+    // string that starts with `_` either, for the same `cmake --build
+    // --target` reason. Empty class_name → empty target list.
+    const auto targets = create_default_build_targets(
+        "", "instrument", "VST3 CLAP AU Standalone");
+    CHECK(targets == std::vector<std::string>{});
 }

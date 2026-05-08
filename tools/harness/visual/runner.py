@@ -303,7 +303,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     mode.add_argument("--verify", action="store_true", help="Verify fixtures against checked-in goldens.")
     p.add_argument("--surface", action="append", default=None, help="Surface to run, default: yoga.")
     p.add_argument("--entry", action="append", default=None, help="Fixture entry name. May be repeated.")
-    p.add_argument("--all", action="store_true", help="Run all fixtures for the selected surface.")
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Run all fixtures for the selected surface. REQUIRED for "
+            "--generate (so accidental bulk golden rewrites need an "
+            "explicit opt-in); a no-op for --verify (kept for parity "
+            "with --generate; emits a deprecation warning when used "
+            "with --verify)."
+        ),
+    )
     p.add_argument("--binary", type=Path, default=None, help="Path to pulp-test-visual.")
     p.add_argument("--build-dir", type=Path, default=None, help="CMake build directory.")
     p.add_argument("--repo-root", type=Path, default=None, help="Override repo root discovery.")
@@ -325,6 +335,35 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.all and args.entry:
         print("error: pass --all OR --entry, not both", file=sys.stderr)
         return 2
+
+    # Codex P2 on PR #1598 — `--all` was previously redundant: omitting
+    # `--entry` ALSO returned every fixture, so `--generate` could
+    # silently rewrite all goldens for a surface without an explicit
+    # opt-in. Tighten the contract:
+    #
+    #   --generate REQUIRES --all OR --entry. Bulk golden rewrites
+    #     are now explicit; a forgotten `--entry` no longer triggers
+    #     a quiet "regenerate everything" path.
+    #
+    #   --verify continues to default to all fixtures when --entry is
+    #     omitted (matching the existing `pulp harness visual --verify`
+    #     CI ergonomic). Passing `--all` to --verify is harmless but
+    #     redundant; warn to discourage it.
+    if mode_generate and not args.all and not args.entry:
+        print(
+            "error: --generate requires either --all (regenerate every "
+            "fixture for the selected surface) or --entry NAME [--entry NAME ...]"
+            " (regenerate the listed fixtures). Refusing to silently "
+            "rewrite every golden — Codex P2 on PR #1598.",
+            file=sys.stderr,
+        )
+        return 2
+    if mode_verify and args.all:
+        print(
+            "warning: --all is redundant with --verify (omitting --entry "
+            "already runs every fixture); ignored.",
+            file=sys.stderr,
+        )
 
     try:
         binary = locate_binary(repo_root, args.build_dir, args.binary)

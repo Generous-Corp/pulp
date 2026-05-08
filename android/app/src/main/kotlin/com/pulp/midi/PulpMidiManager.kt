@@ -112,11 +112,7 @@ class PulpMidiManager(private val context: Context) {
      * Get transport type: UMP (MIDI 2.0) or bytestream (MIDI 1.0).
      */
     fun getTransportType(device: MidiDeviceInfo): Int {
-        return if (Build.VERSION.SDK_INT >= 33) {
-            device.defaultProtocol  // PROTOCOL_UMP or PROTOCOL_BYTESTREAM
-        } else {
-            TRANSPORT_BYTESTREAM
-        }
+        return resolveTransportType(Build.VERSION.SDK_INT, device)
     }
 
     /**
@@ -160,5 +156,32 @@ class PulpMidiManager(private val context: Context) {
         private const val TAG = PulpApplication.LOG_TAG
         const val TRANSPORT_BYTESTREAM = 1
         const val TRANSPORT_UMP = 2
+
+        /**
+         * SDK level at which `MidiDeviceInfo.defaultProtocol` (UMP /
+         * MIDI 2.0 negotiation) became available — Android 13.
+         */
+        const val UMP_PROTOCOL_MIN_SDK = 33
+
+        /**
+         * Transport-resolution helper, separated from `Build.VERSION.SDK_INT`
+         * so unit tests can drive BOTH branches deterministically.
+         *
+         * Codex P2 on PR #1275 — the previous test derived
+         * `expectedTransport` from the same global SDK_INT branch
+         * the production code consulted, so any single test run
+         * exercised at most one side of the API gate. The split
+         * here lets the test assert pre-33 and 33+ behaviour in
+         * the same JVM run, regardless of the host Android level
+         * reported by Robolectric / mock SDK config.
+         */
+        @JvmStatic
+        fun resolveTransportType(sdkInt: Int, device: MidiDeviceInfo): Int {
+            return if (sdkInt >= UMP_PROTOCOL_MIN_SDK) {
+                device.defaultProtocol  // PROTOCOL_UMP or PROTOCOL_BYTESTREAM
+            } else {
+                TRANSPORT_BYTESTREAM
+            }
+        }
     }
 }

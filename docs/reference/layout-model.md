@@ -12,8 +12,10 @@ This is intentional, not aspirational.
   `align-items`, `align-content`, `align-self`, `flex-grow`, `flex-shrink`,
   `flex-basis`, `gap`, `order`, all variants.
 - **Grid** — `display: grid`, `grid-template-columns/rows`, `grid-area`,
-  `grid-column/row`, `grid-auto-flow`, named lines, gap, all spec'd track
-  sizing functions including `fr`, `minmax()`, `repeat()`.
+  `grid-column/row`, `grid-auto-flow`, named lines, gap. Track sizing
+  supports fixed `px`, fractional `fr`, and `auto` today; `minmax()`
+  and `repeat()` are NOT yet implemented (`GridStyle::parse_template`
+  in `core/view/src/view.cpp`). Use explicit track lists for now.
 - **Position** — `position: absolute | relative | static | fixed`, with
   `top`/`right`/`bottom`/`left`/`inset`. Logical-edge variants
   (`marginInlineStart`, `paddingBlockEnd`, `start`, `end`) flip with
@@ -24,9 +26,12 @@ This is intentional, not aspirational.
   `overflow-clip-margin` adjustments.
 - **Border + outline** — `border-width` per-edge, `border-radius`, `outline-*`
   drawn outside the border box.
-- **Modern web** — `transform`, `opacity`, `filter`, `mask`, `clip-path`,
-  `mix-blend-mode`, `box-shadow`, `text-shadow`, gradients, animations,
-  transitions.
+- **Modern web** — `transform`, `opacity`, `filter`, `clip-path`,
+  `mix-blend-mode`, `box-shadow`, `text-shadow`, gradients, animations
+  (frame-driven playback per `compat.json css/animation*`), transitions.
+  `mask` / `mask-image` are partial today — the bridge stores values
+  but paint-time mask compositing (`saveLayer` + `SkBlendMode::kDstIn`)
+  is deferred (#1540). See `compat.json` `css/mask*` for current status.
 
 ## What Pulp does NOT support — by design
 
@@ -42,9 +47,11 @@ They're marked `wontfix` in `compat.json`.
 - **Floats** — `float`, `clear`. (Modern alternatives: flex/grid.)
 - **Print** — `page-break-*`, `print-margin`, paginated layout.
 - **List item primitives** — `display: list-item` with auto-generated
-  markers. (Pulp DOES support `list-style*` properties for explicit
-  marker rendering — just not the auto-flow that block list-item layout
-  provides.)
+  markers. The `list-style*` family is partial: the bridge stores the
+  values verbatim on the View (so a future paint pass can honor them),
+  but marker glyph painting is the architectural blocker — see
+  `compat.json css/listStyle*` (`partial-deferred-paint-time`). Pulp
+  does not model `<li>`/`<ul>`/`<ol>` semantics today.
 - **Vertical writing modes** — `writing-mode: vertical-rl | vertical-lr`.
   (Logical-edge properties work for RTL horizontal flow, but vertical
   text layout is not supported.)

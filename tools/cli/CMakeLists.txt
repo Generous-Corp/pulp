@@ -135,10 +135,18 @@ if(PULP_BUILD_TESTS)
     add_test(NAME cli-doctor
         COMMAND pulp-cli doctor
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    # doctor may exit 0 or 1 depending on environment, but should not crash
+    # doctor may exit 0 or 1 depending on environment, but should not
+    # crash and must always print the "Pulp Doctor" banner. Codex P2
+    # on PR #1278 — we previously gated this with SKIP_RETURN_CODE 1,
+    # but that turns the test into "Not Run" on exit-1 and silently
+    # bypasses PASS_REGULAR_EXPRESSION; a regression that swallowed
+    # the banner while still returning 1 (a common path on hosts with
+    # missing optional SDKs) would look like a skip in CI rather than
+    # a failure. PASS_REGULAR_EXPRESSION already wins over the exit
+    # code check, so dropping SKIP_RETURN_CODE re-enables real
+    # regression detection without breaking exit-1 hosts.
     set_tests_properties(cli-doctor PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
-        SKIP_RETURN_CODE 1
         PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
     # Issue #499 Slice 1: `pulp doctor --versions` must print the
@@ -154,12 +162,15 @@ if(PULP_BUILD_TESTS)
     add_test(NAME cli-doctor-ci
         COMMAND pulp-cli doctor --ci
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    # CI mode may exit 1 if optional SDKs are missing — that's not a crash.
-    # Accept any exit code; the test just verifies it doesn't crash.
+    # CI mode may exit 1 if optional SDKs are missing — that's not a
+    # crash. Pin the contract to "prints the Pulp Doctor banner" so a
+    # regression that swallows output but still returns 1 fails the
+    # test rather than getting silently skipped (Codex P2 on PR #1278).
+    # PASS_REGULAR_EXPRESSION wins over the exit code check, so the
+    # test passes on exit 0 OR 1 as long as the banner is rendered.
     set_tests_properties(cli-doctor-ci PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
-        SKIP_RETURN_CODE 1
-        PASS_REGULAR_EXPRESSION ".*")
+        PASS_REGULAR_EXPRESSION "Pulp Doctor")
 
     # Issue #743: `pulp doctor --validators` always renders the
     # "Validators" header and exits 0/1 (never 2 = unknown flag).
@@ -169,9 +180,12 @@ if(PULP_BUILD_TESTS)
     add_test(NAME cli-doctor-validators
         COMMAND pulp-cli doctor --validators
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # See the cli-doctor / cli-doctor-ci notes above — drop
+    # SKIP_RETURN_CODE so the "Validators" banner contract is enforced
+    # even when an optional validator is missing on the host (exit 1).
+    # Codex P2 on PR #1278.
     set_tests_properties(cli-doctor-validators PROPERTIES
         ENVIRONMENT "${_pulp_cli_doctor_ctest_env}"
-        SKIP_RETURN_CODE 1
         PASS_REGULAR_EXPRESSION "Validators")
 
     add_test(NAME cli-status
