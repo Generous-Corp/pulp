@@ -8702,35 +8702,6 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
 TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter -> kPlus",
           "[view][bridge][css][wave2-css][issue-1549][.skip-corrupt-1638]") {
     SUCCEED("body truncated by interleaved merge in #1638; equivalent coverage is in the renamed plus-lighter / plus-darker test below");
-          "[view][bridge][css][wave2-css][issue-1549]") {
-    // Wave 2 css.9 — plus-lighter / plus-darker are CSS Compositing &
-    // Blending Level 2 keywords. Both map to BlendMode::lighter
-    // (Skia's SkBlendMode::kPlus / additive). Previously fell through
-    // to the unknown-keyword normal fallback.
-    using BM = pulp::canvas::Canvas::BlendMode;
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 400, 300});
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        createPanel('a', '');
-        createPanel('b', '');
-        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
-        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
-        sa._applyProperty('mixBlendMode', 'plus-lighter');
-        sb._applyProperty('mixBlendMode', 'plus-darker');
-    )");
-
-    auto* a = bridge.widget("a");
-    auto* b = bridge.widget("b");
-    REQUIRE(a != nullptr);
-    REQUIRE(b != nullptr);
-    REQUIRE(a->mix_blend_mode() == BM::lighter);
-    REQUIRE(b->mix_blend_mode() == BM::lighter);
-    REQUIRE(a->has_non_default_blend_mode());
-    REQUIRE(b->has_non_default_blend_mode());
 }
 
 // ── pulp Wave 2 canvas2d cheap wiring (DIVERGE → PASS) ───────────────────
@@ -8783,8 +8754,6 @@ TEST_CASE("CSSStyleDeclaration mixBlendMode plus-lighter / plus-darker map to BM
 //                                draw command (RecordingCanvas captures
 //                                the geometry + stops verbatim).
 
-TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to cmd with the radius",
-          "[view][bridge][canvas][wave3-canvas2d]") {
     bridge.load_script(R"(
         createPanel('a', '');
         createPanel('b', '');
@@ -8802,54 +8771,6 @@ TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to cmd with t
     REQUIRE(b->mix_blend_mode() == BM::lighter);
     REQUIRE(a->has_non_default_blend_mode());
     REQUIRE(b->has_non_default_blend_mode());
-}
-
-// pulp #1638/#1636 baseline-corruption (filed as separate issue): The
-// title here got paired with a bare-JS body that was never wrapped in
-// bridge.load_script(R"(...)"). Stubbed out so the file compiles
-// while the full test suite reconstruction is tracked separately.
-TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: title says canvas2d-clip but body
-// tests css borderWidth keyword expansion. Renamed to match the body.
-TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-        var c = document.createElement('canvas');
-        c.id = 'evenodd-fill';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        // Self-overlapping path — the only paths where nonzero vs evenodd
-        // differ. Outer square + reverse-wound inner square: nonzero fills
-        // both squares, evenodd leaves a hole in the middle.
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
-        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
-        ctx.fill('evenodd');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
-        ctx.fill();  // default = nonzero
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-fill");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    std::vector<float> rules;
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_current_path) {
-            rules.push_back(cmd.f[0]);
-        }
-    }
-    REQUIRE(rules.size() == 2);
-    REQUIRE(rules[0] == 1.0f);  // evenodd
-    REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
 TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
@@ -8877,60 +8798,6 @@ TEST_CASE("CSSStyleDeclaration borderWidth keyword expansion thin/medium/thick",
     REQUIRE_THAT(bridge.widget("thin")->border_width(),  WithinAbs(1.0f, 0.001f));
     REQUIRE_THAT(bridge.widget("med")->border_width(),   WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(bridge.widget("thick")->border_width(), WithinAbs(4.0f, 0.001f));
-}
-
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: title says canvas2d-roundRect but
-// body tests css fontStyle oblique → italic alias. Renamed.
-TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-TEST_CASE("Wave 2 canvas2d — ctx.clip('evenodd') reaches Canvas::clip with FillRule::evenodd",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'evenodd-clip';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(100, 0); ctx.lineTo(100, 100); ctx.lineTo(0, 100); ctx.closePath();
-        ctx.moveTo(25, 25); ctx.lineTo(25, 75); ctx.lineTo(75, 75); ctx.lineTo(75, 25); ctx.closePath();
-        ctx.clip('evenodd');
-        ctx.beginPath();
-        ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(10, 10); ctx.closePath();
-        ctx.clip();  // default = nonzero
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "evenodd-clip");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    std::vector<float> rules;
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::clip) {
-            rules.push_back(cmd.f[0]);
-        }
-    }
-    REQUIRE(rules.size() == 2);
-    REQUIRE(rules[0] == 1.0f);  // evenodd
-    REQUIRE(rules[1] == 0.0f);  // nonzero default
 }
 
 TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
@@ -8961,70 +8828,6 @@ TEST_CASE("CSSStyleDeclaration fontStyle oblique aliases to italic",
     REQUIRE(lb->font_style() == 1);   // italic (angle ignored)
 }
 
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638 baseline-corruption: title says canvas2d-ellipse but
-// body tests css top em/vh resolution. Renamed.
-TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport (Wave 2)",
-          "[view][bridge][css][wave2-css]") {
-TEST_CASE("Wave 2 canvas2d — ctx.roundRect with 4 distinct corners produces 4 distinct radii",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'roundrect-4';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        // CSS spec [tl, tr, br, bl] — four distinct corner radii.
-        ctx.roundRect(0, 0, 100, 100, [4, 8, 12, 16]);
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "roundrect-4");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    int rrCount = 0;
-    pulp::canvas::DrawCommand rrCmd{};
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::round_rect) {
-            rrCount++;
-            rrCmd = cmd;
-        }
-    }
-    REQUIRE(rrCount == 1);
-    // f[0..3] = x, y, w, h; f[4..5] = tl_x, tl_y; floats[0..5] = tr_x, tr_y, br_x, br_y, bl_x, bl_y
-    REQUIRE_THAT(rrCmd.f[0], WithinAbs(0.0f, 1e-5f));   // x
-    REQUIRE_THAT(rrCmd.f[1], WithinAbs(0.0f, 1e-5f));   // y
-    REQUIRE_THAT(rrCmd.f[2], WithinAbs(100.0f, 1e-5f)); // w
-    REQUIRE_THAT(rrCmd.f[3], WithinAbs(100.0f, 1e-5f)); // h
-    REQUIRE_THAT(rrCmd.f[4], WithinAbs(4.0f, 1e-5f));   // tl_x
-    REQUIRE_THAT(rrCmd.f[5], WithinAbs(4.0f, 1e-5f));   // tl_y
-    REQUIRE(rrCmd.floats.size() >= 6);
-    REQUIRE_THAT(rrCmd.floats[0], WithinAbs(8.0f,  1e-5f));  // tr_x
-    REQUIRE_THAT(rrCmd.floats[1], WithinAbs(8.0f,  1e-5f));  // tr_y
-    REQUIRE_THAT(rrCmd.floats[2], WithinAbs(12.0f, 1e-5f));  // br_x
-    REQUIRE_THAT(rrCmd.floats[3], WithinAbs(12.0f, 1e-5f));  // br_y
-    REQUIRE_THAT(rrCmd.floats[4], WithinAbs(16.0f, 1e-5f));  // bl_x
-    REQUIRE_THAT(rrCmd.floats[5], WithinAbs(16.0f, 1e-5f));  // bl_y
-}
-
 TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport",
           "[view][bridge][css][wave2-css]") {
     // Wave 2 css.2 — em/rem default to 14 px, vh/vw default to a
@@ -9053,68 +8856,6 @@ TEST_CASE("CSSStyleDeclaration top em/vh resolves to default font-size/viewport"
     REQUIRE_THAT(bridge.widget("b")->left(), WithinAbs(21.0f, 0.05f));
     REQUIRE_THAT(bridge.widget("c")->top(),  WithinAbs(300.0f, 0.05f));
     REQUIRE_THAT(bridge.widget("d")->left(), WithinAbs(200.0f, 0.05f));
-}
-
-// pulp #1638/#1636 baseline-corruption: title/body interleave from a
-// bad merge resolution; body was bare-JS without bridge.load_script.
-// Stubbed for compile.
-TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
-          "[view][bridge][css][wave2-css][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-}
-
-// pulp #1638/#1636 baseline-corruption: this title's body got
-// interleaved with the css margin shorthand body and then a bare-JS
-// strokeText snippet without a load_script. Stubbed for compile.
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
-          "[view][bridge][canvas][wave2-canvas2d][.skip-corrupt-1638]") {
-    SUCCEED("body corrupted by interleaved merge in #1638; reconstruct in follow-up");
-TEST_CASE("Wave 2 canvas2d — ctx.ellipse with non-zero rotation threads through to a single ellipse command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
-    ScriptEngine engine;
-    View root;
-    root.set_bounds({0, 0, 200, 200});
-    root.set_theme(Theme::dark());
-    StateStore store;
-    WidgetBridge bridge(engine, root, store);
-
-    bridge.load_script(R"(
-        var c = document.createElement('canvas');
-        c.id = 'ellipse-rot';
-        c.width = 100; c.height = 100;
-        document.body.appendChild(c);
-        var ctx = c.getContext('2d');
-        ctx.beginPath();
-        // 45 degrees in radians, full sweep.
-        ctx.ellipse(50, 50, 30, 15, Math.PI / 4, 0, Math.PI * 2, false);
-    )");
-    root.layout_children();
-
-    auto* canvas = canvasFromBridge(bridge, engine, "ellipse-rot");
-    REQUIRE(canvas != nullptr);
-
-    pulp::canvas::RecordingCanvas rec;
-    canvas->paint(rec);
-
-    int ellipseCount = 0;
-    pulp::canvas::DrawCommand eCmd{};
-    for (const auto& cmd : rec.commands()) {
-        if (cmd.type == pulp::canvas::DrawCommand::Type::ellipse) {
-            ellipseCount++;
-            eCmd = cmd;
-        }
-    }
-    // Single ellipse command — the JS shim must NOT decompose into multiple
-    // arc segments when rotation is non-zero (pre-Wave-2 the rotation arg
-    // was ignored entirely, which would have collapsed the call to either
-    // `arc` or a no-op).
-    REQUIRE(ellipseCount == 1);
-    REQUIRE_THAT(eCmd.f[0], WithinAbs(50.0f, 1e-5f));   // cx
-    REQUIRE_THAT(eCmd.f[1], WithinAbs(50.0f, 1e-5f));   // cy
-    REQUIRE_THAT(eCmd.f[2], WithinAbs(30.0f, 1e-5f));   // rx
-    REQUIRE_THAT(eCmd.f[3], WithinAbs(15.0f, 1e-5f));   // ry
-    // f[4] = rotation (radians) — confirm it was forwarded, not zeroed.
-    REQUIRE_THAT(eCmd.f[4], WithinAbs(static_cast<float>(M_PI / 4.0), 1e-4f));
 }
 
 TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token",
@@ -9154,8 +8895,8 @@ TEST_CASE("CSSStyleDeclaration margin shorthand honors auto + percent per token"
     REQUIRE_THAT(fb.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
 }
 
-TEST_CASE("Wave 2 canvas2d — ctx.strokeText routes through dedicated stroke_text command",
-          "[view][bridge][canvas][wave2-canvas2d]") {
+TEST_CASE("Wave 3 canvas2d — ctx.arcTo records a single path_arc_to command with the radius",
+          "[view][bridge][canvas][wave3-canvas2d]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 200});
