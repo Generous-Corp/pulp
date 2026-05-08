@@ -42,6 +42,34 @@ Catalog status counts (informational):
 | partial | ~7 |
 | missing | ~3 |
 
+## Wave 1 drift cleanup + arch reclassification (2026-05-07)
+
+Catalog/oracle paperwork only; no JS or C++ source change. Drift
+count dropped from 2 → 0 on the html surface.
+
+- **`html/dialog`** — flipped `supported` → `noop` to match the
+  harness verdict. `Element.show()` / `showModal()` / `close()` are
+  stored-only on the panel; modal dialog rendering is not in the
+  paint pipeline today.
+- **`html/input`** — flipped `partial` → `supported`. `<input>` is
+  fully wired through `_ensureNative` -> bridge `createTextEditor` /
+  `createFader` / `createCheckbox`.
+- **Architectural reclassification (5 entries, status retained):**
+  - `html/StyleSheet_inline` and `html/style` — @media / @keyframes /
+    @import / @font-face / @supports / complex selectors are
+    `arch-no-cascade-engine` (Pulp doesn't model the CSS cascade by
+    design; selector evaluation is single-pass tag/.class/#id).
+  - `html/DocumentFragment` — full Range / Selection API is
+    `arch-text-editor-owns-selection` (Pulp's text editor has its
+    own selection model).
+  - `html/img` — actual image src loading is
+    `partial-deferred-skia-codec` (gated on SkCodec wiring per pulp
+    #932 era); placeholder Label keeps the layout slot until Skia
+    decode lands.
+  - `html/svg` — full SVG rasterization of children is
+    `arch-explicit-non-goal` (createCol shim reserves layout space;
+    use @pulp/react SvgPath intrinsic for rendered paths).
+
 ## DIVERGE→PASS sweep (2026-05-07)
 
 The 14 → 7 flip closed JS-side wiring gaps for 7 entries; the

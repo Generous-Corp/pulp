@@ -199,18 +199,42 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "order", parseInt(resolved) || 0);
             break;
         case "gap": {
-            var g = parseCSSLength(resolved);
-            if (g) setFlex(id, "gap", g.value);
+            // pulp Wave 2 css.2 — CSS shorthand `gap: <row-gap> [<col-gap>]`.
+            // When two tokens are present, fan out to setRowGap +
+            // setColumnGap so each axis gets its own value (matching the
+            // CSS spec). Single-token form falls through to the legacy
+            // shared `gap` slot for backwards compatibility.
+            var gapToks = String(resolved).trim().split(/\s+/);
+            if (gapToks.length >= 2) {
+                var grRow = parseCSSLength(gapToks[0]);
+                var grCol = parseCSSLength(gapToks[1]);
+                if (grRow) setFlex(id, "row_gap",
+                    grRow.unit === "%" ? (grRow.value + "%") : grRow.value);
+                if (grCol) setFlex(id, "column_gap",
+                    grCol.unit === "%" ? (grCol.value + "%") : grCol.value);
+            } else {
+                var g = parseCSSLength(resolved);
+                if (g) setFlex(id, "gap",
+                    g.unit === "%" ? (g.value + "%") : g.value);
+            }
             break;
         }
         case "rowGap": {
+            // pulp Wave 2 css.2 — forward `'NN%'` verbatim so the bridge
+            // stores the percent value on the FlexStyle.row_gap slot
+            // (best-effort: Yoga has no row-gap percent API yet, so the
+            // value is treated as px until the Yoga update lands).
             var rg = parseCSSLength(resolved);
-            if (rg) setFlex(id, "row_gap", rg.value);
+            if (rg) setFlex(id, "row_gap",
+                rg.unit === "%" ? (rg.value + "%") : rg.value);
             break;
         }
         case "columnGap": {
+            // pulp Wave 2 css.2 — forward `'NN%'` verbatim (same caveat
+            // as rowGap above).
             var cg = parseCSSLength(resolved);
-            if (cg) setFlex(id, "column_gap", cg.value);
+            if (cg) setFlex(id, "column_gap",
+                cg.unit === "%" ? (cg.value + "%") : cg.value);
             break;
         }
 
@@ -243,23 +267,47 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
         case "minWidth": {
+            // pulp Wave 2 css.2 — accept `calc()` / `min()` / `max()` /
+            // `clamp()` via the existing resolveCSSLength helper. Numeric
+            // px and % paths route through the legacy parseCSSLength
+            // dispatch (which the bridge then forwards to Yoga).
+            if (/^(calc|min|max|clamp)\(/.test(String(resolved).trim())) {
+                setFlex(id, "min_width", resolveCSSLength(resolved, null));
+                break;
+            }
             var mw = parseCSSLength(resolved);
-            if (mw) setFlex(id, "min_width", mw.value);
+            if (mw) setFlex(id, "min_width",
+                mw.unit === "%" ? (mw.value + "%") : mw.value);
             break;
         }
         case "minHeight": {
+            if (/^(calc|min|max|clamp)\(/.test(String(resolved).trim())) {
+                setFlex(id, "min_height", resolveCSSLength(resolved, null));
+                break;
+            }
             var mh = parseCSSLength(resolved);
-            if (mh) setFlex(id, "min_height", mh.value);
+            if (mh) setFlex(id, "min_height",
+                mh.unit === "%" ? (mh.value + "%") : mh.value);
             break;
         }
         case "maxWidth": {
+            if (/^(calc|min|max|clamp)\(/.test(String(resolved).trim())) {
+                setFlex(id, "max_width", resolveCSSLength(resolved, null));
+                break;
+            }
             var xw = parseCSSLength(resolved);
-            if (xw) setFlex(id, "max_width", xw.value);
+            if (xw) setFlex(id, "max_width",
+                xw.unit === "%" ? (xw.value + "%") : xw.value);
             break;
         }
         case "maxHeight": {
+            if (/^(calc|min|max|clamp)\(/.test(String(resolved).trim())) {
+                setFlex(id, "max_height", resolveCSSLength(resolved, null));
+                break;
+            }
             var xh = parseCSSLength(resolved);
-            if (xh) setFlex(id, "max_height", xh.value);
+            if (xh) setFlex(id, "max_height",
+                xh.unit === "%" ? (xh.value + "%") : xh.value);
             break;
         }
 
@@ -303,11 +351,31 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         }
         // Margin shorthand
         case "margin": {
-            var ms = expandShorthand(resolved);
-            setFlex(id, "margin_top", ms[0]);
-            setFlex(id, "margin_right", ms[1]);
-            setFlex(id, "margin_bottom", ms[2]);
-            setFlex(id, "margin_left", ms[3]);
+            // pulp Wave 2 css.2 — per-token `auto` / `%` support in the
+            // shorthand. Mirrors the per-edge `marginTop` etc. behavior.
+            // expandShorthand collapses all tokens to numeric values
+            // (lossy for auto / percent), so we re-tokenize here and
+            // dispatch each side via the same string-aware setFlex
+            // pathway used by per-edge keys. CSS shorthand convention:
+            //   1 token  → all four
+            //   2 tokens → vertical / horizontal
+            //   3 tokens → top / horizontal / bottom
+            //   4 tokens → top / right / bottom / left
+            var mTokens = String(resolved).trim().split(/\s+/);
+            var mEdges = [mTokens[0], mTokens[1] || mTokens[0],
+                          mTokens[2] || mTokens[0], mTokens[3] || mTokens[1] || mTokens[0]];
+            var mNames = ["margin_top", "margin_right", "margin_bottom", "margin_left"];
+            for (var mi = 0; mi < 4; mi++) {
+                var tok = String(mEdges[mi]).trim().toLowerCase();
+                if (tok === "auto") {
+                    setFlex(id, mNames[mi], "auto");
+                } else {
+                    var mp = parseCSSLength(tok);
+                    if (!mp) continue;
+                    setFlex(id, mNames[mi],
+                        mp.unit === "%" ? (mp.value + "%") : mp.value);
+                }
+            }
             break;
         }
         // pulp #1434 batch 4 — React Native shorthand aliases. RN code
@@ -385,11 +453,22 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         }
         // Padding shorthand
         case "padding": {
-            var ps = expandShorthand(resolved);
-            setFlex(id, "padding_top", ps[0]);
-            setFlex(id, "padding_right", ps[1]);
-            setFlex(id, "padding_bottom", ps[2]);
-            setFlex(id, "padding_left", ps[3]);
+            // pulp Wave 2 css.2 — per-token `%` support in the shorthand.
+            // Yoga's padding doesn't accept `auto` (only margin does), so
+            // the keyword is silently dropped per token. Otherwise the
+            // tokenizing logic mirrors the `margin` shorthand above.
+            var pTokens = String(resolved).trim().split(/\s+/);
+            var pEdges = [pTokens[0], pTokens[1] || pTokens[0],
+                          pTokens[2] || pTokens[0], pTokens[3] || pTokens[1] || pTokens[0]];
+            var pNames = ["padding_top", "padding_right", "padding_bottom", "padding_left"];
+            for (var pi = 0; pi < 4; pi++) {
+                var ptok = String(pEdges[pi]).trim().toLowerCase();
+                if (ptok === "auto") continue; // Yoga padding has no auto
+                var pp = parseCSSLength(ptok);
+                if (!pp) continue;
+                setFlex(id, pNames[pi],
+                    pp.unit === "%" ? (pp.value + "%") : pp.value);
+            }
             break;
         }
         // pulp #1434 batch 4 — React Native shorthand aliases for padding.
@@ -432,8 +511,39 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // Typography
         case "fontSize": {
+            // pulp Wave 2 css.2 — relative-unit & keyword expansion.
+            //   • em/rem/%   → resolve against parent / root font-size.
+            //                  We don't have a real cascade context here
+            //                  (the CSS shim is per-element with no
+            //                  ancestor walk), so we use the CSS default
+            //                  of 14px (matches Pulp's default Label
+            //                  font-size and the resolveCSSLength ctx
+            //                  fallback) as the inherited size. This is
+            //                  imperfect for nested fontSize cascades but
+            //                  matches the existing webview default and
+            //                  unblocks the common case (single-level
+            //                  rem/em).
+            //   • smaller    → 0.83x the inherited size (CSS spec).
+            //   • larger     → 1.2x the inherited size  (CSS spec).
+            var fsResolved = String(resolved).trim().toLowerCase();
+            var inherited = 14; // CSS default + pulp Label default
+            if (fsResolved === "smaller") {
+                setFontSize(id, inherited * 0.83);
+                break;
+            }
+            if (fsResolved === "larger") {
+                setFontSize(id, inherited * 1.2);
+                break;
+            }
             var fs = parseCSSLength(resolved);
-            if (fs) setFontSize(id, fs.value);
+            if (!fs) break;
+            if (fs.unit === "em" || fs.unit === "rem") {
+                setFontSize(id, fs.value * inherited);
+            } else if (fs.unit === "%") {
+                setFontSize(id, fs.value / 100 * inherited);
+            } else {
+                setFontSize(id, fs.value);
+            }
             break;
         }
         case "fontWeight":
@@ -461,16 +571,70 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFontWeight(id, fwNumeric);
             break;
         case "fontStyle":
-            setFontStyle(id, resolved);
+            // pulp Wave 2 css.4 — `oblique` (and `oblique <angle>`) aliases
+            // to `italic`. Skia distinguishes italic-vs-oblique only when
+            // the font has a slant (`slnt`) variation axis, which most
+            // bundled fonts don't. The previous default-case behavior
+            // forwarded `oblique` verbatim, which the bridge silently
+            // dropped (only `italic` flips the Label slot). Aliasing
+            // upgrades a silent no-op to the closest visual approximation.
+            if (/^oblique\b/i.test(String(resolved).trim())) {
+                setFontStyle(id, "italic");
+            } else {
+                setFontStyle(id, resolved);
+            }
             break;
         case "letterSpacing": {
+            // pulp Wave 2 css.2 — `normal` keyword + `em` unit.
+            //   • normal → 0 (CSS spec — no extra spacing)
+            //   • em     → resolved against the same default font-size as
+            //              fontSize above (14px).
+            var lsResolved = String(resolved).trim().toLowerCase();
+            if (lsResolved === "normal") {
+                setLetterSpacing(id, 0);
+                break;
+            }
             var ls = parseCSSLength(resolved);
-            if (ls) setLetterSpacing(id, ls.value);
+            if (!ls) break;
+            if (ls.unit === "em" || ls.unit === "rem") {
+                setLetterSpacing(id, ls.value * 14);
+            } else {
+                setLetterSpacing(id, ls.value);
+            }
             break;
         }
         case "lineHeight": {
+            // pulp Wave 2 css.2 — accept three additional value forms:
+            //   • unitless multiplier ("1.5") → multiply by font-size
+            //     (CSS spec — most common form). Pulp's Label expects a
+            //     line-height in *pixels*; we resolve the multiplier
+            //     against the default font-size of 14px (same caveat as
+            //     fontSize re: single-level cascade).
+            //   • `%`  → percent of font-size (parses to value/100 * 14)
+            //   • `em` → multiplier (same math as unitless)
+            //   • `normal` → spec default 1.2 × font-size.
+            var lhResolved = String(resolved).trim().toLowerCase();
+            if (lhResolved === "normal") {
+                setLineHeight(id, 14 * 1.2);
+                break;
+            }
+            // Unitless number (no `px` / `em` / `%` suffix). parseCSSLength
+            // treats bare numbers as px, so we have to detect this case
+            // before falling through — a value of `1.5` should multiply,
+            // not be set as 1.5 px.
+            if (/^-?[\d.]+$/.test(lhResolved)) {
+                setLineHeight(id, parseFloat(lhResolved) * 14);
+                break;
+            }
             var lh = parseCSSLength(resolved);
-            if (lh) setLineHeight(id, lh.value);
+            if (!lh) break;
+            if (lh.unit === "em" || lh.unit === "rem") {
+                setLineHeight(id, lh.value * 14);
+            } else if (lh.unit === "%") {
+                setLineHeight(id, lh.value / 100 * 14);
+            } else {
+                setLineHeight(id, lh.value);
+            }
             break;
         }
         case "textAlign":
@@ -518,6 +682,13 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // routing to them preserves the unset siblings — matching CSS
         // semantics.
         case "borderRadius": {
+            // pulp Wave 2 css.2 — accept `%` values. Pulp's setBorderRadius
+            // is scalar (no percent unit on the View slot), so we treat
+            // the percent value as a px-equivalent best-effort: 50% on a
+            // 200x100 box would historically be 100/50px, but we don't
+            // have the box size here. The catalog flips %/elliptical to
+            // `partial` honest. Users wanting a circle should use a
+            // numeric radius >= half their min(width, height).
             var br = parseCSSLength(resolved);
             if (br) setBorderRadius(id, br.value);
             break;
@@ -541,6 +712,18 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
         case "borderWidth": {
+            // pulp Wave 2 css.2 — keyword expansion for `thin` / `medium` /
+            // `thick` (CSS Backgrounds & Borders L3 named widths). Browser
+            // defaults vary slightly but the canonical values are 1 / 3 /
+            // 5px (Chromium / WebKit ship 1 / 3 / 5; Firefox uses 1 / 3 /
+            // 5 too). We pick 1 / 2 / 4 to match the original Wave 2 plan
+            // — slightly thinner than browsers but a reasonable visual
+            // ladder for our 1x DPI default. Authors who want exact
+            // browser parity can pass numeric px values.
+            var bwResolved = String(resolved).trim().toLowerCase();
+            if (bwResolved === "thin")   { setBorderWidth(id, 1); break; }
+            if (bwResolved === "medium") { setBorderWidth(id, 2); break; }
+            if (bwResolved === "thick")  { setBorderWidth(id, 4); break; }
             var bw = parseCSSLength(resolved);
             if (bw) setBorderWidth(id, bw.value);
             break;
@@ -814,24 +997,46 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // and detect '%' suffix, routing the value through Yoga's native
         // YGNodeStyleSetPositionPercent path. Mirrors PR #1426 for the
         // View positional fields.
+        // pulp Wave 2 css.2 — relative-unit resolution for top/right/
+        // bottom/left. em/rem are resolved against the default 14px
+        // font-size (no per-element cascade context here); vh/vw are
+        // resolved against an 800x600 default viewport (matches
+        // resolveLength in css-parser.js). Numeric px and `%` paths
+        // are unchanged.
         case "top": {
             var tv = parseCSSLength(resolved); if (!tv) break;
-            if (tv.unit === "%") setTop(id, tv.value + "%"); else setTop(id, tv.value);
+            if (tv.unit === "%") setTop(id, tv.value + "%");
+            else if (tv.unit === "em" || tv.unit === "rem") setTop(id, tv.value * 14);
+            else if (tv.unit === "vh") setTop(id, tv.value / 100 * 600);
+            else if (tv.unit === "vw") setTop(id, tv.value / 100 * 800);
+            else setTop(id, tv.value);
             break;
         }
         case "right": {
             var rv = parseCSSLength(resolved); if (!rv) break;
-            if (rv.unit === "%") setRight(id, rv.value + "%"); else setRight(id, rv.value);
+            if (rv.unit === "%") setRight(id, rv.value + "%");
+            else if (rv.unit === "em" || rv.unit === "rem") setRight(id, rv.value * 14);
+            else if (rv.unit === "vh") setRight(id, rv.value / 100 * 600);
+            else if (rv.unit === "vw") setRight(id, rv.value / 100 * 800);
+            else setRight(id, rv.value);
             break;
         }
         case "bottom": {
             var bv = parseCSSLength(resolved); if (!bv) break;
-            if (bv.unit === "%") setBottom(id, bv.value + "%"); else setBottom(id, bv.value);
+            if (bv.unit === "%") setBottom(id, bv.value + "%");
+            else if (bv.unit === "em" || bv.unit === "rem") setBottom(id, bv.value * 14);
+            else if (bv.unit === "vh") setBottom(id, bv.value / 100 * 600);
+            else if (bv.unit === "vw") setBottom(id, bv.value / 100 * 800);
+            else setBottom(id, bv.value);
             break;
         }
         case "left": {
             var lv = parseCSSLength(resolved); if (!lv) break;
-            if (lv.unit === "%") setLeft(id, lv.value + "%"); else setLeft(id, lv.value);
+            if (lv.unit === "%") setLeft(id, lv.value + "%");
+            else if (lv.unit === "em" || lv.unit === "rem") setLeft(id, lv.value * 14);
+            else if (lv.unit === "vh") setLeft(id, lv.value / 100 * 600);
+            else if (lv.unit === "vw") setLeft(id, lv.value / 100 * 800);
+            else setLeft(id, lv.value);
             break;
         }
 

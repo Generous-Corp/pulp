@@ -61,6 +61,22 @@ struct CanvasDrawCmd {
         // gradient_colors / gradient_positions (same shape as the
         // linear / radial entries above).
         set_fill_gradient_conic,
+        // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle =
+        // createLinearGradient(...) | createRadialGradient(...) |
+        // createConicGradient(...)`. Field layout matches the fill
+        // counterparts:
+        //   set_stroke_gradient_linear:        x/y/x2/y2 = (x0,y0,x1,y1)
+        //   set_stroke_gradient_radial:        x/y/extra = (cx,cy,radius)
+        //   set_stroke_gradient_radial_two_circles:
+        //                                      x/y/extra = (x0,y0,r0)
+        //                                      x2/y2/w   = (x1,y1,r1)
+        //   set_stroke_gradient_conic:         x/y/extra = (cx,cy,startAngle)
+        // Stops live in gradient_colors / gradient_positions.
+        set_stroke_gradient_linear,
+        set_stroke_gradient_radial,
+        set_stroke_gradient_radial_two_circles,
+        set_stroke_gradient_conic,
+        clear_stroke_gradient,
         // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
         // Image source path / data URI in `text`, tile modes packed into
         // `int_val` (bit 0 = x, bit 1 = y; 0 = repeat, 1 = no-repeat).

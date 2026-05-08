@@ -2515,6 +2515,79 @@ TEST_CASE("Canvas2D shim getter round-trip for the 10-entry catalog set",
         "methods-ok");
 }
 
+// ── Wave 4 c2d cleanup — lineDashOffset re-flushes on assignment ─────────
+//
+// HTML5 spec: ctx.lineDashOffset is a sticky phase property; assigning to
+// it must shift the dash phase on subsequent strokes without requiring a
+// redundant setLineDash call. Pre-Wave-4 the field was tracked locally
+// but only sent on the next setLineDash, so phase mutations between
+// draws were silently dropped.
+//
+// Wave 4 converted lineDashOffset to an Object.defineProperty getter/
+// setter pair: the setter re-pushes the active dash pattern via
+// canvasSetLineDash with the new phase. Verify that:
+//   1. The default (lineDashOffset=0) reads back as 0.
+//   2. Assigning a new value with a pattern in place re-pushes
+//      canvasSetLineDash with the new phase.
+//   3. Non-finite values (NaN, Infinity) are ignored per spec.
+TEST_CASE("Canvas2D lineDashOffset re-flushes dash pattern on assignment",
+          "[view][canvas2d][issue-1526][wave4]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setLineDash([6, 4]);            // phase 0 (default)
+        ctx.lineDashOffset = 3;             // re-push w/ phase 3
+        ctx.lineDashOffset = NaN;           // ignored — phase stays 3
+        ctx.lineDashOffset = Infinity;      // ignored
+        ctx.lineDashOffset = -2;            // negative is finite — accepted
+        globalThis.__final_offset__ = ctx.lineDashOffset;
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = pulp::view::CanvasDrawCmd::Type;
+    int set_line_dash_count = 0;
+    float last_phase = 0.0f;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::set_line_dash) {
+            ++set_line_dash_count;
+            last_phase = cmd.extra;
+        }
+    }
+    // Expect at least 3 set_line_dash records:
+    //   (1) ctx.setLineDash([6,4]) phase=0
+    //   (2) ctx.lineDashOffset = 3 (re-flush) phase=3
+    //   (3) ctx.lineDashOffset = -2 (re-flush) phase=-2
+    // NaN / Infinity assignments must NOT push, so the count must be
+    // exactly 3 (not 5).
+    REQUIRE(set_line_dash_count == 3);
+    REQUIRE(last_phase == Catch::Approx(-2.0f));
+}
+
+// Round-trip read: lineDashOffset getter returns the most-recently
+// assigned finite value (HTML5 spec).
+TEST_CASE("Canvas2D lineDashOffset getter round-trips assigned value",
+          "[view][canvas2d][issue-1526][wave4]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var defaults = ctx.lineDashOffset;
+        ctx.lineDashOffset = 3;
+        var assigned1 = ctx.lineDashOffset;
+        ctx.lineDashOffset = NaN;        // ignored
+        var assigned2 = ctx.lineDashOffset;
+        ctx.lineDashOffset = -2.5;
+        var assigned3 = ctx.lineDashOffset;
+        return defaults + '|' + assigned1 + '|' + assigned2 + '|' + assigned3;
+    )");
+    REQUIRE(result == "0|3|3|-2.5");
+}
+
 // ── pulp #1527 — getTransform / resetTransform ───────────────────────────
 //
 // HTML5 spec: ctx.getTransform() returns a DOMMatrix-shaped object whose

@@ -289,6 +289,7 @@
       "setRight", "setRotation", "setScale", "setSkew", "setSvgFill",
       "setSvgPath", "setSvgStroke", "setSvgStrokeWidth", "setSvgViewBox", "setText",
       "setTextAlign", "setTextColor", "setTextDecoration",
+      "setTextShadowColor", "setTextShadowOffset", "setTextShadowRadius",
       "setTextTransform", "setTop", "setTransform", "setTransformOrigin",
       "setTranslate", "setUserSelect", "setVisible", "setZIndex"
     ]

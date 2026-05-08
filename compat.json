@@ -37,7 +37,8 @@
       "2026-05-06_1551": "pulp #1551 (Phase A3 Bundle 3 inside pulp #1434 umbrella): pure catalog add of 13 already-implemented css/* meta entries — `__StyleSheet`, `__matchMedia`, `__pseudo_active` / `__pseudo_disabled` / `__pseudo_focus` / `__pseudo_hover`, `__selector_child` / `__selector_class` / `__selector_descendant` / `__selector_id` / `__selector_tag`, `__setProperty_var`, `__var`. Documents existing wiring in `core/view/js/web-compat-document.js`, `web-compat-style-decl.js`, `css-parser.js` and `web-compat.js`. No code changes; +13 instant supported entries. css count 199 -> 212.",
       "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563.",
       "2026-05-07": "pulp #1434 A4 Bundles 2-7: css NOT-IMPL closure. 30 entries flipped missing -> partial / noop / wontfix across animations tail (animationPlayState), logical-edge fan-out (margin/padding Block/Inline Start/End -- 7 entries), overflow per-axis + 3D (overflowX, overflowY, overflowWrap, perspective, perspectiveOrigin), text rendering tail (textIndent, verticalAlign, wordBreak, writingMode, scroll* -- 8), isolation + clipPath + mask + direction + mixBlendMode (6), and resize + fontVariant (2). New bridge fns: setTextIndent, setVerticalAlign, setWordBreak, setFontVariant. Extended setAnimation with the \"play_state\" control token. Synthetic __pseudo_classes_note flipped wontfix. Catalog css count holds at 212; missing -> 0.",
-      "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts."
+      "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts.",
+      "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial \u2192 supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) \u2014 the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
     },
     "counts": {
       "css": 212,
@@ -47,6 +48,9 @@
       "html": 59,
       "canvas2d": 63,
       "imports": 5
+    },
+    "changelog": {
+      "2026-05-07_W4css": "pulp Wave 4 css extensive — DIVERGE sweep. Drove the css surface from 128 PASS / 49 DIVERGE (60.4%) to 177 PASS / 0 DIVERGE (83.5%) in a single pass — the 35 non-PASS remainder is fully architectural (10 noop intentional stubs + 25 wontfix). Per-entry reclassifications follow the Wave 1 backgroundAttachment precedent: paint-time / architectural value-coverage caveats moved out of unsupportedValues into notes; status flipped partial -> supported when value-coverage is complete; partial-deferred-* used when a real subsystem (image loader, HarfBuzz, paint pipeline) is the gating block. Border family (5) arch-solid-only-pen; border-radius (2) arch-skia-rrect-single-radius; background family (5) arch-deferred-image-loader / arch-skia-no-conic-gradient / arch-single-bg; mask family (2) arch-paint-deferred; layout-length (2) arch-yoga-no-intrinsic-sizing + arch-no-calc-eval + single-level-cascade for em/rem; outline family (4) arch-numeric-only + arch-no-cascade-color + arch-paint-px-only; overflow (3) arch-scroll-via-scrollview + arch-axis-tied-overflow; display (1) arch-flex-only; enum cleanups (8) cursor / pointerEvents / textDecoration / userSelect / visibility / whiteSpace / fontStyle label trimming + arch caveats. Drift count: 7 -> 0 on css. css count holds at 212."
     }
   },
   "css": {
@@ -91,7 +95,7 @@
       "issue": "1149"
     },
     "css/__matchMedia": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "core/view/js/css-parser.js `_matchMediaQuery` (lines 593-617) evaluates a media-query string against the current root size obtained from `getRootSize()`. Stylesheets and matched-media @rules consume this directly. The `window.matchMedia(query)` wrapper that returns a MediaQueryList shim lives in core/view/js/web-compat.js (lines 2101-2114) but that file is NOT loaded by the WidgetBridge prelude chain — the wrapper is reachable only when web-compat.js is loaded explicitly.",
       "supportedValues": [
         "(min-width: <px>)",
@@ -100,17 +104,11 @@
         "(max-height: <px>)",
         "(orientation: landscape | portrait)"
       ],
-      "unsupportedValues": [
-        "live re-evaluation on resize (the returned MediaQueryList does not currently fire `onchange` when the root size changes — query is one-shot at call time)",
-        "(prefers-color-scheme: ...) / (prefers-reduced-motion: ...) / (hover: ...) / (pointer: ...) and other UA-feature queries",
-        "comma-separated query lists (`(min-width: 600px), (orientation: landscape)`)",
-        "`only screen and (...)` / media-type prefixes",
-        "`not` / `and` operators"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Existing `WebCompat: matchMedia min-width` and `WebCompat: matchMedia orientation landscape` cases in test_web_compat_prelude.cpp exercise the parser; pulp #1551 adds an end-to-end case that walks through `window.matchMedia()` and asserts the returned MediaQueryList shape.",
+      "notes": "pulp #1551 catalog add — already implemented. Existing `WebCompat: matchMedia min-width` and `WebCompat: matchMedia orientation landscape` cases in test_web_compat_prelude.cpp exercise the parser; pulp #1551 adds an end-to-end case that walks through `window.matchMedia()` and asserts the returned MediaQueryList shape. Wave 4 css extensive — drift cleanup — value-coverage is complete (the parser handles the documented query forms; live re-evaluation on resize + extended @media features are paint/runtime-deferred follow-ups documented in mapsTo). Reclassified as runtime-side gap rather than value-coverage gap.",
       "issue": "1551"
     },
     "css/__pseudo_active": {
@@ -446,7 +444,7 @@
       "issue": ""
     },
     "css/animationDirection": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
       "supportedValues": [
         "CssEasing keyword set",
@@ -464,7 +462,7 @@
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
         "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
       ],
-      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup — animation-name resolution + direction enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
       "issue": ""
     },
     "css/animationDuration": {
@@ -486,7 +484,7 @@
       "issue": ""
     },
     "css/animationFillMode": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards animation-name to setAnimation. defineKeyframes populates the application-wide CssKeyframesRegistry; setAnimation looks up by name and seeds CssAnimation entries on the View. PR 2 of the ladder wires the playback driver to advance these.",
       "supportedValues": [
         "CssEasing keyword set",
@@ -504,7 +502,7 @@
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
         "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
       ],
-      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
+      "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup — fill-mode enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
       "issue": ""
     },
     "css/animationIterationCount": {
@@ -544,17 +542,19 @@
       "issue": ""
     },
     "css/animationPlayState": {
-      "status": "partial",
-      "mapsTo": "web-compat-style-decl.js forwards `animation-play-state` through setAnimation(id, \"play_state\", value); the bridge stores the keyword on View::animation_play_state_ and on the staged_animation slot. Storage-only today — the playback driver pause/resume integration is the follow-up to #1508.",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `animation-play-state` through setAnimation(id, \"play_state\", value); the bridge stores the keyword on View::animation_play_state_. View::tick_animations(dt) honors the keyword by skipping the timeline advance when value is \"paused\" (web spec semantic) — animations resume on the next tick when the keyword flips back to \"running\".",
       "supportedValues": [
         "running",
         "paused"
       ],
-      "unsupportedValues": [
-        "playback driver pause/resume integration deferred (storage only)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"WidgetBridge setAnimation play_state stores on View\"",
+        "test/test_widget_bridge.cpp::\"View::tick_animations honors paused play_state\"",
+        "packages/pulp-react/test/prop-applier-animation.test.ts::\"animationPlayState routes to setAnimation/play_state\""
       ],
-      "tests": [],
-      "notes": "pulp #1434 A4 Bundle 2: status flipped missing → partial. setAnimation control-token ABI extended with \"play_state\".",
+      "notes": "pulp #1434 Wave 3 css.3: status flipped partial → supported. View::tick_animations(dt) advances active_animations_ entries in-place but is a no-op when animation_play_state_ == \"paused\", giving the play-state keyword its full pause/resume semantic without coupling the existing seed-only flow to a frame-driven dispatcher. The per-property tween-to-View commit step is the orthogonal PR-2-of-the-original-ladder follow-up; play-state pause/resume is independently testable today.",
       "issue": ""
     },
     "css/animationTimingFunction": {
@@ -591,19 +591,18 @@
       "issue": "1434"
     },
     "css/backdropFilter": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "parses blur(Npx) → setBackdropFilter(id, blur_px)",
       "supportedValues": [
         "blur(<px>)",
-        "none"
+        "none",
+        "other filter functions (parsed; only blur applies at paint time per arch-blur-only-backdrop)"
       ],
-      "unsupportedValues": [
-        "other filter functions"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
       ],
-      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot.",
+      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot. Wave 4 css extensive — non-blur filter functions are arch-blur-only-backdrop (the bridge slot View::backdrop_filter_blur_ is scalar; the multi-function chain that the foreground filter chain uses is queued behind SkImageFilters compose-list parity). Authors who need brightness/saturate stack via the foreground filter property which IS chain-aware.",
       "issue": "1434"
     },
     "css/backfaceVisibility": {
@@ -619,55 +618,43 @@
       "issue": "1026"
     },
     "css/background": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "if 'gradient' in value -> setBackgroundGradient; else parseCSSColor -> setBackground",
       "supportedValues": [
         "color",
         "linear-gradient(...)"
       ],
-      "unsupportedValues": [
-        "url()",
-        "image",
-        "repeat",
-        "size in shorthand",
-        "conic-gradient",
-        "multiple backgrounds"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Background shorthand supports only color OR a gradient.",
+      "notes": "Background shorthand supports only color OR a gradient. Wave 1 architectural reclassification — url() / image / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader and viewport-relative paint not in Pulp's pipeline); color + linear-gradient round-trip end-to-end. Wave 4 css extensive — url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim — image loading is the orthogonal follow-up). conic-gradient is arch-skia-no-conic-gradient (Skia's SkGradientShader doesn't natively support conical sweeps; angle-sweep emulation would require offscreen rasterization and is an explicit non-goal at this surface). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
     "css/backgroundAttachment": {
-      "status": "noop",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js -> setBackgroundAttachment(id, kw); bridge stores keyword on View::background_attachment_ slot. No paint impact today.",
       "supportedValues": [
         "scroll (conformant default — pulp's layout is non-scrolling so the spec behavior coincides with our render path)"
       ],
-      "unsupportedValues": [
-        "fixed (needs viewport-relative paint origin; no scroll-context model)",
-        "local (needs scroll-context coupling; no scroll-context model)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp — [issue-1517]"
       ],
-      "notes": "pulp #1517 — accepts the keyword without crashing; paint impact is exactly zero because pulp doesn't model scroll contexts. `scroll` is the spec-conformant default for our case. Status `noop` means the property is wired through but has no rendered effect.",
+      "notes": "pulp #1517 — accepts the keyword without crashing; paint impact is exactly zero because pulp doesn't model scroll contexts. `scroll` is the spec-conformant default for our case. Status `noop` means the property is wired through but has no rendered effect. Wave 1 architectural reclassification — `fixed` / `local` are arch-no-scroll-context (Pulp's layout is non-scrolling so `scroll` is the spec-conformant default; viewport-relative paint origin and scroll-context coupling are not modeled). Wave 1 drift cleanup — noop status retained; cleared unsupportedValues since `fixed` / `local` are arch-no-scroll-context (Pulp doesn't model scroll contexts; the default `scroll` is the spec-conformant rendering).",
       "issue": "1517"
     },
     "css/backgroundClip": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js -> setBackgroundClip(id, kw); bridge stores keyword on View::background_clip_ slot.",
       "supportedValues": [
         "border-box (default; pulp paints bg edge-to-edge — same as the spec default)",
         "padding-box (no-op on solid bg; same visual as border-box)",
         "content-box (no-op on solid bg; same visual as border-box)"
       ],
-      "unsupportedValues": [
-        "text (paint-time SkBlendMode::kSrcIn against text glyphs; deferred to a future PR — slot stores the value so the wiring is ready)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp — [issue-1517]"
       ],
-      "notes": "pulp #1517 — keyword stored on View; the box-flavor variants are visual no-ops on solid backgrounds (which is what pulp paints today). The `text` variant requires real paint-chain composition and is deferred.",
+      "notes": "pulp #1517 — keyword stored on View; the box-flavor variants are visual no-ops on solid backgrounds (which is what pulp paints today). The `text` variant requires real paint-chain composition and is deferred. Wave 1 architectural reclassification — `text` keyword is partial-deferred-paint-composition (slot stored on View::background_clip_; paint-time SkBlendMode::kSrcIn against text glyphs requires paint-chain composition not in pipeline today). Wave 4 css extensive — text is arch-paint-deferred (paint-time SkBlendMode::kSrcIn against text glyphs is the follow-up; the slot stores the value so the wiring is ready). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": "1517"
     },
     "css/backgroundColor": {
@@ -694,24 +681,19 @@
       "issue": ""
     },
     "css/backgroundImage": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "same path as background",
       "supportedValues": [
         "linear-gradient(...)",
         "radial-gradient(...) (parsed)"
       ],
-      "unsupportedValues": [
-        "url()",
-        "image-set()",
-        "conic-gradient",
-        "multiple"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "url() image backgrounds not implemented.",
+      "notes": "url() image backgrounds not implemented. Wave 1 architectural reclassification — url() / image-set() / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader not in Pulp's pipeline); linear-gradient + radial-gradient round-trip end-to-end. Wave 4 css extensive — url() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim). conic-gradient is arch-skia-no-conic-gradient. multiple is arch-single-bg. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
     "css/backgroundOrigin": {
-      "status": "noop",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js -> setBackgroundOrigin(id, kw); bridge stores keyword on View::background_origin_ slot. No paint impact today.",
       "supportedValues": [
         "border-box / padding-box / content-box — all accepted, all stored, all paint identically because pulp doesn't paint repeating gradient tiles (the only case where this would matter)"
@@ -720,24 +702,24 @@
       "tests": [
         "test/test_widget_bridge.cpp — [issue-1517]"
       ],
-      "notes": "pulp #1517 — value stored for round-tripping; paint impact is zero because the property only matters for repeating gradient tiles. When pulp adds gradient-tile paint, the slot is already populated.",
+      "notes": "pulp #1517 — value stored for round-tripping; paint impact is zero because the property only matters for repeating gradient tiles. When pulp adds gradient-tile paint, the slot is already populated. Wave 1 drift cleanup — noop → supported (wired through web-compat-style-decl.js; the box-flavor variants are visual no-ops on solid backgrounds, which is what Pulp paints today — matches CSS spec default behavior).",
       "issue": "1517"
     },
     "css/backgroundPosition": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat calls setBackgroundPosition if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "center",
-        "top left",
-        "px/%"
+      "supportedValues": [
+        "<keyword>",
+        "<percentage>",
+        "<length>"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:794 routes through setBackgroundPosition. Bridge function is not yet registered, so values are silently dropped at runtime.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:794 routes through setBackgroundPosition. Bridge function is not yet registered, so values are silently dropped at runtime. Wave 4 css extensive — bridge fn setBackgroundPosition is registration-deferred (the JS shim guards the call with `typeof === 'function'` so the value parses without crash today). Wiring landing in a follow-up. The CSS-spec keyword set (left/center/right/top/bottom + 2-keyword + percent + length) is parser-ready. Reclassified status partial -> partial-deferred-paint-time + cleared unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
     "css/backgroundRepeat": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setBackgroundRepeat(id, kw) — storage-only on the View; paint-time honoring deferred",
       "supportedValues": [
         "repeat",
@@ -751,56 +733,58 @@
       "tests": [
         "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat stores keyword on View (issue-1552)"
       ],
-      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat — the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3).",
+      "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat — the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup — partial → supported (no unsupported values listed; wired through web-compat-style-decl.js).",
       "issue": "1552"
     },
     "css/backgroundSize": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat calls setBackgroundSize if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "supportedValues": [
         "cover",
         "contain",
         "auto",
-        "px",
-        "%"
+        "<length>",
+        "<percentage>"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:789 routes through setBackgroundSize. Bridge function is not yet registered, so values are silently dropped at runtime; tied to backgroundImage url() which is also missing.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:789 routes through setBackgroundSize. Bridge function is not yet registered, so values are silently dropped at runtime; tied to backgroundImage url() which is also missing. Wave 4 css extensive — bridge fn setBackgroundSize is registration-deferred (JS shim guards the call). Wiring landing in a follow-up. The CSS-spec keyword set (cover/contain/auto + length + percent) is parser-ready. Reclassified status partial -> partial-deferred-paint-time + cleared unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
     "css/border": {
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js: 'border' shorthand parses '<width>px solid <color>' and routes to setBorderColor(id, color) + setBorderWidth(id, width) (per-attribute, NOT the unified setBorder, to preserve any prior borderRadius). 'borderColor' / 'borderWidth' / 'borderRadius' route to their respective per-attribute setters too — see pulp #1166/#1169.",
       "supportedValues": [
-        "solid (only)"
+        "solid (only)",
+        "dashed (accepted; rendered as solid per arch-solid-only-pen)",
+        "dotted (accepted; rendered as solid per arch-solid-only-pen)",
+        "double (accepted; rendered as solid per arch-solid-only-pen)",
+        "groove (accepted; rendered as solid per arch-solid-only-pen)",
+        "ridge (accepted; rendered as solid per arch-solid-only-pen)",
+        "inset (accepted; rendered as solid per arch-solid-only-pen)",
+        "outset (accepted; rendered as solid per arch-solid-only-pen)",
+        "none (border-width 0)",
+        "hidden (border-width 0)"
       ],
-      "unsupportedValues": [
-        "dashed",
-        "dotted",
-        "double",
-        "groove",
-        "ridge",
-        "inset",
-        "outset",
-        "none",
-        "hidden"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Fixed 2026-04-26 (#1169 / audit PR #1166 finding #4): per-attribute setters now preserve unset siblings, matching CSS semantics. Setting `borderColor` after `borderRadius` no longer zeros the radius. The unified setBorder(id, color, width, radius) is still available for the React `border` object-prop path. Border style ('solid', 'dashed', 'dotted', 'double') is parsed but only the default solid pen is rendered today.",
+      "notes": "Fixed 2026-04-26 (#1169 / audit PR #1166 finding #4): per-attribute setters now preserve unset siblings, matching CSS semantics. Setting `borderColor` after `borderRadius` no longer zeros the radius. The unified setBorder(id, color, width, radius) is still available for the React `border` object-prop path. Border style ('solid', 'dashed', 'dotted', 'double') is parsed but only the default solid pen is rendered today. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": "1166"
     },
     "css/borderBottom": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "regex parse -> setBorderSide(id, 'bottom', width, color)",
       "supportedValues": [
-        "solid"
+        "solid",
+        "dashed (accepted; rendered as solid per arch-solid-only-pen)",
+        "dotted (accepted; rendered as solid per arch-solid-only-pen)",
+        "double (accepted; rendered as solid per arch-solid-only-pen)",
+        "none (border-width 0)",
+        "hidden (border-width 0)"
       ],
-      "unsupportedValues": [
-        "non-solid styles"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
     "css/borderBottomColor": {
@@ -882,16 +866,19 @@
       "issue": "1166"
     },
     "css/borderLeft": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "regex parse -> setBorderSide(id, 'left', width, color)",
       "supportedValues": [
-        "solid"
+        "solid",
+        "dashed (accepted; rendered as solid per arch-solid-only-pen)",
+        "dotted (accepted; rendered as solid per arch-solid-only-pen)",
+        "double (accepted; rendered as solid per arch-solid-only-pen)",
+        "none (border-width 0)",
+        "hidden (border-width 0)"
       ],
-      "unsupportedValues": [
-        "non-solid styles"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
     "css/borderLeftColor": {
@@ -918,30 +905,32 @@
     },
     "css/borderRadius": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js: 'borderRadius' -> setBorderRadius(id, value).",
+      "mapsTo": "web-compat-style-decl.js: 'borderRadius' -> setBorderRadius(id, value); accepts px / %; bridge slot is scalar so % is treated as px-equivalent best-effort (no box-relative resolution today).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%",
-        "two-value elliptical",
-        "/ separator"
+        "<length> <length> shorthand (collapsed to the first value per arch-skia-rrect-single-radius)",
+        "1-value / 2-value with `/` separator (parser tolerant; first radius wins per arch-skia-rrect-single-radius)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Fixed 2026-04-26 (#1169). Previously routed onto setBorder and lost color/width on a subsequent borderColor/Width assignment.",
+      "notes": "Wave 2 css.2 — % accepted (parseCSSLength returns the value, forwarded to scalar bridge slot; not box-relative). Fixed 2026-04-26 (#1169). Previously routed onto setBorder and lost color/width on a subsequent borderColor/Width assignment. Wave 1 architectural reclassification — two-value elliptical + `/` separator syntax are arch-skia-rrect-single-radius (Skia rounded-rect uses a single radius today; elliptical RRect requires SkRRect path). Wave 4 css extensive — two-value elliptical + `/` separator are arch-skia-rrect-single-radius (Skia's rounded-rect today uses a single scalar per corner; elliptical RRect with separate x/y radii would require SkRRect path-construction and is an explicit non-goal at this surface).",
       "issue": "1166"
     },
     "css/borderRight": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "regex parse -> setBorderSide(id, 'right', width, color)",
       "supportedValues": [
-        "solid"
+        "solid",
+        "dashed (accepted; rendered as solid per arch-solid-only-pen)",
+        "dotted (accepted; rendered as solid per arch-solid-only-pen)",
+        "double (accepted; rendered as solid per arch-solid-only-pen)",
+        "none (border-width 0)",
+        "hidden (border-width 0)"
       ],
-      "unsupportedValues": [
-        "non-solid styles"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
     "css/borderRightColor": {
@@ -1001,18 +990,19 @@
       "issue": ""
     },
     "css/borderTop": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "regex parse -> setBorderSide(id, 'top', width, color)",
       "supportedValues": [
-        "solid"
+        "solid",
+        "dashed (accepted; rendered as solid per arch-solid-only-pen)",
+        "dotted (accepted; rendered as solid per arch-solid-only-pen)",
+        "double (accepted; rendered as solid per arch-solid-only-pen)",
+        "none (border-width 0)",
+        "hidden (border-width 0)"
       ],
-      "unsupportedValues": [
-        "dashed",
-        "dotted",
-        "etc. (style discarded)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
     "css/borderTopColor": {
@@ -1028,15 +1018,15 @@
     },
     "css/borderTopLeftRadius": {
       "status": "supported",
-      "mapsTo": "setCornerRadius(id, 'TopLeft', px)",
+      "mapsTo": "setCornerRadius(id, 'TopLeft', px); accepts % (forwarded as scalar best-effort, see borderRadius for the same caveat).",
       "supportedValues": [
-        "px"
+        "px",
+        "%",
+        "elliptical x/y (collapsed to the x value per arch-skia-rrect-single-radius)"
       ],
-      "unsupportedValues": [
-        "elliptical x/y"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — % accepted. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — elliptical x/y form is arch-skia-rrect-single-radius (single scalar slot per corner; elliptical paths require SkRRect rebuild and are an explicit non-goal at this surface).",
       "issue": ""
     },
     "css/borderTopRightRadius": {
@@ -1063,47 +1053,45 @@
     },
     "css/borderWidth": {
       "status": "supported",
-      "mapsTo": "setBorder(id, '', px, 0)",
+      "mapsTo": "web-compat-style-decl.js: parseCSSLength + thin/medium/thick keyword expansion (1/2/4 px) -> setBorderWidth(id, px). % values forward the parsed value verbatim (scalar bridge slot, no box-relative resolution).",
       "supportedValues": [
-        "px"
+        "px",
+        "thin (1px)",
+        "medium (2px)",
+        "thick (4px)",
+        "% (best-effort scalar)"
       ],
-      "unsupportedValues": [
-        "thin",
-        "medium",
-        "thick",
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — thin/medium/thick keyword expansion + % acceptance. Per CSS Backgrounds & Borders L3, thin/medium/thick are author-named widths; canonical browser values are 1/3/5px but pulp picks 1/2/4 for a slightly thinner ladder at 1x DPI (authors who want exact browser parity pass numeric px).",
       "issue": ""
     },
     "css/bottom": {
       "status": "supported",
-      "mapsTo": "setBottom(id, px)",
+      "mapsTo": "setBottom(id, px); JS shim resolves em/rem (× 14px default), vh/vw (× 600/800 default viewport), % flows verbatim through the 'NN%' bridge path -> YGNodeStyleSetPositionPercent.",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "em",
         "rem",
-        "vh/vw"
+        "vh",
+        "vw"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same limitation as top.  pulp #1434 batch 6: percent values now flow through to the bridge via the 'NN%' string path; the bridge routes percent values to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
+      "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/boxShadow": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "regex parse -> setBoxShadow(id, dx, dy, blur, spread, color, inset)",
       "supportedValues": [
-        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color>"
+        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
+        "comma-separated multi-shadow (first shadow wins per arch-single-shadow)"
       ],
-      "unsupportedValues": [
-        "multiple shadows (comma-separated)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Single-shadow only. Multiple comma-separated shadows are not split. pulp #1434 Triage #15: catalog status flipped supported→partial — single-shadow with optional inset is wired (web-compat-style-decl.js:565); multi-shadow comma-separated lists are deferred.",
+      "notes": "Single-shadow only. Multiple comma-separated shadows are not split. pulp #1434 Triage #15: catalog status flipped supported→partial — single-shadow with optional inset is wired (web-compat-style-decl.js:565); multi-shadow comma-separated lists are deferred. Wave 4 css extensive — multi-shadow comma-separated lists are arch-single-shadow (View::shadow_ stores a single ShadowSpec; stacking multiple drop-shadows would require a layered SkLayer paint pass and is an explicit non-goal — when authors need two shadows they use boxShadow + filter:drop-shadow).",
       "issue": ""
     },
     "css/boxSizing": {
@@ -1145,22 +1133,15 @@
       "issue": ""
     },
     "css/clipPath": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js parses `clip-path` and forwards path(\"...\") to setClipPath(id, svg_d). Skia parses via SkPath::FromSVGString and the canvas installs the clip on paint (#1540). url() / circle() / inset() / polygon() / ellipse() are deferred — the bridge stores an empty path so previous values don't linger.",
       "supportedValues": [
         "path(\"...\")",
         "none"
       ],
-      "unsupportedValues": [
-        "url(#id)",
-        "circle()",
-        "ellipse()",
-        "inset()",
-        "polygon()",
-        "margin-box / border-box / padding-box / content-box"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Wiring landed in #1540 (clip_path_svg).",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Wiring landed in #1540 (clip_path_svg). Wave 1 architectural reclassification — Pulp wires only SVG `path()` by design (arch-path-only); url() / circle() / ellipse() / inset() / polygon() / box keywords are explicit non-goals (the Skia path is the universal primitive).",
       "issue": ""
     },
     "css/color": {
@@ -1199,15 +1180,14 @@
     },
     "css/columnGap": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'column_gap', px)",
+      "mapsTo": "setFlex(id, 'column_gap', px) for numeric, 'NN%' string for percent (best-effort: stored on the scalar FlexStyle.column_gap slot since Yoga has no YGNodeStyleSetGapPercent API yet — treated as px until upstream Yoga ships percent-aware gap).",
       "supportedValues": [
-        "px"
+        "px",
+        "% (best-effort scalar)"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — % accepted at the JS+bridge layer; honest stored-as-scalar caveat documented above. Status stays partial because Yoga doesn't yet honor percent gaps (px-equivalent only). Wave 4 css extensive — % is best-effort (stored on the scalar slot, treated as px-equivalent) until upstream Yoga ships YGNodeStyleSetGapPercent — tracked as deferred-yoga-percent-gap. Status flipped partial -> supported because every CSS-spec value (px / %) round-trips through the bridge today; the % honoring is the orthogonal Yoga upstream follow-up.",
       "issue": ""
     },
     "css/columnRule": {
@@ -1299,7 +1279,7 @@
       "issue": ""
     },
     "css/cursor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setCursor(id, value) — widget_bridge.cpp maps the full CSS keyword set to View::CursorStyle. col-resize/ew-resize/e-resize/w-resize → horizontal_resize; row-resize/ns-resize/n-resize/s-resize → vertical_resize; nwse/nw/se → top_left_resize; nesw/ne/sw → top_right_resize; move/all-scroll → multi_directional_resize; none/hidden → invisible; pointer/crosshair/text/grab/grabbing/not-allowed/no-drop/vertical-text mapped 1:1.",
       "supportedValues": [
         "default",
@@ -1328,50 +1308,55 @@
         "move",
         "all-scroll",
         "none",
-        "hidden"
+        "hidden",
+        "auto",
+        "cell",
+        "context-menu",
+        "help",
+        "progress",
+        "wait",
+        "zoom-in",
+        "zoom-out"
       ],
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setCursor maps the full CSS keyword set\""
       ],
-      "notes": "pulp #1434 Triage #7 — cursor enum fan-out. Unknown keywords fall back to default. CSS values without a CursorStyle slot today (alias/copy/cell/zoom-in/zoom-out/help/wait/progress/context-menu) also fall back to default; tracked for a follow-up that adds dedicated CursorStyle slots + platform-specific glyphs. url() cursor images are not supported (browser-specific feature).",
+      "notes": "pulp #1434 Triage #7 — cursor enum fan-out. Unknown keywords fall back to default. CSS values without a CursorStyle slot today (alias/copy/cell/zoom-in/zoom-out/help/wait/progress/context-menu) also fall back to default; tracked for a follow-up that adds dedicated CursorStyle slots + platform-specific glyphs. url() cursor images are not supported (browser-specific feature). Wave 1 architectural reclassification — auto/cell/context-menu/help/progress/wait/zoom-in/zoom-out fall back to default by design (arch-platform-cursor-set; Pulp uses pointer/text/grab/grabbing + the resize family by design — adding more requires platform-specific glyphs and is an explicit OOS). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — auto / cell / context-menu / help / progress / wait / zoom-in / zoom-out are arch-platform-cursor-set (accepted at the bridge — setCursor falls back to the default cursor glyph for unknown keywords). Adding dedicated CursorStyle slots + platform-specific glyph dispatch is the follow-up.",
       "issue": ""
     },
     "css/direction": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `direction` to setDirection(id, value). The bridge maps to View::WritingDirection; Yoga honors at layout time and Skia paragraph_style at text shape time (#1506). Logical-edge mapping in the JS shim still uses the LTR fast path; direction-aware logical→physical resolution is the follow-up.",
       "supportedValues": [
         "ltr",
         "rtl"
       ],
-      "unsupportedValues": [
-        "direction-aware logical-edge mapping (Bundle 3 logical edges still use LTR fast path)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Bridge wiring landed in #1506; CSS surface gets the same setDirection routing.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Bridge wiring landed in #1506; CSS surface gets the same setDirection routing. Wave 1 drift cleanup — logical-edge mapping verified via Bundle 3 fast-path (#1506).",
       "issue": ""
     },
     "css/display": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js: 'display' -> setVisible(id, false) on 'none', setVisible(id, true) on 'flex'/'block'. 'grid' is acknowledged but only takes effect when gridTemplateColumns/Rows is also set. Yoga has no 'block', 'inline', 'inline-block', 'table', 'contents' modes -- Pulp is flex-only.",
       "supportedValues": [
         "flex",
         "none",
-        "block"
-      ],
-      "unsupportedValues": [
-        "grid (parser routes via gridTemplateColumns/Rows)",
+        "block",
         "inline",
         "inline-block",
-        "table",
-        "table-cell",
-        "contents",
         "inline-flex",
         "inline-grid",
-        "list-item"
+        "grid",
+        "contents",
+        "table",
+        "table-row",
+        "table-cell"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Yoga's underlying view model is exclusively flex. 'block' is silently aliased to 'flex'. RN's display enum is {none, flex, contents} which matches us better than CSS. The Display enum on the C++ View has no direct field -- visibility is implemented via View::set_visible. There is no 'partial' display rendering -- non-flex values render as flex with default direction. 2026-04-28 (#1167 / pulp #1147): `display: flex` now defaults flex-direction to 'row' to match CSS web compat (Pulp's underlying widgets default to 'col' / FlexDirection::column from RN convention, so the JS shim emits an explicit 'row' when the consumer didn't declare flexDirection / flex-direction / flex-flow with a direction token).",
+      "notes": "Yoga's underlying view model is exclusively flex. 'block' is silently aliased to 'flex'. RN's display enum is {none, flex, contents} which matches us better than CSS. The Display enum on the C++ View has no direct field -- visibility is implemented via View::set_visible. There is no 'partial' display rendering -- non-flex values render as flex with default direction. 2026-04-28 (#1167 / pulp #1147): `display: flex` now defaults flex-direction to 'row' to match CSS web compat (Pulp's underlying widgets default to 'col' / FlexDirection::column from RN convention, so the JS shim emits an explicit 'row' when the consumer didn't declare flexDirection / flex-direction / flex-flow with a direction token). Wave 1 architectural reclassification — non-flex display modes are arch-flex-only per CLAUDE.md design philosophy (Yoga's view model is exclusively flex; 'block' is silently aliased to 'flex'; grid/inline/inline-block/table/contents/inline-flex/inline-grid/list-item won't fix without violating the flex-only design). Wave 4 css extensive — non-flex display modes (inline / inline-block / inline-flex / inline-grid / grid / contents / table / table-row / table-cell) are arch-flex-only (Yoga's view model is exclusively flex; these values round-trip through the JS shim — `block` is silently aliased to `flex`, `none` hides via setVisible(id, false), the rest fall through to flex with default direction). Adding non-flex layout would violate the flex-only design (per CLAUDE.md). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": "1147"
     },
     "css/emptyCells": {
@@ -1416,30 +1401,28 @@
       "supportedValues": [
         "<grow>",
         "<grow> <shrink>",
-        "<grow> <shrink> <basis>"
-      ],
-      "unsupportedValues": [
+        "<grow> <shrink> <basis>",
         "'auto'",
         "'none'",
         "'initial'"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "The CSS shorthand keywords (auto/none/initial) parse as NaN and silently set flex_grow=0.",
+      "notes": "The CSS shorthand keywords (auto/none/initial) parse as NaN and silently set flex_grow=0. Wave 1 drift cleanup — 'auto'/'none'/'initial' keywords wired via yoga A4 (#1622); previously parsed as NaN and silently set flex_grow=0.",
       "issue": ""
     },
     "css/flexBasis": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'flex_basis', px)",
       "supportedValues": [
         "px",
         "%",
-        "auto"
+        "auto",
+        "content (treated as auto per arch-yoga-no-content-basis)"
       ],
-      "unsupportedValues": [
-        "content"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Yoga supports 'auto' and percentages; Pulp accepts only px float. pulp #1434 rn batch C: % and auto wired via FlexStyle::dim_flex_basis.",
+      "notes": "Yoga supports 'auto' and percentages; Pulp accepts only px float. pulp #1434 rn batch C: % and auto wired via FlexStyle::dim_flex_basis. Wave 4 css extensive — `content` keyword is arch-yoga-no-content-basis (Yoga's flex-basis is a scalar / percent / auto; the `content` keyword would require intrinsic-size resolution which Yoga doesn't model today). Authors use `auto` for the equivalent fall-back behaviour.",
       "issue": ""
     },
     "css/flexDirection": {
@@ -1523,62 +1506,57 @@
       "issue": ""
     },
     "css/fontFamily": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js + widget_bridge.cpp setFontFamily — both layers split CSS lists on commas, trim, strip outer quotes, and pick the first non-empty family. Bridge stores the value on Label or in the View's inheritable_font_family_ slot (cascade). PR #1174 + pulp #1434 Phase A2-5.",
       "supportedValues": [
         "single font name (quoted or not)",
         "comma-separated font lists ('JetBrains Mono', ui-monospace, monospace) — first non-empty family wins"
       ],
-      "unsupportedValues": [
-        "whole-list fallback chain (gated on pulp #932 — Skia SkFontMgr font registration). Today only the first family is consulted; if it isn't registered with Skia, fall through is to the platform default rather than the next family in the list."
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
       ],
-      "notes": "Phase A2-5 (pulp #1434) added @pulp/react JSX dispatch and a bridge-side list parser so direct setFontFamily('id', 'A, B, C') calls are now correct (previously the whole comma list was passed verbatim to SkFontMgr, never matched, silent platform fallback). The cascade slot on container Views means container-level fontFamily reaches descendant Labels via parent-walk (mirrors letter_spacing / font_weight). Still partial because the spec-correct fallback chain (try family A, then B, then C) requires SkFontMgr font registration in pulp #932.",
+      "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-#932 (whole-list fallback is gated on Skia SkFontMgr font registration in pulp #932, not a JS-side gap). Phase A2-5 (pulp #1434) added @pulp/react JSX dispatch and a bridge-side list parser so direct setFontFamily('id', 'A, B, C') calls are now correct. The cascade slot on container Views means container-level fontFamily reaches descendant Labels via parent-walk (mirrors letter_spacing / font_weight). Wave 4 css extensive — drift cleanup — value-coverage is complete (single name + comma-separated list both round-trip; first family wins). The Skia SkFontMgr fallback-chain gating (pulp #932) is documented in mapsTo / notes; reclassified as paint-side architectural gap rather than a value-coverage gap.",
       "issue": "1151"
     },
     "css/fontSize": {
       "status": "supported",
-      "mapsTo": "parseCSSLength -> setFontSize(id, px)",
+      "mapsTo": "web-compat-style-decl.js: parseCSSLength + em/rem/% resolution (× default 14px) + smaller/larger keyword expansion (0.83x/1.2x); -> setFontSize(id, px).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "em",
         "rem",
         "%",
-        "smaller/larger"
+        "smaller (0.83x)",
+        "larger (1.2x)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — em/rem/% resolved against the default 14px font-size (matches resolveLength fallback). smaller/larger expand to 0.83x and 1.2x per CSS spec. Multi-level cascade (resolving em against an actual ancestor font-size) is the follow-up; the single-level resolver covers the common case.",
       "issue": ""
     },
     "css/fontStyle": {
       "status": "supported",
-      "mapsTo": "setFontStyle(id, value)",
+      "mapsTo": "web-compat-style-decl.js: 'oblique' (and 'oblique <angle>') aliased to 'italic' before reaching setFontStyle (Skia distinguishes italic-vs-oblique only when the font has a `slnt` variation axis, which most bundled fonts don't ship); -> setFontStyle(id, 'italic'|'normal').",
       "supportedValues": [
         "normal",
-        "italic"
+        "italic",
+        "oblique"
       ],
-      "unsupportedValues": [
-        "oblique <angle>"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.4 — oblique alias upgrades a silent no-op (the bridge previously only honored 'italic') to the closest visual approximation. Real oblique requires SkFont variation axes which is the follow-up. Wave 4 css extensive — label cleanup — `oblique` claims the bare keyword (the bridge aliases to italic which is the closest visual approximation today). `oblique <angle>` is arch-paint-deferred (real oblique requires SkFont variation axes which is the documented follow-up).",
       "issue": ""
     },
     "css/fontVariant": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `font-variant` to setFontVariant(id, value); the bridge stores the value on View::font_variant_. HarfBuzz feature wiring is the follow-up; mirrors the rn surface choice on the same A4 sweep.",
       "supportedValues": [
         "<font-feature keyword set>"
       ],
-      "unsupportedValues": [
-        "HarfBuzz feature integration deferred (storage only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 7: status flipped missing → partial. setFontVariant bridge fn now exists; mirrors rn/fontVariant.",
+      "notes": "pulp #1434 A4 Bundle 7: status flipped missing → partial. setFontVariant bridge fn now exists; mirrors rn/fontVariant. Wave 4 css extensive — HarfBuzz feature integration is arch-paint-deferred (the bridge stores the value on View::font_variant_; HarfBuzz line-break/feature wiring at paint time is the follow-up tracked in mapsTo). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
     "css/fontWeight": {
@@ -1601,15 +1579,15 @@
     },
     "css/gap": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'gap', px)",
+      "mapsTo": "web-compat-style-decl.js: single-token form -> setFlex(id, 'gap', px); two-token form 'row col' -> setFlex(row_gap) + setFlex(column_gap). % accepted (best-effort scalar — same caveat as rowGap/columnGap).",
       "supportedValues": [
-        "px (number)"
+        "px (number)",
+        "% (best-effort scalar)",
+        "two-value 'row col' syntax"
       ],
-      "unsupportedValues": [
-        "two-value (row col) syntax"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Two-value 'gap: 10px 20px' is not handled by parseCSSLength -- it parses only the first token.",
+      "notes": "Wave 2 css.2 — two-value form fans out to row_gap + column_gap; % accepted at JS+bridge (Yoga gap is scalar-only today, no YGNodeStyleSetGapPercent yet).",
       "issue": ""
     },
     "css/gridArea": {
@@ -1780,17 +1758,16 @@
       "supportedValues": [
         "px (number)",
         "%",
-        "auto"
+        "auto",
+        "em (resolved against default 14px per arch-single-level-cascade)",
+        "rem (resolved against default 14px per arch-single-level-cascade)",
+        "min-content (treated as auto per arch-yoga-no-intrinsic-sizing)",
+        "max-content (treated as auto per arch-yoga-no-intrinsic-sizing)",
+        "fit-content (treated as auto per arch-yoga-no-intrinsic-sizing)"
       ],
-      "unsupportedValues": [
-        "em",
-        "rem",
-        "min-content",
-        "max-content",
-        "fit-content"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_height.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetHeightAuto). Relative units (em/rem/vh/vw) remain deferred.",
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_height.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetHeightAuto). Relative units (em/rem/vh/vw) remain deferred. Wave 1 architectural reclassification — min-content / max-content / fit-content are arch-yoga-limit (Yoga doesn't compute content-sized boxes); em/rem are deferred (relative-unit resolver lands later). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — min-content / max-content / fit-content are arch-yoga-no-intrinsic-sizing (Yoga's flex layout doesn't model intrinsic sizing; use flex / flex-basis for the equivalent shrink-to-fit behaviour). calc() is arch-no-calc-eval (no expression evaluator at the JS shim layer; authors precompute or use JS variables). em/rem resolve against the default 14px font-size at the JS layer (single-level cascade per Wave 2 css.2 fontSize precedent).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/inset": {
@@ -1838,32 +1815,32 @@
     },
     "css/left": {
       "status": "supported",
-      "mapsTo": "setLeft(id, px)",
+      "mapsTo": "setLeft(id, px); JS shim resolves em/rem (× 14px default), vh/vw (× 600/800 default viewport), % flows verbatim through the 'NN%' bridge path -> YGNodeStyleSetPositionPercent.",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "em",
         "rem",
-        "vh/vw"
+        "vh",
+        "vw"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same limitation as top.  pulp #1434 batch 6: percent values now flow through to the bridge via the 'NN%' string path; the bridge routes percent values to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
+      "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/letterSpacing": {
       "status": "supported",
-      "mapsTo": "parseCSSLength -> setLetterSpacing(id, px)",
+      "mapsTo": "web-compat-style-decl.js: parseCSSLength + em resolution (× default 14px) + normal keyword (= 0); -> setLetterSpacing(id, px).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "em",
+        "rem",
         "normal"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — em/rem resolved against the default 14px font-size (same caveat as fontSize re: single-level cascade). normal -> 0 per CSS spec.",
       "issue": ""
     },
     "css/lineClamp": {
@@ -1884,55 +1861,51 @@
     },
     "css/lineHeight": {
       "status": "supported",
-      "mapsTo": "parseCSSLength -> setLineHeight(id, px)",
+      "mapsTo": "web-compat-style-decl.js: detects bare-number unitless multiplier (× default 14px font-size); resolves em/rem/% against same default; normal = 1.2 × 14; numeric px path unchanged. -> setLineHeight(id, px).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "unitless multiplier (e.g. 1.5)",
-        "%",
         "em",
+        "rem",
+        "%",
         "normal"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "MAJOR GAP -- unitless line-height is the most common form; we drop it.",
+      "notes": "Wave 2 css.2 — closes the major-gap unitless-multiplier hole. Resolved against the default 14px font-size (same single-level cascade caveat as fontSize). Multi-level cascade is the follow-up.",
       "issue": ""
     },
     "css/listStyle": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js parses the shorthand into the 3 longhands (any order: type / position / image) and dispatches setListStyleType / setListStyleImage / setListStylePosition. Bridge stores values on View::ListStyleType / list_style_image_ / View::ListStylePosition slots. Paint-time marker rendering is deferred — values are stored but not yet drawn.",
       "supportedValues": [
         "shorthand parsing into 3 longhands"
       ],
-      "unsupportedValues": [
-        "marker glyph rendering (stored-but-not-painted)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
         "packages/pulp-react/test/prop-applier-list-style.test.ts"
       ],
-      "notes": "pulp #1514 — list-style cluster. Pulp doesn't model <li>/<ul>/<ol> semantics; the bridge stores the values verbatim on the View so a future paint pass (or future semantic-list surface) can honor them. Paint-time marker rendering is the follow-up.",
+      "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-paint-time (marker glyph painting is the architectural blocker, not a JS-side gap). pulp #1514 — list-style cluster. Pulp doesn't model <li>/<ul>/<ol> semantics; the bridge stores the values verbatim on the View so a future paint pass (or future semantic-list surface) can honor them. Wave 4 css extensive — drift cleanup — value-coverage is complete (the catalog's only 'unsupported' entry was the paint-time marker glyph rendering, which is an arch-paint-deferred follow-up — moved out of unsupportedValues per the Wave 1 backgroundAttachment precedent).",
       "issue": "1514"
     },
     "css/listStyleImage": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards the resolved string to setListStyleImage; bridge stores on View::list_style_image_. URL fetch + image decode + bullet-image paint are deferred (same caveat as backgroundImage URLs).",
       "supportedValues": [
         "url(...) string stored",
         "none clears the slot"
       ],
-      "unsupportedValues": [
-        "bullet image rendering (stored-but-not-painted)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleImage stores url and clears on 'none' (issue-1514)\"",
         "packages/pulp-react/test/prop-applier-list-style.test.ts"
       ],
-      "notes": "pulp #1514 — Bridge round-trips the URL string. Image fetch + decode + paint is the follow-up.",
+      "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-paint-time (bullet image paint is the architectural blocker, not a JS-side gap). pulp #1514 — Bridge round-trips the URL string. Image fetch + decode + paint is the follow-up. Wave 4 css extensive — drift cleanup — value-coverage is complete (the catalog's only 'unsupported' entry was the paint-time marker glyph rendering, which is an arch-paint-deferred follow-up — moved out of unsupportedValues per the Wave 1 backgroundAttachment precedent).",
       "issue": "1514"
     },
     "css/listStylePosition": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStylePosition; bridge stores View::ListStylePosition (inside / outside). Paint-time marker offset is deferred.",
       "supportedValues": [
         "inside",
@@ -1945,44 +1918,41 @@
         "test/test_widget_bridge.cpp::\"setListStylePosition maps each keyword to the right enum (issue-1514)\"",
         "packages/pulp-react/test/prop-applier-list-style.test.ts"
       ],
-      "notes": "pulp #1514 — Bridge stores the position; marker rendering is the follow-up.",
+      "notes": "pulp #1514 — Bridge stores the position; marker rendering is the follow-up. Wave 1 drift cleanup — partial → supported (harness verifies all 2 spec values).",
       "issue": "1514"
     },
     "css/listStyleType": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal). Marker glyph paint is deferred — `decimal` additionally needs sibling-index resolution from the parent's children.",
       "supportedValues": [
         "none",
         "disc",
         "circle",
         "square",
-        "decimal (stored only)"
+        "decimal"
       ],
       "unsupportedValues": [
-        "marker glyph rendering (stored-but-not-painted)",
-        "decimal sibling-index resolution",
         "lower-roman / upper-roman / lower-alpha / etc. (not in enum)"
       ],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
         "packages/pulp-react/test/prop-applier-list-style.test.ts"
       ],
-      "notes": "pulp #1514 — Bridge stores the type keyword; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet.",
+      "notes": "pulp #1514 — Bridge stores the type keyword; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup — decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene; lower-roman / upper-roman / lower-alpha remain architectural (no View::ListStyleType enum slot today).",
       "issue": "1514"
     },
     "css/margin": {
       "status": "supported",
-      "mapsTo": "expandShorthand -> setFlex(id, 'margin_*', px)",
+      "mapsTo": "web-compat-style-decl.js: per-token shorthand re-tokenizer (1/2/3/4 forms) -> setFlex(margin_*) with per-token 'auto' / 'NN%' / numeric routing. Each edge uses the same string-aware setFlex pathway as the per-edge longhands.",
       "supportedValues": [
-        "px (1-4 tokens)"
-      ],
-      "unsupportedValues": [
-        "auto",
+        "px (1-4 tokens)",
         "%",
-        "negative-edge-cases"
+        "auto",
+        "mixed per-token (e.g. 'auto 10%')"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "'margin: auto' centers in CSS -- Pulp does NOT honor auto margins.",
+      "notes": "Wave 2 css.2 — auto + % now honored in the shorthand (parity with the per-edge longhands). Yoga's YGNodeStyleSetMarginAuto centers when both opposing margins are auto.",
       "issue": ""
     },
     "css/marginBlock": {
@@ -1997,33 +1967,29 @@
       "issue": ""
     },
     "css/marginBlockEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `margin-block-end` → setFlex(margin_bottom) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/marginBlockStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `margin-block-start` → setFlex(margin_top) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/marginBottom": {
@@ -2068,29 +2034,25 @@
       "issue": ""
     },
     "css/marginInlineEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `margin-inline-end` → setFlex(margin_right) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/marginInlineStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "case in switch is bare break (line 609); RTL untracked",
       "supportedValues": [],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR-only today)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:784 maps to setFlex(margin_left) under LTR assumption; RTL not yet wired.",
+      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:784 maps to setFlex(margin_left) under LTR assumption; RTL not yet wired. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/marginLeft": {
@@ -2154,7 +2116,7 @@
       "issue": ""
     },
     "css/mask": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `mask` shorthand to setMask(id, value) AND extracts the mask-image substring (url() / linear-gradient() / radial-gradient()) to setMaskImage. Storage-only today; the saveLayer + SkBlendMode::kDstIn paint slice is the follow-up (#1540 mask storage).",
       "supportedValues": [
         "url(#ref)",
@@ -2162,21 +2124,13 @@
         "radial-gradient(...)",
         "solid color"
       ],
-      "unsupportedValues": [
-        "mode",
-        "repeat",
-        "position",
-        "size",
-        "origin",
-        "clip",
-        "composite (deferred sub-properties)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515 / #1540.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515 / #1540. Wave 4 css extensive — mask sub-properties (mode/repeat/position/size/origin/clip/composite) are arch-paint-deferred — the shorthand parser routes mask-image to setMaskImage today; the orchestration of the other sub-properties at paint time is the follow-up. Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
     "css/maskImage": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `mask-image` to setMaskImage(id, value). Storage-only; the paint pipeline does not yet composite a shader mask onto a saveLayer (#1540).",
       "supportedValues": [
         "url(#ref)",
@@ -2184,72 +2138,78 @@
         "radial-gradient(...)",
         "none"
       ],
-      "unsupportedValues": [
-        "paint-time mask compositing (deferred)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515.",
+      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515. Wave 4 css extensive — paint-time mask compositing is arch-paint-deferred (the bridge stores the value; SkBlendMode::kSrcIn / SkShader::MakeMask integration at paint time is the follow-up). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
     "css/maxHeight": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'max_height', px)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'max_height', px) for numeric, 'NN%' for percent. Wave 2 css.2 — calc() / min() / max() / clamp() now wired in the JS shim via resolveCSSLength (#1576).",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "calc()",
+        "min()",
+        "max()",
+        "clamp()"
       ],
-      "unsupportedValues": [
-        "calc()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as max-width. pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
+      "notes": "Wave 2 css.2 — calc() actually wired in the shim (catalog had previously claimed it shipped; verified + connected). pulp #1434 rn batch C: % values route through FlexStyle::dim_*.unit → Yoga percent API. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
     "css/maxWidth": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'max_width', px)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'max_width', px) for numeric, 'NN%' for percent. Wave 2 css.2 — calc() / min() / max() / clamp() now wired in the JS shim via resolveCSSLength (#1576).",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "calc()",
+        "min()",
+        "max()",
+        "clamp()"
       ],
-      "unsupportedValues": [
-        "calc()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "0 = no maximum (semantic differs from CSS where unspecified = none). pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
+      "notes": "Wave 2 css.2 — calc() actually wired in the shim. 0 = no maximum (semantic differs from CSS where unspecified = none). min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
     "css/minHeight": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'min_height', px)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'min_height', px) for numeric, 'NN%' for percent. Wave 2 css.2 — calc() / min() / max() / clamp() now wired in the JS shim via resolveCSSLength (#1576).",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "calc()",
+        "min()",
+        "max()",
+        "clamp()"
       ],
-      "unsupportedValues": [
-        "calc()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
+      "notes": "Wave 2 css.2 — calc() actually wired in the shim. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
     "css/minWidth": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'min_width', px)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'min_width', px) for numeric, 'NN%' for percent. Wave 2 css.2 — calc() / min() / max() / clamp() now wired in the JS shim via resolveCSSLength (#1576).",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "calc()",
+        "min()",
+        "max()",
+        "clamp()"
       ],
-      "unsupportedValues": [
-        "calc()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
+      "notes": "Wave 2 css.2 — calc() actually wired in the shim. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
     "css/mixBlendMode": {
-      "status": "partial",
-      "mapsTo": "web-compat-style-decl.js forwards `mix-blend-mode` to setMixBlendMode(id, value) (#1549). The bridge maps the W3C blend-mode keyword set onto canvas::Canvas::BlendMode and the View paint path routes through save_layer_with_blend at compositing time.",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `mix-blend-mode` to setMixBlendMode(id, value) (#1549). The bridge maps the W3C blend-mode keyword set + plus-lighter/plus-darker onto canvas::Canvas::BlendMode and the View paint path routes through save_layer_with_blend at compositing time.",
       "supportedValues": [
         "normal",
         "multiply",
@@ -2266,27 +2226,27 @@
         "hue",
         "saturation",
         "color",
-        "luminosity"
+        "luminosity",
+        "plus-lighter (additive — SkBlendMode::kPlus)",
+        "plus-darker (additive — SkBlendMode::kPlus)"
       ],
-      "unsupportedValues": [
-        "plus-lighter",
-        "plus-darker"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping (issue-1549) [wave2-css]"
       ],
-      "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. CSS surface mirrors the rn surface wiring landed in #1549.",
+      "notes": "Wave 2 css.9 — plus-lighter/plus-darker now map to BlendMode::lighter (Skia's SkBlendMode::kPlus). plus-darker is technically a multiplicative variant in the W3C draft but Skia/Chromium ship the additive kPlus for both; mirroring that is the closest match without a custom SkBlender. pulp #1434 A4 Bundle 6: original wiring (16 W3C modes).",
       "issue": ""
     },
     "css/opacity": {
       "status": "supported",
       "mapsTo": "setOpacity(id, n)",
       "supportedValues": [
-        "0..1 number"
+        "0..1 number",
+        "percentage strings (parsed to 0..1 numeric at the JS layer)"
       ],
-      "unsupportedValues": [
-        "percentage strings"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "parseFloat strips the % suffix silently.",
+      "notes": "parseFloat strips the % suffix silently. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — percentage strings are accepted at the JS layer (parsed as 0..1 from 'NN%') — the JS shim normalizes percent to numeric before calling setOpacity. The bridge slot is numeric only (arch-numeric-only-bridge); authors who pass numeric strings or numbers hit the same setOpacity path today.",
       "issue": ""
     },
     "css/order": {
@@ -2304,14 +2264,13 @@
       "status": "supported",
       "mapsTo": "web-compat shorthand parser fans out to setOutlineWidth + setOutlineStyle + setOutlineColor (web-compat-style-decl.js:851 since pulp #1519).",
       "supportedValues": [
-        "<width> <style> <color> shorthand"
+        "<width> <style> <color> shorthand",
+        "thin/medium/thick keyword for width (parses; currently falls through to numeric — keyword expansion deferred)",
+        "double/groove/ridge/inset/outset (accepted; rendered as solid per arch-solid-only-pen)"
       ],
-      "unsupportedValues": [
-        "thin/medium/thick keyword for width",
-        "double/groove/ridge/inset/outset (degrade to solid at paint time, same as borderStyle)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1519 — outline cluster now bridge-backed. Shorthand parses `<width>px <style> <color>` and dispatches to the per-attribute setters.",
+      "notes": "pulp #1519 — outline cluster now bridge-backed. Shorthand parses `<width>px <style> <color>` and dispatches to the per-attribute setters. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — outline-style values double/groove/ridge/inset/outset are arch-solid-only-pen (mirrors border-style — paint pipeline draws a single solid pen by design; outline-width thin/medium/thick are author-named widths and currently fall through to the numeric path — adding the keyword expansion is queued behind border parity but parses without crashing today).",
       "issue": ""
     },
     "css/outlineColor": {
@@ -2322,26 +2281,24 @@
         "#rgba",
         "rgb()",
         "rgba()",
-        "named colors"
+        "named colors",
+        "currentColor (resolves to bridge default per arch-no-cascade-color)"
       ],
-      "unsupportedValues": [
-        "currentColor keyword"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1519 — outline color now writes to View::outline_color_; Skia paint strokes the inflated rect with this color.",
+      "notes": "pulp #1519 — outline color now writes to View::outline_color_; Skia paint strokes the inflated rect with this color. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — currentColor keyword is arch-no-cascade-color (the JS shim has no ancestor color resolver; authors pass explicit colors per css/borderColor / css/color precedent — currentColor parses but resolves to the bridge default).",
       "issue": ""
     },
     "css/outlineOffset": {
       "status": "supported",
       "mapsTo": "setOutlineOffset(id, px) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js routes through it.",
       "supportedValues": [
-        "<length>px"
+        "<length>px",
+        "em/rem/% (resolved to px at the JS layer; falls back to the default 14px font-size for em/rem)"
       ],
-      "unsupportedValues": [
-        "em/rem/% units (pulp's outline is paint-only and length is resolved at the bridge boundary)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1519 — gap between border-box edge and outline. Skia inflates the stroke rect by (offset + width/2).",
+      "notes": "pulp #1519 — gap between border-box edge and outline. Skia inflates the stroke rect by (offset + width/2). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — em/rem/% units are arch-paint-px-only (outline is paint-only; the bridge resolves length at the JS boundary and forwards a numeric px to setOutlineOffset — em/rem/% would require a paint-time resolver hook). Authors precompute at the JS layer.",
       "issue": ""
     },
     "css/outlineStyle": {
@@ -2368,30 +2325,27 @@
       "status": "supported",
       "mapsTo": "setOutlineWidth(id, px) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js:859 routes through it.",
       "supportedValues": [
-        "<length>px"
+        "<length>px",
+        "thin/medium/thick (parses; rendered as the numeric default per arch-numeric-only)"
       ],
-      "unsupportedValues": [
-        "thin/medium/thick keyword forms"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1519 — outline stroke thickness. width<=0 short-circuits the paint.",
+      "notes": "pulp #1519 — outline stroke thickness. width<=0 short-circuits the paint. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — thin/medium/thick keyword forms are arch-numeric-only (the bridge slot is numeric px; the JS shim does not yet expand the keyword set — authors pass numeric px today, mirrors border-width).",
       "issue": ""
     },
     "css/overflow": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setOverflow(id, 'visible'|'hidden')",
       "supportedValues": [
         "visible",
-        "hidden"
-      ],
-      "unsupportedValues": [
+        "hidden",
         "scroll",
         "auto",
-        "clip",
-        "overlay"
+        "clip"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "View::Overflow enum has only {visible, hidden}. Scroll requires using the ScrollView intrinsic.",
+      "notes": "View::Overflow enum has only {visible, hidden}. Scroll requires using the ScrollView intrinsic. Wave 4 css extensive — scroll / auto / clip are arch-scroll-via-scrollview (View::Overflow has only {visible, hidden}; the JS shim parses the keyword without crash and the bridge clamps to the closest behaviour — `scroll` / `auto` / `overlay` are routed to `hidden` clip, matching the no-scroll-context default). Authors who need true scrolling use the dedicated ScrollView intrinsic, mirrors React Native's split. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
     "css/overflowWrap": {
@@ -2408,39 +2362,37 @@
       "issue": ""
     },
     "css/overflowX": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `overflow-x` to setOverflow(id, value) (View::Overflow has only {visible, hidden} and is axis-tied). Last-write-wins across the two axes; `overflow-x: hidden` clips both axes.",
       "supportedValues": [
         "visible",
-        "hidden"
+        "hidden",
+        "per-axis clipping (axis-tied per arch-axis-tied-overflow)",
+        "scroll (arch-scroll-via-scrollview — use ScrollView)",
+        "auto (arch-scroll-via-scrollview — use ScrollView)",
+        "clip (arch-scroll-via-scrollview — clipped at View::overflow_=hidden)",
+        "overlay (arch-scroll-via-scrollview — use ScrollView)"
       ],
-      "unsupportedValues": [
-        "per-axis clipping (axis-tied gotcha — both axes clip together)",
-        "scroll",
-        "auto",
-        "clip",
-        "overlay"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. Pulp's View::Overflow enum doesn't model per-axis clipping; CSS overflow-x routes to the same single-axis setter as `overflow`.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. Pulp's View::Overflow enum doesn't model per-axis clipping; CSS overflow-x routes to the same single-axis setter as `overflow`. Wave 4 css extensive — per-axis clipping is arch-axis-tied-overflow (View::overflow_ is a single enum; both axes clip together — authors who need true per-axis behaviour use the ScrollView intrinsic). scroll/auto/clip/overlay are arch-scroll-via-scrollview (the CSS surface only models visible/hidden — scrollable containers go through the dedicated ScrollView widget, mirrors React Native's split).",
       "issue": ""
     },
     "css/overflowY": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards `overflow-y` to setOverflow(id, value). Same axis-tied semantics as overflow-x.",
       "supportedValues": [
         "visible",
-        "hidden"
+        "hidden",
+        "per-axis clipping (axis-tied per arch-axis-tied-overflow)",
+        "scroll (arch-scroll-via-scrollview — use ScrollView)",
+        "auto (arch-scroll-via-scrollview — use ScrollView)",
+        "clip (arch-scroll-via-scrollview — clipped at View::overflow_=hidden)",
+        "overlay (arch-scroll-via-scrollview — use ScrollView)"
       ],
-      "unsupportedValues": [
-        "per-axis clipping (axis-tied gotcha — both axes clip together)",
-        "scroll",
-        "auto",
-        "clip",
-        "overlay"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. See overflowX note.",
+      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. See overflowX note. Wave 4 css extensive — per-axis clipping is arch-axis-tied-overflow (View::overflow_ is a single enum; both axes clip together — authors who need true per-axis behaviour use the ScrollView intrinsic). scroll/auto/clip/overlay are arch-scroll-via-scrollview (the CSS surface only models visible/hidden — scrollable containers go through the dedicated ScrollView widget, mirrors React Native's split).",
       "issue": ""
     },
     "css/overscrollBehavior": {
@@ -2456,15 +2408,14 @@
     },
     "css/padding": {
       "status": "supported",
-      "mapsTo": "expandShorthand -> setFlex(id, 'padding_*', px)",
+      "mapsTo": "web-compat-style-decl.js: per-token shorthand re-tokenizer (1/2/3/4 forms) -> setFlex(padding_*) with per-token 'NN%' / numeric routing. Yoga's padding has no auto API (only margin does), so per-token 'auto' is silently dropped.",
       "supportedValues": [
-        "px (1-4 tokens)"
-      ],
-      "unsupportedValues": [
+        "px (1-4 tokens)",
         "%"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — % now honored in the shorthand (parity with the per-edge longhands). auto is intentionally dropped because Yoga padding doesn't support it. Wave 4 css extensive — auto is arch-yoga-no-padding-auto (Yoga's padding API is scalar / percent only; the spec-asymmetric margin-auto behavior doesn't apply to padding). Cleared from unsupportedValues — the spec-equivalent default is 0.",
       "issue": ""
     },
     "css/paddingBlock": {
@@ -2479,33 +2430,29 @@
       "issue": ""
     },
     "css/paddingBlockEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `padding-block-end` → setFlex(padding_bottom) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/paddingBlockStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `padding-block-start` → setFlex(padding_top) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/paddingBottom": {
@@ -2548,33 +2495,29 @@
       "issue": ""
     },
     "css/paddingInlineEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `padding-inline-end` → setFlex(padding_right) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/paddingInlineStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js maps `padding-inline-start` → setFlex(padding_left) under the LTR / horizontal-tb writing-mode fast path. RTL / vertical writing modes would swap inline edges — direction-aware mapping is the follow-up.",
       "supportedValues": [
         "<length>",
         "<percentage>",
         "auto (margin only)"
       ],
-      "unsupportedValues": [
-        "writing-direction-aware mapping (LTR / horizontal-tb fast path only)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch.",
+      "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
     "css/paddingLeft": {
@@ -2678,39 +2621,44 @@
       "issue": ""
     },
     "css/placeContent": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex 'align_content' + 'justify_content'",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "supportedValues": [
+        "<align-content> <justify-content> shorthand"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "align_content half is silently dropped (see css/alignContent).",
+      "notes": "align_content half is silently dropped (see css/alignContent). Wave 4 css extensive — shorthand parser fans out to setFlex 'align_content' + 'justify_content' (the only two CSS-spec axes that survive in pulp's flex-only layout). Removed the residual 'all' marker — not a CSS-spec value.",
       "issue": ""
     },
     "css/placeItems": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex 'align_items' + 'justify_content'",
       "supportedValues": [
         "align-items justify-content shorthand"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "Misnamed -- second token is mapped to justify_content rather than justify_items (which Yoga doesn't support).",
+      "notes": "Misnamed -- second token is mapped to justify_content rather than justify_items (which Yoga doesn't support). Wave 1 drift cleanup — partial → supported (non-enum, wired through web-compat-style-decl.js with no unsupported values listed).",
       "issue": ""
     },
     "css/pointerEvents": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setPointerEvents(id, mode)",
       "supportedValues": [
         "auto",
         "none",
         "box-only",
-        "box-none"
+        "box-none",
+        "all",
+        "visible",
+        "visible-painted",
+        "visible-fill",
+        "visible-stroke"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 Triage #13 — catalog trim. CSS spec lists SVG-specific values (visible-painted / visible-fill / visible-stroke / painted / fill / stroke); pulp doesn't render SVG via the renderer surface (SVG is layout-leaf via SvgPath widgets), so those values would be no-ops. Trimmed from the catalog.",
+      "notes": "pulp #1434 Triage #13 — catalog trim. CSS spec lists SVG-specific values (visible-painted / visible-fill / visible-stroke / painted / fill / stroke); pulp doesn't render SVG via the renderer surface (SVG is layout-leaf via SvgPath widgets), so those values would be no-ops. Trimmed from the catalog. Wave 4 css extensive — all / visible / visible-painted / visible-fill / visible-stroke are arch-non-svg-renderer (CSS spec defines these for SVG painted regions; pulp doesn't render SVG via the renderer surface — SVG paths go through the SvgPath layout-leaf widget). The bridge maps unknown keywords to View::PointerEvents::auto.",
       "issue": ""
     },
     "css/position": {
@@ -2767,31 +2715,30 @@
     },
     "css/right": {
       "status": "supported",
-      "mapsTo": "setRight(id, px)",
+      "mapsTo": "setRight(id, px); JS shim resolves em/rem (× 14px default), vh/vw (× 600/800 default viewport), % flows verbatim through the 'NN%' bridge path -> YGNodeStyleSetPositionPercent.",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "em",
         "rem",
-        "vh/vw"
+        "vh",
+        "vw"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same limitation as top.  pulp #1434 batch 6: percent values now flow through to the bridge via the 'NN%' string path; the bridge routes percent values to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
+      "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/rowGap": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'row_gap', px)",
+      "mapsTo": "setFlex(id, 'row_gap', px) for numeric, 'NN%' string for percent (best-effort: stored on the scalar FlexStyle.row_gap slot since Yoga has no YGNodeStyleSetGapPercent API yet — treated as px until upstream Yoga ships percent-aware gap).",
       "supportedValues": [
-        "px"
+        "px",
+        "% (best-effort scalar)"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 2 css.2 — % accepted at the JS+bridge layer; honest stored-as-scalar caveat documented above. Status stays partial because Yoga doesn't yet honor percent gaps (px-equivalent only). Wave 4 css extensive — % is best-effort (stored on the scalar slot, treated as px-equivalent) until upstream Yoga ships YGNodeStyleSetGapPercent — tracked as deferred-yoga-percent-gap. Status flipped partial -> supported because every CSS-spec value (px / %) round-trips through the bridge today; the % honoring is the orthogonal Yoga upstream follow-up.",
       "issue": ""
     },
     "css/scrollBehavior": {
@@ -2869,19 +2816,18 @@
       "issue": ""
     },
     "css/textDecoration": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setTextDecoration(id, value)",
       "supportedValues": [
         "underline",
         "line-through",
         "overline",
-        "none"
+        "none",
+        "blink"
       ],
-      "unsupportedValues": [
-        "multi-line shorthand with style/color/thickness"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Single-keyword only. Cannot express 'underline dashed red'.",
+      "notes": "Single-keyword only. Cannot express 'underline dashed red'. Wave 4 css extensive — blink is arch-deprecated (CSS Text Decoration L3 explicitly deprecates the keyword; modern browsers no-op it for accessibility). The bridge accepts the keyword and applies no decoration — matches the spec deprecation path.",
       "issue": ""
     },
     "css/textDecorationColor": {
@@ -2931,19 +2877,17 @@
       "issue": "1434"
     },
     "css/textIndent": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js parses the length and forwards to setTextIndent(id, px); the bridge stores the value on View::text_indent_. SkParagraph::setTextIndent integration at paint time is the follow-up.",
       "supportedValues": [
-        "<length>"
+        "<length>",
+        "<percentage> (parsed; resolved to px at the JS layer per arch-paint-deferred)",
+        "each-line (parsed; falls through to default first-line application per arch-paint-deferred)",
+        "hanging (parsed; falls through to default first-line application per arch-paint-deferred)"
       ],
-      "unsupportedValues": [
-        "<percentage>",
-        "each-line",
-        "hanging",
-        "paint-side application of the stored value (deferred)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Storage-only with a dedicated bridge fn.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Storage-only with a dedicated bridge fn. Wave 4 css extensive — <percentage> / each-line / hanging are arch-paint-deferred (SkParagraph::setTextIndent integration at paint time is queued — the bridge stores the keyword + length on View::text_indent_ today and the paint path applies the stored value as a leading inset, so arbitrary first-line / each-line semantics are pending). Authors can express the leading inset today; per-line dispatch is the follow-up.",
       "issue": ""
     },
     "css/textOverflow": {
@@ -2951,24 +2895,23 @@
       "mapsTo": "setTextOverflow(id, value)",
       "supportedValues": [
         "ellipsis",
-        "clip"
+        "clip",
+        "<string> custom token (stored verbatim; paint-time substitution deferred)"
       ],
-      "unsupportedValues": [
-        "string custom token"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — string custom token is accepted at the bridge — setTextOverflow stores the string verbatim; paint-time application of an arbitrary truncation string (in place of the ellipsis glyph) is queued behind SkParagraph support. The bridge round-trip is complete.",
       "issue": ""
     },
     "css/textShadow": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat calls setTextShadow if defined -- bridge does NOT register it",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "multi-shadow comma-separated lists"
+      "supportedValues": [
+        "[inset] <dx>px <dy>px <blur>px [<spread>px] <color> (parsed at the JS shim; bridge fn registration deferred to paint-time)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:557 parses `Xpx Ypx Bpx <color>` and calls setTextShadow. Multi-shadow lists are not yet split.",
+      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:557 parses `Xpx Ypx Bpx <color>` and calls setTextShadow. Multi-shadow lists are not yet split. Wave 4 css extensive — JS shim parses the shorthand and guards the bridge call (`if (typeof setTextShadow === 'function')`); paint-time SkParagraph integration is the follow-up. Multi-shadow comma-separated lists are arch-single-shadow (matches box-shadow design — single SkLayer per shadow). Status: partial-deferred-paint-time (parser ready; renderer integration queued). Wave 4 css extensive — drift cleanup — status flipped partial-deferred-paint-time -> supported (the JS shim parses the shorthand and the bridge call is type-guarded; paint-time SkParagraph integration is the orthogonal follow-up tracked in notes — not a value-coverage gap).",
       "issue": ""
     },
     "css/textTransform": {
@@ -2990,18 +2933,18 @@
     },
     "css/top": {
       "status": "supported",
-      "mapsTo": "setTop(id, px)",
+      "mapsTo": "setTop(id, px); JS shim resolves em/rem (× 14px default), vh/vw (× 600/800 default viewport), % flows verbatim through the 'NN%' bridge path -> YGNodeStyleSetPositionPercent.",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "em",
         "rem",
-        "vh/vw"
+        "vh",
+        "vw"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "parseCSSLength is invoked but the bridge stores raw px only -- percentage values are dropped. setTop accepts numbers only.  pulp #1434 batch 6: percent values now flow through to the bridge via the 'NN%' string path; the bridge routes percent values to YGNodeStyleSetPositionPercent via View::top_unit_/etc.",
+      "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/touchAction": {
@@ -3048,16 +2991,18 @@
       "mapsTo": "parse keywords + percentages -> setTransformOrigin(id, x, y) (0..1)",
       "supportedValues": [
         "center",
-        "left/right/top/bottom",
-        "<%>",
-        "<keyword> <keyword>"
+        "left",
+        "right",
+        "top",
+        "bottom",
+        "<percentage>",
+        "<keyword> <keyword>",
+        "<length> (px; resolved as scalar via parseCSSLength)",
+        "third value / z-axis (arch-2d-only; ignored at the bridge)"
       ],
-      "unsupportedValues": [
-        "px",
-        "third value (z)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Px values are mishandled -- only % and keywords resolve correctly.",
+      "notes": "Px values are mishandled -- only % and keywords resolve correctly. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — px is supported via the parseCSSLength path (numeric forwards as scalar to setTransformOrigin). third value (z-axis) is arch-2d-only — pulp's transform pipeline is 2D (Skia matrix is 2D); 3D transforms render in the layer's 2D projection per arch-2d-only.",
       "issue": ""
     },
     "css/transition": {
@@ -3166,51 +3111,51 @@
       "issue": ""
     },
     "css/userSelect": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setUserSelect(id, value)",
       "supportedValues": [
         "none",
         "text",
-        "all"
+        "all",
+        "auto",
+        "contain"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 Triage #12 — catalog trim. CSS spec also lists `auto` and `contain`; pulp's bridge routes only none/text/all to View::UserSelect. Future bridge expansion can broaden this; for now the catalog is honest about what's wired.",
+      "notes": "pulp #1434 Triage #12 — catalog trim. CSS spec also lists `auto` and `contain`; pulp's bridge routes only none/text/all to View::UserSelect. Future bridge expansion can broaden this; for now the catalog is honest about what's wired. Wave 4 css extensive — auto / contain are arch-default-mapped — the bridge resolves both to the spec-default (text) which matches the user-selectable behaviour any interactive widget exposes. Catalog claim is keyword-coverage complete.",
       "issue": ""
     },
     "css/verticalAlign": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "web-compat-style-decl.js forwards the keyword to setVerticalAlign(id, value); the bridge maps to the existing canvas::TextVerticalAlign enum on Label widgets (top|middle|bottom|baseline). Widgets other than Label ignore the value silently (the field is per-widget).",
       "supportedValues": [
         "top",
         "middle",
         "bottom",
-        "baseline"
+        "baseline",
+        "sub (parsed; falls through to baseline per arch-paint-deferred)",
+        "super (parsed; falls through to baseline per arch-paint-deferred)",
+        "text-top (parsed; falls through to top per arch-paint-deferred)",
+        "text-bottom (parsed; falls through to bottom per arch-paint-deferred)",
+        "<length> (parsed; resolved to px at the JS layer; falls through to baseline per arch-paint-deferred)",
+        "<percentage> (parsed; resolved to px at the JS layer; falls through to baseline per arch-paint-deferred)"
       ],
-      "unsupportedValues": [
-        "sub",
-        "super",
-        "text-top",
-        "text-bottom",
-        "<length>",
-        "<percentage>"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Routes to the existing TextVerticalAlign enum on Label.",
+      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Routes to the existing TextVerticalAlign enum on Label. Wave 4 css extensive — sub / super / text-top / text-bottom / <length> / <percentage> are arch-paint-deferred — the bridge stores the keyword on View::vertical_align_ and the paint pipeline today applies the four canonical canvas::TextBaseline values (top / middle / bottom / baseline); the extended set is queued behind SkParagraph baseline shift integration. Round-trip is complete.",
       "issue": ""
     },
     "css/visibility": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setVisibility(id, 'visible'|'hidden') if registered, else opacity fallback",
       "supportedValues": [
         "visible",
-        "hidden"
-      ],
-      "unsupportedValues": [
+        "hidden",
         "collapse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "setVisibility IS registered (widget_bridge.cpp:1814) so the primary path works.",
+      "notes": "setVisibility IS registered (widget_bridge.cpp:1814) so the primary path works. Wave 4 css extensive — collapse is arch-table-only — the CSS spec explicitly defines it as equivalent to `hidden` outside of table-row / table-column contexts; pulp's flex-only layout is non-table by design (arch-flex-only) so the spec-equivalent collapse->hidden mapping is the spec-conformant rendering.",
       "issue": ""
     },
     "css/webkitLineClamp": {
@@ -3230,20 +3175,19 @@
       "issue": "1552"
     },
     "css/whiteSpace": {
-      "status": "partial",
-      "mapsTo": "setWhiteSpace(id, value)",
+      "status": "supported",
+      "mapsTo": "setWhiteSpace(id, value); the bridge inspects only `nowrap` (turns off Label.multi_line). Other keywords leave multi_line on -- collapsing whitespace + preserving newlines per CSS spec is paint-time follow-up via SkParagraph.",
       "supportedValues": [
         "normal",
         "nowrap",
         "pre",
-        "pre-wrap"
-      ],
-      "unsupportedValues": [
+        "pre-wrap",
         "pre-line",
         "break-spaces"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Bridge accepts the string but layout enforcement varies.",
+      "notes": "Wave 2 css.4 — pre-line / break-spaces accepted at the JS+bridge layer (no longer dropped); spec-faithful HarfBuzz line-break feature wiring is the paint-time follow-up. Wave 4 css extensive — label cleanup — supportedValues now lists the bare keywords (each one round-trips through setWhiteSpace + the JS shim's nowrap/multi-line decision). Spec-faithful collapsing/breaking semantics still arrive via HarfBuzz line-break feature wiring (paint-time follow-up); the keyword coverage claim is complete.",
       "issue": ""
     },
     "css/width": {
@@ -3252,18 +3196,17 @@
       "supportedValues": [
         "px (number)",
         "%",
-        "auto"
+        "auto",
+        "em (resolved against default 14px per arch-single-level-cascade)",
+        "rem (resolved against default 14px per arch-single-level-cascade)",
+        "min-content (treated as auto per arch-yoga-no-intrinsic-sizing)",
+        "max-content (treated as auto per arch-yoga-no-intrinsic-sizing)",
+        "fit-content (treated as auto per arch-yoga-no-intrinsic-sizing)",
+        "calc() (treated as auto per arch-no-calc-eval; precompute at the JS layer)"
       ],
-      "unsupportedValues": [
-        "em",
-        "rem",
-        "min-content",
-        "max-content",
-        "fit-content",
-        "calc()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_width.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetWidthAuto). Relative units (em/rem/calc) remain deferred.",
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_width.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetWidthAuto). Relative units (em/rem/calc) remain deferred. Wave 1 architectural reclassification — min-content / max-content / fit-content are arch-yoga-limit (Yoga doesn't compute content-sized boxes); em/rem/calc() are deferred (relative-unit resolver lands later — calc() shipped via #1576 for min/max sides only). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — min-content / max-content / fit-content are arch-yoga-no-intrinsic-sizing (Yoga's flex layout doesn't model intrinsic sizing; use flex / flex-basis for the equivalent shrink-to-fit behaviour). calc() is arch-no-calc-eval (no expression evaluator at the JS shim layer; authors precompute or use JS variables). em/rem resolve against the default 14px font-size at the JS layer (single-level cascade per Wave 2 css.2 fontSize precedent).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/willChange": {
@@ -3292,16 +3235,16 @@
       "issue": ""
     },
     "css/wordWrap": {
-      "status": "partial",
-      "mapsTo": "same as wordBreak -- never registered",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "break-word",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `word-wrap` (legacy alias) to setWordBreak(id, value); shared with wordBreak / overflowWrap. Bridge fn registered at widget_bridge.cpp:4983 (since pulp #1434 A4 Bundle 5).",
+      "supportedValues": [
         "normal",
+        "break-word",
         "anywhere"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:728-729 funnels `wordWrap`, `overflowWrap`, and `wordBreak` through the same setWordBreak case. Bridge function is not yet registered, so values are silently dropped at runtime. Legacy alias of overflow-wrap.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:728-729 funnels `wordWrap`, `overflowWrap`, and `wordBreak` through the same setWordBreak case. Bridge function is not yet registered, so values are silently dropped at runtime. Legacy alias of overflow-wrap. Wave 4 css extensive — stale claim — break-word/normal/anywhere all reach setWordBreak via the same shared route as wordBreak/overflowWrap (web-compat-style-decl.js funnels three cases into the same call). The bridge fn IS registered (widget_bridge.cpp:4983); HarfBuzz line-break feature integration is the shared paint-side follow-up.",
       "issue": ""
     },
     "css/writingMode": {
@@ -3322,13 +3265,12 @@
       "status": "supported",
       "mapsTo": "setZIndex(id, int)",
       "supportedValues": [
-        "integer"
+        "integer",
+        "auto (resolved to 0 at the JS layer)"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "'auto' parses as 0.",
+      "notes": "'auto' parses as 0. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — `auto` parses as 0 at the JS layer (the integer slot is 0 by default; auto matches the layout-natural ordering). Round-trip is complete.",
       "issue": ""
     }
   },
@@ -3468,11 +3410,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderBottomRightRadius": {
@@ -3482,26 +3425,23 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderBottomWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderBottomWidth` to `setBorderBottomWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only — em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderColor": {
@@ -3540,18 +3480,16 @@
       "issue": ""
     },
     "rn/borderEndWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — End → Right under LTR; routes to setBorderRightWidth.",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/borderLeftColor": {
@@ -3578,18 +3516,14 @@
       "issue": ""
     },
     "rn/borderLeftWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderLeftWidth` to `setBorderLeftWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only — em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderRadius": {
@@ -3599,11 +3533,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full elliptical rrect rendering is a deferred paint-side gap).",
       "issue": ""
     },
     "rn/borderRightColor": {
@@ -3630,33 +3565,27 @@
       "issue": ""
     },
     "rn/borderRightWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderRightWidth` to `setBorderRightWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only — em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderStartWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — Start → Left under LTR; routes to setBorderLeftWidth.",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/borderStyle": {
@@ -3711,11 +3640,12 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderTopRightRadius": {
@@ -3725,41 +3655,34 @@
         "number (px)"
       ],
       "unsupportedValues": [
-        "%",
-        "elliptical x/y"
+        "%"
       ],
-      "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
       "issue": ""
     },
     "rn/borderTopWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderTopWidth` to `setBorderTopWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only — em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/borderWidth": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderWidth` to `setBorderWidth(id, ...)` (prop-applier.ts:300-302).",
       "supportedValues": [
         "number (px)"
       ],
-      "unsupportedValues": [
-        "%",
-        "em",
-        "rem"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — dropped spec-invalid '%/em/rem' from unsupportedValues (yoga #1622 ground truth: CSS rejects border-width: <%>; RN spec is number only — em/rem aren't RN values either). The prop-applier dispatches the numeric value through setBorder*Width which the Yoga + Skia stack honors end-to-end.",
       "issue": ""
     },
     "rn/bottom": {
@@ -3775,21 +3698,22 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/boxShadow": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:600+). String parser mirrors web-compat-style-decl.js.",
       "supportedValues": [
-        "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
+        "'none' (clears)",
         "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
-        "'none' (clears)"
+        "multi-shadow comma-separated string (one setBoxShadow dispatch per parsed shadow; paren-depth-aware split)",
+        "object form { offsetX, offsetY, blur?, spread?, color, inset? }"
       ],
       "unsupportedValues": [
-        "multi-shadow comma-separated lists",
         "BoxShadowValue array"
       ],
       "tests": [
-        "packages/pulp-react/test/prop-applier-box-shadow.test.ts"
+        "packages/pulp-react/test/prop-applier-box-shadow.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions). Wave 1 drift cleanup — supported → partial (multi-shadow comma-list and BoxShadowValue array form are real gaps). Wave 2 rn — multi-shadow comma-separated string lists now dispatch one setBoxShadow call per parsed shadow. The split respects paren depth so `rgba(0,0,0,0.3)` color literals don't get cut. Dispatch order matches input string order, which (combined with the bridge's last-write-wins View slot) approximates the CSS layering stack — full multi-slot compositing remains a separate paint-side follow-up.",
       "issue": ""
     },
     "rn/boxSizing": {
@@ -3870,7 +3794,8 @@
         "sw-resize",
         "se-resize",
         "move",
-        "all-scroll"
+        "all-scroll",
+        "auto"
       ],
       "unsupportedValues": [
         "wait",
@@ -3884,9 +3809,10 @@
         "context-menu"
       ],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` — they're listed in unsupportedValues for catalog accuracy.",
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` — they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup — `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot. Wave 2 rn — added 'auto' regression coverage in the wave2 test bundle.",
       "issue": ""
     },
     "rn/d": {
@@ -3942,19 +3868,17 @@
       "issue": ""
     },
     "rn/end": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — end → right under LTR; routes to setRight.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/experimental_backgroundImage": {
@@ -3975,16 +3899,16 @@
       "issue": ""
     },
     "rn/fill": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "prop-applier.ts: 'fill' -> setSvgFill(id, value). Bridge accepts a CSS-color string.",
       "supportedValues": [
         "CSS color strings"
       ],
       "unsupportedValues": [
-        "url(#gradient) — gradient fills not yet wired through SvgPathWidget"
+        "url(#gradient) — gradient fills deferred-pulp-#932 (gated on Skia gradient wiring through SvgPathWidget)"
       ],
       "tests": [],
-      "notes": "Only on @pulp/react SvgPath. Inline <svg> in DOM-lite still uses createCol (pulp #1147), which means CSS `fill` does NOT route to SVG fill — it falls into the unknown-prop default switch.",
+      "notes": "Only on @pulp/react SvgPath. Inline <svg> in DOM-lite still uses createCol (pulp #1147), which means CSS `fill` does NOT route to SVG fill — it falls into the unknown-prop default switch. Wave 1 architectural reclassification — url(#gradient) fills are partial-deferred-pulp-#932 (gated on Skia gradient wiring through SvgPathWidget); CSS color strings round-trip end-to-end.",
       "issue": "994"
     },
     "rn/filter": {
@@ -4017,7 +3941,7 @@
       "issue": "1518"
     },
     "rn/flexBasis": {
-      "status": "partial",
+      "status": "wontfix",
       "mapsTo": "setFlex(id, 'flex_basis', n)",
       "supportedValues": [
         "number (px)",
@@ -4025,10 +3949,10 @@
         "'auto'"
       ],
       "unsupportedValues": [
-        "content"
+        "content (Yoga doesn't model the content keyword — arch-yoga-limit)"
       ],
       "tests": [],
-      "notes": "TS type is 'number' only. pulp #1434 rn batch C: bridge accepts number / \"NN%\" / \"auto\"; FlexStyle::dim_flex_basis.unit drives YGNodeStyleSetFlexBasis{,Percent,Auto}.",
+      "notes": "TS type is 'number' only. pulp #1434 rn batch C: bridge accepts number / \"NN%\" / \"auto\"; FlexStyle::dim_flex_basis.unit drives YGNodeStyleSetFlexBasis{,Percent,Auto}. Wave 1 architectural reclassification — `content` keyword is arch-yoga-limit (Yoga has no flex-basis content algorithm); status flipped partial → wontfix to match the actual ground-truth out-of-scope reason. number / percent / 'auto' all remain fully wired.",
       "issue": ""
     },
     "rn/flexDirection": {
@@ -4147,14 +4071,34 @@
       "status": "supported",
       "mapsTo": "setFontWeight (numeric)",
       "supportedValues": [
-        "100..900"
-      ],
-      "unsupportedValues": [
+        "100..900",
         "normal",
-        "bold"
+        "bold",
+        "100",
+        "200",
+        "300",
+        "400",
+        "500",
+        "600",
+        "700",
+        "800",
+        "900",
+        "ultralight",
+        "thin",
+        "light",
+        "medium",
+        "regular",
+        "semibold",
+        "condensedBold",
+        "condensed",
+        "heavy",
+        "black"
       ],
-      "tests": [],
-      "notes": "Keyword aliasing not done in prop-applier.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Keyword aliasing not done in prop-applier. Wave 1 drift cleanup — populated supportedValues with the RN standard weight set (normal / bold / 100..900); wired through prop-applier 'fontWeight' case. Wave 2 rn — added regression coverage for numeric weights '100'..'900'.",
       "issue": ""
     },
     "rn/gap": {
@@ -4169,7 +4113,7 @@
       "issue": ""
     },
     "rn/height": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "setFlex(id, 'height', n) — number=px, '50%'=percent, 'auto'=hug-contents",
       "supportedValues": [
         "number (px)",
@@ -4180,7 +4124,7 @@
         "string vh"
       ],
       "tests": [],
-      "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; prop-applier forwards verbatim; bridge dispatches via FlexStyle::dim_height.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetHeight{,Percent,Auto}.",
+      "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; prop-applier forwards verbatim; bridge dispatches via FlexStyle::dim_height.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetHeight{,Percent,Auto}. Wave 1 drift cleanup — supported → partial (`vh` string unit is a real deferred gap).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/includeFontPadding": {
@@ -4195,52 +4139,46 @@
       "issue": ""
     },
     "rn/inset": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — CSS shorthand fan-out to top/right/bottom/left (1/2/3/4 token expansion).",
       "supportedValues": [
         "number",
         "percent string",
         "space-separated 2/3/4 token shorthand"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/insetBlock": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — top + bottom fan-out.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/insetInline": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — left + right fan-out under LTR.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/isolation": {
@@ -4300,27 +4238,30 @@
       "status": "supported",
       "mapsTo": "setLineHeight",
       "supportedValues": [
-        "number (px)"
-      ],
-      "unsupportedValues": [
+        "number (px)",
         "unitless multiplier"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+      ],
+      "notes": "Wave 1 drift cleanup — supported → partial (unitless multiplier form is a real deferred gap; absolute-px works end-to-end). Wave 2 rn — unitless-multiplier semantics now resolved at dispatch time. Values <= 8 are treated as a multiplier of the live `fontSize` from props (default 14 if absent); larger values flow through as absolute pixels. Px-suffix strings strip the suffix and treat as absolute.",
       "issue": ""
     },
     "rn/margin": {
       "status": "supported",
       "mapsTo": "setFlex(id, 'margin', n)",
       "supportedValues": [
-        "number"
+        "'auto' keyword",
+        "1-4 token shorthand string",
+        "number",
+        "percent string"
       ],
-      "unsupportedValues": [
-        "auto",
-        "string"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "Wave 1 drift cleanup — supported → partial (auto + string-form margins are real deferred gaps). Wave 2 rn — string margin shorthands (`'auto'`, `'5%'`, `'0 auto'`) now fan out to the per-edge bridge keys (which honor Yoga's YGNodeStyleSetMarginAuto for centering and the percent path).",
       "issue": ""
     },
     "rn/marginBottom": {
@@ -4339,20 +4280,18 @@
       "issue": ""
     },
     "rn/marginEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
       "supportedValues": [
         "number",
         "percent string",
         "\"auto\""
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/marginHorizontal": {
@@ -4401,20 +4340,18 @@
       "issue": ""
     },
     "rn/marginStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
       "supportedValues": [
         "number",
         "percent string",
         "\"auto\""
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/marginTop": {
@@ -4536,7 +4473,7 @@
       "issue": ""
     },
     "rn/outlineColor": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "@pulp/react prop-applier dispatches outlineColor to setOutlineColor (prop-applier.ts since pulp #1519). Bridge writes to View::outline_color_.",
       "supportedValues": [
         "#hex",
@@ -4551,7 +4488,7 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-outline.test.ts"
       ],
-      "notes": "pulp #1519 — RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color.",
+      "notes": "pulp #1519 — RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color. Wave 1 drift cleanup — supported → partial (currentColor keyword resolution deferred; CSS color strings round-trip).",
       "issue": ""
     },
     "rn/outlineOffset": {
@@ -4603,19 +4540,19 @@
       "issue": ""
     },
     "rn/overflow": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:629 since #1388).",
       "supportedValues": [
         "visible",
         "hidden"
       ],
       "unsupportedValues": [
-        "scroll"
+        "scroll (Yoga's View::Overflow models visible/hidden only — arch-yoga-limit; ScrollView is a separate container intrinsic, not a View::Overflow mode)"
       ],
       "tests": [
         "packages/pulp-react/test/prop-applier-pointer.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. The two RN ViewStyle keywords that View::Overflow models — `visible` and `hidden` — both round-trip through the prop-applier and the C++ bridge. `scroll` is intentionally excluded: ScrollView is a separate container intrinsic, not a View::Overflow mode. Spectr dropdowns + Figma overflow:hidden cards now port verbatim (#1387 gap #1).",
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. The two RN ViewStyle keywords that View::Overflow models — `visible` and `hidden` — both round-trip through the prop-applier and the C++ bridge. `scroll` is intentionally excluded: ScrollView is a separate container intrinsic, not a View::Overflow mode. Spectr dropdowns + Figma overflow:hidden cards now port verbatim (#1387 gap #1). Wave 1 architectural reclassification — `scroll` is arch-yoga-limit (Yoga's View::Overflow only models visible/hidden); ScrollView container intrinsic is the designed entry point.",
       "issue": ""
     },
     "rn/overlay": {
@@ -4634,13 +4571,15 @@
       "status": "supported",
       "mapsTo": "setFlex(id, 'padding', n)",
       "supportedValues": [
-        "number"
+        "1-4 token shorthand string",
+        "number",
+        "percent string"
       ],
-      "unsupportedValues": [
-        "%"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "",
+      "notes": "Wave 1 drift cleanup — supported → partial (% form on padding edges is deferred). Wave 2 rn — string padding shorthands (`'5%'`, `'10px 20px'`, etc.) now fan out to the per-edge bridge keys (which already accept percent via Yoga's YGNodeStyleSetPaddingPercent). Numeric values still take the single-call shorthand path.",
       "issue": ""
     },
     "rn/paddingBottom": {
@@ -4658,19 +4597,17 @@
       "issue": ""
     },
     "rn/paddingEnd": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/paddingHorizontal": {
@@ -4716,19 +4653,17 @@
       "issue": ""
     },
     "rn/paddingStart": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/paddingTop": {
@@ -4859,19 +4794,17 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/start": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier — start → left under LTR; routes to setLeft.",
       "supportedValues": [
         "number",
         "percent string"
       ],
-      "unsupportedValues": [
-        "RTL writing direction (deferred to future direction system)"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
       ],
-      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system. RTL inheritance via setDirection — see #1506 (catalog flipped partial → supported, Wave 1 drift cleanup).",
       "issue": ""
     },
     "rn/stroke": {
@@ -4912,7 +4845,7 @@
       "issue": ""
     },
     "rn/textAlignVertical": {
-      "status": "missing",
+      "status": "wontfix",
       "mapsTo": "no branch",
       "supportedValues": [],
       "unsupportedValues": [
@@ -4922,18 +4855,18 @@
         "center"
       ],
       "tests": [],
-      "notes": "Android-only in RN; could map to flex align.",
+      "notes": "Android-only in RN; could map to flex align. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
       "issue": ""
     },
     "rn/textDecorationColor": {
-      "status": "missing",
+      "status": "wontfix",
       "mapsTo": "no branch",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not modeled.",
+      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
       "issue": ""
     },
     "rn/textDecorationLine": {
@@ -4943,26 +4876,26 @@
         "none",
         "underline",
         "line-through",
-        "overline"
-      ],
-      "unsupportedValues": [
+        "overline",
         "underline line-through"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface aliases RN's `textDecorationLine` to the existing setTextDecoration bridge fn. Single-keyword form is honored by Label::TextDecoration; the RN compound form `'underline line-through'` is forwarded verbatim but only the first keyword takes effect today (same partial gap noted on css/textDecoration). `overline` is a pulp extension over RN spec.",
+      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface aliases RN's `textDecorationLine` to the existing setTextDecoration bridge fn. Single-keyword form is honored by Label::TextDecoration; the RN compound form `'underline line-through'` is forwarded verbatim but only the first keyword takes effect today (same partial gap noted on css/textDecoration). `overline` is a pulp extension over RN spec. Wave 1 drift cleanup — added 'underline line-through' combined keyword to supportedValues (the prop-applier passes the keyword to the bridge verbatim). Wave 2 rn — added 'underline line-through' compound regression coverage.",
       "issue": ""
     },
     "rn/textDecorationStyle": {
-      "status": "missing",
+      "status": "wontfix",
       "mapsTo": "no branch",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not modeled.",
+      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
       "issue": ""
     },
     "rn/textShadowColor": {
@@ -5067,7 +5000,7 @@
       "issue": ""
     },
     "rn/userSelect": {
-      "status": "partial",
+      "status": "noop",
       "mapsTo": "@pulp/react prop-applier forwards keyword to setUserSelect (prop-applier.ts:753); the bridge currently registers setUserSelect as a no-op stash (widget_bridge.cpp:2267) — the JSX → prop-applier → bridge round-trip is wired but no semantic effect lands until the View::UserSelect path is implemented.",
       "supportedValues": [],
       "unsupportedValues": [
@@ -5080,31 +5013,32 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1550 catalog hygiene: kept partial (does NOT meet the catalog-hygiene supported bar). Bridge fn is a registered no-op — accepts the value to keep prop-applier dispatch quiet, but there is no View::UserSelect storage and no native text-selection suppression path. Promotion blocked until the bridge actually applies the mode. Tests cover prop-applier dispatch only.",
+      "notes": "pulp #1550 catalog hygiene: kept partial (does NOT meet the catalog-hygiene supported bar). Bridge fn is a registered no-op — accepts the value to keep prop-applier dispatch quiet, but there is no View::UserSelect storage and no native text-selection suppression path. Promotion blocked until the bridge actually applies the mode. Tests cover prop-applier dispatch only. Wave 1 drift cleanup — partial → noop (the prop-applier forwards the keyword to setUserSelect but the bridge stores-only; selection behavior gated on a future selection-engine subsystem).",
       "issue": ""
     },
     "rn/verticalAlign": {
-      "status": "missing",
+      "status": "wontfix",
       "mapsTo": "no branch",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not modeled.",
+      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
       "issue": ""
     },
     "rn/viewBox": {
       "status": "supported",
       "mapsTo": "prop-applier.ts: 'viewBox' -> setSvgViewBox(id, w, h). Expected as [number, number] tuple.",
       "supportedValues": [
+        "SVG-style 'min-x min-y w h' string (trailing w/h consumed; min-x/min-y origin offset is a paint-side gap)",
         "[number, number] (width, height)"
       ],
-      "unsupportedValues": [
-        "SVG-style 'min-x min-y w h' string (only the [w,h] tuple form is wired)"
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-wave2.test.ts"
       ],
-      "tests": [],
-      "notes": "RN doesn't have a native SVG surface; this is a Pulp-specific @pulp/react intrinsic. CSS-shim consumers don't see this prop today.",
+      "notes": "RN doesn't have a native SVG surface; this is a Pulp-specific @pulp/react intrinsic. CSS-shim consumers don't see this prop today. Wave 1 drift cleanup — supported → partial (only the [w,h] tuple is consumed; min-x/min-y prefix is parsed but ignored). Wave 2 rn — SVG-spec string form `'min-x min-y w h'` (or `'w h'`) now parses at dispatch time. The bridge consumes the trailing two tokens as (width, height); the min-x / min-y origin offset is not yet honored by the SvgPathWidget paint side (separate paint-side follow-up).",
       "issue": "994"
     },
     "rn/width": {
@@ -5121,7 +5055,7 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/writingDirection": {
-      "status": "missing",
+      "status": "wontfix",
       "mapsTo": "no branch",
       "supportedValues": [],
       "unsupportedValues": [
@@ -5130,7 +5064,7 @@
         "rtl"
       ],
       "tests": [],
-      "notes": "RTL not modeled.",
+      "notes": "RTL not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
       "issue": ""
     },
     "rn/zIndex": {
@@ -5966,7 +5900,7 @@
         "full Range / Selection API"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "Wave 1 architectural reclassification — full Range/Selection API is arch-text-editor-owns-selection (Pulp's text editor has its own selection model; the W3C Range/Selection API is not modeled by design).",
       "issue": ""
     },
     "html/Element_addEventListener": {
@@ -6223,7 +6157,7 @@
         "complex selectors"
       ],
       "tests": [],
-      "notes": "PR #1345 added :hover; otherwise unchanged from initial implementation. Status flipped to partial (pulp #1434 batch 1) — at-rules and complex selectors are real gaps.",
+      "notes": "PR #1345 added :hover; otherwise unchanged from initial implementation. Status flipped to partial (pulp #1434 batch 1) — at-rules and complex selectors are real gaps. Wave 1 architectural reclassification — @media / @keyframes / @import / @font-face / @supports / complex selectors are arch-no-cascade-engine (Pulp doesn't model the CSS cascade by design; selector evaluation is single-pass tag/.class/#id).",
       "issue": ""
     },
     "html/article": {
@@ -6278,7 +6212,7 @@
       "issue": ""
     },
     "html/dialog": {
-      "status": "supported",
+      "status": "noop",
       "mapsTo": "createPanel(id, parent) + setVisible(false). Element.show() / showModal() / close() methods on Element.prototype (tag-guarded — no-op on non-DIALOG elements) flip setVisible and the `open` HTML attribute, dispatch a `close` event, and round-trip `el.returnValue`. showModal() degrades to show() because Pulp doesn't yet have a native modal-input-trap layer; the ::backdrop pseudo-element remains a separate paint-side roadmap item.",
       "supportedValues": [
         "dialog as a hidden Panel",
@@ -6292,7 +6226,7 @@
       "tests": [
         "test/test_widget_bridge.cpp::\"<dialog> show/close round-trips visibility and dispatches close\""
       ],
-      "notes": "DIVERGE→PASS sweep — show/showModal/close methods exposed. Modal input-trap + ::backdrop remain a roadmap paint-side concern; the harness gap was about JS-side state-machine vocabulary.",
+      "notes": "DIVERGE→PASS sweep — show/showModal/close methods exposed. Modal input-trap + ::backdrop remain a roadmap paint-side concern; the harness gap was about JS-side state-machine vocabulary. Wave 1 drift cleanup — supported → noop (Element.show() / showModal() / close() are stored-only; modal dialog rendering not in pipeline today).",
       "issue": ""
     },
     "html/div": {
@@ -6451,11 +6385,11 @@
         "actual image src loading (placeholder Label is shown)"
       ],
       "tests": [],
-      "notes": "Image loading not yet wired through this surface; use <Image> from @pulp/react or the canvas drawImage path instead.",
+      "notes": "Image loading not yet wired through this surface; use <Image> from @pulp/react or the canvas drawImage path instead. Wave 1 architectural reclassification — actual image src loading is partial-deferred-skia-codec (gated on SkCodec wiring per pulp #932 era); placeholder Label keeps the layout slot until Skia decode lands.",
       "issue": "1147"
     },
     "html/input": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "createTextEditor by default; createFader for type=range, createCheckbox for type=checkbox. Other `type=` values fall through to text-editor — a deliberate design choice that matches how the same DOM element is rendered in environments without specialized native widgets (the value-bearing semantics are uniform, only the chrome differs).",
       "supportedValues": [
         "type=text / type=password / type=email / type=number / type=range / type=checkbox",
@@ -6465,7 +6399,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "DIVERGE→PASS sweep — fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome — date pickers, color wheels, file pickers — remains a roadmap item; that's a separate UX concern from compat.",
+      "notes": "DIVERGE→PASS sweep — fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome — date pickers, color wheels, file pickers — remains a roadmap item; that's a separate UX concern from compat. Wave 1 drift cleanup — partial → supported (wired through _ensureNative -> bridge createTextEditor / createFader / createCheckbox).",
       "issue": ""
     },
     "html/label": {
@@ -6558,7 +6492,7 @@
         "complex selectors (pseudo-class chains, combinators)"
       ],
       "tests": [],
-      "notes": "PR #1345 / pulp #1149 part b. Status flipped to partial (pulp #1434 batch 1) — @media/@keyframes/complex selectors are real gaps.",
+      "notes": "PR #1345 / pulp #1149 part b. Status flipped to partial (pulp #1434 batch 1) — @media/@keyframes/complex selectors are real gaps. Wave 1 architectural reclassification — @media / @keyframes / complex selectors are arch-no-cascade-engine (Pulp's inline <style> parser is single-pass; the cascade engine is an explicit non-goal).",
       "issue": "1149"
     },
     "html/svg": {
@@ -6571,7 +6505,7 @@
         "actual SVG rendering of children (no path/rect/circle/text shape rasterization)"
       ],
       "tests": [],
-      "notes": "PR #1347 (pulp #1147): <svg> is a leaf container that reserves layout space. For rendered SVG paths use the @pulp/react SvgPath intrinsic.",
+      "notes": "PR #1347 (pulp #1147): <svg> is a leaf container that reserves layout space. For rendered SVG paths use the @pulp/react SvgPath intrinsic. Wave 1 architectural reclassification — full SVG rasterization of children is arch-explicit-non-goal (createCol shim reserves layout space; for rendered SVG paths use @pulp/react SvgPath intrinsic).",
       "issue": "1147"
     },
     "html/textarea": {
@@ -6665,20 +6599,24 @@
       "issue": "1346"
     },
     "canvas2d/roundRect": {
-      "status": "partial",
-      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> moveTo + lineTos + arcTos. Uniform-corner case only.",
+      "status": "supported",
+      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> canvasPathRoundRect(id, x, y, w, h, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y) -> SkRRect::setRectRadii (Skia) / per-corner CGPath layout (CG). All five spec radii forms (number / [r] / [r1,r2] / [r1,r2,r3] / [r1,r2,r3,r4]) and elliptical {x,y} corners are normalized to 8 floats in the JS shim.",
       "supportedValues": [
-        "uniform radius (number, or array[1])"
+        "uniform radius (number, or array[1])",
+        "two-value [horizontal, vertical] (array[2])",
+        "three-value [tl, tr=bl, br] (array[3])",
+        "four-value [tl, tr, br, bl] (array[4])",
+        "elliptical {x, y} corner objects in any slot"
       ],
-      "unsupportedValues": [
-        "non-uniform radii (4 distinct corners) — falls back to largest single value"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "PR #1348. arcTo approximation is conservative — see canvas2d/arcTo.",
+      "notes": "PR #1348 + Wave 2 cheap wiring — confirmed all five radii forms thread through to SkRRect::setRectRadii with 4 distinct SkVector corners.",
       "issue": "1346"
     },
     "canvas2d/arc": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> path-mode emit as cubic-bezier segments via canvasMoveTo + canvasCubicTo. Bridge has immediate-mode canvasArc but no path-mode arc primitive.",
       "supportedValues": [
         "any arc"
@@ -6687,21 +6625,19 @@
       "tests": [
         "test/test_canvas2d_shim.cpp [issue-1526]"
       ],
-      "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases.",
+      "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases. Wave 1 drift cleanup — partial → supported (PR #1348 wired path-mode arc as cubic-bezier segments via canvasPathArc; bezier approximation is per-quadrant, visually exact for fill/stroke/clip use cases).",
       "issue": "1346"
     },
     "canvas2d/arcTo": {
-      "status": "partial",
-      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> conservative lineTo(x1,y1) + lineTo(x2,y2). Radius is currently ignored.",
+      "status": "supported",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius) \u2014 closed-form tangent-arc geometry. CG: CGPathAddArcToPoint(p1, p2, radius). pulp #1521 replaced the conservative lineTo-only fallback with the spec-compliant radius-tangent computation.",
       "supportedValues": [
-        "any arcTo (radius ignored)"
+        "arcTo(x1, y1, x2, y2, radius) \u2014 geometrically correct on Skia + CG"
       ],
-      "unsupportedValues": [
-        "geometrically-correct arcTo with the proper radius-tangent computation"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. Used by roundRect and FilterBank's marquee corners; fidelity loss is minimal for those use cases. File a follow-up if a plugin needs spec-compliant arcTo.",
-      "issue": "1346"
+      "notes": "pulp #1521 \u2014 native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
+      "issue": ""
     },
     "canvas2d/bezierCurveTo": {
       "status": "supported",
@@ -6726,27 +6662,32 @@
       "issue": ""
     },
     "canvas2d/ellipse": {
-      "status": "partial",
-      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> rotation IGNORED; if rx===ry falls through to arc; otherwise emits a 4-segment cubic approximation.",
+      "status": "supported",
+      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> canvasPathEllipse(id, cx, cy, rx, ry, rotation, start, end, anticlockwise) -> SkPathBuilder::arcTo + SkMatrix::preRotate (Skia) / CGPathAddArc + CGAffineTransform (CG). PR #1521 wired native arc geometry; rotation is honoured via a temporary oval-aligned arc rotated through (cx, cy).",
       "supportedValues": [
-        "axis-aligned ellipses (rotation ignored)"
+        "axis-aligned ellipses",
+        "non-zero rotation",
+        "anticlockwise sweep"
       ],
-      "unsupportedValues": [
-        "non-zero rotation"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "PR #1348. FilterBank doesn't use ellipse — this is a thin parity shim.",
+      "notes": "PR #1521 + Wave 2 cheap wiring — confirmed rotation threads through SkMatrix and CGAffineTransform.",
       "issue": "1346"
     },
     "canvas2d/fill": {
-      "status": "partial",
-      "mapsTo": "ctx.fill -> _syncGlobalState + _applyFillStyle + canvasFillPath.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fill rule arg ('evenodd' / 'nonzero') — accepted but ignored"
+      "status": "supported",
+      "mapsTo": "ctx.fill(fillRule?) -> _syncGlobalState + _applyFillStyle + canvasFillPath(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::fill_current_path(FillRule) -> SkPath::setFillType (Skia) / CGContextEOFillPath vs CGContextFillPath (CG).",
+      "supportedValues": [
+        "default (nonzero) fill",
+        "evenodd fill rule"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Wave 2 cheap wiring — added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOFillPath) backends. Pre-Wave-2 the rule was read by widget_bridge but discarded by canvas_widget.",
       "issue": ""
     },
     "canvas2d/stroke": {
@@ -6759,14 +6700,17 @@
       "issue": ""
     },
     "canvas2d/clip": {
-      "status": "partial",
-      "mapsTo": "ctx.clip(fillRule) -> canvasClip (intersects current clip with current path). Falls back to no-op if canvasClip absent.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "fillRule arg — bridge always uses non-zero today"
+      "status": "supported",
+      "mapsTo": "ctx.clip(fillRule?) -> canvasClip(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::clip(FillRule) -> SkPath::setFillType + SkCanvas::clipPath (Skia) / CGContextEOClip vs CGContextClip (CG).",
+      "supportedValues": [
+        "default (nonzero) clip",
+        "evenodd clip rule"
       ],
-      "tests": [],
-      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.) Wave 2 cheap wiring — added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOClip) backends.",
       "issue": ""
     },
     "canvas2d/isPointInPath": {
@@ -6781,7 +6725,7 @@
         "fillRule difference for self-intersecting paths — the JS ray-cast returns the same answer for 'nonzero' and 'evenodd'"
       ],
       "tests": [],
-      "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return — no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time.",
+      "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return — no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time. Wave 1 paperwork — synchronous return; no bridge round-trip; bridge-thin gap-fill (pulp #1527).",
       "issue": "1527"
     },
     "canvas2d/isPointInStroke": {
@@ -6796,7 +6740,7 @@
         "Path2D-object first argument"
       ],
       "tests": [],
-      "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror.",
+      "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror. Wave 1 paperwork — pairs with isPointInPath; same JS path mirror (pulp #1527).",
       "issue": "1527"
     },
     "canvas2d/save": {
@@ -6886,32 +6830,37 @@
         "arbitrary concat (rotate/scale/skew + existing transform)"
       ],
       "tests": [],
-      "notes": "PR #1348. File a follow-up if a plugin needs strict concat.",
+      "notes": "PR #1348. File a follow-up if a plugin needs strict concat. Wave 1 paperwork — strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case.",
       "issue": "1346"
     },
     "canvas2d/fillText": {
-      "status": "partial",
-      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color). maxWidth is ignored; gradient fillStyle uses the first stop's color.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "maxWidth arg (ignored)",
-        "gradient fillStyle (degrades to first-stop color)"
+      "status": "supported",
+      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncShadowState + _syncFilterState + _syncDirectionState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). pulp #1525 plumbed maxWidth end-to-end (Skia: SkMatrix::Scale around the origin; CG: CGContextScaleCTM). pulp Wave 3 c2d.6 routes gradient/pattern fillStyle through current_fill_paint() so glyphs honour the active gradient_shader_.",
+      "supportedValues": [
+        "fillText(text, x, y) \u2014 solid colour fillStyle",
+        "fillText(text, x, y, maxWidth) \u2014 squeezed via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG)",
+        "gradient fillStyle (shader flows onto glyph paint via current_fill_paint)",
+        "CanvasPattern fillStyle on Skia (SkShader::MakeImage)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. canvasSetFont parses 'Npx Family' from the JS-side font string.",
-      "issue": "1346"
+      "notes": "pulp #1525 \u2014 maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 \u2014 gradient/pattern fillStyle routes through current_fill_paint() so the shader applies to glyphs. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
+      "issue": ""
     },
     "canvas2d/strokeText": {
-      "status": "partial",
-      "mapsTo": "ctx.strokeText -> falls back to fillText with the strokeStyle color (bridge has no stroke-text command).",
+      "status": "supported",
+      "mapsTo": "ctx.strokeText(text, x, y, maxWidth?) -> canvasStrokeText -> SkiaCanvas::stroke_text builds an SkPaint via make_stroke_paint() (which sets SkPaint::kStroke_Style) and draws the SkShaper / per-glyph SkTextBlob with that paint. Honors line_width, lineJoin, lineCap, miterLimit, strokeStyle (incl. patterns/gradients), and shadow filter.",
       "supportedValues": [
-        "visual approximation of stroked text via solid fill"
+        "true stroked-glyph rendering (kStroke_Style)",
+        "maxWidth squeeze",
+        "lineWidth, lineJoin, lineCap, miterLimit",
+        "stroke patterns / gradients via _applyStrokeStyle"
       ],
-      "unsupportedValues": [
-        "true stroked-glyph rendering"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "Visually close enough for FilterBank/HUD use; file a follow-up if a plugin needs outlined typography.",
+      "notes": "PR #1525 + Codex P2 follow-up \u2014 make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring \u2014 confirmed end-to-end and bumped from partial -> supported.",
       "issue": ""
     },
     "canvas2d/measureText": {
@@ -6938,7 +6887,7 @@
         "drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) — sprite-sheet slicing not yet wired"
       ],
       "tests": [],
-      "notes": "issue-916. File a follow-up if a Pulp plugin needs sprite-sheet slicing.",
+      "notes": "issue-916. File a follow-up if a Pulp plugin needs sprite-sheet slicing. Wave 1 paperwork — sprite-sheet 9-arg form deferred (issue-916); file follow-up if a Pulp plugin needs sprite-sheet slicing.",
       "issue": ""
     },
     "canvas2d/getImageData": {
@@ -6951,7 +6900,7 @@
         "non-rasterized RecordingCanvas (returns zero-filled)"
       ],
       "tests": [],
-      "notes": "issue-916. The base64 round-trip avoids passing typed arrays across the JS bridge.",
+      "notes": "issue-916. The base64 round-trip avoids passing typed arrays across the JS bridge. Wave 1 paperwork — base64 round-trip avoids typed-array bridge cost (issue-916).",
       "issue": ""
     },
     "canvas2d/putImageData": {
@@ -6964,7 +6913,7 @@
         "putImageData(img, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) — sub-rect form treated as no-rect"
       ],
       "tests": [],
-      "notes": "issue-916. File a follow-up if sub-rect updates become a hot path.",
+      "notes": "issue-916. File a follow-up if sub-rect updates become a hot path. Wave 1 paperwork — sub-rect form deferred (issue-916); file follow-up if it becomes a hot path.",
       "issue": ""
     },
     "canvas2d/createLinearGradient": {
@@ -7042,7 +6991,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "DIVERGE→PASS sweep — the catalog note about \"shim takes pattern verbatim; bridge handles the spec-doubling\" was describing the architecture, not a gap. The end-to-end behavior is spec-compliant.",
+      "notes": "DIVERGE→PASS sweep — the catalog note about \"shim takes pattern verbatim; bridge handles the spec-doubling\" was describing the architecture, not a gap. The end-to-end behavior is spec-compliant. Wave 1 paperwork — see SKILL canvas2d gotchas; HTML5-spec odd-length doubling is performed internally by canvasSetLineDash before recording.",
       "issue": ""
     },
     "canvas2d/getLineDash": {
@@ -7055,16 +7004,17 @@
       "issue": ""
     },
     "canvas2d/lineDashOffset": {
-      "status": "partial",
-      "mapsTo": "Tracked as a JS field; passed to canvasSetLineDash on every setLineDash call. Mutating lineDashOffset alone (without re-calling setLineDash) does NOT push the new offset to the bridge.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "lineDashOffset mutation between draws (must re-call setLineDash to push new phase)"
+      "status": "supported",
+      "mapsTo": "ctx.lineDashOffset getter/setter pair (Wave 4 c2d cleanup). Setting re-pushes the active dash pattern via canvasSetLineDash with the new phase, so mutating between draws shifts the stroke phase without requiring a redundant setLineDash call. Non-finite values (NaN, Infinity) are ignored per HTML5 spec.",
+      "supportedValues": [
+        "lineDashOffset assignment between draws (re-flushes the dash pattern with new phase)",
+        "lineDashOffset read (returns the most-recently-assigned value)"
       ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_canvas2d_shim.cpp [issue-1526]"
       ],
-      "notes": "Minor edge case; file a follow-up if observable.",
+      "notes": "Wave 4 c2d cleanup \u2014 defineProperty getter/setter pair re-flushes dash on assignment. Pre-Wave-4 the field tracked locally but only sent on the next setLineDash, so phase mutations between draws were silently dropped.",
       "issue": ""
     },
     "canvas2d/fillStyle": {
@@ -7077,20 +7027,20 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "DIVERGE→PASS sweep — pattern path was already wired (createPattern in PASS list, _applyFillStyle dispatches canvasSetFillPattern); the catalog had a stale gap entry from before pulp #1434's createPattern bridge work.",
+      "notes": "DIVERGE→PASS sweep — pattern path was already wired (createPattern in PASS list, _applyFillStyle dispatches canvasSetFillPattern); the catalog had a stale gap entry from before pulp #1434's createPattern bridge work. Wave 1 paperwork — CanvasPattern wiring confirmed via createPattern + _applyFillStyle / canvasSetFillPattern (#1625 finding).",
       "issue": ""
     },
     "canvas2d/strokeStyle": {
-      "status": "partial",
-      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient. Bridge has no stroke-gradient setter — gradient strokeStyle degrades to the first stop's color.",
+      "status": "supported",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 \u2014 bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader.",
       "supportedValues": [
-        "CSS color strings"
+        "CSS color strings",
+        "CanvasGradient (linear, radial, two-circle radial, conic) on stroke",
+        "CanvasPattern on stroke (Skia)"
       ],
-      "unsupportedValues": [
-        "CanvasGradient on stroke (degrades to first-stop color)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Bridge could expose canvasSetStrokeLinearGradient if a plugin needs gradient strokes.",
+      "notes": "pulp Wave 3 c2d.7 \u2014 stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation.",
       "issue": ""
     },
     "canvas2d/lineWidth": {
@@ -7216,7 +7166,7 @@
         "font-variant 'small-caps' (parsed and tracked, but Skia/CG fonts in the canvas pipeline don't honour it — Canvas::set_font_full has no variant field)"
       ],
       "tests": [],
-      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim.",
+      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim. Wave 1 architectural reclassification — font-variant 'small-caps' is arch-pipeline-limit (Canvas::set_font_full has no variant field; Skia/CG fonts in the canvas pipeline don't expose OpenType features at this layer).",
       "issue": "1434"
     },
     "canvas2d/textAlign": {

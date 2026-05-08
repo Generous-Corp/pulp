@@ -22,14 +22,14 @@ This section was previously a stub. The 2026-05-04 pass walked the
 `canvas*` register_function entries in widget_bridge.cpp, with extra
 notes per backend where Skia and CG diverge.
 
-## Counts (2026-05-07 — DIVERGE→PASS sweep)
+## Counts (2026-05-07 — Wave 4 cleanup)
 
 Harness verdict (per `tools/harness/verifier`):
 
 | Verdict | Count |
 |---------|------:|
-| PASS    | 48 |
-| DIVERGE | 18 |
+| PASS    | 57 |
+| DIVERGE | 9 |
 | NO-OP   | 0 |
 | NOT-IMPL | 0 |
 | OOS     | 0 |
@@ -38,14 +38,43 @@ Catalog status counts (informational):
 
 | Status | Count |
 |--------|------:|
-| supported | ~43 |
+| supported | ~57 |
 | partial | ~9 |
-| missing | ~12 |
+| missing | 0 |
 
 `fillText` and `strokeText` flipped `partial → supported` in pulp #1525
 once `maxWidth` was plumbed end-to-end and `strokeText` got its own
 dedicated bridge command (true outlined-glyph rendering, not the
 pre-#1525 fillText-with-stroke-color approximation).
+
+## Wave 1 paperwork (2026-05-07)
+
+Catalog/oracle gotcha hygiene only; no JS or C++ source change. Drift
+count dropped from 1 → 0 on the canvas2d surface.
+
+- **`canvas2d/arc`** — flipped `partial` → `supported` (PR #1348 wired
+  path-mode arc as cubic-bezier segments via `canvasPathArc`; the
+  per-quadrant bezier approximation is visually exact for fill / stroke /
+  clip use cases — the harness already verified PASS against the oracle).
+- **Tracked-deferred gotcha annotations (5 entries — stay DIVERGE
+  per oracle expectedStatus, but read as tracked rather than drift):**
+  - `isPointInPath`, `isPointInStroke` — bridge-thin gap-fill (pulp
+    #1527); synchronous JS-side ray-cast / closest-point on the path
+    mirror.
+  - `transform` — strict concat semantics deferred (PR #1348);
+    pure-translation fast path covers the common case.
+  - `lineDashOffset` — minor edge case; file follow-up if observable.
+  - `setLineDash` — HTML5-spec odd-length doubling done internally
+    by `canvasSetLineDash` before recording.
+- **Architectural reclassification (4 entries):**
+  - `font` `small-caps` — `arch-pipeline-limit` (Canvas::set_font_full
+    has no variant field; Skia/CG fonts in the canvas pipeline don't
+    expose OpenType features at this layer).
+  - `fillStyle` CanvasPattern — wiring confirmed via createPattern +
+    `_applyFillStyle` / `canvasSetFillPattern` (#1625 finding).
+  - `drawImage` sprite-sheet 9-arg form — issue-916 deferred.
+  - `getImageData` / `putImageData` — issue-916 (base64 round-trip
+    avoids typed-array bridge cost; sub-rect form deferred).
 
 ## DIVERGE→PASS sweep (2026-05-07)
 
@@ -102,6 +131,52 @@ Remaining DIVERGE (18) — implementation / oracle gaps:
 | `canvas2d/lineDashOffset` | Mutation must re-call setLineDash. |
 | `canvas2d/strokeStyle` | Gradient on stroke (no `canvasSetStrokeLinearGradient` bridge fn). |
 | `canvas2d/transform` | `transform()` concat only routes pure-translation. |
+
+## Wave 4 cleanup (2026-05-07)
+
+Catalog reconciliation against Wave 1 / 2 / 3 wiring + one small JS
+shim fix. Net: **53 PASS / 13 DIVERGE → 57 PASS / 9 DIVERGE (80.3% →
+86.4%)** on the canvas2d surface.
+
+Flipped `partial → supported`:
+
+- **`canvas2d/arcTo`** — pulp #1521 wired native `SkPath::arcTo(p1, p2, r)`
+  (Skia) and `CGPathAddArcToPoint` (CG); the catalog's "lineTo
+  fallback / radius ignored" claim was stale from the pre-#1521 era.
+- **`canvas2d/fillText`** — pulp #1525 plumbed `maxWidth` end-to-end
+  (Skia: `SkMatrix::Scale` around the origin; CG: `CGContextScaleCTM`)
+  AND Wave 3 c2d.6 routed gradient/pattern `fillStyle` through
+  `current_fill_paint()` so glyphs honour `gradient_shader_`. Both
+  catalog "unsupported values" entries were stale.
+- **`canvas2d/strokeStyle`** — Wave 3 c2d.7 wired
+  `canvasSetStrokeLinearGradient` / `canvasSetStrokeRadialGradient` /
+  `canvasSetStrokeRadialGradientTwoCircles` /
+  `canvasSetStrokeConicGradient` / `canvasSetStrokePattern` plus the
+  `_applyStrokeStyle` per-kind dispatcher. Catalog "no
+  stroke-gradient setter" claim was stale.
+- **`canvas2d/lineDashOffset`** — Wave 4 micro-fix in
+  `web-compat-canvas.js`: the field is now an `Object.defineProperty`
+  getter/setter pair that re-pushes the active dash pattern via
+  `canvasSetLineDash` on every assignment. Mutating between draws now
+  shifts the stroke phase without requiring a redundant
+  `setLineDash` call (HTML5 spec).
+
+Oracle gotcha cleanup: `stroke-no-gradient` and `no-pattern-bridge`
+gotchas were removed (stale — both are wired).
+
+Remaining 9 DIVERGE are all genuine tracked-deferred or architectural:
+
+| Entry | Reason |
+|---|---|
+| `canvas2d/transform` | Strict concat semantics (PR #1348). |
+| `canvas2d/isPointInPath` | Path2D-object arg + fillRule self-intersect (#1527). |
+| `canvas2d/isPointInStroke` | Square caps / miter spike approximations (#1527). |
+| `canvas2d/drawImage` | Sprite-sheet 9-arg slicing (issue-916). |
+| `canvas2d/getImageData` | RecordingCanvas returns zero-filled (issue-916). |
+| `canvas2d/putImageData` | Sub-rect form treated as no-rect (issue-916). |
+| `canvas2d/font` | `small-caps` (architectural — Canvas::set_font_full has no variant field). |
+| `canvas2d/direction` | Mixed-script bidi (#1506 SkParagraph plumbing). |
+| `canvas2d/filter` | drop-shadow / url() / CG backend unfiltered. |
 
 ## Recently expanded (#1348)
 

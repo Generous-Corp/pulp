@@ -189,11 +189,18 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
 // CanvasRenderingContext2D.clip() and SkiaCanvas::clip(). Without the
 // override, the base-class no-op silently leaves the clip region wide open
 // so subsequent draws spill over their intended bounds.
-void CoreGraphicsCanvas::clip() {
+void CoreGraphicsCanvas::clip(FillRule rule) {
     if (!path_) return;
     CGContextAddPath(ctx_, path_);
-    // Use even-odd? Canvas2D defaults to non-zero winding for clip().
-    CGContextClip(ctx_);
+    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
+    // (`ctx.clip('evenodd')`). CG distinguishes between CGContextClip
+    // (nonzero winding) and CGContextEOClip (even-odd) at the API
+    // surface; pre-Wave-2 the bridge always called CGContextClip.
+    if (rule == FillRule::evenodd) {
+        CGContextEOClip(ctx_);
+    } else {
+        CGContextClip(ctx_);
+    }
 }
 
 void CoreGraphicsCanvas::apply_fill_color() {
@@ -708,19 +715,33 @@ void CoreGraphicsCanvas::close_path() {
     if (path_) CGPathCloseSubpath(path_);
 }
 
-void CoreGraphicsCanvas::fill_current_path() {
+void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
     if (!path_) return;
+    // pulp Wave 2 cheap wiring — honour the JS-supplied fillRule arg
+    // (`ctx.fill('evenodd')`). CG splits nonzero (CGContextFillPath /
+    // CGContextClip) and even-odd (CGContextEOFillPath /
+    // CGContextEOClip) at the API surface; pre-Wave-2 the bridge
+    // unconditionally used the nonzero variant.
+    const bool eo = (rule == FillRule::evenodd);
     if (has_gradient_) {
         // Clip to the path, then draw the gradient; restore the clip.
         CGContextSaveGState(ctx_);
         CGContextAddPath(ctx_, path_);
-        CGContextClip(ctx_);
+        if (eo) {
+            CGContextEOClip(ctx_);
+        } else {
+            CGContextClip(ctx_);
+        }
         fill_with_active_paint();
         CGContextRestoreGState(ctx_);
     } else {
         apply_fill_color();
         CGContextAddPath(ctx_, path_);
-        CGContextFillPath(ctx_);
+        if (eo) {
+            CGContextEOFillPath(ctx_);
+        } else {
+            CGContextFillPath(ctx_);
+        }
     }
     // Mirrors SkiaCanvas::fill_current_path which detaches the path on use —
     // the next draw must begin_path() again, matching Canvas2D semantics.

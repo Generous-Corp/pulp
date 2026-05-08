@@ -170,6 +170,12 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
+// pulp Wave 2 canvas2d cheap wiring — Canvas2D fill rule for fill() / clip().
+// Mirrors the spec's ('nonzero' | 'evenodd') string enum. Default 'nonzero'
+// matches CSS behaviour and the JS shim's fillRule==='evenodd'?1:0 mapping in
+// `core/view/js/web-compat-canvas.js` so existing call sites remain
+// behaviourally identical.
+enum class FillRule { nonzero, evenodd };
 // pulp #1434 — added `justify` for CSS / RN `text-align: justify`.
 // SkiaCanvas dispatches `kJustify` via SkParagraph when the backend
 // supports it; CG / RecordingCanvas back-ends approximate as `left`
@@ -281,7 +287,8 @@ public:
     /// Intersect the current clip region with the current path.
     /// Mirrors CanvasRenderingContext2D.clip(). Default no-op so
     /// backends without a path builder remain unaffected.
-    virtual void clip() {}
+    /// `rule` selects nonzero vs evenodd winding (Wave 2 cheap wiring).
+    virtual void clip(FillRule rule = FillRule::nonzero) { (void)rule; }
 
     /// CSS `clip-path: path("...")` — intersect the current clip with
     /// an SVG-path-d string (pulp #1515). Skia maps to
@@ -369,6 +376,46 @@ public:
 
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
+
+    // ── Stroke gradients (pulp Wave 3 c2d.7) ─────────────────────────────
+    //
+    // Mirror of the fill-gradient surface for `ctx.strokeStyle =
+    // createLinearGradient(...) | createRadialGradient(...) |
+    // createConicGradient(...)`. Defaults degrade to the first-stop
+    // colour via `set_stroke_color`, matching the prior pre-Wave-3
+    // behavior; SkiaCanvas overrides with real `SkGradientShader`
+    // shaders stored on `stroke_shader_` so subsequent stroke paths
+    // (stroke_rect / stroke_current_path / stroke_text) pick the
+    // gradient up via `apply_stroke_state`.
+    virtual void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                             const Color* colors, const float* positions,
+                                             int count) {
+        if (count > 0) set_stroke_color(colors[0]); // fallback: first color
+    }
+
+    virtual void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                             const Color* colors, const float* positions,
+                                             int count) {
+        if (count > 0) set_stroke_color(colors[0]);
+    }
+
+    /// Two-circle radial gradient on stroke (mirrors fill counterpart).
+    virtual void set_stroke_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_stroke_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
+    virtual void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                            const Color* colors, const float* positions,
+                                            int count) {
+        if (count > 0) set_stroke_color(colors[0]);
+    }
+
+    /// Clear stroke gradient/pattern shader, restore solid stroke color.
+    virtual void clear_stroke_gradient() {}
 
     /// pulp #1434 bridge-thin gap-fill — Canvas2D `ctx.createPattern`.
     /// Tile mode per axis: `repeat` mirrors Skia's `SkTileMode::kRepeat`,
@@ -493,8 +540,11 @@ public:
     }
     /// Close the current path subpath.
     virtual void close_path() {}
-    /// Fill the current path.
-    virtual void fill_current_path() {}
+    /// Fill the current path. `rule` selects nonzero vs evenodd winding
+    /// (Wave 2 cheap wiring; matches Canvas2D `ctx.fill('evenodd')`).
+    virtual void fill_current_path(FillRule rule = FillRule::nonzero) {
+        (void)rule;
+    }
     /// Stroke the current path.
     virtual void stroke_current_path() {}
 
@@ -1068,6 +1118,22 @@ struct DrawCommand {
         // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
         set_fill_pattern,
         set_stroke_pattern,
+        // pulp Wave 3 c2d.7 — Canvas2D `ctx.strokeStyle =
+        // createLinearGradient(...) | createRadialGradient(...) |
+        // createConicGradient(...)`. Mirrors the fill-side gradient cmds
+        // so canvas2d harness tests can assert that the bridge plumbed
+        // the stroke-gradient setter at the right point in the stream.
+        // Layout matches the fill counterparts: linear (x0,y0)→(x1,y1)
+        // packed as f[0..3]; radial (cx,cy,r) as (f[0],f[1],f[2]); conic
+        // (cx,cy,startAngle) as (f[0],f[1],f[2]); two-circle (x0,y0,r0,
+        // x1,y1,r1) as (f[0]..f[5]). Stops in `floats` interleaved as
+        // [pos0, r0, g0, b0, a0, pos1, r1, g1, b1, a1, ...] — same shape
+        // RecordingCanvas already uses for fill gradients.
+        set_stroke_gradient_linear,
+        set_stroke_gradient_radial,
+        set_stroke_gradient_radial_two_circles,
+        set_stroke_gradient_conic,
+        clear_stroke_gradient,
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── pulp #1515: CSS clip-path: path("...") ────────────────────
@@ -1142,7 +1208,7 @@ public:
                           float d, float e, float f) override;
     AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
-    void clip() override;
+    void clip(FillRule rule = FillRule::nonzero) override;
     void clip_path_svg(const std::string& svg_path_d) override;
     void set_blend_mode(BlendMode mode) override;
     void set_fill_color(Color c) override;
@@ -1226,6 +1292,26 @@ public:
                             PatternTileMode tile_x,
                             PatternTileMode tile_y) override;
 
+    // pulp Wave 3 c2d.7 — capture stroke-gradient setter intents so the
+    // canvas2d harness can assert the bridge plumbed `ctx.strokeStyle =
+    // createLinearGradient(...)` (etc.) end-to-end. Stops are flattened
+    // into `floats` as [pos0, r0, g0, b0, a0, pos1, r1, g1, b1, a1, ...]
+    // — same shape as set_line_dash but per-stop instead of per-interval.
+    void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                    const Color* colors, const float* positions,
+                                    int count) override;
+    void clear_stroke_gradient() override;
+
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape
     // without needing a real raster surface. Pure capture; no geometry
@@ -1237,7 +1323,7 @@ public:
     void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
                   float x, float y) override;
     void close_path() override;
-    void fill_current_path() override;
+    void fill_current_path(FillRule rule = FillRule::nonzero) override;
     void stroke_current_path() override;
 
     // pulp #1521 — native arc subpaths (recorded as DrawCommands so

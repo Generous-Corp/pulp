@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import subprocess
 import unittest
 
@@ -158,6 +159,81 @@ class ConfigKeysAreConsumed(unittest.TestCase):
 
     WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
 
+    @staticmethod
+    def _executable_lines(text: str) -> str:
+        """Strip shell-style comments + heredoc/string-block bodies.
+
+        A "consumed" key must appear in code that actually executes —
+        not in a comment or in documentation prose. We approximate the
+        executable portion by stripping shell-style `#` comments and
+        YAML-comment lines. This is good enough for our config files;
+        if a future contributor commits scripts with embedded heredoc
+        prose that mentions a config key by name, they'll need to
+        annotate the test exemption.
+        """
+        out_lines: list[str] = []
+        for raw in text.splitlines():
+            # YAML / shell single-line comments — keep the part before `#`.
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                continue
+            # Strip trailing inline `# ...` comments. Heuristic: a `#`
+            # preceded by whitespace and not inside a single-quoted
+            # string (which `jq -r '.foo'` uses). We don't try to be
+            # perfect here — the goal is to drop comment-only mentions.
+            in_squote = False
+            in_dquote = False
+            i = 0
+            while i < len(raw):
+                ch = raw[i]
+                if ch == "'" and not in_dquote:
+                    in_squote = not in_squote
+                elif ch == '"' and not in_squote:
+                    in_dquote = not in_dquote
+                elif ch == "#" and not in_squote and not in_dquote:
+                    # Inline comment — chop it off (must be preceded by
+                    # whitespace OR be the entire content).
+                    if i == 0 or raw[i - 1].isspace():
+                        raw = raw[:i]
+                        break
+                i += 1
+            out_lines.append(raw)
+        return "\n".join(out_lines)
+
+    @staticmethod
+    def _key_is_consumed(key: str, script_text: str, workflow_text: str) -> bool:
+        """Structural check: key is read by an actual consumer pattern.
+
+        Codex P2 on PR #1152 — the previous `key in text` check matched
+        comments and docstrings, so a key mentioned only in a doc block
+        looked "consumed". Match the executable read shapes we
+        actually use:
+
+          1. `jq -r '.<key>'`              (workflow + script)
+          2. `jq -r '.<key> // ...'`       (script default-handling)
+          3. `read_config_value <key>`     (script helper)
+
+        That covers every real read site without false positives from
+        prose mentions. If a new consumer pattern is added, add it
+        here; the test will fail until the matcher and the consumer
+        agree.
+        """
+        for text in (script_text, workflow_text):
+            exec_text = ConfigKeysAreConsumed._executable_lines(text)
+            # Pattern 1/2: jq -r '.<key>' or jq -r '.<key> // ...'
+            jq_pattern = re.compile(
+                rf"jq\s+-r\s+'\.{re.escape(key)}\b",
+            )
+            if jq_pattern.search(exec_text):
+                return True
+            # Pattern 3: read_config_value <key>
+            helper_pattern = re.compile(
+                rf"\bread_config_value\s+{re.escape(key)}\b",
+            )
+            if helper_pattern.search(exec_text):
+                return True
+        return False
+
     def test_every_config_key_has_a_consumer(self) -> None:
         with CONFIG.open() as f:
             cfg = json.load(f)
@@ -169,17 +245,76 @@ class ConfigKeysAreConsumed(unittest.TestCase):
             # are exempt — they exist for readers, not consumers.
             if key.startswith("_"):
                 continue
-            if key in script_text or key in workflow_text:
+            if self._key_is_consumed(key, script_text, workflow_text):
                 continue
             unread.append(key)
         self.assertEqual(
             unread, [],
             f"coverage_config.json contains unread key(s) {unread!r} — "
             f"silent no-op per #1052. Either wire the key into "
-            f"tools/scripts/local_diff_cover.sh / .github/workflows/coverage.yml, "
+            f"tools/scripts/local_diff_cover.sh / .github/workflows/coverage.yml "
+            f"as `jq -r '.<key>' ...` or `read_config_value <key>`, "
             f"remove it, or rename it with a leading underscore "
-            f"(e.g. `_meta`) if it is documentation-only metadata.",
+            f"(e.g. `_meta`) if it is documentation-only metadata. "
+            f"NOTE: a comment-only mention does NOT count as consumed "
+            f"(Codex P2 on PR #1152).",
         )
+
+    def test_comment_only_mention_does_not_count_as_consumed(self) -> None:
+        # Belt-and-suspenders for the methodology fix: a key that
+        # appears ONLY inside a comment or a doc-string must not be
+        # treated as consumed. We synthesise a couple of fake script
+        # texts and confirm the new structural matcher rejects them.
+        comment_only_script = (
+            "#!/bin/bash\n"
+            "# This script does not actually read foo_phantom_key.\n"
+            "# But it mentions foo_phantom_key in a comment — should NOT count.\n"
+            "echo hello\n"
+        )
+        comment_only_workflow = (
+            "name: ci\n"
+            "jobs:\n"
+            "  test:\n"
+            "    # foo_phantom_key is not used here either.\n"
+            "    runs-on: ubuntu-latest\n"
+        )
+        self.assertFalse(
+            self._key_is_consumed(
+                "foo_phantom_key", comment_only_script, comment_only_workflow,
+            ),
+            "comment-only mention of a key was treated as consumed; "
+            "the structural matcher must skip comment lines.",
+        )
+
+    def test_real_consumer_patterns_are_recognised(self) -> None:
+        # Confirm the matcher accepts the read shapes we actually use.
+        jq_script = (
+            "#!/bin/bash\n"
+            "T=$(jq -r '.diff_coverage_fail_under' \"${CONFIG_JSON}\")\n"
+        )
+        helper_script = (
+            "#!/bin/bash\n"
+            "B=\"$(read_config_value compare_branch)\"\n"
+        )
+        jq_default_script = (
+            "#!/bin/bash\n"
+            "mapfile -t E < <(jq -r '.diff_cover_excludes // [] | .[]' \"${CONFIG_JSON}\")\n"
+        )
+        for label, script_text in (
+            ("jq -r", jq_script),
+            ("read_config_value", helper_script),
+            ("jq -r with //", jq_default_script),
+        ):
+            with self.subTest(label):
+                self.assertTrue(
+                    self._key_is_consumed(
+                        "diff_coverage_fail_under" if "fail_under" in script_text
+                        else ("compare_branch" if "compare_branch" in script_text
+                              else "diff_cover_excludes"),
+                        script_text, "",
+                    ),
+                    f"matcher missed real consumer pattern: {label}",
+                )
 
     def test_silent_noop_filter_keys_stay_removed(self) -> None:
         """Belt-and-suspenders: explicit reject for the two keys that

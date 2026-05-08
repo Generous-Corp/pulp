@@ -764,6 +764,28 @@ public:
     std::vector<CssAnimation>& active_animations() { return active_animations_; }
     const std::vector<CssAnimation>& active_animations() const { return active_animations_; }
 
+    /// Advance every active CSS animation by `dt` seconds (pulp #1434
+    /// Wave 3 css.3 — animation-play-state playback driver pause /
+    /// resume). When `animation_play_state_ == "paused"`, the call is
+    /// a no-op so the animations' `elapsed_seconds` does not advance —
+    /// the spec semantic of `animation-play-state: paused`. The default
+    /// keyword is `running`; any value other than `paused` advances.
+    /// Returns the number of animations that finished this tick (i.e.
+    /// flipped `active` to false). The caller is responsible for
+    /// committing finished animations; this method only ticks the
+    /// timeline.
+    int tick_animations(float dt) {
+        if (animation_play_state_ == "paused") return 0;
+        int finished = 0;
+        for (auto& a : active_animations_) {
+            if (!a.active) continue;
+            const bool was_active = a.active;
+            a.tick(dt);
+            if (was_active && !a.active) ++finished;
+        }
+        return finished;
+    }
+
     /// Staged CSS animation control tokens (pulp #1434 — Codex audit on
     /// PR #1508). The web-compat-style-decl shim invokes
     /// `setAnimation(id, "name"|"duration"|"easing"|..., value)` one
@@ -855,6 +877,21 @@ public:
     /// for direct round-trip queries.
     void set_animation_play_state(std::string kw)  { animation_play_state_ = std::move(kw); }
     const std::string& animation_play_state() const { return animation_play_state_; }
+
+    /// pulp #1548 — RN textShadow per-attribute storage. Storage-only;
+    /// SkPaint shadow integration is the deferred paint-time slice.
+    /// Each slot is round-trippable so a commitUpdate that touches only
+    /// one of the three preserves the others (mirrors the per-side
+    /// border slot pattern). A future combined `set_text_shadow`
+    /// helper for the CSS shorthand path can write all three slots
+    /// atomically.
+    void set_text_shadow_color(std::string c)      { text_shadow_color_ = std::move(c); }
+    const std::string& text_shadow_color() const   { return text_shadow_color_; }
+    void set_text_shadow_offset(float dx, float dy){ text_shadow_dx_ = dx; text_shadow_dy_ = dy; }
+    float text_shadow_offset_x() const             { return text_shadow_dx_; }
+    float text_shadow_offset_y() const             { return text_shadow_dy_; }
+    void set_text_shadow_radius(float r)           { text_shadow_radius_ = r; }
+    float text_shadow_radius() const               { return text_shadow_radius_; }
 
 
     /// Force this View's subtree to render into a compositing layer.
@@ -1087,6 +1124,12 @@ private:
     std::string isolation_;                // wontfix (no z-buffer)
     std::string resize_;                   // noop (no resize handles)
     std::string animation_play_state_;     // partial (storage only)
+    // pulp #1548 — RN textShadow* per-attribute storage slots. SkPaint
+    // shadow integration deferred; storage path is round-trippable.
+    std::string text_shadow_color_;
+    float       text_shadow_dx_ = 0.0f;
+    float       text_shadow_dy_ = 0.0f;
+    float       text_shadow_radius_ = 0.0f;
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;

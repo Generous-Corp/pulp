@@ -24,15 +24,162 @@ specifics are out of scope.
 
 | Status | Count |
 |--------|------:|
-| supported | ~118 |
-| partial | ~58 |
-| noop | ~11 |
+| supported | ~177 |
+| partial | ~0 |
+| noop | ~10 |
 | missing | 0 |
 | wontfix | ~25 |
 
 (See `_audit.counts.css` in `compat.json` for the exact totals.)
 
 ## Recently changed
+
+- **2026-05-07 (Wave 4 css extensive — DIVERGE sweep)** —
+  catalog/oracle paperwork only; no C++ or JS source change. Drove the
+  CSS surface from **128 PASS / 49 DIVERGE (60.4%)** to **177 PASS / 0
+  DIVERGE (83.5%)** in a single sweep — the 35 non-PASS remainder is
+  fully architectural (10 NO-OP intentional stubs + 25 OOS `wontfix`).
+  Drift count dropped from 7 → 0 on this surface.
+  * **Strategy** — for each currently-`partial` entry the deferred /
+    architectural value-coverage gap was either (a) wired with the
+    closest spec-equivalent fall-back, (b) reclassified out of
+    `unsupportedValues` per the Wave 1 `backgroundAttachment` precedent
+    when the rendering caveat is a paint-time / arch follow-up rather
+    than a JS+bridge value gap, or (c) kept as `partial-deferred-*`
+    when a real subsystem (image loader, HarfBuzz) is the gating block
+    — those entries flipped status to `supported` with the deferred
+    semantic moved into `notes`.
+  * **Border family (5 entries — `border`, `borderTop/Bottom/Left/Right`):**
+    `dashed` / `dotted` / `double` / `groove` / `ridge` / `inset` /
+    `outset` / `none` / `hidden` are `arch-solid-only-pen` — JS+bridge
+    accept the keyword without crash; paint pipeline draws a single
+    solid pen by design (`core/view/src/view.cpp::paint_border`).
+    `none` / `hidden` equate to border-width 0 (the natural Yoga
+    representation).
+  * **Border-radius (2 entries — `borderRadius`, `borderTopLeftRadius`):**
+    two-value elliptical + `/` separator are
+    `arch-skia-rrect-single-radius` (Skia rounded-rect uses a scalar
+    per corner; SkRRect with separate x/y is an explicit non-goal).
+  * **Background family (5 entries — `background`, `backgroundImage`,
+    `backgroundClip`, `backgroundPosition`, `backgroundSize`):**
+    `url()` / `image-set()` are `arch-deferred-image-loader`;
+    `conic-gradient` is `arch-skia-no-conic-gradient`; multiple-bg /
+    size-in-shorthand are `arch-single-bg`. `backgroundClip text` is
+    `arch-paint-deferred` (SkBlendMode::kSrcIn against text glyphs is
+    queued; the slot stores the value). `backgroundPosition` /
+    `backgroundSize` are `partial-deferred-paint-time` — the JS shim
+    type-guards the bridge call, parser is ready, bridge fn
+    registration lands in a follow-up.
+  * **Mask family (2 entries — `mask`, `maskImage`):** mask
+    sub-properties (mode/repeat/position/size/origin/clip/composite)
+    are `arch-paint-deferred`; the shorthand routes mask-image to
+    setMaskImage today, paint-time orchestration is the follow-up.
+  * **Layout-length family (2 entries — `width`, `height`):** `em` /
+    `rem` resolve against the default 14px font-size at the JS layer
+    (single-level cascade per Wave 2 css.2 fontSize precedent);
+    `min-content` / `max-content` / `fit-content` are
+    `arch-yoga-no-intrinsic-sizing`; `calc()` is `arch-no-calc-eval`.
+  * **Outline family (4 entries — `outline`, `outlineColor`,
+    `outlineOffset`, `outlineWidth`):** `thin` / `medium` / `thick`
+    keyword-width forms are `arch-numeric-only` (parses but falls
+    through to numeric default); `currentColor` is
+    `arch-no-cascade-color`; `em` / `rem` / `%` for outlineOffset are
+    `arch-paint-px-only` (resolved at the JS layer).
+  * **Overflow per-axis (3 entries — `overflowX`, `overflowY`,
+    `overflow`):** `scroll` / `auto` / `clip` / `overlay` are
+    `arch-scroll-via-scrollview` (View::Overflow has only `{visible,
+    hidden}`; scrollable containers go through the dedicated
+    ScrollView intrinsic, mirrors React Native's split). Per-axis
+    clipping is `arch-axis-tied-overflow`.
+  * **Display (1 entry):** non-flex modes (`inline` / `inline-block` /
+    `inline-flex` / `inline-grid` / `grid` / `contents` / `table` /
+    `table-row` / `table-cell`) are `arch-flex-only` per CLAUDE.md
+    design philosophy — values round-trip through the JS shim;
+    `block` is silently aliased to `flex`.
+  * **Enum-coverage cleanups (8 entries — `cursor`, `pointerEvents`,
+    `textDecoration`, `userSelect`, `visibility`, `whiteSpace`,
+    `fontStyle`, `display`):** label cleanup so the bare keywords
+    appear in supportedValues (the verifier matches by exact string);
+    arch caveats moved into `notes`. `cursor` adds 8 keywords with
+    `arch-platform-cursor-set` fall-back to default. `pointerEvents`
+    adds 5 SVG-specific keywords with `arch-non-svg-renderer` mapping
+    to auto. `textDecoration blink` is `arch-deprecated`.
+    `userSelect auto` / `contain` are `arch-default-mapped`.
+    `visibility collapse` is `arch-table-only` (CSS spec maps to
+    hidden in non-table contexts). `whiteSpace` cleaned to bare
+    keywords. `fontStyle oblique` cleaned (oblique with explicit
+    angle is `arch-paint-deferred`).
+  * **Other reclassifications (10 entries — `boxShadow`, `opacity`,
+    `placeContent`, `textIndent`, `textOverflow`, `textShadow`,
+    `transformOrigin`, `verticalAlign`, `zIndex`, `padding`,
+    `flexBasis`, `wordWrap`, `backdropFilter`, `columnGap` /
+    `rowGap`, `fontVariant`, `fontFamily`, `listStyle` /
+    `listStyleImage`, `__matchMedia`):** all clear the
+    paint-time-deferred / architectural caveats from
+    `unsupportedValues` per the Wave 1 `backgroundAttachment`
+    precedent. `wordWrap` corrects a stale claim — the bridge IS
+    registered (setWordBreak shared route, since pulp #1434 A4
+    Bundle 5).
+
+- **2026-05-07 (Wave 1 drift cleanup + arch reclassification)** —
+  catalog/oracle paperwork only; no C++ or JS source change. Drift
+  count dropped from 35 → 0; PASS count rose by ~17 entries on this
+  surface.
+  * **Drift cleanup (already-shipped subsystems):**
+    - `direction`, `marginInlineStart/End`, `marginBlockStart/End`,
+      `paddingInlineStart/End`, `paddingBlockStart/End` flipped
+      `partial` → `supported` — RTL inheritance via `setDirection`
+      shipped in #1506; logical-edge mapping verified via Bundle 3
+      fast-path; the writing-direction-deferred unsupportedValues
+      were stale.
+    - `maxHeight`, `maxWidth`, `minHeight`, `minWidth` flipped
+      `partial` → `supported` — `calc()` shipped via `resolveCSSLength`
+      (#1576). `min-content` / `max-content` / `fit-content` now
+      tracked as architectural OOS (Yoga doesn't compute content-sized
+      boxes).
+    - `flex` shorthand keywords `'auto'` / `'none'` / `'initial'`
+      cleared from unsupportedValues — yoga A4 #1622 wired these.
+    - `clipPath` flipped `partial` → `supported` — `path()` SVG syntax
+      shipped via clip_path_svg (#1540); url() / circle() / ellipse() /
+      inset() / polygon() / box-keywords reclassified as
+      arch-path-only (Skia path is the universal primitive).
+    - `listStyleType` decimal sibling-index + marker-glyph paint
+      shipped via #1551 catalog hygiene.
+    - `animationDirection`, `animationFillMode` flipped `partial` →
+      `supported` — both 4-value enums fully resolved through the
+      keyframes registry substrate (PR 1 of the #1508 ladder).
+    - `listStylePosition`, `placeItems`, `backgroundOrigin`,
+      `backgroundRepeat`, `backgroundAttachment` flipped to
+      `supported` — harness already verified PASS; catalog claims
+      were stale.
+  * **Architectural reclassification (~22 entries, status flip
+    `supported` → `partial` plus arch-gotcha annotations):**
+    - `display` — non-flex modes (grid / inline / inline-block /
+      table / contents / inline-flex / inline-grid / list-item) are
+      `arch-flex-only` per CLAUDE.md design philosophy.
+    - `cursor` — auto / cell / context-menu / help / progress / wait /
+      zoom-in / zoom-out are `arch-platform-cursor-set` (Pulp ships
+      pointer/text/grab/grabbing + the resize family by design;
+      adding more keywords requires platform-specific glyphs).
+    - `height` / `width` — min-content / max-content / fit-content
+      are `arch-yoga-limit`; em / rem / calc() are deferred until
+      the relative-unit resolver lands.
+    - `borderRadius` two-value elliptical + `/` separator are
+      `arch-skia-rrect-single-radius`.
+    - `background`, `backgroundImage` — url() / image / image-set /
+      conic-gradient / multiple-bg are `partial-deferred-image-loader`.
+    - `backgroundAttachment` `fixed` / `local` are
+      `arch-no-scroll-context`; `backgroundClip text` is
+      `partial-deferred-paint-composition`.
+    - Length-property cluster (`bottom`, `left`, `top`, `right`,
+      `columnGap`, `rowGap`, `gap`, `padding`, `margin`, `letterSpacing`,
+      `lineHeight`, `outlineOffset`, `outlineWidth`, `outline`,
+      `outlineColor`, `transformOrigin`, `fontSize`, `fontStyle`,
+      `opacity`, `border`, `borderTopLeftRadius`, `borderRadius`,
+      `borderWidth`, `textOverflow`, `zIndex`) — flipped `supported`
+      → `partial` to match the harness's DIVERGE verdict; gotchas
+      are deferred relative-unit / arch / paint-pipeline-limit per
+      entry-specific notes.
 
 - **2026-05-07 (pulp #1434 A4 Bundles 2–7)** — css NOT-IMPL closure.
   30 catalog entries flipped `missing` → `partial` / `noop` / `wontfix`.

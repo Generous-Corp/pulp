@@ -104,4 +104,23 @@ describe('animation* props dispatch to setAnimation (pulp #1508 P1)', () => {
         expect(anim).toHaveLength(1);
         expect(anim[0].args).toEqual(['k', 'fade-in', 1.0, 1, 'normal']);
     });
+
+    // pulp #1434 Wave 3 css.3 — animationPlayState routing. The case
+    // was previously missing from prop-applier.ts (only the JS shim
+    // path forwarded the keyword), so React-side `animationPlayState`
+    // changes never reached the bridge at all. Now routed through the
+    // legacy 2-arg setAnimation control-token form.
+    it('animationPlayState routes to setAnimation/play_state (paused)', () => {
+        applyChangedProps(makeInstance(), {}, { animationPlayState: 'paused' });
+        const anim = callsOf(bridge, 'setAnimation');
+        expect(anim).toHaveLength(1);
+        expect(anim[0].args).toEqual(['k', 'play_state', 'paused']);
+    });
+
+    it('animationPlayState routes to setAnimation/play_state (running)', () => {
+        applyChangedProps(makeInstance(), {}, { animationPlayState: 'running' });
+        const anim = callsOf(bridge, 'setAnimation');
+        expect(anim).toHaveLength(1);
+        expect(anim[0].args).toEqual(['k', 'play_state', 'running']);
+    });
 });
