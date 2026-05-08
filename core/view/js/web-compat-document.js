@@ -568,6 +568,13 @@ var document = {
         return el;
     },
 
+    createElementNS: function(ns, tag) {
+        var el = new Element(tag);
+        el.namespaceURI = ns == null ? null : String(ns);
+        __elements__[el._id] = el;
+        return el;
+    },
+
     getElementById: function(id) {
         return __elements__["#" + id] || null;
     },
@@ -650,6 +657,52 @@ var document = {
     }
 };
 
+document.nodeType = 9;
+document.nodeName = "#document";
+document.readyState = "loading";
+document.activeElement = __bodyElement__;
+
+function __installEventTargetMethods(target, id) {
+    target.addEventListener = function(type, fn, opts) {
+        var capture = false;
+        if (opts === true) capture = true;
+        else if (opts && opts.capture) capture = true;
+        if (!__eventListeners__[id]) __eventListeners__[id] = {};
+        if (!__eventListeners__[id][type]) __eventListeners__[id][type] = [];
+        __eventListeners__[id][type].push({ fn: fn, capture: capture });
+    };
+    target.removeEventListener = function(type, fn, opts) {
+        var capture = false;
+        if (opts === true) capture = true;
+        else if (opts && opts.capture) capture = true;
+        var listeners = __eventListeners__[id] && __eventListeners__[id][type];
+        if (!listeners) return;
+        for (var i = listeners.length - 1; i >= 0; i--) {
+            if (listeners[i].fn === fn && listeners[i].capture === capture) {
+                listeners.splice(i, 1);
+            }
+        }
+    };
+    target.dispatchEvent = function(event) {
+        if (!event) return true;
+        if (!event.type) event.type = "";
+        if (!event.target) event.target = target;
+        event.currentTarget = target;
+        var listeners = __eventListeners__[id] && __eventListeners__[id][event.type];
+        if (!listeners) return !event.defaultPrevented;
+        var copy = listeners.slice(0);
+        for (var i = 0; i < copy.length; i++) {
+            listeners = __eventListeners__[id] && __eventListeners__[id][event.type];
+            if (!listeners || listeners.indexOf(copy[i]) < 0) continue;
+            copy[i].fn.call(target, event);
+            if (event._stopped) break;
+        }
+        return !event.defaultPrevented;
+    };
+}
+
+__installEventTargetMethods(document, "__document__");
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // window object (minimal shim)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -660,6 +713,17 @@ var window = {
     innerWidth: 800,
     innerHeight: 600,
     devicePixelRatio: 2,
+    location: {
+        href: "file:///",
+        protocol: "file:",
+        host: "",
+        hostname: "",
+        port: "",
+        pathname: "/",
+        search: "",
+        hash: "",
+        origin: "file://"
+    },
     requestAnimationFrame: function(fn) {
         // Map to Pulp's frame clock
         if (typeof __requestFrame__ === "function") {
@@ -674,6 +738,13 @@ var window = {
         if (typeof __cancelFrame__ === "function") __cancelFrame__(id);
     }
 };
+window.window = window;
+window.self = window;
+window.top = window;
+window.parent = window;
+window.HTMLIFrameElement = function HTMLIFrameElement() {};
+
+__installEventTargetMethods(window, "__window__");
 
 function __installGlobalIfMissing(name, value) {
     if (typeof globalThis[name] === "undefined") {
@@ -1218,6 +1289,12 @@ function __createMockGPUCanvasContext(canvasEl) {
 }
 
 var navigator = globalThis.navigator || {};
+if (typeof navigator.userAgent !== "string") {
+    navigator.userAgent = "Mozilla/5.0 Pulp/1.0";
+}
+if (typeof navigator.platform !== "string") {
+    navigator.platform = "native";
+}
 if (typeof navigatorGPU !== "undefined" && navigatorGPU) {
     navigator.gpu = navigatorGPU;
     navigator.gpu.requestAdapter = function() {

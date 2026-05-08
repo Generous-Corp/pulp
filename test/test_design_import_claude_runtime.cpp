@@ -4,7 +4,7 @@
 // Boots a real ScriptEngine + WidgetBridge against synthetic Claude
 // Design bundles built on the fly, then asserts the materialized DOM
 // walker emits a DesignIR with materially more nodes than the
-// loader-shell baseline (>9, per the issue's success bar).
+// loader-shell baseline (>30, per the current issue's success bar).
 //
 // Optional [.fixture] case runs against the real Spectr fixture when
 // PULP_CLAUDE_BUNDLE_FIXTURE points at a Claude Design HTML on disk.
@@ -111,9 +111,12 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     // Synthetic "app code" that mounts a non-trivial tree on document.body
     // when evaluated. Mimics what React's commit phase eventually does:
     // builds a hierarchy of named elements with classes, attributes,
-    // styles, and text — enough for the walker + IR mapper to see >9
+    // styles, and text — enough for the walker + IR mapper to see >30
     // nodes.
     const std::string app_js = R"JS(
+        if (globalThis.IS_REACT_ACT_ENVIRONMENT !== true) {
+            throw new Error('IS_REACT_ACT_ENVIRONMENT was not enabled before app eval');
+        }
         var root = document.getElementById('root');
         if (!root) {
             root = document.createElement('div');
@@ -136,7 +139,10 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
         }
         // Simulate a small editor: 3 panels, each with a label + button.
         var editor = make('div', { id: 'editor', 'data-pulp-role': 'editor-root' });
-        var panels = ['Oscillator', 'Filter', 'Amp'];
+        var panels = [
+            'Oscillator', 'Filter', 'Amp', 'Envelope', 'LFO', 'Matrix',
+            'Drive', 'Mixer', 'Output', 'Modulation', 'Macros', 'Scope'
+        ];
         for (var i = 0; i < panels.length; i++) {
             var name = panels[i];
             var panel = make('section', {
@@ -167,7 +173,7 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     REQUIRE(ir.source == DesignSource::claude);
 
     // Walk the materialized IR and count nodes — must beat the
-    // loader-shell baseline of 9.
+    // loader-shell baseline of 30.
     std::function<size_t(const IRNode&)> count = [&](const IRNode& n) {
         size_t total = 1;
         for (const auto& c : n.children) total += count(c);
@@ -175,7 +181,7 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     };
     auto nodes = count(ir.root);
     INFO("materialized IR node count: " << nodes);
-    REQUIRE(nodes > 9);
+    REQUIRE(nodes > 30);
 
     // Confirm at least one node carries the data-pulp-role marker the
     // app set — proves the attribute round-trip works.
@@ -187,6 +193,225 @@ TEST_CASE("parse_claude_html_with_runtime materialises an app-injected DOM tree"
     };
     walk(ir.root);
     REQUIRE(found_role);
+}
+
+TEST_CASE("parse_claude_html_with_runtime skips document chrome and maps inline layout",
+          "[view][import][issue-1690]") {
+    const std::string app_js = R"JS(
+        var root = document.getElementById('root');
+        root.style.position = 'absolute';
+        root.style.inset = '0';
+        root.style.display = 'flex';
+        root.style.flexDirection = 'row';
+        root.style.gap = '8px';
+        root.style.padding = '6px 10px';
+        root.style.justifyContent = 'space-between';
+        root.style.alignItems = 'center';
+        root.style.overflow = 'hidden';
+        root.style.background = 'linear-gradient(90deg, #111111, #222222)';
+
+        var button = document.createElement('button');
+        button.id = 'run-button';
+        button.style.flex = '2 1 auto';
+        button.style.margin = '1px 2px 3px 4px';
+        button.textContent = 'Run';
+        root.appendChild(button);
+
+        var label = document.createElement('span');
+        label.id = 'status-label';
+        label.textContent = 'OK';
+        root.appendChild(label);
+
+        for (var i = 0; i < 32; i++) {
+            var cell = document.createElement('div');
+            cell.id = 'cell-' + i;
+            cell.textContent = '.';
+            root.appendChild(cell);
+        }
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+
+    const std::string full_document_template = R"HTML(
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Hidden Spectr Title</title>
+            <style>body { color: red; }</style>
+          </head>
+          <body>
+            <div id="root"></div>
+            <script src="u-app"></script>
+          </body>
+        </html>
+    )HTML";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), full_document_template), opts);
+
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+    REQUIRE(ir.source == DesignSource::claude);
+
+    std::function<size_t(const IRNode&)> count = [&](const IRNode& n) {
+        size_t total = 1;
+        for (const auto& c : n.children) total += count(c);
+        return total;
+    };
+    REQUIRE(count(ir.root) > 30);
+
+    bool found_hidden_title = false;
+    bool emitted_head = false;
+    std::function<void(const IRNode&)> scan = [&](const IRNode& n) {
+        if (n.name == "head" || n.type == "head" || n.name == "html" || n.type == "html")
+            emitted_head = true;
+        if (n.text_content.find("Hidden Spectr Title") != std::string::npos)
+            found_hidden_title = true;
+        for (const auto& c : n.children) scan(c);
+    };
+    scan(ir.root);
+    REQUIRE_FALSE(emitted_head);
+    REQUIRE_FALSE(found_hidden_title);
+
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& root = ir.root.children.front();
+    REQUIRE(root.name == "root");
+    REQUIRE(root.layout.direction == LayoutDirection::row);
+    REQUIRE(root.layout.gap == 8.0f);
+    REQUIRE(root.layout.padding_top == 6.0f);
+    REQUIRE(root.layout.padding_right == 10.0f);
+    REQUIRE(root.layout.padding_bottom == 6.0f);
+    REQUIRE(root.layout.padding_left == 10.0f);
+    REQUIRE(root.layout.justify == LayoutAlign::space_between);
+    REQUIRE(root.layout.align == LayoutAlign::center);
+    REQUIRE(root.layout.width_mode == SizingMode::fill);
+    REQUIRE(root.layout.height_mode == SizingMode::fill);
+    REQUIRE(root.style.position == "absolute");
+    REQUIRE(root.style.overflow == "hidden");
+    REQUIRE(root.style.background_gradient.has_value());
+    REQUIRE(root.style.top == 0.0f);
+    REQUIRE(root.style.right == 0.0f);
+    REQUIRE(root.style.bottom == 0.0f);
+    REQUIRE(root.style.left == 0.0f);
+
+    const auto& button = root.children.front();
+    REQUIRE(button.name == "run-button");
+    REQUIRE(std::stof(button.attributes.at("_flexGrow")) == 2.0f);
+    REQUIRE(std::stof(button.attributes.at("_marginTop")) == 1.0f);
+    REQUIRE(std::stof(button.attributes.at("_marginRight")) == 2.0f);
+    REQUIRE(std::stof(button.attributes.at("_marginBottom")) == 3.0f);
+    REQUIRE(std::stof(button.attributes.at("_marginLeft")) == 4.0f);
+}
+
+TEST_CASE("parse_claude_html_with_runtime preserves inert JSON scripts for app render",
+          "[view][import][issue-1690]") {
+    const std::string app_js = R"JS(
+        var cfg = JSON.parse(document.getElementById('tweak-defaults').textContent);
+        var root = document.getElementById('root');
+        for (var i = 0; i < cfg.cells; i++) {
+            var d = document.createElement('div');
+            d.id = 'json-cell-' + i;
+            d.setAttribute('data-pulp-role', 'json-cell');
+            root.appendChild(d);
+        }
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-app", "text/javascript", app_js, true) << "}";
+
+    const std::string body =
+        R"(<div id="root"></div>)"
+        R"(<script type="application/json" id="tweak-defaults">{"cells":36}</script>)"
+        R"(<script src="u-app"></script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), body), opts);
+
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+
+    std::function<size_t(const IRNode&)> count = [&](const IRNode& n) {
+        size_t total = 1;
+        for (const auto& c : n.children) total += count(c);
+        return total;
+    };
+    REQUIRE(count(ir.root) > 30);
+
+    bool found_json_cell = false;
+    bool emitted_script = false;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        if (n.type == "script") emitted_script = true;
+        auto it = n.attributes.find("data-pulp-role");
+        if (it != n.attributes.end() && it->second == "json-cell") found_json_cell = true;
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    REQUIRE(found_json_cell);
+    REQUIRE_FALSE(emitted_script);
+}
+
+TEST_CASE("parse_claude_html_with_runtime forces browser branch for UMD payloads",
+          "[view][import][issue-1690]") {
+    const std::string commonjs_globals = R"JS(
+        globalThis.exports = {};
+        globalThis.module = { exports: globalThis.exports };
+    )JS";
+    const std::string umd_payload = R"JS(
+        (function(global, factory) {
+            typeof exports === 'object' && typeof module !== 'undefined'
+                ? factory(exports)
+                : factory((global = global || self).BrowserLib = {});
+        }(this, function(exports) {
+            exports.ready = true;
+        }));
+    )JS";
+    const std::string app_js = R"JS(
+        if (!globalThis.BrowserLib || !globalThis.BrowserLib.ready) {
+            throw new Error('BrowserLib did not materialize on globalThis');
+        }
+        var root = document.getElementById('root');
+        for (var i = 0; i < 36; i++) {
+            var d = document.createElement('div');
+            d.id = 'umd-cell-' + i;
+            d.setAttribute('data-pulp-role', 'umd-cell');
+            root.appendChild(d);
+        }
+    )JS";
+
+    std::ostringstream manifest;
+    manifest << "{"
+             << manifest_entry("u-commonjs", "text/javascript", commonjs_globals, true) << ","
+             << manifest_entry("u-umd", "text/javascript", umd_payload, true) << ","
+             << manifest_entry("u-app", "text/javascript", app_js, true)
+             << "}";
+
+    const std::string body =
+        R"(<div id="root"></div>)"
+        R"(<script src="u-commonjs"></script>)"
+        R"(<script src="u-umd"></script>)"
+        R"(<script src="u-app"></script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts; opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), body), opts);
+
+    INFO("runtime error_out: " << err);
+    REQUIRE(err.empty());
+
+    bool found_umd_cell = false;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        auto it = n.attributes.find("data-pulp-role");
+        if (it != n.attributes.end() && it->second == "umd-cell") found_umd_cell = true;
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    REQUIRE(found_umd_cell);
 }
 
 TEST_CASE("parse_claude_html_with_runtime falls back when bundle JS is too large",
@@ -220,7 +445,7 @@ TEST_CASE("parse_claude_html_with_runtime falls back when bundle JS is too large
 TEST_CASE("parse_claude_html_with_runtime falls back below the loader-shell floor",
           "[view][import][issue-468]") {
     // App that creates only one extra div — total IR ends up below the
-    // 9-node floor, so the harness should fall back to the static
+    // 30-node floor, so the harness should fall back to the static
     // parser rather than return a regression.
     const std::string trivial_js = R"JS(
         var root = document.getElementById('root');
@@ -273,8 +498,8 @@ TEST_CASE("parse_claude_html_with_runtime against the real Spectr fixture "
     INFO("materialized IR node count from Spectr fixture: " << nodes);
     INFO("error_out (empty=success): " << err);
     REQUIRE(ir.source == DesignSource::claude);
-    // Acceptance bar from the issue: > 9 nodes (loader-shell baseline).
+    // Acceptance bar from the issue: > 30 nodes (loader-shell baseline).
     // If even the real Spectr bundle can't get past the floor, surface
     // the error_out via INFO above so the diagnostic is captured.
-    REQUIRE(nodes > 9);
+    REQUIRE(nodes > 30);
 }

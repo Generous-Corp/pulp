@@ -22,6 +22,12 @@
 // timer-driven event loop that the QuickJS embedding would never pump.
 
 (function () {
+    function __pulpFormatAsyncError(e) {
+        var msg = String((e && e.message) || e);
+        var stack = String((e && e.stack) || "");
+        return stack && stack.indexOf(msg) < 0 ? msg + "\n" + stack : (stack || msg);
+    }
+
     // ── queueMicrotask ───────────────────────────────────────────────────
     if (typeof globalThis.queueMicrotask !== "function") {
         globalThis.queueMicrotask = function (fn) {
@@ -32,8 +38,9 @@
                 Promise.resolve().then(function () {
                     try { fn(); }
                     catch (e) {
+                        globalThis.__pulpLastAsyncError__ = "queueMicrotask: " + __pulpFormatAsyncError(e);
                         if (typeof console !== "undefined" && console.error) {
-                            console.error("queueMicrotask:", e);
+                            console.error("queueMicrotask:", __pulpFormatAsyncError(e));
                         }
                     }
                 });
@@ -134,15 +141,17 @@
                 var event = { data: data, source: null, ports: [] };
                 if (other._onmessage) {
                     try { other._onmessage(event); } catch (e) {
+                        globalThis.__pulpLastAsyncError__ = "MessagePort.onmessage: " + __pulpFormatAsyncError(e);
                         if (typeof console !== "undefined" && console.error) {
-                            console.error("MessagePort.onmessage:", e);
+                            console.error("MessagePort.onmessage:", __pulpFormatAsyncError(e));
                         }
                     }
                 }
                 for (var i = 0; i < other._listeners.length; i++) {
                     try { other._listeners[i](event); } catch (e2) {
+                        globalThis.__pulpLastAsyncError__ = "MessagePort listener: " + __pulpFormatAsyncError(e2);
                         if (typeof console !== "undefined" && console.error) {
-                            console.error("MessagePort listener:", e2);
+                            console.error("MessagePort listener:", __pulpFormatAsyncError(e2));
                         }
                     }
                 }

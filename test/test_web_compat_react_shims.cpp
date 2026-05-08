@@ -94,6 +94,119 @@ TEST_CASE("Element constructor + prototype expose DOM Level 1 node-type constant
     REQUIRE(result == "1,3,8,1,3,8");
 }
 
+TEST_CASE("window exposes browser location and navigator defaults for UMD bundles",
+          "[view][web-compat][import-design][issue-1688]") {
+    auto result = run_in_bridge(R"(
+        return [
+            window.location && window.location.protocol,
+            window.location && window.location.href,
+            window.navigator && typeof window.navigator.userAgent,
+            navigator && typeof navigator.userAgent,
+            window.navigator === navigator
+        ].join('|');
+    )");
+    REQUIRE(result == "file:|file:///|string|string|true");
+}
+
+TEST_CASE("document and window expose EventTarget listeners for React roots",
+          "[view][web-compat][import-design][issue-1688]") {
+    auto result = run_in_bridge(R"(
+        var fired = [];
+        function docListener(evt) { fired.push('doc:' + evt.type + ':' + (evt.currentTarget === document)); }
+        function winListener(evt) { fired.push('win:' + evt.type + ':' + (evt.currentTarget === window)); }
+        document.addEventListener('selectionchange', docListener, false);
+        window.addEventListener('load', winListener, true);
+        document.dispatchEvent({ type: 'selectionchange' });
+        window.dispatchEvent({ type: 'load' });
+        document.removeEventListener('selectionchange', docListener, false);
+        document.dispatchEvent({ type: 'selectionchange' });
+        return fired.join('|');
+    )");
+    REQUIRE(result == "doc:selectionchange:true|win:load:true");
+}
+
+TEST_CASE("document EventTarget skips listeners removed during dispatch",
+          "[view][web-compat][import-design]") {
+    auto result = run_in_bridge(R"(
+        var calls = [];
+        function first() {
+            calls.push('first');
+            document.removeEventListener('selectionchange', second, false);
+        }
+        function second() { calls.push('second'); }
+        document.addEventListener('selectionchange', first, false);
+        document.addEventListener('selectionchange', second, false);
+        document.dispatchEvent({ type: 'selectionchange' });
+        return calls.join(',');
+    )");
+    REQUIRE(result == "first");
+}
+
+TEST_CASE("Element dispatch snapshots listeners added during dispatch",
+          "[view][web-compat][import-design]") {
+    auto result = run_in_bridge(R"(
+        var el = document.createElement('button');
+        var calls = [];
+        function third() { calls.push('third'); }
+        function first() {
+            calls.push('first');
+            el.addEventListener('click', third);
+        }
+        function second() { calls.push('second'); }
+        el.addEventListener('click', first);
+        el.addEventListener('click', second);
+        el.dispatchEvent(new Event('click'));
+        return calls.join(',');
+    )");
+    REQUIRE(result == "first,second");
+}
+
+TEST_CASE("Element dispatch skips listeners removed during dispatch",
+          "[view][web-compat][import-design]") {
+    auto result = run_in_bridge(R"(
+        var el = document.createElement('button');
+        var calls = [];
+        function first() {
+            calls.push('first');
+            el.removeEventListener('click', second);
+        }
+        function second() { calls.push('second'); }
+        el.addEventListener('click', first);
+        el.addEventListener('click', second);
+        el.dispatchEvent(new Event('click'));
+        return calls.join(',');
+    )");
+    REQUIRE(result == "first");
+}
+
+TEST_CASE("document activeElement and iframe constructor support React selection probes",
+          "[view][web-compat][import-design][issue-1688]") {
+    auto result = run_in_bridge(R"(
+        return [
+            document.activeElement === document.body,
+            typeof window.HTMLIFrameElement,
+            document.body instanceof window.HTMLIFrameElement
+        ].join('|');
+    )");
+    REQUIRE(result == "true|function|false");
+}
+
+TEST_CASE("document.createElementNS supports React SVG commits",
+          "[view][web-compat][import-design][issue-1688]") {
+    auto result = run_in_bridge(R"(
+        var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttributeNS(null, 'width', '12');
+        rect.setAttributeNS(null, 'data-pulp-role', 'shape');
+        return [
+            rect.tagName,
+            rect.namespaceURI,
+            rect.getAttributeNS(null, 'width'),
+            rect.getAttribute('data-pulp-role')
+        ].join('|');
+    )");
+    REQUIRE(result == "RECT|http://www.w3.org/2000/svg|12|shape");
+}
+
 // ── createTextNode reports as a real text node ──────────────────────────
 
 TEST_CASE("createTextNode reports nodeType=3 and nodeName='#text'",

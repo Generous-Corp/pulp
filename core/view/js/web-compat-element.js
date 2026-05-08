@@ -692,6 +692,18 @@ Element.prototype.getAttribute = function(name) {
     return this._attributes[name] !== undefined ? this._attributes[name] : null;
 };
 
+Element.prototype.setAttributeNS = function(ns, name, value) {
+    this.setAttribute(name, value);
+};
+
+Element.prototype.getAttributeNS = function(ns, name) {
+    return this.getAttribute(name);
+};
+
+Element.prototype.removeAttributeNS = function(ns, name) {
+    this.removeAttribute(name);
+};
+
 Element.prototype.removeAttribute = function(name) {
     var was = this._attributes[name];
     delete this._attributes[name];
@@ -874,10 +886,27 @@ Element.prototype._registerNativeEvent = function(type) {
         // path. Before, only the explicit `registerWheel(id)` API was
         // accessible from JS — DOM consumers got no surface at all.
         if (typeof registerWheel === "function") registerWheel(id);
-        on(id, "wheel", function(dx, dy) {
-            var evt = _makeEvent("wheel", self, {});
-            evt.deltaX = dx || 0;
-            evt.deltaY = dy || 0;
+        on(id, "wheel", function(dx, dy, clientX, clientY, offsetX, offsetY, ctrlKey, shiftKey, altKey, metaKey) {
+            var data;
+            if (dx && typeof dx === "object") {
+                data = dx;
+            } else {
+                data = {
+                    deltaX: dx || 0,
+                    deltaY: dy || 0,
+                    clientX: clientX || 0,
+                    clientY: clientY || 0,
+                    offsetX: offsetX || 0,
+                    offsetY: offsetY || 0,
+                    ctrlKey: !!ctrlKey,
+                    shiftKey: !!shiftKey,
+                    altKey: !!altKey,
+                    metaKey: !!metaKey
+                };
+            }
+            var evt = _makeEvent("wheel", self, data);
+            evt.deltaX = data.deltaX || 0;
+            evt.deltaY = data.deltaY || 0;
             evt.deltaZ = 0;
             evt.deltaMode = 0;  // DOM_DELTA_PIXEL
             self.dispatchEvent(evt);
@@ -1010,9 +1039,12 @@ function _fireListeners(el, event) {
     var id = el._id;
     var listeners = __eventListeners__[id] && __eventListeners__[id][event.type];
     if (!listeners) return;
+    var copy = listeners.slice(0);
     event.currentTarget = el;
-    for (var i = 0; i < listeners.length; i++) {
-        listeners[i].fn.call(el, event);
+    for (var i = 0; i < copy.length; i++) {
+        listeners = __eventListeners__[id] && __eventListeners__[id][event.type];
+        if (!listeners || listeners.indexOf(copy[i]) < 0) continue;
+        copy[i].fn.call(el, event);
         if (event._stopped) break;
     }
 }
@@ -1029,10 +1061,13 @@ function _dispatchEvent(target, event) {
     for (var i = 0; i < path.length && !event._stopped; i++) {
         var listeners = __eventListeners__[path[i]._id] && __eventListeners__[path[i]._id][event.type];
         if (listeners) {
+            var captureCopy = listeners.slice(0);
             event.currentTarget = path[i];
-            for (var j = 0; j < listeners.length; j++) {
-                if (listeners[j].capture) {
-                    listeners[j].fn.call(path[i], event);
+            for (var j = 0; j < captureCopy.length; j++) {
+                listeners = __eventListeners__[path[i]._id] && __eventListeners__[path[i]._id][event.type];
+                if (!listeners || listeners.indexOf(captureCopy[j]) < 0) continue;
+                if (captureCopy[j].capture) {
+                    captureCopy[j].fn.call(path[i], event);
                     if (event._stopped) return;
                 }
             }
@@ -1047,10 +1082,13 @@ function _dispatchEvent(target, event) {
     for (var k = path.length - 1; k >= 0 && !event._stopped; k--) {
         var listeners2 = __eventListeners__[path[k]._id] && __eventListeners__[path[k]._id][event.type];
         if (listeners2) {
+            var bubbleCopy = listeners2.slice(0);
             event.currentTarget = path[k];
-            for (var l = 0; l < listeners2.length; l++) {
-                if (!listeners2[l].capture) {
-                    listeners2[l].fn.call(path[k], event);
+            for (var l = 0; l < bubbleCopy.length; l++) {
+                listeners2 = __eventListeners__[path[k]._id] && __eventListeners__[path[k]._id][event.type];
+                if (!listeners2 || listeners2.indexOf(bubbleCopy[l]) < 0) continue;
+                if (!bubbleCopy[l].capture) {
+                    bubbleCopy[l].fn.call(path[k], event);
                     if (event._stopped) return;
                 }
             }

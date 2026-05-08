@@ -42,7 +42,7 @@
         "track": 1, "wbr": 1
     };
 
-    var SKIP_TAGS = { "script": 1, "style": 1, "noscript": 1 };
+    var SKIP_TAGS = { "style": 1, "noscript": 1 };
 
     function decodeEntities(str) {
         if (str.indexOf("&") < 0) return str;
@@ -100,6 +100,33 @@
                 el.setAttribute(name, val);
             }
         }
+    }
+
+    function findRawTextTagClose(html, pos, tagName) {
+        var len = html.length;
+        var closeStr = "</" + tagName;
+        var k = pos;
+        while (k < len) {
+            var n = html.indexOf("<", k);
+            if (n < 0) return { body: html.slice(pos), end: len };
+            if (html.substr(n, closeStr.length).toLowerCase() === closeStr) {
+                var ce = html.indexOf(">", n);
+                if (ce < 0) return { body: html.slice(pos), end: len };
+                return { body: html.slice(pos, n), end: ce + 1 };
+            }
+            k = n + 1;
+        }
+        return { body: html.slice(pos), end: len };
+    }
+
+    function isJsonScript(attrs) {
+        if (!attrs) return false;
+        if (attrs.src) return false;
+        var type = String(attrs.type || "").toLowerCase();
+        return type === "application/json" ||
+               type === "text/json" ||
+               type.slice(-5) === "/json" ||
+               type.indexOf("+json") >= 0;
     }
 
     function buildDom(html, parent) {
@@ -173,25 +200,41 @@
             tagName = tagName.toLowerCase();
             pos = ge2 + 1;
 
-            // Skip <script>, <style>, <noscript> entirely — find matching close.
-            if (SKIP_TAGS[tagName]) {
-                var closeStr = "</" + tagName;
-                var k = pos;
-                while (k < len) {
-                    var n = html.indexOf("<", k);
-                    if (n < 0) { pos = len; break; }
-                    if (html.substr(n, closeStr.length).toLowerCase() === closeStr) {
-                        var ce = html.indexOf(">", n);
-                        if (ce < 0) { pos = len; break; }
-                        pos = ce + 1;
-                        break;
-                    }
-                    k = n + 1;
+            var attrs = parseAttrs(attrStr);
+
+            // Claude exports a full document. The import harness builds
+            // inside document.body, so wrapper tags must not become visible
+            // native nodes. Keep body/html transparent and discard head.
+            if (tagName === "head") {
+                pos = findRawTextTagClose(html, pos, tagName).end;
+                continue;
+            }
+            if (tagName === "html" || tagName === "body") {
+                continue;
+            }
+
+            // Preserve inert JSON scripts because app code may query them
+            // by id during render (Spectr's `tweak-defaults` is one example).
+            // Executable scripts are evaluated by the C++ harness and should
+            // not be kept as visible DOM.
+            if (tagName === "script") {
+                var scriptText = findRawTextTagClose(html, pos, tagName);
+                pos = scriptText.end;
+                if (isJsonScript(attrs)) {
+                    var scriptEl = document.createElement(tagName);
+                    applyAttrs(scriptEl, attrs);
+                    scriptEl.textContent = scriptText.body;
+                    top().appendChild(scriptEl);
                 }
                 continue;
             }
 
-            var attrs = parseAttrs(attrStr);
+            // Skip <style> and <noscript> entirely — find matching close.
+            if (SKIP_TAGS[tagName]) {
+                pos = findRawTextTagClose(html, pos, tagName).end;
+                continue;
+            }
+
             var el = document.createElement(tagName);
             applyAttrs(el, attrs);
             top().appendChild(el);
@@ -248,9 +291,11 @@
         }
         // Comment node — drop.
         if (root._isCommentNode) return null;
+        var tag = (root.tagName || "div").toLowerCase();
+        if (tag === "script" || tag === "style" || tag === "noscript") return null;
 
         var node = {
-            type: (root.tagName || "div").toLowerCase(),
+            type: tag,
             id: root._userIdSet ? (root._attributes && root._attributes["id"]) || "" : "",
             class: root._className || "",
             attrs: serializeAttrs(root),

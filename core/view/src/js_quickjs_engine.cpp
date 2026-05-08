@@ -14,7 +14,9 @@ namespace pulp::view {
 // ── QuickJS stack size increase ─────────────────────────────────────────────
 // The web-compat prelude + deep JS↔C++ interleaving during DOM operations
 // (appendChild → _reparentNative → native bridge → back to JS) exhausts
-// QuickJS's default 256KB JS stack. We increase it to 1MB.
+// QuickJS's default 256KB JS stack. Babel-standalone, used by Claude
+// Design imports, also needs a larger stack just to initialize. We
+// increase it to 8MB.
 //
 // CHOC's Context::pimpl is private, but we need the JSRuntime* to call
 // JS_SetMaxStackSize. Since this file includes the full QuickJS implementation,
@@ -101,7 +103,7 @@ public:
     QuickJsEngine()
         : context_(choc::javascript::createQuickJSContext())
     {
-        set_quickjs_stack_size(context_, 1024 * 1024);  // 1MB (up from 256KB)
+        set_quickjs_stack_size(context_, 8 * 1024 * 1024);  // up from QuickJS's 256KB default
         setup_console();
     }
 
