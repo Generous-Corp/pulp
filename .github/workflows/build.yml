@@ -240,13 +240,14 @@ jobs:
         run: choco install ccache --no-progress -y
 
       # ── Caches (#420) ──────────────────────────────────────────────────
-      # FetchContent source cache: Skia / Dawn / Yoga / SDL3 / Catch2 /
-      # mbedtls / CHOC / CLAP / LV2 / VST3 SDK, keyed on setup.sh's
-      # content (which pins every ref). Hit → setup.sh finds everything
-      # already unpacked and returns in seconds. Cold → ~3-5 min
-      # downloading + unpacking.
-      - name: Cache FetchContent sources
-        uses: actions/cache@v4
+      # The local macOS runner keeps these paths on disk between jobs.
+      # Avoid round-tripping multi-GB compiler/source caches through
+      # GitHub's cloud cache there; GitHub-hosted runners restore main's
+      # cache and only main pushes publish fresh cache entries.
+      - name: Restore FetchContent sources (GitHub-hosted)
+        if: runner.os != 'macOS' || runner.environment == 'github-hosted'
+        id: fetchcontent-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/Pulp/fetchcontent-src
@@ -256,12 +257,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
 
-      # ccache: skip compilation of unchanged translation units. Keyed
-      # on CMakeLists + PR ref so each PR has its own warm cache. The
-      # restore-key fallback shares warm cache across PRs on the same
-      # base branch, so first-run-per-PR starts near-warm.
-      - name: Cache ccache
-        uses: actions/cache@v4
+      - name: Restore ccache (GitHub-hosted)
+        if: runner.os != 'macOS' || runner.environment == 'github-hosted'
+        id: ccache-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/ccache
@@ -275,6 +274,16 @@ jobs:
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
+
+      - name: Save FetchContent sources (main GitHub-hosted)
+        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetchcontent-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cache/Pulp/fetchcontent-src
+            ~/AppData/Local/Pulp/Cache/fetchcontent-src
+          key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
       - name: Configure
         # On pull_request events, skip example plugin builds
@@ -307,6 +316,16 @@ jobs:
             echo "ccache not available; skipping stats"
           fi
         shell: bash
+
+      - name: Save ccache (main GitHub-hosted)
+        if: (runner.os != 'macOS' || runner.environment == 'github-hosted') && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.ccache-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/ccache
+            ~/.cache/ccache
+            ~/AppData/Local/ccache
+          key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
 
       - name: Test (non-Windows)
         if: runner.os != 'Windows'

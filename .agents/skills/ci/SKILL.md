@@ -430,6 +430,14 @@ GitHub-hosted Ubuntu must create a `docker-container` Buildx builder before
 calling the wrapper; the default `docker` driver on that image rejects
 `type=local` cache export unless containerd image storage is enabled.
 
+For macOS visual/layout jobs, do not use the combined `actions/cache` action
+for `ccache` or FetchContent on the local self-hosted runner. Its home
+directory persists between jobs, so GitHub cloud-cache saves can spend
+20+ minutes uploading multi-GB compiler caches that the runner already has
+locally. Use `actions/cache/restore` for GitHub-hosted fallback runners and
+`actions/cache/save` only on `push` to `main`; PRs should restore existing
+remote caches at most, not publish PR-scoped ccache blobs.
+
 The container is a reproducible smoke/developer environment. It does not
 replace the future canonical arm64-darwin raster-golden gate.
 

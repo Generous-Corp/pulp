@@ -852,8 +852,8 @@ TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget p
 
     RecordingCanvas path_image_canvas;
     path_image.paint(path_image_canvas);
-    REQUIRE(path_image_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
-    REQUIRE(commands_of(path_image_canvas, DrawCommand::Type::fill_text).front().text == "pulp-widget-preview.png");
+    REQUIRE(path_image_canvas.count(DrawCommand::Type::draw_image) == 1);
+    REQUIRE(commands_of(path_image_canvas, DrawCommand::Type::draw_image).front().text == "/tmp/pulp-widget-preview.png");
 }
 
 TEST_CASE("Meter set_level", "[view][widget]") {
