@@ -4899,8 +4899,8 @@
       "issue": ""
     },
     "rn/textShadowColor": {
-      "status": "partial",
-      "mapsTo": "prop-applier.ts -> setTextShadowColor(id, hex) (bridge fn registration deferred to #1548)",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setTextShadowColor(id, hex) -> widget_bridge.cpp:5010",
       "supportedValues": [
         "CSS color strings"
       ],
@@ -4908,12 +4908,11 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): the @pulp/react surface dispatches each text-shadow longhand to its own per-attribute bridge fn so JSX prop diffs preserve sibling slots. Bridge registration of setTextShadowColor / setTextShadowOffset / setTextShadowRadius is staged on the #1548 feature branch (paint-time SkPaint shadow + Label glyph layer) and lands in a follow-up; the prop-applier dispatch is a paint no-op until that registration lands. Storage and dispatch are wired so callers can ship the JSX surface today.",
-      "issue": "1548"
+      "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5010-5017) and prop-applier wired (prop-applier.ts:1280). Earlier catalog note claimed deferred-to-#1548 \u2014 that work landed. CSS color strings flow through to View::set_text_shadow_color_."
     },
     "rn/textShadowOffset": {
-      "status": "partial",
-      "mapsTo": "prop-applier.ts -> setTextShadowOffset(id, dx, dy) (bridge fn registration deferred to #1548)",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setTextShadowOffset(id, dx, dy) -> widget_bridge.cpp:5018",
       "supportedValues": [
         "{ width, height }"
       ],
@@ -4921,12 +4920,11 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): `{ width, height }` shape is the RN spec; the prop-applier coerces missing axes to 0. See rn/textShadowColor for the bridge-registration-pending caveat (#1548).",
-      "issue": "1548"
+      "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5018-5026) and prop-applier wired (prop-applier.ts:1281-1287). { width, height } shape per RN spec; prop-applier coerces missing axes to 0."
     },
     "rn/textShadowRadius": {
-      "status": "partial",
-      "mapsTo": "prop-applier.ts -> setTextShadowRadius(id, px) (bridge fn registration deferred to #1548)",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setTextShadowRadius(id, px) -> widget_bridge.cpp:5027",
       "supportedValues": [
         "px (number)"
       ],
@@ -4934,8 +4932,7 @@
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1): blur radius in px. See rn/textShadowColor for the bridge-registration-pending caveat (#1548).",
-      "issue": "1548"
+      "notes": "pulp #1548 work shipped: bridge fn registered (widget_bridge.cpp:5027-5034) and prop-applier wired (prop-applier.ts:1288). Blur radius in px (number)."
     },
     "rn/textTransform": {
       "status": "supported",
