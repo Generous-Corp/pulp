@@ -258,7 +258,13 @@ fn do_check_only<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Wri
                         "could not refresh latest version: {e}"
                     )));
                 }
-                (previous, "cache")
+                if let Some(ref path) = cache_path_opt {
+                    // Preserve the 24h backoff semantics for normal
+                    // TTL refresh failures: carry the previous latest,
+                    // but remember that we tried.
+                    let _ = update::write_cache(path, &next);
+                }
+                (next, "cache")
             }
         }
     } else {
@@ -455,13 +461,17 @@ fn persist_successful_install_cache(version: &str) {
     let owner_repo =
         std::env::var("PULP_RS_UPGRADE_REPO").unwrap_or_else(|_| DEFAULT_REPO.to_owned());
     let previous = update::read_cache(&path).ok().flatten().unwrap_or_default();
-    let entry = update::CacheEntry {
-        schema: update::CACHE_SCHEMA_VERSION,
-        last_check_epoch_sec: now_epoch_sec(),
-        latest_version: version.to_owned(),
-        release_notes_url: release_notes_url_for(&owner_repo, version, &previous),
-        banner_shown_for_version: version.to_owned(),
-    };
+    let installed_is_latest = previous.latest_version.is_empty()
+        || previous.latest_version == version
+        || is_newer(&previous.latest_version, version);
+    let mut entry = previous.clone();
+    entry.schema = update::CACHE_SCHEMA_VERSION;
+    entry.last_check_epoch_sec = now_epoch_sec();
+    if installed_is_latest {
+        entry.latest_version = version.to_owned();
+        entry.release_notes_url = release_notes_url_for(&owner_repo, version, &previous);
+        entry.banner_shown_for_version = version.to_owned();
+    }
     let _ = update::write_cache(&path, &entry);
 }
 
@@ -725,6 +735,41 @@ mod tests {
     }
 
     #[test]
+    fn check_only_stale_cache_fetch_failure_advances_backoff() {
+        let (_td, _g) = isolated_env();
+        std::env::set_var("PULP_RS_CLI_VERSION", "0.78.2");
+        let cache = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: 1,
+            latest_version: "0.78.3".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+                .to_owned(),
+            banner_shown_for_version: String::new(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &cache).unwrap();
+
+        let args = UpgradeArgs {
+            check_only: true,
+            json: true,
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        run_with(&args, &ErrFetcher, &mut buf).unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["latest"], "0.78.3");
+        assert_eq!(v["source"], "cache");
+
+        let refreshed = update::read_cache(&update::cache_path().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(refreshed.latest_version, "0.78.3");
+        assert!(
+            refreshed.last_check_epoch_sec > 1,
+            "failed TTL refresh should still back off"
+        );
+    }
+
+    #[test]
     fn check_only_to_override_reports_matching_notes_url_without_fetch() {
         let (_td, _g) = isolated_env();
         let cache = update::CacheEntry {
@@ -905,6 +950,33 @@ mod tests {
         );
         assert_eq!(cache.banner_shown_for_version, "0.78.3");
         assert!(cache.last_check_epoch_sec >= 1);
+    }
+
+    #[test]
+    fn persist_successful_install_cache_does_not_downgrade_newer_latest() {
+        let (_td, _g) = isolated_env();
+        let old = update::CacheEntry {
+            schema: 1,
+            last_check_epoch_sec: 42,
+            latest_version: "0.78.4".to_owned(),
+            release_notes_url: "https://github.com/danielraffel/pulp/releases/tag/v0.78.4"
+                .to_owned(),
+            banner_shown_for_version: "0.78.4".to_owned(),
+        };
+        update::write_cache(&update::cache_path().unwrap(), &old).unwrap();
+
+        persist_successful_install_cache("0.78.2");
+
+        let cache = update::read_cache(&update::cache_path().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache.latest_version, "0.78.4");
+        assert_eq!(
+            cache.release_notes_url,
+            "https://github.com/danielraffel/pulp/releases/tag/v0.78.4"
+        );
+        assert_eq!(cache.banner_shown_for_version, "0.78.4");
+        assert!(cache.last_check_epoch_sec >= 42);
     }
 
     // ── #45 coverage uplift slice 10 — upgrade.rs parse + helpers ─
