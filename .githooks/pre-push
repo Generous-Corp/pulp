@@ -156,13 +156,19 @@ check_compat_status_flips() {
         test_changed=1
     fi
 
-    # Check for partial→supported flips in compat.json.
-    local flips
-    flips=$(git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -cE '^\-.*"partial"' || echo 0)
-    local flips_to
-    flips_to=$(git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -cE '^\+.*"supported"' || echo 0)
+    # Check for partial→supported flips in compat.json using a simple heuristic.
+    # If the diff removes any line containing "partial" and adds any line
+    # containing "supported", assume a status flip.
+    local flips=0
+    local flips_to=0
+    if git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -qE '^\-.*"partial"'; then
+        flips=1
+    fi
+    if git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -qE '^\+.*"supported"'; then
+        flips_to=1
+    fi
 
-    if [ "${flips:-0}" -gt 0 ] && [ "${flips_to:-0}" -gt 0 ] && [ "$test_changed" -eq 0 ]; then
+    if [ "$flips" -eq 1 ] && [ "$flips_to" -eq 1 ] && [ "$test_changed" -eq 0 ]; then
         echo "[pre-push] compat_status_flip: status flips detected (partial→supported) in compat.json" >&2
         echo "[pre-push]   but no test files changed (test/ or tools/harness/tests/)." >&2
         echo "[pre-push]   partial→supported flips require new/modified test coverage (pulp #1657)." >&2
