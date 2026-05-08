@@ -2747,10 +2747,12 @@ TEST_CASE("WidgetBridge canvasSetLineDash records pattern + phase, "
                 continue;
             }
             dashIndex = idx;
+            REQUIRE_THAT(cmd.f[0], WithinAbs(0.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[0], WithinAbs(5.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[1], WithinAbs(3.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[2], WithinAbs(2.0f, 1e-5f));
             REQUIRE_THAT(cmd.floats[3], WithinAbs(5.0f, 1e-5f));
+            break;
         }
         ++idx;
     }
