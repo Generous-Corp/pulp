@@ -116,6 +116,74 @@ TEST_CASE("Canvas text in nested clip contexts -- no duplication (#75)",
     REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 3);
 }
 
+// pulp #1737 — direct unit tests for the new draw_image_*_rect overrides.
+// The integration test [issue-1737] in test_widget_bridge.cpp exercises
+// draw_image_from_file_rect end-to-end via the JS bridge, but codecov's
+// patch-coverage measurement reported 0% on the new lines anyway (the
+// widget-bridge test goes through too many dispatch layers for the
+// per-line attribution). Direct calls on RecordingCanvas pin the new
+// behavior to specific test cases that codecov measures unambiguously.
+TEST_CASE("RecordingCanvas::draw_image_from_file_rect captures src + dst rect",
+          "[canvas][issue-1737][issue-916]") {
+    RecordingCanvas canvas;
+    bool ok = canvas.draw_image_from_file_rect(
+        "/sprites/walk.png",
+        /*sx=*/16, /*sy=*/0, /*sw=*/32, /*sh=*/32,
+        /*dx=*/4,  /*dy=*/8, /*dw=*/64, /*dh=*/64);
+    REQUIRE(ok);
+    REQUIRE(canvas.count(DrawCommand::Type::draw_image) == 1);
+    const auto& cmd = canvas.commands().back();
+    REQUIRE(cmd.text == "/sprites/walk.png");
+    // dst rect in f[0..3]
+    REQUIRE(cmd.f[0] == Catch::Approx(4.0f));
+    REQUIRE(cmd.f[1] == Catch::Approx(8.0f));
+    REQUIRE(cmd.f[2] == Catch::Approx(64.0f));
+    REQUIRE(cmd.f[3] == Catch::Approx(64.0f));
+    // src rect in floats[0..3]
+    REQUIRE(cmd.floats.size() == 4);
+    REQUIRE(cmd.floats[0] == Catch::Approx(16.0f));
+    REQUIRE(cmd.floats[1] == Catch::Approx(0.0f));
+    REQUIRE(cmd.floats[2] == Catch::Approx(32.0f));
+    REQUIRE(cmd.floats[3] == Catch::Approx(32.0f));
+}
+
+TEST_CASE("RecordingCanvas::draw_image_from_data_rect captures src + dst rect",
+          "[canvas][issue-1737][issue-916]") {
+    RecordingCanvas canvas;
+    // Tiny synthetic encoded payload — RecordingCanvas doesn't decode,
+    // it just stashes the bytes verbatim. Use a recognisable
+    // 4-byte sentinel so the test asserts the bytes flow through.
+    const uint8_t sentinel[] = { 0xAB, 0xCD, 0xEF, 0x01 };
+    bool ok = canvas.draw_image_from_data_rect(
+        sentinel, sizeof(sentinel),
+        /*sx=*/0, /*sy=*/0, /*sw=*/4, /*sh=*/1,
+        /*dx=*/100, /*dy=*/200, /*dw=*/40, /*dh=*/10);
+    REQUIRE(ok);
+    REQUIRE(canvas.count(DrawCommand::Type::draw_image) == 1);
+    const auto& cmd = canvas.commands().back();
+    // Bytes round-trip (RecordingCanvas treats them as binary text payload).
+    REQUIRE(cmd.text.size() == sizeof(sentinel));
+    REQUIRE(static_cast<unsigned char>(cmd.text[0]) == 0xAB);
+    REQUIRE(static_cast<unsigned char>(cmd.text[3]) == 0x01);
+    // dst rect.
+    REQUIRE(cmd.f[0] == Catch::Approx(100.0f));
+    REQUIRE(cmd.f[2] == Catch::Approx(40.0f));
+    // src rect.
+    REQUIRE(cmd.floats.size() == 4);
+    REQUIRE(cmd.floats[2] == Catch::Approx(4.0f));
+}
+
+// (Note on canvas.hpp defaults: the base-class `draw_image_from_*_rect`
+// virtual defaults strip src rect and delegate to the dst-only form.
+// Both RecordingCanvas and SkiaCanvas override the _rect methods, so
+// the defaults are effectively dead code on real backends — they only
+// fire on a backend that overrides _file/_data but NOT _file_rect.
+// Exercising the defaults requires a contrived Canvas subclass that
+// can't easily be set up here without re-implementing every pure
+// virtual; skipping. The defaults remain in diff_cover_excludes
+// (`**/canvas.hpp` per tools/scripts/coverage_config.json), so this
+// is documented-and-excluded rather than a real coverage gap.)
+
 TEST_CASE("RecordingCanvas captures draw_box_shadow with full payload",
           "[canvas][issue-925]") {
     RecordingCanvas canvas;
