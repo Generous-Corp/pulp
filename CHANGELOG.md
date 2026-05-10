@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07910"></a>
+## [0.79.10] - 2026-05-10
+
+- fix(view/css): parse gap before clearing per-axis (Codex P2 followup on #1700, closes #1707) ([#1713](https://github.com/danielraffel/pulp/pull/1713))
+
 <a id="v0799"></a>
 ## [0.79.9] - 2026-05-10
 
@@ -1457,6 +1462,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.79.10]: https://github.com/danielraffel/pulp/releases/tag/v0.79.10
 [0.79.9]: https://github.com/danielraffel/pulp/releases/tag/v0.79.9
 [0.79.8]: https://github.com/danielraffel/pulp/releases/tag/v0.79.8
 [0.79.6]: https://github.com/danielraffel/pulp/releases/tag/v0.79.6
