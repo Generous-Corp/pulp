@@ -293,9 +293,8 @@
       "bridge": [
         "canvasPutImageData"
       ],
-      "expectedStatus": "partial",
-      "notes": "Shim base64-encodes the ImageData.",
-      "gotcha": "sub-rect form deferred (issue-916)"
+      "expectedStatus": "supported",
+      "notes": "Shim base64-encodes the ImageData. pulp #1737 — 7-arg sub-rect form sliced row-by-row in JS shim before encoding; bridge contract unchanged."
     },
     "setLineDash": {
       "kind": "method",

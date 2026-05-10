@@ -2981,6 +2981,138 @@ TEST_CASE("WidgetBridge canvasPutImageData records pixel buffer for paint replay
     REQUIRE(writeIndex >= 0);
 }
 
+// pulp #1737 — putImageData(imageData, dx, dy, dirtyX, dirtyY, dirtyW,
+// dirtyH) sub-rect form. Pre-fix the JS shim accepted the 7-arg
+// signature but silently dropped dirtyX/Y/W/H and wrote the entire
+// ImageData. Per HTML5 spec only the (dirtyX, dirtyY)→(dirtyX+dirtyW,
+// dirtyY+dirtyH) sub-rect of the source ImageData is written, at
+// destination top-left (dx + dirtyX, dy + dirtyY).
+//
+// Test drives a 4×4 ImageData with a recognisable colour pattern and
+// asks the shim to write only the 2×2 bottom-right sub-rect at
+// (dx=10, dy=20). The recorded write_pixels command must have:
+//   * width  == 2 (sliced to dirtyW)
+//   * height == 2 (sliced to dirtyH)
+//   * dx     == 10 + 2 == 12 (dx + dirtyX)
+//   * dy     == 20 + 2 == 22 (dy + dirtyY)
+//   * 16 RGBA bytes carrying the bottom-right 2×2 colours.
+TEST_CASE("WidgetBridge canvasPutImageData 7-arg sub-rect slices on the JS side",
+          "[view][bridge][canvas][issue-916][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // 4x4 RGBA: every pixel is colour-coded so the slice can be verified
+    // unambiguously. Colour scheme: R = column*64, G = row*64, B = 128.
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'put-rect-canvas';
+        c.width = 32; c.height = 32;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var bytes = new Uint8ClampedArray(4*4*4);
+        for (var row = 0; row < 4; ++row) {
+            for (var col = 0; col < 4; ++col) {
+                var off = (row * 4 + col) * 4;
+                bytes[off+0] = col * 64;   // R
+                bytes[off+1] = row * 64;   // G
+                bytes[off+2] = 128;        // B
+                bytes[off+3] = 255;        // A
+            }
+        }
+        var img = { width: 4, height: 4, data: bytes };
+        // 7-arg form: only the (sx=2, sy=2, sw=2, sh=2) sub-rect goes
+        // to (dx + sx, dy + sy) = (10 + 2, 20 + 2) = (12, 22).
+        ctx.putImageData(img, 10, 20, 2, 2, 2, 2);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "put-rect-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int writeIndex = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::write_pixels) {
+            writeIndex = idx;
+            REQUIRE(static_cast<int>(cmd.f[0]) == 2);  // sliced width
+            REQUIRE(static_cast<int>(cmd.f[1]) == 2);  // sliced height
+            REQUIRE(static_cast<int>(cmd.f[2]) == 12); // dx + dirtyX
+            REQUIRE(static_cast<int>(cmd.f[3]) == 22); // dy + dirtyY
+            REQUIRE(cmd.text.size() == 16);             // 2*2*4 RGBA bytes
+            // First pixel of the slice = source (col=2, row=2) →
+            //   R=128, G=128, B=128, A=255
+            REQUIRE(static_cast<unsigned char>(cmd.text[0]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[1]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[2]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[3]) == 255);
+            // Second pixel of the slice = source (col=3, row=2) →
+            //   R=192, G=128, B=128, A=255
+            REQUIRE(static_cast<unsigned char>(cmd.text[4]) == 192);
+            REQUIRE(static_cast<unsigned char>(cmd.text[5]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[6]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[7]) == 255);
+            // Fourth pixel = source (col=3, row=3) → R=192, G=192, B=128
+            REQUIRE(static_cast<unsigned char>(cmd.text[12]) == 192);
+            REQUIRE(static_cast<unsigned char>(cmd.text[13]) == 192);
+            REQUIRE(static_cast<unsigned char>(cmd.text[14]) == 128);
+            REQUIRE(static_cast<unsigned char>(cmd.text[15]) == 255);
+        }
+        ++idx;
+    }
+    REQUIRE(writeIndex >= 0);
+}
+
+// pulp #1737 — putImageData with an empty dirty rect (e.g. dirtyW <= 0
+// after clamping) is a no-op per HTML5 spec. Pre-fix the JS shim
+// dropped the dirty args entirely, so an empty dirty rect would still
+// blast the whole ImageData onto the canvas. Post-fix the shim
+// recognises the empty case and bails before encoding/sending.
+TEST_CASE("WidgetBridge canvasPutImageData 7-arg empty dirty rect is a no-op",
+          "[view][bridge][canvas][issue-916][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'put-empty-canvas';
+        c.width = 32; c.height = 32;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var img = {
+            width: 4, height: 4,
+            data: new Uint8ClampedArray(4*4*4)
+        };
+        // dirtyW=0 means the dirty rect is empty — must be a no-op.
+        ctx.putImageData(img, 0, 0, 0, 0, 0, 4);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "put-empty-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    bool any_write = false;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::write_pixels) {
+            any_write = true;
+        }
+    }
+    REQUIRE_FALSE(any_write);
+}
+
 TEST_CASE("WidgetBridge canvasGetImageData returns a TextMetrics-like object "
           "with width/height/data even when no surface is rasterized",
           "[view][bridge][canvas][issue-916]") {

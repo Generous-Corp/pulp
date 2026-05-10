@@ -7600,16 +7600,17 @@
       "issue": ""
     },
     "canvas2d/putImageData": {
-      "status": "partial",
-      "mapsTo": "ctx.putImageData(imgdata, dx, dy) -> base64-encodes and calls canvasPutImageData.",
+      "status": "supported",
+      "mapsTo": "ctx.putImageData(imgdata, dx, dy [, dirtyX, dirtyY, dirtyW, dirtyH]) -> base64-encodes and calls canvasPutImageData. pulp #1737 — 7-arg sub-rect form is now plumbed: the JS shim slices the (dirtyX, dirtyY, dirtyW, dirtyH) sub-rect from imageData.data row-by-row, clamps the rect to source bounds (per HTML5 spec), short-circuits to no-op on empty rect, and calls the same canvasPutImageData bridge fn with the sliced buffer + smaller dimensions + adjusted dst (dx + dirtyX, dy + dirtyY).",
       "supportedValues": [
-        "putImageData(img, dx, dy)"
+        "putImageData(img, dx, dy)",
+        "putImageData(img, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) — sub-rect form"
       ],
-      "unsupportedValues": [
-        "putImageData(img, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) — sub-rect form treated as no-rect"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1737]"
       ],
-      "tests": [],
-      "notes": "issue-916. File a follow-up if sub-rect updates become a hot path. Wave 1 paperwork — sub-rect form deferred (issue-916); file follow-up if it becomes a hot path.",
+      "notes": "pulp #1737 — sub-rect form sliced in JS shim (no bridge contract change). Empty dirty rect is a no-op per HTML5 spec; negative dirtyW/dirtyH are normalised; out-of-bounds dirty rect is clamped to source bounds.",
       "issue": ""
     },
     "canvas2d/createLinearGradient": {

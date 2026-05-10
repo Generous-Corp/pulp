@@ -1460,17 +1460,76 @@ CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
     return { data: buf, width: width, height: height };
 };
 
-// putImageData(imageData, dx, dy) — encodes the Uint8ClampedArray as
-// base64 and hands it to the bridge for rasterization on the next
-// paint. Source-rect form (putImageData(img, dx, dy, dirtyX, dirtyY,
-// dirtyW, dirtyH)) is treated as the no-rect form for now — file a
-// follow-up if sub-rect updates become a hot path.
-CanvasRenderingContext2D.prototype.putImageData = function(imageData, dx, dy) {
+// putImageData(imageData, dx, dy)
+//   or putImageData(imageData, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH)
+//
+// Encodes the Uint8ClampedArray as base64 and hands it to the bridge for
+// rasterization on the next paint.
+//
+// pulp #1737 — 7-arg sub-rect form: only the (dirtyX, dirtyY, dirtyW,
+// dirtyH) sub-rectangle of the source ImageData is written, at
+// destination (dx + dirtyX, dy + dirtyY). Per HTML5 spec the dirty rect
+// is clamped to the ImageData bounds; if it ends up empty the call is
+// a no-op. We slice the source pixels row-by-row in JS so the bridge
+// contract stays the no-rect form (smaller buffer + adjusted dst+
+// dimensions), which avoids passing a sub-rect across the bridge or
+// rewriting the C++ paint path.
+CanvasRenderingContext2D.prototype.putImageData = function(imageData, dx, dy,
+                                                            dirtyX, dirtyY,
+                                                            dirtyW, dirtyH) {
     if (!imageData || typeof canvasPutImageData !== "function") return;
-    var data = imageData.data || [];
-    var width  = imageData.width  | 0;
-    var height = imageData.height | 0;
-    if (width <= 0 || height <= 0) return;
+    var srcData = imageData.data || [];
+    var srcW = imageData.width  | 0;
+    var srcH = imageData.height | 0;
+    if (srcW <= 0 || srcH <= 0) return;
+
+    // Resolve dirty-rect args. The 3-arg form means "whole ImageData".
+    var has_dirty = arguments.length >= 7;
+    var sx, sy, sw, sh;
+    if (has_dirty) {
+        sx = dirtyX | 0;
+        sy = dirtyY | 0;
+        sw = dirtyW | 0;
+        sh = dirtyH | 0;
+        // HTML5 spec: negative width/height inverts the rect. Normalize.
+        if (sw < 0) { sx += sw; sw = -sw; }
+        if (sh < 0) { sy += sh; sh = -sh; }
+        // Clamp to source bounds.
+        if (sx < 0) { sw += sx; sx = 0; }
+        if (sy < 0) { sh += sy; sy = 0; }
+        if (sx + sw > srcW) sw = srcW - sx;
+        if (sy + sh > srcH) sh = srcH - sy;
+        if (sw <= 0 || sh <= 0) return; // empty dirty rect — no-op
+    } else {
+        sx = 0; sy = 0; sw = srcW; sh = srcH;
+    }
+
+    // Source-rect slice: copy `sw * sh` RGBA pixels starting at (sx, sy).
+    // For the no-rect path we keep the original flat array to avoid the
+    // copy cost on the hot path.
+    var data, width, height;
+    if (has_dirty) {
+        var sliced_n = sw * sh * 4;
+        data = new Array(sliced_n);
+        var di = 0;
+        for (var row = 0; row < sh; ++row) {
+            var srcRowStart = ((sy + row) * srcW + sx) * 4;
+            for (var col = 0; col < sw * 4; ++col) {
+                data[di++] = srcData[srcRowStart + col] | 0;
+            }
+        }
+        width = sw;
+        height = sh;
+    } else {
+        data = srcData;
+        width = srcW;
+        height = srcH;
+    }
+
+    // Destination top-left for the 7-arg form is (dx + sx, dy + sy).
+    var dstX = (dx | 0) + (has_dirty ? sx : 0);
+    var dstY = (dy | 0) + (has_dirty ? sy : 0);
+
     var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     var n = width * height * 4;
     var out = "";
@@ -1484,7 +1543,7 @@ CanvasRenderingContext2D.prototype.putImageData = function(imageData, dx, dy) {
         out += (i+1 < n) ? alphabet.charAt((nbits >> 6) & 0x3F) : "=";
         out += (i+2 < n) ? alphabet.charAt(nbits & 0x3F) : "=";
     }
-    canvasPutImageData(this._id, out, width, height, dx | 0, dy | 0);
+    canvasPutImageData(this._id, out, width, height, dstX, dstY);
 };
 
 function __ensurePulpGpuHelpers() {
