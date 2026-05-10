@@ -117,6 +117,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - feat(view/css+rn): transform function fan-out — scaleX/Y, skewX/Y, rotateX/Y/Z, matrix3d (refs pulp #1434, Triage #9) ([#1487](https://github.com/danielraffel/pulp/pull/1487))
 
 <a id="v0782"></a>
+## [0.79.0]
+
 ## [0.78.2] - 2026-05-06
 
 - feat(import-ir): Phase 1 spike — IR types + Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1) ([#1499](https://github.com/danielraffel/pulp/pull/1499))

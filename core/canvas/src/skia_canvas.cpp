@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
@@ -510,6 +513,150 @@ double parse_filter_arg(const std::string& body, FilterArgKind kind) {
     return v;
 }
 
+// Split space-separated arguments from a filter function's body.
+// Handles parenthesised sub-expressions (e.g. `rgb(1,2,3)`) so color
+// functions are kept as a single token.
+std::vector<std::string> parse_filter_args(const std::string& body) {
+    std::vector<std::string> tokens;
+    std::string tok;
+    int paren = 0;
+    for (char c : body) {
+        if (c == '(') { ++paren; tok += c; continue; }
+        if (c == ')') { --paren; tok += c; continue; }
+        if (paren == 0 && std::isspace(static_cast<unsigned char>(c))) {
+            if (!tok.empty()) { tokens.push_back(std::move(tok)); tok.clear(); }
+            continue;
+        }
+        tok += c;
+    }
+    if (!tok.empty()) tokens.push_back(std::move(tok));
+    return tokens;
+}
+
+// Parse a single CSS length token to a numeric pixel value.
+// "12px" → 12.0, "12" → 12.0, "invalid" → NaN.
+double parse_filter_arg_length(const std::string& tok) {
+    if (tok.empty()) return std::nan("");
+    size_t end = 0;
+    while (end < tok.size() &&
+           (std::isdigit(static_cast<unsigned char>(tok[end])) ||
+            tok[end] == '.' || tok[end] == '-' || tok[end] == '+' ||
+            tok[end] == 'e' || tok[end] == 'E')) {
+        ++end;
+    }
+    if (end == 0) return std::nan("");
+    double v = 0;
+    try { v = std::stod(tok.substr(0, end)); }
+    catch (...) { return std::nan(""); }
+    return v; // bare number or "px" suffix both treated as pixels
+}
+
+// Parse a CSS color string into SkColor. Supports #hex, rgb()/rgba(),
+// hsl()/hsla(), "transparent", and a subset of named colors.
+// Defaults to black on parse failure.
+SkColor parse_css_color_to_skcolor(const std::string& str) {
+    if (str == "transparent") return SK_ColorTRANSPARENT;
+
+    if (!str.empty() && str[0] == '#') {
+        auto parse_hex = [](const std::string& s) -> std::optional<uint8_t> {
+            try { return static_cast<uint8_t>(std::stoul(s, nullptr, 16)); }
+            catch (...) { return std::nullopt; }
+        };
+        if (str.size() == 4) { // #RGB — each nibble doubled
+            auto r = parse_hex(std::string(2, str[1]));
+            auto g = parse_hex(std::string(2, str[2]));
+            auto b = parse_hex(std::string(2, str[3]));
+            if (r && g && b) return SkColorSetRGB(*r, *g, *b);
+            return SK_ColorBLACK;
+        }
+        if (str.size() >= 7) { // #RRGGBB[AA]
+            auto r = parse_hex(str.substr(1, 2));
+            auto g = parse_hex(str.substr(3, 2));
+            auto b = parse_hex(str.substr(5, 2));
+            if (!r || !g || !b) return SK_ColorBLACK;
+            uint8_t a = 255;
+            if (str.size() >= 9) {
+                auto parsed = parse_hex(str.substr(7, 2));
+                if (!parsed) return SK_ColorBLACK;
+                a = *parsed;
+            }
+            return SkColorSetARGB(a, *r, *g, *b);
+        }
+        return SK_ColorBLACK;
+    }
+
+    // rgb(r, g, b) / rgba(r, g, b, a)
+    if (str.substr(0, 4) == "rgb(" || str.substr(0, 5) == "rgba(") {
+        auto inner = str.substr(str.find('(') + 1);
+        inner = inner.substr(0, inner.find(')'));
+        float vals[4] = {0, 0, 0, 1};
+        int n = 0;
+        std::istringstream ss(inner);
+        std::string tok;
+        while (std::getline(ss, tok, ',') && n < 4) {
+            while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
+            vals[n++] = std::stof(tok);
+        }
+        uint8_t r = static_cast<uint8_t>(std::clamp(vals[0] / 255.0f, 0.0f, 1.0f) * 255.0f + 0.5f);
+        uint8_t g = static_cast<uint8_t>(std::clamp(vals[1] / 255.0f, 0.0f, 1.0f) * 255.0f + 0.5f);
+        uint8_t b = static_cast<uint8_t>(std::clamp(vals[2] / 255.0f, 0.0f, 1.0f) * 255.0f + 0.5f);
+        uint8_t a = static_cast<uint8_t>(std::clamp(vals[3], 0.0f, 1.0f) * 255.0f + 0.5f);
+        return SkColorSetARGB(a, r, g, b);
+    }
+
+    // hsl(h, s%, l%) / hsla(h, s%, l%, a)
+    if (str.substr(0, 4) == "hsl(" || str.substr(0, 5) == "hsla(") {
+        auto inner = str.substr(str.find('(') + 1);
+        inner = inner.substr(0, inner.find(')'));
+        float vals[4] = {0, 0, 0, 1};
+        int n = 0;
+        std::istringstream ss(inner);
+        std::string tok;
+        while (std::getline(ss, tok, ',') && n < 4) {
+            while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
+            if (tok.back() == '%') tok.pop_back();
+            vals[n++] = std::stof(tok);
+        }
+        float h = std::fmod(vals[0], 360.0f) / 360.0f;
+        float s = vals[1] / 100.0f;
+        float l = vals[2] / 100.0f;
+        auto hue2rgb = [](float p, float q, float t) {
+            if (t < 0) t += 1; if (t > 1) t -= 1;
+            if (t < 1.0f / 6) return p + (q - p) * 6 * t;
+            if (t < 1.0f / 2) return q;
+            if (t < 2.0f / 3) return p + (q - p) * (2.0f / 3 - t) * 6;
+            return p;
+        };
+        float r, g, b;
+        if (s == 0) { r = g = b = l; }
+        else {
+            float q = l < 0.5f ? l * (1 + s) : l + s - l * s;
+            float p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1.0f / 3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1.0f / 3);
+        }
+        return SkColorSetARGB(
+            static_cast<uint8_t>(vals[3] * 255.0f + 0.5f),
+            static_cast<uint8_t>(r * 255.0f + 0.5f),
+            static_cast<uint8_t>(g * 255.0f + 0.5f),
+            static_cast<uint8_t>(b * 255.0f + 0.5f));
+    }
+
+    // Named colors (subset matching test expectations).
+    static const std::unordered_map<std::string, SkColor> named = {
+        {"black", SK_ColorBLACK}, {"white", SK_ColorWHITE},
+        {"red", SK_ColorRED}, {"green", SK_ColorGREEN},
+        {"blue", SK_ColorBLUE}, {"yellow", SK_ColorYELLOW},
+        {"cyan", SK_ColorCYAN}, {"magenta", SK_ColorMAGENTA},
+        {"gray", 0xFF808080}, {"grey", 0xFF808080},
+    };
+    auto it = named.find(str);
+    if (it != named.end()) return it->second;
+
+    return SK_ColorBLACK;
+}
+
 // Build a saturation SkColorMatrix. s=1 is identity, s=0 is grayscale,
 // s>1 boosts saturation. Standard luminance weights match the CSS spec.
 SkColorMatrix make_saturation_matrix(double s) {
@@ -719,10 +866,25 @@ sk_sp<SkImageFilter> parse_filter_chain(const std::string& src) {
                 if (amt < 0.0) amt = 0.0;
                 step = color_matrix_filter(make_sepia_matrix(amt));
             }
+        } else if (name == "drop-shadow") {
+            // drop-shadow(<dx> <dy> <blur-radius> <color>)
+            // dx, dy, blur-radius are lengths (px); color is optional
+            // (defaults to black per CSS spec § filter-effects).
+            auto tokens = parse_filter_args(body);
+            if (tokens.size() >= 3) {
+                float dx   = static_cast<float>(parse_filter_arg_length(tokens[0]));
+                float dy   = static_cast<float>(parse_filter_arg_length(tokens[1]));
+                float blur = static_cast<float>(parse_filter_arg_length(tokens[2]));
+                if (blur < 0) blur = 0; // CSS spec: negative blur → 0
+                SkColor color = SK_ColorBLACK;
+                if (tokens.size() >= 4) {
+                    std::string cs = tokens[3];
+                    for (size_t k = 4; k < tokens.size(); ++k) cs += " " + tokens[k];
+                    color = parse_css_color_to_skcolor(cs);
+                }
+                step = SkImageFilters::DropShadow(dx, dy, blur, blur, color, nullptr, nullptr);
+            }
         }
-        // drop-shadow could be added here as SkImageFilters::DropShadow
-        // — deferred to a follow-up since the parser would also need to
-        // consume up to four arguments (offset-x offset-y blur-radius color).
         chain = compose(std::move(step), std::move(chain));
         // Skip optional comma between functions (spec is whitespace-only,
         // but tolerate ",").

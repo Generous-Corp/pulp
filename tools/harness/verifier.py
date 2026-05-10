@@ -142,6 +142,72 @@ def collect_entries(compat: dict, surface: str) -> list[CatalogEntry]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Evidence check (#1657 control #1) — requires runtime tests for supported claims
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _get_grace_until(compat: dict) -> Optional[str]:
+    audit = compat.get("_audit") or {}
+    return audit.get("_evidence_grace_until")  # e.g. "2026-05-22"
+
+
+def _grace_active(grace_until: Optional[str]) -> bool:
+    if not grace_until:
+        return False
+    from datetime import date
+
+    try:
+        deadline = date.fromisoformat(grace_until)
+        return date.today() <= deadline
+    except (ValueError, TypeError):
+        return False
+
+
+def check_evidence(repo_root: Path, results: list[Result], compat: dict) -> list[Result]:
+    """Post-process PASS results: demote to SUPPORTED_NO_EVIDENCE when the
+    catalog entry claims ``supported`` but has no ``tests`` paths that exist in
+    the repo. During a grace period the result stays PASS with a warning;
+    after the grace period it becomes SUPPORTED_NO_EVIDENCE.
+    """
+    grace_until = _get_grace_until(compat)
+    in_grace = _grace_active(grace_until)
+    updated: list[Result] = []
+    for r in results:
+        if r.status is not Status.PASS:
+            updated.append(r)
+            continue
+        if r.entry.status != "supported":
+            updated.append(r)
+            continue
+        # Check for evidence: at least one test path that exists.
+        valid_tests = [
+            t for t in r.entry.tests
+            if (repo_root / t.split("[")[0].strip()).exists()
+        ]
+        if valid_tests:
+            updated.append(r)
+            continue
+        # No evidence.
+        if in_grace:
+            logger.warning(
+                "evidence: `%s` claims supported but has no tests — "
+                "grace period until %s, will fail after",
+                r.entry.name,
+                grace_until,
+            )
+            updated.append(r)
+        else:
+            updated.append(
+                Result(
+                    entry=r.entry,
+                    status=Status.SUPPORTED_NO_EVIDENCE,
+                    detail="catalog claims supported but evidence.tests is empty",
+                )
+            )
+    return updated
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Run
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -152,15 +218,20 @@ def run_surface(repo_root: Path, surface: str) -> list[Result]:
     compat = load_compat(repo_root)
     entries = collect_entries(compat, surface)
     adapter = ADAPTERS[surface](repo_root)
-    return [adapter.run(e) for e in entries]
+    results = [adapter.run(e) for e in entries]
+    return check_evidence(repo_root, results, compat)
 
 
 def run_all(repo_root: Path) -> dict[str, list[Result]]:
     out: dict[str, list[Result]] = {}
+    compat = load_compat(repo_root)
     for surface in KNOWN_SURFACES:
         if surface not in ADAPTERS:
             continue
-        out[surface] = run_surface(repo_root, surface)
+        entries = collect_entries(compat, surface)
+        adapter = ADAPTERS[surface](repo_root)
+        results = [adapter.run(e) for e in entries]
+        out[surface] = check_evidence(repo_root, results, compat)
     return out
 
 
@@ -207,18 +278,19 @@ def render_markdown(
     )
     lines.append("## Summary")
     lines.append("")
-    lines.append("| Surface | Total | PASS | DIVERGE | NO-OP | NOT-IMPL | OOS | PASS % | Progress % | Drift | Validation route | Visual covered |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Surface | Total | PASS | NO-EV | DIVERGE | NO-OP | NOT-IMPL | OOS | PASS % | Progress % | Drift | Validation route | Visual covered |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for surface, results in results_by_surface.items():
         counts = StatusCounts.from_results([r.status for r in results])
         drifts = sum(1 for r in results if r.drifts)
         visual = visual_counts.get(surface, {"label": "0/0"})
         validation = validation_counts.get(surface, {"label": "0/0"})
         lines.append(
-            "| `{}/` | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {} | {} |".format(
+            "| `{}/` | {} | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {} | {} |".format(
                 surface,
                 counts.total,
                 counts.pass_,
+                counts.supported_no_evidence,
                 counts.diverge,
                 counts.no_op,
                 counts.not_impl,
@@ -242,9 +314,10 @@ def render_markdown(
         validation_pass = sum(int(v.get("pass", 0)) for v in validation_counts.values())
         validation_total = sum(int(v.get("total", 0)) for v in validation_counts.values())
         lines.append(
-            "| **TOTAL** | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {}/{} | {}/{} |".format(
+            "| **TOTAL** | {} | {} | {} | {} | {} | {} | {} | {:.1f}% | {:.1f}% | {} | {}/{} | {}/{} |".format(
                 total_counts.total,
                 total_counts.pass_,
+                total_counts.supported_no_evidence,
                 total_counts.diverge,
                 total_counts.no_op,
                 total_counts.not_impl,
@@ -319,6 +392,7 @@ def render_json(
         out_surfaces[surface] = {
             "total": counts.total,
             "pass": counts.pass_,
+            "supported_no_evidence": counts.supported_no_evidence,
             "diverge": counts.diverge,
             "no_op": counts.no_op,
             "not_impl": counts.not_impl,
@@ -355,6 +429,7 @@ def render_json(
         "totals": {
             "total": total_counts.total,
             "pass": total_counts.pass_,
+            "supported_no_evidence": total_counts.supported_no_evidence,
             "diverge": total_counts.diverge,
             "no_op": total_counts.no_op,
             "not_impl": total_counts.not_impl,
@@ -513,7 +588,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     print(f"# pulp harness coverage @ {sha}")
     print(f"")
-    print(f"{'surface':<10} {'total':>6} {'PASS':>6} {'DIVERGE':>8} {'NO-OP':>6} "
+    print(f"{'surface':<10} {'total':>6} {'PASS':>6} {'NO-EV':>6} {'DIVERGE':>8} {'NO-OP':>6} "
           f"{'NOT-IMPL':>9} {'OOS':>5} {'PASS%':>7} {'drift':>6} {'valid':>8} {'visual':>8}")
     for surface, results in results_by_surface.items():
         c = StatusCounts.from_results([r.status for r in results])
@@ -521,7 +596,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         visual = visual_counts.get(surface, {"label": "0/0"})
         validation = validation_counts.get(surface, {"label": "0/0"})
         print(
-            f"{surface:<10} {c.total:>6} {c.pass_:>6} {c.diverge:>8} "
+            f"{surface:<10} {c.total:>6} {c.pass_:>6} {c.supported_no_evidence:>6} {c.diverge:>8} "
             f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% "
             f"{drifts:>6} {validation['label']:>8} {visual['label']:>8}"
         )
@@ -538,7 +613,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         validation_pass = sum(int(v.get("pass", 0)) for v in validation_counts.values())
         validation_total = sum(int(v.get("total", 0)) for v in validation_counts.values())
         print(
-            f"{'TOTAL':<10} {c.total:>6} {c.pass_:>6} {c.diverge:>8} "
+            f"{'TOTAL':<10} {c.total:>6} {c.pass_:>6} {c.supported_no_evidence:>6} {c.diverge:>8} "
             f"{c.no_op:>6} {c.not_impl:>9} {c.oos:>5} {c.pass_pct:>6.1f}% "
             f"{all_drifts:>6} {f'{validation_pass}/{validation_total}':>8} "
             f"{f'{visual_pass}/{visual_total}':>8}"

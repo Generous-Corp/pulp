@@ -137,6 +137,45 @@ fi
 # configure+build cost on doc-only or workflow-only PRs that CI's coverage
 # workflow itself bypasses for the gate.
 diff_cover_failed=0
+
+# Compat status-flip gate (#1657 control #2) — when a compat.json entry
+# flips from partial to supported, require that the same diff also
+# modified/added at least one test file.
+compat_flip_failed=0
+check_compat_status_flips() {
+    local base="$1"
+    local compat_file="compat.json"
+    shift
+
+    if ! git diff --name-only "$base...HEAD" 2>/dev/null | grep -q "^$compat_file$"; then
+        return 0
+    fi
+
+    local test_changed=0
+    if git diff --name-only "$base...HEAD" 2>/dev/null | grep -qE '^(test/|tools/harness/tests/)'; then
+        test_changed=1
+    fi
+
+    # Check for partial→supported flips in compat.json using a simple heuristic.
+    # If the diff removes any line containing "partial" and adds any line
+    # containing "supported", assume a status flip.
+    local flips=0
+    local flips_to=0
+    if git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -qE '^\-.*"partial"'; then
+        flips=1
+    fi
+    if git diff "$base...HEAD" -- "$compat_file" 2>/dev/null | grep -qE '^\+.*"supported"'; then
+        flips_to=1
+    fi
+
+    if [ "$flips" -eq 1 ] && [ "$flips_to" -eq 1 ] && [ "$test_changed" -eq 0 ]; then
+        echo "[pre-push] compat_status_flip: status flips detected (partial→supported) in compat.json" >&2
+        echo "[pre-push]   but no test files changed (test/ or tools/harness/tests/)." >&2
+        echo "[pre-push]   partial→supported flips require new/modified test coverage (pulp #1657)." >&2
+        compat_flip_failed=1
+    fi
+}
+check_compat_status_flips "$BASE"
 DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
 if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
     if changed=$(git diff --name-only "$BASE...HEAD" 2>/dev/null); then
@@ -154,7 +193,7 @@ fi
 # to advisory; `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes the
 # diff-cover gate only.
 
-if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ]; then
+if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
     echo "[pre-push] gates clean." >&2
     exit 0
 fi
@@ -168,19 +207,24 @@ if [ "$diff_cover_failed" = "1" ] && [ "$disable_diff" = "1" ]; then
     diff_cover_failed=0
 fi
 
+if [ "$compat_flip_failed" = "1" ] && [ "$disable_main" = "1" ]; then
+    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — compat status-flip failure DEMOTED to advisory." >&2
+    compat_flip_failed=0
+fi
+
 if [ "$fail" = "1" ] && [ "$disable_main" = "1" ]; then
     echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/deps gate failures DEMOTED to advisory." >&2
     fail=0
 fi
 
-if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ]; then
+if [ "$fail" = "0" ] && [ "$diff_cover_failed" = "0" ] && [ "$compat_flip_failed" = "0" ]; then
     echo "[pre-push] gate failures present but demoted by env override; push allowed. Fix before merging." >&2
     exit 0
 fi
 
 echo "[pre-push] gate failure(s) above; blocking push." >&2
 echo "[pre-push] To bypass (use sparingly; CI still runs the same gates):" >&2
-echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/deps" >&2
+echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/deps/flip" >&2
 echo "[pre-push]   PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push     # demote diff-cover only" >&2
 echo "[pre-push]   PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (emergencies)" >&2
 exit 1

@@ -21,6 +21,7 @@ class Status(str, Enum):
     """
 
     PASS = "PASS"
+    SUPPORTED_NO_EVIDENCE = "SUPPORTED-NO-EVIDENCE"
     DIVERGE = "DIVERGE"
     NO_OP = "NO-OP"
     NOT_IMPL = "NOT-IMPL"
@@ -39,6 +40,7 @@ class Status(str, Enum):
 # Canonical ordering for table rendering.
 STATUS_ORDER = [
     Status.PASS,
+    Status.SUPPORTED_NO_EVIDENCE,
     Status.DIVERGE,
     Status.NO_OP,
     Status.NOT_IMPL,
@@ -51,6 +53,7 @@ class StatusCounts:
     """Aggregated counts across one surface (or the whole run)."""
 
     pass_: int = 0
+    supported_no_evidence: int = 0
     diverge: int = 0
     no_op: int = 0
     not_impl: int = 0
@@ -58,7 +61,8 @@ class StatusCounts:
 
     @property
     def total(self) -> int:
-        return self.pass_ + self.diverge + self.no_op + self.not_impl + self.oos
+        return (self.pass_ + self.supported_no_evidence + self.diverge +
+                self.no_op + self.not_impl + self.oos)
 
     @property
     def pass_pct(self) -> float:
@@ -71,12 +75,13 @@ class StatusCounts:
         """PASS+DIVERGE / total."""
         if self.total == 0:
             return 0.0
-        return 100.0 * (self.pass_ + self.diverge) / self.total
+        return 100.0 * (self.pass_ + self.supported_no_evidence + self.diverge) / self.total
 
     @classmethod
     def from_results(cls, statuses: list[Status]) -> "StatusCounts":
         return cls(
             pass_=sum(1 for s in statuses if s is Status.PASS),
+            supported_no_evidence=sum(1 for s in statuses if s is Status.SUPPORTED_NO_EVIDENCE),
             diverge=sum(1 for s in statuses if s is Status.DIVERGE),
             no_op=sum(1 for s in statuses if s is Status.NO_OP),
             not_impl=sum(1 for s in statuses if s is Status.NOT_IMPL),

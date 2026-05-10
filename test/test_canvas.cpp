@@ -1221,6 +1221,80 @@ TEST_CASE("SkiaCanvas filter chain: opacity ordering changes pixel output "
     REQUIRE(any_channel_differs);
 }
 
+// Regression test: `parse_filter_chain("drop-shadow(dx dy blur color)")`
+// must return non-null and the resulting SkImageFilter must produce a
+// visible offset shadow when rendered through SkiaCanvas::set_filter().
+TEST_CASE("SkiaCanvas set_filter parses drop-shadow and renders shadow",
+          "[canvas][skia][filter-chain][drop-shadow][wave6-canvas2d]") {
+    constexpr int kW = 32;
+    constexpr int kH = 32;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    REQUIRE(sk_canvas != nullptr);
+    sk_canvas->clear(SK_ColorWHITE);
+
+    SkiaCanvas canvas(sk_canvas);
+    canvas.set_filter("drop-shadow(4px 4px 0px black)");
+
+    SkPaint paint;
+    canvas.apply_filter(paint);
+    REQUIRE(paint.getImageFilter() != nullptr);
+
+    // Render a 16x16 filled rect at (8,8). The drop-shadow should
+    // produce a black pixel at the shadow offset position (8+16+4, 8+16+4)
+    // = (28,28) that is NOT fully white.
+    sk_canvas->saveLayer(nullptr, &paint);
+    SkPaint rect_paint;
+    rect_paint.setColor(SK_ColorRED);
+    rect_paint.setAntiAlias(false);
+    sk_canvas->drawRect(SkRect::MakeXYWH(8, 8, 16, 16), rect_paint);
+    sk_canvas->restore();
+
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    SkColor shadow_pixel = pm.getColor(28, 28);
+    // Black drop-shadow on white → at least one channel < 200.
+    bool has_shadow =
+        SkColorGetR(shadow_pixel) < 200 ||
+        SkColorGetG(shadow_pixel) < 200 ||
+        SkColorGetB(shadow_pixel) < 200;
+    REQUIRE(has_shadow);
+}
+
+TEST_CASE("SkiaCanvas set_filter parsers drop-shadow with hex color",
+          "[canvas][skia][filter-chain][drop-shadow][wave6-canvas2d]") {
+    constexpr int kW = 32;
+    constexpr int kH = 32;
+    SkImageInfo info = SkImageInfo::Make(kW, kH, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    REQUIRE(sk_canvas != nullptr);
+    sk_canvas->clear(SK_ColorWHITE);
+
+    SkiaCanvas canvas(sk_canvas);
+    canvas.set_filter("drop-shadow(2px 2px 2px #ff0000)");
+
+    SkPaint paint;
+    canvas.apply_filter(paint);
+    REQUIRE(paint.getImageFilter() != nullptr);
+}
+
+TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
+          "[canvas][skia][filter-chain][wave6-canvas2d]") {
+    SkiaCanvas canvas(nullptr);  // null canvas for this test
+    canvas.set_filter("none");
+    SkPaint paint;
+    canvas.apply_filter(paint);
+    REQUIRE(paint.getImageFilter() == nullptr);
+}
+
 #endif  // PULP_HAS_SKIA
 
 // ── pulp #1434 Phase A2-4 — portable filter-chain matrix math ──────────
