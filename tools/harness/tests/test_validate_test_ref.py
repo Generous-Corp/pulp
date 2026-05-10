@@ -142,19 +142,43 @@ class ValidateTestRefTests(unittest.TestCase):
         self.assertTrue(ok, msg=reason)
 
     # ── Typed prefixes ─────────────────────────────────────────────────
-    def test_unit_prefix_accepted(self) -> None:
-        ok, _ = _validate_test_ref(self.repo, "unit:foo/bar.test")
+    def test_unit_prefix_with_real_path_accepted(self) -> None:
+        # Body looks like a path AND ends in .cpp → existence-checked.
+        ok, _ = _validate_test_ref(self.repo, "unit:test/sample.cpp")
         self.assertTrue(ok)
 
-    def test_semantic_prefix_accepted(self) -> None:
+    def test_unit_prefix_with_missing_path_rejected(self) -> None:
+        """pulp #1737 followup (Codex P2 on #1768): typed refs that
+        look like file paths get existence-checked. Pre-fix any string
+        starting with `unit:` auto-passed."""
+        ok, reason = _validate_test_ref(
+            self.repo, "unit:test/missing.cpp"
+        )
+        self.assertFalse(ok)
+        self.assertIn("does not exist", reason)
+
+    def test_semantic_prefix_fixture_id_accepted(self) -> None:
+        # Body looks like a fixture id (no recognised extension) → accepted.
         ok, _ = _validate_test_ref(self.repo, "semantic:yoga/foo")
         self.assertTrue(ok)
 
-    def test_cannot_validate_prefix_accepted(self) -> None:
+    def test_visual_prefix_with_real_path_accepted(self) -> None:
+        # Path-form body checked, even for visual:.
+        ok, _ = _validate_test_ref(self.repo, "visual:test/sample.cpp")
+        self.assertTrue(ok)
+
+    def test_cannot_validate_prefix_always_accepted(self) -> None:
+        """`cannot-validate:` documents intentional un-verifiability —
+        it never gets checked, even if the body looks like a path."""
         ok, _ = _validate_test_ref(
-            self.repo, "cannot-validate:#999 platform-only"
+            self.repo, "cannot-validate:test/missing.cpp platform-only"
         )
         self.assertTrue(ok)
+        # Still accepted for fixture-id form.
+        ok2, _ = _validate_test_ref(
+            self.repo, "cannot-validate:#999 platform-only"
+        )
+        self.assertTrue(ok2)
 
     # ── File-existence ─────────────────────────────────────────────────
     def test_missing_file_rejected(self) -> None:

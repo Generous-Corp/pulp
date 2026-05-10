@@ -6910,7 +6910,7 @@
         "descendant (a b)",
         "child (a > b)",
         ":hover / :focus / :active / :disabled / :checked / :enabled (state-on-element pseudo-classes — read el._isHovered / _hasFocus / _isActive / _disabled / _checked)",
-        ":first-child / :last-child / :only-child / :empty / :root (DOM-position pseudo-classes)",
+        ":first-child / :last-child / :only-child / :empty (DOM-position pseudo-classes — :root removed pulp #1737 followup; querySelector traversal starts from root._children so :root is unreachable)",
         ":nth-child(N) / :nth-child(2n+1) / :nth-child(odd|even) / :nth-last-child(...) (formula + keyword forms)",
         ":not(<simple>) (functional negation — recursively dispatches to _matchesSelector)"
       ],

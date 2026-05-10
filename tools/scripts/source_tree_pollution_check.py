@@ -35,13 +35,32 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 CLOCK_FIXTURE_SIGNATURE = "project(Clock VERSION 1.0.0"
-PULP_PROJECT_SIGNATURE = "project(Pulp"
+# pulp #1763 (Codex P2 followup) — case-insensitive `project(Pulp`
+# matcher. CMake command names are case-insensitive and allow
+# whitespace before `(`, so `PROJECT(Pulp...)` and `project (Pulp...)`
+# are valid. Substring match was too strict; use a regex.
+PULP_PROJECT_PATTERN = re.compile(r"\bproject\s*\(\s*Pulp\b", re.IGNORECASE)
 TEMP_FIXTURE_PATH_HINTS = ("/private/var/folders/", "pulp-shellout-")
+
+
+# Sentinel returned by _git_diff_files when the diff itself failed.
+# Distinguishes "no changed files" (empty list) from "git diff couldn't
+# run" — the latter must fail closed per Codex P1 finding on #1761.
+class _DiffFailure(Exception):
+    """Raised when `git diff` cannot resolve the requested ref range.
+
+    The previous behaviour was to return an empty list, which made the
+    pollution gate silently bypass itself whenever `--base origin/main`
+    was missing (fresh clones, detached worktrees). The hard-block
+    contract is meaningless if the gate can return success without
+    inspecting any file. Raise + fail explicitly instead.
+    """
 
 
 def _git_diff_files(rev_range: str | None, mode: str) -> list[str]:
@@ -49,13 +68,16 @@ def _git_diff_files(rev_range: str | None, mode: str) -> list[str]:
         cmd = ["git", "diff", "--cached", "--name-only"]
     elif mode == "push":
         if not rev_range:
-            return []
+            raise _DiffFailure("push mode requires a non-empty rev range")
         cmd = ["git", "diff", "--name-only", rev_range]
     else:
         return []
     out = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if out.returncode != 0:
-        return []
+        raise _DiffFailure(
+            f"`git {' '.join(cmd[1:])}` exited {out.returncode}: "
+            f"{(out.stderr or '').strip()[:200]}"
+        )
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 
@@ -118,19 +140,22 @@ def check(files: list[str], rev: str | None) -> tuple[list[str], list[str]]:
                 )
                 continue
             # Positive assertion — first ~10 lines must contain
-            # `project(Pulp`. Catches any non-Pulp CMakeLists.txt at the
-            # root regardless of the specific fixture, including future
-            # examples/foo/CMakeLists.txt accidents.
+            # `project(Pulp` (case-insensitive, whitespace before `(` ok
+            # per Codex P2 followup on #1763). Catches any non-Pulp
+            # CMakeLists.txt at the root regardless of the specific
+            # fixture, including future examples/foo/CMakeLists.txt
+            # accidents.
             head = "\n".join(content.splitlines()[:10])
-            if content.strip() and PULP_PROJECT_SIGNATURE not in head:
+            if content.strip() and not PULP_PROJECT_PATTERN.search(head):
                 errors.append(
-                    f"  {path}: first 10 lines do not contain "
-                    f"`{PULP_PROJECT_SIGNATURE}`. The root CMakeLists.txt "
-                    "must declare `project(Pulp ...)` — anything else is "
-                    "almost certainly an example or fixture file pasted "
-                    "into the wrong place. If you genuinely intended to "
-                    "rename the project, update both this guard and the "
-                    "test in tools/scripts/test_source_tree_pollution_check.py."
+                    f"  {path}: first 10 lines do not contain a "
+                    "`project(Pulp ...)` declaration (case-insensitive, "
+                    "whitespace before `(` allowed). The root "
+                    "CMakeLists.txt must declare `project(Pulp ...)` — "
+                    "anything else is almost certainly an example or "
+                    "fixture file pasted into the wrong place. If you "
+                    "genuinely intended to rename the project, update "
+                    "both this guard and tools/scripts/test_source_tree_pollution_check.py."
                 )
                 continue
         # Warn — paths that look like test-fixture leakage.
@@ -156,18 +181,31 @@ def main(argv: list[str]) -> int:
                         help="for --mode=files, explicit file list")
     args = parser.parse_args(argv)
 
-    if args.mode == "stage":
-        files = _git_diff_files(None, "stage")
-        rev = None
-    elif args.mode == "push":
-        files = _git_diff_files(f"{args.base}...HEAD", "push")
-        rev = "HEAD"
-    elif args.mode == "files":
-        files = args.files
-        rev = None
-    else:
-        sys.stderr.write(f"unknown mode: {args.mode}\n")
-        return 2
+    try:
+        if args.mode == "stage":
+            files = _git_diff_files(None, "stage")
+            rev = None
+        elif args.mode == "push":
+            files = _git_diff_files(f"{args.base}...HEAD", "push")
+            rev = "HEAD"
+        elif args.mode == "files":
+            files = args.files
+            rev = None
+        else:
+            sys.stderr.write(f"unknown mode: {args.mode}\n")
+            return 2
+    except _DiffFailure as e:
+        # Codex P1 finding on #1761 — fail closed when git diff cannot
+        # resolve. The previous behaviour silently bypassed the gate
+        # whenever `--base origin/main` was missing (fresh clones,
+        # detached worktrees), defeating the hard-block contract.
+        sys.stderr.write(
+            "[source-tree-pollution] BLOCKED: git diff could not resolve "
+            "the requested ref range. Pass `--base <ref>` or fix the "
+            "git remote so the diff target exists, then retry.\n"
+            f"  reason: {e}\n"
+        )
+        return 1
 
     errors, warnings = check(files, rev)
 

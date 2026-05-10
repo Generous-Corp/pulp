@@ -577,11 +577,14 @@ function _matchesPseudoClass(el, pseudo) {
         return !!parent && parent._children && parent._children.length === 1
             && parent._children[0] === el;
     }
-    if (lower === "root") {
-        // CSS :root matches the document root — for our shim, treat as
-        // the body element (no html element in the DOM-lite tree).
-        return !el._parentElement;
-    }
+    // pulp #1737 followup (Codex P2 on #1759): `:root` removed from the
+    // supported set. _findMatch starts traversal from root._children, so
+    // even an "el with no parent" check can't reach the body element
+    // (every element in the BFS queue is by construction a descendant
+    // of root). Implementing :root would require either pushing `root`
+    // into the queue or special-casing :root at the document.querySelector
+    // level — out of scope for this shim. The matcher returns false for
+    // :root rather than advertising support that doesn't work end-to-end.
     if (lower === "empty") {
         return !el._children || el._children.length === 0;
     }

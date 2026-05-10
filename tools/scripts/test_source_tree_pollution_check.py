@@ -71,6 +71,41 @@ class SourceTreePollutionTests(unittest.TestCase):
         result = self._run("CMakeLists.txt")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_accepts_uppercase_project_keyword(self) -> None:
+        """pulp #1763 followup (Codex P2) — CMake command names are
+        case-insensitive. PROJECT(Pulp ...) and project (Pulp ...) with
+        whitespace before ( are valid; the original substring check
+        rejected both."""
+        Path("CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "PROJECT(Pulp VERSION 0.81.0 LANGUAGES CXX)\n"
+        )
+        result = self._run("CMakeLists.txt")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_accepts_whitespace_before_project_paren(self) -> None:
+        Path("CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project (Pulp VERSION 0.81.0 LANGUAGES CXX)\n"
+        )
+        result = self._run("CMakeLists.txt")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_fails_closed_on_invalid_git_diff_base(self) -> None:
+        """pulp #1761 followup (Codex P1) — git diff failures must
+        block the push, not silently succeed. Original behaviour
+        returned an empty list when --base couldn't be resolved,
+        defeating the hard-block contract."""
+        # Use --mode=push with a base that doesn't exist in this temp
+        # dir (no git repo here at all → diff fails).
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--mode=push",
+             "--base", "origin/definitely-not-a-real-ref"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("git diff", result.stderr)
+
     def test_blocks_arbitrary_non_pulp_cmakelists(self) -> None:
         """Even a non-Clock CMakeLists.txt is blocked if it doesn't say
         project(Pulp — catches any example or fixture pasted at the root.

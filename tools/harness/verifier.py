@@ -248,9 +248,34 @@ def _validate_test_ref(repo_root: Path, ref: str) -> tuple[bool, str]:
     why the entry is intentionally unverifiable).
     """
     stripped = ref.strip()
-    # Typed prefixes: accept on prefix match.
+    # Typed prefixes — pulp #1737 followup (Codex P2 on #1768): the
+    # part-after-prefix is validated when it looks like a file path
+    # (contains `/`) so typo'd / stale typed refs don't auto-pass.
+    # `cannot-validate:` always passes — it documents intentional
+    # un-verifiability. The other prefixes try a file-existence check;
+    # if the body doesn't look like a path, fall back to accept-on-prefix
+    # (e.g. `semantic:yoga/aspect-ratio` is a fixture id, not a path).
     for prefix in _TYPED_REF_PREFIXES:
         if stripped.startswith(prefix):
+            if prefix == "cannot-validate:":
+                return True, ""
+            body = stripped[len(prefix):].strip()
+            # Heuristic: bodies with a `/` AND a recognised test-source
+            # extension are paths (test/foo.cpp, packages/x/foo.test.ts).
+            # Anything else is a fixture id we can't validate from here.
+            looks_like_path = "/" in body and any(
+                body.endswith(ext) for ext in (
+                    ".cpp", ".hpp", ".h", ".cc", ".mm",
+                    ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx",
+                    ".test.js", ".spec.js",
+                )
+            )
+            if looks_like_path:
+                if not (repo_root / body).exists():
+                    return False, (
+                        f"typed ref `{prefix}{body}` points at `{body}` "
+                        "which does not exist in the repo"
+                    )
             return True, ""
     # Prefer the bracket-tag form when `[` appears before `::`. This
     # avoids tripping on `::` that appears inside free-form description
