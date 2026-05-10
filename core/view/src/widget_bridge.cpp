@@ -6453,6 +6453,11 @@ void WidgetBridge::register_api() {
     // ═══════════════════════════════════════════════════════════════════
 
     // Canvas drawImage(canvasId, imagePath, dx, dy, dw, dh)
+    //   or 9-arg form: canvasDrawImage(id, path, dx,dy,dw,dh, sx,sy,sw,sh)
+    // pulp #1737 — when args[6..9] are present the JS shim is using the
+    // source-rect 9-arg form. Bridge stashes it in x2/y2/x3/y3 + sets
+    // has_source_rect; the canvas_widget renderer routes through the
+    // _rect overload so the source sub-rectangle lands on the dst rect.
     engine_.register_function("canvasDrawImage", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::draw_image;
@@ -6461,6 +6466,16 @@ void WidgetBridge::register_api() {
             cmd.y = (float)args.get<double>(3, 0);
             cmd.w = (float)args.get<double>(4, 0);
             cmd.h = (float)args.get<double>(5, 0);
+            // 9-arg drawImage source rect — JS appends sx,sy,sw,sh
+            // when the caller used the 9-arg form. choc reports
+            // missing args as defaults, so we gate on numArgs >= 10.
+            if (args.numArgs >= 10) {
+                cmd.x2 = (float)args.get<double>(6, 0);
+                cmd.y2 = (float)args.get<double>(7, 0);
+                cmd.x3 = (float)args.get<double>(8, 0);
+                cmd.y3 = (float)args.get<double>(9, 0);
+                cmd.has_source_rect = true;
+            }
             c->add_command(cmd);
         }
         return choc::value::Value();

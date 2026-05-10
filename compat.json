@@ -7574,17 +7574,18 @@
       "issue": ""
     },
     "canvas2d/drawImage": {
-      "status": "partial",
-      "mapsTo": "ctx.drawImage(img, ...) -> canvasDrawImage(id, src, dx, dy, dw, dh). Supports the 3-arg, 5-arg, and 9-arg signatures; the 9-arg source-rect form is currently treated as the destination-only form (sx/sy/sw/sh ignored).",
+      "status": "supported",
+      "mapsTo": "ctx.drawImage(img, ...) -> canvasDrawImage(id, src, dx, dy, dw, dh [, sx, sy, sw, sh]). Supports the 3-arg, 5-arg, and 9-arg signatures. pulp #1737 — 9-arg source-rect form (sprite-sheet slicing) is now plumbed end-to-end: JS shim passes sx/sy/sw/sh as args[6..9]; bridge sets has_source_rect on the CanvasDrawCmd; canvas widget routes through Canvas::draw_image_from_file_rect (Skia: SkCanvas::drawImageRect with src+dst).",
       "supportedValues": [
         "drawImage(img, dx, dy)",
-        "drawImage(img, dx, dy, dw, dh)"
+        "drawImage(img, dx, dy, dw, dh)",
+        "drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) — sprite-sheet slicing"
       ],
-      "unsupportedValues": [
-        "drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) — sprite-sheet slicing not yet wired"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1737]"
       ],
-      "tests": [],
-      "notes": "issue-916. File a follow-up if a Pulp plugin needs sprite-sheet slicing. Wave 1 paperwork — sprite-sheet 9-arg form deferred (issue-916); file follow-up if a Pulp plugin needs sprite-sheet slicing.",
+      "notes": "pulp #1737 — 9-arg source-rect form wired: Canvas + Skia + RecordingCanvas got draw_image_from_*_rect overrides; CanvasDrawCmd gained has_source_rect + uses x2/y2/x3/y3 for sx/sy/sw/sh.",
       "issue": ""
     },
     "canvas2d/getImageData": {

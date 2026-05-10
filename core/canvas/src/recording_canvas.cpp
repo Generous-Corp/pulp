@@ -334,6 +334,32 @@ bool RecordingCanvas::draw_image_from_file(const std::string& path,
     return true;
 }
 
+// pulp #1737 — 9-arg drawImage source-rect form. Dst rect stays in
+// f[0..3] (matches the 5-arg test path); source rect (sx, sy, sw, sh)
+// goes into floats[0..3] so harness tests can assert sprite-sheet
+// slicing was plumbed end-to-end.
+bool RecordingCanvas::draw_image_from_file_rect(const std::string& path,
+                                                 float sx, float sy, float sw, float sh,
+                                                 float dx, float dy, float dw, float dh) {
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = dx; cmd.f[1] = dy; cmd.f[2] = dw; cmd.f[3] = dh;
+    cmd.text = path;
+    cmd.floats = {sx, sy, sw, sh};
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
+bool RecordingCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                                 float sx, float sy, float sw, float sh,
+                                                 float dx, float dy, float dw, float dh) {
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = dx; cmd.f[1] = dy; cmd.f[2] = dw; cmd.f[3] = dh;
+    cmd.text.assign(reinterpret_cast<const char*>(data), size);
+    cmd.floats = {sx, sy, sw, sh};
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
 bool RecordingCanvas::write_pixels(const uint8_t* data, int width, int height,
                                     int dx, int dy) {
     DrawCommand cmd{DrawCommand::Type::write_pixels};

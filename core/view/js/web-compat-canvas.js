@@ -1346,11 +1346,11 @@ CanvasRenderingContext2D.prototype.measureText = function(text) {
 };
 
 // drawImage(img, dx, dy) / drawImage(img, dx, dy, dw, dh) /
-// drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) — only the first two
-// signatures are wired through the bridge today (issue-916). The 9-arg
-// source-rect form is recorded as the destination-only form and the
-// source rect is currently ignored — file a follow-up if a Pulp plugin
-// needs sprite-sheet slicing.
+// drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh).
+// pulp #1737 — 9-arg source-rect form is now wired. The JS shim
+// passes sx,sy,sw,sh as args[6..9] and the bridge routes through
+// Canvas::draw_image_from_*_rect (Skia: SkCanvas::drawImageRect with
+// src+dst rects). Sprite-sheet slicing without re-decoding.
 CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g, h) {
     if (typeof canvasDrawImage !== "function") return;
     // pulp #1434 — flush imageSmoothing state so Skia / CG honour the
@@ -1364,6 +1364,8 @@ CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g
     else if (img && typeof img.src === "string") src = img.src;
     else if (img && typeof img._src === "string") src = img._src;
     var dx, dy, dw, dh;
+    var sx, sy, sw, sh;
+    var has_src_rect = false;
     if (arguments.length <= 3) {
         // drawImage(img, dx, dy) — use intrinsic size if known.
         dx = a; dy = b;
@@ -1374,10 +1376,15 @@ CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g
         dx = a; dy = b; dw = c; dh = d;
     } else {
         // drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
-        // — record dst rect; source-rect slicing not yet wired.
+        sx = a; sy = b; sw = c; sh = d;
         dx = e; dy = f; dw = g; dh = h;
+        has_src_rect = true;
     }
-    canvasDrawImage(this._id, src, dx, dy, dw, dh);
+    if (has_src_rect) {
+        canvasDrawImage(this._id, src, dx, dy, dw, dh, sx, sy, sw, sh);
+    } else {
+        canvasDrawImage(this._id, src, dx, dy, dw, dh);
+    }
 };
 
 // setLineDash([5, 3, 2, ...]) — even-length arrays are taken verbatim;

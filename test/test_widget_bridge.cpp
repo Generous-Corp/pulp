@@ -2853,6 +2853,71 @@ TEST_CASE("WidgetBridge canvasDrawImage records draw_image with src + dst rect",
             REQUIRE_THAT(cmd.f[1], WithinAbs(20.0f, 1e-5f));
             REQUIRE_THAT(cmd.f[2], WithinAbs(64.0f, 1e-5f));
             REQUIRE_THAT(cmd.f[3], WithinAbs(32.0f, 1e-5f));
+            // 5-arg form leaves the floats payload empty — has_source_rect
+            // is false, so the renderer routes through the dst-only path.
+            REQUIRE(cmd.floats.empty());
+        }
+        ++idx;
+    }
+    REQUIRE(drawIndex >= 0);
+}
+
+// pulp #1737 — drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) sprite-sheet
+// slicing form. Pre-fix, the JS shim accepted the 9-arg signature but
+// silently dropped the source rect — only the dst rect made it across
+// the bridge, so a sprite-sheet `drawImage(strip, 32,0,32,32, 0,0,32,32)`
+// drew the entire strip scaled into the 32×32 dst tile. Post-fix, the
+// JS shim passes sx/sy/sw/sh as args[6..9], the bridge plumbs them via
+// a `has_source_rect` flag, and the canvas widget routes through
+// `Canvas::draw_image_from_file_rect` so the source sub-rectangle maps
+// onto the destination rect.
+TEST_CASE("WidgetBridge canvasDrawImage 9-arg form plumbs source rect end-to-end",
+          "[view][bridge][canvas][issue-916][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'sprite-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // 9-arg form: slice the (32, 0)→(64, 32) sub-rect of the
+        // sprite-strip and paint it into (10, 20)→(74, 52).
+        ctx.drawImage({ src: '/sprites/walk.png', width: 256, height: 32 },
+                      32, 0, 32, 32,
+                      10, 20, 64, 32);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "sprite-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int drawIndex = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::draw_image) {
+            drawIndex = idx;
+            REQUIRE(cmd.text == "/sprites/walk.png");
+            // dst rect in f[0..3]
+            REQUIRE_THAT(cmd.f[0], WithinAbs(10.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[1], WithinAbs(20.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[2], WithinAbs(64.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[3], WithinAbs(32.0f, 1e-5f));
+            // src rect in floats[0..3] — proves the 9-arg form routed
+            // through draw_image_from_file_rect, not the dst-only fallback.
+            REQUIRE(cmd.floats.size() == 4);
+            REQUIRE_THAT(cmd.floats[0], WithinAbs(32.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[1], WithinAbs(0.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[2], WithinAbs(32.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[3], WithinAbs(32.0f, 1e-5f));
         }
         ++idx;
     }
