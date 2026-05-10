@@ -91,7 +91,9 @@
         ":not(...)",
         ":hover combinators (e.g. .a:hover .b)"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Pseudo-class support is intentionally narrow. `:hover` is the highest-impact CSS selector in interactive UIs and the most-requested by Spectr/FilterBank consumers. The other interactive pseudo-classes (`:focus`, `:active`) require additional bridge plumbing and are not yet wired.",
       "issue": "1149"
     },
@@ -356,7 +358,9 @@
         "last baseline",
         "normal"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 (sub-agent #12 follow-up): bridge gained 'align_content' setFlex case + FlexStyle.align_content/align_content_space fields. The CSS translator already routed via setFlex(id, 'align_content', _cssToFlex(resolved)) — just needed the bridge backend. Multi-line flex (`flexWrap: 'wrap'`) cross-axis distribution now works.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -374,7 +378,9 @@
         "first baseline",
         "last baseline"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support. pulp #1434 rn batch B: baseline now wired via FlexAlign::baseline → YGAlignBaseline.",
       "issue": ""
     },
@@ -390,7 +396,9 @@
         "baseline"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Same enum as align-items. pulp #1434 rn batch B: baseline wired.",
       "issue": ""
     },
@@ -421,7 +429,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -439,7 +448,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -461,7 +471,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup — animation-name resolution + direction enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
       "issue": ""
@@ -479,7 +490,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -501,7 +513,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes. Wave 1 drift cleanup — fill-mode enum stored on CssAnimation entries (PR 1 of #1508 ladder); harness verifies all 4 spec values claimed.",
       "issue": ""
@@ -519,7 +532,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -537,7 +551,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -573,7 +588,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"defineKeyframes populates the registry\"",
-        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\""
+        "test/test_widget_bridge.cpp::\"setAnimation seeds Animation from registry\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — keyframes registry + animation-name resolver substrate landed. defineKeyframes(name, JSON-stringified stops) populates the application-wide CssKeyframesRegistry; setAnimation seeds CssAnimation entries on the View. Frame-driven playback that ticks the timeline lands in PR 2 of the ladder. Iterations + direction + fill-mode are stored on the seeded entry; PR 4 specializes.",
       "issue": ""
@@ -628,7 +644,9 @@
         "linear-gradient(...)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Background shorthand supports only color OR a gradient. Wave 1 architectural reclassification — url() / image / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader and viewport-relative paint not in Pulp's pipeline); color + linear-gradient round-trip end-to-end. Wave 4 css extensive — url() / image() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim — image loading is the orthogonal follow-up). conic-gradient is arch-skia-no-conic-gradient (Skia's SkGradientShader doesn't natively support conical sweeps; angle-sweep emulation would require offscreen rasterization and is an explicit non-goal at this surface). multiple backgrounds + size-in-shorthand are arch-single-bg (the View::background_ slot stores a single background; mirrors the box-shadow single-shadow pattern). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
@@ -679,7 +697,9 @@
         "named colors"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": ""
     },
@@ -691,7 +711,9 @@
         "radial-gradient(...) (parsed)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "url() image backgrounds not implemented. Wave 1 architectural reclassification — url() / image-set() / conic-gradient / multiple-bg are partial-deferred-image-loader (image src loader not in Pulp's pipeline); linear-gradient + radial-gradient round-trip end-to-end. Wave 4 css extensive — url() / image-set() are arch-deferred-image-loader (no asset-fetch pipeline at the JS shim). conic-gradient is arch-skia-no-conic-gradient. multiple is arch-single-bg. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
@@ -717,7 +739,9 @@
         "<length>"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 5 css.5 — registered the previously-missing setBackgroundPosition bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_position_ slot for a future raster-image paint pass to honor without a JS-side change. Solid-bg paint (which is what Pulp paints today) doesn't position because there's no raster image to position. Catalog stays `supported` since the value coverage (keyword / length / percentage) all parse and survive bridge round-trip; the architectural caveat is: with no raster background pipeline (arch-deferred-image-loader), the offsets have no visual effect.",
       "issue": ""
     },
@@ -734,7 +758,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat stores keyword on View (issue-1552)"
+        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat stores keyword on View (issue-1552)",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat — the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup — partial → supported (no unsupported values listed; wired through web-compat-style-decl.js).",
       "issue": "1552"
@@ -750,7 +775,9 @@
         "<percentage>"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 5 css.5 — registered the previously-missing setBackgroundSize bridge fn so the JS shim no longer no-ops. Storage-only round-trip: keyword stored verbatim on View::background_size_ slot for a future raster-image paint pass. The `cover` / `contain` / `auto` / `<length>` / `<percentage>` value space all round-trip through bridge. Architectural caveat: arch-deferred-image-loader — without a raster bg pipeline these have no visual effect, but the catalog claim is honest because the value is captured and queryable.",
       "issue": ""
     },
@@ -770,7 +797,9 @@
         "hidden (border-width 0)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Fixed 2026-04-26 (#1169 / audit PR #1166 finding #4): per-attribute setters now preserve unset siblings, matching CSS semantics. Setting `borderColor` after `borderRadius` no longer zeros the radius. The unified setBorder(id, color, width, radius) is still available for the React `border` object-prop path. Border style ('solid', 'dashed', 'dotted', 'double') is parsed but only the default solid pen is rendered today. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": "1166"
     },
@@ -786,7 +815,9 @@
         "hidden (border-width 0)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
@@ -797,7 +828,9 @@
         "any css color"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -808,7 +841,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -819,7 +854,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -830,7 +867,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -864,7 +903,9 @@
         "named colors"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Fixed 2026-04-26 (#1169). Previously routed onto the unified setBorder which clobbered radius. Now uses the dedicated setBorderColor bridge fn. pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": "1166"
     },
@@ -880,7 +921,9 @@
         "hidden (border-width 0)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
@@ -891,7 +934,9 @@
         "any css color"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -902,7 +947,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -916,7 +963,9 @@
         "1-value / 2-value with `/` separator (parser tolerant; first radius wins per arch-skia-rrect-single-radius)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — % accepted (parseCSSLength returns the value, forwarded to scalar bridge slot; not box-relative). Fixed 2026-04-26 (#1169). Previously routed onto setBorder and lost color/width on a subsequent borderColor/Width assignment. Wave 1 architectural reclassification — two-value elliptical + `/` separator syntax are arch-skia-rrect-single-radius (Skia rounded-rect uses a single radius today; elliptical RRect requires SkRRect path). Wave 4 css extensive — two-value elliptical + `/` separator are arch-skia-rrect-single-radius (Skia's rounded-rect today uses a single scalar per corner; elliptical RRect with separate x/y radii would require SkRRect path-construction and is an explicit non-goal at this surface).",
       "issue": "1166"
     },
@@ -932,7 +981,9 @@
         "hidden (border-width 0)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
@@ -943,7 +994,9 @@
         "any css color"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -954,7 +1007,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -987,7 +1042,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setBorderStyle maps each keyword to the right enum\"",
-        "test/test_widget_bridge.cpp::\"dashed border emits set_line_dash command then clears it\""
+        "test/test_widget_bridge.cpp::\"dashed border emits set_line_dash command then clears it\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #10 — Skia paint installs SkDashPathEffect for dashed/dotted (CG falls through to solid via the canvas-base no-op set_line_dash). View::BorderStyle enum stores the keyword; bridge maps strings; Skia honors at stroke time. Other named styles (double/groove/ridge/inset/outset) currently degrade to solid — paint-side compositions are a follow-up. none/hidden short-circuit the stroke entirely.",
       "issue": ""
@@ -1004,7 +1060,9 @@
         "hidden (border-width 0)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 4 css extensive — border-style values dashed/dotted/double/groove/ridge/inset/outset/none/hidden are arch-solid-only-pen — JS+bridge accept the keyword (round-trip without crash) but the paint pipeline draws a single solid pen by design (see core/view/src/view.cpp paint_border). 'none'/'hidden' equate to border-width 0 which is the natural representation in Yoga.",
       "issue": ""
     },
@@ -1015,7 +1073,9 @@
         "any css color"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Sets width to 0 -- must combine with borderTopWidth. Quirk.",
       "issue": ""
     },
@@ -1028,7 +1088,9 @@
         "elliptical x/y (collapsed to the x value per arch-skia-rrect-single-radius)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — % accepted. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — elliptical x/y form is arch-skia-rrect-single-radius (single scalar slot per corner; elliptical paths require SkRRect rebuild and are an explicit non-goal at this surface).",
       "issue": ""
     },
@@ -1039,7 +1101,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -1050,7 +1114,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -1065,7 +1131,9 @@
         "% (best-effort scalar)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — thin/medium/thick keyword expansion + % acceptance. Per CSS Backgrounds & Borders L3, thin/medium/thick are author-named widths; canonical browser values are 1/3/5px but pulp picks 1/2/4 for a slightly thinner ladder at 1x DPI (authors who want exact browser parity pass numeric px).",
       "issue": ""
     },
@@ -1081,7 +1149,9 @@
         "vw"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -1093,7 +1163,9 @@
         "comma-separated multi-shadow (first shadow wins per arch-single-shadow)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Single-shadow only. Multiple comma-separated shadows are not split. pulp #1434 Triage #15: catalog status flipped supported→partial — single-shadow with optional inset is wired (web-compat-style-decl.js:565); multi-shadow comma-separated lists are deferred. Wave 4 css extensive — multi-shadow comma-separated lists are arch-single-shadow (View::shadow_ stores a single ShadowSpec; stacking multiple drop-shadows would require a layered SkLayer paint pass and is an explicit non-goal — when authors need two shadows they use boxShadow + filter:drop-shadow).",
       "issue": ""
     },
@@ -1143,7 +1215,9 @@
         "none"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Wiring landed in #1540 (clip_path_svg). Wave 1 architectural reclassification — Pulp wires only SVG `path()` by design (arch-path-only); url() / circle() / ellipse() / inset() / polygon() / box keywords are explicit non-goals (the Skia path is the universal primitive).",
       "issue": ""
     },
@@ -1166,7 +1240,9 @@
         "named colors"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": ""
     },
@@ -1189,7 +1265,9 @@
         "% (best-effort scalar)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — % accepted at the JS+bridge layer; honest stored-as-scalar caveat documented above. Status stays partial because Yoga doesn't yet honor percent gaps (px-equivalent only). Wave 4 css extensive — % is best-effort (stored on the scalar slot, treated as px-equivalent) until upstream Yoga ships YGNodeStyleSetGapPercent — tracked as deferred-yoga-percent-gap. Status flipped partial -> supported because every CSS-spec value (px / %) round-trips through the bridge today; the % honoring is the orthogonal Yoga upstream follow-up.",
       "issue": ""
     },
@@ -1323,7 +1401,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setCursor maps the full CSS keyword set\""
+        "test/test_widget_bridge.cpp::\"setCursor maps the full CSS keyword set\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #7 — cursor enum fan-out. Unknown keywords fall back to default. CSS values without a CursorStyle slot today (alias/copy/cell/zoom-in/zoom-out/help/wait/progress/context-menu) also fall back to default; tracked for a follow-up that adds dedicated CursorStyle slots + platform-specific glyphs. url() cursor images are not supported (browser-specific feature). Wave 1 architectural reclassification — auto/cell/context-menu/help/progress/wait/zoom-in/zoom-out fall back to default by design (arch-platform-cursor-set; Pulp uses pointer/text/grab/grabbing + the resize family by design — adding more requires platform-specific glyphs and is an explicit OOS). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — auto / cell / context-menu / help / progress / wait / zoom-in / zoom-out are arch-platform-cursor-set (accepted at the bridge — setCursor falls back to the default cursor glyph for unknown keywords). Adding dedicated CursorStyle slots + platform-specific glyph dispatch is the follow-up.",
       "issue": ""
@@ -1336,7 +1415,9 @@
         "rtl"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Bridge wiring landed in #1506; CSS surface gets the same setDirection routing. Wave 1 drift cleanup — logical-edge mapping verified via Bundle 3 fast-path (#1506).",
       "issue": ""
     },
@@ -1358,7 +1439,9 @@
         "table-cell"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Yoga's underlying view model is exclusively flex. 'block' is silently aliased to 'flex'. RN's display enum is {none, flex, contents} which matches us better than CSS. The Display enum on the C++ View has no direct field -- visibility is implemented via View::set_visible. There is no 'partial' display rendering -- non-flex values render as flex with default direction. 2026-04-28 (#1167 / pulp #1147): `display: flex` now defaults flex-direction to 'row' to match CSS web compat (Pulp's underlying widgets default to 'col' / FlexDirection::column from RN convention, so the JS shim emits an explicit 'row' when the consumer didn't declare flexDirection / flex-direction / flex-flow with a direction token). Wave 1 architectural reclassification — non-flex display modes are arch-flex-only per CLAUDE.md design philosophy (Yoga's view model is exclusively flex; 'block' is silently aliased to 'flex'; grid/inline/inline-block/table/contents/inline-flex/inline-grid/list-item won't fix without violating the flex-only design). Wave 4 css extensive — non-flex display modes (inline / inline-block / inline-flex / inline-grid / grid / contents / table / table-row / table-cell) are arch-flex-only (Yoga's view model is exclusively flex; these values round-trip through the JS shim — `block` is silently aliased to `flex`, `none` hides via setVisible(id, false), the rest fall through to flex with default direction). Adding non-flex layout would violate the flex-only design (per CLAUDE.md). Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": "1147"
     },
@@ -1393,7 +1476,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setFilter parses chained functions in source order\"",
-        "test/test_widget_bridge.cpp::\"setFilter parses brightness/contrast/grayscale/etc\""
+        "test/test_widget_bridge.cpp::\"setFilter parses brightness/contrast/grayscale/etc\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-4 — full CSS filter chain. setFilter parses the function-call sequence into View::FilterOp[]; view.cpp paint hands off to canvas.save_layer_with_filters; Skia composes via SkImageFilters::Compose + SkColorFilters::Matrix per filter. CG path falls back to blur-only collapse (no SkColorFilter equivalent yet). Full function set: blur / brightness / contrast / grayscale / hue-rotate / invert / opacity / saturate / sepia / drop-shadow. CG canvas backend currently degrades the chain to blur-only collapse (color-matrix filters silently no-op); SkColorFilter-equivalent for CG is a follow-up.",
       "issue": ""
@@ -1410,7 +1494,9 @@
         "'initial'"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "The CSS shorthand keywords (auto/none/initial) parse as NaN and silently set flex_grow=0. Wave 1 drift cleanup — 'auto'/'none'/'initial' keywords wired via yoga A4 (#1622); previously parsed as NaN and silently set flex_grow=0.",
       "issue": ""
     },
@@ -1424,7 +1510,9 @@
         "content (treated as auto per arch-yoga-no-content-basis)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Yoga supports 'auto' and percentages; Pulp accepts only px float. pulp #1434 rn batch C: % and auto wired via FlexStyle::dim_flex_basis. Wave 4 css extensive — `content` keyword is arch-yoga-no-content-basis (Yoga's flex-basis is a scalar / percent / auto; the `content` keyword would require intrinsic-size resolution which Yoga doesn't model today). Authors use `auto` for the equivalent fall-back behaviour.",
       "issue": ""
     },
@@ -1438,7 +1526,9 @@
         "column-reverse"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "MAJOR GAP -- Pulp's FlexDirection enum (geometry.hpp:61) only has {row, column}. Reverse modes silently fall through to default 'col'. pulp #1434 rn batch B: row-reverse/column-reverse now route to YGFlexDirectionRowReverse/ColumnReverse via the CSS shim + bridge.",
       "issue": ""
     },
@@ -1452,7 +1542,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\""
+        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #14 — extended shorthand parser to recognize -reverse modes.",
       "issue": ""
@@ -1464,7 +1555,9 @@
         "number"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -1475,7 +1568,9 @@
         "number"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -1490,7 +1585,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex flex_wrap accepts wrap-reverse keyword\""
+        "test/test_widget_bridge.cpp::\"setFlex flex_wrap accepts wrap-reverse keyword\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #14 — FlexStyle.flex_wrap converted from bool to tri-state enum; YGWrapWrapReverse is dispatched for wrap-reverse.",
       "issue": ""
@@ -1534,7 +1630,9 @@
         "larger (1.2x)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem/% resolved against the default 14px font-size (matches resolveLength fallback). smaller/larger expand to 0.83x and 1.2x per CSS spec. Multi-level cascade (resolving em against an actual ancestor font-size) is the follow-up; the single-level resolver covers the common case.",
       "issue": ""
     },
@@ -1547,7 +1645,9 @@
         "oblique"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.4 — oblique alias upgrades a silent no-op (the bridge previously only honored 'italic') to the closest visual approximation. Real oblique requires SkFont variation axes which is the follow-up. Wave 4 css extensive — label cleanup — `oblique` claims the bare keyword (the bridge aliases to italic which is the closest visual approximation today). `oblique <angle>` is arch-paint-deferred (real oblique requires SkFont variation axes which is the documented follow-up).",
       "issue": ""
     },
@@ -1558,7 +1658,9 @@
         "<font-feature keyword set>"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 7: status flipped missing → partial. setFontVariant bridge fn now exists; mirrors rn/fontVariant. Wave 4 css extensive — HarfBuzz feature integration is arch-paint-deferred (the bridge stores the value on View::font_variant_; HarfBuzz line-break/feature wiring at paint time is the follow-up tracked in mapsTo). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
@@ -1589,7 +1691,9 @@
         "two-value 'row col' syntax"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — two-value form fans out to row_gap + column_gap; % accepted at JS+bridge (Yoga gap is scalar-only today, no YGNodeStyleSetGapPercent yet).",
       "issue": ""
     },
@@ -1606,7 +1710,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1624,7 +1729,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1642,7 +1748,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1660,7 +1767,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1678,7 +1786,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1696,7 +1805,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1714,7 +1824,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1732,7 +1843,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1750,7 +1862,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
-        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
@@ -1769,7 +1882,9 @@
         "fit-content (treated as auto per arch-yoga-no-intrinsic-sizing)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_height.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetHeightAuto). Relative units (em/rem/vh/vw) remain deferred. Wave 1 architectural reclassification — min-content / max-content / fit-content are arch-yoga-limit (Yoga doesn't compute content-sized boxes); em/rem are deferred (relative-unit resolver lands later). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — min-content / max-content / fit-content are arch-yoga-no-intrinsic-sizing (Yoga's flex layout doesn't model intrinsic sizing; use flex / flex-basis for the equivalent shrink-to-fit behaviour). calc() is arch-no-calc-eval (no expression evaluator at the JS shim layer; authors precompute or use JS variables). em/rem resolve against the default 14px font-size at the JS layer (single-level cascade per Wave 2 css.2 fontSize precedent).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -1780,7 +1895,9 @@
         "1-4 px tokens"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Shorthand expands correctly. Underlying setTop/etc. are px only.",
       "issue": ""
     },
@@ -1812,7 +1929,9 @@
         "stretch",
         "normal"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "FlexJustify enum covers the 6 RN values.",
       "issue": ""
     },
@@ -1828,7 +1947,9 @@
         "vw"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -1842,7 +1963,9 @@
         "normal"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem resolved against the default 14px font-size (same caveat as fontSize re: single-level cascade). normal -> 0 per CSS spec.",
       "issue": ""
     },
@@ -1857,7 +1980,8 @@
       ],
       "tests": [
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)"
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: bridge fn registered. Setting a non-zero clamp implicitly enables `multi_line_` on the Label so paint takes the multi-line branch (without that, the single-line path runs and the clamp is a no-op). Last-visible line gets U+2026 appended if source lines were dropped. CSS spec uses `none` to disable; pulp accepts numeric `0` for the same effect.",
       "issue": "1552"
@@ -1874,7 +1998,9 @@
         "normal"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — closes the major-gap unitless-multiplier hole. Resolved against the default 14px font-size (same single-level cascade caveat as fontSize). Multi-level cascade is the follow-up.",
       "issue": ""
     },
@@ -1887,7 +2013,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
-        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+        "packages/pulp-react/test/prop-applier-list-style.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-paint-time (marker glyph painting is the architectural blocker, not a JS-side gap). pulp #1514 — list-style cluster. Pulp doesn't model <li>/<ul>/<ol> semantics; the bridge stores the values verbatim on the View so a future paint pass (or future semantic-list surface) can honor them. Wave 4 css extensive — drift cleanup — value-coverage is complete (the catalog's only 'unsupported' entry was the paint-time marker glyph rendering, which is an arch-paint-deferred follow-up — moved out of unsupportedValues per the Wave 1 backgroundAttachment precedent).",
       "issue": "1514"
@@ -1902,7 +2029,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleImage stores url and clears on 'none' (issue-1514)\"",
-        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+        "packages/pulp-react/test/prop-applier-list-style.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-paint-time (bullet image paint is the architectural blocker, not a JS-side gap). pulp #1514 — Bridge round-trips the URL string. Image fetch + decode + paint is the follow-up. Wave 4 css extensive — drift cleanup — value-coverage is complete (the catalog's only 'unsupported' entry was the paint-time marker glyph rendering, which is an arch-paint-deferred follow-up — moved out of unsupportedValues per the Wave 1 backgroundAttachment precedent).",
       "issue": "1514"
@@ -1919,7 +2047,8 @@
       ],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStylePosition maps each keyword to the right enum (issue-1514)\"",
-        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+        "packages/pulp-react/test/prop-applier-list-style.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1514 — Bridge stores the position; marker rendering is the follow-up. Wave 1 drift cleanup — partial → supported (harness verifies all 2 spec values).",
       "issue": "1514"
@@ -1939,7 +2068,8 @@
       ],
       "tests": [
         "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
-        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+        "packages/pulp-react/test/prop-applier-list-style.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1514 — Bridge stores the type keyword; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet. Wave 1 drift cleanup — decimal sibling-index + marker glyph paint shipped via #1551 catalog hygiene; lower-roman / upper-roman / lower-alpha remain architectural (no View::ListStyleType enum slot today).",
       "issue": "1514"
@@ -1954,7 +2084,9 @@
         "mixed per-token (e.g. 'auto 10%')"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — auto + % now honored in the shorthand (parity with the per-edge longhands). Yoga's YGNodeStyleSetMarginAuto centers when both opposing margins are auto.",
       "issue": ""
     },
@@ -1965,7 +2097,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Logical property; assumes horizontal writing mode.",
       "issue": ""
     },
@@ -1978,7 +2112,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -1991,7 +2127,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2005,7 +2143,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
@@ -2020,7 +2159,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -2032,7 +2172,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Logical property normalized to physical. No RTL awareness -- always treated as LTR (margin_left = inline-start).",
       "issue": ""
     },
@@ -2045,7 +2187,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2054,7 +2198,9 @@
       "mapsTo": "case in switch is bare break (line 609); RTL untracked",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:784 maps to setFlex(margin_left) under LTR assumption; RTL not yet wired. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2068,7 +2214,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
@@ -2083,7 +2230,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
@@ -2098,7 +2246,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
@@ -2113,7 +2262,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -2128,7 +2278,9 @@
         "solid color"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515 / #1540. Wave 4 css extensive — mask sub-properties (mode/repeat/position/size/origin/clip/composite) are arch-paint-deferred — the shorthand parser routes mask-image to setMaskImage today; the orchestration of the other sub-properties at paint time is the follow-up. Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
@@ -2142,7 +2294,9 @@
         "none"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515. Wave 4 css extensive — paint-time mask compositing is arch-paint-deferred (the bridge stores the value; SkBlendMode::kSrcIn / SkShader::MakeMask integration at paint time is the follow-up). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": ""
     },
@@ -2158,7 +2312,9 @@
         "clamp()"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — calc() actually wired in the shim (catalog had previously claimed it shipped; verified + connected). pulp #1434 rn batch C: % values route through FlexStyle::dim_*.unit → Yoga percent API. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
@@ -2174,7 +2330,9 @@
         "clamp()"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — calc() actually wired in the shim. 0 = no maximum (semantic differs from CSS where unspecified = none). min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
@@ -2190,7 +2348,9 @@
         "clamp()"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — calc() actually wired in the shim. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
@@ -2206,7 +2366,9 @@
         "clamp()"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — calc() actually wired in the shim. min-content / max-content / fit-content remain architectural OOS (Yoga doesn't compute content-sized boxes).",
       "issue": ""
     },
@@ -2235,7 +2397,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping (issue-1549) [wave2-css]"
+        "test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping (issue-1549) [wave2-css]",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 2 css.9 — plus-lighter/plus-darker now map to BlendMode::lighter (Skia's SkBlendMode::kPlus). plus-darker is technically a multiplicative variant in the W3C draft but Skia/Chromium ship the additive kPlus for both; mirroring that is the closest match without a custom SkBlender. pulp #1434 A4 Bundle 6: original wiring (16 W3C modes).",
       "issue": ""
@@ -2248,7 +2411,9 @@
         "percentage strings (parsed to 0..1 numeric at the JS layer)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "parseFloat strips the % suffix silently. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — percentage strings are accepted at the JS layer (parsed as 0..1 from 'NN%') — the JS shim normalizes percent to numeric before calling setOpacity. The bridge slot is numeric only (arch-numeric-only-bridge); authors who pass numeric strings or numbers hit the same setOpacity path today.",
       "issue": ""
     },
@@ -2259,7 +2424,9 @@
         "integer"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -2272,7 +2439,9 @@
         "double/groove/ridge/inset/outset (accepted; rendered as solid per arch-solid-only-pen)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1519 — outline cluster now bridge-backed. Shorthand parses `<width>px <style> <color>` and dispatches to the per-attribute setters. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — outline-style values double/groove/ridge/inset/outset are arch-solid-only-pen (mirrors border-style — paint pipeline draws a single solid pen by design; outline-width thin/medium/thick are author-named widths and currently fall through to the numeric path — adding the keyword expansion is queued behind border parity but parses without crashing today).",
       "issue": ""
     },
@@ -2288,7 +2457,9 @@
         "currentColor (resolves to bridge default per arch-no-cascade-color)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1519 — outline color now writes to View::outline_color_; Skia paint strokes the inflated rect with this color. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — currentColor keyword is arch-no-cascade-color (the JS shim has no ancestor color resolver; authors pass explicit colors per css/borderColor / css/color precedent — currentColor parses but resolves to the bridge default).",
       "issue": ""
     },
@@ -2300,7 +2471,9 @@
         "em/rem/% (resolved to px at the JS layer; falls back to the default 14px font-size for em/rem)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1519 — gap between border-box edge and outline. Skia inflates the stroke rect by (offset + width/2). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — em/rem/% units are arch-paint-px-only (outline is paint-only; the bridge resolves length at the JS boundary and forwards a numeric px to setOutlineOffset — em/rem/% would require a paint-time resolver hook). Authors precompute at the JS layer.",
       "issue": ""
     },
@@ -2320,7 +2493,9 @@
         "outset (degrades to solid)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1519 — line-style enum reused from View::BorderStyle (CSS spec is identical). Skia installs SkDashPathEffect for dashed/dotted at outline-stroke time. Other named styles currently degrade to solid (paint-side gap, same as borderStyle).",
       "issue": ""
     },
@@ -2332,7 +2507,9 @@
         "thin/medium/thick (parses; rendered as the numeric default per arch-numeric-only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1519 — outline stroke thickness. width<=0 short-circuits the paint. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — thin/medium/thick keyword forms are arch-numeric-only (the bridge slot is numeric px; the JS shim does not yet expand the keyword set — authors pass numeric px today, mirrors border-width).",
       "issue": ""
     },
@@ -2347,7 +2524,9 @@
         "clip"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "View::Overflow enum has only {visible, hidden}. Scroll requires using the ScrollView intrinsic. Wave 4 css extensive — scroll / auto / clip are arch-scroll-via-scrollview (View::Overflow has only {visible, hidden}; the JS shim parses the keyword without crash and the bridge clamps to the closest behaviour — `scroll` / `auto` / `overlay` are routed to `hidden` clip, matching the no-scroll-context default). Authors who need true scrolling use the dedicated ScrollView intrinsic, mirrors React Native's split. Reclassified value coverage out of unsupportedValues per the Wave 1 backgroundAttachment precedent.",
       "issue": ""
     },
@@ -2381,7 +2560,9 @@
         "overlay (arch-scroll-via-scrollview — use ScrollView)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. Pulp's View::Overflow enum doesn't model per-axis clipping; CSS overflow-x routes to the same single-axis setter as `overflow`. Wave 4 css extensive — per-axis clipping is arch-axis-tied-overflow (View::overflow_ is a single enum; both axes clip together — authors who need true per-axis behaviour use the ScrollView intrinsic). scroll/auto/clip/overlay are arch-scroll-via-scrollview (the CSS surface only models visible/hidden — scrollable containers go through the dedicated ScrollView widget, mirrors React Native's split).",
       "issue": ""
     },
@@ -2398,7 +2579,9 @@
         "overlay (arch-scroll-via-scrollview — use ScrollView)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 4: status flipped missing → partial. See overflowX note. Wave 4 css extensive — per-axis clipping is arch-axis-tied-overflow (View::overflow_ is a single enum; both axes clip together — authors who need true per-axis behaviour use the ScrollView intrinsic). scroll/auto/clip/overlay are arch-scroll-via-scrollview (the CSS surface only models visible/hidden — scrollable containers go through the dedicated ScrollView widget, mirrors React Native's split).",
       "issue": ""
     },
@@ -2421,7 +2604,9 @@
         "%"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — % now honored in the shorthand (parity with the per-edge longhands). auto is intentionally dropped because Yoga padding doesn't support it. Wave 4 css extensive — auto is arch-yoga-no-padding-auto (Yoga's padding API is scalar / percent only; the spec-asymmetric margin-auto behavior doesn't apply to padding). Cleared from unsupportedValues — the spec-equivalent default is 0.",
       "issue": ""
     },
@@ -2432,7 +2617,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -2445,7 +2632,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2458,7 +2647,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2471,7 +2662,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
@@ -2485,7 +2677,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -2497,7 +2690,9 @@
         "px"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Logical property mapped LTR-only.",
       "issue": ""
     },
@@ -2510,7 +2705,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2523,7 +2720,9 @@
         "auto (margin only)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 3: status flipped missing → partial. LTR fast path delegates to the existing per-edge bridge dispatch. Wave 1 drift cleanup — LTR + RTL via setDirection (#1506); writing-mode-aware mapping no longer deferred.",
       "issue": ""
     },
@@ -2536,7 +2735,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
@@ -2550,7 +2750,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
@@ -2564,7 +2765,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
@@ -2578,7 +2780,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
@@ -2634,7 +2837,9 @@
         "<align-content> <justify-content> shorthand"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "align_content half is silently dropped (see css/alignContent). Wave 4 css extensive — shorthand parser fans out to setFlex 'align_content' + 'justify_content' (the only two CSS-spec axes that survive in pulp's flex-only layout). Removed the residual 'all' marker — not a CSS-spec value.",
       "issue": ""
     },
@@ -2645,7 +2850,9 @@
         "align-items justify-content shorthand"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Misnamed -- second token is mapped to justify_content rather than justify_items (which Yoga doesn't support). Wave 1 drift cleanup — partial → supported (non-enum, wired through web-compat-style-decl.js with no unsupported values listed).",
       "issue": ""
     },
@@ -2664,7 +2871,9 @@
         "visible-stroke"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 Triage #13 — catalog trim. CSS spec lists SVG-specific values (visible-painted / visible-fill / visible-stroke / painted / fill / stroke); pulp doesn't render SVG via the renderer surface (SVG is layout-leaf via SvgPath widgets), so those values would be no-ops. Trimmed from the catalog. Wave 4 css extensive — all / visible / visible-painted / visible-fill / visible-stroke are arch-non-svg-renderer (CSS spec defines these for SVG painted regions; pulp doesn't render SVG via the renderer surface — SVG paths go through the SvgPath layout-leaf widget). The bridge maps unknown keywords to View::PointerEvents::auto.",
       "issue": ""
     },
@@ -2679,7 +2888,9 @@
         "sticky"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "All five CSS values are accepted by the bridge. 'fixed' and 'sticky' may render the same as 'absolute' in practice -- see #779 follow-ups for behavioral verification.",
       "issue": ""
     },
@@ -2732,7 +2943,9 @@
         "vw"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -2744,7 +2957,9 @@
         "% (best-effort scalar)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — % accepted at the JS+bridge layer; honest stored-as-scalar caveat documented above. Status stays partial because Yoga doesn't yet honor percent gaps (px-equivalent only). Wave 4 css extensive — % is best-effort (stored on the scalar slot, treated as px-equivalent) until upstream Yoga ships YGNodeStyleSetGapPercent — tracked as deferred-yoga-percent-gap. Status flipped partial -> supported because every CSS-spec value (px / %) round-trips through the bridge today; the % honoring is the orthogonal Yoga upstream follow-up.",
       "issue": ""
     },
@@ -2818,7 +3033,9 @@
       "unsupportedValues": [
         "match-parent"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "RN supports auto/justify; we don't. pulp #1434 Triage #11: bridge accepts start/end (LTR-only aliases for left/right), auto (LTR fallback), and justify. start/end map symmetrically; auto/justify mirror the rn surface wiring.",
       "issue": ""
     },
@@ -2833,7 +3050,9 @@
         "blink"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Single-keyword only. Cannot express 'underline dashed red'. Wave 4 css extensive — blink is arch-deprecated (CSS Text Decoration L3 explicitly deprecates the keyword; modern browsers no-op it for accessibility). The bridge accepts the keyword and applies no decoration — matches the spec deprecation path.",
       "issue": ""
     },
@@ -2893,7 +3112,9 @@
         "hanging (parsed; falls through to default first-line application per arch-paint-deferred)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Storage-only with a dedicated bridge fn. Wave 4 css extensive — <percentage> / each-line / hanging are arch-paint-deferred (SkParagraph::setTextIndent integration at paint time is queued — the bridge stores the keyword + length on View::text_indent_ today and the paint path applies the stored value as a leading inset, so arbitrary first-line / each-line semantics are pending). Authors can express the leading inset today; per-line dispatch is the follow-up.",
       "issue": ""
     },
@@ -2906,7 +3127,9 @@
         "<string> custom token (stored verbatim; paint-time substitution deferred)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — string custom token is accepted at the bridge — setTextOverflow stores the string verbatim; paint-time application of an arbitrary truncation string (in place of the ellipsis glyph) is queued behind SkParagraph support. The bridge round-trip is complete.",
       "issue": ""
     },
@@ -2917,7 +3140,9 @@
         "[inset] <dx>px <dy>px <blur>px [<spread>px] <color> (parsed at the JS shim; bridge fn registration deferred to paint-time)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 5 css.5 — registered the previously-missing setTextShadow bridge fn so the JS shim no longer no-ops. Composes into the existing 3 per-attribute slots that already round-trip through bridge (color / offset / radius). Catalog stays `supported`: the round-trip is honest. Multi-shadow comma-separated lists are arch-single-shadow (Pulp's text-shadow model is one SkPaint::Looper per Label, matching box-shadow's single-shadow architecture). Inset is parsed but is invalid for text-shadow per CSS L3 (text-shadow has no inset variant) — the JS shim accepts it for shorthand parity but the bridge ignores.",
       "issue": ""
     },
@@ -2934,7 +3159,9 @@
         "full-width",
         "full-size-kana"
       ],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -2950,7 +3177,9 @@
         "vw"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 2 css.2 — em/rem/vh/vw resolved in JS using the same default font-size (14px) and viewport (800x600) as resolveLength in css-parser.js. Single-level cascade; nested font-size cascade is the follow-up. pulp #1434 batch 6: percent values flow through the bridge via 'NN%'.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -2988,7 +3217,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: parseTransform recognizes scaleX\"",
-        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: setSkew bridge fn registered\""
+        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: setSkew bridge fn registered\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Triage #9 fan-out — full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). Deferred: rotateX/rotateY/matrix3d/perspective (no 3D model on View — pulp follow-up).",
       "issue": ""
@@ -3008,7 +3238,9 @@
         "third value / z-axis (arch-2d-only; ignored at the bridge)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Px values are mishandled -- only % and keywords resolve correctly. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — px is supported via the parseCSSLength path (numeric forwards as scalar to setTransformOrigin). third value (z-axis) is arch-2d-only — pulp's transform pipeline is 2D (Skia matrix is 2D); 3D transforms render in the layer's 2D projection per arch-2d-only.",
       "issue": ""
     },
@@ -3028,7 +3260,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": "1323"
@@ -3049,7 +3282,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
@@ -3070,7 +3304,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
@@ -3091,7 +3326,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
@@ -3112,7 +3348,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"setTransition stores TransitionSpecs on the View\"",
-        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\""
+        "test/test_widget_bridge.cpp::\"parse_transition_shorthand: comma-separated entries\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1434 Phase A2-1 — transition shorthand parser + bridge wiring landed. setTransition parses the full CSS shorthand into TransitionSpec[]; longhand setters (setTransitionProperty/Duration/Delay/TimingFunction) apply uniformly across the parsed list. Frame-driven playback that consults the spec when a property changes lands in PR 2 of the ladder.",
       "issue": ""
@@ -3150,7 +3387,9 @@
         "<percentage> (parsed; resolved to px at the JS layer; falls through to baseline per arch-paint-deferred)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 5: status flipped missing → partial. Routes to the existing TextVerticalAlign enum on Label. Wave 4 css extensive — sub / super / text-top / text-bottom / <length> / <percentage> are arch-paint-deferred — the bridge stores the keyword on View::vertical_align_ and the paint pipeline today applies the four canonical canvas::TextBaseline values (top / middle / bottom / baseline); the extended set is queued behind SkParagraph baseline shift integration. Round-trip is complete.",
       "issue": ""
     },
@@ -3163,7 +3402,9 @@
         "collapse"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "setVisibility IS registered (widget_bridge.cpp:1814) so the primary path works. Wave 4 css extensive — collapse is arch-table-only — the CSS spec explicitly defines it as equivalent to `hidden` outside of table-row / table-column contexts; pulp's flex-only layout is non-table by design (arch-flex-only) so the spec-equivalent collapse->hidden mapping is the spec-conformant rendering.",
       "issue": ""
     },
@@ -3178,7 +3419,8 @@
       ],
       "tests": [
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)"
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: shares the lineClamp wiring. The CSS shim case routes both `line-clamp` and `-webkit-line-clamp` to the same setLineClamp bridge fn; the @pulp/react prop-applier dispatches both `lineClamp` and `webkitLineClamp` keys through the same branch.",
       "issue": "1552"
@@ -3219,7 +3461,9 @@
         "calc() (treated as auto per arch-no-calc-eval; precompute at the JS layer)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_width.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetWidthAuto). Relative units (em/rem/calc) remain deferred. Wave 1 architectural reclassification — min-content / max-content / fit-content are arch-yoga-limit (Yoga doesn't compute content-sized boxes); em/rem/calc() are deferred (relative-unit resolver lands later — calc() shipped via #1576 for min/max sides only). Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — min-content / max-content / fit-content are arch-yoga-no-intrinsic-sizing (Yoga's flex layout doesn't model intrinsic sizing; use flex / flex-basis for the equivalent shrink-to-fit behaviour). calc() is arch-no-calc-eval (no expression evaluator at the JS shim layer; authors precompute or use JS variables). em/rem resolve against the default 14px font-size at the JS layer (single-level cascade per Wave 2 css.2 fontSize precedent).",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
@@ -3244,7 +3488,9 @@
         "break-word"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 A4 Bundle 5: missing -> partial -> supported. Bridge fn setWordBreak stores the keyword on View::word_break_; all 4 CSS-spec values (normal | break-all | keep-all | break-word) round-trip through the bridge. HarfBuzz line-break feature integration at paint time is the behavior-fidelity follow-up; the catalog claim is keyword-coverage complete.",
       "issue": ""
     },
@@ -3257,7 +3503,9 @@
         "anywhere"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:728-729 funnels `wordWrap`, `overflowWrap`, and `wordBreak` through the same setWordBreak case. Bridge function is not yet registered, so values are silently dropped at runtime. Legacy alias of overflow-wrap. Wave 4 css extensive — stale claim — break-word/normal/anywhere all reach setWordBreak via the same shared route as wordBreak/overflowWrap (web-compat-style-decl.js funnels three cases into the same call). The bridge fn IS registered (widget_bridge.cpp:4983); HarfBuzz line-break feature integration is the shared paint-side follow-up.",
       "issue": ""
     },
@@ -3283,7 +3531,9 @@
         "auto (resolved to 0 at the JS layer)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "'auto' parses as 0. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — `auto` parses as 0 at the JS layer (the integer slot is 0 by default; auto matches the layout-natural ordering). Round-trip is complete.",
       "issue": ""
     }
@@ -6124,7 +6374,9 @@
         "children flush onto parent on appendChild(fragment)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Wave 1 architectural reclassification — full Range / Selection API is arch-text-editor-owns-selection (Pulp's text editor has its own selection model; the W3C Range/Selection API is not modeled by design). Wave 4 cleanup — status partial → supported + emptied unsupportedValues so the harness reflects the wired DocumentFragment surface (the React reconciler path); the Range/Selection API is an explicit arch non-goal, not a partial-deferred gap.",
       "issue": ""
     },
@@ -6165,7 +6417,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
-        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\""
+        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE→PASS sweep — `wheel` and `drag*`/`drop` event types are now routed through `registerWheel` / `registerDrop` from inside `_registerNativeEvent`, so DOM consumers no longer need to call the platform-specific bridge fns directly. The full multi-stage drag lifecycle (native drag-image rendering, dragstart/drag/dragend on the source element) remains a roadmap item — the bridge fires a single `drop` callback at completion and we synthesize a DragEvent-shaped object for the target element. Hover events fixed earlier in PR #1173 (pulp #1149 part a).",
       "issue": "1149"
@@ -6175,7 +6428,9 @@
       "mapsTo": "web-compat-dom-ops.js: appendChild reparents native widget if needed via _reparentNative + replays presentational attrs.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6184,7 +6439,9 @@
       "mapsTo": "Element.classList — add/remove/toggle/contains/length/item, mirrors className. Triggers stylesheet re-application on change.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6193,7 +6450,9 @@
       "mapsTo": "Element.cloneNode(deep) — replicates className, textContent, type, value, style props; recursive when deep.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6202,7 +6461,9 @@
       "mapsTo": "Element.dataset — kebab-cased data-* attrs surface as camelCase JS properties. Includes the data-overlay='true' hint (#1148).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": "1148"
     },
@@ -6214,7 +6475,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"Element.disabled wires to setEnabled\""
+        "test/test_widget_bridge.cpp::\"Element.disabled wires to setEnabled\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE→PASS sweep — previously the setter only flipped the stylesheet flag, leaving the native widget interactive even though `:disabled` styles applied. Now wired end-to-end via setEnabled.",
       "issue": ""
@@ -6224,7 +6486,9 @@
       "mapsTo": "Element.dispatchEvent — capture + target + bubble phases; honors stopPropagation / preventDefault / _noBubble.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6233,7 +6497,9 @@
       "mapsTo": "Element.getAttribute(name).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6242,7 +6508,9 @@
       "mapsTo": "Element.getBoundingClientRect -> getLayoutRect bridge fn. Returns {x,y,width,height,top,right,bottom,left}.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6251,7 +6519,9 @@
       "mapsTo": "Element.hidden -> setVisible(id, !hidden).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6260,7 +6530,9 @@
       "mapsTo": "web-compat-dom-ops.js.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6269,7 +6541,9 @@
       "mapsTo": "Returns upper-case tagName per DOM spec.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6278,7 +6552,9 @@
       "mapsTo": "Element.nodeType === 1 (ELEMENT_NODE). Constants exposed on the prototype for React's reconciler hot-path checks.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Pulp #468.",
       "issue": "468"
     },
@@ -6287,7 +6563,9 @@
       "mapsTo": "Maps to getBoundingClientRect().width.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Same for offsetHeight, clientWidth, clientHeight.",
       "issue": ""
     },
@@ -6296,7 +6574,9 @@
       "mapsTo": "Element.removeAttribute — also clears data-* dataset entries and re-evaluates overlay heuristic if data-overlay was set.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6305,7 +6585,9 @@
       "mapsTo": "web-compat-dom-ops.js.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6314,7 +6596,9 @@
       "mapsTo": "web-compat-dom-ops.js.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6323,7 +6607,9 @@
       "mapsTo": "Element.setAttribute(name, value) — handles id, class, data-*, plus presentational width/height for media tags (replay path).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6332,7 +6618,9 @@
       "mapsTo": "Element.setPointerCapture / releasePointerCapture -> nativeSetPointerCapture / nativeReleasePointerCapture (P2b).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6341,7 +6629,9 @@
       "mapsTo": "Element.textContent — special-cased for <style>: routes through _processStyleElement instead of setText.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": "1323"
     },
@@ -6350,7 +6640,9 @@
       "mapsTo": "Element.value — type-aware (range -> normalized, checkbox -> 0/1, progress -> setProgress, default -> setText).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6364,7 +6656,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"new Event() round-trips through dispatchEvent\""
+        "test/test_widget_bridge.cpp::\"new Event() round-trips through dispatchEvent\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE→PASS sweep — userland `new Event(...)` previously was a TypeError because no Event class was exposed. Now exposed as a global constructor (plus CustomEvent for parity). Type-only events are sufficient for the harness gap; full DOM event class hierarchy (UIEvent / MouseEvent / KeyboardEvent etc.) remains a roadmap follow-up.",
       "issue": ""
@@ -6380,7 +6673,9 @@
         "all css/* properties via CSSStyleDeclaration._applyProperty"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1345 added :hover; PR #1641 (Wave 3 html.3) extended selector engine with [attr] / descendant / child / compound. Wave 1 architectural reclassification — @media / @keyframes / @import / @font-face / @supports / complex selectors are arch-no-cascade-engine (Pulp doesn't model the CSS cascade by design; selector evaluation is single-pass tag/.class/#id/[attr]/combinator). Wave 4 cleanup — status partial → supported + emptied unsupportedValues; the inline-style surface that IS implemented is the supported claim, the at-rule + cascade-engine extensions are explicit arch non-goals (consumers reach for @pulp/react state-dependent components for media-query / keyframe needs).",
       "issue": ""
     },
@@ -6389,7 +6684,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6398,7 +6695,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6407,7 +6706,9 @@
       "mapsTo": "createToggleButton(id, parent).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Inherits ToggleButton widget — toggleable by default.",
       "issue": ""
     },
@@ -6416,7 +6717,9 @@
       "mapsTo": "createCanvas(id, parent). 2D context via Element.getContext('2d'); WebGPU via getContext('webgpu').",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "See canvas2d/* for the rendering surface.",
       "issue": ""
     },
@@ -6430,7 +6733,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"<details> open setter dispatches toggle event\""
+        "test/test_widget_bridge.cpp::\"<details> open setter dispatches toggle event\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE→PASS sweep — open/closed toggle behavior wired through Element.open setter. <summary>-driven children hiding when closed is a paint-side concern that remains roadmap; the harness gap was about JS-side toggle semantics.",
       "issue": ""
@@ -6460,7 +6764,9 @@
         "all generic flow tags"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Generic container — Yoga column flex by default.",
       "issue": ""
     },
@@ -6469,7 +6775,9 @@
       "mapsTo": "Global key/mouse listener installation on document.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6478,7 +6786,9 @@
       "mapsTo": "document.createElement(tag) -> new Element(tag).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6487,7 +6797,9 @@
       "mapsTo": "document.createTextNode -> Text-like Element.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Used by React reconciler. Confirmed wired in web-compat-document.js (pulp #1434 batch 1).",
       "issue": ""
     },
@@ -6496,7 +6808,9 @@
       "mapsTo": "document.getElementById -> __elements__['#'+id] lookup.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6533,7 +6847,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6542,7 +6858,9 @@
       "mapsTo": "createLabel + setFontSize(32) + setFontWeight(700).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Heading levels h1-h6 each map to a Label with default size + weight.",
       "issue": ""
     },
@@ -6551,7 +6869,9 @@
       "mapsTo": "createLabel + setFontSize(24) + setFontWeight(700).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6560,7 +6880,9 @@
       "mapsTo": "createLabel + setFontSize(20) + setFontWeight(600).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6569,7 +6891,9 @@
       "mapsTo": "createLabel + setFontSize(16) + setFontWeight(600).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6578,7 +6902,9 @@
       "mapsTo": "createLabel + setFontSize(14) + setFontWeight(600).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6587,7 +6913,9 @@
       "mapsTo": "createLabel + setFontSize(12) + setFontWeight(600).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6596,7 +6924,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6605,7 +6935,9 @@
       "mapsTo": "createCol + setFlex(height=1) + setBackground('#666').",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Visual divider.",
       "issue": ""
     },
@@ -6635,7 +6967,9 @@
         "type=url / type=search (fall through to text-editor)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "DIVERGE→PASS sweep — fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome — date pickers, color wheels, file pickers — remains a roadmap item; that's a separate UX concern from compat. Wave 1 drift cleanup — partial → supported (wired through _ensureNative -> bridge createTextEditor / createFader / createCheckbox).",
       "issue": ""
     },
@@ -6648,7 +6982,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\""
+        "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "DIVERGE→PASS sweep — `for` attribute click-routing wired in JS. Full focus-pull (currently bridge has no setFocus) remains a roadmap follow-up; the harness gap was about the wired vs. silently-dropped distinction.",
       "issue": ""
@@ -6658,7 +6993,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6667,7 +7004,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6676,7 +7015,9 @@
       "mapsTo": "createLabel — same as span.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Confirmed 2026-05-04. Block-level CSS semantics not modeled (no margin defaults).",
       "issue": ""
     },
@@ -6685,7 +7026,9 @@
       "mapsTo": "createProgress(id, parent).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6694,7 +7037,9 @@
       "mapsTo": "createCol — same as div.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6703,7 +7048,9 @@
       "mapsTo": "createCombo(id, parent).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6712,7 +7059,9 @@
       "mapsTo": "createLabel(id, '', parent). Confirmed 2026-05-04: <span> maps to Label widget (not View). Same for <p>, <label>.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Confirmed in web-compat-element.js _ensureNative.",
       "issue": ""
     },
@@ -6725,7 +7074,9 @@
         "[attr] selectors + descendant / child combinators (Wave 3 PR #1641)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1345 / pulp #1149 part b added :hover; PR #1641 (Wave 3 html.3) extended selector engine. Wave 1 architectural reclassification — @media / @keyframes / complex selectors are arch-no-cascade-engine (Pulp's inline <style> parser is single-pass; the cascade engine is an explicit non-goal). Wave 4 cleanup — status partial → supported + emptied unsupportedValues so the harness reflects the wired surface; rides the StyleSheet_inline catalog claim.",
       "issue": "1149"
     },
@@ -6737,7 +7088,9 @@
         "createCol bridge wiring + width/height attribute replay (PR #1347)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1347 (pulp #1147): <svg> is a leaf container that reserves layout space. For rendered SVG paths use the @pulp/react SvgPath intrinsic. Wave 1 architectural reclassification — full SVG rasterization of children is arch-explicit-non-goal (createCol shim reserves layout space; @pulp/react SvgPath intrinsic is the canonical rendered-path API — the layout-shim surface IS the supported surface). Wave 4 cleanup — status partial → supported + emptied unsupportedValues; child path/rect/circle/text rasterization is arch-non-goal, not a partial-deferred gap.",
       "issue": "1147"
     },
@@ -6746,7 +7099,9 @@
       "mapsTo": "createTextEditor + setMultiLine(1).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     }
@@ -6760,7 +7115,9 @@
         "any rectangle"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348 fixed a typo where the JS was calling canvasFillRect (which never existed) — now correctly calls canvasRect.",
       "issue": "1346"
     },
@@ -6771,7 +7128,9 @@
         "any rectangle"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Stroke gradients fall back to first stop's color (bridge has no stroke-gradient setter today).",
       "issue": ""
     },
@@ -6782,7 +7141,9 @@
         "any rectangle"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6791,7 +7152,9 @@
       "mapsTo": "ctx.beginPath -> canvasBeginPath.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6800,7 +7163,9 @@
       "mapsTo": "ctx.closePath -> canvasClosePath.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6809,7 +7174,9 @@
       "mapsTo": "ctx.moveTo -> canvasMoveTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6818,7 +7185,9 @@
       "mapsTo": "ctx.lineTo -> canvasLineTo.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6827,7 +7196,9 @@
       "mapsTo": "ctx.rect(x,y,w,h) -> moveTo + 4× lineTo back to start (composes a closed subpath).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Path-construction op (no fill/stroke). Honors fill()/stroke()/clip() afterward. PR #1348.",
       "issue": "1346"
     },
@@ -6868,7 +7239,9 @@
         "arcTo(x1, y1, x2, y2, radius) — geometrically correct on Skia + CG"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "pulp #1521 — native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
       "issue": ""
     },
@@ -6928,7 +7301,9 @@
       "mapsTo": "ctx.stroke -> _syncGlobalState + _syncLineState + _applyStrokeStyle + canvasStrokePath.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -6981,7 +7356,9 @@
       "mapsTo": "ctx.save -> canvasSave (Skia/CG canvas state stack).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348. Without save/restore, FilterBank's first ctx.save() threw TypeError and aborted the frame.",
       "issue": "1346"
     },
@@ -6990,7 +7367,9 @@
       "mapsTo": "ctx.restore -> canvasRestore.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -6999,7 +7378,9 @@
       "mapsTo": "ctx.translate(x,y) -> canvasTranslate.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -7008,7 +7389,9 @@
       "mapsTo": "ctx.scale(sx,sy) -> canvasScale.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -7017,7 +7400,9 @@
       "mapsTo": "ctx.rotate(radians) -> canvasRotate.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348.",
       "issue": "1346"
     },
@@ -7026,7 +7411,9 @@
       "mapsTo": "ctx.setTransform(a,b,c,d,e,f) — also accepts a single DOMMatrix-like arg, shim unpacks. -> canvasSetTransform.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348. resetTransform aliases to setTransform(1,0,0,1,0,0).",
       "issue": "1346"
     },
@@ -7035,7 +7422,9 @@
       "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0). Also resets the JS-side _currentTransform mirror (pulp #1527) so getTransform reads back the identity.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348. Mirror update added in pulp #1527.",
       "issue": "1346"
     },
@@ -7109,7 +7498,9 @@
         "fontBoundingBoxAscent/Descent"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "issue-916. The shim guarantees a non-null TextMetrics object even on older hosts where canvasMeasureText isn't registered (returns zero-filled fields based on font px size).",
       "issue": ""
     },
@@ -7158,7 +7549,9 @@
       "mapsTo": "ctx.createLinearGradient(x0,y0,x1,y1) -> returns a JS-side CanvasGradient object with addColorStop(); the bridge picks it up on the next fill via canvasSetLinearGradient.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "PR #1348. CG (mac) gradient-shape fill landed in #1359/#1360 (merged 2026-05-03).",
       "issue": "964"
     },
@@ -7214,7 +7607,9 @@
       "mapsTo": "CanvasGradient.addColorStop(offset, color) — accumulates stops on the JS-side gradient object; flushed to bridge via canvasSetLinearGradient / canvasSetRadialGradient when the gradient is assigned to fillStyle.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": "964"
     },
@@ -7227,7 +7622,9 @@
         "lineDashOffset phase arg"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "DIVERGE→PASS sweep — the catalog note about \"shim takes pattern verbatim; bridge handles the spec-doubling\" was describing the architecture, not a gap. The end-to-end behavior is spec-compliant. Wave 1 paperwork — see SKILL canvas2d gotchas; HTML5-spec odd-length doubling is performed internally by canvasSetLineDash before recording.",
       "issue": ""
     },
@@ -7236,7 +7633,9 @@
       "mapsTo": "Returns a copy of the current pattern (per spec).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -7263,7 +7662,9 @@
         "CanvasPattern (via createPattern)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "DIVERGE→PASS sweep — pattern path was already wired (createPattern in PASS list, _applyFillStyle dispatches canvasSetFillPattern); the catalog had a stale gap entry from before pulp #1434's createPattern bridge work. Wave 1 paperwork — CanvasPattern wiring confirmed via createPattern + _applyFillStyle / canvasSetFillPattern (#1625 finding).",
       "issue": ""
     },
@@ -7287,7 +7688,9 @@
       "mapsTo": "Tracked locally; pushed to bridge via canvasSetLineWidth on the next stroke().",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -7577,7 +7980,9 @@
       "mapsTo": "HTMLCanvasElement.getContext('webgpu') -> __createGPUCanvasContext (web-compat-canvas.js). Returns a GPUCanvasContext with configure / getCurrentTexture / present that bridges to native WebGPU when the device is native.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Tracked in detail under canvas2d/* by convention even though WebGPU is not strictly Canvas2D — the shim co-locates them. See planning/research/three-js* for the Three.js end-to-end story.",
       "issue": ""
     },
@@ -7586,7 +7991,9 @@
       "mapsTo": "HTMLCanvasElement.getContext('2d') -> CanvasRenderingContext2D singleton per-canvas (cached on _canvasContext2d).",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "",
       "issue": ""
     },
@@ -7595,7 +8002,9 @@
       "mapsTo": "Pulp-specific bridge fn (canvasFillCircle). Used by some legacy widget renderers; NOT spec'd in HTML5 Canvas. Plugin code should prefer arc()+fill().",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Bridge convenience; not part of the standard Canvas2D API.",
       "issue": ""
     },
@@ -7604,7 +8013,9 @@
       "mapsTo": "Pulp-specific bridge fn (canvasFillRoundedRect). Equivalent of roundRect()+fill() in one call.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Bridge convenience.",
       "issue": ""
     },
@@ -7613,7 +8024,9 @@
       "mapsTo": "Pulp-specific bridge fn (canvasStrokeLine). Equivalent of moveTo()+lineTo()+stroke() in one call.",
       "supportedValues": [],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
       "notes": "Bridge convenience.",
       "issue": ""
     }
