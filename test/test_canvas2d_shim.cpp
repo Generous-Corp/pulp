@@ -2943,14 +2943,18 @@ TEST_CASE("Canvas2D getTransform DOMMatrix scaleSelf + isIdentity recompute",
     REQUIRE(result == "true,2,3,false,true");
 }
 
-TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf 90deg",
-          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf takes degrees [issue-1730]",
+          "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
+    // Codex P1 on #1730: rotateSelf() input is DEGREES per the
+    // DOMMatrix spec (https://drafts.fxtf.org/geometry/#dom-dommatrix-rotateself).
+    // Previously this test passed Math.PI/2 and expected a 90deg
+    // rotation — that documented the BUG. Now we pass 90 (degrees).
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
         var ctx = c.getContext('2d');
         var m = ctx.getTransform();
-        m.rotateSelf(Math.PI / 2);
+        m.rotateSelf(90);
         // identity rotated 90deg: a≈0, b≈1, c≈-1, d≈0
         return [Math.abs(m.a) < 1e-10,
                 Math.abs(m.b - 1) < 1e-10,
@@ -2958,6 +2962,58 @@ TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf 90deg",
                 Math.abs(m.d) < 1e-10].join(',');
     )");
     REQUIRE(result == "true,true,true,true");
+}
+
+TEST_CASE("Canvas2D DOMMatrix rotateSelf(180) flips signs [issue-1730]",
+          "[view][canvas2d][issue-1730][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        m.rotateSelf(180);
+        // identity rotated 180deg: a=-1, b=0, c=0, d=-1
+        return [Math.abs(m.a + 1) < 1e-10,
+                Math.abs(m.b) < 1e-10,
+                Math.abs(m.c) < 1e-10,
+                Math.abs(m.d + 1) < 1e-10].join(',');
+    )");
+    REQUIRE(result == "true,true,true,true");
+}
+
+TEST_CASE("Canvas2D DOMMatrix rotateSelf() omitted arg defaults to 0 [issue-1730]",
+          "[view][canvas2d][issue-1730][dommatrix-mutators]") {
+    // Codex P1 on #1730: omitted angle defaults to 0 — must not be NaN.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        m.rotateSelf();
+        return [m.a, m.b, m.c, m.d].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1");
+}
+
+TEST_CASE("Canvas2D DOMMatrix scaleSelf() omitted args default to identity [issue-1730]",
+          "[view][canvas2d][issue-1730][dommatrix-mutators]") {
+    // Codex P2 on #1730: spec says scaleX defaults to 1 when omitted,
+    // scaleY defaults to scaleX when omitted. Was producing NaN before.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 3, 0, 0);
+        var m = ctx.getTransform();
+        // Bare scaleSelf() — should be a no-op.
+        m.scaleSelf();
+        var noop_ok = (m.a === 2 && m.d === 3);
+        // scaleSelf(4) — applies 4x to BOTH axes.
+        m.scaleSelf(4);
+        var single_arg_ok = (m.a === 8 && m.d === 12);
+        return [noop_ok, single_arg_ok].join(',');
+    )");
+    REQUIRE(result == "true,true");
 }
 
 TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
@@ -2975,25 +3031,34 @@ TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
     REQUIRE(result == "2,1,10,3");
 }
 
-TEST_CASE("Canvas2D getTransform DOMMatrix inverse round-trips identity; singular throws",
-          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+TEST_CASE("Canvas2D DOMMatrix inverse round-trips identity; singular yields NaN matrix [issue-1730]",
+          "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
+    // Codex P1 on #1730: per spec
+    // (https://drafts.fxtf.org/geometry/#dom-dommatrixreadonly-inverse),
+    // a non-invertible matrix produces a matrix with NaN components and
+    // is2D=false. It does NOT throw. The previous test asserted "throws
+    // TypeError" — that was documenting the BUG.
     auto result = run_in_bridge(R"(
         var c = document.createElement('canvas');
         c.id = 'probe'; document.body.appendChild(c);
         var ctx = c.getContext('2d');
-        // Inverse of identity is identity
+        // Inverse of identity is identity.
         var inv = ctx.getTransform().inverse();
         var ok1 = (inv.a === 1 && inv.b === 0 && inv.c === 0 &&
                    inv.d === 1 && inv.e === 0 && inv.f === 0);
-        // Singular throws TypeError
+        // Singular: does NOT throw, returns NaN matrix with is2D=false.
+        ctx.setTransform(1, 1, 1, 1, 0, 0);  // det = 1*1 - 1*1 = 0
         var threw = false;
+        var ninv;
         try {
-            ctx.setTransform(1, 1, 1, 1, 0, 0);  // det=0
-            ctx.getTransform().inverse();
+            ninv = ctx.getTransform().inverse();
         } catch (e) {
             threw = true;
         }
-        return [ok1, threw].join(',');
+        var ok2 = !threw && isNaN(ninv.a) && isNaN(ninv.b) && isNaN(ninv.c) &&
+                  isNaN(ninv.d) && isNaN(ninv.e) && isNaN(ninv.f) &&
+                  ninv.is2D === false;
+        return [ok1, ok2].join(',');
     )");
     REQUIRE(result == "true,true");
 }
