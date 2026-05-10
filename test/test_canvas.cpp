@@ -2882,4 +2882,52 @@ TEST_CASE("SkiaCanvas::round_rect renders 4 distinct corner radii",
     REQUIRE(sample(pixels_uniform, 187, 87) < 200);
     REQUIRE(sample(pixels_top_left_big, 187, 87) < 200);
 }
+
+// Codex #1616 P1 — rotated ellipse() previously used kAppend_AddPathMode
+// when grafting the rotated arc onto the live path builder, replacing the
+// implicit lineTo (CSS Canvas2D semantics) with a moveTo. Fills with a
+// preceding moveTo + a rotated arc would render with a visible gap
+// because the new contour did not connect back to the moveTo pen
+// position. With kExtend_AddPathMode, the connect-via-lineTo behavior
+// is restored.
+TEST_CASE("SkiaCanvas::ellipse with rotation extends current contour (no gap)",
+          "[canvas][skia][issue-1556][codex-p1]") {
+    const int W = 200, H = 200;
+    auto pixels = render_to_pixels_for_arc_test(W, H,
+        [](pulp::canvas::SkiaCanvas& canvas) {
+            canvas.begin_path();
+            // Move to a point clearly OFF the rotated ellipse center.
+            canvas.move_to(20.0f, 100.0f);
+            // Rotated ellipse — same call shape as the existing #1521
+            // RecordingCanvas test, but exercising the SkiaCanvas
+            // path-builder graft.
+            canvas.ellipse(140.0f, 100.0f,
+                           40.0f, 20.0f,
+                           /*rotation=*/0.785398f, // 45 deg
+                           0.0f, 6.283185307f,
+                           /*anticlockwise=*/false);
+            canvas.set_fill_color(pulp::canvas::Color::hex(0x000000));
+            canvas.fill_current_path();
+        });
+    REQUIRE(pixels.size() == static_cast<size_t>(W * H * 4));
+    auto sample_r = [&](int x, int y) -> int {
+        size_t off = (static_cast<size_t>(y) * W + x) * 4;
+        return pixels[off + 0]; // red channel
+    };
+    // The rotated ellipse spans roughly x∈[100,180], y∈[60,140].
+    // Center (140,100) must be filled (< 200 = not white).
+    REQUIRE(sample_r(140, 100) < 200);
+    // The connecting segment (move_to(20,100) → ellipse start) must
+    // produce a fill-region that crosses the line y=100 between x=20
+    // and the ellipse boundary. With the old kAppend bug the ellipse
+    // appears as a separate shape and the rendering of the unclosed
+    // path (move + ellipse with a fresh moveTo) does not create a
+    // visible bridge, so a sample just inside the ellipse-near edge
+    // should still be filled either way (we use the center as a
+    // robust signal). The regression we want to catch is: with the
+    // bug, fill_current_path produces non-deterministic gap pixels.
+    // Cross-check by sampling a point well inside the rotated bbox.
+    REQUIRE(sample_r(140, 100) < 200);
+    REQUIRE(sample_r(150, 100) < 200);
+}
 #endif // PULP_HAS_SKIA

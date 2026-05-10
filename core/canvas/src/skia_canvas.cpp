@@ -1963,9 +1963,15 @@ void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
     SkPath rotated = tmp.detach();
     rotated.transform(m);
     // Append rotated path into the live builder, preserving the current
-    // subpath. addPath with kAppend_AddPathMode joins the new path to
-    // any existing pen position via a moveTo on the first verb.
-    path_builder_->addPath(rotated);
+    // subpath. kExtend connects the rotated arc's first point to the
+    // existing pen position with an implicit lineTo (matching CSS
+    // Canvas2D semantics for ellipse: "If the current point is not at
+    // the start of the arc, a straight line is added."). The earlier
+    // kAppend default replaced that with a moveTo, breaking contour
+    // continuity for fills (Codex #1616 P1 on #1556). When the builder
+    // is empty kExtend degrades to kAppend, so unrotated standalone
+    // ellipses still work.
+    path_builder_->addPath(rotated, SkPath::kExtend_AddPathMode);
 }
 
 void SkiaCanvas::round_rect(float x, float y, float w, float h,
