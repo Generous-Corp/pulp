@@ -837,6 +837,39 @@ public:
     void set_mask(const std::string& value) { mask_ = value; }
     const std::string& mask() const { return mask_; }
 
+    /// CSS `mask-size` (pairs with mask-image — pulp #1515 followup).
+    /// Stored alongside mask_image_; consumed by the paint slice that
+    /// composites the mask shader. Honored values: `auto` (default),
+    /// `cover`, `contain`, `<length>`, `<length> <length>`.
+    void set_mask_size(const std::string& value) { mask_size_ = value; }
+    const std::string& mask_size() const { return mask_size_; }
+
+    /// CSS `appearance` — controls native form-widget rendering.
+    /// Pulp paints all widgets custom (no native form widgets), so
+    /// this property is observably storage-only — `none` is the
+    /// effective default for every Pulp View regardless of slot value.
+    /// The slot exists so authors who set `appearance: none` for
+    /// reset-style consistency see a no-op (not an unsupported drop)
+    /// and the value round-trips through CSSStyleDeclaration.
+    void set_appearance(const std::string& value) { appearance_ = value; }
+    const std::string& appearance() const { return appearance_; }
+
+    /// CSS `object-fit` — controls how an `<img>` content's intrinsic
+    /// size is fitted into its layout box. Storage-only today; the
+    /// ImageView paint slice that consumes this needs access to the
+    /// decoded image's natural size (planned follow-up). Honored
+    /// values in the future paint slice: `fill` (default — current
+    /// behavior of stretching to bounds), `contain`, `cover`, `none`,
+    /// `scale-down`.
+    void set_object_fit(const std::string& value) { object_fit_ = value; }
+    const std::string& object_fit() const { return object_fit_; }
+
+    /// CSS `object-position` — alignment of the object inside its
+    /// content box when object-fit leaves blank space (e.g. `contain`
+    /// in a wider box). Storage-only today; pairs with object-fit.
+    void set_object_position(const std::string& value) { object_position_ = value; }
+    const std::string& object_position() const { return object_position_; }
+
     /// CSS background sub-properties (pulp #1517). These slots store the
     /// keyword for round-tripping; paint impact is partial — see notes:
     ///   • background-attachment: only `scroll` is conformant in pulp's
@@ -1130,6 +1163,10 @@ private:
     std::string clip_path_;
     std::string mask_image_;
     std::string mask_;
+    std::string mask_size_;     // pulp #1515 followup
+    std::string appearance_;    // CSS appearance — storage-only no-op for Pulp custom widgets
+    std::string object_fit_;    // CSS object-fit — storage; ImageView paint follow-up
+    std::string object_position_; // CSS object-position — storage; pairs with object-fit
     /// pulp #1434 Phase A2-1 — transition specs + active animations.
     std::vector<TransitionSpec> transitions_{};
     std::vector<CssAnimation> active_animations_{};

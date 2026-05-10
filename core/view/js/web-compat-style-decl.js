@@ -1157,6 +1157,45 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // pulp #1515 followup — `mask-size` pairs with mask-image.
+        // Storage-only today; consumed by the future paint slice that
+        // wires the mask shader onto the saveLayer.
+        case "maskSize": {
+            if (typeof setMaskSize !== "function") break;
+            setMaskSize(id, String(resolved).trim());
+            break;
+        }
+
+        // CSS `appearance`. Pulp paints all widgets custom (no native
+        // form-widget rendering), so this is observably storage-only.
+        // Authors who set `appearance: none` get the same paint behavior
+        // they always had; the value round-trips through the View slot
+        // for any tooling that inspects computed style.
+        case "appearance":
+        case "WebkitAppearance":
+        case "MozAppearance": {
+            if (typeof setAppearance !== "function") break;
+            setAppearance(id, String(resolved).trim());
+            break;
+        }
+
+        // CSS `object-fit` — controls fitting of <img> intrinsic
+        // size into its layout box. Storage-only today; ImageView
+        // paint-time consumption needs natural-size access (follow-up).
+        case "objectFit": {
+            if (typeof setObjectFit !== "function") break;
+            setObjectFit(id, String(resolved).trim());
+            break;
+        }
+
+        // CSS `object-position` — alignment of object-fit residual
+        // space. Pairs with object-fit. Storage-only today.
+        case "objectPosition": {
+            if (typeof setObjectPosition !== "function") break;
+            setObjectPosition(id, String(resolved).trim());
+            break;
+        }
+
         // pulp #1515 — CSS `mask` shorthand. Parse the image
         // sub-property out (it's the only longhand we support today)
         // and forward both the shorthand verbatim (so View::mask()
@@ -1229,6 +1268,43 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 setBackgroundOrigin(id, resolved);
             }
             break;
+
+        // CSS `grid` shorthand — fans out into the existing grid
+        // longhands. The full spec syntax is complex (auto-flow forms,
+        // grid-template-areas embedded between row tracks); this shim
+        // parses the common `<rows> / <cols>` form which covers the
+        // bulk of imported designs. Other forms are deferred — authors
+        // can use the longhand grid-template-{rows,columns,areas} +
+        // grid-auto-{rows,columns,flow} entries directly.
+        case "grid": {
+            var gv = String(resolved).trim();
+            if (gv === "" || gv === "none") {
+                if (typeof setGrid === "function") {
+                    setGrid(id, "template_rows", "none");
+                    setGrid(id, "template_columns", "none");
+                }
+                break;
+            }
+            // Detect "<rows> / <cols>" form. Split on first unparenthesized "/".
+            var depth = 0, slashIdx = -1;
+            for (var gi = 0; gi < gv.length; ++gi) {
+                var gc = gv[gi];
+                if (gc === "(") depth++;
+                else if (gc === ")") depth--;
+                else if (gc === "/" && depth === 0) { slashIdx = gi; break; }
+            }
+            if (slashIdx > 0 && typeof setGrid === "function") {
+                var rows = gv.slice(0, slashIdx).trim();
+                var cols = gv.slice(slashIdx + 1).trim();
+                if (rows) setGrid(id, "template_rows", rows);
+                if (cols) setGrid(id, "template_columns", cols);
+            } else if (typeof setGrid === "function") {
+                // Single-track form: treat as template_rows for spec-most
+                // common interpretation; cols default to 1fr.
+                setGrid(id, "template_rows", gv);
+            }
+            break;
+        }
 
         // Grid
         case "gridTemplateColumns":

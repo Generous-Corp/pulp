@@ -7343,6 +7343,173 @@ TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",
     REQUIRE(panel->mask_image().empty());
 }
 
+// pulp #1515 followup — `mask-size` pairs with mask-image. Storage-only;
+// the slot round-trips through View::mask_size() so authors can set/get
+// it and a future paint slice can honor it without a JS-side change.
+TEST_CASE("WidgetBridge setMaskSize round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-maskSize]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->mask_size().empty());
+
+    // Direct bridge call.
+    bridge.load_script("setMaskSize('p', 'cover')");
+    REQUIRE(panel->mask_size() == "cover");
+
+    bridge.load_script("setMaskSize('p', '50% 100%')");
+    REQUIRE(panel->mask_size() == "50% 100%");
+
+    // CSSStyleDeclaration JS path also dispatches end-to-end.
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('maskSize', 'contain');
+    )");
+    REQUIRE(panel->mask_size() == "contain");
+}
+
+// CSS `appearance` — Pulp paints all widgets custom (no native form
+// rendering), so this is observably storage-only. The slot exists so
+// authors who set `appearance: none` for reset-style consistency see
+// a no-op (not an unsupported drop) and the value round-trips.
+TEST_CASE("WidgetBridge setAppearance round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-appearance]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->appearance().empty());
+
+    bridge.load_script("setAppearance('p', 'none')");
+    REQUIRE(panel->appearance() == "none");
+
+    bridge.load_script("setAppearance('p', 'auto')");
+    REQUIRE(panel->appearance() == "auto");
+
+    bridge.load_script("setAppearance('p', 'button')");
+    REQUIRE(panel->appearance() == "button");
+
+    // CSSStyleDeclaration JS path — including vendor-prefixed forms.
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('appearance', 'none');
+    )");
+    REQUIRE(panel->appearance() == "none");
+
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('WebkitAppearance', 'textfield');
+    )");
+    REQUIRE(panel->appearance() == "textfield");
+
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('MozAppearance', 'menulist-button');
+    )");
+    REQUIRE(panel->appearance() == "menulist-button");
+}
+
+// CSS `object-fit` storage round-trip (paint-time consumption is a
+// planned follow-up that needs ImageView access to decoded image
+// natural size; status is `partial` until paint lands).
+TEST_CASE("WidgetBridge setObjectFit round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-objectFit]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->object_fit().empty());
+
+    for (auto kw : {"fill", "contain", "cover", "none", "scale-down"}) {
+        bridge.load_script(std::string("setObjectFit('p', '") + kw + "')");
+        REQUIRE(panel->object_fit() == kw);
+    }
+
+    // CSSStyleDeclaration JS path.
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('objectFit', 'cover');
+    )");
+    REQUIRE(panel->object_fit() == "cover");
+}
+
+// CSS `object-position` storage round-trip (pairs with object-fit).
+TEST_CASE("WidgetBridge setObjectPosition round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-objectPosition]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->object_position().empty());
+
+    bridge.load_script("setObjectPosition('p', 'center')");
+    REQUIRE(panel->object_position() == "center");
+
+    bridge.load_script("setObjectPosition('p', '50% 50%')");
+    REQUIRE(panel->object_position() == "50% 50%");
+
+    bridge.load_script("setObjectPosition('p', '10px top')");
+    REQUIRE(panel->object_position() == "10px top");
+
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('objectPosition', '25% 75%');
+    )");
+    REQUIRE(panel->object_position() == "25% 75%");
+}
+
+// CSS `grid` shorthand — JS shim parses `<rows> / <cols>` form and
+// fans out to setGrid(template_rows) + setGrid(template_columns).
+// Full spec is deferred; this covers the common form.
+TEST_CASE("CSSStyleDeclaration grid shorthand parses <rows> / <cols> form",
+          "[view][bridge][css][issue-1707-followup-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+
+    // <rows> / <cols> common form — verifies fan-out to both axes.
+    // template_columns and template_rows are vector<GridTrack>; the
+    // common form here yields 2 tracks each side.
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('grid', '100px 1fr / 50% 50%');
+    )");
+    REQUIRE(panel->grid().template_rows.size() == 2);
+    REQUIRE(panel->grid().template_columns.size() == 2);
+
+    // 3-track rows on a single side
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('grid', '1fr 1fr 1fr / 100%');
+    )");
+    REQUIRE(panel->grid().template_rows.size() == 3);
+    REQUIRE(panel->grid().template_columns.size() == 1);
+
+    // Single-track form — falls back to template_rows only
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('grid', '200px');
+    )");
+    REQUIRE(panel->grid().template_rows.size() == 1);
+}
+
 TEST_CASE("View::paint_all emits clip_path_svg when clip_path is set",
           "[view][canvas][issue-1515]") {
     using namespace pulp::canvas;

@@ -1149,6 +1149,14 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'clipPath':           return call('setClipPath', id, value as string);
         case 'mask':               return call('setMask', id, value as string);
         case 'maskImage':          return call('setMaskImage', id, value as string);
+        case 'maskSize':           return call('setMaskSize', id, value as string);
+        // CSS `appearance` — Pulp paints all widgets custom, so this
+        // is observably storage-only. Slot exists for round-trip.
+        case 'appearance':         return call('setAppearance', id, value as string);
+        // CSS `object-fit` / `object-position` — image fitting.
+        // Storage-only today; ImageView paint follow-up.
+        case 'objectFit':          return call('setObjectFit', id, value as string);
+        case 'objectPosition':     return call('setObjectPosition', id, value as string);
         // pulp #1549 — RN `mixBlendMode` (RN 0.76 New Architecture).
         // Forwards the W3C blend-mode keyword string to
         // `setMixBlendMode`; the bridge keyword→enum table lives at

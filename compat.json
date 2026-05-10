@@ -42,7 +42,7 @@
       "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial → supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) — the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
     },
     "counts": {
-      "css": 212,
+      "css": 217,
       "rn": 120,
       "yoga": 56,
       "react": 0,
@@ -3536,6 +3536,84 @@
       ],
       "notes": "'auto' parses as 0. Wave 1 drift cleanup — supported → partial (catalog had real unsupportedValues; honest claim is partial, not supported; gotchas are arch / deferred per entry-specific notes). Wave 4 css extensive — `auto` parses as 0 at the JS layer (the integer slot is 0 by default; auto matches the layout-natural ordering). Round-trip is complete.",
       "issue": ""
+    },
+    "css/appearance": {
+      "status": "supported",
+      "mapsTo": "el.style.appearance -> setAppearance(id, value) -> View::appearance_ (storage-only). Pulp paints all widgets custom; appearance has no rendering impact in the architecture.",
+      "supportedValues": [
+        "auto",
+        "none",
+        "button",
+        "textfield",
+        "menulist",
+        "menulist-button",
+        "searchfield",
+        "textarea",
+        "checkbox",
+        "radio",
+        "menulist-text",
+        "menulist-textfield"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1707-followup-appearance]"
+      ],
+      "notes": "Pulp paints all widgets custom (no native form-widget rendering). `appearance: none` is the effective behavior for every Pulp View regardless of slot value. Slot exists so authors who set `appearance: none` for reset-style consistency see a no-op (not an unsupported drop) and the value round-trips through CSSStyleDeclaration. Includes WebKit/Moz-prefixed variants for compatibility with imported designs."
+    },
+    "css/maskSize": {
+      "status": "partial",
+      "mapsTo": "el.style.maskSize -> setMaskSize(id, value) -> View::mask_size_ (storage-only). Pairs with mask-image (#1515). Paint-time consumption is the same follow-up paint slice that wires the mask shader.",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values (storage-only — paint-side composite is the same #1515 follow-up that gates mask-image rendering)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1707-followup-maskSize]"
+      ],
+      "notes": "Storage-only today; the slot round-trips through View::mask_size() so authors can set/get it. Actual paint-time honoring of the size value is gated on the same paint slice that wires the mask-image shader (saveLayer + SkBlendMode::kDstIn) — see css/maskImage notes. Status `partial` is honest until paint lands.",
+      "issue": "1515"
+    },
+    "css/objectFit": {
+      "status": "partial",
+      "mapsTo": "el.style.objectFit -> setObjectFit(id, value) -> View::object_fit_ (storage-only). ImageView paint slice that consumes this needs access to decoded image natural size — planned follow-up.",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values (storage-only — ImageView paint slice currently stretches to bounds regardless; object-fit consumption is a follow-up)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1707-followup-objectFit]"
+      ],
+      "notes": "Storage-only today; the slot round-trips through View::object_fit() so authors can set/get it. Status `partial` is honest until ImageView paint slice consumes the value (needs access to decoded image natural size for fit math)."
+    },
+    "css/objectPosition": {
+      "status": "partial",
+      "mapsTo": "el.style.objectPosition -> setObjectPosition(id, value) -> View::object_position_ (storage-only). Pairs with object-fit.",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "all values (storage-only — same paint follow-up as object-fit)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1707-followup-objectPosition]"
+      ],
+      "notes": "Storage-only today; pairs with object-fit (#1707-followup). Honored by the same paint slice that consumes object-fit."
+    },
+    "css/grid": {
+      "status": "partial",
+      "mapsTo": "el.style.grid -> JS-shim parses `<rows> / <cols>` form and fans out to setGrid(id, 'template_rows', ...) + setGrid(id, 'template_columns', ...). Full grid shorthand spec (auto-flow forms, embedded template-areas, dense packing) is deferred — authors can use the existing longhand grid-template-{rows,columns,areas} + grid-auto-{rows,columns,flow} entries directly.",
+      "supportedValues": [
+        "<rows> / <cols>",
+        "none",
+        "single-track value (treated as template_rows)"
+      ],
+      "unsupportedValues": [
+        "auto-flow forms (`auto-flow [dense]? / <cols>`, `<rows> / auto-flow`)",
+        "template-areas embedded between row tracks (string + length pairs)",
+        "subgrid"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1707-followup-grid]"
+      ],
+      "notes": "Common `<rows> / <cols>` form parsed; longhand fan-out to existing grid-template-{rows,columns} entries which are already supported. Status `partial` is honest until full shorthand parser ships. Most imported designs use the simple form; complex auto-flow shorthands are rare in practice."
     }
   },
   "rn": {
