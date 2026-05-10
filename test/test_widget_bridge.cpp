@@ -10372,6 +10372,47 @@ TEST_CASE("querySelector :first-child / :last-child / :nth-child / :only-child /
     REQUIRE(engine.evaluate("__emptyCount").getWithDefault<int64_t>(0) == 5);
 }
 
+// pulp #1773 — `:root` regression. PR #1759 removed `:root` from the
+// pseudo-class evaluator entirely (it was unsupported in the
+// querySelector BFS), but stylesheet evaluation (StyleSheet._applyTo)
+// uses the same `_matchesPseudoClass` and visits __bodyElement__, so
+// CSS custom-property themes like `:root { --accent: red; }` silently
+// stopped applying. The fix re-adds `:root` matching at the primitive
+// level (body or documentElement), restoring the stylesheet path.
+TEST_CASE(":root pseudo-class matches body/documentElement for stylesheet themes",
+          "[view][bridge][wave3-html][html-stylesheet][issue-1773]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        // `:root` should match document.body (the stylesheet iteration
+        // root in this shim) and document.documentElement (real <html>).
+        // A non-root element must NOT match.
+        var d = document.createElement('div');
+        d.id = 'inner';
+        document.body.appendChild(d);
+
+        // Round-trip via the StyleSheet/_matchesSelector path: a
+        // :root rule must apply to document.body even though body is
+        // the only element __elements__ has from this fixture.
+        // Use width because it's a numeric Yoga slot we can read back.
+        var sheet = new StyleSheet({ ':root': { width: '321px' } });
+        sheet.attach();
+
+        // Body width should now be 321px from the stylesheet pass.
+        globalThis.__bodyWidth = document.body.style.width;
+        // The inner div must NOT have been styled by the :root rule.
+        globalThis.__innerWidth = d.style.width || '';
+    )");
+
+    REQUIRE(std::string(engine.evaluate("__bodyWidth")
+        .getWithDefault<std::string_view>("")) == "321px");
+    REQUIRE(std::string(engine.evaluate("__innerWidth")
+        .getWithDefault<std::string_view>("")).empty());
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Wave 5 css.5 — audit of the 49 entries flipped by PR #1649 from
 // `partial`/DIVERGE to `supported`. These tests exercise the *runtime*
