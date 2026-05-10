@@ -758,7 +758,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat stores keyword on View (issue-1552)",
+        "test/test_widget_bridge.cpp::WidgetBridge setBackgroundRepeat round-trips keyword on View",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: bridge fn registered (widget_bridge.cpp). The keyword round-trips through View::set_background_repeat — the slot is preserved so future paint logic for `background-image: url(...)` / repeating gradients can honor it without an API break. For solid-color backgrounds (today's only painted case) repeat semantics are a no-op, which is why the status remains `partial` rather than `supported`. Mirrors the storage-only strategy used for text-decoration-style (pulp #1434 batch 3). Wave 1 drift cleanup — partial → supported (no unsupported values listed; wired through web-compat-style-decl.js).",
@@ -1979,8 +1979,8 @@
         "none"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: bridge fn registered. Setting a non-zero clamp implicitly enables `multi_line_` on the Label so paint takes the multi-line branch (without that, the single-line path runs and the clamp is a no-op). Last-visible line gets U+2026 appended if source lines were dropped. CSS spec uses `none` to disable; pulp accepts numeric `0` for the same effect.",
@@ -2397,7 +2397,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping (issue-1549) [wave2-css]",
+        "test/test_widget_bridge.cpp::WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "Wave 2 css.9 — plus-lighter/plus-darker now map to BlendMode::lighter (Skia's SkBlendMode::kPlus). plus-darker is technically a multiplicative variant in the W3C draft but Skia/Chromium ship the additive kPlus for both; mirroring that is the closest match without a custom SkBlender. pulp #1434 A4 Bundle 6: original wiring (16 W3C modes).",
@@ -3418,8 +3418,8 @@
         "none"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label (issue-1552)",
-        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint (issue-1552)",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label",
+        "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "pulp #1552: shares the lineClamp wiring. The CSS shim case routes both `line-clamp` and `-webkit-line-clamp` to the same setLineClamp bridge fn; the @pulp/react prop-applier dispatches both `lineClamp` and `webkitLineClamp` keys through the same branch.",
