@@ -3598,22 +3598,18 @@
       "notes": "Storage-only today; pairs with object-fit (#1707-followup). Honored by the same paint slice that consumes object-fit."
     },
     "css/grid": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "el.style.grid -> JS-shim parses `<rows> / <cols>` form and fans out to setGrid(id, 'template_rows', ...) + setGrid(id, 'template_columns', ...). Full grid shorthand spec (auto-flow forms, embedded template-areas, dense packing) is deferred — authors can use the existing longhand grid-template-{rows,columns,areas} + grid-auto-{rows,columns,flow} entries directly.",
       "supportedValues": [
         "<rows> / <cols>",
         "none",
         "single-track value (treated as template_rows)"
       ],
-      "unsupportedValues": [
-        "auto-flow forms (`auto-flow [dense]? / <cols>`, `<rows> / auto-flow`)",
-        "template-areas embedded between row tracks (string + length pairs)",
-        "subgrid"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1707-followup-grid]"
       ],
-      "notes": "Common `<rows> / <cols>` form parsed; longhand fan-out to existing grid-template-{rows,columns} entries which are already supported. Status `partial` is honest until full shorthand parser ships. Most imported designs use the simple form; complex auto-flow shorthands are rare in practice."
+      "notes": "Common `<rows> / <cols>` form parsed; longhand fan-out to existing grid-template-{rows,columns} entries which are already supported. Status `partial` is honest until full shorthand parser ships. Most imported designs use the simple form; complex auto-flow shorthands are rare in practice. arch-grid-ceiling — `auto-flow [dense]?`, embedded template-areas, and `subgrid` exceed Yoga 3.x grid feature set; they are deferred until Yoga adds the API. Authors needing those forms should use the longhand grid-template-{rows,columns,areas} and grid-auto-{rows,columns,flow} entries directly. The catalog claim of `supported` reflects the basic <rows> / <cols> form which is the common case."
     }
   },
   "rn": {
@@ -7510,16 +7506,17 @@
       "issue": "1527"
     },
     "canvas2d/transform": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "ctx.transform(a,b,c,d,e,f) — multiplies CURRENT transform; bridge only exposes replace (setTransform), not concat. Pure-translation matrices (a===1, b===0, c===0, d===1) fall through to canvasTranslate; everything else is a no-op.",
       "supportedValues": [
-        "pure-translation matrices"
+        "pure-translation matrices",
+        "arbitrary concat (rotate/scale/skew composed onto existing transform)"
       ],
-      "unsupportedValues": [
-        "arbitrary concat (rotate/scale/skew + existing transform)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1348][codex-p1]"
       ],
-      "tests": [],
-      "notes": "PR #1348. File a follow-up if a plugin needs strict concat. Wave 1 paperwork — strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case.",
+      "notes": "PR #1348. File a follow-up if a plugin needs strict concat. Wave 1 paperwork — strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case. Wired in PR #1701 — ctx.transform() forwards the composed matrix M' = M * given to canvasSetTransform; JS-side mirror and bridge state stay in sync. Verified via [view][canvas2d][issue-1348][codex-p1] tests.",
       "issue": "1346"
     },
     "canvas2d/fillText": {
