@@ -187,6 +187,73 @@ _PulpCanvasMatrix.prototype.toJSON = function() {
              e: this.e, f: this.f, is2D: true, isIdentity: this.isIdentity };
 };
 
+// pulp #1527 — DOMMatrix mutator methods. Snapshot semantics
+// (mutating the returned matrix does NOT affect the live ctx — that
+// matches HTML5 Canvas spec). The mutators are useful for offline
+// transform calculations like
+// `ctx.getTransform().translateSelf(x, y).inverse()` and are widely
+// used in plugin code adapted from web canvas libraries (Three.js
+// canvas adapter, Skia-canvas, etc.). Each *Self method mutates this
+// matrix in place and returns this for chaining; inverse() returns a
+// NEW matrix (or throws on singular).
+_PulpCanvasMatrix.prototype._refreshAliases = function() {
+    this.m11 = this.a; this.m12 = this.b;
+    this.m21 = this.c; this.m22 = this.d;
+    this.m41 = this.e; this.m42 = this.f;
+    this.isIdentity = (this.a === 1 && this.b === 0 && this.c === 0 &&
+                       this.d === 1 && this.e === 0 && this.f === 0);
+};
+_PulpCanvasMatrix.prototype.multiplySelf = function(other) {
+    var a = this.a, b = this.b, c = this.c, d = this.d, e = this.e, f = this.f;
+    var oa = other.a, ob = other.b, oc = other.c, od = other.d, oe = other.e, of = other.f;
+    this.a = a * oa + c * ob;
+    this.b = b * oa + d * ob;
+    this.c = a * oc + c * od;
+    this.d = b * oc + d * od;
+    this.e = a * oe + c * of + e;
+    this.f = b * oe + d * of + f;
+    this._refreshAliases();
+    return this;
+};
+_PulpCanvasMatrix.prototype.scaleSelf = function(sx, sy) {
+    if (sy === undefined) sy = sx;
+    this.a *= sx;
+    this.b *= sx;
+    this.c *= sy;
+    this.d *= sy;
+    this._refreshAliases();
+    return this;
+};
+_PulpCanvasMatrix.prototype.rotateSelf = function(angle) {
+    var cos = Math.cos(angle), sin = Math.sin(angle);
+    var a = this.a, b = this.b, c = this.c, d = this.d;
+    this.a =  a * cos + c * sin;
+    this.b =  b * cos + d * sin;
+    this.c = -a * sin + c * cos;
+    this.d = -b * sin + d * cos;
+    this._refreshAliases();
+    return this;
+};
+_PulpCanvasMatrix.prototype.translateSelf = function(tx, ty) {
+    if (ty === undefined) ty = 0;
+    this.e += this.a * tx + this.c * ty;
+    this.f += this.b * tx + this.d * ty;
+    this._refreshAliases();
+    return this;
+};
+_PulpCanvasMatrix.prototype.inverse = function() {
+    var a = this.a, b = this.b, c = this.c, d = this.d, e = this.e, f = this.f;
+    var det = a * d - b * c;
+    if (det === 0) {
+        throw new TypeError("DOMMatrix.inverse() called on a singular matrix");
+    }
+    var ia =  d / det, ib = -b / det;
+    var ic = -c / det, id =  a / det;
+    var ie = (c * f - d * e) / det;
+    var ifv = (b * e - a * f) / det;
+    return new _PulpCanvasMatrix(ia, ib, ic, id, ie, ifv);
+};
+
 CanvasRenderingContext2D.prototype._applyFillStyle = function() {
     var fs = this.fillStyle;
     if (fs && fs._kind === "linear" && typeof canvasSetLinearGradient === "function") {

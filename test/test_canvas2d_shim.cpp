@@ -2902,3 +2902,111 @@ TEST_CASE("Canvas2D isPointInPath / isPointInStroke survive save/restore",
     )");
     REQUIRE(result == "true,false");
 }
+
+
+// pulp #1527 — DOMMatrix mutator methods on _PulpCanvasMatrix.
+// Snapshot semantics preserved per HTML5 spec: mutating the returned
+// matrix does NOT affect the live ctx. This proves the 5 mutator
+// methods (multiplySelf, scaleSelf, rotateSelf, translateSelf, inverse).
+TEST_CASE("Canvas2D getTransform DOMMatrix mutator chains + snapshot semantics",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 3, 4, 5);  // [[2,0,4],[0,3,5]]
+        var m = ctx.getTransform();
+        // multiplySelf with translation matrix [[1,0,10],[0,1,20]]
+        var tr = ctx.getTransform();
+        tr.a = 1; tr.b = 0; tr.c = 0; tr.d = 1; tr.e = 10; tr.f = 20;
+        m.multiplySelf(tr);
+        // After: a=2, b=0, c=0, d=3, e=2*10+4=24, f=3*20+5=65
+        // Live ctx unaffected (snapshot semantics)
+        var live = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f,
+                live.a, live.e, live.f].join(',');
+    )");
+    REQUIRE(result == "2,0,0,3,24,65,2,4,5");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix scaleSelf + isIdentity recompute",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        var was_identity = m.isIdentity;
+        var same = (m.scaleSelf(2, 3) === m);
+        return [was_identity, m.a, m.d, m.isIdentity, same].join(',');
+    )");
+    REQUIRE(result == "true,2,3,false,true");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix rotateSelf 90deg",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        m.rotateSelf(Math.PI / 2);
+        // identity rotated 90deg: a≈0, b≈1, c≈-1, d≈0
+        return [Math.abs(m.a) < 1e-10,
+                Math.abs(m.b - 1) < 1e-10,
+                Math.abs(m.c + 1) < 1e-10,
+                Math.abs(m.d) < 1e-10].join(',');
+    )");
+    REQUIRE(result == "true,true,true,true");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 1, 0, 0);
+        var m = ctx.getTransform();
+        m.translateSelf(5, 3);
+        // e = 0 + 2*5 + 0*3 = 10; f = 0 + 0*5 + 1*3 = 3
+        return [m.a, m.d, m.e, m.f].join(',');
+    )");
+    REQUIRE(result == "2,1,10,3");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix inverse round-trips identity; singular throws",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Inverse of identity is identity
+        var inv = ctx.getTransform().inverse();
+        var ok1 = (inv.a === 1 && inv.b === 0 && inv.c === 0 &&
+                   inv.d === 1 && inv.e === 0 && inv.f === 0);
+        // Singular throws TypeError
+        var threw = false;
+        try {
+            ctx.setTransform(1, 1, 1, 1, 0, 0);  // det=0
+            ctx.getTransform().inverse();
+        } catch (e) {
+            threw = true;
+        }
+        return [ok1, threw].join(',');
+    )");
+    REQUIRE(result == "true,true");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix method chaining returns this",
+          "[view][canvas2d][issue-1527][dommatrix-mutators]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        var same = (m.scaleSelf(2).rotateSelf(0).translateSelf(0, 0) === m);
+        return same ? '1' : '0';
+    )");
+    REQUIRE(result == "1");
+}

@@ -7490,19 +7490,24 @@
       "issue": "1346"
     },
     "canvas2d/getTransform": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "ctx.getTransform() -> returns a DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform. The shim tracks `_currentTransform` via translate / scale / rotate / setTransform / transform / save / restore so the read is synchronous (no bridge round-trip; the bridge replays draws at paint time and has no queryable 'current matrix' from JS). Per HTML5 Canvas spec, getTransform() returns a NEW DOMMatrix per call (a snapshot — mutating it does not affect the live ctx). DOMMatrix mutation methods (multiplySelf, scaleSelf, etc.) on the returned object are not exposed because they would only mutate the snapshot, not the canvas — same outcome as on the standard browser surface.",
       "supportedValues": [
         "a, b, c, d, e, f (live)",
         "m11/m12/m21/m22/m41/m42 DOMMatrix aliases",
         "is2D, isIdentity flags",
-        "toFloat32Array / toFloat64Array readers"
+        "toFloat32Array / toFloat64Array readers",
+        "multiplySelf(other) — right-multiply + chain",
+        "scaleSelf(sx, sy?) — post-multiply scale",
+        "rotateSelf(angle) — post-multiply rotation (radians)",
+        "translateSelf(tx, ty) — post-multiply translation",
+        "inverse() — return inverted copy (throws on singular)"
       ],
-      "unsupportedValues": [
-        "DOMMatrix mutator methods (multiplySelf/scaleSelf/rotateSelf/translateSelf/inverse/etc. — getTransform returns the lightweight _PulpCanvasMatrix shim with read-only fields, not a spec DOMMatrix)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527][dommatrix-mutators]"
       ],
-      "tests": [],
-      "notes": "DIVERGE→PASS sweep — clarified that snapshot semantics are spec-compliant (HTML5 Canvas spec: getTransform() returns a NEW DOMMatrix); DOMMatrix mutation methods on a snapshot wouldn't affect the canvas anyway. pulp #1527 bridge-thin gap-fill. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. `_PulpCanvasMatrix` (web-compat-canvas.js) has `a/b/c/d/e/f` getters and `is2D`/`isIdentity` flags but does NOT implement DOMMatrix mutators like `multiplySelf` / `scaleSelf` / `inverse()`. Standard DOM code that does `ctx.getTransform().multiplySelf(other)` will throw at runtime.",
+      "notes": "DIVERGE→PASS sweep — clarified that snapshot semantics are spec-compliant (HTML5 Canvas spec: getTransform() returns a NEW DOMMatrix); DOMMatrix mutation methods on a snapshot wouldn't affect the canvas anyway. pulp #1527 bridge-thin gap-fill. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. `_PulpCanvasMatrix` (web-compat-canvas.js) has `a/b/c/d/e/f` getters and `is2D`/`isIdentity` flags but does NOT implement DOMMatrix mutators like `multiplySelf` / `scaleSelf` / `inverse()`. Standard DOM code that does `ctx.getTransform().multiplySelf(other)` will throw at runtime. PR #1527 followup: DOMMatrix mutator methods (multiplySelf / scaleSelf / rotateSelf / translateSelf / inverse) now implemented on the snapshot. Snapshot semantics preserved per HTML5 spec — mutating the returned matrix does NOT affect the live ctx; mutators return `this` for chaining; inverse() returns a NEW matrix (throws TypeError on singular).",
       "issue": "1527"
     },
     "canvas2d/transform": {
