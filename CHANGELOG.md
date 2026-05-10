@@ -8,8 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0811"></a>
+## [0.81.1]
+
+- fix(build): restore root CMakeLists.txt + bump to 0.81.1 (post-#1755 recovery — root CMakeLists.txt was inadvertently overwritten by #1755 with a 3-line examples/clock stub, breaking all builds on main and triggering an auto-release at v1.0.0; v1.0.0 tag/release deleted as bogus, lineage continues at 0.81.1)
+
 <a id="v100"></a>
-## [1.0.0] - 2026-05-10
+## [1.0.0] - 2026-05-10 (broken — do not use; tag/release deleted; see v0.81.1 recovery)
 
 - feat(css): consume object-fit + object-position in ImageView::paint (closes pulp #1707) ([#1755](https://github.com/danielraffel/pulp/pull/1755))
 - feat(catalog): hygiene PR — yoga 100%, 5 grace saves, 5 test-ref backfills ([#1752](https://github.com/danielraffel/pulp/pull/1752))
