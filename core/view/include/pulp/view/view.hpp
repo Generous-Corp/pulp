@@ -342,7 +342,20 @@ public:
     /// stroke even when set_border() was never called.
     void set_border_color(Color c) { border_color_ = c; has_border_ = true; }
     void set_border_width(float w) { border_width_ = w; has_border_ = true; }
-    void set_border_radius(float r) { corner_radius_ = r; }
+    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; }
+    /// pulp #1663 — set corner radius as percent of min(width,height).
+    /// Resolved at paint time. Pass 0 to clear the percent and revert
+    /// to the plain px slot.
+    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; }
+    float corner_radius_pct() const { return corner_radius_pct_; }
+    /// Compute the effective uniform corner radius in px against the
+    /// given bounds (called by paint code).
+    float effective_corner_radius(float width, float height) const {
+        if (corner_radius_pct_ > 0.0f) {
+            return corner_radius_pct_ * 0.01f * std::min(width, height);
+        }
+        return corner_radius_;
+    }
 
     /// CSS / RN border-style. pulp #1434 Triage #10 — Skia path effect
     /// dispatches on style at paint time. CG falls through to solid
@@ -466,10 +479,26 @@ public:
     /// `set_border_radius(10); set_corner_radius_tl(2);` renders as
     /// {2, 10, 10, 10} instead of {2, 0, 0, 0} (which silently
     /// discarded the uniform radius).
-    void set_corner_radius_tl(float r) { promote_uniform_to_per_corner(); corner_radii_[0] = r; has_corner_radii_ = true; }
-    void set_corner_radius_tr(float r) { promote_uniform_to_per_corner(); corner_radii_[1] = r; has_corner_radii_ = true; }
-    void set_corner_radius_bl(float r) { promote_uniform_to_per_corner(); corner_radii_[2] = r; has_corner_radii_ = true; }
-    void set_corner_radius_br(float r) { promote_uniform_to_per_corner(); corner_radii_[3] = r; has_corner_radii_ = true; }
+    void set_corner_radius_tl(float r) { promote_uniform_to_per_corner(); corner_radii_[0] = r; corner_radii_pct_[0] = 0; has_corner_radii_ = true; }
+    void set_corner_radius_tr(float r) { promote_uniform_to_per_corner(); corner_radii_[1] = r; corner_radii_pct_[1] = 0; has_corner_radii_ = true; }
+    void set_corner_radius_bl(float r) { promote_uniform_to_per_corner(); corner_radii_[2] = r; corner_radii_pct_[2] = 0; has_corner_radii_ = true; }
+    void set_corner_radius_br(float r) { promote_uniform_to_per_corner(); corner_radii_[3] = r; corner_radii_pct_[3] = 0; has_corner_radii_ = true; }
+    /// pulp #1663 — per-corner percent setters. Same semantics as
+    /// set_border_radius_pct: paint time resolves to
+    /// `pct * 0.01 * min(width, height)`.
+    void set_corner_radius_tl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[0] = pct; has_corner_radii_ = true; }
+    void set_corner_radius_tr_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[1] = pct; has_corner_radii_ = true; }
+    void set_corner_radius_bl_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[2] = pct; has_corner_radii_ = true; }
+    void set_corner_radius_br_pct(float pct) { promote_uniform_to_per_corner(); corner_radii_pct_[3] = pct; has_corner_radii_ = true; }
+    float corner_radius_tl_pct() const { return corner_radii_pct_[0]; }
+    float corner_radius_tr_pct() const { return corner_radii_pct_[1]; }
+    float corner_radius_bl_pct() const { return corner_radii_pct_[2]; }
+    float corner_radius_br_pct() const { return corner_radii_pct_[3]; }
+    /// Compute effective per-corner radius (px) against given bounds.
+    float effective_corner_radius_tl(float w, float h) const { return corner_radii_pct_[0] > 0 ? corner_radii_pct_[0] * 0.01f * std::min(w,h) : corner_radii_[0]; }
+    float effective_corner_radius_tr(float w, float h) const { return corner_radii_pct_[1] > 0 ? corner_radii_pct_[1] * 0.01f * std::min(w,h) : corner_radii_[1]; }
+    float effective_corner_radius_bl(float w, float h) const { return corner_radii_pct_[2] > 0 ? corner_radii_pct_[2] * 0.01f * std::min(w,h) : corner_radii_[2]; }
+    float effective_corner_radius_br(float w, float h) const { return corner_radii_pct_[3] > 0 ? corner_radii_pct_[3] * 0.01f * std::min(w,h) : corner_radii_[3]; }
     /// Per-corner radius accessors. corner_radii_[0..3] = TL, TR, BL, BR.
     bool has_corner_radii() const { return has_corner_radii_; }
     float corner_radius_tl() const { return corner_radii_[0]; }
@@ -1085,6 +1114,11 @@ private:
     Color border_color_{};
     float border_width_ = 0;
     float corner_radius_ = 0;
+    // pulp #1663 — borderRadius % support. When > 0, paint code resolves
+    // effective radius as `corner_radius_pct_ * 0.01 * min(width, height)`.
+    // 0 means "use plain corner_radius_ in px". Same pattern for the
+    // per-corner radii_pct_ slots below.
+    float corner_radius_pct_ = 0;
     bool has_border_ = false;
     BorderStyle border_style_ = BorderStyle::solid;
     // pulp #1514 — list-style cluster slots. Stored verbatim; paint-
@@ -1117,6 +1151,9 @@ private:
     bool border_left_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
+    // pulp #1663 — % support paired with corner_radii_. >0 means use pct
+    // resolution, 0 means use the px slot above. Sized 4 (TL, TR, BL, BR).
+    float corner_radii_pct_[4] = {0, 0, 0, 0};
     bool has_corner_radii_ = false;
     Position position_ = Position::static_;
     float top_ = 0, right_ = 0, bottom_ = 0, left_ = 0;

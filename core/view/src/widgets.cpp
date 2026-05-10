@@ -1512,7 +1512,9 @@ void Panel::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     auto bg = resolve_color(bg_token_, canvas::Color::rgba8(45, 45, 60));
     canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, b.width, b.height, corner_radius_);
+    // pulp #1663 — resolve the effective uniform radius (px or %).
+    const float eff_radius = effective_corner_radius(b.width, b.height);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, eff_radius);
 
     if (border_width_ > 0) {
         auto border = resolve_color(border_token_, canvas::Color::rgba8(80, 80, 100));
@@ -1523,7 +1525,7 @@ void Panel::paint(canvas::Canvas& canvas) {
         float inset = border_width_ * 0.5f;
         canvas.stroke_rounded_rect(inset, inset,
                                     b.width - border_width_, b.height - border_width_,
-                                    std::max(0.0f, corner_radius_ - inset));
+                                    std::max(0.0f, eff_radius - inset));
     }
 }
 

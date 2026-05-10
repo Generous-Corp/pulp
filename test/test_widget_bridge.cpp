@@ -11018,3 +11018,63 @@ TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
     auto fallback = panel->outline_color();
     REQUIRE(fallback.a > 0.0f);
 }
+
+// pulp #1663 — rn/borderRadius % family (5 entries) supports percent
+// values via paint-time bounds resolution. Bridge stores percent in
+// View::corner_radius_pct_ / corner_radii_pct_[4]; paint code calls
+// effective_corner_radius(width, height) which computes
+// `pct * 0.01 * min(width, height)` when percent slot > 0, otherwise
+// returns the plain px slot.
+TEST_CASE("setBorderRadius accepts % string + paint-time bounds resolution",
+          "[view][bridge][rn][issue-1663][borderradius-pct]") {
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Uniform — use a regular Panel
+    bridge.load_script("createPanel('p', '')");
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    p->set_bounds({0, 0, 100, 200});
+
+    // Plain px (existing behavior)
+    bridge.load_script("setBorderRadius('p', 12)");
+    REQUIRE_THAT(p->corner_radius(), WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(p->corner_radius_pct(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius(100, 200), WithinAbs(12.0f, 0.001f));
+
+    // % — slot stored in pct; effective resolves at paint time
+    bridge.load_script("setBorderRadius('p', '50%')");
+    REQUIRE_THAT(p->corner_radius_pct(), WithinAbs(50.0f, 0.001f));
+    // Effective = 50% of min(100, 200) = 50
+    REQUIRE_THAT(p->effective_corner_radius(100, 200), WithinAbs(50.0f, 0.001f));
+    // If bounds change, the resolved value tracks
+    REQUIRE_THAT(p->effective_corner_radius(40, 80), WithinAbs(20.0f, 0.001f));
+
+    // Switching back to px clears pct
+    bridge.load_script("setBorderRadius('p', 7)");
+    REQUIRE_THAT(p->corner_radius_pct(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius(100, 200), WithinAbs(7.0f, 0.001f));
+
+    // Per-corner percent
+    bridge.load_script("setBorderTopLeftRadius('p', '25%')");
+    bridge.load_script("setBorderTopRightRadius('p', '30%')");
+    bridge.load_script("setBorderBottomLeftRadius('p', '35%')");
+    bridge.load_script("setBorderBottomRightRadius('p', '40%')");
+    REQUIRE_THAT(p->corner_radius_tl_pct(), WithinAbs(25.0f, 0.001f));
+    REQUIRE_THAT(p->corner_radius_tr_pct(), WithinAbs(30.0f, 0.001f));
+    REQUIRE_THAT(p->corner_radius_bl_pct(), WithinAbs(35.0f, 0.001f));
+    REQUIRE_THAT(p->corner_radius_br_pct(), WithinAbs(40.0f, 0.001f));
+    // Effective on 100x200 = pct * 0.01 * min(100,200) = pct * 1
+    REQUIRE_THAT(p->effective_corner_radius_tl(100, 200), WithinAbs(25.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius_tr(100, 200), WithinAbs(30.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius_bl(100, 200), WithinAbs(35.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius_br(100, 200), WithinAbs(40.0f, 0.001f));
+
+    // Switching a per-corner back to px clears its pct slot
+    bridge.load_script("setBorderTopLeftRadius('p', 8)");
+    REQUIRE_THAT(p->corner_radius_tl_pct(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(p->effective_corner_radius_tl(100, 200), WithinAbs(8.0f, 0.001f));
+}

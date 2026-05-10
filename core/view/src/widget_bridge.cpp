@@ -3398,11 +3398,30 @@ void WidgetBridge::register_api() {
     // setBorderRadius(id, radius) — uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.
-    engine_.register_function("setBorderRadius", [this](choc::javascript::ArgumentList args) {
+    //
+    // pulp #1663 — accepts either a number (px) or a string with % suffix
+    // (e.g. "50%"). Percent values are stored separately and resolved at
+    // paint time as `pct * 0.01 * min(width, height)` so the radius
+    // tracks the View's actual bounds.
+    auto parseRadiusArg = [](choc::javascript::ArgumentList& args, int idx) -> std::pair<float, float> {
+        // returns {px_radius, pct_radius}: at most one is non-zero.
+        auto sval = args.get<std::string>(idx, "");
+        if (!sval.empty() && sval.back() == '%') {
+            try { return {0.0f, std::stof(sval.substr(0, sval.size() - 1))}; }
+            catch (...) { return {0.0f, 0.0f}; }
+        }
+        return {static_cast<float>(args.get<double>(idx, 0.0)), 0.0f};
+    };
+    engine_.register_function("setBorderRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto radius = static_cast<float>(args.get<double>(1, 0.0));
+        auto [px, pct] = parseRadiusArg(args, 1);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_border_radius(radius);
+        if (!v) return choc::value::Value();
+        if (pct > 0.0f) {
+            v->set_border_radius_pct(pct);
+        } else {
+            v->set_border_radius(px);
+        }
         return choc::value::Value();
     });
 
@@ -3412,32 +3431,41 @@ void WidgetBridge::register_api() {
     // without a translation layer. Sets the `has_corner_radii_` flag on
     // the View; paint_all() then routes background/border through the
     // per-corner path builder rather than fill_rounded_rect.
-    engine_.register_function("setBorderTopLeftRadius", [this](choc::javascript::ArgumentList args) {
+    // pulp #1663 — same %-string handling as setBorderRadius.
+    engine_.register_function("setBorderTopLeftRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto [px, pct] = parseRadiusArg(args, 1);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_corner_radius_tl(r);
+        if (!v) return choc::value::Value();
+        if (pct > 0.0f) v->set_corner_radius_tl_pct(pct);
+        else v->set_corner_radius_tl(px);
         return choc::value::Value();
     });
-    engine_.register_function("setBorderTopRightRadius", [this](choc::javascript::ArgumentList args) {
+    engine_.register_function("setBorderTopRightRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto [px, pct] = parseRadiusArg(args, 1);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_corner_radius_tr(r);
+        if (!v) return choc::value::Value();
+        if (pct > 0.0f) v->set_corner_radius_tr_pct(pct);
+        else v->set_corner_radius_tr(px);
         return choc::value::Value();
     });
-    engine_.register_function("setBorderBottomLeftRadius", [this](choc::javascript::ArgumentList args) {
+    engine_.register_function("setBorderBottomLeftRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto [px, pct] = parseRadiusArg(args, 1);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_corner_radius_bl(r);
+        if (!v) return choc::value::Value();
+        if (pct > 0.0f) v->set_corner_radius_bl_pct(pct);
+        else v->set_corner_radius_bl(px);
         return choc::value::Value();
     });
-    engine_.register_function("setBorderBottomRightRadius", [this](choc::javascript::ArgumentList args) {
+    engine_.register_function("setBorderBottomRightRadius", [this, parseRadiusArg](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto [px, pct] = parseRadiusArg(args, 1);
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_corner_radius_br(r);
+        if (!v) return choc::value::Value();
+        if (pct > 0.0f) v->set_corner_radius_br_pct(pct);
+        else v->set_corner_radius_br(px);
         return choc::value::Value();
     });
 

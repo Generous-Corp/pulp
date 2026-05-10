@@ -297,7 +297,7 @@ function _coerceMarginLen(tok: string | number): number | string {
 // today only takes a uniform radius, so we average x and y as the
 // closest visual approximation. True elliptical rendering needs the
 // paint side to call SkRRect::setRectXY; tracked as a deferred gap.
-function _coerceRadius(value: unknown): number {
+function _coerceRadius(value: unknown): number | string {
     if (typeof value === 'number') return value;
     if (value != null && typeof value === 'object') {
         const o = value as { x?: number; y?: number };
@@ -306,7 +306,15 @@ function _coerceRadius(value: unknown): number {
         return (x + y) / 2;
     }
     if (typeof value === 'string') {
-        const n = parseFloat(value);
+        // pulp #1663 — preserve "%" suffix so the bridge can route to
+        // percent-aware paint-time resolution. Other unit suffixes (px,
+        // em, etc.) collapse to a plain number as before.
+        const trimmed = value.trim();
+        if (trimmed.endsWith('%')) {
+            const n = parseFloat(trimmed);
+            return Number.isFinite(n) ? `${n}%` : 0;
+        }
+        const n = parseFloat(trimmed);
         return Number.isFinite(n) ? n : 0;
     }
     return 0;

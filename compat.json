@@ -3753,33 +3753,33 @@
       "issue": ""
     },
     "rn/borderBottomLeftRadius": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderBottomLeftRadius` to `setBorderBottomLeftRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
       "supportedValues": [
-        "number (px)"
+        "number (px)",
+        "% (resolved at paint time as pct * 0.01 * min(width, height))"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
+        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
       ],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
     },
     "rn/borderBottomRightRadius": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderBottomRightRadius` to `setBorderBottomRightRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
       "supportedValues": [
-        "number (px)"
+        "number (px)",
+        "% (resolved at paint time as pct * 0.01 * min(width, height))"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
+        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
       ],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
     },
     "rn/borderBottomWidth": {
@@ -3885,18 +3885,18 @@
       "issue": ""
     },
     "rn/borderRadius": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderRadius` to `setBorderRadius(id, ...)` (prop-applier.ts:300-302).",
       "supportedValues": [
-        "number (px)"
+        "number (px)",
+        "% (resolved at paint time as pct * 0.01 * min(width, height))"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
+        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
       ],
-      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full elliptical rrect rendering is a deferred paint-side gap).",
+      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full elliptical rrect rendering is a deferred paint-side gap). pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
     },
     "rn/borderRightColor": {
@@ -4000,33 +4000,33 @@
       "issue": ""
     },
     "rn/borderTopLeftRadius": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderTopLeftRadius` to `setBorderTopLeftRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
       "supportedValues": [
-        "number (px)"
+        "number (px)",
+        "% (resolved at paint time as pct * 0.01 * min(width, height))"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
+        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
       ],
-      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
+      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
     },
     "rn/borderTopRightRadius": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderTopRightRadius` to `setBorderTopRightRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
       "supportedValues": [
-        "number (px)"
+        "number (px)",
+        "% (resolved at paint time as pct * 0.01 * min(width, height))"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-wave2.test.ts"
+        "packages/pulp-react/test/prop-applier-wave2.test.ts",
+        "test/test_widget_bridge.cpp [issue-1663][borderradius-pct]"
       ],
-      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported. Wave 2 rn — RN Fabric `{ x, y }` elliptical form now flows through (degraded to averaged uniform radius; full SkRRect::setRectXY rendering remains a deferred paint-side gap). % keyword on radius still requires bridge-side wiring and stays in unsupportedValues. pulp #1663 wired %: bridge accepts \"NN%\" string, View stores in corner_radius_pct_ slot, paint-time effective_corner_radius() resolves against current bounds. Test backing at [view][bridge][rn][issue-1663][borderradius-pct].",
       "issue": ""
     },
     "rn/borderTopWidth": {
