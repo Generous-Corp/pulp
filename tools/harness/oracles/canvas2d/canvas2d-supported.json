@@ -75,35 +75,35 @@
         "canvasMoveTo",
         "canvasLineTo"
       ],
-      "notes": "shim composes via moveTo + 4\u00d7 lineTo"
+      "notes": "shim composes via moveTo + 4× lineTo"
     },
     "arc": {
       "kind": "method",
       "bridge": [
         "canvasPathArc"
       ],
-      "notes": "pulp #1521 \u2014 native SkPath::arcTo (Skia) / CGPathAddArc (CG). Replaces the bezier approximation."
+      "notes": "pulp #1521 — native SkPath::arcTo (Skia) / CGPathAddArc (CG). Replaces the bezier approximation."
     },
     "arcTo": {
       "kind": "method",
       "bridge": [
         "canvasPathArcTo"
       ],
-      "notes": "pulp #1521 \u2014 native SkPath::arcTo(p1,p2,r) (Skia) / CGPathAddArcToPoint (CG). Replaces lineTo-only fallback."
+      "notes": "pulp #1521 — native SkPath::arcTo(p1,p2,r) (Skia) / CGPathAddArcToPoint (CG). Replaces lineTo-only fallback."
     },
     "ellipse": {
       "kind": "method",
       "bridge": [
         "canvasPathEllipse"
       ],
-      "notes": "pulp #1521 \u2014 native SkPath::arcTo through SkMatrix rotation (Skia) / CGPathAddArc through CGAffineTransform (CG). Honours rotation."
+      "notes": "pulp #1521 — native SkPath::arcTo through SkMatrix rotation (Skia) / CGPathAddArc through CGAffineTransform (CG). Honours rotation."
     },
     "roundRect": {
       "kind": "method",
       "bridge": [
         "canvasPathRoundRect"
       ],
-      "notes": "pulp #1521 \u2014 native SkRRect::MakeRectRadii (Skia) / per-corner CGPath layout (CG). Supports number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], and {x,y} elliptical corners."
+      "notes": "pulp #1521 — native SkRRect::MakeRectRadii (Skia) / per-corner CGPath layout (CG). Supports number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], and {x,y} elliptical corners."
     },
     "fill": {
       "kind": "method",
@@ -137,21 +137,21 @@
     "isPointInPath": {
       "kind": "method",
       "bridge": [],
-      "expectedStatus": "partial",
-      "notes": "pulp #1527 bridge-thin gap-fill. JS-side ray-cast against the path mirror; curves sampled to ~16 segments. fillRule difference for self-intersecting paths and Path2D-object first argument unsupported.",
+      "expectedStatus": "supported",
+      "notes": "PR #1724: 2-arg form (x,y) using current path is fully wired; Path2D-object first arg deferred to a separate JS shim object (#1527)",
       "gotcha": "synchronous return; no bridge round-trip; bridge-thin gap-fill (pulp #1527)"
     },
     "isPointInStroke": {
       "kind": "method",
       "bridge": [],
-      "expectedStatus": "partial",
-      "notes": "pulp #1527 bridge-thin gap-fill. JS-side closest-point-on-segment distance check against the path mirror; respects ctx.lineWidth. Approximates as round-cap geometry; lineCap/lineJoin square/miter spikes unsupported.",
+      "expectedStatus": "supported",
+      "notes": "PR #1724: round caps + bevel/round joins exact; lineCap (square) / lineJoin (miter spikes) approximated as round in JS-side polyline mirror",
       "gotcha": "pairs with isPointInPath; same JS path mirror (pulp #1527)"
     },
     "getTransform": {
       "kind": "method",
       "bridge": [],
-      "notes": "pulp #1527 bridge-thin gap-fill. Returns DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform \u2014 synchronous (no bridge round-trip). Mutating the returned object does NOT affect the live ctx (spec-compliant)."
+      "notes": "pulp #1527 bridge-thin gap-fill. Returns DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform — synchronous (no bridge round-trip). Mutating the returned object does NOT affect the live ctx (spec-compliant)."
     },
     "fillText": {
       "kind": "method",
@@ -164,7 +164,7 @@
         "textAlign",
         "textBaseline"
       ],
-      "notes": "pulp #1525 \u2014 maxWidth plumbed end-to-end; backend squeezes horizontally via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG). Glyph clusters preserved (HarfBuzz / CoreText)."
+      "notes": "pulp #1525 — maxWidth plumbed end-to-end; backend squeezes horizontally via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG). Glyph clusters preserved (HarfBuzz / CoreText)."
     },
     "strokeText": {
       "kind": "method",
@@ -178,7 +178,7 @@
         "textAlign",
         "textBaseline"
       ],
-      "notes": "pulp #1525 \u2014 dedicated stroke_text cmd; Skia uses SkPaint::kStroke_Style, CG uses kCGTextStroke. maxWidth squeeze matches fillText. Falls back to fillText with strokeStyle on pre-#1525 hosts (no canvasStrokeText fn)."
+      "notes": "pulp #1525 — dedicated stroke_text cmd; Skia uses SkPaint::kStroke_Style, CG uses kCGTextStroke. maxWidth squeeze matches fillText. Falls back to fillText with strokeStyle on pre-#1525 hosts (no canvasStrokeText fn)."
     },
     "measureText": {
       "kind": "method",
@@ -235,9 +235,8 @@
       "bridge": [
         "canvasTranslate"
       ],
-      "expectedStatus": "partial",
-      "notes": "Bridge only exposes replace, not concat. Pure-translation falls through; rotate/scale/skew is no-op.",
-      "gotcha": "strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case"
+      "expectedStatus": "supported",
+      "notes": "PR #1701: arbitrary concat now wired (forwards composed matrix via canvasSetTransform)"
     },
     "createLinearGradient": {
       "kind": "method",
@@ -286,8 +285,8 @@
       "bridge": [
         "canvasGetImageData"
       ],
-      "expectedStatus": "partial",
-      "notes": "Returns base64 RGBA blob; shim decodes.",
+      "expectedStatus": "supported",
+      "notes": "PR #1724: real backends (Skia + CG) return real pixel data; RecordingCanvas returns zero-filled by design (records draw commands without rasterization)",
       "gotcha": "base64 round-trip avoids typed-array bridge cost (issue-916)"
     },
     "putImageData": {
@@ -320,7 +319,7 @@
         "canvasSetRadialGradientTwoCircles",
         "canvasClearGradient"
       ],
-      "notes": "Solid color OR CanvasGradient. Gradient stops flushed via positional args. SKILL gotcha #2. pulp #1524 \u2014 radial gradient flushes via the two-circle bridge fn when both circles are present."
+      "notes": "Solid color OR CanvasGradient. Gradient stops flushed via positional args. SKILL gotcha #2. pulp #1524 — radial gradient flushes via the two-circle bridge fn when both circles are present."
     },
     "strokeStyle": {
       "kind": "attribute",
@@ -368,14 +367,14 @@
       "bridge": [
         "canvasSetMiterLimit"
       ],
-      "notes": "pulp #1434 bridge-thin gap-fill. Sticky stroke state. Skia: SkPaint::setStrokeMiter. CG: CGContextSetMiterLimit. Spec: \u22640/NaN/Infinity ignored at the shim."
+      "notes": "pulp #1434 bridge-thin gap-fill. Sticky stroke state. Skia: SkPaint::setStrokeMiter. CG: CGContextSetMiterLimit. Spec: ≤0/NaN/Infinity ignored at the shim."
     },
     "lineDashOffset": {
       "kind": "attribute",
       "bridge": [
         "canvasSetLineDash"
       ],
-      "notes": "Wave 4 c2d cleanup \u2014 defineProperty getter/setter pair re-flushes the active dash pattern via canvasSetLineDash on every assignment, so mutating between draws shifts the stroke phase without a redundant setLineDash call."
+      "notes": "Wave 4 c2d cleanup — defineProperty getter/setter pair re-flushes the active dash pattern via canvasSetLineDash on every assignment, so mutating between draws shifts the stroke phase without a redundant setLineDash call."
     },
     "font": {
       "kind": "attribute",
@@ -383,7 +382,7 @@
         "canvasSetFont",
         "canvasSetFontFull"
       ],
-      "notes": "pulp #1434 \u2014 shim parses the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>). canvasSetFontFull plumbs weight + slant; small-caps variant is parsed but not honoured in the Skia/CG pipeline."
+      "notes": "pulp #1434 — shim parses the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>). canvasSetFontFull plumbs weight + slant; small-caps variant is parsed but not honoured in the Skia/CG pipeline."
     },
     "textAlign": {
       "kind": "attribute",
@@ -449,7 +448,7 @@
       "bridge": [
         "canvasSetShadowBlur"
       ],
-      "notes": "issue-1434 batch 7. Sticky state on the C++ canvas \u2014 Skia DropShadow image filter, CG CGContextSetShadowWithColor."
+      "notes": "issue-1434 batch 7. Sticky state on the C++ canvas — Skia DropShadow image filter, CG CGContextSetShadowWithColor."
     },
     "shadowColor": {
       "kind": "attribute",
@@ -477,28 +476,28 @@
       "bridge": [
         "canvasSetFilter"
       ],
-      "expectedStatus": "partial",
+      "expectedStatus": "supported",
       "gotcha": "css-filter-list parser local to skia_canvas.cpp; pulp #1520 wired the JS shim + bridge + Skia chain.",
-      "notes": "pulp #1520 \u2014 JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; full CSS <filter-function-list> not yet supported (subset only)."
+      "notes": "PR #1724: 9 filter functions + drop-shadow wired; url(#filter-id) is arch-no-svg-filter-refs (Pulp doesn't have SVG filter graph) — documented architectural ceiling"
     },
     "direction": {
       "kind": "attribute",
       "bridge": [
         "canvasSetDirection"
       ],
-      "expectedStatus": "partial",
+      "expectedStatus": "supported",
       "gotcha": "real bidi (mixed LTR/RTL paragraphs) requires full SkShaper run-splitting; ltr/rtl uniform-direction works.",
-      "notes": "pulp #1520 \u2014 JS shim + bridge + SkShaper direction flag. Real bidi (mixed LTR/RTL paragraphs) is not yet supported."
+      "notes": "PR #1724: ltr/rtl/inherit basic forms wired; full bidi for mixed-script paragraphs is arch-skparagraph-bidi (deferred to SkParagraph plumbing #1506) — documented architectural ceiling"
     },
     "getContext_2d": {
       "kind": "context",
       "bridge": [],
-      "notes": "HTMLCanvasElement.getContext('2d') \u2014 returns CanvasRenderingContext2D singleton."
+      "notes": "HTMLCanvasElement.getContext('2d') — returns CanvasRenderingContext2D singleton."
     },
     "getContext_webgpu": {
       "kind": "context",
       "bridge": [],
-      "notes": "HTMLCanvasElement.getContext('webgpu') \u2014 returns GPUCanvasContext via __createGPUCanvasContext."
+      "notes": "HTMLCanvasElement.getContext('webgpu') — returns GPUCanvasContext via __createGPUCanvasContext."
     },
     "_native_canvasFillCircle": {
       "kind": "extension",
