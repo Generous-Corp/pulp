@@ -170,8 +170,20 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         # v1 is too old per actionlint (GH deprecated its runner version);
         # v2 uses the Node 20 runner and is a drop-in replacement.
+        #
+        # pulp #1737 — only upload appcast.xml to the release page. The
+        # example plugin .pkg files (PulpEffect, PulpCompressor, PulpDrums,
+        # PulpGain, PulpPluck, PulpTone, PulpSynth, PulpSampler,
+        # PulpMpeSynth, AraPitchTracker — across AU/CLAP/VST3) still build
+        # in the steps above as smoke tests (catches regressions when the
+        # SDK touches examples/), and they're still uploaded to the
+        # workflow run via actions/upload-artifact for debugging. They are
+        # just NOT promoted to the user-facing release page, where they
+        # would imply they're production-quality installers ready to drop
+        # into ~/Library/Audio/Plug-Ins/. The SDK + CLI artifacts (pulp-*,
+        # pulp-sdk-*) are uploaded by .github/workflows/release-cli.yml.
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: artifacts/appcast.xml
           draft: true
           generate_release_notes: true
