@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07916"></a>
+## [0.79.16] - 2026-05-10
+
+- feat(view/css): wire 5 ABSENT css entries — appearance + maskSize + objectFit + objectPosition + grid shorthand ([#1709](https://github.com/danielraffel/pulp/pull/1709))
+
+<a id="v07913"></a>
+## [0.79.13] - 2026-05-10
+
+- test(css/html/canvas2d): NO-EV evidence backfill — 233 entries (closes #1711 batches #3-5) ([#1719](https://github.com/danielraffel/pulp/pull/1719))
+
 <a id="v07912"></a>
 ## [0.79.12] - 2026-05-10
 
@@ -1473,6 +1483,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.79.16]: https://github.com/danielraffel/pulp/releases/tag/v0.79.16
+[0.79.13]: https://github.com/danielraffel/pulp/releases/tag/v0.79.13
 [0.79.12]: https://github.com/danielraffel/pulp/releases/tag/v0.79.12
 [0.79.11]: https://github.com/danielraffel/pulp/releases/tag/v0.79.11
 [0.79.10]: https://github.com/danielraffel/pulp/releases/tag/v0.79.10
