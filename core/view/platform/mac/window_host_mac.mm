@@ -265,6 +265,7 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 
     pulp::view::MouseEvent me;
     me.position = pt;
+    me.window_position = pt;
     me.is_wheel = true;
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
     me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
@@ -274,12 +275,20 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
     while (v) {
         if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(v)) {
             sv->on_mouse_event(me);
-            sv->layout_children();  // re-layout after scroll position change
+            sv->layout_children();
+            [self setNeedsDisplay:YES];
+            return;
+        }
+        if (v->on_pointer_event) {
+            std::fprintf(stderr, "[DIAG] wheel bubbled from '%s' to '%s' (deltaY=%.2f)\n",
+                target->id().c_str(), v->id().c_str(), me.scroll_delta_y);
+            v->on_mouse_event(me);
             [self setNeedsDisplay:YES];
             return;
         }
         v = v->parent();
     }
+    std::fprintf(stderr, "[DIAG] wheel: no handler found from '%s'\n", target->id().c_str());
     target->on_mouse_event(me);
     [self setNeedsDisplay:YES];
 }
@@ -495,7 +504,24 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             me.modifiers = modifiersFromNSFlags(event.modifierFlags);
             me.is_down = true;
             me.click_count = static_cast<int>(event.clickCount);
-            _dragTarget->on_mouse_event(me);
+            // DOM-style pointer event bubbling: hit_test returns the
+            // deepest view, but on_pointer_event (from registerPointer)
+            // may live on an ancestor — e.g. a <canvas> child inside a
+            // <div onPointerDown=...> wrapper. Walk up to deliver.
+            auto* pe_target = _dragTarget;
+            while (pe_target && !pe_target->on_pointer_event) {
+                pe_target = pe_target->parent();
+            }
+            if (pe_target) {
+                std::fprintf(stderr, "[DIAG] pointerdown bubbled from '%s' to '%s' (clientX=%.0f clientY=%.0f)\n",
+                    _dragTarget->id().c_str(), pe_target->id().c_str(), pt.x, pt.y);
+                auto pe_me = me;
+                pe_me.position = toLocal(pt, pe_target, self.rootView);
+                pe_target->on_mouse_event(pe_me);
+            } else {
+                std::fprintf(stderr, "[DIAG] pointerdown: no on_pointer_event found walking up from '%s'\n",
+                    _dragTarget->id().c_str());
+            }
             _dragTarget->on_mouse_down(local);
         }
             [self setNeedsDisplay:YES];
@@ -527,7 +553,22 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             auto pt = [self localPoint:event];
             auto local = toLocal(pt, _dragTarget, self.rootView);
             _dragTarget->on_mouse_drag(local);
-            if (_dragTarget->on_drag) _dragTarget->on_drag(local);
+            // DOM-style drag bubbling: on_drag (pointermove from
+            // registerPointer) may live on an ancestor of the hit target.
+            auto* drag_handler = _dragTarget;
+            while (drag_handler && !drag_handler->on_drag) {
+                drag_handler = drag_handler->parent();
+            }
+            if (drag_handler) {
+                static int drag_count = 0;
+                if (++drag_count <= 3)
+                    std::fprintf(stderr, "[DIAG] drag bubbled to '%s'\n", drag_handler->id().c_str());
+                auto drag_local = toLocal(pt, drag_handler, self.rootView);
+                drag_handler->on_drag(drag_local);
+            } else {
+                static bool logged = false;
+                if (!logged) { logged = true; std::fprintf(stderr, "[DIAG] drag: no on_drag found from '%s'\n", _dragTarget->id().c_str()); }
+            }
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost mouseDragged error: " << e.what() << "\n";
@@ -587,6 +628,23 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                 // bubbled-to ancestor).
                 auto clicked_id = _dragTarget->id();
                 auto modifiers = modifiersFromNSFlags(event.modifierFlags);
+
+                // Dispatch pointerup with DOM-style bubbling (same
+                // pattern as pointerdown in mouseDown:).
+                pulp::view::MouseEvent me;
+                me.window_position = pt;
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = modifiers;
+                me.is_down = false;
+                auto* pe_up = _dragTarget;
+                while (pe_up && !pe_up->on_pointer_event) {
+                    pe_up = pe_up->parent();
+                }
+                if (pe_up) {
+                    me.position = toLocal(pt, pe_up, self.rootView);
+                    pe_up->on_mouse_event(me);
+                }
+
                 _dragTarget->on_mouse_up(local);
                 if (released_target == _dragTarget && (click_handler || global_click)) {
                     dispatch_async(dispatch_get_main_queue(), ^{
