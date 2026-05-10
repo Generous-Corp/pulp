@@ -1349,3 +1349,37 @@ TEST_CASE("WebCompat: :root pseudo applies stylesheet rules to body element",
     auto applied = env.engine.evaluate("__bodyElement__.style._props.width");
     REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "7px");
 }
+
+// pulp #1737 (Codex P2 followup #3 on #1779): `:root` must match the
+// actual document root (body), NOT any element with a null parent.
+// Pre-fix the matcher returned true for `!el._parentElement`, which
+// also matched DETACHED elements (createElement before appendChild),
+// leaking `:root { ... }` styles into normal nodes when they were
+// later inserted. Tied to identity check `el === __bodyElement__`.
+TEST_CASE("WebCompat: :root pseudo does not match detached elements",
+          "[webcompat][css-pseudo][issue-1737][issue-1779-followup]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        // Detached element — has no _parentElement but is NOT the root.
+        var __detached = document.createElement('div');
+        __detached.id = 'detached-target';
+        // Don't appendChild — leave detached.
+
+        var __rSheet = new StyleSheet({ ':root': { width: '99px' } });
+        __rSheet._parsedRules[0].parsed.pseudo = 'root';
+        __rSheet.attach();
+
+        // Pre-fix: detached element matched :root and got width:99px.
+        // Post-fix: detached element does NOT match — width slot stays
+        // empty (no rule applied).
+    )JS");
+    auto detached_width = env.engine.evaluate(
+        "__detached.style._props.width || ''");
+    REQUIRE(std::string(detached_width.getWithDefault<std::string_view>(""))
+            == "");
+    // Sanity: body still gets the rule.
+    auto body_width = env.engine.evaluate(
+        "__bodyElement__.style._props.width || ''");
+    REQUIRE(std::string(body_width.getWithDefault<std::string_view>(""))
+            == "99px");
+}

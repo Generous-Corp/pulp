@@ -577,20 +577,29 @@ function _matchesPseudoClass(el, pseudo) {
         return !!parent && parent._children && parent._children.length === 1
             && parent._children[0] === el;
     }
-    // pulp #1737 (Codex P2 followup #2 on #1773): `:root` matcher
-    // restored. The earlier removal broke StyleSheet._applyTo, which
-    // calls _matchesSelector directly to apply `:root { ... }` rules
-    // to the body — without the matcher branch, those rules silently
-    // stopped working (CSS token / theme patterns regressed).
+    // pulp #1737 (Codex P2 followup #3 on #1779): `:root` matches the
+    // document root element specifically (`__bodyElement__`), not any
+    // element with no parent. The previous `!el._parentElement` check
+    // also matched DETACHED elements (createElement before appendChild),
+    // which leaked `:root { ... }` theme/layout styles into normal
+    // nodes when they were later inserted. StyleSheet.attach() walks
+    // every entry in `__elements__` so the bug surfaced for any element
+    // created mid-stylesheet-life.
+    //
+    // Tied to the root via identity check — __bodyElement__ is the
+    // synthetic body element this shim creates at the top of
+    // web-compat-document.js. Detached elements still have a non-null
+    // _parentElement once mounted (and even pre-mount they're never
+    // === __bodyElement__), so this branch is safe.
     //
     // Catalog still doesn't claim :root for document.querySelector
     // because _findMatch starts traversal from root._children — the
     // root itself is never queued. So:
-    //   * stylesheet `:root { color: red }` → applies (this branch).
+    //   * stylesheet `:root { color: red }` → applies to body (this branch).
     //   * document.querySelector(':root') → returns null (traversal
     //     never sees the root). Catalog supportedValues notes the gap.
     if (lower === "root") {
-        return !el._parentElement;
+        return el === __bodyElement__;
     }
     if (lower === "empty") {
         return !el._children || el._children.length === 0;
