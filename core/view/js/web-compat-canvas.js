@@ -830,11 +830,15 @@ CanvasRenderingContext2D.prototype.getTransform = function() {
 // non-translation matrices (caller should not rely on visual output) but
 // the query result is correct.
 CanvasRenderingContext2D.prototype.transform = function(a, b, c, d, e, f) {
-    if (a === 1 && b === 0 && c === 0 && d === 1 && typeof canvasTranslate === "function") {
-        canvasTranslate(this._id, e, f);
-    }
-    // M' = M * given (concat-on-right). Spec semantics for the JS-side
-    // mirror; the bridge replay path is the visual lossy one.
+    // pulp #1348 / #1666 — strict-concat semantics: M' = M * given
+    // (concat-on-right). Compose on the JS-side mirror, then forward
+    // the FULL composed matrix to the bridge so the canvas state stays
+    // in sync. Previously only the pure-translation sub-case was
+    // forwarded (canvasTranslate fast path); arbitrary scale/rotate/
+    // skew concats silently no-op'd at the bridge — JS mirror tracked
+    // correct values but Skia drew with the wrong transform.
+    // canvasSetTransform replaces the bridge state with the composed
+    // result, which equals the M' computed below.
     var t = this._currentTransform;
     var na = t[0] * a + t[2] * b;
     var nb = t[1] * a + t[3] * b;
@@ -842,6 +846,9 @@ CanvasRenderingContext2D.prototype.transform = function(a, b, c, d, e, f) {
     var nd = t[1] * c + t[3] * d;
     var ne = t[0] * e + t[2] * f + t[4];
     var nf = t[1] * e + t[3] * f + t[5];
+    if (typeof canvasSetTransform === "function") {
+        canvasSetTransform(this._id, na, nb, nc, nd, ne, nf);
+    }
     this._currentTransform = [na, nb, nc, nd, ne, nf];
 };
 

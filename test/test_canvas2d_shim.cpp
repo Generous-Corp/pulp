@@ -2659,6 +2659,56 @@ TEST_CASE("Canvas2D resetTransform returns matrix to identity",
     REQUIRE(result == "1,0,0,1,0,0,true");
 }
 
+// pulp #1348 / #1666 — `ctx.transform(a,b,c,d,e,f)` is concat-on-right,
+// not replace. Previously only the pure-translation sub-case forwarded
+// to the bridge (canvasTranslate fast path); arbitrary scale/rotate/
+// skew concats updated the JS-side mirror but never reached the bridge.
+// The fix forwards the FULL composed matrix via canvasSetTransform.
+TEST_CASE("Canvas2D transform() concats on right and forwards to bridge",
+          "[view][canvas2d][issue-1348][codex-p1]") {
+    // Scale * translate: result must be the JS-side composed matrix,
+    // and getTransform() must reflect that (post-fix the bridge state
+    // matches; pre-fix only the JS mirror was correct, but
+    // getTransform() reads from the JS mirror anyway, so the failure
+    // mode was a *paint-time* divergence, not a getTransform read).
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Establish a baseline transform: translate(10, 20)
+        ctx.translate(10, 20);
+        // Now concat a 2x scale via transform()
+        ctx.transform(2, 0, 0, 2, 0, 0);
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f].join(',');
+    )");
+    // After translate(10,20): M = [[1,0,10],[0,1,20]]
+    // After transform(2,0,0,2,0,0): M' = M * S
+    //   na = 1*2 + 0*0 = 2, nb = 0*2 + 1*0 = 0
+    //   nc = 1*0 + 0*2 = 0, nd = 0*0 + 1*2 = 2
+    //   ne = 1*0 + 0*0 + 10 = 10, nf = 0*0 + 1*0 + 20 = 20
+    REQUIRE(result == "2,0,0,2,10,20");
+}
+
+// Sequential transform() concats — exercises the strict-concat path
+// across multiple non-translation operations.
+TEST_CASE("Canvas2D transform() composes with sequential rotate + scale",
+          "[view][canvas2d][issue-1348][codex-p1]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Identity → 3x scale → 3x scale (cumulative 9x)
+        ctx.transform(3, 0, 0, 3, 0, 0);
+        ctx.transform(3, 0, 0, 3, 0, 0);
+        var m = ctx.getTransform();
+        return [m.a, m.d].join(',');
+    )");
+    REQUIRE(result == "9,9");
+}
+
 TEST_CASE("Canvas2D save/restore restores prior transform",
           "[view][canvas2d][issue-1527]") {
     auto result = run_in_bridge(R"(
