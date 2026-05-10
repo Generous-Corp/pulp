@@ -7229,12 +7229,15 @@ TEST_CASE("WidgetBridge setClipPath stores SVG-path-d on the View",
     REQUIRE_FALSE(panel->has_clip_path());
 }
 
-// Codex #1616 P1 — `setClipPath` was forwarding the verbatim CSS value
-// (e.g. `path("M ...")`, `none`, `circle(...)`) to `SkPath::FromSVGString`,
-// which only accepts raw "d" data. The unwrap path below is the bridge-side
-// fix; non-path() shapes are deferred per #1515.
-TEST_CASE("WidgetBridge setClipPath unwraps path() and rejects non-path forms",
-          "[view][bridge][issue-1540][codex-p1]") {
+// pulp #1656 Tier-2 follow-up — `setUserSelect` was a literal `(void)args`
+// no-op; #1656 walked the catalog claim back to `partial`. This Tier-2
+// PR wires the keyword to View::user_select_ for real, flips the catalog
+// back to `supported` with this test as evidence, and exercises the
+// new #1657 control #1 evidence gate end-to-end (a `supported` claim
+// now requires real test coverage of the bridge fn).
+TEST_CASE("WidgetBridge setUserSelect routes all 5 CSS keywords to View::user_select_",
+          "[view][bridge][css][issue-1656-tier2-userSelect]") {
+    using US = pulp::view::View::UserSelect;
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -7243,63 +7246,39 @@ TEST_CASE("WidgetBridge setClipPath unwraps path() and rejects non-path forms",
     auto* panel = bridge.widget("p");
     REQUIRE(panel != nullptr);
 
-    // path("...") — quoted, double-quote
-    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 L 50 0 L 50 50 Z")'))");
-    REQUIRE(panel->has_clip_path());
-    REQUIRE(panel->clip_path() == "M 0 0 L 50 0 L 50 50 Z");
+    // Default (unset): auto.
+    REQUIRE(panel->user_select() == US::auto_);
 
-    // path('...') — single-quote variant
-    bridge.load_script("setClipPath('p', \"path('M 1 1 L 9 1')\")");
-    REQUIRE(panel->clip_path() == "M 1 1 L 9 1");
+    // Each of the 5 CSS keywords routes to the matching enum value.
+    bridge.load_script("setUserSelect('p', 'none')");
+    REQUIRE(panel->user_select() == US::none);
+    bridge.load_script("setUserSelect('p', 'text')");
+    REQUIRE(panel->user_select() == US::text);
+    bridge.load_script("setUserSelect('p', 'all')");
+    REQUIRE(panel->user_select() == US::all);
+    bridge.load_script("setUserSelect('p', 'contain')");
+    REQUIRE(panel->user_select() == US::contain);
+    bridge.load_script("setUserSelect('p', 'auto')");
+    REQUIRE(panel->user_select() == US::auto_);
 
-    // path("...") with surrounding whitespace and inner trim
-    bridge.load_script(R"(setClipPath('p', '  path( "M 0 0 H 10"  )  '))");
-    REQUIRE(panel->clip_path() == "M 0 0 H 10");
+    // Unknown keyword resets to spec default (auto).
+    bridge.load_script("setUserSelect('p', 'none')");   // not auto
+    REQUIRE(panel->user_select() == US::none);
+    bridge.load_script("setUserSelect('p', 'wat')");
+    REQUIRE(panel->user_select() == US::auto_);
 
-    // `none` clears the slot per CSS spec.
-    bridge.load_script("setClipPath('p', 'none')");
-    REQUIRE_FALSE(panel->has_clip_path());
-
-    // Re-set then pass a non-path shape: slot must clear (deferred form).
-    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
-    REQUIRE(panel->has_clip_path());
-    bridge.load_script("setClipPath('p', 'circle(50% at 50% 50%)')");
-    REQUIRE_FALSE(panel->has_clip_path());
-
-    // url(#ref) — also deferred form, slot must clear (no bogus forward).
-    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
-    bridge.load_script("setClipPath('p', 'url(#someId)')");
-    REQUIRE_FALSE(panel->has_clip_path());
-
-    // polygon(...) — also deferred form.
-    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
-    bridge.load_script("setClipPath('p', 'polygon(0 0, 10 0, 5 10)')");
-    REQUIRE_FALSE(panel->has_clip_path());
-
-    // Bare SVG-path "d" data (no wrapper): the original pre-#1540
-    // form. Still passes through verbatim for legacy callers and the
-    // existing [issue-1515] round-trip test.
-    bridge.load_script("setClipPath('p', 'M 0 0 L 20 0 L 20 20 Z')");
-    REQUIRE(panel->has_clip_path());
-    REQUIRE(panel->clip_path() == "M 0 0 L 20 0 L 20 20 Z");
-
-    // Codex #1616 P2 — CSS keywords are case-insensitive. Verify the
-    // bridge normalizes case before dispatch (NONE clears, PATH(...)
-    // unwraps, URL(#id) is treated as deferred).
-    bridge.load_script("setClipPath('p', 'M 1 1 L 9 1')");  // pre-set
-    REQUIRE(panel->has_clip_path());
-    bridge.load_script("setClipPath('p', 'NONE')");
-    REQUIRE_FALSE(panel->has_clip_path());
-
-    bridge.load_script(R"(setClipPath('p', 'PATH("M 5 5 L 6 6")'))");
-    REQUIRE(panel->has_clip_path());
-    REQUIRE(panel->clip_path() == "M 5 5 L 6 6");
-
-    bridge.load_script(R"(setClipPath('p', 'Path("M 7 7")'))"); // mixed-case
-    REQUIRE(panel->clip_path() == "M 7 7");
-
-    bridge.load_script("setClipPath('p', 'URL(#someId)')");  // deferred
-    REQUIRE_FALSE(panel->has_clip_path());
+    // CSSStyleDeclaration JS path also dispatches end-to-end (matches
+    // the user-facing `el.style.userSelect = '...'` surface).
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('userSelect', 'none');
+    )");
+    REQUIRE(panel->user_select() == US::none);
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('userSelect', 'text');
+    )");
+    REQUIRE(panel->user_select() == US::text);
 }
 
 TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",

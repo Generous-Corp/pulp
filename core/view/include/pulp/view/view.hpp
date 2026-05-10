@@ -1000,6 +1000,15 @@ public:
     void set_cursor(CursorStyle c) { cursor_ = c; }
     CursorStyle cursor() const { return cursor_; }
 
+    /// CSS `user-select` (pulp #1538 / #1656 / Tier-2 follow-up).
+    /// Stored slot for the keyword the JS shim resolves to. Read by
+    /// interactive widgets (TextEditor, Label) that participate in
+    /// text selection. `auto_` is the spec default (resolves per-widget
+    /// to whatever its native selectability is).
+    enum class UserSelect { auto_, none, text, all, contain };
+    void set_user_select(UserSelect s) { user_select_ = s; }
+    UserSelect user_select() const { return user_select_; }
+
 private:
     /// Seed corner_radii_ from the uniform corner_radius_ on the first
     /// transition into per-corner mode (pulp #1171 Codex P2 on #1044).
@@ -1157,6 +1166,7 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
+    UserSelect user_select_ = UserSelect::auto_;  // pulp #1538 / #1656 follow-up
     WritingDirection direction_ = WritingDirection::auto_;  // pulp #1434 A2-3
     // pulp #1549 — CSS / RN mix-blend-mode. Default kSrcOver (canvas
     // BlendMode::normal) is a paint-time no-op; any non-default value
