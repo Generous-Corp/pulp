@@ -7525,19 +7525,21 @@
       "issue": "1346"
     },
     "canvas2d/fillText": {
-      "status": "partial",
-      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncShadowState + _syncFilterState + _syncDirectionState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). pulp #1525 plumbed maxWidth end-to-end (Skia: SkMatrix::Scale around the origin; CG: CGContextScaleCTM). pulp Wave 3 c2d.6 routes gradient/pattern fillStyle through current_fill_paint() so glyphs honour the active gradient_shader_.",
+      "status": "supported",
+      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncShadowState + _syncFilterState + _syncDirectionState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). pulp #1525 plumbed maxWidth end-to-end (Skia: SkMatrix::Scale around the origin; CG: CGContextScaleCTM). pulp Wave 3 c2d.6 routes gradient/pattern fillStyle through current_fill_paint() on Skia. pulp #1666 — CoreGraphicsCanvas::fill_text now switches to kCGTextClip on the glyph fills then calls fill_with_active_paint(), so the active gradient (set via set_fill_gradient_linear/_radial/_two_circles) paints the glyphs on the CG path too.",
       "supportedValues": [
         "fillText(text, x, y) — solid colour fillStyle",
         "fillText(text, x, y, maxWidth) — squeezed via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG)",
-        "gradient fillStyle (shader flows onto glyph paint via current_fill_paint)",
+        "gradient fillStyle on Skia (shader flows onto glyph paint via current_fill_paint)",
+        "gradient fillStyle on CoreGraphics (kCGTextClip + CGContextDrawLinearGradient/Radial inside the glyph clip)",
         "CanvasPattern fillStyle on Skia (SkShader::MakeImage)"
       ],
-      "unsupportedValues": [
-        "gradient/pattern fillStyle on CoreGraphics backend (apply_fill_color() in core/canvas/platform/mac/cg_canvas.mm doesn't honor gradient state for glyph fills — Skia path is the only one that paints gradient text)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [issue-1666]",
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
       ],
-      "tests": [],
-      "notes": "pulp #1525 — maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 — gradient/pattern fillStyle routes through current_fill_paint() so the shader applies to glyphs. Wave 4 c2d cleanup: catalog reconciled to match wired implementation. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1643 added gradient fillStyle to glyphs only on the Skia backend; CG path still degrades to solid color from the gradient's first stop.",
+      "notes": "pulp #1525 — maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 — gradient/pattern fillStyle routes through current_fill_paint() on Skia. pulp #1666 — CoreGraphics path now handles gradient fillStyle via kCGTextClip + fill_with_active_paint(). CG pattern fillStyle on glyphs is a separate sub-feature tracked under canvas2d/createPattern follow-ups.",
       "issue": ""
     },
     "canvas2d/strokeText": {
@@ -7734,18 +7736,19 @@
       "issue": ""
     },
     "canvas2d/strokeStyle": {
-      "status": "partial",
-      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 — bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader.",
+      "status": "supported",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 — bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader. pulp #1666 — CoreGraphicsCanvas now implements set_stroke_gradient_linear/_radial/_two_circles/_conic + a stroke_with_active_paint() helper that builds CGGradientRef from the stops, calls CGContextReplacePathWithStrokedPath + CGContextClip, then CGContextDrawLinearGradient/Radial inside the clip. All stroke entry points (stroke_rect, stroke_rounded_rect, stroke_circle, stroke_arc, stroke_line, stroke_path, stroke_current_path, stroke_text via CTFontCreatePathForGlyph) route through that helper when has_stroke_gradient_ is set.",
       "supportedValues": [
         "CSS color strings",
-        "CanvasGradient (linear, radial, two-circle radial, conic) on stroke",
+        "CanvasGradient (linear, radial, two-circle radial) on stroke (Skia + CoreGraphics)",
+        "CanvasGradient (conic) on stroke (Skia)",
         "CanvasPattern on stroke (Skia)"
       ],
-      "unsupportedValues": [
-        "gradient strokes on non-Skia backends (set_stroke_gradient_* fallbacks collapse the gradient to set_stroke_color from the first stop; only SkiaCanvas implements true gradient stroke shading)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [issue-1666]"
       ],
-      "tests": [],
-      "notes": "pulp Wave 3 c2d.7 — stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1643 added gradient stroke shaders only on Skia; CG and other backends fall through Canvas::set_stroke_gradient_*'s first-stop fallback.",
+      "notes": "pulp Wave 3 c2d.7 — stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation. PR #1643 added gradient stroke shaders on Skia. pulp #1666 — added native CG stroke gradient implementation (linear/radial/two-circle) using CGContextReplacePathWithStrokedPath + CGContextDrawLinearGradient/Radial. CG conic stroke + CG pattern stroke fall back to first-stop solid; tracked as separate follow-ups under canvas2d/createConicGradient + canvas2d/createPattern.",
       "issue": ""
     },
     "canvas2d/lineWidth": {

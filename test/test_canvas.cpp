@@ -2559,6 +2559,132 @@ TEST_CASE("CoreGraphicsCanvas set_fill_pattern clears on empty src",
     REQUIRE(pixels[2] == 0);    // B
 }
 
+// pulp #1666 — CoreGraphicsCanvas::fill_text must honour an active fill
+// gradient. Pre-fix, fill_text used kCGTextFill with apply_fill_color()
+// which routed solid `fill_color_` into the glyphs and silently dropped
+// the gradient set via set_fill_gradient_linear. Post-fix, fill_text
+// switches to kCGTextClip on the glyph fills then paints the active
+// gradient inside the clip. Test renders glyphs with a horizontal
+// red→blue linear gradient and probes left vs right pixels to confirm
+// the colour ramp lands on glyph pixels (not solid stroke colour).
+TEST_CASE("CoreGraphicsCanvas::fill_text honours active fill gradient",
+          "[canvas][cg][issue-1666]") {
+    constexpr int W = 128;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        // Horizontal gradient: red at x=0, blue at x=W.
+        Color stops[2] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+            Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+        };
+        float positions[2] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(0.0f, 0.0f,
+                                        static_cast<float>(W), 0.0f,
+                                        stops, positions, 2);
+        canvas.set_font("Helvetica", 28);
+        canvas.fill_text("WWWWWWWW", 0, 26);
+    }
+    CGContextRelease(ctx);
+
+    auto sample = [&](int x, int y, int chan) -> int {
+        return pixels[(static_cast<size_t>(y) * W + x) * 4u + chan];
+    };
+
+    // Find a glyph pixel near the left edge (high red, low blue) and a
+    // glyph pixel near the right edge (low red, high blue). Scan the
+    // baseline-ish row range [10, 25] across the column.
+    auto any_glyph_with_dominant_channel = [&](int x_lo, int x_hi,
+                                                int dominant, int other) {
+        for (int x = x_lo; x < x_hi; ++x) {
+            for (int y = 6; y < 28; ++y) {
+                int d = sample(x, y, dominant);
+                int o = sample(x, y, other);
+                int a = sample(x, y, 3);
+                if (a > 32 && d > 100 && d > o + 30) return true;
+            }
+        }
+        return false;
+    };
+    INFO("Left edge of gradient text should have red-dominant glyph pixels.");
+    REQUIRE(any_glyph_with_dominant_channel(0, 16, /*r*/0, /*b*/2));
+    INFO("Right edge of gradient text should have blue-dominant glyph pixels.");
+    REQUIRE(any_glyph_with_dominant_channel(W - 16, W, /*b*/2, /*r*/0));
+}
+
+// pulp #1666 — CoreGraphicsCanvas stroke ops must honour an active
+// stroke gradient set via set_stroke_gradient_linear. Pre-fix, every
+// stroke_* method called apply_stroke_color() which routed solid
+// `stroke_color_` and silently dropped the gradient. Post-fix, stroke
+// methods short-circuit to stroke_with_active_paint() which clips to
+// the stroked outline and draws the gradient. Probe a wide stroke_rect
+// rendered with a horizontal red→blue gradient: the left vertical edge
+// must be red-dominant; the right vertical edge must be blue-dominant.
+TEST_CASE("CoreGraphicsCanvas::stroke_rect honours active stroke gradient",
+          "[canvas][cg][issue-1666]") {
+    constexpr int W = 128;
+    constexpr int H = 64;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        Color stops[2] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+            Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+        };
+        float positions[2] = {0.0f, 1.0f};
+        canvas.set_stroke_gradient_linear(0.0f, 0.0f,
+                                          static_cast<float>(W), 0.0f,
+                                          stops, positions, 2);
+        canvas.set_line_width(6.0f);
+        canvas.stroke_rect(8, 8, W - 16, H - 16);
+    }
+    CGContextRelease(ctx);
+
+    auto sample = [&](int x, int y, int chan) -> int {
+        return pixels[(static_cast<size_t>(y) * W + x) * 4u + chan];
+    };
+
+    auto any_stroked_with_channel = [&](int x_lo, int x_hi,
+                                         int dominant, int other) {
+        for (int x = x_lo; x < x_hi; ++x) {
+            for (int y = 8; y < H - 8; ++y) {
+                int d = sample(x, y, dominant);
+                int o = sample(x, y, other);
+                int a = sample(x, y, 3);
+                if (a > 32 && d > 100 && d > o + 30) return true;
+            }
+        }
+        return false;
+    };
+    INFO("Left edge of gradient-stroked rect should be red-dominant.");
+    REQUIRE(any_stroked_with_channel(4, 16, /*r*/0, /*b*/2));
+    INFO("Right edge of gradient-stroked rect should be blue-dominant.");
+    REQUIRE(any_stroked_with_channel(W - 16, W - 4, /*b*/2, /*r*/0));
+}
+
 #endif  // __APPLE__
 
 // pulp #1368 — Canvas's default save_count() / restore_to_count() impls

@@ -70,6 +70,27 @@ public:
                                   int count) override;
     void clear_fill_gradient() override;
 
+    // pulp #1666 — stroke-side gradient overrides. Parallel to fill-side
+    // GradientKind state so stroke calls can route through
+    // stroke_with_active_paint() when a gradient is active. Without these
+    // overrides the base no-op meant stroke draws collapsed to first-stop
+    // color even when the JS shim set createLinearGradient() as
+    // strokeStyle.
+    void set_stroke_gradient_linear(float x0, float y0, float x1, float y1,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial(float cx, float cy, float radius,
+                                     const Color* colors, const float* positions,
+                                     int count) override;
+    void set_stroke_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
+    void set_stroke_gradient_conic(float cx, float cy, float start_angle,
+                                    const Color* colors, const float* positions,
+                                    int count) override;
+    void clear_stroke_gradient() override;
+
     // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern. CG
     // has no first-class pattern shader (CGPattern requires a custom
     // CGPatternRef + tiling closure dance), so degrade silently to the
@@ -193,6 +214,17 @@ private:
     std::vector<Color> grad_colors_;
     std::vector<float> grad_positions_;
 
+    // pulp #1666 — parallel stroke-side state. Same shape as the fill
+    // gradient slots; checked by stroke_with_active_paint() at every
+    // stroke site that previously called apply_stroke_color directly.
+    bool has_stroke_gradient_ = false;
+    GradientKind stroke_gradient_kind_ = GradientKind::none;
+    float stroke_grad_x0_ = 0, stroke_grad_y0_ = 0, stroke_grad_x1_ = 0, stroke_grad_y1_ = 0;
+    float stroke_grad_radius_ = 0;
+    float stroke_grad_radius_inner_ = 0;
+    std::vector<Color> stroke_grad_colors_;
+    std::vector<float> stroke_grad_positions_;
+
     // pulp #1524 — software-rasterised conic gradient. CG has no native
     // conic shader, so set_fill_gradient_conic walks every pixel of a
     // bounding-box bitmap, computes the angle from the centre, interpolates
@@ -249,6 +281,10 @@ private:
     // Fills (or clips to) the current path or rect using either the solid
     // fill_color_ or the active gradient when has_gradient_ is set.
     void fill_with_active_paint();
+    // Strokes the current path using either apply_stroke_color or, when
+    // has_stroke_gradient_ is set, draws the active stroke gradient
+    // clipped to the stroked-path outline (via CGContextReplacePathWithStrokedPath).
+    void stroke_with_active_paint();
     void release_path();
 };
 

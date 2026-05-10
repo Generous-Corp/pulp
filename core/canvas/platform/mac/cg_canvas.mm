@@ -319,6 +319,12 @@ void CoreGraphicsCanvas::clear_rect(float x, float y, float w, float h) {
 }
 
 void CoreGraphicsCanvas::stroke_rect(float x, float y, float w, float h) {
+    if (has_stroke_gradient_) {
+        CGContextBeginPath(ctx_);
+        CGContextAddRect(ctx_, CGRectMake(x, y, w, h));
+        stroke_with_active_paint();
+        return;
+    }
     apply_stroke_color();
     CGContextStrokeRect(ctx_, CGRectMake(x, y, w, h));
 }
@@ -357,6 +363,10 @@ void CoreGraphicsCanvas::fill_rounded_rect(float x, float y, float w, float h, f
 
 void CoreGraphicsCanvas::stroke_rounded_rect(float x, float y, float w, float h, float radius) {
     add_rounded_rect_path(x, y, w, h, radius);
+    if (has_stroke_gradient_) {
+        stroke_with_active_paint();
+        return;
+    }
     apply_stroke_color();
     CGContextStrokePath(ctx_);
 }
@@ -380,36 +390,54 @@ void CoreGraphicsCanvas::fill_circle(float cx, float cy, float radius) {
 }
 
 void CoreGraphicsCanvas::stroke_circle(float cx, float cy, float radius) {
+    if (has_stroke_gradient_) {
+        CGContextBeginPath(ctx_);
+        CGContextAddEllipseInRect(ctx_, CGRectMake(cx - radius, cy - radius, radius * 2, radius * 2));
+        stroke_with_active_paint();
+        return;
+    }
     apply_stroke_color();
     CGContextStrokeEllipseInRect(ctx_, CGRectMake(cx - radius, cy - radius, radius * 2, radius * 2));
 }
 
 void CoreGraphicsCanvas::stroke_arc(float cx, float cy, float radius,
                                    float start_angle, float end_angle) {
-    apply_stroke_color();
     CGContextBeginPath(ctx_);
     // CG uses clockwise=0 for counterclockwise, but our coords are flipped
     CGContextAddArc(ctx_, cx, cy, radius, start_angle, end_angle, 0);
+    if (has_stroke_gradient_) {
+        stroke_with_active_paint();
+        return;
+    }
+    apply_stroke_color();
     CGContextStrokePath(ctx_);
 }
 
 void CoreGraphicsCanvas::stroke_line(float x0, float y0, float x1, float y1) {
-    apply_stroke_color();
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, x0, y0);
     CGContextAddLineToPoint(ctx_, x1, y1);
+    if (has_stroke_gradient_) {
+        stroke_with_active_paint();
+        return;
+    }
+    apply_stroke_color();
     CGContextStrokePath(ctx_);
 }
 
 void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
     if (count < 2) return;
-    apply_stroke_color();
     CGContextSetShouldAntialias(ctx_, true);
     CGContextSetAllowsAntialiasing(ctx_, true);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         CGContextAddLineToPoint(ctx_, points[i].x, points[i].y);
+    if (has_stroke_gradient_) {
+        stroke_with_active_paint();
+        return;
+    }
+    apply_stroke_color();
     CGContextStrokePath(ctx_);
 }
 
@@ -501,11 +529,30 @@ void CoreGraphicsCanvas::fill_text(const std::string& text, float x, float y) {
         // CoreText draws bottom-up, but we've flipped the context.
         // Need to flip text back to render correctly.
         CGContextSaveGState(ctx_);
-        apply_fill_color();
-        CGContextTranslateCTM(ctx_, draw_x, y);
-        CGContextScaleCTM(ctx_, 1.0, -1.0);
-        CGContextSetTextPosition(ctx_, 0, 0);
-        CTLineDraw(line, ctx_);
+        if (has_gradient_) {
+            // pulp #1643/#1666 followup — gradient text on CG. Use the
+            // glyph silhouette as a clip mask, then paint the gradient
+            // through fill_with_active_paint(). Mirrors Skia's
+            // shader-based glyph fill via CGContextSetTextDrawingMode
+            // kCGTextClip + Draw* gradient call.
+            CGContextTranslateCTM(ctx_, draw_x, y);
+            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            CGContextSetTextPosition(ctx_, 0, 0);
+            CGContextSetTextDrawingMode(ctx_, kCGTextClip);
+            CTLineDraw(line, ctx_);
+            // Restore CTM so the gradient paints in canvas-world coords.
+            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            CGContextTranslateCTM(ctx_, -draw_x, -y);
+            // Reset to default fill mode (clip is independent of mode).
+            CGContextSetTextDrawingMode(ctx_, kCGTextFill);
+            fill_with_active_paint();
+        } else {
+            apply_fill_color();
+            CGContextTranslateCTM(ctx_, draw_x, y);
+            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            CGContextSetTextPosition(ctx_, 0, 0);
+            CTLineDraw(line, ctx_);
+        }
         CGContextRestoreGState(ctx_);
 
         CFRelease(line);
@@ -582,23 +629,59 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
             CGContextTranslateCTM(ctx_, -x, -y);
         }
 
-        // Stroke mode + active stroke colour. The line width was set by
-        // a prior set_line_width() call and is preserved by the GState
-        // we just saved — no need to mirror it here.
-        CGContextSetRGBStrokeColor(ctx_,
-                                   stroke_color_.r, stroke_color_.g,
-                                   stroke_color_.b, stroke_color_.a);
-        CGContextSetTextDrawingMode(ctx_, kCGTextStroke);
+        if (has_stroke_gradient_) {
+            // pulp #1666 — stroke gradient on glyph outlines: build a
+            // CGPath of every glyph in the line, route through
+            // stroke_with_active_paint() (which clips to the stroked
+            // outline + draws the gradient).
+            CGContextTranslateCTM(ctx_, draw_x, y);
+            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            CGMutablePathRef glyph_path = CGPathCreateMutable();
+            CFArrayRef runs = CTLineGetGlyphRuns(line);
+            CFIndex run_count = CFArrayGetCount(runs);
+            for (CFIndex r = 0; r < run_count; ++r) {
+                CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, r);
+                CFIndex glyph_count = CTRunGetGlyphCount(run);
+                if (glyph_count == 0) continue;
+                CFDictionaryRef attrs = CTRunGetAttributes(run);
+                CTFontRef run_font = (CTFontRef)CFDictionaryGetValue(attrs, kCTFontAttributeName);
+                if (!run_font) continue;
+                std::vector<CGGlyph> glyphs(glyph_count);
+                std::vector<CGPoint> positions(glyph_count);
+                CTRunGetGlyphs(run, CFRangeMake(0, glyph_count), glyphs.data());
+                CTRunGetPositions(run, CFRangeMake(0, glyph_count), positions.data());
+                for (CFIndex g = 0; g < glyph_count; ++g) {
+                    CGAffineTransform tx = CGAffineTransformMakeTranslation(
+                        positions[g].x, positions[g].y);
+                    CGPathRef gp = CTFontCreatePathForGlyph(run_font, glyphs[g], &tx);
+                    if (gp) {
+                        CGPathAddPath(glyph_path, NULL, gp);
+                        CGPathRelease(gp);
+                    }
+                }
+            }
+            CGContextAddPath(ctx_, glyph_path);
+            CGPathRelease(glyph_path);
+            stroke_with_active_paint();
+        } else {
+            // Stroke mode + active stroke colour. The line width was set by
+            // a prior set_line_width() call and is preserved by the GState
+            // we just saved — no need to mirror it here.
+            CGContextSetRGBStrokeColor(ctx_,
+                                       stroke_color_.r, stroke_color_.g,
+                                       stroke_color_.b, stroke_color_.a);
+            CGContextSetTextDrawingMode(ctx_, kCGTextStroke);
 
-        CGContextTranslateCTM(ctx_, draw_x, y);
-        CGContextScaleCTM(ctx_, 1.0, -1.0);
-        CGContextSetTextPosition(ctx_, 0, 0);
-        CTLineDraw(line, ctx_);
+            CGContextTranslateCTM(ctx_, draw_x, y);
+            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            CGContextSetTextPosition(ctx_, 0, 0);
+            CTLineDraw(line, ctx_);
 
-        // Reset to fill mode for subsequent draws — fill_text doesn't
-        // re-set the mode and would otherwise leak our stroke setting
-        // into the next text call.
-        CGContextSetTextDrawingMode(ctx_, kCGTextFill);
+            // Reset to fill mode for subsequent draws — fill_text doesn't
+            // re-set the mode and would otherwise leak our stroke setting
+            // into the next text call.
+            CGContextSetTextDrawingMode(ctx_, kCGTextFill);
+        }
         CGContextRestoreGState(ctx_);
 
         CFRelease(line);
@@ -750,8 +833,13 @@ void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
 
 void CoreGraphicsCanvas::stroke_current_path() {
     if (!path_) return;
-    apply_stroke_color();
     CGContextAddPath(ctx_, path_);
+    if (has_stroke_gradient_) {
+        stroke_with_active_paint();
+        release_path();
+        return;
+    }
+    apply_stroke_color();
     CGContextStrokePath(ctx_);
     release_path();
 }
@@ -967,6 +1055,145 @@ void CoreGraphicsCanvas::clear_fill_gradient() {
     grad_positions_.clear();
     release_conic_image();
     release_pattern_image();
+}
+
+// pulp #1666 — stroke gradient setters mirror the fill gradient ones
+// 1:1, populating the parallel `stroke_*` slots. The gradient itself is
+// painted at stroke time by stroke_with_active_paint() which clips to
+// the path and routes through the same CGGradientRef draw calls.
+void CoreGraphicsCanvas::set_stroke_gradient_linear(float x0, float y0,
+                                                     float x1, float y1,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+    if (count <= 0) { clear_stroke_gradient(); return; }
+    has_stroke_gradient_ = true;
+    stroke_gradient_kind_ = GradientKind::linear;
+    stroke_grad_x0_ = x0; stroke_grad_y0_ = y0;
+    stroke_grad_x1_ = x1; stroke_grad_y1_ = y1;
+    stroke_grad_colors_.assign(colors, colors + count);
+    stroke_grad_positions_.assign(positions, positions + count);
+}
+
+void CoreGraphicsCanvas::set_stroke_gradient_radial(float cx, float cy,
+                                                     float radius,
+                                                     const Color* colors,
+                                                     const float* positions,
+                                                     int count) {
+    if (count <= 0) { clear_stroke_gradient(); return; }
+    has_stroke_gradient_ = true;
+    stroke_gradient_kind_ = GradientKind::radial;
+    stroke_grad_x0_ = cx; stroke_grad_y0_ = cy;
+    stroke_grad_x1_ = cx; stroke_grad_y1_ = cy;
+    stroke_grad_radius_inner_ = 0.0f;
+    stroke_grad_radius_ = radius;
+    stroke_grad_colors_.assign(colors, colors + count);
+    stroke_grad_positions_.assign(positions, positions + count);
+}
+
+void CoreGraphicsCanvas::set_stroke_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) {
+    if (count <= 0) { clear_stroke_gradient(); return; }
+    has_stroke_gradient_ = true;
+    stroke_gradient_kind_ = GradientKind::radial_two_circles;
+    stroke_grad_x0_ = x0; stroke_grad_y0_ = y0;
+    stroke_grad_x1_ = x1; stroke_grad_y1_ = y1;
+    stroke_grad_radius_inner_ = r0;
+    stroke_grad_radius_ = r1;
+    stroke_grad_colors_.assign(colors, colors + count);
+    stroke_grad_positions_.assign(positions, positions + count);
+}
+
+void CoreGraphicsCanvas::set_stroke_gradient_conic(float cx, float cy,
+                                                    float start_angle,
+                                                    const Color* colors,
+                                                    const float* positions,
+                                                    int count) {
+    if (count <= 0) { clear_stroke_gradient(); return; }
+    has_stroke_gradient_ = true;
+    stroke_gradient_kind_ = GradientKind::conic_image;
+    stroke_grad_x0_ = cx; stroke_grad_y0_ = cy;
+    stroke_grad_x1_ = start_angle; stroke_grad_y1_ = 0;
+    stroke_grad_colors_.assign(colors, colors + count);
+    stroke_grad_positions_.assign(positions, positions + count);
+}
+
+void CoreGraphicsCanvas::clear_stroke_gradient() {
+    has_stroke_gradient_ = false;
+    stroke_gradient_kind_ = GradientKind::none;
+    stroke_grad_colors_.clear();
+    stroke_grad_positions_.clear();
+}
+
+// pulp #1666 — paint a stroke through the active stroke gradient. Uses
+// the same approach as fill: create CGGradientRef from stroke_grad_colors_,
+// clip the context to the stroked path's outline (replace path mode), then
+// call CGContextDrawLinearGradient / CGContextDrawRadialGradient over the
+// clip's bounding rect. Conic falls back to apply_stroke_color (CG has no
+// native sweep; the rasterised conic image isn't worth the complexity for
+// stroked outlines which would need the conic image clipped to the stroke
+// silhouette).
+void CoreGraphicsCanvas::stroke_with_active_paint() {
+    if (!has_stroke_gradient_ || stroke_grad_colors_.empty()) {
+        apply_stroke_color();
+        CGContextStrokePath(ctx_);
+        return;
+    }
+    // Convert path to its stroked outline + clip to it. Then draw gradient.
+    CGContextSaveGState(ctx_);
+    CGContextReplacePathWithStrokedPath(ctx_);
+    CGContextClip(ctx_);
+
+    if (stroke_gradient_kind_ == GradientKind::linear ||
+        stroke_gradient_kind_ == GradientKind::radial ||
+        stroke_gradient_kind_ == GradientKind::radial_two_circles) {
+        // Build CGColorSpace + CGGradientRef from stops.
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        std::vector<CGFloat> components;
+        components.reserve(stroke_grad_colors_.size() * 4);
+        for (const auto& c : stroke_grad_colors_) {
+            components.push_back(c.r);
+            components.push_back(c.g);
+            components.push_back(c.b);
+            components.push_back(c.a);
+        }
+        std::vector<CGFloat> locations(stroke_grad_positions_.begin(),
+                                       stroke_grad_positions_.end());
+        CGGradientRef grad = CGGradientCreateWithColorComponents(
+            cs, components.data(), locations.data(),
+            static_cast<size_t>(stroke_grad_colors_.size()));
+        if (grad) {
+            CGGradientDrawingOptions opts =
+                kCGGradientDrawsBeforeStartLocation |
+                kCGGradientDrawsAfterEndLocation;
+            if (stroke_gradient_kind_ == GradientKind::linear) {
+                CGContextDrawLinearGradient(ctx_, grad,
+                    CGPointMake(stroke_grad_x0_, stroke_grad_y0_),
+                    CGPointMake(stroke_grad_x1_, stroke_grad_y1_),
+                    opts);
+            } else {
+                // radial / two_circles
+                CGContextDrawRadialGradient(ctx_, grad,
+                    CGPointMake(stroke_grad_x0_, stroke_grad_y0_), stroke_grad_radius_inner_,
+                    CGPointMake(stroke_grad_x1_, stroke_grad_y1_), stroke_grad_radius_,
+                    opts);
+            }
+            CGGradientRelease(grad);
+        }
+        CGColorSpaceRelease(cs);
+    } else if (stroke_gradient_kind_ == GradientKind::conic_image) {
+        // Conic stroke isn't supported on CG today (would require
+        // rasterising the conic image then clipping to the stroke
+        // silhouette — hot path). Fall back to first-stop solid.
+        if (!stroke_grad_colors_.empty()) {
+            const auto& first = stroke_grad_colors_.front();
+            CGContextSetRGBFillColor(ctx_, first.r, first.g, first.b, first.a);
+            CGContextFillRect(ctx_, CGContextGetClipBoundingBox(ctx_));
+        }
+    }
+    CGContextRestoreGState(ctx_);
 }
 
 // pulp #1524 — Canvas2D ctx.createPattern on the CG backend.
