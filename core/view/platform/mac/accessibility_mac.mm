@@ -59,10 +59,52 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
 }
 
 - (id)accessibilityValue {
+    // pulp #1737 — surface ARIA state attributes (aria-pressed,
+    // aria-checked) through accessibilityValue. NSAccessibility's
+    // toggle/checkbox VoiceOver output reads accessibilityValue and
+    // expects @(YES) / @(NO) / @"mixed" / nil. Tri-state mapping per
+    // ARIA 1.2:
+    //   "true"  → @YES (announced as "checked" / "on" / "pressed")
+    //   "false" → @NO  (announced as "unchecked" / "off" / "not pressed")
+    //   "mixed" → @"mixed" (announced as "mixed")
+    //   unset / other → fall through to legacy access_value()
+    // aria-checked takes priority over aria-pressed when both set
+    // because checkbox/radio states are more semantic-load-bearing
+    // than toggle-button pressed state.
+    if (_view) {
+        const std::string& checked = _view->access_checked();
+        if (!checked.empty()) {
+            if (checked == "true")  return @YES;
+            if (checked == "false") return @NO;
+            if (checked == "mixed") return @"mixed";
+        }
+        const std::string& pressed = _view->access_pressed();
+        if (!pressed.empty()) {
+            if (pressed == "true")  return @YES;
+            if (pressed == "false") return @NO;
+            if (pressed == "mixed") return @"mixed";
+        }
+    }
     if (!_view || _view->access_value().empty()) return nil;
     return [NSString stringWithUTF8String:_view->access_value().c_str()];
 }
 
+// pulp #1737 — surface aria-disabled. NSAccessibility's
+// isAccessibilityEnabled returns YES by default; we flip to NO when
+// aria-disabled is "true". `false` and unset both leave the view
+// enabled. Note: this does NOT change actual interaction handling —
+// View::set_enabled() is the C++-side gate for that. This only affects
+// what VoiceOver announces.
+- (BOOL)isAccessibilityEnabled {
+    if (!_view) return YES;
+    return _view->access_disabled() == "true" ? NO : YES;
+}
+
+// pulp #1737 — surface aria-hidden. NSAccessibility's accessibility
+// element flag should return NO when aria-hidden="true" so VoiceOver
+// skips the element. The legacy isAccessibilityElement check
+// (role != AccessRole::none) still applies — aria-hidden is an
+// additional gate.
 - (BOOL)isAccessibilityFocused {
     return _view ? _view->has_focus() : NO;
 }
@@ -88,7 +130,12 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
 }
 
 - (BOOL)isAccessibilityElement {
-    return _view && _view->access_role() != pulp::view::View::AccessRole::none;
+    if (!_view) return NO;
+    // pulp #1737 — aria-hidden="true" suppresses the element regardless
+    // of role. Other aria-hidden values (false, unset) keep the legacy
+    // role-based gate.
+    if (_view->access_hidden() == "true") return NO;
+    return _view->access_role() != pulp::view::View::AccessRole::none;
 }
 
 @end

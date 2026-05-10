@@ -157,3 +157,52 @@ TEST_CASE("snapshot captures nested range metadata", "[a11y][harness]") {
     REQUIRE(nodes[1].current_value == 6.0);
     REQUIRE(nodes[1].value_string == "75%");
 }
+
+// pulp #1737 — ARIA state attributes (aria-pressed, aria-checked,
+// aria-disabled, aria-hidden) must surface through the cross-platform
+// AccessibilityNodeSnapshot so AT bridges (NSAccessibility today;
+// AT-SPI / UIA when wired per #217) and offline tests can read them.
+// Pre-fix the View slots existed but the snapshot only carried role/
+// label/value — assistive tech never saw the state.
+TEST_CASE("Accessibility snapshot surfaces ARIA state attributes",
+          "[a11y][issue-1737]") {
+    using namespace pulp::view;
+    Probe root;
+
+    auto btn = std::make_unique<Probe>();
+    btn->set_access_role(View::AccessRole::toggle);
+    btn->set_access_label("Mute");
+    btn->set_access_pressed("true");
+
+    auto chk = std::make_unique<Probe>();
+    chk->set_access_role(View::AccessRole::toggle);
+    chk->set_access_label("Tri-state filter");
+    chk->set_access_checked("mixed");
+    chk->set_access_disabled("false");
+
+    auto hidden = std::make_unique<Probe>();
+    hidden->set_access_role(View::AccessRole::label);
+    hidden->set_access_label("Decorative icon");
+    hidden->set_access_hidden("true");
+
+    root.add_child(std::move(btn));
+    root.add_child(std::move(chk));
+    root.add_child(std::move(hidden));
+
+    auto nodes = snapshot_accessibility_tree(root);
+    REQUIRE(nodes.size() == 3);
+
+    REQUIRE(nodes[0].label == "Mute");
+    REQUIRE(nodes[0].pressed  == "true");
+    REQUIRE(nodes[0].checked.empty());
+    REQUIRE(nodes[0].disabled.empty());
+    REQUIRE(nodes[0].hidden.empty());
+
+    REQUIRE(nodes[1].label == "Tri-state filter");
+    REQUIRE(nodes[1].checked  == "mixed");
+    REQUIRE(nodes[1].disabled == "false");
+    REQUIRE(nodes[1].pressed.empty());
+
+    REQUIRE(nodes[2].label == "Decorative icon");
+    REQUIRE(nodes[2].hidden == "true");
+}
