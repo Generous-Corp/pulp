@@ -11,6 +11,15 @@ void walk(const View& v, int depth,
     snap.role  = v.access_role();
     snap.label = v.access_label();
     snap.value = v.access_value();
+    // pulp #1737 — surface ARIA state attributes through the cross-
+    // platform snapshot so AT bridges (and offline tests) see the state
+    // alongside role/label/value. Platform bridges (NSAccessibility
+    // here; AT-SPI / UIA when wired per #217) read the same View slots
+    // directly; the snapshot is the cross-platform mirror.
+    snap.pressed  = v.access_pressed();
+    snap.checked  = v.access_checked();
+    snap.disabled = v.access_disabled();
+    snap.hidden   = v.access_hidden();
     snap.depth = depth;
 
     // If the view implements AccessibilityValueInterface, fill value range.

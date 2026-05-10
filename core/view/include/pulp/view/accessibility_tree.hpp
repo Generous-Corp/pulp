@@ -32,6 +32,17 @@ struct AccessibilityNodeSnapshot {
     double current_value = 0.0;
     std::string value_string;
 
+    // pulp #1737 — ARIA state attributes. Tri-state per ARIA 1.2:
+    // `true` / `false` / `mixed` / unset (empty string). Platform AT
+    // bridges (NSAccessibility today; AT-SPI / UIA when those land
+    // per pulp #217) read these to expose the toggle/checkbox state.
+    // Stored on View::access_pressed_/_checked_/_disabled_/_hidden_;
+    // surfaced through this snapshot for the cross-platform tree path.
+    std::string pressed;   // aria-pressed
+    std::string checked;   // aria-checked
+    std::string disabled;  // aria-disabled
+    std::string hidden;    // aria-hidden
+
     // Nesting depth under the root; the root itself is depth 0.
     int depth = 0;
 };
