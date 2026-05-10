@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0811"></a>
+## [0.81.1] - 2026-05-10
+
+- fix(html): restore :root pseudo-class for stylesheet matching (Codex P2 on #1773) ([#1777](https://github.com/danielraffel/pulp/pull/1777))
+
 <a id="v100"></a>
 ## [1.0.0] - 2026-05-10
 
