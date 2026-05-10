@@ -6818,21 +6818,21 @@
       "issue": ""
     },
     "html/dialog": {
-      "status": "noop",
-      "mapsTo": "createPanel(id, parent) + setVisible(false). Element.show() / showModal() / close() methods on Element.prototype (tag-guarded — no-op on non-DIALOG elements) flip setVisible and the `open` HTML attribute, dispatch a `close` event, and round-trip `el.returnValue`. showModal() degrades to show() because Pulp doesn't yet have a native modal-input-trap layer; the ::backdrop pseudo-element remains a separate paint-side roadmap item.",
+      "status": "supported",
+      "mapsTo": "createPanel(id, parent) + setVisible(false). Element.show() / showModal() / close() methods on Element.prototype (tag-guarded — return early on non-DIALOG elements) flip setVisible and the `open` HTML attribute, dispatch a `close` event, and round-trip `el.returnValue`. showModal() degrades to show() + an internal `_dialogModal` flag because Pulp doesn't yet have a native modal-input-trap layer; the ::backdrop pseudo-element remains a separate paint-side roadmap item.",
       "supportedValues": [
         "dialog as a hidden Panel",
-        "el.show()",
-        "el.showModal() (degrades to show() — no native modal trap layer yet)",
-        "el.close(returnValue) + 'close' event",
-        "el.open getter (reflects open attribute)",
-        "el.returnValue"
+        "el.show() — non-modal open with `open` attribute reflection",
+        "el.showModal() (degrades to show() + _dialogModal flag — no native modal trap layer yet, tracked separately)",
+        "el.close(returnValue) + 'close' event dispatch",
+        "el.open getter / setter (reflects + drives `open` attribute)",
+        "el.returnValue round-trip"
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp::\"<dialog> show/close round-trips visibility and dispatches close\""
+        "test/test_widget_bridge.cpp::<dialog> show/close round-trips visibility and dispatches close"
       ],
-      "notes": "DIVERGE→PASS sweep — show/showModal/close methods exposed. Modal input-trap + ::backdrop remain a roadmap paint-side concern; the harness gap was about JS-side state-machine vocabulary. Wave 1 drift cleanup — supported → noop (Element.show() / showModal() / close() are stored-only; modal dialog rendering not in pipeline today).",
+      "notes": "DIVERGE→PASS sweep — show/showModal/close methods exposed. pulp #1737: catalog flipped noop → supported to match the wired behavior. Wave 1 walked this back to noop conservatively because modal-input-trap + ::backdrop aren't wired, but the JS surface (show / showModal / close / open / returnValue) IS wired and the existing test [test/test_widget_bridge.cpp \"<dialog> show/close...\"] exercises the round-trip. Architectural follow-ups (native modal-input-trap layer, ::backdrop pseudo-element paint) are documented in supportedValues notes — same precedent as object-fit's degraded-but-honored claim. Closes the last html-surface NO-OP.",
       "issue": ""
     },
     "html/div": {
