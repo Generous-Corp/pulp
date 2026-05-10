@@ -9855,6 +9855,43 @@ TEST_CASE("querySelector matches attribute selectors",
     REQUIRE(std::string(engine.evaluate("__withAria").getWithDefault<std::string_view>("")) == "d4");
 }
 
+// pulp #1641 followup — _parseSelector colon-strip bug. Selectors like
+// `[href="http://x"]` and `[data-time="12:30"]` contain `:` inside the
+// attribute brackets. The earlier scanner used `str.search(/:/)` which
+// found the first colon anywhere — truncating the selector mid-bracket.
+// Fix: scan for `:` at bracket depth 0 only.
+TEST_CASE("querySelector handles colons inside attribute brackets",
+          "[view][bridge][html][issue-1641-followup-querySelector-colon]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var a1 = document.createElement('a'); a1.id = 'a1';
+        a1.setAttribute('href', 'http://example.com/page');
+        var a2 = document.createElement('a'); a2.id = 'a2';
+        a2.setAttribute('href', 'https://example.com/page');
+        var d1 = document.createElement('div'); d1.id = 'd1';
+        d1.setAttribute('data-time', '12:30');
+        document.body.appendChild(a1);
+        document.body.appendChild(a2);
+        document.body.appendChild(d1);
+
+        // Resolve to id strings (or "MISS") so the C++ side gets clean values.
+        globalThis.__byHttp  = (document.querySelector('[href="http://example.com/page"]')  || {id:'MISS'}).id;
+        globalThis.__byHttps = (document.querySelector('[href="https://example.com/page"]') || {id:'MISS'}).id;
+        globalThis.__byTime  = (document.querySelector('[data-time="12:30"]')               || {id:'MISS'}).id;
+        // pseudo at end still works (a:hover → matches any <a> after stripping :hover)
+        globalThis.__pseudo  = (document.querySelector('a:hover')                            || {id:'MISS'}).id;
+    )");
+
+    REQUIRE(std::string(engine.evaluate("__byHttp" ).getWithDefault<std::string_view>("")) == "a1");
+    REQUIRE(std::string(engine.evaluate("__byHttps").getWithDefault<std::string_view>("")) == "a2");
+    REQUIRE(std::string(engine.evaluate("__byTime" ).getWithDefault<std::string_view>("")) == "d1");
+    REQUIRE(std::string(engine.evaluate("__pseudo" ).getWithDefault<std::string_view>("")) == "a1");
+}
+
 TEST_CASE("querySelector descendant and child combinators",
           "[view][bridge][wave3-html][html-querySelector]") {
     ScriptEngine engine;

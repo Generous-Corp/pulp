@@ -328,7 +328,21 @@ function _parseSelector(str) {
     // doesn't implement them, but we tolerate them at the tokenizer
     // level so a real-world selector like `div.foo:hover` still
     // matches `div.foo` instead of refusing to parse.
-    var pseudoIdx = str.search(/(?<!\\):/);
+    //
+    // pulp #1641 followup: scan for `:` at bracket depth 0 only, so
+    // colons inside attribute selectors like `[href="http://x"]` or
+    // `[data-time="12:30"]` aren't misinterpreted as pseudo-class
+    // boundaries (which would truncate the selector mid-bracket).
+    var pseudoIdx = -1;
+    var pdepth = 0;
+    for (var pi = 0; pi < str.length; pi++) {
+        var pc = str[pi];
+        if (pc === '[') pdepth++;
+        else if (pc === ']') pdepth--;
+        else if (pdepth === 0 && pc === ':' && (pi === 0 || str[pi - 1] !== '\\')) {
+            pseudoIdx = pi; break;
+        }
+    }
     var mainPart = str;
     if (pseudoIdx >= 0) {
         result.pseudo = str.slice(pseudoIdx + 1);
