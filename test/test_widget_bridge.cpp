@@ -10016,6 +10016,71 @@ TEST_CASE("HTML removeAttribute resets View accessibility slots",
     REQUIRE(v->access_role() == View::AccessRole::none);
 }
 
+// pulp #1737 — ARIA state attributes (aria-pressed, aria-checked,
+// aria-disabled, aria-hidden) round-trip through the new
+// setAccessibilityState bridge fn into View::access_pressed_ /
+// access_checked_ / access_disabled_ / access_hidden_ slots. macOS
+// NSAccessibility reads them automatically; Linux AT-SPI / Windows UIA
+// read the same slots when those bridges land (pulp #217).
+//
+// Test exercises both code paths: setAttribute on a mounted element
+// (fast-path through the bridge) and setAttribute before mount
+// followed by appendChild (replay through __replayAriaAttributes__).
+TEST_CASE("HTML aria-pressed / -checked / -disabled / -hidden route to View slots",
+          "[view][bridge][wave3-html][html-aria][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        // Direct path: mounted element + setAttribute fast-path.
+        var btn = document.createElement('button');
+        btn.id = 'mute-btn';
+        document.body.appendChild(btn);
+        btn.setAttribute('aria-pressed', 'true');
+        btn.setAttribute('aria-disabled', 'false');
+
+        // Replay path: setAttribute before mount, appendChild flushes.
+        var chk = document.createElement('div');
+        chk.id = 'tristate-chk';
+        chk._nativeCreated = false;
+        chk.setAttribute('aria-checked', 'mixed');
+        chk.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(chk);
+    )");
+
+    auto btn_id = std::string(engine.evaluate(
+        "document.getElementById('mute-btn')._id"
+    ).getWithDefault<std::string_view>(""));
+    auto chk_id = std::string(engine.evaluate(
+        "document.getElementById('tristate-chk')._id"
+    ).getWithDefault<std::string_view>(""));
+
+    auto* btn = bridge.widget(btn_id);
+    auto* chk = bridge.widget(chk_id);
+    REQUIRE(btn != nullptr);
+    REQUIRE(chk != nullptr);
+
+    // Fast-path values.
+    REQUIRE(btn->access_pressed()  == "true");
+    REQUIRE(btn->access_disabled() == "false");
+    // Replay-path values (incl. tri-state `mixed` per ARIA 1.2).
+    REQUIRE(chk->access_checked() == "mixed");
+    REQUIRE(chk->access_hidden()  == "true");
+
+    // removeAttribute clears the slot.
+    bridge.load_script(R"(
+        document.getElementById('mute-btn').removeAttribute('aria-pressed');
+        document.getElementById('tristate-chk').removeAttribute('aria-checked');
+    )");
+    REQUIRE(btn->access_pressed().empty());
+    REQUIRE(chk->access_checked().empty());
+    // Untouched slots remain populated.
+    REQUIRE(btn->access_disabled() == "false");
+    REQUIRE(chk->access_hidden()   == "true");
+}
+
 TEST_CASE("querySelector matches tag / .class / #id forms",
           "[view][bridge][wave3-html][html-querySelector]") {
     ScriptEngine engine;

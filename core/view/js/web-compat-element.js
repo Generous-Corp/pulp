@@ -205,6 +205,20 @@ function __replayAriaAttributes__(el) {
     if (role !== undefined && typeof setAccessibilityRole === "function") {
         setAccessibilityRole(el._id, String(role));
     }
+    // pulp #1737 — replay ARIA state attributes via setAccessibilityState.
+    // React commits attributes before mount, so we have to defer the
+    // bridge call until _nativeCreated. Each state attribute routes
+    // through one bridge fn; the C++ side dispatches by attr name.
+    if (typeof setAccessibilityState === "function") {
+        var states = ["pressed", "checked", "disabled", "hidden"];
+        for (var si = 0; si < states.length; si++) {
+            var key = "aria-" + states[si];
+            var val = el._attributes[key];
+            if (val !== undefined) {
+                setAccessibilityState(el._id, states[si], String(val));
+            }
+        }
+    }
 }
 
 // ── nodeType / nodeName (DOM Level 1 reconciler hooks) ──────────────────────
@@ -684,6 +698,18 @@ Element.prototype.setAttribute = function(name, value) {
             setAccessibilityRole(this._id, String(value));
         }
     }
+    // pulp #1737 — ARIA state attributes (aria-pressed/checked/disabled/
+    // hidden) route through setAccessibilityState. Same pre-mount
+    // capture pattern as aria-label / role above; __replayAriaAttributes__
+    // flushes from _attributes when _nativeCreated flips. Other ARIA
+    // attributes still store via _attributes for getAttribute round-trip
+    // only — only the four with a Pulp View slot are forwarded.
+    else if (name === "aria-pressed" || name === "aria-checked" ||
+             name === "aria-disabled" || name === "aria-hidden") {
+        if (this._nativeCreated && typeof setAccessibilityState === "function") {
+            setAccessibilityState(this._id, name.slice(5), String(value));
+        }
+    }
 };
 
 Element.prototype.getAttribute = function(name) {
@@ -715,6 +741,14 @@ Element.prototype.removeAttribute = function(name) {
     else if (name === "aria-label" && this._nativeCreated &&
              typeof setAccessibilityLabel === "function") {
         setAccessibilityLabel(this._id, "");
+    }
+    // pulp #1737 — same reset semantics for ARIA state attributes.
+    // Empty string clears the View::access_*_ slot.
+    else if ((name === "aria-pressed" || name === "aria-checked" ||
+              name === "aria-disabled" || name === "aria-hidden") &&
+             this._nativeCreated &&
+             typeof setAccessibilityState === "function") {
+        setAccessibilityState(this._id, name.slice(5), "");
     }
 };
 

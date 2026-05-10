@@ -1424,6 +1424,27 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1737 — ARIA state attributes (aria-pressed / aria-checked /
+    // aria-disabled / aria-hidden). Tri-state per ARIA 1.2: `true` /
+    // `false` / `mixed` / unset. We store the raw string the JS shim
+    // hands us so platform AT bridges (NSAccessibility today; AT-SPI /
+    // UIA when those land per pulp #217) can read it back verbatim.
+    // Single bridge fn rather than four — `attr` selects the slot.
+    engine_.register_function("setAccessibilityState",
+                              [this](choc::javascript::ArgumentList args) {
+        auto id    = args.get<std::string>(0, "");
+        auto attr  = args.get<std::string>(1, "");
+        auto value = args.get<std::string>(2, "");
+        auto it = widgets_.find(id);
+        if (it == widgets_.end()) return choc::value::Value();
+        if      (attr == "pressed")  it->second->set_access_pressed(std::move(value));
+        else if (attr == "checked")  it->second->set_access_checked(std::move(value));
+        else if (attr == "disabled") it->second->set_access_disabled(std::move(value));
+        else if (attr == "hidden")   it->second->set_access_hidden(std::move(value));
+        // Unknown aria-* state attr → no-op (forward-compat per ARIA spec).
+        return choc::value::Value();
+    });
+
     // registerHover(id) — enables "mouseenter"/"mouseleave" JS callbacks (CSS :hover)
     engine_.register_function("registerHover", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

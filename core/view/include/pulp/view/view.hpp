@@ -293,6 +293,22 @@ public:
     void set_access_value(std::string value) { access_value_ = std::move(value); }
     const std::string& access_value() const { return access_value_; }
 
+    // pulp #1737 — ARIA state attributes. Tri-state semantics per the
+    // ARIA 1.2 spec (`true` / `false` / `mixed` / unset). We store the
+    // raw string the JS shim hands us so platform AT bridges can read
+    // it back verbatim (NSAccessibility's `accessibilityValue` for
+    // toggle buttons reads from this slot; Linux AT-SPI / Windows UIA
+    // bridges follow the same pattern when they land — tracked under
+    // pulp #217). Setting the empty string clears the state.
+    void set_access_pressed(std::string s)  { access_pressed_  = std::move(s); }
+    void set_access_checked(std::string s)  { access_checked_  = std::move(s); }
+    void set_access_disabled(std::string s) { access_disabled_ = std::move(s); }
+    void set_access_hidden(std::string s)   { access_hidden_   = std::move(s); }
+    const std::string& access_pressed()  const { return access_pressed_; }
+    const std::string& access_checked()  const { return access_checked_; }
+    const std::string& access_disabled() const { return access_disabled_; }
+    const std::string& access_hidden()   const { return access_hidden_; }
+
     /// Called by platform accessibility when VoiceOver increment/decrement is triggered.
     /// Delta is typically ±0.05 (5% step). Override in widgets to adjust the value.
     virtual void on_accessibility_adjust(float delta) { (void)delta; }
@@ -1096,6 +1112,11 @@ private:
     AccessRole access_role_ = AccessRole::none;
     std::string access_label_;
     std::string access_value_;
+    // pulp #1737 — ARIA state attributes (tri-state per spec).
+    std::string access_pressed_;
+    std::string access_checked_;
+    std::string access_disabled_;
+    std::string access_hidden_;
     bool visible_ = true;
     bool focusable_ = false;
     bool enabled_ = true;
