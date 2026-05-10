@@ -3369,15 +3369,22 @@ void WidgetBridge::register_api() {
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v || hex.empty()) return choc::value::Value();
-        // CSS `currentColor`: resolve from the View's inheritable text
-        // color (walks the parent chain), falling back to the theme
-        // text token if no ancestor set one explicitly.
+        // CSS `currentColor`: resolve to the element's own computed text
+        // color first, then the inheritable cascade, then theme fallback.
+        // Order matters — pulp #1728 Codex P2: a Label that set its own
+        // `color` via setTextColor stores it in `Label::text_color_`
+        // (`has_own_text_color_=true`) and does NOT touch the inheritable
+        // slot, so `inheritable_text_color()` would skip the Label and
+        // climb to the parent's inheritable color. CSS semantics: an
+        // element's own `color` always wins over inheritance for that
+        // element's `currentColor`.
         std::string lower;
         lower.reserve(hex.size());
         for (char c : hex) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (lower == "currentcolor") {
-            auto inherited = v->inheritable_text_color();
-            if (inherited) {
+            if (auto* l = dynamic_cast<Label*>(v); l && l->has_own_text_color()) {
+                v->set_outline_color(l->text_color());
+            } else if (auto inherited = v->inheritable_text_color()) {
                 v->set_outline_color(*inherited);
             } else {
                 v->set_outline_color(v->resolve_color("text.primary",

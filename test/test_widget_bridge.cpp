@@ -11582,6 +11582,53 @@ TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
     REQUIRE(fallback.a > 0.0f);
 }
 
+// pulp #1728 (Codex P2) — `currentColor` must honor an element's own
+// computed `color` before climbing the inheritable cascade. A Label
+// that set its own text color via setTextColor stores it in
+// Label::text_color_ (has_own_text_color_=true) and does NOT touch the
+// inheritable slot. Pre-fix, the resolver called inheritable_text_color()
+// which skipped the Label and climbed to the parent's inheritable color
+// — so setOutlineColor(label, 'currentColor') resolved to the parent's
+// color, contradicting CSS (own color always wins for currentColor on
+// that element) AND contradicting Label::paint() which prefers
+// has_own_text_color_ first.
+TEST_CASE("setOutlineColor currentColor honors Label's own text color over parent inheritance",
+          "[view][bridge][rn][issue-1728][outline-currentcolor]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Set up: root carries inheritable blue text; the Label sits under
+    // root (createLabel attaches to root by default in this bridge).
+    root.set_inheritable_text_color(Color::rgba8(20, 50, 220));  // blue
+
+    bridge.load_script("createLabel('lbl', 'hi')");
+    auto* lbl = bridge.widget("lbl");
+    REQUIRE(lbl != nullptr);
+    REQUIRE(dynamic_cast<Label*>(lbl) != nullptr);
+
+    // Pre-condition: Label has no own color yet → currentColor resolves
+    // from root's inheritable blue.
+    bridge.load_script("setOutlineColor('lbl', 'currentColor')");
+    REQUIRE_THAT(lbl->outline_color().b, WithinAbs(220.0f / 255.0f, 0.01f));
+
+    // Give Label its own red text color via setTextColor (which sets
+    // Label::text_color_ + has_own_text_color_, NOT the inheritable slot).
+    bridge.load_script("setTextColor('lbl', '#ff3322')");
+
+    // The Label's own red MUST now win over root's inheritable blue.
+    bridge.load_script("setOutlineColor('lbl', 'currentColor')");
+    auto oc = lbl->outline_color();
+    REQUIRE_THAT(oc.r, WithinAbs(1.0f, 0.01f));            // 0xff
+    REQUIRE_THAT(oc.g, WithinAbs(0x33 / 255.0f, 0.02f));   // 0x33
+    REQUIRE_THAT(oc.b, WithinAbs(0x22 / 255.0f, 0.02f));   // 0x22
+    // Specifically NOT the root's blue (b=220/255 ≈ 0.86).
+    REQUIRE(oc.b < 0.5f);
+}
+
 // pulp #1663 — rn/borderRadius % family (5 entries) supports percent
 // values via paint-time bounds resolution. Bridge stores percent in
 // View::corner_radius_pct_ / corner_radii_pct_[4]; paint code calls
