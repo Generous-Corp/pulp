@@ -3121,7 +3121,7 @@
       "status": "supported",
       "mapsTo": "setUserSelect(id, value)",
       "supportedValues": [
-        "auto (default)",
+        "auto",
         "none",
         "text",
         "all",
