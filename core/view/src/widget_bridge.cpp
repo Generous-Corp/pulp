@@ -3327,12 +3327,31 @@ void WidgetBridge::register_api() {
     // — same paint-side gap as borderStyle.
     //
     // setOutlineColor(id, hex) — accepts the same color forms as
-    // setBackground / setBorderColor (#hex / rgb() / named).
+    // setBackground / setBorderColor (#hex / rgb() / named), plus the
+    // CSS `currentColor` keyword which resolves to the View's text
+    // color via the inheritable cascade (#1710).
     engine_.register_function("setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v && !hex.empty()) v->set_outline_color(parseHexColor(hex));
+        if (!v || hex.empty()) return choc::value::Value();
+        // CSS `currentColor`: resolve from the View's inheritable text
+        // color (walks the parent chain), falling back to the theme
+        // text token if no ancestor set one explicitly.
+        std::string lower;
+        lower.reserve(hex.size());
+        for (char c : hex) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lower == "currentcolor") {
+            auto inherited = v->inheritable_text_color();
+            if (inherited) {
+                v->set_outline_color(*inherited);
+            } else {
+                v->set_outline_color(v->resolve_color("text.primary",
+                                                      canvas::Color::rgba8(220, 220, 220)));
+            }
+        } else {
+            v->set_outline_color(parseHexColor(hex));
+        }
         return choc::value::Value();
     });
 

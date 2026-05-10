@@ -10974,3 +10974,47 @@ TEST_CASE("Catalog flips: canvas2d/transform concat + css/grid shorthand support
     // harness-anchor that proves the catalog-flip claim.
     SUCCEED("canvas2d/transform composed matrix coverage in test_canvas2d_shim.cpp [issue-1348][codex-p1]");
 }
+
+// pulp #1710 — rn/outlineColor `currentColor` keyword resolves via the
+// View's inheritable text color cascade. Catalog flip partial→supported
+// requires evidence per #1657 control #2.
+TEST_CASE("setOutlineColor resolves currentColor from inheritable text color",
+          "[view][bridge][rn][issue-1710][outline-currentcolor]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+
+    // Set inheritable text color on root → child inherits via cascade.
+    // Color uses normalized float channels [0,1].
+    root.set_inheritable_text_color(Color::rgba8(255, 100, 50));
+
+    bridge.load_script("setOutlineColor('p', 'currentColor')");
+    auto oc = panel->outline_color();
+    REQUIRE_THAT(oc.r, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(oc.g, WithinAbs(100.0f / 255.0f, 0.01f));
+    REQUIRE_THAT(oc.b, WithinAbs(50.0f / 255.0f, 0.01f));
+
+    // Case-insensitive: CURRENTCOLOR + CurrentColor work the same.
+    root.set_inheritable_text_color(Color::rgba8(10, 200, 40));
+    bridge.load_script("setOutlineColor('p', 'CURRENTCOLOR')");
+    REQUIRE_THAT(panel->outline_color().g, WithinAbs(200.0f / 255.0f, 0.01f));
+
+    bridge.load_script("setOutlineColor('p', 'CurrentColor')");
+    REQUIRE_THAT(panel->outline_color().g, WithinAbs(200.0f / 255.0f, 0.01f));
+
+    // Non-keyword colors still parse normally.
+    bridge.load_script("setOutlineColor('p', '#0080ff')");
+    REQUIRE_THAT(panel->outline_color().b, WithinAbs(1.0f, 0.01f));
+
+    // No inheritable text → falls back to theme text.primary token (non-zero).
+    root.clear_inheritable_text_color();
+    bridge.load_script("setOutlineColor('p', 'currentColor')");
+    auto fallback = panel->outline_color();
+    REQUIRE(fallback.a > 0.0f);
+}

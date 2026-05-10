@@ -4900,22 +4900,22 @@
       "issue": ""
     },
     "rn/outlineColor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches outlineColor to setOutlineColor (prop-applier.ts since pulp #1519). Bridge writes to View::outline_color_.",
       "supportedValues": [
         "#hex",
         "#rgba",
         "rgb()",
         "rgba()",
-        "named colors"
+        "named colors",
+        "currentColor (resolves to View::inheritable_text_color() with theme text fallback)"
       ],
-      "unsupportedValues": [
-        "currentColor keyword"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-outline.test.ts"
+        "packages/pulp-react/test/prop-applier-outline.test.ts",
+        "test/test_widget_bridge.cpp [issue-1710][outline-currentcolor]"
       ],
-      "notes": "pulp #1519 — RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color. Wave 1 drift cleanup — supported → partial (currentColor keyword resolution deferred; CSS color strings round-trip).",
+      "notes": "pulp #1519 — RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color. Wave 1 drift cleanup — supported → partial (currentColor keyword resolution deferred; CSS color strings round-trip). Wired in pulp #1710 — `currentColor` keyword resolves to the View's inheritable text color (walks parent chain via View::inheritable_text_color), falling back to theme `text.primary` token when no ancestor set the text color explicitly. Test [view][bridge][rn][issue-1710][outline-currentcolor] proves the resolution.",
       "issue": ""
     },
     "rn/outlineOffset": {
