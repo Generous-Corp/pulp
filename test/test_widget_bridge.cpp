@@ -9783,6 +9783,42 @@ TEST_CASE("HTML setAttribute before mount replays ARIA on appendChild",
     REQUIRE(v->access_role() == View::AccessRole::slider);
 }
 
+// pulp #1641 followup — `removeAttribute('role')` /
+// `removeAttribute('aria-label')` must reset View::access_role_ /
+// access_label_. The earlier shim only deleted the JS-side
+// `_attributes[name]` entry, leaving the bridge slot stale (a
+// user-observable bug for assistive tech that reads stale state).
+TEST_CASE("HTML removeAttribute resets View accessibility slots",
+          "[view][bridge][html][issue-1641-followup-aria-removeattribute]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var d = document.createElement('div');
+        d.id = 'aria-rm';
+        document.body.appendChild(d);
+        d.setAttribute('aria-label', 'Mute toggle');
+        d.setAttribute('role', 'switch');
+    )");
+    auto idVal = engine.evaluate("document.getElementById('aria-rm')._id");
+    auto id = std::string(idVal.getWithDefault<std::string_view>(""));
+    auto* v = bridge.widget(id);
+    REQUIRE(v != nullptr);
+    REQUIRE(v->access_label() == "Mute toggle");
+    REQUIRE(v->access_role() == View::AccessRole::toggle);
+
+    // removeAttribute should reset the bridge slot (was the bug).
+    bridge.load_script(R"(
+        var d = document.getElementById('aria-rm');
+        d.removeAttribute('aria-label');
+        d.removeAttribute('role');
+    )");
+    REQUIRE(v->access_label().empty());
+    REQUIRE(v->access_role() == View::AccessRole::none);
+}
+
 TEST_CASE("querySelector matches tag / .class / #id forms",
           "[view][bridge][wave3-html][html-querySelector]") {
     ScriptEngine engine;

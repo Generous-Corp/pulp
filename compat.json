@@ -6423,13 +6423,13 @@
         "aria-disabled state routing to native AT (storage-only)",
         "aria-hidden state routing to native AT (storage-only)",
         "Linux AT-SPI bridge (storage-only)",
-        "Windows UIA bridge (storage-only)",
-        "removeAttribute('role') / removeAttribute('aria-label') don't reset View::access_role_ — stale until next set"
+        "Windows UIA bridge (storage-only)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp: HTML aria-label + role attributes route to View access slots [wave3-html]"
+        "test/test_widget_bridge.cpp: HTML aria-label + role attributes route to View access slots [wave3-html]",
+        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]"
       ],
-      "notes": "Wave 3 (PR #1641) html.2 — setAccessibilityLabel / setAccessibilityRole bridge fns wired; web-compat-element.js setAttribute() fast-paths aria-label and role. Replay path on _ensureNative + _reparentNative covers the React/JSX setAttribute-before-mount commit order. macOS NSAccessibility wired; Linux AT-SPI / Windows UIA platform routing remains storage-only (tracked under #217). Wave 4 cleanup — catalog flip from PR #1641 was clobbered by the Wave 3 css PR rebase (#1640); restored to status=supported + emptied unsupportedValues so the harness reflects the wired surface. aria-pressed / aria-checked / aria-disabled / aria-hidden state routing is a follow-on (the View doesn't have a state slot today — partial-deferred-access-state); not part of the supported surface claim. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1641 added setters that mirror role/aria-label into View::access_role_ / access_label_, but the platform-AT side is only wired on macOS NSAccessibility. State attributes (aria-pressed/checked/disabled/hidden) and Linux/Windows platform routing are still storage-only. Removal also doesn't reset state.",
+      "notes": "Wave 3 (PR #1641) html.2 — setAccessibilityLabel / setAccessibilityRole bridge fns wired; web-compat-element.js setAttribute() fast-paths aria-label and role. Replay path on _ensureNative + _reparentNative covers the React/JSX setAttribute-before-mount commit order. macOS NSAccessibility wired; Linux AT-SPI / Windows UIA platform routing remains storage-only (tracked under #217). Wave 4 cleanup — catalog flip from PR #1641 was clobbered by the Wave 3 css PR rebase (#1640); restored to status=supported + emptied unsupportedValues so the harness reflects the wired surface. aria-pressed / aria-checked / aria-disabled / aria-hidden state routing is a follow-on (the View doesn't have a state slot today — partial-deferred-access-state); not part of the supported surface claim. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1641 added setters that mirror role/aria-label into View::access_role_ / access_label_, but the platform-AT side is only wired on macOS NSAccessibility. State attributes (aria-pressed/checked/disabled/hidden) and Linux/Windows platform routing are still storage-only. Removal also doesn't reset state. pulp #1641 followup — removeAttribute(role)/(aria-label) now resets the View slot via bridge calls. Test [view][bridge][html][issue-1641-followup-aria-removeattribute] proves the reset.",
       "issue": "1476"
     },
     "html/DocumentFragment": {

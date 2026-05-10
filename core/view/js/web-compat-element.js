@@ -704,6 +704,18 @@ Element.prototype.removeAttribute = function(name) {
             this.style._reevaluateOverlay();
         }
     }
+    // pulp #1641 followup — reset View::access_role_ / access_label_
+    // when role / aria-label are removed. Without this the slot stayed
+    // populated even after the author detached the attribute (a user-
+    // observable bug for assistive tech that reads stale state).
+    else if (name === "role" && this._nativeCreated &&
+             typeof setAccessibilityRole === "function") {
+        setAccessibilityRole(this._id, "");
+    }
+    else if (name === "aria-label" && this._nativeCreated &&
+             typeof setAccessibilityLabel === "function") {
+        setAccessibilityLabel(this._id, "");
+    }
 };
 
 Element.prototype.hasAttribute = function(name) {
