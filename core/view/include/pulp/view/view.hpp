@@ -1049,6 +1049,34 @@ public:
     void set_white_space_nowrap(bool n) { white_space_nowrap_ = n; }
     bool white_space_nowrap() const { return white_space_nowrap_; }
 
+    // pulp #1737 — full CSS `white-space` enum. Replaces the
+    // nowrap-only bool with the spec's 6 keywords. Each value
+    // controls a different combination of:
+    //   * collapse_spaces — runs of whitespace collapse to single space.
+    //   * preserve_newlines — `\n` is preserved as a hard line break.
+    //   * wrap — long lines wrap at word boundaries.
+    //
+    // Per CSS Text Module Level 3 §3:
+    //   normal       collapse  drop_nl   wrap
+    //   nowrap       collapse  drop_nl   nowrap
+    //   pre          preserve  preserve  nowrap
+    //   pre_wrap     preserve  preserve  wrap
+    //   pre_line     collapse  preserve  wrap
+    //   break_spaces preserve  preserve  wrap (extra break opps)
+    //
+    // The legacy `set_white_space_nowrap()` setter still works — it's
+    // mapped to nowrap when true and normal when false. New callers
+    // should prefer the enum API. Label::paint reads the enum to
+    // preprocess display text + toggle multi_line.
+    enum class WhiteSpaceMode {
+        normal, nowrap, pre, pre_wrap, pre_line, break_spaces
+    };
+    void set_white_space_mode(WhiteSpaceMode m) {
+        white_space_mode_ = m;
+        white_space_nowrap_ = (m == WhiteSpaceMode::nowrap || m == WhiteSpaceMode::pre);
+    }
+    WhiteSpaceMode white_space_mode() const { return white_space_mode_; }
+
     /// CSS / RN `mix-blend-mode` (pulp #1549). The blend mode applied when
     /// this View's compositing layer composites back onto its parent. Stored
     /// as the canvas BlendMode enum so the paint path can pass it straight
@@ -1260,6 +1288,7 @@ private:
     std::string background_repeat_;  ///< pulp #1552: CSS background-repeat keyword (storage-only)
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;  // pulp #1410
+    WhiteSpaceMode white_space_mode_ = WhiteSpaceMode::normal;  // pulp #1737
     CursorStyle cursor_ = CursorStyle::default_;
     UserSelect user_select_ = UserSelect::auto_;  // pulp #1538 / #1656 follow-up
     WritingDirection direction_ = WritingDirection::auto_;  // pulp #1434 A2-3

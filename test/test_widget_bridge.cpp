@@ -4757,6 +4757,59 @@ TEST_CASE("WidgetBridge setWhiteSpace flips View flag and Label multi_line for b
     REQUIRE(label->multi_line());
 }
 
+// pulp #1737 — full CSS white-space enum. Beyond normal/nowrap (#1410
+// covered), the bridge now routes pre / pre-wrap / pre-line /
+// break-spaces to View::WhiteSpaceMode and toggles Label.multi_line
+// per spec semantics:
+//   pre          → no wrap (treat like nowrap for Label)
+//   pre-wrap     → wrap
+//   pre-line     → wrap
+//   break-spaces → wrap
+// The legacy white_space_nowrap() bool is true for { nowrap, pre }
+// so existing consumers (text shaper) keep working.
+TEST_CASE("WidgetBridge setWhiteSpace routes all 6 CSS keywords to WhiteSpaceMode",
+          "[view][bridge][css][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lbl', 'multi line text', '');
+    )");
+    auto* label = dynamic_cast<Label*>(bridge.widget("lbl"));
+    REQUIRE(label != nullptr);
+
+    using M = View::WhiteSpaceMode;
+    struct Case {
+        const char* keyword;
+        M expected_mode;
+        bool expected_multi_line;
+        bool expected_nowrap_bool;
+    } cases[] = {
+        {"normal",       M::normal,       true,  false},
+        {"nowrap",       M::nowrap,       false, true },
+        {"pre",          M::pre,          false, true },
+        {"pre-wrap",     M::pre_wrap,     true,  false},
+        {"pre-line",     M::pre_line,     true,  false},
+        {"break-spaces", M::break_spaces, true,  false},
+    };
+    for (const auto& c : cases) {
+        std::string js = std::string("setWhiteSpace('lbl', '") + c.keyword + "')";
+        bridge.load_script(js);
+        INFO("white-space keyword: " << c.keyword);
+        REQUIRE(label->white_space_mode() == c.expected_mode);
+        REQUIRE(label->multi_line() == c.expected_multi_line);
+        REQUIRE(label->white_space_nowrap() == c.expected_nowrap_bool);
+    }
+
+    // Unknown keyword falls back to normal per CSS forward-compat.
+    bridge.load_script("setWhiteSpace('lbl', 'mystery-future-keyword')");
+    REQUIRE(label->white_space_mode() == M::normal);
+    REQUIRE(label->multi_line());
+}
+
 // pulp #1410 — CSS translator side. style.whiteSpace = 'nowrap' must
 // route through CSSStyleDeclaration._applyProperty to setWhiteSpace,
 // which then sets the View flag.

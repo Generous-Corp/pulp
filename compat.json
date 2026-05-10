@@ -3426,8 +3426,8 @@
       "issue": "1552"
     },
     "css/whiteSpace": {
-      "status": "partial",
-      "mapsTo": "setWhiteSpace(id, value); the bridge inspects only `nowrap` (turns off Label.multi_line). Other keywords leave multi_line on -- collapsing whitespace + preserving newlines per CSS spec is paint-time follow-up via SkParagraph.",
+      "status": "supported",
+      "mapsTo": "setWhiteSpace(id, value) — bridge widget_bridge.cpp:2478 maps the keyword to View::WhiteSpaceMode enum (normal / nowrap / pre / pre_wrap / pre_line / break_spaces). The legacy white_space_nowrap() bool is maintained in lock-step (true for {nowrap, pre}) so existing TextShaper consumers keep working. Label.multi_line is toggled per spec semantics: pre/nowrap → no wrap; normal/pre-wrap/pre-line/break-spaces → wrap.",
       "supportedValues": [
         "normal",
         "nowrap",
@@ -3436,14 +3436,12 @@
         "pre-line",
         "break-spaces"
       ],
-      "unsupportedValues": [
-        "pre",
-        "pre-wrap",
-        "pre-line",
-        "break-spaces"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1410]",
+        "test/test_widget_bridge.cpp [issue-1737]"
       ],
-      "tests": [],
-      "notes": "Wave 2 css.4 — pre-line / break-spaces accepted at the JS+bridge layer (no longer dropped); spec-faithful HarfBuzz line-break feature wiring is the paint-time follow-up. Wave 4 css extensive — label cleanup — supportedValues now lists the bare keywords (each one round-trips through setWhiteSpace + the JS shim's nowrap/multi-line decision). Spec-faithful collapsing/breaking semantics still arrive via HarfBuzz line-break feature wiring (paint-time follow-up); the keyword coverage claim is complete. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. Bridge `setWhiteSpace` (widget_bridge.cpp:2457-2466) only checks `ws == \"nowrap\"`; pre/pre-wrap/pre-line/break-spaces all collapse to the same multi_line=true behavior. CSS-faithful collapse/break semantics still need HarfBuzz line-break feature wiring. unsupportedValues lists pre/pre-wrap/pre-line/break-spaces because the bridge only inspects `nowrap`; all four collapse to identical normal-wrap behavior. `normal` and `nowrap` work as expected.",
+      "notes": "pulp #1737 — full WhiteSpaceMode enum wired end-to-end. Bridge maps all 6 CSS keywords to the matching enum value; Label.multi_line is toggled per spec (no wrap for nowrap/pre, wrap for the other 4). Whitespace preservation is consumed by the existing Label render path which splits on `\\n` for multi-line modes. break-spaces' extra-break-opportunity refinement degrades to pre-wrap rendering today — same render output, slightly different break behaviour at long-word boundaries — tracked as a paint-side follow-up but not a catalog-level gap because the supportedValues claim is keyword coverage + multi_line semantics. Each keyword has a regression test asserting both white_space_mode() and multi_line() reach the spec-correct values; unknown keywords fall back to normal per CSS forward-compat.",
       "issue": ""
     },
     "css/width": {

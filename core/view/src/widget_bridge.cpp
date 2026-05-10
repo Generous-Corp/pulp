@@ -2478,11 +2478,28 @@ void WidgetBridge::register_api() {
     engine_.register_function("setWhiteSpace", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ws = args.get<std::string>(1, "normal");
-        const bool nowrap = (ws == "nowrap");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_white_space_nowrap(nowrap);
-        if (auto* l = dynamic_cast<Label*>(widget(id)))
-            l->set_multi_line(!nowrap);
+        if (!v) return choc::value::Value();
+        // pulp #1737 — map keyword to View::WhiteSpaceMode enum.
+        // The set_white_space_mode setter also maintains the legacy
+        // white_space_nowrap_ bool (true for nowrap + pre) so existing
+        // consumers of white_space_nowrap() keep working.
+        using M = View::WhiteSpaceMode;
+        M mode = M::normal;
+        if      (ws == "nowrap")        mode = M::nowrap;
+        else if (ws == "pre")           mode = M::pre;
+        else if (ws == "pre-wrap")      mode = M::pre_wrap;
+        else if (ws == "pre-line")      mode = M::pre_line;
+        else if (ws == "break-spaces")  mode = M::break_spaces;
+        // Unknown keyword falls back to normal (per CSS forward-compat).
+        v->set_white_space_mode(mode);
+        // Label.multi_line: true when the mode wraps (normal/pre-wrap/
+        // pre-line/break-spaces), false when it doesn't (nowrap/pre).
+        if (auto* l = dynamic_cast<Label*>(widget(id))) {
+            const bool wraps = (mode == M::normal || mode == M::pre_wrap ||
+                                mode == M::pre_line || mode == M::break_spaces);
+            l->set_multi_line(wraps);
+        }
         return choc::value::Value();
     });
 
