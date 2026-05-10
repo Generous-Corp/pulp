@@ -1191,7 +1191,158 @@ void ImageView::paint(canvas::Canvas& canvas) {
     if (fs_path.compare(0, kFileScheme.size(), kFileScheme) == 0) {
         fs_path = fs_path.substr(kFileScheme.size());
     }
-    if (!fs_path.empty() && canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
+
+    // pulp #1737 — honour CSS `object-fit` + `object-position`.
+    // Probe intrinsic image dimensions; if the backend can't measure
+    // (no decode primitive on this platform) fall back to the
+    // pre-#1737 stretch-to-bounds path (= object-fit: fill).
+    float img_w = 0.0f, img_h = 0.0f;
+    bool has_intrinsic =
+        !fs_path.empty() &&
+        canvas.measure_image_from_file(fs_path, img_w, img_h) &&
+        img_w > 0.0f && img_h > 0.0f;
+
+    struct FitRect { float x, y, width, height; };
+    auto compute_fit = [&]() -> std::pair<FitRect, FitRect> {
+        // dst rect (relative to view origin), src rect (in image coords).
+        FitRect dst{0.0f, 0.0f, b.width, b.height};
+        FitRect src{0.0f, 0.0f, img_w, img_h};
+        const std::string& fit = object_fit();
+
+        // Default `fill` (CSS spec): stretch to the box, full src.
+        // Same applies when `object-fit` is unset or unknown — the
+        // pre-#1737 behaviour.
+        if (fit.empty() || fit == "fill") {
+            return {dst, src};
+        }
+
+        // `none` — natural size, no scaling. Crop or letterbox both axes.
+        // Centre by default; refined below by object-position parsing.
+        if (fit == "none") {
+            float dw = std::min(b.width,  img_w);
+            float dh = std::min(b.height, img_h);
+            dst = {(b.width - dw) * 0.5f, (b.height - dh) * 0.5f, dw, dh};
+            float sx = (img_w - dw) * 0.5f;
+            float sy = (img_h - dh) * 0.5f;
+            src = {std::max(sx, 0.0f), std::max(sy, 0.0f), dw, dh};
+            return {dst, src};
+        }
+
+        // `contain` (and `scale-down` when img > box) — letterbox,
+        // preserve aspect ratio, scale so the larger axis hits the box.
+        // `cover` — crop, preserve aspect ratio, scale so the smaller
+        // axis hits the box (the other axis overflows + gets cropped).
+        // `scale-down` chooses between `none` and `contain` based on
+        // which produces the smaller painted region.
+        bool is_contain = (fit == "contain");
+        bool is_cover   = (fit == "cover");
+        bool is_scale_down = (fit == "scale-down");
+
+        if (is_scale_down) {
+            // Per spec: scale-down behaves as `none` if it would shrink
+            // (i.e. the image is smaller than the box on both axes);
+            // otherwise behaves as `contain`.
+            if (img_w <= b.width && img_h <= b.height) {
+                // Recurse via the `none` path semantics.
+                float dw = img_w, dh = img_h;
+                dst = {(b.width - dw) * 0.5f, (b.height - dh) * 0.5f, dw, dh};
+                src = {0, 0, img_w, img_h};
+                return {dst, src};
+            }
+            is_contain = true;
+        }
+
+        if (is_contain || is_cover) {
+            float scale_x = b.width  / img_w;
+            float scale_y = b.height / img_h;
+            float scale = is_cover ? std::max(scale_x, scale_y)
+                                   : std::min(scale_x, scale_y);
+            float dw = img_w * scale;
+            float dh = img_h * scale;
+            dst = {(b.width - dw) * 0.5f, (b.height - dh) * 0.5f, dw, dh};
+            src = {0, 0, img_w, img_h};
+            return {dst, src};
+        }
+
+        // Unknown fit keyword — degrade to fill.
+        return {dst, src};
+    };
+
+    if (has_intrinsic) {
+        auto [dst, src] = compute_fit();
+
+        // pulp #1737 — apply `object-position` as a percentage offset.
+        // CSS spec lets the value be lengths or percentages; the JS
+        // shim normalises to a `<x>% <y>%` two-token string before
+        // routing through setObjectPosition. Anything we can't parse
+        // collapses to "50% 50%" (the spec default), which keeps the
+        // centred-by-default `compute_fit` result.
+        auto parse_object_position = [&](float& px, float& py) {
+            px = 50.0f; py = 50.0f;
+            const std::string& s = object_position();
+            if (s.empty()) return;
+            // Tokenise on whitespace; accept `Npx`, `N%`, or bare numbers.
+            std::vector<std::string> toks;
+            std::string cur;
+            for (char c : s) {
+                if (c == ' ' || c == '\t') {
+                    if (!cur.empty()) { toks.push_back(cur); cur.clear(); }
+                } else {
+                    cur.push_back(c);
+                }
+            }
+            if (!cur.empty()) toks.push_back(cur);
+
+            auto parse_one = [&](const std::string& tok, float box_extent,
+                                  float img_extent, float& out_pct) {
+                // Percentage: linear; CSS object-position percentage
+                // means "<P% of the SLACK> measured from the start".
+                if (!tok.empty() && tok.back() == '%') {
+                    try { out_pct = std::stof(tok.substr(0, tok.size() - 1)); }
+                    catch (...) {}
+                    return;
+                }
+                // Length (px): convert to a percentage of the slack.
+                float n = 0.0f;
+                bool ok = true;
+                try { n = std::stof(tok); } catch (...) { ok = false; }
+                if (!ok) return;
+                float slack = box_extent - img_extent;
+                if (std::abs(slack) < 0.001f) { out_pct = 50.0f; return; }
+                out_pct = (n / slack) * 100.0f;
+            };
+
+            if (toks.size() >= 1) parse_one(toks[0], b.width,  dst.width,  px);
+            if (toks.size() >= 2) parse_one(toks[1], b.height, dst.height, py);
+        };
+
+        if (!object_position().empty()) {
+            float px = 50.0f, py = 50.0f;
+            parse_object_position(px, py);
+            float slack_x = b.width  - dst.width;
+            float slack_y = b.height - dst.height;
+            dst.x = slack_x * (px / 100.0f);
+            dst.y = slack_y * (py / 100.0f);
+        }
+
+        // Route via the source-rect overload when `none` / `cover` / a
+        // non-identity src was computed. The dst-only path stays for
+        // the simple `fill` / `contain` cases (full src rect).
+        bool drawn = false;
+        if (src.x != 0.0f || src.y != 0.0f ||
+            std::abs(src.width  - img_w) > 0.001f ||
+            std::abs(src.height - img_h) > 0.001f) {
+            drawn = canvas.draw_image_from_file_rect(
+                fs_path,
+                src.x, src.y, src.width, src.height,
+                dst.x, dst.y, dst.width, dst.height);
+        } else {
+            drawn = canvas.draw_image_from_file(
+                fs_path, dst.x, dst.y, dst.width, dst.height);
+        }
+        if (drawn) { loaded_ = true; return; }
+    } else if (!fs_path.empty() &&
+               canvas.draw_image_from_file(fs_path, 0, 0, b.width, b.height)) {
         loaded_ = true;
         return;
     }

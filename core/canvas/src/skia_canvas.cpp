@@ -1643,6 +1643,25 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
     return true;
 }
 
+// pulp #1737 — peek-only image dimensions for ImageView object-fit /
+// object-position layout. Decode is deferred until first paint, so this
+// just builds the SkImage header to read width()/height() — Skia caches
+// the SkImageInfo so the next draw_image_from_file in the same paint
+// pass reuses it (the GPU decode lives in the SkImages::DeferredFrom...
+// shared chain).
+bool SkiaCanvas::measure_image_from_file(const std::string& path,
+                                          float& out_width, float& out_height) {
+    out_width = 0.0f; out_height = 0.0f;
+    if (path.empty()) return false;
+    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    if (!sk_data) return false;
+    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    if (!image) return false;
+    out_width  = static_cast<float>(image->width());
+    out_height = static_cast<float>(image->height());
+    return true;
+}
+
 // ── Gradients ────────────────────────────────────────────────────────────────
 
 static void colors_to_skia(const Color* colors, const float* positions, int count,

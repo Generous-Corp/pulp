@@ -817,6 +817,19 @@ public:
         return draw_image_from_data(data, size, dx, dy, dw, dh);
     }
 
+    /// Decoded-image intrinsic dimensions in pixels. Returned via out-params
+    /// so backends without image decode just leave them at 0 and callers
+    /// short-circuit to "use destination bounds" (the pre-#1737 behaviour).
+    /// Used by ImageView::paint to honour CSS object-fit / object-position
+    /// and by canvas2d sprite sizing. Default returns false; Skia + CG
+    /// override to consult their decoder.
+    virtual bool measure_image_from_file(const std::string& path,
+                                          float& out_width, float& out_height) {
+        (void)path;
+        out_width = 0.0f; out_height = 0.0f;
+        return false;
+    }
+
     /// Measure text with full font metrics using current font settings.
     virtual TextMetrics measure_text_full(const std::string& text) {
         TextMetrics m;

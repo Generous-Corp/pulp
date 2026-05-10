@@ -3574,28 +3574,36 @@
       "issue": "1515"
     },
     "css/objectFit": {
-      "status": "partial",
-      "mapsTo": "el.style.objectFit -> setObjectFit(id, value) -> View::object_fit_ (storage-only). ImageView paint slice that consumes this needs access to decoded image natural size — planned follow-up.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all values (storage-only — ImageView paint slice currently stretches to bounds regardless; object-fit consumption is a follow-up)"
+      "status": "supported",
+      "mapsTo": "el.style.objectFit -> setObjectFit(id, value) -> View::object_fit_. pulp #1737 — ImageView::paint now consumes the value: probes intrinsic image dimensions via Canvas::measure_image_from_file (Skia override consults SkImage header without forcing decode), computes a fit rect per spec, then routes through draw_image_from_file (full src) or draw_image_from_file_rect (cropped src for `none`/`cover` overflow). Backends without measure_image_from_file fall back to the pre-#1737 stretch-to-bounds path (object-fit: fill).",
+      "supportedValues": [
+        "fill",
+        "contain",
+        "cover",
+        "none",
+        "scale-down"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1707-followup-objectFit]"
+        "test/test_widget_bridge.cpp [issue-1707-followup-objectFit]",
+        "test/test_image_view_cache.cpp [object-fit][issue-1737]"
       ],
-      "notes": "Storage-only today; the slot round-trips through View::object_fit() so authors can set/get it. Status `partial` is honest until ImageView paint slice consumes the value (needs access to decoded image natural size for fit math)."
+      "notes": "pulp #1737 — wired end-to-end: Canvas::measure_image_from_file API + ImageView::paint compute_fit lambda + Skia override using SkImages::DeferredFromEncodedData (peek SkImage header). Per CSS spec: `fill` stretches; `contain` letterboxes preserving AR; `cover` crops to fill the larger axis; `none` paints native size centred (with src-rect crop when image overflows the box); `scale-down` chooses `none` if smaller, else `contain`."
     },
     "css/objectPosition": {
-      "status": "partial",
-      "mapsTo": "el.style.objectPosition -> setObjectPosition(id, value) -> View::object_position_ (storage-only). Pairs with object-fit.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all values (storage-only — same paint follow-up as object-fit)"
+      "status": "supported",
+      "mapsTo": "el.style.objectPosition -> setObjectPosition(id, value) -> View::object_position_. pulp #1737 — ImageView::paint parses `<x> <y>` two-token strings (`%`, bare numbers, or px lengths) and offsets the centred dst rect within the box. CSS percentage form is implemented per spec: `0%` pins to the start, `100%` to the end (slack-relative).",
+      "supportedValues": [
+        "<percentage> <percentage>",
+        "<length> <length>",
+        "single-token shorthand (applied to both axes)"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1707-followup-objectPosition]"
+        "test/test_widget_bridge.cpp [issue-1707-followup-objectPosition]",
+        "test/test_image_view_cache.cpp [object-position][issue-1737]"
       ],
-      "notes": "Storage-only today; pairs with object-fit (#1707-followup). Honored by the same paint slice that consumes object-fit."
+      "notes": "pulp #1737 — paired with object-fit, consumed by ImageView::paint after compute_fit. Slack-based percentage interpretation matches the spec; lengths are converted to a percentage of the slack so they compose with the centred-default fit rect."
     },
     "css/grid": {
       "status": "supported",

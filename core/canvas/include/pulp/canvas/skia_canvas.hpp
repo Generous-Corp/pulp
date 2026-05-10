@@ -118,6 +118,8 @@ public:
     bool draw_image_from_file_rect(const std::string& path,
                                     float sx, float sy, float sw, float sh,
                                     float dx, float dy, float dw, float dh) override;
+    bool measure_image_from_file(const std::string& path,
+                                  float& out_width, float& out_height) override;
 
     // ── Line dash / pixel manipulation (issue-916) ─────────────────────
     void set_line_dash(const float* intervals, int count, float phase) override;
