@@ -1179,6 +1179,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // CSS `object-fit` — controls fitting of <img> intrinsic
+        // size into its layout box. Storage-only today; ImageView
+        // paint-time consumption needs natural-size access (follow-up).
+        case "objectFit": {
+            if (typeof setObjectFit !== "function") break;
+            setObjectFit(id, String(resolved).trim());
+            break;
+        }
+
+        // CSS `object-position` — alignment of object-fit residual
+        // space. Pairs with object-fit. Storage-only today.
+        case "objectPosition": {
+            if (typeof setObjectPosition !== "function") break;
+            setObjectPosition(id, String(resolved).trim());
+            break;
+        }
+
         // pulp #1515 — CSS `mask` shorthand. Parse the image
         // sub-property out (it's the only longhand we support today)
         // and forward both the shorthand verbatim (so View::mask()

@@ -7416,6 +7416,61 @@ TEST_CASE("WidgetBridge setAppearance round-trips on the View",
     REQUIRE(panel->appearance() == "menulist-button");
 }
 
+// CSS `object-fit` storage round-trip (paint-time consumption is a
+// planned follow-up that needs ImageView access to decoded image
+// natural size; status is `partial` until paint lands).
+TEST_CASE("WidgetBridge setObjectFit round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-objectFit]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->object_fit().empty());
+
+    for (auto kw : {"fill", "contain", "cover", "none", "scale-down"}) {
+        bridge.load_script(std::string("setObjectFit('p', '") + kw + "')");
+        REQUIRE(panel->object_fit() == kw);
+    }
+
+    // CSSStyleDeclaration JS path.
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('objectFit', 'cover');
+    )");
+    REQUIRE(panel->object_fit() == "cover");
+}
+
+// CSS `object-position` storage round-trip (pairs with object-fit).
+TEST_CASE("WidgetBridge setObjectPosition round-trips on the View",
+          "[view][bridge][css][issue-1707-followup-objectPosition]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->object_position().empty());
+
+    bridge.load_script("setObjectPosition('p', 'center')");
+    REQUIRE(panel->object_position() == "center");
+
+    bridge.load_script("setObjectPosition('p', '50% 50%')");
+    REQUIRE(panel->object_position() == "50% 50%");
+
+    bridge.load_script("setObjectPosition('p', '10px top')");
+    REQUIRE(panel->object_position() == "10px top");
+
+    bridge.load_script(R"(
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('objectPosition', '25% 75%');
+    )");
+    REQUIRE(panel->object_position() == "25% 75%");
+}
+
 TEST_CASE("View::paint_all emits clip_path_svg when clip_path is set",
           "[view][canvas][issue-1515]") {
     using namespace pulp::canvas;

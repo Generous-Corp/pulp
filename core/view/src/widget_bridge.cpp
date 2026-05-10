@@ -4969,6 +4969,29 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // setObjectFit(id, value) — CSS `object-fit`. Storage-only today;
+    // the ImageView paint slice that consumes this needs access to
+    // the decoded image's natural size (planned follow-up).
+    engine_.register_function("setObjectFit",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_object_fit(value);
+            return choc::value::Value();
+        });
+
+    // setObjectPosition(id, value) — CSS `object-position`. Pairs
+    // with object-fit. Storage-only today.
+    engine_.register_function("setObjectPosition",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto value = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_object_position(value);
+            return choc::value::Value();
+        });
+
     // pulp #1549 — setMixBlendMode(id, "multiply") for CSS / RN
     // `mix-blend-mode`. Maps the W3C blend-mode keyword set to the
     // canvas BlendMode enum so the View paint path can pass it
