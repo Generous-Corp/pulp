@@ -4593,16 +4593,13 @@
       "issue": ""
     },
     "rn/isolation": {
-      "status": "noop",
-      "mapsTo": "no-op accept — RN models isolation as enum auto|isolate (rn-viewstyle.json:134, RN New Architecture only). Pulp's box composition doesn't currently honor stacking-context isolation, so the value is accepted silently with no rendered effect (same shape as css/willChange / css/animation noop pattern).",
+      "status": "wontfix",
+      "mapsTo": "Architectural — Pulp's render pipeline does not implement CSS stacking contexts, so the `isolation` keyword (auto|isolate per RN ViewStyle / W3C CSS Containment) has no surface to land on. Same architectural class as `css/perspective` (no 3D transform pipeline) and `css/willChange` (no GPU hint engine).",
       "supportedValues": [],
-      "unsupportedValues": [
-        "auto",
-        "isolate"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "RN's ViewStyle DOES model isolation (oracle defines enum auto|isolate, flagged 'RN New Architecture only'). The earlier wontfix premise ('no RN model') was factually wrong — corrected per Codex P2 review on PR #1565. Pulp accepts the value but the underlying box composition isn't isolated, which matches the noop vocabulary (consumer can pass, no visual effect; same pattern as css/animation, css/willChange). Reclassified missing → noop per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
-      "issue": "https://github.com/danielraffel/pulp/issues/1546"
+      "notes": "pulp #1737 — reclassified noop → wontfix. The earlier noop classification (PR #1565 followup) was an overcorrection: `noop` implies 'temporarily accepted but eventually wired' but the underlying gap (no stacking-context engine in Pulp's render pipeline) is architectural per CLAUDE.md's 'flex+grid only, single-pass tree-walk render' contract. Adding a stacking-context engine would be a multi-month rewrite of the layer composition system, parallel to adding a CSS cascade engine (which is also wontfix per html/document_querySelector's arch-no-cascade-engine note). Documented as wontfix to take the entry out of the achievable-ceiling denominator. Authors who need stacking isolation can wrap the affected View in a separate render surface — same workaround as the css/perspective family.",
+      "issue": ""
     },
     "rn/justifyContent": {
       "status": "supported",
