@@ -19,6 +19,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(view): removeAttribute(role)/(aria-label) resets View slot (Codex P1 on #1641) ([#1733](https://github.com/danielraffel/pulp/pull/1733))
 
 <a id="v07923"></a>
+## [0.80.0]
+
 ## [0.79.23] - 2026-05-10
 
 - fix(view): querySelector handles colons inside attribute brackets (Codex P1 on #1641) ([#1732](https://github.com/danielraffel/pulp/pull/1732))
