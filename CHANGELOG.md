@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07912"></a>
+## [0.79.12] - 2026-05-10
+
+- test(rn): NO-EV evidence backfill — 92 entries (closes #1711 batch #2) ([#1718](https://github.com/danielraffel/pulp/pull/1718))
+
+<a id="v07911"></a>
+## [0.79.11] - 2026-05-10
+
+- test(yoga): NO-EV evidence backfill — 47 entries (closes #1711 batch #1) ([#1717](https://github.com/danielraffel/pulp/pull/1717))
+- fix(compat): rn/height vh reclassified as architectural-OOS (closes #1712) ([#1715](https://github.com/danielraffel/pulp/pull/1715))
+
 <a id="v07910"></a>
 ## [0.79.10] - 2026-05-10
 
@@ -1462,6 +1473,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.79.12]: https://github.com/danielraffel/pulp/releases/tag/v0.79.12
+[0.79.11]: https://github.com/danielraffel/pulp/releases/tag/v0.79.11
 [0.79.10]: https://github.com/danielraffel/pulp/releases/tag/v0.79.10
 [0.79.9]: https://github.com/danielraffel/pulp/releases/tag/v0.79.9
 [0.79.8]: https://github.com/danielraffel/pulp/releases/tag/v0.79.8
