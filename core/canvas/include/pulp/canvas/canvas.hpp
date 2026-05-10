@@ -800,6 +800,23 @@ public:
         return false; // Override in Skia backend
     }
 
+    // pulp #1737 — 9-arg drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh) source-rect
+    // slicing. Default impl delegates to the dst-only form (loses the slice);
+    // Skia + CG override to use drawImageRect(src, dst) / CGContextDrawImage
+    // on a CGImageCreateWithImageInRect-cropped sub-image.
+    virtual bool draw_image_from_file_rect(const std::string& path,
+                                            float sx, float sy, float sw, float sh,
+                                            float dx, float dy, float dw, float dh) {
+        (void)sx; (void)sy; (void)sw; (void)sh;
+        return draw_image_from_file(path, dx, dy, dw, dh);
+    }
+    virtual bool draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                            float sx, float sy, float sw, float sh,
+                                            float dx, float dy, float dw, float dh) {
+        (void)sx; (void)sy; (void)sw; (void)sh;
+        return draw_image_from_data(data, size, dx, dy, dw, dh);
+    }
+
     /// Measure text with full font metrics using current font settings.
     virtual TextMetrics measure_text_full(const std::string& text) {
         TextMetrics m;
@@ -1249,6 +1266,16 @@ public:
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
                               float x, float y, float w, float h) override;
+    // pulp #1737 — record the source-rect overload so widget-bridge tests
+    // can assert that the JS shim plumbed sx/sy/sw/sh through the bridge.
+    // Source rect is stored in `floats[0..3]` (sx, sy, sw, sh); dst rect
+    // stays in f[0..3] for backward-compat with the 5-arg test path.
+    bool draw_image_from_file_rect(const std::string& path,
+                                    float sx, float sy, float sw, float sh,
+                                    float dx, float dy, float dw, float dh) override;
+    bool draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                    float sx, float sy, float sw, float sh,
+                                    float dx, float dy, float dw, float dh) override;
     bool write_pixels(const uint8_t* data, int width, int height,
                       int dx, int dy) override;
     void save_backdrop_filter(float x, float y, float w, float h,

@@ -1607,6 +1607,42 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     return true;
 }
 
+// pulp #1737 — 9-arg drawImage source-rect form. Skia's drawImageRect has
+// a four-rect overload that maps `src` (in image coords) onto `dst` (in
+// canvas coords) with the active sampling. Used by sprite-sheet slicing.
+bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                            float sx, float sy, float sw, float sh,
+                                            float dx, float dy, float dw, float dh) {
+    if (!canvas_ || !data || size == 0) return false;
+    auto sk_data = SkData::MakeWithoutCopy(data, size);
+    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    if (!image) return false;
+    canvas_->drawImageRect(image,
+                           SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh),
+                           sampling_options_for_image_smoothing(),
+                           nullptr,
+                           SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+}
+
+bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
+                                            float sx, float sy, float sw, float sh,
+                                            float dx, float dy, float dw, float dh) {
+    if (!canvas_ || path.empty()) return false;
+    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    if (!sk_data) return false;
+    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    if (!image) return false;
+    canvas_->drawImageRect(image,
+                           SkRect::MakeXYWH(sx, sy, sw, sh),
+                           SkRect::MakeXYWH(dx, dy, dw, dh),
+                           sampling_options_for_image_smoothing(),
+                           nullptr,
+                           SkCanvas::kStrict_SrcRectConstraint);
+    return true;
+}
+
 // ── Gradients ────────────────────────────────────────────────────────────────
 
 static void colors_to_skia(const Color* colors, const float* positions, int count,

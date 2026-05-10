@@ -624,7 +624,19 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                     (void)b64;
                 }
             } else if (!src.empty()) {
-                drawn = canvas.draw_image_from_file(src, cmd.x, cmd.y, cmd.w, cmd.h);
+                // pulp #1737 — when the JS caller used the 9-arg form,
+                // the bridge stashed the source rect in x2/y2/x3/y3 and
+                // set has_source_rect. Route through the _rect overload
+                // so a sub-rectangle of the decoded image lands on the
+                // destination rect (sprite-sheet slicing).
+                if (cmd.has_source_rect) {
+                    drawn = canvas.draw_image_from_file_rect(
+                        src,
+                        cmd.x2, cmd.y2, cmd.x3, cmd.y3,
+                        cmd.x, cmd.y, cmd.w, cmd.h);
+                } else {
+                    drawn = canvas.draw_image_from_file(src, cmd.x, cmd.y, cmd.w, cmd.h);
+                }
             }
             if (!drawn) {
                 canvas.save();

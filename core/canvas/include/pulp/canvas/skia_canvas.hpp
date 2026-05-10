@@ -108,6 +108,16 @@ public:
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
                                float x, float y, float w, float h) override;
+    // pulp #1737 — 9-arg drawImage source-rect form: routes through
+    // SkCanvas::drawImageRect(image, src, dst, sampling) so a sub-rect of
+    // the decoded SkImage maps onto the destination rect. Supports
+    // sprite-sheet slicing without re-decoding the source bitmap.
+    bool draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                    float sx, float sy, float sw, float sh,
+                                    float dx, float dy, float dw, float dh) override;
+    bool draw_image_from_file_rect(const std::string& path,
+                                    float sx, float sy, float sw, float sh,
+                                    float dx, float dy, float dw, float dh) override;
 
     // ── Line dash / pixel manipulation (issue-916) ─────────────────────
     void set_line_dash(const float* intervals, int count, float phase) override;

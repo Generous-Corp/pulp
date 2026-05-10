@@ -153,6 +153,14 @@ struct CanvasDrawCmd {
     /// shim that relies on a previously-set `ctx.fillStyle`, including
     /// gradients).
     bool use_active_style = false;
+
+    /// pulp #1737 — when true on a `draw_image` cmd, x2/y2/x3/y3 carry
+    /// the source rect (sx, sy, sw, sh) for the 9-arg
+    /// `ctx.drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh)` form. The renderer
+    /// routes through `Canvas::draw_image_from_*_rect` so the source
+    /// sub-rectangle of the decoded image maps onto the destination rect
+    /// (sprite-sheet slicing). Without the flag the dst-only path runs.
+    bool has_source_rect = false;
 };
 
 /// A View whose paint() replays a list of recorded draw commands.

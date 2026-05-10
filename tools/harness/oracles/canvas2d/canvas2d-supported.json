@@ -276,9 +276,8 @@
       "bridge": [
         "canvasDrawImage"
       ],
-      "expectedStatus": "partial",
-      "notes": "Supports the 5- and 9-arg forms; 3-arg supported via shim default sizing.",
-      "gotcha": "sprite-sheet 9-arg form deferred (issue-916)"
+      "expectedStatus": "supported",
+      "notes": "pulp #1737 — 9-arg source-rect form (sprite-sheet slicing) now plumbed end-to-end. JS shim passes sx/sy/sw/sh as args[6..9]; bridge sets has_source_rect; canvas widget routes through Canvas::draw_image_from_file_rect (Skia: SkCanvas::drawImageRect with src+dst). 3-arg form uses shim default sizing."
     },
     "getImageData": {
       "kind": "method",
