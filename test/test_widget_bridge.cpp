@@ -7282,6 +7282,24 @@ TEST_CASE("WidgetBridge setClipPath unwraps path() and rejects non-path forms",
     bridge.load_script("setClipPath('p', 'M 0 0 L 20 0 L 20 20 Z')");
     REQUIRE(panel->has_clip_path());
     REQUIRE(panel->clip_path() == "M 0 0 L 20 0 L 20 20 Z");
+
+    // Codex #1616 P2 — CSS keywords are case-insensitive. Verify the
+    // bridge normalizes case before dispatch (NONE clears, PATH(...)
+    // unwraps, URL(#id) is treated as deferred).
+    bridge.load_script("setClipPath('p', 'M 1 1 L 9 1')");  // pre-set
+    REQUIRE(panel->has_clip_path());
+    bridge.load_script("setClipPath('p', 'NONE')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    bridge.load_script(R"(setClipPath('p', 'PATH("M 5 5 L 6 6")'))");
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 5 5 L 6 6");
+
+    bridge.load_script(R"(setClipPath('p', 'Path("M 7 7")'))"); // mixed-case
+    REQUIRE(panel->clip_path() == "M 7 7");
+
+    bridge.load_script("setClipPath('p', 'URL(#someId)')");  // deferred
+    REQUIRE_FALSE(panel->has_clip_path());
 }
 
 TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",

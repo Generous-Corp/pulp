@@ -4871,9 +4871,16 @@ void WidgetBridge::register_api() {
                 return s.substr(a, b - a + 1);
             };
             std::string t = trim(value);
-            if (t.empty() || t == "none") {
+            // CSS keywords (`none`, `path(...)`, `circle(...)`, etc.) are
+            // case-insensitive per spec. Build a lowercased copy of the
+            // prefix-bearing portion for comparison; preserve the original
+            // case for the SVG path "d" data inside path("...") (Codex
+            // #1616 P2 on #1540 follow-up #1698).
+            std::string t_lower = t;
+            for (auto& c : t_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (t_lower.empty() || t_lower == "none") {
                 v->set_clip_path("");
-            } else if (t.size() > 6 && t.rfind("path(", 0) == 0 && t.back() == ')') {
+            } else if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
                 std::string inner = trim(t.substr(5, t.size() - 6));
                 if (inner.size() >= 2 && (inner.front() == '"' || inner.front() == '\'')
                     && inner.back() == inner.front()) {
@@ -4884,7 +4891,7 @@ void WidgetBridge::register_api() {
                 bool deferred_shape = false;
                 for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
                                        "rect(", "xywh(", "url("}) {
-                    if (t.rfind(p, 0) == 0) { deferred_shape = true; break; }
+                    if (t_lower.rfind(p, 0) == 0) { deferred_shape = true; break; }
                 }
                 if (deferred_shape) {
                     v->set_clip_path("");
