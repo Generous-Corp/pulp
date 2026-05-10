@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0798"></a>
+## [0.79.8] - 2026-05-09
+
+- fix(canvas2d): transform() forwards composed matrix to bridge (closes pulp #1348 / #1666 followup) ([#1701](https://github.com/danielraffel/pulp/pull/1701))
+- fix(canvas2d): rotated ellipse extends current contour (Codex P1, pulp #1556 followup) ([#1699](https://github.com/danielraffel/pulp/pull/1699))
+
 <a id="v0796"></a>
 ## [0.79.6] - 2026-05-09
 
@@ -1446,6 +1452,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.79.8]: https://github.com/danielraffel/pulp/releases/tag/v0.79.8
 [0.79.6]: https://github.com/danielraffel/pulp/releases/tag/v0.79.6
 [0.79.5]: https://github.com/danielraffel/pulp/releases/tag/v0.79.5
 [0.79.4]: https://github.com/danielraffel/pulp/releases/tag/v0.79.4
