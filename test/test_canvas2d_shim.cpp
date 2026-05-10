@@ -3031,6 +3031,50 @@ TEST_CASE("Canvas2D getTransform DOMMatrix translateSelf affine compose",
     REQUIRE(result == "2,1,10,3");
 }
 
+TEST_CASE("Canvas2D DOMMatrix singular inverse: all 16 components are NaN [issue-1730]",
+          "[view][canvas2d][issue-1730][dommatrix-mutators]") {
+    // Codex P2 follow-up on #1754: spec says ALL 16 matrix components
+    // become NaN for a non-invertible inverse. Constructor only NaN'd
+    // the 2D aliases; m13/m14/m23/m24/m31..m34/m43/m44 stayed at
+    // constructor-default identity. toFloat32Array/toFloat64Array
+    // would return mixed finite/NaN, violating the contract.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(1, 1, 1, 1, 0, 0);  // det=0
+        var ninv = ctx.getTransform().inverse();
+        var arr = ninv.toFloat32Array();
+        var allNaN = true;
+        for (var i = 0; i < arr.length; ++i) {
+            if (!isNaN(arr[i])) { allNaN = false; break; }
+        }
+        return [allNaN, arr.length].join(',');
+    )");
+    REQUIRE(result == "true,16");
+}
+
+TEST_CASE("Canvas2D DOMMatrix toJSON honors actual is2D [issue-1730]",
+          "[view][canvas2d][issue-1730][dommatrix-mutators]") {
+    // Codex P2 follow-up on #1754: toJSON used to hardcode is2D=true;
+    // a singular-inverse result has is2D=false but JSON serialization
+    // would lose the inversion-failure indicator.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe'; document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Identity → is2D=true should serialize true.
+        var j_ok = ctx.getTransform().toJSON();
+        var ok1 = (j_ok.is2D === true);
+        // Singular → is2D=false should serialize false.
+        ctx.setTransform(1, 1, 1, 1, 0, 0);
+        var j_bad = ctx.getTransform().inverse().toJSON();
+        var ok2 = (j_bad.is2D === false);
+        return [ok1, ok2].join(',');
+    )");
+    REQUIRE(result == "true,true");
+}
+
 TEST_CASE("Canvas2D DOMMatrix inverse round-trips identity; singular yields NaN matrix [issue-1730]",
           "[view][canvas2d][issue-1527][issue-1730][dommatrix-mutators]") {
     // Codex P1 on #1730: per spec

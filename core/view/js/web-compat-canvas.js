@@ -183,8 +183,13 @@ _PulpCanvasMatrix.prototype.toFloat64Array = function() {
     return this.toFloat32Array();
 };
 _PulpCanvasMatrix.prototype.toJSON = function() {
+    // Codex P2 follow-up on #1754: honor the actual is2D state. A
+    // singular-inverse result has is2D=false; if toJSON hardcodes
+    // true, JSON consumers can't distinguish inversion failure from
+    // a successful 2D inverse.
     return { a: this.a, b: this.b, c: this.c, d: this.d,
-             e: this.e, f: this.f, is2D: true, isIdentity: this.isIdentity };
+             e: this.e, f: this.f, is2D: this.is2D !== false,
+             isIdentity: this.isIdentity };
 };
 
 // pulp #1527 — DOMMatrix mutator methods. Snapshot semantics
@@ -262,7 +267,17 @@ _PulpCanvasMatrix.prototype.inverse = function() {
     var a = this.a, b = this.b, c = this.c, d = this.d, e = this.e, f = this.f;
     var det = a * d - b * c;
     if (det === 0 || !isFinite(det)) {
+        // Codex P2 follow-up: spec says ALL 16 components become NaN
+        // for a non-invertible matrix. The constructor only NaNs the
+        // 2D aliases (m11..m22, m41..m42); m13, m14, m23, m24,
+        // m31..m34, m43, m44 stay at constructor-default identity.
+        // toFloat32Array() / toFloat64Array() would then return
+        // mixed finite/NaN data, violating the contract.
         var nan = new _PulpCanvasMatrix(NaN, NaN, NaN, NaN, NaN, NaN);
+        nan.m13 = NaN; nan.m14 = NaN;
+        nan.m23 = NaN; nan.m24 = NaN;
+        nan.m31 = NaN; nan.m32 = NaN; nan.m33 = NaN; nan.m34 = NaN;
+        nan.m43 = NaN; nan.m44 = NaN;
         nan.is2D = false;
         return nan;
     }
