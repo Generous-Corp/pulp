@@ -3613,7 +3613,14 @@ void WidgetBridge::register_api() {
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
         auto& f = v->flex();
-        f.box_sizing = (kw == "border-box") ? BoxSizing::border_box : BoxSizing::content_box;
+        if (kw == "border-box") {
+            f.box_sizing = BoxSizing::border_box;
+        } else if (kw == "inherit") {
+            f.box_sizing = v->parent() ? v->parent()->flex().box_sizing
+                                       : BoxSizing::content_box;
+        } else {
+            f.box_sizing = BoxSizing::content_box;
+        }
         return choc::value::Value();
     });
 
