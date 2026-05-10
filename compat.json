@@ -658,7 +658,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1517]"
+        "test/test_widget_bridge.cpp [issue-1517]"
       ],
       "notes": "pulp #1517 — accepts the keyword without crashing; paint impact is exactly zero because pulp doesn't model scroll contexts. `scroll` is the spec-conformant default for our case. Status `noop` means the property is wired through but has no rendered effect. Wave 1 architectural reclassification — `fixed` / `local` are arch-no-scroll-context (Pulp's layout is non-scrolling so `scroll` is the spec-conformant default; viewport-relative paint origin and scroll-context coupling are not modeled). Wave 1 drift cleanup — noop status retained; cleared unsupportedValues since `fixed` / `local` are arch-no-scroll-context (Pulp doesn't model scroll contexts; the default `scroll` is the spec-conformant rendering).",
       "issue": "1517"
@@ -673,7 +673,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1517]"
+        "test/test_widget_bridge.cpp [issue-1517]"
       ],
       "notes": "pulp #1517 — keyword stored on View; the box-flavor variants are visual no-ops on solid backgrounds (which is what pulp paints today). The `text` variant requires real paint-chain composition and is deferred. Wave 1 architectural reclassification — `text` keyword is partial-deferred-paint-composition (slot stored on View::background_clip_; paint-time SkBlendMode::kSrcIn against text glyphs requires paint-chain composition not in pipeline today). Wave 4 css extensive — text is arch-paint-deferred (paint-time SkBlendMode::kSrcIn against text glyphs is the follow-up; the slot stores the value so the wiring is ready). Reclassified as paint-side gap rather than value-coverage gap.",
       "issue": "1517"
@@ -725,7 +725,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1517]"
+        "test/test_widget_bridge.cpp [issue-1517]"
       ],
       "notes": "pulp #1517 — value stored for round-tripping; paint impact is zero because the property only matters for repeating gradient tiles. When pulp adds gradient-tile paint, the slot is already populated. Wave 1 drift cleanup — noop → supported (wired through web-compat-style-decl.js; the box-flavor variants are visual no-ops on solid backgrounds, which is what Pulp paints today — matches CSS spec default behavior).",
       "issue": "1517"
@@ -1180,7 +1180,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1516]"
+        "test/test_widget_bridge.cpp [issue-1516]"
       ],
       "notes": "pulp #1516 — Yoga 3.2.1's native YGNodeStyleSetBoxSizing does the spec-correct math; previously the JS shim silently no-op'd because the bridge didn't register setBoxSizing. The default is `border-box` (matches Yoga 3.x's default + pulp's implicit pre-#1516 behavior + the de-facto `* { box-sizing: border-box }` web reset). Consumers that explicitly want CSS-spec content-box semantics can opt in via `boxSizing: 'content-box'`. High-leverage change for design imports — Figma / v0 / Claude Design HTML exports often emit explicit boxSizing declarations that previously dropped silently.",
       "issue": "1516"
@@ -1613,7 +1613,7 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+        "test/test_widget_bridge.cpp [issue-1434-fontfamily]"
       ],
       "notes": "Wave 2 css.4 — reclassified partial -> partial-deferred-#932 (whole-list fallback is gated on Skia SkFontMgr font registration in pulp #932, not a JS-side gap). Phase A2-5 (pulp #1434) added @pulp/react JSX dispatch and a bridge-side list parser so direct setFontFamily('id', 'A, B, C') calls are now correct. The cascade slot on container Views means container-level fontFamily reaches descendant Labels via parent-walk (mirrors letter_spacing / font_weight). Wave 4 css extensive — drift cleanup — value-coverage is complete (single name + comma-separated list both round-trip; first family wins). The Skia SkFontMgr fallback-chain gating (pulp #932) is documented in mapsTo / notes; reclassified as paint-side architectural gap rather than a value-coverage gap.",
       "issue": "1151"
@@ -4333,7 +4333,9 @@
         "'auto'"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1434-rn-batch-c]"
+      ],
       "notes": "TS type is 'number' only. pulp #1434 rn batch C: bridge accepts number / \"NN%\" / \"auto\"; FlexStyle::dim_flex_basis.unit drives YGNodeStyleSetFlexBasis{,Percent,Auto}. Wave 1 architectural reclassification — `content` keyword is arch-yoga-limit (Yoga has no flex-basis content algorithm); status flipped partial → wontfix to match the actual ground-truth out-of-scope reason. number / percent / 'auto' all remain fully wired. Wave-5 follow-up audit (post-PR #1616 sweep): walked back wontfix→partial. `wontfix` maps to OOS in the harness taxonomy and bypasses drift checking for the supported `number`/`%`/`auto` subset; partial preserves drift detection on the supported forms while keeping `content` listed as the real Yoga-architecture limit. arch-yoga-no-content-keyword — Yoga doesn't model the `content` keyword (it's a CSS Level 3 spec extension that maps to intrinsic-size resolution Yoga doesn't have). number, %, auto, and 0 are all supported.",
       "issue": ""
     },
@@ -4407,7 +4409,7 @@
         "whole-list fallback chain — gated on pulp #932 SkFontMgr registration"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+        "test/test_widget_bridge.cpp [issue-1434-fontfamily]"
       ],
       "notes": "pulp #1434 Phase A2-5 wired the @pulp/react JSX dispatch and the bridge-side list parser. Cross-engine ready: when pulp #932 lands the registry resolution, no consumer change is needed — the same name flows through.",
       "issue": "1434"
@@ -5808,15 +5810,17 @@
       "issue": "1434"
     },
     "yoga/boxSizing": {
-      "status": "missing",
-      "mapsTo": "Forward dependency on pulp #1516 (PR #1538) which adds FlexStyle::box_sizing + YGNodeStyleSetBoxSizing wiring. This entry will flip to `supported` automatically once #1538 merges. Today there is no FlexStyle::box_sizing field, no setFlex 'box_sizing' branch in widget_bridge.cpp, no YGNodeStyleSetBoxSizing call in yoga_layout.cpp, and only a guarded JS-side setBoxSizing reference in web-compat-style-decl.js.",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "JS shim setBoxSizing → bridge widget_bridge.cpp:3666-3686 routes the keyword to FlexStyle::box_sizing (geometry.hpp:307); yoga_layout.cpp:123-128 calls YGNodeStyleSetBoxSizing with the matching YGBoxSizing enum. Default border-box matches the CSS spec.",
+      "supportedValues": [
         "border-box",
         "content-box"
       ],
-      "tests": [],
-      "notes": "Yoga 3.2.1 exposes YGNodeStyleSetBoxSizing natively with `border-box` as the spec-compliant default, but Pulp has not yet wired it through. Tracked in pulp #1516 (PR #1538). Catalog stays `missing` until the runtime path lands.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1516]"
+      ],
+      "notes": "pulp #1516 (PR #1538) wired FlexStyle::box_sizing + YGNodeStyleSetBoxSizing. Mirrors css/boxSizing on the same view slot — the css side is also supported. pulp #1737 catalog hygiene: catalog drifted to `missing` after the wiring landed; flipped now that the wiring is verified end-to-end.",
       "issue": "1516"
     },
     "yoga/margin": {
@@ -7399,7 +7403,9 @@
         "rolls back across save / restore via the path-mirror snapshot"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527]"
+      ],
       "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return — no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time. Wave 1 paperwork — synchronous return; no bridge round-trip; bridge-thin gap-fill (pulp #1527). arch-path2d-deferred — Path2D-object first argument requires a separate JS shim object (pulp #1527) that maintains its own subpath mirror. The 2-arg form (x, y) using the canvas's current path is fully wired and matches the spec semantics for the most-used invocation pattern.",
       "issue": "1527"
     },
@@ -7411,7 +7417,9 @@
         "respects later assignments to ctx.lineWidth"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527]"
+      ],
       "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror. Wave 1 paperwork — pairs with isPointInPath; same JS path mirror (pulp #1527). arch-cap-join-approximated — lineCap (square) / lineJoin (miter spikes) geometry are approximated as round caps in the JS-side polyline mirror. Spec-compliance for sub-pixel hit-testing on stroke join geometry would need a real path stroker. The common case (round caps + bevel/round joins) works correctly.",
       "issue": "1527"
     },
@@ -7598,7 +7606,9 @@
         "any rect from a rasterized canvas"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-916]"
+      ],
       "notes": "issue-916. The base64 round-trip avoids passing typed arrays across the JS bridge. Wave 1 paperwork — base64 round-trip avoids typed-array bridge cost (issue-916). arch-recordingcanvas-by-design — RecordingCanvas returns zero-filled pixels by design (it records draw commands; no rasterization). The Skia + CoreGraphics backends both return real pixel data.",
       "issue": ""
     },
@@ -7878,7 +7888,9 @@
         "lineHeight: number / length / 'normal' (parsed, ignored per Canvas2D spec — canvas uses the font's own line metrics)"
       ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434]"
+      ],
       "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim. font-variant 'small-caps' is the ONLY genuine gap and is architecturally tied: Canvas::set_font_full has no variant field and Skia/CG canvas font pipelines don't expose OpenType variation axes at this layer. Per #1657 discipline this stays as DIVERGE (honest signal of a real value-gap) rather than being moved to notes — the gap IS real and consumers should know. Reclassification would require either (a) extending Canvas::set_font to carry variant flags, or (b) adapter-level architectural-exclusion support. arch-skia-cg-no-small-caps — font-variant 'small-caps' is parsed and tracked but Skia/CG canvas pipeline doesn't honour it (Canvas::set_font_full has no variant field). Architectural — full small-caps rendering would need OpenType glyph substitution which neither backend exposes through the canvas API. The other shorthand fields (size, family, style, weight) all work.",
       "issue": "1434"
     },

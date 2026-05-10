@@ -29,6 +29,7 @@
     "borderTopWidth":    {"kind": "length"},
     "borderWidth":       {"kind": "length", "notes": "shorthand for all edges"},
     "bottom":            {"kind": "length-or-percentage", "notes": "physical edge"},
+    "boxSizing":         {"kind": "enum", "values": ["border-box", "content-box"], "default": "border-box", "notes": "Yoga 3.x — wired via YGNodeStyleSetBoxSizing in core/view/src/yoga_layout.cpp:126; bridge fn setBoxSizing in widget_bridge.cpp:3670; mirrors css/boxSizing on the same view slot. pulp #1737 catalog hygiene."},
     "columnGap":         {"kind": "length-or-percentage"},
     "direction": {
       "kind": "enum",
