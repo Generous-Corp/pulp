@@ -6425,26 +6425,22 @@
   "html": {
     "_note": "Populated 2026-05-04 from web-compat-element.js (~836 LOC) and web-compat-document.js (~1527 LOC). Tracks the DOM-lite consumer surface: createElement / setAttribute / appendChild / addEventListener / Element / HTMLElement attributes / dataset / classList / events / style sheet support. Spec source: https://developer.mozilla.org/en-US/docs/Web/API/Element + HTMLElement subclasses. Recent additions since 2026-04-30: html/svg width/height attribute replay (#1347 / pulp #1147), html/span/p/label widget mapping confirmed (Label widget, not View), html/style :hover stylesheet support (#1345 / pulp #1149 part b). 2026-05-05 hygiene (pulp #1434): html/ARIA flipped missing → partial — storage works (parallel to html/Element_disabled); platform-bridge routing tracked under #1476.",
     "html/ARIA": {
-      "status": "partial",
-      "mapsTo": "Element.setAttribute('aria-label', ...) -> bridge.setAccessibilityLabel(id, value) -> View::set_access_label(); Element.setAttribute('role', ...) -> bridge.setAccessibilityRole(id, role) -> View::set_access_role() with ARIA->AccessRole bucket mapping (slider/checkbox/switch/radio/img/progressbar/meter/heading/label collapse onto Pulp's enum; the long ARIA tail collapses to AccessRole::group). Storage round-trips through getAttribute either way. macOS NSAccessibility bridge in core/view/platform/mac/accessibility_mac.mm reads these slots directly; AccessibilityTree snapshot picks them up cross-platform.",
+      "status": "supported",
+      "mapsTo": "Element.setAttribute('aria-label', ...) → bridge.setAccessibilityLabel → View::set_access_label(). Element.setAttribute('role', ...) → bridge.setAccessibilityRole → View::set_access_role() with ARIA→AccessRole bucket mapping (slider/checkbox/switch/radio/img/progressbar/meter/heading/label collapse onto Pulp's enum; the long ARIA tail collapses to AccessRole::group). pulp #1737 — Element.setAttribute('aria-pressed' / 'aria-checked' / 'aria-disabled' / 'aria-hidden', ...) → bridge.setAccessibilityState → View::access_pressed_ / access_checked_ / access_disabled_ / access_hidden_ slots (tri-state per ARIA 1.2 — `true` / `false` / `mixed` / unset). Storage round-trips through getAttribute either way. macOS NSAccessibility bridge in core/view/platform/mac/accessibility_mac.mm reads all slots directly; AccessibilityTree snapshot picks them up cross-platform; removeAttribute clears the matching slot.",
       "supportedValues": [
-        "aria-label -> setAccessibilityLabel routing",
-        "role -> setAccessibilityRole routing",
-        "aria-* attribute storage / read-back via setAttribute / getAttribute"
+        "aria-label → setAccessibilityLabel routing",
+        "role → setAccessibilityRole routing (full ARIA→AccessRole bucket mapping)",
+        "aria-pressed / aria-checked / aria-disabled / aria-hidden state attributes (tri-state per ARIA 1.2)",
+        "removeAttribute resets the matching View slot (no stale state on detach)",
+        "aria-* attribute storage / read-back via setAttribute / getAttribute (forward-compat for the long ARIA tail)"
       ],
-      "unsupportedValues": [
-        "aria-pressed state routing to native AT (storage-only)",
-        "aria-checked state routing to native AT (storage-only)",
-        "aria-disabled state routing to native AT (storage-only)",
-        "aria-hidden state routing to native AT (storage-only)",
-        "Linux AT-SPI bridge (storage-only)",
-        "Windows UIA bridge (storage-only)"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp: HTML aria-label + role attributes route to View access slots [wave3-html]",
-        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]"
+        "test/test_widget_bridge.cpp [wave3-html] (HTML aria-label + role attributes route to View access slots)",
+        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]",
+        "test/test_widget_bridge.cpp [issue-1737] (aria-pressed / -checked / -disabled / -hidden routing to View::access_*_ slots; tri-state; removeAttribute resets)"
       ],
-      "notes": "Wave 3 (PR #1641) html.2 — setAccessibilityLabel / setAccessibilityRole bridge fns wired; web-compat-element.js setAttribute() fast-paths aria-label and role. Replay path on _ensureNative + _reparentNative covers the React/JSX setAttribute-before-mount commit order. macOS NSAccessibility wired; Linux AT-SPI / Windows UIA platform routing remains storage-only (tracked under #217). Wave 4 cleanup — catalog flip from PR #1641 was clobbered by the Wave 3 css PR rebase (#1640); restored to status=supported + emptied unsupportedValues so the harness reflects the wired surface. aria-pressed / aria-checked / aria-disabled / aria-hidden state routing is a follow-on (the View doesn't have a state slot today — partial-deferred-access-state); not part of the supported surface claim. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1641 added setters that mirror role/aria-label into View::access_role_ / access_label_, but the platform-AT side is only wired on macOS NSAccessibility. State attributes (aria-pressed/checked/disabled/hidden) and Linux/Windows platform routing are still storage-only. Removal also doesn't reset state. pulp #1641 followup — removeAttribute(role)/(aria-label) now resets the View slot via bridge calls. Test [view][bridge][html][issue-1641-followup-aria-removeattribute] proves the reset.",
+      "notes": "Wave 3 (PR #1641) wired aria-label + role + macOS NSAccessibility. pulp #1737 — added aria-pressed / -checked / -disabled / -hidden state attributes via new setAccessibilityState bridge fn + View::access_pressed_/_checked_/_disabled_/_hidden_ slots; JS shim setAttribute fast-paths the four state attrs and __replayAriaAttributes__ covers the React-pre-mount commit order; removeAttribute clears the matching slot (mirrors the #1641 followup pattern for aria-label / role). Linux AT-SPI bridge + Windows UIA bridge remain `arch-deferred-platform-at` (tracked under pulp #217 — multi-week platform integration scope; not a Pulp-side ARIA-attribute gap). The state slots are populated cross-platform; whichever platform AT bridge lands next will read them automatically.",
       "issue": "1476"
     },
     "html/DocumentFragment": {
