@@ -634,8 +634,19 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
             // CGPath of every glyph in the line, route through
             // stroke_with_active_paint() (which clips to the stroked
             // outline + draws the gradient).
-            CGContextTranslateCTM(ctx_, draw_x, y);
-            CGContextScaleCTM(ctx_, 1.0, -1.0);
+            //
+            // pulp #1747 (P1 Codex review on #1736) — the per-glyph
+            // CGAffineTransform must bake in BOTH the glyph offset AND
+            // the text-rendering transform (translate(draw_x, y) +
+            // scale(1, -1) to flip from CT's bottom-up glyph space into
+            // canvas-down space). Pre-fix the CTM was modified instead,
+            // which left the gradient endpoints evaluated in text-local
+            // space — same createLinearGradient stops produced different
+            // colors as text x-position changed, and vertical gradients
+            // rendered upside-down. With the transform baked into the
+            // path itself, the CTM stays the canvas-space identity (or
+            // whatever the caller had) and gradient endpoints land where
+            // the caller meant them to land.
             CGMutablePathRef glyph_path = CGPathCreateMutable();
             CFArrayRef runs = CTLineGetGlyphRuns(line);
             CFIndex run_count = CFArrayGetCount(runs);
@@ -651,8 +662,18 @@ void CoreGraphicsCanvas::stroke_text(const std::string& text, float x, float y,
                 CTRunGetGlyphs(run, CFRangeMake(0, glyph_count), glyphs.data());
                 CTRunGetPositions(run, CFRangeMake(0, glyph_count), positions.data());
                 for (CFIndex g = 0; g < glyph_count; ++g) {
-                    CGAffineTransform tx = CGAffineTransformMakeTranslation(
-                        positions[g].x, positions[g].y);
+                    // Combined affine: glyph point (gx, gy) maps to
+                    //   (gx + positions[g].x + draw_x,
+                    //    -(gy + positions[g].y) + y)
+                    // i.e. shift by glyph position, flip y, translate to
+                    // (draw_x, y). CGAffineTransform fields are
+                    // (a, b, c, d, tx, ty) with x' = a*x + c*y + tx and
+                    // y' = b*x + d*y + ty.
+                    CGAffineTransform tx = CGAffineTransformMake(
+                        1.0, 0.0,
+                        0.0, -1.0,
+                        positions[g].x + draw_x,
+                        -positions[g].y + y);
                     CGPathRef gp = CTFontCreatePathForGlyph(run_font, glyphs[g], &tx);
                     if (gp) {
                         CGPathAddPath(glyph_path, NULL, gp);

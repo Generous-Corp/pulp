@@ -2685,6 +2685,109 @@ TEST_CASE("CoreGraphicsCanvas::stroke_rect honours active stroke gradient",
     REQUIRE(any_stroked_with_channel(W - 16, W - 4, /*b*/2, /*r*/0));
 }
 
+// pulp #1747 (P1 Codex review on #1736) — stroke_text gradient endpoints
+// must be evaluated in canvas space, NOT in text-local space. Pre-fix
+// stroke_text mutated the CTM (translate(draw_x, y) + scale(1, -1)) and
+// then called stroke_with_active_paint(), so the gradient was sampled
+// in text-local coords: same createLinearGradient stops produced
+// different colors as text x-position changed, and vertical gradients
+// rendered upside-down. Regression test: render the same horizontal
+// red→blue gradient over identical glyphs at two different text
+// positions; assert the stroked-glyph pixels at canvas-x=center are
+// the same purple (gradient midpoint) in both. Pre-fix the colors
+// would diverge because the gradient shifted with the text.
+TEST_CASE("CoreGraphicsCanvas::stroke_text gradient is canvas-space anchored",
+          "[canvas][cg][issue-1747][issue-1666]") {
+    auto render_at = [](float text_x, std::vector<uint8_t>& pixels,
+                        int W, int H) {
+        pixels.assign(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            // Horizontal red→blue gradient spanning the full canvas width.
+            // Endpoints are in CANVAS coordinates regardless of where
+            // the text is positioned.
+            Color stops[2] = {
+                Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+                Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+            };
+            float positions[2] = {0.0f, 1.0f};
+            canvas.set_stroke_gradient_linear(0.0f, 0.0f,
+                                              static_cast<float>(W), 0.0f,
+                                              stops, positions, 2);
+            canvas.set_line_width(2.5f);
+            canvas.set_font("Helvetica", 32);
+            // Long string of W glyphs covers most of the canvas width
+            // so we always have stroked pixels to sample at the centre.
+            canvas.stroke_text("WWWWWWWW", text_x, 36);
+        }
+        CGContextRelease(ctx);
+    };
+
+    constexpr int W = 256;
+    constexpr int H = 64;
+
+    std::vector<uint8_t> pixels_a, pixels_b;
+    render_at(0.0f,   pixels_a, W, H);
+    render_at(40.0f,  pixels_b, W, H);
+
+    auto sample = [&](const std::vector<uint8_t>& p, int x, int y, int chan) {
+        return p[(static_cast<size_t>(y) * W + x) * 4u + chan];
+    };
+
+    // For each render, scan a vertical strip near canvas-x=W/2 (the
+    // midpoint of the gradient) for the strongest stroked pixel and
+    // assert it is purple-ish — neither red-dominant nor blue-dominant.
+    // If the gradient is canvas-space anchored, BOTH renders should
+    // hit purple at canvas-x=W/2. Pre-fix render_b would shift the
+    // gradient with the text and the sample at x=W/2 would be either
+    // pure red or pure blue (depending on which glyph landed there).
+    auto best_stroked_pixel = [&](const std::vector<uint8_t>& p) {
+        int best_alpha = 0; int best_x = 0; int best_y = 0;
+        for (int x = W/2 - 8; x < W/2 + 8; ++x) {
+            for (int y = 0; y < H; ++y) {
+                int a = sample(p, x, y, 3);
+                if (a > best_alpha) { best_alpha = a; best_x = x; best_y = y; }
+            }
+        }
+        return std::tuple<int,int,int>{best_x, best_y, best_alpha};
+    };
+
+    auto [ax, ay, aa] = best_stroked_pixel(pixels_a);
+    auto [bx, by, ba] = best_stroked_pixel(pixels_b);
+    INFO("render_a strongest stroked pixel near x=W/2: (" << ax << "," << ay
+         << ") alpha=" << aa);
+    INFO("render_b strongest stroked pixel near x=W/2: (" << bx << "," << by
+         << ") alpha=" << ba);
+    REQUIRE(aa > 32);
+    REQUIRE(ba > 32);
+
+    int ar = sample(pixels_a, ax, ay, 0), ab = sample(pixels_a, ax, ay, 2);
+    int br = sample(pixels_b, bx, by, 0), bb = sample(pixels_b, bx, by, 2);
+    INFO("render_a (text_x=0) midpoint sample R=" << ar << " B=" << ab);
+    INFO("render_b (text_x=40) midpoint sample R=" << br << " B=" << bb);
+    // Pre-fix at least one of these would be heavily skewed (e.g.
+    // R>200 with B<50 if the gradient shifted). With the fix both
+    // should be in the purple band: red+blue both substantial,
+    // neither dominating by more than ~80 (out of 255). Use a loose
+    // tolerance to absorb anti-aliasing + glyph-shape noise.
+    REQUIRE(std::abs(ar - br) < 80);
+    REQUIRE(std::abs(ab - bb) < 80);
+    // Both samples must be PURPLE, not pure-red and not pure-blue.
+    // (Either channel below 30 would mean the gradient missed.)
+    REQUIRE(ar > 30); REQUIRE(ab > 30);
+    REQUIRE(br > 30); REQUIRE(bb > 30);
+}
+
 #endif  // __APPLE__
 
 // pulp #1368 — Canvas's default save_count() / restore_to_count() impls
