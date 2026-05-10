@@ -7,6 +7,7 @@
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/widgets/svg_rect.hpp>
 #include <pulp/view/widgets/svg_line.hpp>
+#include <pulp/view/widgets/svg_icon.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/design_import.hpp>
@@ -3376,8 +3377,7 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // ── pulp #1492 — SvgIconWidget bridge (DISABLED while svg_icon.cpp not compiled) ──
-    /*
+    // ── pulp #1492 — SvgIconWidget bridge (whole-svg outerHTML rendering) ──
     engine_.register_function("createSvgIcon", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
@@ -3398,7 +3398,6 @@ void WidgetBridge::register_api() {
         }
         return choc::value::Value();
     });
-    */
 
     engine_.register_function("setBorder", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
