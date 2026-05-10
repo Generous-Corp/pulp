@@ -6897,8 +6897,8 @@
       "issue": ""
     },
     "html/document_querySelector": {
-      "status": "partial",
-      "mapsTo": "document.querySelector / querySelectorAll — _parseSelector + _matchesSelector in web-compat-document.js. Tokenizes the rightmost simple selector (tag / #id / .class / [attr] / [attr=value] / [attr^=v] / [attr$=v] / [attr*=v] / [attr|=v] / [attr~=v]) plus descendant (`a b`) and child (`a > b`) combinators, walking left to right with bracket-aware splitting.",
+      "status": "supported",
+      "mapsTo": "document.querySelector / querySelectorAll — _parseSelector + _matchesSelector in web-compat-document.js. Tokenizes the rightmost simple selector (tag / #id / .class / [attr] / [attr=value] / [attr^=v] / [attr$=v] / [attr*=v] / [attr|=v] / [attr~=v]) plus descendant (`a b`), child (`a > b`), and a curated set of pseudo-classes. Walks left to right with bracket-aware splitting.",
       "supportedValues": [
         "#id",
         ".class",
@@ -6912,16 +6912,19 @@
         "[attr~=value]",
         "compound (tag.class, tag#id, tag[attr], #id.class[attr])",
         "descendant (a b)",
-        "child (a > b)"
+        "child (a > b)",
+        ":hover / :focus / :active / :disabled / :checked / :enabled (state-on-element pseudo-classes — read el._isHovered / _hasFocus / _isActive / _disabled / _checked)",
+        ":first-child / :last-child / :only-child / :empty / :root (DOM-position pseudo-classes)",
+        ":nth-child(N) / :nth-child(2n+1) / :nth-child(odd|even) / :nth-last-child(...) (formula + keyword forms)",
+        ":not(<simple>) (functional negation — recursively dispatches to _matchesSelector)"
       ],
-      "unsupportedValues": [
-        "trailing pseudo-classes on otherwise-supported selectors degrade to broader match (parser stores `parsed.pseudo` but `_matchesSelector` ignores it, so `div:nth-child(2)` matches all `div`)"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp: querySelector minimal selector engine [wave3-html]",
-        "test/test_widget_bridge.cpp [issue-1641-followup-querySelector-colon]"
+        "test/test_widget_bridge.cpp [wave3-html] (querySelector minimal selector engine)",
+        "test/test_widget_bridge.cpp [issue-1641-followup-querySelector-colon]",
+        "test/test_widget_bridge.cpp [issue-1737] (pseudo-class evaluation: :hover state, :disabled, :checked, :enabled, :not, :first/:last/:only-child, :nth-child, :empty)"
       ],
-      "notes": "Wave 3 (PR #1641) html.3 — tag/.class/#id/[attr]/[attr=value]/descendant/child wired; pseudo-classes (:hover, :nth-child) and sibling combinators not implemented (parser tolerates trailing `:pseudo` for forward compat — it's stored but unmatched). Selectors that include unsupported features fall through to no-match rather than throwing. CSS StyleSheet `_applyTo` rides the same code path. Wave 4 cleanup — catalog flip from PR #1641 was clobbered by Wave 3 css PR rebase (#1640); restored to status=supported + emptied unsupportedValues. Pseudo-classes / pseudo-elements / sibling combinators / selector-lists / case-insensitive flag are arch-no-cascade-engine (Pulp's selector engine is single-pass tag/.class/#id/[attr]/combinator; the full CSS Selectors Level 4 cascade is an explicit non-goal — use @pulp/react components for state-dependent styling). Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. PR #1641 added [attr=...] support but the colon-stripping pre-pass isn't bracket-aware, so any attribute value containing a `:` (URLs, times) gets truncated. Pseudo-class matching is also still no-op (parsed but ignored). pulp #1641 followup — colon-in-attribute-bracket bug fixed: _parseSelector now scans for `:` at bracket depth 0 only, so `[href=\"http://x\"]` and `[data-time=\"12:30\"]` parse correctly. Test [view][bridge][html][issue-1641-followup-querySelector-colon] proves the fix.",
+      "notes": "Wave 3 (PR #1641) wired tag/.class/#id/[attr]/[attr=value]/descendant/child. pulp #1641 followup fixed bracket-aware colon scanning. pulp #1737 — pseudo-class state matching now implemented end-to-end: state-on-element forms read the bridge-maintained el._isHovered/_hasFocus/_isActive/_disabled/_checked slots; DOM-position forms walk parent._children; :nth-child(...) supports both keyword (`odd`/`even`) and `An+B` formula syntax; :not(<simple>) recursively dispatches to _matchesSelector. Stylesheet `_applyTo` strips the pseudo before structural matching so the existing :hover/:focus/:active wire-up path keeps firing on style application (the live state evaluation happens via the event listener). Out of scope: `:has()`, `:is()`, `:where()`, attribute namespaces — these need the full CSS Selectors Level 4 cascade engine (arch-no-cascade-engine per CLAUDE.md; use @pulp/react components for state-dependent styling that goes beyond what's wired here).",
       "issue": ""
     },
     "html/footer": {

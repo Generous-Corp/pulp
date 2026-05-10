@@ -40,21 +40,41 @@ StyleSheet.prototype._applyTo = function(el) {
         var rule = this._parsedRules[i];
         var parsed = rule.parsed;
 
-        // Handle pseudo-classes separately
+        // Handle pseudo-classes separately. We pass `parsedNoPseudo`
+        // (the parsed selector with pseudo stripped) to `_matchesSelector`
+        // because the stylesheet wire-up path matches "would this
+        // selector apply if state X were true?" — that's the structural
+        // match, not the live state. The live state check is then either
+        // (a) deferred to the event-handler wiring (`:hover` / `:focus` /
+        // `:active`), or (b) done explicitly here (`:disabled` reads
+        // `el._disabled` after the structural match). The new
+        // querySelector-side _matchesSelector pseudo evaluator (pulp
+        // #1737) honours pseudo when present, but is bypassed here so
+        // the wire-up still sees structural matches before the user has
+        // moused over anything.
+        var parsedNoPseudo = parsed;
+        if (parsed.pseudo) {
+            parsedNoPseudo = {
+                tag: parsed.tag, id: parsed.id, classes: parsed.classes,
+                attrs: parsed.attrs, pseudo: null,
+                parent: parsed.parent, direct: parsed.direct,
+            };
+        }
+
         if (parsed.pseudo === "hover") {
-            if (_matchesSelector(el, parsed)) {
+            if (_matchesSelector(el, parsedNoPseudo)) {
                 _setupPseudoHover(el, rule.properties);
             }
         } else if (parsed.pseudo === "focus") {
-            if (_matchesSelector(el, parsed)) {
+            if (_matchesSelector(el, parsedNoPseudo)) {
                 _setupPseudoFocus(el, rule.properties);
             }
         } else if (parsed.pseudo === "active") {
-            if (_matchesSelector(el, parsed)) {
+            if (_matchesSelector(el, parsedNoPseudo)) {
                 _setupPseudoActive(el, rule.properties);
             }
         } else if (parsed.pseudo === "disabled") {
-            if (_matchesSelector(el, parsed) && el._disabled) {
+            if (_matchesSelector(el, parsedNoPseudo) && el._disabled) {
                 _applyStyles(el, rule.properties);
             }
         } else {
@@ -501,7 +521,123 @@ function _matchesSelector(el, parsed) {
         }
     }
 
+    // pulp #1737 — pseudo-class state matching for querySelector. The
+    // parser stored parsed.pseudo (e.g. `disabled`, `checked`, `nth-child(2)`)
+    // but pre-fix _matchesSelector ignored it, so `div:disabled` matched
+    // every `div` (catalog DIVERGE on html/document_querySelector).
+    //
+    // Implemented here: state-on-element pseudo-classes (`:disabled`,
+    // `:checked`, `:enabled`, `:hover`, `:focus`) read directly from the
+    // matching el._* slot the bridge already maintains. DOM-position
+    // pseudo-classes (`:first-child`, `:last-child`, `:nth-child(N)`,
+    // `:nth-of-type(N)`) walk the parent's children. `:not(<simple>)`
+    // recursively dispatches to _matchesSelector with the negated selector.
+    //
+    // Pseudo-classes that require the full CSS Selectors Level 4 cascade
+    // engine (`:has()`, `:is()`, `:where()`, attribute-namespace forms)
+    // remain a no-match — the catalog flags those as architectural per
+    // CLAUDE.md (Pulp's selector engine is single-pass tag/.class/#id/
+    // [attr]/combinator).
+    if (parsed.pseudo) {
+        if (!_matchesPseudoClass(el, parsed.pseudo)) return false;
+    }
+
     return true;
+}
+
+// pulp #1737 — pseudo-class evaluator. Returns true if `el` matches the
+// pseudo-class string (e.g. `disabled`, `checked`, `nth-child(2n+1)`,
+// `not(.foo)`). Unknown / unimplemented forms return false (the broader
+// catalog claim is "no-match rather than throw" — same precedent as the
+// pre-#1737 parser-tolerates-but-matcher-ignores behaviour, except now
+// the matcher explicitly rejects so `div:nth-child(2)` no longer leaks
+// to all `div`).
+function _matchesPseudoClass(el, pseudo) {
+    if (!pseudo) return true;
+    var lower = pseudo.toLowerCase();
+
+    // State-on-element pseudo-classes — read the bridge-maintained slot.
+    if (lower === "disabled") return !!el._disabled;
+    if (lower === "enabled")  return !el._disabled;
+    if (lower === "checked")  return !!el._checked;
+    if (lower === "hover")    return !!el._isHovered;
+    if (lower === "focus")    return !!el._hasFocus;
+    if (lower === "active")   return !!el._isActive;
+
+    // DOM-position pseudo-classes. Need a parent to compute the index.
+    var parent = el._parentElement;
+    if (lower === "first-child") {
+        return !!parent && parent._children && parent._children[0] === el;
+    }
+    if (lower === "last-child") {
+        if (!parent || !parent._children) return false;
+        return parent._children[parent._children.length - 1] === el;
+    }
+    if (lower === "only-child") {
+        return !!parent && parent._children && parent._children.length === 1
+            && parent._children[0] === el;
+    }
+    if (lower === "root") {
+        // CSS :root matches the document root — for our shim, treat as
+        // the body element (no html element in the DOM-lite tree).
+        return !el._parentElement;
+    }
+    if (lower === "empty") {
+        return !el._children || el._children.length === 0;
+    }
+
+    // Functional pseudo-classes: `:not(<simple>)` and `:nth-child(N|2n|...)`.
+    // Use raw `pseudo` (not lowercased) so the inner selector retains case
+    // semantics for tag names + attribute values.
+    var notMatch = pseudo.match(/^not\((.+)\)$/i);
+    if (notMatch) {
+        var inner = _parseSelector(notMatch[1]);
+        return !_matchesSelector(el, inner);
+    }
+    var nthMatch = pseudo.match(/^nth-child\((.+)\)$/i);
+    if (nthMatch) {
+        if (!parent || !parent._children) return false;
+        var idx = parent._children.indexOf(el);
+        if (idx < 0) return false;
+        return _matchesNth(idx + 1, nthMatch[1].trim());
+    }
+    var nthLast = pseudo.match(/^nth-last-child\((.+)\)$/i);
+    if (nthLast) {
+        if (!parent || !parent._children) return false;
+        var lastIdx = parent._children.indexOf(el);
+        if (lastIdx < 0) return false;
+        return _matchesNth(parent._children.length - lastIdx, nthLast[1].trim());
+    }
+
+    // Unknown pseudo-class — explicit no-match (per CSS Selectors Level 4
+    // forward-compat: unknown pseudo-classes match nothing rather than
+    // refusing to parse).
+    return false;
+}
+
+// pulp #1737 — :nth-child(N) argument parser. Accepts:
+//   * `odd` / `even` (case-insensitive)
+//   * a positive integer literal (`2`, `5`)
+//   * `An+B` / `An-B` formula (e.g. `2n`, `2n+1`, `3n-1`, `-n+3`).
+// Returns true if `pos` (1-based child index) matches the formula.
+function _matchesNth(pos, arg) {
+    var lower = arg.toLowerCase().replace(/\s+/g, "");
+    if (lower === "odd")  return pos % 2 === 1;
+    if (lower === "even") return pos % 2 === 0;
+    // Plain integer.
+    if (/^-?\d+$/.test(lower)) return pos === parseInt(lower, 10);
+    // An+B form. Match `[A]n[+|-B]` where A and B are signed integers.
+    // Both are optional; n is required.
+    var m = lower.match(/^(-?\d*)n([+-]\d+)?$/);
+    if (!m) return false;
+    var aRaw = m[1];
+    var bRaw = m[2] || "0";
+    var a = aRaw === "" || aRaw === "+" ? 1 : (aRaw === "-" ? -1 : parseInt(aRaw, 10));
+    var b = parseInt(bRaw, 10);
+    if (a === 0) return pos === b;
+    var k = (pos - b) / a;
+    // Index must be a non-negative integer.
+    return k >= 0 && Math.floor(k) === k;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

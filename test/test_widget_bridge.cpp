@@ -10115,13 +10115,19 @@ TEST_CASE("querySelector handles colons inside attribute brackets",
         globalThis.__byHttp  = (document.querySelector('[href="http://example.com/page"]')  || {id:'MISS'}).id;
         globalThis.__byHttps = (document.querySelector('[href="https://example.com/page"]') || {id:'MISS'}).id;
         globalThis.__byTime  = (document.querySelector('[data-time="12:30"]')               || {id:'MISS'}).id;
-        // pseudo at end still works (a:hover → matches any <a> after stripping :hover)
-        globalThis.__pseudo  = (document.querySelector('a:hover')                            || {id:'MISS'}).id;
+        // pulp #1737 — a:hover now strictly matches only currently-hovered
+        // anchors. Pre-fix the matcher returned a1 (broader match — any <a>
+        // after stripping). Post-fix it returns null because no <a> is
+        // currently hovered. After we flag a1 as hovered, the matcher finds it.
+        globalThis.__pseudoNull = document.querySelector('a:hover') === null;
+        a1._isHovered = true;
+        globalThis.__pseudo = (document.querySelector('a:hover') || {id:'MISS'}).id;
     )");
 
     REQUIRE(std::string(engine.evaluate("__byHttp" ).getWithDefault<std::string_view>("")) == "a1");
     REQUIRE(std::string(engine.evaluate("__byHttps").getWithDefault<std::string_view>("")) == "a2");
     REQUIRE(std::string(engine.evaluate("__byTime" ).getWithDefault<std::string_view>("")) == "d1");
+    REQUIRE(engine.evaluate("__pseudoNull").getWithDefault<bool>(false));
     REQUIRE(std::string(engine.evaluate("__pseudo" ).getWithDefault<std::string_view>("")) == "a1");
 }
 
@@ -10166,28 +10172,139 @@ TEST_CASE("querySelector descendant and child combinators",
     REQUIRE(engine.evaluate("__deepDescAll").getWithDefault<int64_t>(0) == 2);
 }
 
-TEST_CASE("querySelector tolerates unsupported pseudo-classes",
-          "[view][bridge][wave3-html][html-querySelector]") {
+// pulp #1737 — querySelector now evaluates pseudo-classes spec-correctly
+// (used to "tolerate by stripping" — every selector that included
+// `:hover` matched all elements regardless of hover state). The new
+// matcher honours element state for runtime-state pseudo-classes
+// (`:hover`, `:focus`, `:active`, `:disabled`, `:checked`, `:enabled`),
+// DOM-position pseudo-classes (`:first-child`, `:last-child`, `:nth-child`,
+// `:nth-last-child`, `:only-child`, `:empty`, `:root`), and the
+// functional `:not(<simple>)` form.
+//
+// This first test asserts the contract change: `:hover` no longer
+// matches every `div.foo` — it correctly returns null when no element
+// is currently hovered. Pre-fix the matcher returned the div; post-fix
+// it returns null (no widget is hovered in this synthetic environment).
+// Importantly, the call MUST NOT throw — unknown / state-false
+// pseudo-classes return no-match per CSS Selectors Level 4 forward-
+// compat, which is what the test now asserts.
+TEST_CASE("querySelector evaluates :hover pseudo-class against element state",
+          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
     ScriptEngine engine;
     View root;
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
-    // `div.foo:hover` MUST NOT throw — we strip the pseudo-class and
-    // match the rest so React-style code that hands us `selector + :hover`
-    // still resolves (the `:hover` semantics are implemented separately
-    // via the StyleSheet :hover pipeline).
     bridge.load_script(R"(
         var d = document.createElement('div');
         d.id = 'pseudo'; d.className = 'foo';
         document.body.appendChild(d);
 
-        globalThis.__pseudoOk = document.querySelector('div.foo:hover') !== null;
-        globalThis.__pseudoId = document.querySelector('div.foo:hover').id;
+        // Selector parses without throwing.
+        globalThis.__noThrow = (function() {
+            try { document.querySelector('div.foo:hover'); return true; }
+            catch (e) { return false; }
+        })();
+        // Returns null because nothing is hovered.
+        globalThis.__hoverNull = document.querySelector('div.foo:hover') === null;
+        // After flagging the element as hovered, the matcher finds it.
+        d._isHovered = true;
+        globalThis.__hoverHit = document.querySelector('div.foo:hover');
     )");
 
-    REQUIRE(engine.evaluate("__pseudoOk").getWithDefault<bool>(false));
-    REQUIRE(std::string(engine.evaluate("__pseudoId").getWithDefault<std::string_view>("")) == "pseudo");
+    REQUIRE(engine.evaluate("__noThrow").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("__hoverNull").getWithDefault<bool>(false));
+    REQUIRE(std::string(
+        engine.evaluate("__hoverHit ? __hoverHit.id : ''")
+            .getWithDefault<std::string_view>("")
+    ) == "pseudo");
+}
+
+// pulp #1737 — :disabled, :checked, :enabled — state-on-element pseudo
+// classes that read the bridge-maintained el._disabled / el._checked
+// slots. Comprehensive coverage including the negation pseudo (:not()).
+TEST_CASE("querySelector :disabled / :checked / :enabled / :not()",
+          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var b1 = document.createElement('button');
+        b1.id = 'b1'; b1.disabled = true;
+        var b2 = document.createElement('button');
+        b2.id = 'b2'; // not disabled
+        var b3 = document.createElement('button');
+        b3.id = 'b3'; b3._checked = true;
+        document.body.appendChild(b1);
+        document.body.appendChild(b2);
+        document.body.appendChild(b3);
+
+        globalThis.__disabledHit = document.querySelector('button:disabled').id;
+        globalThis.__enabledMatches = document.querySelectorAll('button:enabled').length;
+        globalThis.__checkedHit = document.querySelector('button:checked').id;
+        // :not(<simple>) — the negated-class form. b2 + b3 are not disabled.
+        globalThis.__notDisabledMatches = document.querySelectorAll('button:not(:disabled)').length;
+    )");
+
+    REQUIRE(std::string(engine.evaluate("__disabledHit")
+        .getWithDefault<std::string_view>("")) == "b1");
+    REQUIRE(engine.evaluate("__enabledMatches").getWithDefault<int64_t>(0) == 2);
+    REQUIRE(std::string(engine.evaluate("__checkedHit")
+        .getWithDefault<std::string_view>("")) == "b3");
+    REQUIRE(engine.evaluate("__notDisabledMatches").getWithDefault<int64_t>(0) == 2);
+}
+
+// pulp #1737 — DOM-position pseudo-classes: :first-child, :last-child,
+// :nth-child(N), :nth-child(2n+1), :only-child, :empty, :root.
+TEST_CASE("querySelector :first-child / :last-child / :nth-child / :only-child / :empty",
+          "[view][bridge][wave3-html][html-querySelector][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var ul = document.createElement('ul');
+        ul.id = 'list';
+        document.body.appendChild(ul);
+        for (var i = 0; i < 5; i++) {
+            var li = document.createElement('li');
+            li.id = 'li' + i;
+            ul.appendChild(li);
+        }
+        // Lone-child sibling under a separate parent.
+        var solo_parent = document.createElement('div');
+        solo_parent.id = 'solo-parent';
+        document.body.appendChild(solo_parent);
+        var solo = document.createElement('span');
+        solo.id = 'solo';
+        solo_parent.appendChild(solo);
+
+        // First / last / only.
+        globalThis.__first = document.querySelector('li:first-child').id;
+        globalThis.__last = document.querySelector('li:last-child').id;
+        globalThis.__only = document.querySelector('span:only-child').id;
+        // nth-child(2) — 1-based, so li1.
+        globalThis.__nth2 = document.querySelector('li:nth-child(2)').id;
+        // nth-child(2n+1) — odd children: li0, li2, li4 → 3 hits.
+        globalThis.__nthOddCount = document.querySelectorAll('li:nth-child(2n+1)').length;
+        // :empty — solo_parent is NOT empty (has solo); list is NOT empty;
+        // each individual li IS empty (no children).
+        globalThis.__emptyCount = document.querySelectorAll('li:empty').length;
+    )");
+
+    REQUIRE(std::string(engine.evaluate("__first")
+        .getWithDefault<std::string_view>("")) == "li0");
+    REQUIRE(std::string(engine.evaluate("__last")
+        .getWithDefault<std::string_view>("")) == "li4");
+    REQUIRE(std::string(engine.evaluate("__only")
+        .getWithDefault<std::string_view>("")) == "solo");
+    REQUIRE(std::string(engine.evaluate("__nth2")
+        .getWithDefault<std::string_view>("")) == "li1");
+    REQUIRE(engine.evaluate("__nthOddCount").getWithDefault<int64_t>(0) == 3);
+    REQUIRE(engine.evaluate("__emptyCount").getWithDefault<int64_t>(0) == 5);
 }
 
 // ──────────────────────────────────────────────────────────────────────
