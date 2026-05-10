@@ -7390,6 +7390,33 @@ TEST_CASE("setBoxSizing border-box / content-box round-trips onto FlexStyle",
     REQUIRE(bridge.widget("a")->flex().box_sizing == BoxSizing::content_box);
 }
 
+// Codex #1616 P1 — `box-sizing: inherit` must walk the parent chain
+// instead of silently coercing to content-box. Reproduces the common
+// reset pattern `html { box-sizing: border-box }` + descendants
+// `* { box-sizing: inherit }` that gets imported from web designs.
+TEST_CASE("setBoxSizing 'inherit' resolves to parent's box_sizing",
+          "[view][bridge][css][issue-1538][codex-p1]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('parent', '');
+        createPanel('child', 'parent');
+        createPanel('grandchild', 'child');
+        setBoxSizing('parent', 'border-box');
+        setBoxSizing('child', 'inherit');
+        setBoxSizing('grandchild', 'inherit');
+    )");
+    REQUIRE(bridge.widget("parent")->flex().box_sizing == BoxSizing::border_box);
+    REQUIRE(bridge.widget("child")->flex().box_sizing == BoxSizing::border_box);
+    REQUIRE(bridge.widget("grandchild")->flex().box_sizing == BoxSizing::border_box);
+
+    // inherit on a detached/root node falls back to the CSS default content-box.
+    bridge.load_script("setBoxSizing('', 'inherit');");
+    REQUIRE(root.flex().box_sizing == BoxSizing::content_box);
+}
+
 // pulp #1516 — CSSStyleDeclaration shim forwards camelCase boxSizing.
 TEST_CASE("CSSStyleDeclaration forwards box-sizing to bridge",
           "[view][bridge][css][issue-1516]") {
