@@ -1325,3 +1325,27 @@ TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issu
     auto detached = env.engine.evaluate("__ssSheet._attached");
     REQUIRE(detached.getWithDefault<bool>(true) == false);
 }
+
+// pulp #1737 (Codex P2 followup #2 on #1773): :root pseudo-class
+// must remain wired in _matchesPseudoClass for stylesheet matching.
+// Codex caught a regression where my earlier removal (intended only
+// for the querySelector path, where :root is unreachable due to
+// _findMatch starting from root._children) silently broke
+// `:root { ... }` style application via StyleSheet._applyTo. CSS
+// token / theme patterns regressed.
+TEST_CASE("WebCompat: :root pseudo applies stylesheet rules to body element",
+          "[webcompat][css-pseudo][issue-1737][issue-1773-followup]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __rSheet = new StyleSheet({ ':root': { width: '7px' } });
+        // Emulate the parser's pseudo extraction — _parseSelector strips
+        // the leading colon, so the stored pseudo is "root".
+        __rSheet._parsedRules[0].parsed.pseudo = 'root';
+        __rSheet.attach();
+    )JS");
+    // The body element has no parent in the DOM-lite tree, so the
+    // :root branch in _matchesPseudoClass returns true for it. After
+    // attach() walks all elements, the rule should be applied.
+    auto applied = env.engine.evaluate("__bodyElement__.style._props.width");
+    REQUIRE(std::string(applied.getWithDefault<std::string_view>("")) == "7px");
+}

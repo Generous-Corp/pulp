@@ -577,14 +577,21 @@ function _matchesPseudoClass(el, pseudo) {
         return !!parent && parent._children && parent._children.length === 1
             && parent._children[0] === el;
     }
-    // pulp #1737 followup (Codex P2 on #1759): `:root` removed from the
-    // supported set. _findMatch starts traversal from root._children, so
-    // even an "el with no parent" check can't reach the body element
-    // (every element in the BFS queue is by construction a descendant
-    // of root). Implementing :root would require either pushing `root`
-    // into the queue or special-casing :root at the document.querySelector
-    // level — out of scope for this shim. The matcher returns false for
-    // :root rather than advertising support that doesn't work end-to-end.
+    // pulp #1737 (Codex P2 followup #2 on #1773): `:root` matcher
+    // restored. The earlier removal broke StyleSheet._applyTo, which
+    // calls _matchesSelector directly to apply `:root { ... }` rules
+    // to the body — without the matcher branch, those rules silently
+    // stopped working (CSS token / theme patterns regressed).
+    //
+    // Catalog still doesn't claim :root for document.querySelector
+    // because _findMatch starts traversal from root._children — the
+    // root itself is never queued. So:
+    //   * stylesheet `:root { color: red }` → applies (this branch).
+    //   * document.querySelector(':root') → returns null (traversal
+    //     never sees the root). Catalog supportedValues notes the gap.
+    if (lower === "root") {
+        return !el._parentElement;
+    }
     if (lower === "empty") {
         return !el._children || el._children.length === 0;
     }
