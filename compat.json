@@ -625,15 +625,12 @@
       "issue": "1434"
     },
     "css/backfaceVisibility": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js does not route backfaceVisibility from `el.style` (no-op for the CSS DOM path); @pulp/react prop-applier forwards to setBackfaceVisibility(id, value) which stores the flag on the View. Paint path consumes the flag only when a 3D transform with negative Z is active; pulp's transform model is 2D-affine today, so this is a no-op for painting and reserved for future 3D support (pulp #1026).",
-      "supportedValues": [
-        "visible",
-        "hidden"
-      ],
+      "status": "wontfix",
+      "mapsTo": "Architectural — Pulp's render is 2D-affine only; backface culling requires the same 3D pipeline as css/perspective + perspectiveOrigin. Same wontfix-arch class as css/perspective.",
+      "supportedValues": [],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1615 — downgraded from `supported` to `noop`: the bridge function exists but is paint-time inert under the current 2D-affine transform model, and the CSS DOM path has no `case \"backfaceVisibility\"` arm. Will flip back to `supported` when 3D transforms land.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Pre-fix flagged \"noop pending #1026 (3D pipeline)\" but #1026 isn't on the near-term roadmap. Treat consistently with css/perspective family which is already wontfix.",
       "issue": "1026"
     },
     "css/background": {
@@ -2809,25 +2806,21 @@
       "issue": ""
     },
     "css/perspective": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"perspective\":` that intentionally no-ops (Pulp's render pipeline is 2D — no perspective matrix slot on View).",
+      "status": "wontfix",
+      "mapsTo": "Architectural — no 3D transform stack. Pulp's View::setTransform is 2D-affine only (geometry.hpp). Adding 3D would be a major engine rewrite.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all 3D perspective values (Pulp pipeline is 2D)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → noop. Architecturally out of scope — Pulp uses a 2D Skia/Canvas pipeline; perspective() / matrix3d() / rotate3d would need a 3D transform stack which is not modeled.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Catalog notes already said \"Architecturally out of scope\"; the noop classification was misleading. Direct parallel to css/willChange (already wontfix).",
       "issue": ""
     },
     "css/perspectiveOrigin": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"perspectiveOrigin\":` that intentionally no-ops (Pulp's render pipeline is 2D).",
+      "status": "wontfix",
+      "mapsTo": "Architectural — companion to css/perspective. Same wontfix-arch class.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all values (Pulp pipeline is 2D)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 4: status flipped missing → noop. See css/perspective note.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Bundled with css/perspective.",
       "issue": ""
     },
     "css/placeContent": {
@@ -2917,18 +2910,12 @@
       "issue": ""
     },
     "css/resize": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"resize\":` that intentionally no-ops. Pulp doesn't render OS-style resize handles for textarea / overflow:auto regions.",
+      "status": "wontfix",
+      "mapsTo": "Architectural — no CSS-resize-handle paint primitive + no overflow:auto drag-router. Same class as the multi-column / table primitives already wontfix under \"non-Yoga layout\" per CLAUDE.md flex+grid layout-model contract.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "both",
-        "horizontal",
-        "vertical",
-        "block",
-        "inline"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 7: status flipped missing → noop. Resize handles require a CSS-resize-handle paint primitive that Pulp doesn't model.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Resize handles fall outside the flex+grid layout primitives Pulp commits to.",
       "issue": ""
     },
     "css/right": {
@@ -2964,47 +2951,39 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"scrollBehavior\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports — the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
+      "status": "wontfix",
+      "mapsTo": "Architectural — Pulp doesn't model CSS scroll viewports; ScrollView is the dedicated scroll-container intrinsic and there's no element→ScrollView promotion path for CSS. The smoothness toggle itself is plausible but has no surface to bind to.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all values (no CSS scroll-viewport model in Pulp)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → noop. scroll-behavior (smooth / instant) requires a CSS scroll-container model that Pulp does not implement.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Same \"scroll-via-ScrollView\" rationale as css/overflow scroll/auto/clip.",
       "issue": ""
     },
     "css/scrollMargin": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"scrollMargin\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports — the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
+      "status": "wontfix",
+      "mapsTo": "Architectural — needs CSS scroll-container model + scroll-snap engine. Multi-element coordination engine parallel to a CSS cascade engine.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all values (no CSS scroll-viewport model in Pulp)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → noop. scroll-margin (positions scroll snap target) requires a CSS scroll-container model that Pulp does not implement.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Bundled with the scroll-snap family.",
       "issue": ""
     },
     "css/scrollPadding": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"scrollPadding\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports — the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
+      "status": "wontfix",
+      "mapsTo": "Architectural — same scroll-snap engine prerequisite as css/scrollMargin.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all values (no CSS scroll-viewport model in Pulp)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → noop. scroll-padding (snap-area inset) requires a CSS scroll-container model that Pulp does not implement.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Bundled with the scroll-snap family.",
       "issue": ""
     },
     "css/scrollSnapType": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"scrollSnapType\":` that intentionally no-ops. Pulp doesn't model CSS scroll viewports — the ScrollView intrinsic owns scroll state; CSS-driven scroll properties have no surface to bind.",
+      "status": "wontfix",
+      "mapsTo": "Architectural — scroll-snap engine is a multi-element coordination engine (snap-area resolution + snap-strictness state machine) parallel to a CSS cascade engine.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "all values (no CSS scroll-viewport model in Pulp)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → noop. scroll-snap-type (axis + strictness) requires a CSS scroll-container model that Pulp does not implement.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Same shape as the stacking-context engine that justified rn/isolation as wontfix in PR #1785.",
       "issue": ""
     },
     "css/tableLayout": {
@@ -3508,17 +3487,12 @@
       "issue": ""
     },
     "css/writingMode": {
-      "status": "noop",
-      "mapsTo": "web-compat-style-decl.js has a `case \"writingMode\":` that intentionally no-ops (Pulp text flows horizontally only — no vertical-rl / vertical-lr writing-mode pipeline).",
+      "status": "wontfix",
+      "mapsTo": "Architectural — Pulp's TextShaper is horizontal-tb only; vertical writing requires a separate text-layout pipeline in HarfBuzz/SkParagraph.",
       "supportedValues": [],
-      "unsupportedValues": [
-        "vertical-rl",
-        "vertical-lr",
-        "sideways-rl",
-        "sideways-lr"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 A4 Bundle 5: status flipped missing → noop. Architecturally out of scope — Pulp's text shaper is horizontal-tb only.",
+      "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Catalog text already said \"Architecturally out of scope\"; the noop classification was misleading.",
       "issue": ""
     },
     "css/zIndex": {
