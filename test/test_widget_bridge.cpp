@@ -8698,6 +8698,43 @@ TEST_CASE("CSSStyleDeclaration gap two-value fans out to row + column",
     REQUIRE_THAT(f.column_gap, WithinAbs(20.0f, 0.001f));
 }
 
+// Codex #1616 P1 on #1638 — single-token `gap` was leaving prior
+// row_gap/column_gap intact; FlexStyle::effective_gap prefers per-axis
+// when ≥0, so `gap: 5px` after `gap: 10px 20px` was reading 10/20
+// instead of 5/5. The fix resets per-axis to the -1 sentinel before
+// writing the shared slot.
+TEST_CASE("CSSStyleDeclaration single-token gap clears per-axis (no shadowing)",
+          "[view][bridge][css][issue-1638][codex-p1]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s._applyProperty('gap', '10px 20px');
+    )");
+    const auto& f = bridge.widget("p")->flex();
+    REQUIRE_THAT(f.row_gap,    WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(f.column_gap, WithinAbs(20.0f, 0.001f));
+
+    // Now overwrite with single-token gap. Per-axis must reset (-1)
+    // so the shared `gap` value is consulted by effective_gap.
+    bridge.load_script(R"(
+        var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s2._applyProperty('gap', '5px');
+    )");
+    REQUIRE_THAT(f.gap,        WithinAbs(5.0f,  0.001f));
+    REQUIRE(f.row_gap    < 0.0f);  // -1 sentinel = "consult shared gap"
+    REQUIRE(f.column_gap < 0.0f);
+    // effective_gap on either axis should now resolve to 5.0
+    REQUIRE_THAT(f.effective_gap(pulp::view::FlexDirection::row),
+                 WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(f.effective_gap(pulp::view::FlexDirection::column),
+                 WithinAbs(5.0f, 0.001f));
+}
+
 // pulp #1638 baseline-corruption: this TEST_CASE body got truncated
 // during the bad merge — it set up `using BM = ...; ScriptEngine
 // engine; View root; root.set_bounds(...);` but never wrapped the

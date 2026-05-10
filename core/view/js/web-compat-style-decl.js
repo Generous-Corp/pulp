@@ -202,8 +202,13 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             // pulp Wave 2 css.2 — CSS shorthand `gap: <row-gap> [<col-gap>]`.
             // When two tokens are present, fan out to setRowGap +
             // setColumnGap so each axis gets its own value (matching the
-            // CSS spec). Single-token form falls through to the legacy
-            // shared `gap` slot for backwards compatibility.
+            // CSS spec). Single-token form writes the shared `gap` slot.
+            //
+            // Codex #1616 P1 on #1638 — single-token writes were ignoring
+            // any prior 2-token state, leaving stale row_gap/column_gap
+            // (which FlexStyle::effective_gap prefers when ≥0). The fix
+            // resets per-axis to the -1 sentinel before writing the
+            // shared slot so the new shorthand value actually wins.
             var gapToks = String(resolved).trim().split(/\s+/);
             if (gapToks.length >= 2) {
                 var grRow = parseCSSLength(gapToks[0]);
@@ -213,6 +218,11 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 if (grCol) setFlex(id, "column_gap",
                     grCol.unit === "%" ? (grCol.value + "%") : grCol.value);
             } else {
+                // Reset per-axis (-1 = "consult shared gap") so the new
+                // single-token value isn't shadowed by a prior 2-token
+                // write.
+                setFlex(id, "row_gap", -1);
+                setFlex(id, "column_gap", -1);
                 var g = parseCSSLength(resolved);
                 if (g) setFlex(id, "gap",
                     g.unit === "%" ? (g.value + "%") : g.value);
