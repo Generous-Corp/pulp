@@ -2465,9 +2465,22 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setUserSelect(id, "none"|"text"|"all")
+    // setUserSelect(id, "auto"|"none"|"text"|"all"|"contain") — CSS
+    // user-select. Tier-2 follow-up to #1656 (which walked the catalog
+    // claim back to partial because this stub was a literal no-op).
+    // Now stores the keyword on View::user_select_ so widgets that
+    // participate in selection can read it. Unknown keywords map to
+    // the spec default (auto).
     engine_.register_function("setUserSelect", [this](choc::javascript::ArgumentList args) {
-        (void)args; // Store for future use — currently no-op
+        auto id = args.get<std::string>(0, "");
+        auto kw = args.get<std::string>(1, "auto");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if      (kw == "none")    v->set_user_select(View::UserSelect::none);
+        else if (kw == "text")    v->set_user_select(View::UserSelect::text);
+        else if (kw == "all")     v->set_user_select(View::UserSelect::all);
+        else if (kw == "contain") v->set_user_select(View::UserSelect::contain);
+        else                       v->set_user_select(View::UserSelect::auto_);
         return choc::value::Value();
     });
 

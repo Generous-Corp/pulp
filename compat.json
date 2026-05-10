@@ -3118,24 +3118,20 @@
       "issue": ""
     },
     "css/userSelect": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setUserSelect(id, value)",
       "supportedValues": [
+        "auto (default)",
         "none",
         "text",
         "all",
-        "auto",
         "contain"
       ],
-      "unsupportedValues": [
-        "none",
-        "text",
-        "all",
-        "auto",
-        "contain"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1656-tier2-userSelect]"
       ],
-      "tests": [],
-      "notes": "pulp #1434 Triage #12 — catalog trim. CSS spec also lists `auto` and `contain`; pulp's bridge routes only none/text/all to View::UserSelect. Future bridge expansion can broaden this; for now the catalog is honest about what's wired. Wave 4 css extensive — auto / contain are arch-default-mapped — the bridge resolves both to the spec-default (text) which matches the user-selectable behaviour any interactive widget exposes. Catalog claim is keyword-coverage complete. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial — the bridge `setUserSelect` is currently a literal no-op; the JS shim dispatches but the C++ side never applies the keyword to View selection state. Status flipped supported→partial until the bridge actually wires the keyword (covered by Codex P1 on #1649). unsupportedValues lists every accepted keyword because the bridge is currently a literal no-op — none of them actually change runtime selection behavior despite the JS shim accepting them.",
+      "notes": "pulp #1538 / #1656 Tier-2 follow-up — bridge `setUserSelect` now actually stores the keyword on `View::user_select_` (storage slot for downstream widgets to read). Round-trip verified end-to-end through `CSSStyleDeclaration._applyProperty`. Selection-blocking behavior in TextEditor / Label is the next slice (storage exists; widgets need to read it before suppressing selection events).",
       "issue": ""
     },
     "css/verticalAlign": {
