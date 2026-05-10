@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0800"></a>
+## [0.81.0]
+
 ## [0.80.0] - 2026-05-10
 
 - feat(canvas2d): wire fill/stroke gradients on CoreGraphics text + paths ([#1736](https://github.com/danielraffel/pulp/pull/1736))
