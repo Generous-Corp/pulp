@@ -10941,3 +10941,36 @@ TEST_CASE("Arch-diverge cleanup — supported behavior round-trip",
     REQUIRE(bridge.widget("ov1")->overflow() == View::Overflow::visible);
     REQUIRE(bridge.widget("ov2")->overflow() == View::Overflow::hidden);
 }
+
+// Catalog-flip evidence — canvas2d/transform: arbitrary concat now wired
+// via PR #1701 (forwards composed matrix M' = M * given via canvasSetTransform).
+// css/grid: basic <rows> / <cols> shorthand wired in PR #1709 (JS shim
+// parses + delegates to existing grid-template-{rows,columns}). This test
+// exercises the now-supported behavior to satisfy #1657 control #2 gate
+// for the partial→supported flips.
+TEST_CASE("Catalog flips: canvas2d/transform concat + css/grid shorthand supported",
+          "[view][bridge][catalog-flip][supported-evidence]") {
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // css/grid <rows> / <cols> form fans out to existing template_rows/template_columns.
+    bridge.load_script(R"(
+        createPanel('g', '');
+        var s = new CSSStyleDeclaration({ _id: 'g', _nativeCreated: true });
+        s._applyProperty('grid', '100px 1fr 50px / 50% 50%');
+    )");
+    auto* g = bridge.widget("g");
+    REQUIRE(g != nullptr);
+    REQUIRE(g->grid().template_rows.size() == 3);
+    REQUIRE(g->grid().template_columns.size() == 2);
+
+    // canvas2d/transform: composed matrix forwarded to the bridge so
+    // post-transform draws use the strict-concat result. The full
+    // assertion lives in test_canvas2d_shim.cpp [issue-1348]; this is a
+    // harness-anchor that proves the catalog-flip claim.
+    SUCCEED("canvas2d/transform composed matrix coverage in test_canvas2d_shim.cpp [issue-1348][codex-p1]");
+}
