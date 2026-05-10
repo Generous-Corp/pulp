@@ -7229,6 +7229,79 @@ TEST_CASE("WidgetBridge setClipPath stores SVG-path-d on the View",
     REQUIRE_FALSE(panel->has_clip_path());
 }
 
+// Codex #1616 P1 — `setClipPath` was forwarding the verbatim CSS value
+// (e.g. `path("M ...")`, `none`, `circle(...)`) to `SkPath::FromSVGString`,
+// which only accepts raw "d" data. The unwrap path below is the bridge-side
+// fix; non-path() shapes are deferred per #1515.
+TEST_CASE("WidgetBridge setClipPath unwraps path() and rejects non-path forms",
+          "[view][bridge][issue-1540][codex-p1]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+
+    // path("...") — quoted, double-quote
+    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 L 50 0 L 50 50 Z")'))");
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 0 0 L 50 0 L 50 50 Z");
+
+    // path('...') — single-quote variant
+    bridge.load_script("setClipPath('p', \"path('M 1 1 L 9 1')\")");
+    REQUIRE(panel->clip_path() == "M 1 1 L 9 1");
+
+    // path("...") with surrounding whitespace and inner trim
+    bridge.load_script(R"(setClipPath('p', '  path( "M 0 0 H 10"  )  '))");
+    REQUIRE(panel->clip_path() == "M 0 0 H 10");
+
+    // `none` clears the slot per CSS spec.
+    bridge.load_script("setClipPath('p', 'none')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    // Re-set then pass a non-path shape: slot must clear (deferred form).
+    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
+    REQUIRE(panel->has_clip_path());
+    bridge.load_script("setClipPath('p', 'circle(50% at 50% 50%)')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    // url(#ref) — also deferred form, slot must clear (no bogus forward).
+    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
+    bridge.load_script("setClipPath('p', 'url(#someId)')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    // polygon(...) — also deferred form.
+    bridge.load_script(R"(setClipPath('p', 'path("M 0 0 H 5")'))");
+    bridge.load_script("setClipPath('p', 'polygon(0 0, 10 0, 5 10)')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    // Bare SVG-path "d" data (no wrapper): the original pre-#1540
+    // form. Still passes through verbatim for legacy callers and the
+    // existing [issue-1515] round-trip test.
+    bridge.load_script("setClipPath('p', 'M 0 0 L 20 0 L 20 20 Z')");
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 0 0 L 20 0 L 20 20 Z");
+
+    // Codex #1616 P2 — CSS keywords are case-insensitive. Verify the
+    // bridge normalizes case before dispatch (NONE clears, PATH(...)
+    // unwraps, URL(#id) is treated as deferred).
+    bridge.load_script("setClipPath('p', 'M 1 1 L 9 1')");  // pre-set
+    REQUIRE(panel->has_clip_path());
+    bridge.load_script("setClipPath('p', 'NONE')");
+    REQUIRE_FALSE(panel->has_clip_path());
+
+    bridge.load_script(R"(setClipPath('p', 'PATH("M 5 5 L 6 6")'))");
+    REQUIRE(panel->has_clip_path());
+    REQUIRE(panel->clip_path() == "M 5 5 L 6 6");
+
+    bridge.load_script(R"(setClipPath('p', 'Path("M 7 7")'))"); // mixed-case
+    REQUIRE(panel->clip_path() == "M 7 7");
+
+    bridge.load_script("setClipPath('p', 'URL(#someId)')");  // deferred
+    REQUIRE_FALSE(panel->has_clip_path());
+}
+
 TEST_CASE("WidgetBridge setMaskImage / setMask round-trip on the View",
           "[view][bridge][issue-1515]") {
     ScriptEngine engine;

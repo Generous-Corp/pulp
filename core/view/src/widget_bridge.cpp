@@ -4850,18 +4850,55 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
-    // setClipPath(id, svg_path_d) — CSS `clip-path: path("...")` (pulp
-    // #1515). Stores the SVG-path-d string on the View; paint_all()
-    // installs it as a canvas clip via Canvas::clip_path_svg. Empty
-    // string clears the slot. URL refs (`url(#id)`) and named shapes
-    // (`circle()`, `inset()`, `polygon()`) are deferred — only
-    // `path("...")` form is honored today.
+    // setClipPath(id, value) — CSS `clip-path` (pulp #1515). The paint
+    // side feeds the stored slot to `Canvas::clip_path_svg` which calls
+    // `SkPath::FromSVGString` — that parser only accepts raw SVG path
+    // "d" data, so we must unwrap `path("...")` here and explicitly
+    // skip shapes / URL refs that the paint side cannot honor (they
+    // remain documented as deferred). Forwarding the verbatim value
+    // produced silent paint failures on every non-path() form (Codex
+    // #1616 P1 on #1540).
     engine_.register_function("setClipPath",
         [this](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
             auto* v = id.empty() ? &root_ : widget(id);
-            if (v) v->set_clip_path(value);
+            if (!v) return choc::value::Value();
+            auto trim = [](std::string s) {
+                auto a = s.find_first_not_of(" \t\n\r");
+                if (a == std::string::npos) return std::string{};
+                auto b = s.find_last_not_of(" \t\n\r");
+                return s.substr(a, b - a + 1);
+            };
+            std::string t = trim(value);
+            // CSS keywords (`none`, `path(...)`, `circle(...)`, etc.) are
+            // case-insensitive per spec. Build a lowercased copy of the
+            // prefix-bearing portion for comparison; preserve the original
+            // case for the SVG path "d" data inside path("...") (Codex
+            // #1616 P2 on #1540 follow-up #1698).
+            std::string t_lower = t;
+            for (auto& c : t_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (t_lower.empty() || t_lower == "none") {
+                v->set_clip_path("");
+            } else if (t_lower.size() > 6 && t_lower.rfind("path(", 0) == 0 && t.back() == ')') {
+                std::string inner = trim(t.substr(5, t.size() - 6));
+                if (inner.size() >= 2 && (inner.front() == '"' || inner.front() == '\'')
+                    && inner.back() == inner.front()) {
+                    inner = inner.substr(1, inner.size() - 2);
+                }
+                v->set_clip_path(inner);
+            } else {
+                bool deferred_shape = false;
+                for (const char* p : {"circle(", "ellipse(", "inset(", "polygon(",
+                                       "rect(", "xywh(", "url("}) {
+                    if (t_lower.rfind(p, 0) == 0) { deferred_shape = true; break; }
+                }
+                if (deferred_shape) {
+                    v->set_clip_path("");
+                } else {
+                    v->set_clip_path(t);
+                }
+            }
             return choc::value::Value();
         });
 
