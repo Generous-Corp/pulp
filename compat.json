@@ -4274,16 +4274,18 @@
       "issue": ""
     },
     "rn/fill": {
-      "status": "partial",
-      "mapsTo": "prop-applier.ts: 'fill' -> setSvgFill(id, value). Bridge accepts a CSS-color string.",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts: 'fill' -> setSvgFill(id, value) for CSS-color strings, OR setSvgFillGradient(id, css_linear_gradient_string) for gradient fills. SvgPathWidget stores either solid fill_color_ OR fill_gradient_ (the gradient slot wins when set). paint() parses the CSS linear-gradient string against local bounds and calls Canvas::set_fill_gradient_linear before fill_current_path; SkiaCanvas implements via SkGradientShader::MakeLinear.",
       "supportedValues": [
-        "CSS color strings"
+        "CSS color strings",
+        "url(#gradient) — when paired with a defining JSX <SvgLinearGradient> intrinsic OR a CSS linear-gradient(...) string forwarded directly via setSvgFillGradient"
       ],
-      "unsupportedValues": [
-        "url(#gradient) — gradient fills deferred-pulp-#932 (gated on Skia gradient wiring through SvgPathWidget)"
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_svg_path_widget#issue-932",
+        "unit:test_svg_path_widget#issue-1737"
       ],
-      "tests": [],
-      "notes": "Only on @pulp/react SvgPath. Inline <svg> in DOM-lite still uses createCol (pulp #1147), which means CSS `fill` does NOT route to SVG fill — it falls into the unknown-prop default switch. Wave 1 architectural reclassification — url(#gradient) fills are partial-deferred-pulp-#932 (gated on Skia gradient wiring through SvgPathWidget); CSS color strings round-trip end-to-end.",
+      "notes": "Only on @pulp/react SvgPath. Inline <svg> in DOM-lite still uses createCol (pulp #1147), which means CSS `fill` does NOT route to SVG fill — it falls into the unknown-prop default switch. pulp #932 (initial gradient slot deferred) + pulp #1737 PR-4 (this slice). SvgPathWidget gained a fill_gradient_ string slot + set_fill_gradient/clear_fill_gradient API. paint() parses the CSS linear-gradient at frame time against local bounds, builds endpoint coords + colors/positions arrays, and routes through Canvas::set_fill_gradient_linear (cross-backend — RecordingCanvas's default falls back to set_fill_color(stops[0]); SkiaCanvas implements via SkGradientShader::MakeLinear; CG falls back to its solid fill). New bridge fn setSvgFillGradient(id, css_value) accepts the linear-gradient string verbatim. JSX consumers (`<SvgLinearGradient id='g' stops={...}>` + `fill='url(#g)'`) work via the prop-applier resolving the JSX subtree's gradient defs into the CSS string before calling the bridge — direct C++ consumers can also call set_fill_gradient with a hand-built string. radial-gradient + url(file_path) image fills are followups (parser-only extension; no API change needed).",
       "issue": "994"
     },
     "rn/filter": {

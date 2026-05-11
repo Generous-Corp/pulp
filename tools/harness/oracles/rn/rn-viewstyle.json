@@ -286,7 +286,7 @@
       "setOpacity",
       "setOutlineColor", "setOutlineOffset", "setOutlineStyle", "setOutlineWidth",
       "setOverflow", "setPointerEvents", "setPosition",
-      "setRight", "setRotation", "setScale", "setSkew", "setSvgFill",
+      "setRight", "setRotation", "setScale", "setSkew", "setSvgFill", "setSvgFillGradient",
       "setSvgPath", "setSvgStroke", "setSvgStrokeWidth", "setSvgViewBox", "setText",
       "setTextAlign", "setTextColor", "setTextDecoration",
       "setTextShadowColor", "setTextShadowOffset", "setTextShadowRadius",

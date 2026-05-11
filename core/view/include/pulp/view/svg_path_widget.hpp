@@ -53,6 +53,29 @@ public:
     void set_fill_color(canvas::Color c);
     void clear_fill();
 
+    /// pulp #932 / #1737 PR-4 — gradient fill as a CSS linear-gradient
+    /// string. When set (non-empty), `paint()` overrides the solid
+    /// fill_color_ with the parsed gradient — calls
+    /// `canvas.set_fill_gradient_linear(...)` before
+    /// `fill_current_path()`. Wins over `fill_color_` while non-empty;
+    /// `clear_fill_gradient()` returns to solid fill semantics.
+    ///
+    /// The string MUST be a CSS linear-gradient — e.g.
+    /// `"linear-gradient(to bottom, #ff0000, #0000ff)"`. Other
+    /// gradient kinds (radial, conic) are followups; unparseable input
+    /// silently falls back to `fill_color_` so authors don't lose
+    /// their content to a parser error.
+    ///
+    /// Wired via the `setSvgFillGradient` bridge fn. The intended
+    /// JSX consumer is `<SvgLinearGradient id="g1" stops={...}>` +
+    /// `fill="url(#g1)"`; the prop-applier resolves the JSX subtree's
+    /// gradient definitions into linear-gradient strings before calling
+    /// the bridge. Direct C++ consumers can also call this with a
+    /// hand-built gradient string.
+    void set_fill_gradient(std::string css_linear_gradient);
+    void clear_fill_gradient();
+    const std::string& fill_gradient() const { return fill_gradient_; }
+
     /// Solid-stroke paint. Pass an alpha-zero color or call
     /// clear_stroke() to disable stroking. Default: no stroke.
     void set_stroke_color(canvas::Color c);
@@ -81,6 +104,7 @@ private:
     std::vector<SvgPathSegment> segments_;
     canvas::Color fill_color_{0.0f, 0.0f, 0.0f, 1.0f};
     canvas::Color stroke_color_{0.0f, 0.0f, 0.0f, 1.0f};
+    std::string   fill_gradient_;  // pulp #932 — non-empty overrides solid fill
     float stroke_width_ = 1.0f;
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"
     float viewbox_h_ = 0.0f;
