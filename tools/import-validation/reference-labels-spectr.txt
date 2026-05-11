@@ -1,0 +1,29 @@
+# Canonical reference labels for spectr/resources/editor.html.
+# Captured 2026-05-11 from Chrome accessibility tree at 1320x860 viewport.
+# Used by check_label_coverage.sh to assert importer's IR captures the
+# right UI text strings.
+#
+# Lines starting with # are ignored.
+
+SPECTR
+ZOOMABLE FILTER BANK
+LIVE
+PRECISION
+IIR
+FFT
+HYBRID
+64 bands ▾
+1.00
+× zoom
+CLEAR
+⋯
+SCULPT ▾
+PEAK ▾
+PRESETS ▾
+SNAPSHOT
+A
+B
+▸ A
+▸ B
+Settings
+?
