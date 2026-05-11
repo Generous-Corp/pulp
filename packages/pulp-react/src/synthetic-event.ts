@@ -123,6 +123,12 @@ interface PointerLikeData {
     metaKey?: boolean;
     scale?: number;
     rotation?: number;
+    // Wheel event fields — bridge sends {deltaX, deltaY, clientX, clientY}
+    // for `wheel` since the dispatch object-form change.
+    deltaX?: number;
+    deltaY?: number;
+    deltaZ?: number;
+    deltaMode?: number;
 }
 
 /// React-DOM-compatible synthetic event surface (subset). Constructed
@@ -155,6 +161,15 @@ export interface SyntheticEvent {
     // Gesture (ignored unless gesture event)
     scale: number;
     rotation: number;
+    // Wheel event — bridge sends {deltaX, deltaY, clientX, clientY}
+    // as an object (since SDK 0.78.4). Without these fields the
+    // wheel handler in React JSX (`e.deltaY > 0 ? zoomOut() : zoomIn()`)
+    // reads NaN. See pulp #1XXX (Spectr trackpad-zoom regression
+    // post-GPU-path migration).
+    deltaX: number;
+    deltaY: number;
+    deltaZ: number;
+    deltaMode: number;
     // Form events (text input / change)
     key: string;
     keyCode: number;
@@ -201,6 +216,7 @@ export function makeSyntheticEvent(
         pointerId: 0, pointerType: 'mouse', isPrimary: true, pressure: 0.5,
         ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
         scale: 1, rotation: 0,
+        deltaX: 0, deltaY: 0, deltaZ: 0, deltaMode: 0,
         key: '', keyCode: 0,
     };
 
@@ -214,6 +230,12 @@ export function makeSyntheticEvent(
         if (typeof d.clientY === 'number') evt.clientY = d.clientY;
         if (typeof d.offsetX === 'number') evt.offsetX = d.offsetX;
         if (typeof d.offsetY === 'number') evt.offsetY = d.offsetY;
+        // pulp #1XXX — wheel events arrive as {deltaX, deltaY, clientX, clientY}.
+        // Surface the deltas so JSX `onWheel` handlers (`e.deltaY > 0 …`) work.
+        if (typeof d.deltaX === 'number') evt.deltaX = d.deltaX;
+        if (typeof d.deltaY === 'number') evt.deltaY = d.deltaY;
+        if (typeof d.deltaZ === 'number') evt.deltaZ = d.deltaZ;
+        if (typeof d.deltaMode === 'number') evt.deltaMode = d.deltaMode;
         if (typeof d.button === 'number') evt.button = d.button;
         if (typeof d.pointerId === 'number') evt.pointerId = d.pointerId;
         if (typeof d.pointerType === 'string') evt.pointerType = d.pointerType;

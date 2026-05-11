@@ -1648,9 +1648,23 @@ void WidgetBridge::register_api() {
 
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "pointer");
             };
-            // W3C PointerEvents: forward drag as pointermove
-            w->on_drag = [alive, engine, id](Point pos) {
+            // W3C PointerEvents: forward drag as pointermove.
+            // Include clientX/clientY (window-relative) so JSX drag
+            // handlers reading `e.clientX - rect.left` (the standard
+            // pattern) get real coords. Pre-fix, pointermove only had
+            // offsetX/Y — JSX dragging a slider thumb or drawing a band
+            // column read clientX as 0 and the drag silently broke.
+            // Capture View* `w` so we can accumulate the parent chain
+            // bounds to convert local → window coords.
+            w->on_drag = [alive, engine, id, w](Point pos) {
+                float wx = pos.x, wy = pos.y;
+                for (View* cur = w; cur; cur = cur->parent()) {
+                    wx += cur->bounds().x;
+                    wy += cur->bounds().y;
+                }
                 std::string data = "{"
+                    "clientX:" + std::to_string(wx) + ","
+                    "clientY:" + std::to_string(wy) + ","
                     "offsetX:" + std::to_string(pos.x) + ","
                     "offsetY:" + std::to_string(pos.y) + ","
                     "pointerId:0,pointerType:'mouse',isPrimary:true}";
@@ -3669,7 +3683,20 @@ void WidgetBridge::register_api() {
                 if (!me.is_wheel) {
                     return;
                 }
-                std::string data = std::to_string(me.scroll_delta_x) + "," + std::to_string(me.scroll_delta_y);
+                // Dispatch wheel data as an object so the synthetic-event
+                // shim can lift deltaX/deltaY + clientX/clientY off it.
+                // Pre-fix this sent raw positional args (deltaX,deltaY),
+                // which the synthetic event's isPlainObject(a0) branch
+                // never visited — JSX onWheel handlers read undefined
+                // deltas and trackpad zoom silently broke. Also include
+                // clientX/clientY (window-relative) so handlers reading
+                // `e.clientX - rect.left` work for anchor-frequency.
+                std::string data = "{"
+                    "deltaX:" + std::to_string(me.scroll_delta_x) + ","
+                    "deltaY:" + std::to_string(me.scroll_delta_y) + ","
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) +
+                    "}";
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'wheel', " + data + ")", "wheel");
             };
         }
