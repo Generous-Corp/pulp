@@ -9,7 +9,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0850"></a>
-## [0.85.0]
+## [0.85.0] - 2026-05-10
+
+- feat(view): wire CSS mask-image + mask-size paint composite (closes css/maskSize → css 100% achievable) ([#1798](https://github.com/danielraffel/pulp/pull/1798))
 
 <a id="v0840"></a>
 ## [0.84.0] - 2026-05-10
@@ -1596,6 +1598,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.85.0]: https://github.com/danielraffel/pulp/releases/tag/v0.85.0
 [0.84.0]: https://github.com/danielraffel/pulp/releases/tag/v0.84.0
 [0.83.1]: https://github.com/danielraffel/pulp/releases/tag/v0.83.1
 [0.83.0]: https://github.com/danielraffel/pulp/releases/tag/v0.83.0
