@@ -8,15 +8,40 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v100"></a>
-## [1.0.0] - 2026-05-10
+<a id="v0820"></a>
+## [0.82.0] - 2026-05-10
 
-- feat(css): consume object-fit + object-position in ImageView::paint (closes pulp #1707) ([#1755](https://github.com/danielraffel/pulp/pull/1755))
-- feat(catalog): hygiene PR — yoga 100%, 5 grace saves, 5 test-ref backfills ([#1752](https://github.com/danielraffel/pulp/pull/1752))
-- fix(canvas): restore text CTM before stroke gradients (Codex P1 on #1736) ([#1750](https://github.com/danielraffel/pulp/pull/1750))
-- feat(rn): catalog flip — rn/userSelect noop → supported (matches wired impl) ([#1746](https://github.com/danielraffel/pulp/pull/1746))
-- feat(rn): catalog flip — rn/overflow lists all 3 RN keywords incl. scroll ([#1745](https://github.com/danielraffel/pulp/pull/1745))
-- feat(canvas2d): wire putImageData 7-arg sub-rect form (issue-916) ([#1741](https://github.com/danielraffel/pulp/pull/1741))
+This release recovers the SDK release pipeline. PR #1755 corrupted CMakeLists.txt VERSION (Clock test fixture leak → 1.0.0); the file was hot-fixed in #1757 but the CHANGELOG retained a bogus `## [1.0.0]` heading and 16 subsequent merges accumulated on main without a tag because `auto-release.yml` saw `CMakeLists.txt VERSION` unchanged. The bogus heading is removed here and v0.82.0 is the proper iterative successor to v0.81.0; the unreleased work below is consolidated into this single minor bump.
+
+Surface changes (canvas2d / css / rn / html):
+
+- feat(css): full white-space enum (normal/nowrap/pre/pre-wrap/pre-line/break-spaces) wired through bridge + Label ([#1786](https://github.com/danielraffel/pulp/pull/1786), [#1788](https://github.com/danielraffel/pulp/pull/1788))
+- feat(rn): SkFontMgr fallback chain — fontFamily comma-list now walks all families instead of only the first ([#1781](https://github.com/danielraffel/pulp/pull/1781))
+- feat(html): querySelector evaluates pseudo-classes spec-correctly (state, DOM-position, :not, :nth-child) ([#1759](https://github.com/danielraffel/pulp/pull/1759), [#1779](https://github.com/danielraffel/pulp/pull/1779), [#1783](https://github.com/danielraffel/pulp/pull/1783))
+- feat(html): aria-pressed/checked/disabled/hidden state attributes wired end-to-end through NSAccessibility + AccessibilityTree ([#1766](https://github.com/danielraffel/pulp/pull/1766), [#1771](https://github.com/danielraffel/pulp/pull/1771))
+- feat(html): catalog flip — html/dialog noop → supported (html surface 100%) ([#1775](https://github.com/danielraffel/pulp/pull/1775))
+- feat(css): object-fit + object-position consumed in ImageView::paint (closes pulp #1707) ([#1755](https://github.com/danielraffel/pulp/pull/1755))
+- feat(canvas2d): putImageData 7-arg sub-rect form (issue-916) ([#1741](https://github.com/danielraffel/pulp/pull/1741))
+- feat(rn): catalog flips — rn/overflow with `scroll`, rn/userSelect noop → supported ([#1745](https://github.com/danielraffel/pulp/pull/1745), [#1746](https://github.com/danielraffel/pulp/pull/1746))
+- fix(canvas): stroke text gradient CTM restored before gradient eval ([#1750](https://github.com/danielraffel/pulp/pull/1750))
+- fix(css): white-space pre keeps multi_line=true so newlines are preserved ([#1788](https://github.com/danielraffel/pulp/pull/1788))
+
+Catalog hygiene + tooling:
+
+- feat(catalog): yoga surface to 100%; 5 grace saves + 5 test-ref backfills ([#1752](https://github.com/danielraffel/pulp/pull/1752))
+- chore(catalog): rn/isolation noop → wontfix (architectural — no stacking-context engine) ([#1785](https://github.com/danielraffel/pulp/pull/1785))
+- chore(catalog): 9 css NO-OPs → wontfix (architectural per flex+grid layout-model contract) ([#1790](https://github.com/danielraffel/pulp/pull/1790))
+- feat(harness): verify-tests step grepping TEST_CASE tags + names against catalog refs ([#1768](https://github.com/danielraffel/pulp/pull/1768))
+- test(canvas): direct unit tests for draw_image_from_*_rect (PR #1739 codecov backfill) ([#1770](https://github.com/danielraffel/pulp/pull/1770))
+
+Release-engineering + guards:
+
+- fix: restore CMakeLists.txt + drop pulp.toml after #1755 corruption ([#1757](https://github.com/danielraffel/pulp/pull/1757))
+- guard: source-tree pollution check (prevents #1755-class CMakeLists corruption) ([#1761](https://github.com/danielraffel/pulp/pull/1761), [#1763](https://github.com/danielraffel/pulp/pull/1763))
+- feat(release): drop example plugin .pkg artifacts from GitHub release page ([#1764](https://github.com/danielraffel/pulp/pull/1764))
+- fix: 4 Codex sweep findings on #1759/#1761/#1763/#1768 ([#1773](https://github.com/danielraffel/pulp/pull/1773))
+
+Surface coverage at v0.82.0: yoga 100%, canvas2d 100%, html 100%, css 82.9%, rn 87.5%, **TOTAL 90.0%**.
 
 <a id="v0810"></a>
 ## [0.81.0] - 2026-05-10
