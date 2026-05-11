@@ -17,6 +17,7 @@
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
+#include <optional>
 
 using pulp::view::SvgPathWidget;
 using pulp::view::SvgPathSegment;
@@ -382,4 +383,111 @@ TEST_CASE("SvgPathWidget setFill / clearFill toggles emission",
     RecordingCanvas rc3;
     w.paint(rc3);
     REQUIRE(rc3.commands().empty());
+}
+
+
+// ── pulp #932 / #1737 PR-4 — SVG fill via CSS linear-gradient ───────────
+//
+// SvgPathWidget::set_fill_gradient() accepts a CSS linear-gradient
+// string verbatim. paint() parses it on each frame against the
+// widget's local bounds and routes through the cross-backend
+// Canvas::set_fill_gradient_linear API. RecordingCanvas's default
+// Canvas impl resolves set_fill_gradient_linear to set_fill_color
+// with the FIRST stop's color, so the spy can verify both that the
+// gradient parsed (first color = expected) AND that
+// clear_fill_gradient was called by checking that the widget didn't
+// fall back to its solid fill_color on this paint pass.
+
+TEST_CASE("SvgPathWidget linear-gradient fill: first stop becomes the recorded fill color",
+          "[view][svg-path][issue-932][issue-1737]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 0 L 10 0 L 10 10 L 0 10 Z");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    // Solid color is "should not be used" — bright green so a fall-
+    // through to solid would be obvious.
+    w.set_fill_color(Color::rgba8(0, 255, 0));
+    w.set_fill_gradient("linear-gradient(to bottom, red, blue)");
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    // RecordingCanvas's default set_fill_gradient_linear impl records
+    // set_fill_color(colors[0]) — i.e. red (255,0,0). If the gradient
+    // path failed and we fell back to the solid fill_color, the
+    // recorded color would be green (0,255,0).
+    auto find_first_fill = [&]() -> std::optional<Color> {
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::set_fill_color) return cmd.color;
+        }
+        return std::nullopt;
+    };
+    auto first_fill = find_first_fill();
+    REQUIRE(first_fill.has_value());
+    const auto& c = *first_fill;
+    REQUIRE(c.r > 0.9f);  // red == 1.0
+    REQUIRE(c.g < 0.1f);  // not green
+    REQUIRE(c.b < 0.1f);  // not blue (yet — that's the second stop)
+}
+
+TEST_CASE("SvgPathWidget unparseable gradient falls back to solid fill_color",
+          "[view][svg-path][issue-932][issue-1737]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 0 L 10 0 L 10 10 Z");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    w.set_fill_color(Color::rgba8(255, 0, 0));  // red — the fallback we expect
+    w.set_fill_gradient("not-a-real-gradient(...)");  // no `linear-gradient(` substring
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    auto find_first_fill = [&]() -> std::optional<Color> {
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::set_fill_color) return cmd.color;
+        }
+        return std::nullopt;
+    };
+    auto first_fill = find_first_fill();
+    REQUIRE(first_fill.has_value());
+    const auto& c = *first_fill;
+    REQUIRE(c.r > 0.9f);  // red — the solid fallback
+    REQUIRE(c.g < 0.1f);
+    REQUIRE(c.b < 0.1f);
+}
+
+TEST_CASE("SvgPathWidget clear_fill_gradient returns to solid-fill mode",
+          "[view][svg-path][issue-932][issue-1737]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 0 L 10 0 L 10 10 Z");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    w.set_fill_color(Color::rgba8(0, 255, 0));  // green — the post-clear fallback
+    w.set_fill_gradient("linear-gradient(to bottom, black, white)");
+    w.clear_fill_gradient();
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    auto find_first_fill = [&]() -> std::optional<Color> {
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::set_fill_color) return cmd.color;
+        }
+        return std::nullopt;
+    };
+    auto first_fill = find_first_fill();
+    REQUIRE(first_fill.has_value());
+    const auto& c = *first_fill;
+    REQUIRE(c.g > 0.9f);  // green — gradient was cleared
+    REQUIRE(c.r < 0.1f);
+    REQUIRE(c.b < 0.1f);
 }

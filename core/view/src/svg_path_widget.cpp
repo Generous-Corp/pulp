@@ -4,10 +4,197 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 namespace pulp::view {
 
 namespace {
+
+// pulp #932 — minimal CSS linear-gradient parser used by SvgPathWidget
+// for `fill="url(#g)"` resolution. Mirrors the parser in skia_canvas.cpp
+// but emits structured stops + endpoint coords instead of an SkShader,
+// because SvgPathWidget paints through Canvas::set_fill_gradient_linear
+// which is the cross-backend path (works on RecordingCanvas / CG /
+// Skia equally). Subset honored: direction keyword (`to top/bottom/
+// left/right`) or `<n>deg` angle; 2+ color stops with hex (#RGB,
+// #RRGGBB, #RRGGBBAA) / rgb()/rgba() / `transparent` / `black` /
+// `white` / `red` / `blue` (extend on demand). Stop positions parsed
+// when present; otherwise even-distribution per CSS spec.
+
+inline void grad_skip_ws(const std::string& s, size_t& i) {
+    while (i < s.size() && (s[i]==' ' || s[i]=='\t' || s[i]=='\n')) ++i;
+}
+
+std::optional<canvas::Color> parse_grad_color(const std::string& s, size_t& i) {
+    grad_skip_ws(s, i);
+    if (i >= s.size()) return std::nullopt;
+    auto starts = [&](const char* lit) {
+        size_t n = std::strlen(lit);
+        return i + n <= s.size() && s.compare(i, n, lit) == 0;
+    };
+    if (s[i] == '#') {
+        size_t start = i + 1;
+        size_t end = start;
+        while (end < s.size() && std::isxdigit(static_cast<unsigned char>(s[end]))) ++end;
+        std::string hex = s.substr(start, end - start);
+        i = end;
+        auto h = [&](size_t off, int width) {
+            return std::stoi(hex.substr(off, width), nullptr, 16);
+        };
+        if (hex.size() == 3) {
+            return canvas::Color::rgba8(h(0,1)*17, h(1,1)*17, h(2,1)*17, 255);
+        }
+        if (hex.size() == 6) {
+            return canvas::Color::rgba8(h(0,2), h(2,2), h(4,2), 255);
+        }
+        if (hex.size() == 8) {
+            return canvas::Color::rgba8(h(0,2), h(2,2), h(4,2), h(6,2));
+        }
+        return std::nullopt;
+    }
+    if (starts("rgba(") || starts("rgb(")) {
+        bool has_alpha = starts("rgba(");
+        i += has_alpha ? 5 : 4;
+        auto eat_num = [&](float& out) {
+            grad_skip_ws(s, i);
+            size_t start = i;
+            while (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) ||
+                                    s[i]=='.' || s[i]=='-' || s[i]=='+')) ++i;
+            if (start == i) return false;
+            out = std::stof(s.substr(start, i - start));
+            grad_skip_ws(s, i);
+            if (i < s.size() && s[i]=='%') { out = out * 2.55f; ++i; grad_skip_ws(s, i); }
+            return true;
+        };
+        float r=0, g=0, b=0, af=1.0f;
+        if (!eat_num(r)) return std::nullopt;
+        if (i<s.size() && s[i]==',') ++i;
+        if (!eat_num(g)) return std::nullopt;
+        if (i<s.size() && s[i]==',') ++i;
+        if (!eat_num(b)) return std::nullopt;
+        if (has_alpha) {
+            if (i<s.size() && s[i]==',') ++i;
+            if (!eat_num(af)) return std::nullopt;
+            if (af > 1.0f) af /= 255.0f;  // accept 0..255 form too
+        }
+        grad_skip_ws(s, i);
+        if (i<s.size() && s[i]==')') ++i;
+        auto cb = [](float v) { return std::max(0, std::min(255, static_cast<int>(std::round(v)))); };
+        return canvas::Color::rgba8(cb(r), cb(g), cb(b), cb(af * 255.0f));
+    }
+    if (starts("transparent")) { i += 11; return canvas::Color::rgba8(0,0,0,0); }
+    if (starts("black"))       { i += 5;  return canvas::Color::rgba8(0,0,0,255); }
+    if (starts("white"))       { i += 5;  return canvas::Color::rgba8(255,255,255,255); }
+    if (starts("red"))         { i += 3;  return canvas::Color::rgba8(255,0,0,255); }
+    if (starts("blue"))        { i += 4;  return canvas::Color::rgba8(0,0,255,255); }
+    if (starts("green"))       { i += 5;  return canvas::Color::rgba8(0,128,0,255); }
+    return std::nullopt;
+}
+
+// Parsed result — endpoint coords (in widget local space) + parallel
+// arrays of colors / positions ready to feed to Canvas::set_fill_gradient_linear.
+struct ParsedLinearGradient {
+    float x0, y0, x1, y1;
+    std::vector<canvas::Color> colors;
+    std::vector<float> positions;
+};
+
+std::optional<ParsedLinearGradient> parse_svg_linear_gradient(
+        const std::string& value, float w, float h) {
+    auto p = value.find("linear-gradient(");
+    if (p == std::string::npos) return std::nullopt;
+    size_t i = p + 16;
+    size_t end = i;
+    int depth = 1;
+    while (end < value.size() && depth > 0) {
+        if (value[end] == '(') ++depth;
+        else if (value[end] == ')') --depth;
+        ++end;
+    }
+    if (depth != 0) return std::nullopt;
+    std::string inner = value.substr(i, end - i - 1);
+
+    // Default direction: `to bottom` (CSS default; matches the mask
+    // parser in skia_canvas.cpp).
+    float angle_deg = 180.0f;
+    size_t k = 0;
+    grad_skip_ws(inner, k);
+    auto starts_with = [&](const char* lit) {
+        size_t n = std::strlen(lit);
+        return k + n <= inner.size() && inner.compare(k, n, lit) == 0;
+    };
+    bool consumed_dir = false;
+    if      (starts_with("to top"))    { angle_deg = 0;   k += 6; consumed_dir = true; }
+    else if (starts_with("to bottom")) { angle_deg = 180; k += 9; consumed_dir = true; }
+    else if (starts_with("to right"))  { angle_deg = 90;  k += 8; consumed_dir = true; }
+    else if (starts_with("to left"))   { angle_deg = 270; k += 7; consumed_dir = true; }
+    else {
+        size_t numstart = k;
+        while (k < inner.size() && (std::isdigit(static_cast<unsigned char>(inner[k])) ||
+                                    inner[k] == '.' || inner[k] == '-' || inner[k] == '+')) ++k;
+        if (k > numstart) {
+            float ang = std::stof(inner.substr(numstart, k - numstart));
+            grad_skip_ws(inner, k);
+            if (k + 3 <= inner.size() && inner.compare(k, 3, "deg") == 0) {
+                k += 3;
+                angle_deg = ang;
+                consumed_dir = true;
+            } else {
+                k = numstart;
+            }
+        }
+    }
+    grad_skip_ws(inner, k);
+    if (consumed_dir && k < inner.size() && inner[k] == ',') { ++k; grad_skip_ws(inner, k); }
+
+    ParsedLinearGradient out;
+    while (k < inner.size()) {
+        auto col = parse_grad_color(inner, k);
+        if (!col) return std::nullopt;
+        out.colors.push_back(*col);
+        grad_skip_ws(inner, k);
+        // Optional explicit position: `<n>%`
+        if (k < inner.size() && inner[k] != ',' && inner[k] != ')') {
+            size_t numstart = k;
+            while (k < inner.size() && (std::isdigit(static_cast<unsigned char>(inner[k])) ||
+                                        inner[k]=='.' || inner[k]=='-' || inner[k]=='+')) ++k;
+            if (k > numstart) {
+                float pos = std::stof(inner.substr(numstart, k - numstart));
+                if (k < inner.size() && inner[k] == '%') { ++k; pos /= 100.0f; }
+                out.positions.push_back(pos);
+            } else {
+                out.positions.push_back(-1.0f);  // sentinel: even-distribute later
+            }
+        } else {
+            out.positions.push_back(-1.0f);
+        }
+        grad_skip_ws(inner, k);
+        if (k < inner.size() && inner[k] == ',') { ++k; grad_skip_ws(inner, k); }
+    }
+    if (out.colors.size() < 2) return std::nullopt;
+
+    // Even-distribute any sentinel positions.
+    const int n = static_cast<int>(out.colors.size());
+    for (int idx = 0; idx < n; ++idx) {
+        if (out.positions[idx] < 0.0f) {
+            out.positions[idx] = (n == 1) ? 0.0f : static_cast<float>(idx) / (n - 1);
+        }
+    }
+
+    // Convert angle (CSS convention: 0deg = bottom→top) to endpoint
+    // coords inside (0,0,w,h). 0 = bottom→top, 90 = left→right.
+    const float cx = w * 0.5f;
+    const float cy = h * 0.5f;
+    const float angle_rad = (angle_deg - 90.0f) * 3.14159265f / 180.0f;
+    const float half_diag = 0.5f * std::sqrt(w*w + h*h);
+    const float dx = std::cos(angle_rad) * half_diag;
+    const float dy = std::sin(angle_rad) * half_diag;
+    out.x0 = cx - dx; out.y0 = cy - dy;
+    out.x1 = cx + dx; out.y1 = cy + dy;
+    return out;
+}
 
 // SVG path-data tokenizer. Walks the input string, returning the next
 // command letter or float in turn. Whitespace and commas are separators
@@ -417,6 +604,15 @@ void SvgPathWidget::clear_fill() {
     has_fill_ = false;
 }
 
+void SvgPathWidget::set_fill_gradient(std::string css_linear_gradient) {
+    fill_gradient_ = std::move(css_linear_gradient);
+    has_fill_ = true;  // gradient is a fill source — re-enable filling.
+}
+
+void SvgPathWidget::clear_fill_gradient() {
+    fill_gradient_.clear();
+}
+
 void SvgPathWidget::set_stroke_color(canvas::Color c) {
     stroke_color_ = c;
     has_stroke_ = true;
@@ -477,8 +673,38 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
     }
 
     if (has_fill_) {
-        canvas.set_fill_color(fill_color_);
-        canvas.fill_current_path();
+        // pulp #932 / #1737 PR-4 — gradient fill takes precedence over
+        // solid fill_color_ when set. Parse the CSS linear-gradient
+        // string against the LOCAL bounds (not the viewBox-scaled
+        // path coords) — the gradient endpoints span the widget's
+        // visible area in screen space. The path itself paints in the
+        // viewBox-scaled subspace via the active transform, but Skia
+        // resolves the shader in device space, so spanning the local
+        // bounds gives the expected "gradient covers the icon's
+        // visible box" behavior.
+        bool gradient_applied = false;
+        if (!fill_gradient_.empty()) {
+            // Compute the current device-space bounds (pre-scale,
+            // pre-translate for the viewBox transform). Since we're
+            // already inside save() + translate + scale, "(0,0,vw,vh)"
+            // is the viewBox-space rect that maps to the visible area.
+            auto pg = parse_svg_linear_gradient(fill_gradient_, vw, vh);
+            if (pg) {
+                canvas.set_fill_gradient_linear(pg->x0, pg->y0, pg->x1, pg->y1,
+                                                 pg->colors.data(),
+                                                 pg->positions.data(),
+                                                 static_cast<int>(pg->colors.size()));
+                canvas.fill_current_path();
+                canvas.clear_fill_gradient();
+                gradient_applied = true;
+            }
+            // Unparseable input → silently fall through to solid fill
+            // (matches the mask-image parser's safe-fallback policy).
+        }
+        if (!gradient_applied) {
+            canvas.set_fill_color(fill_color_);
+            canvas.fill_current_path();
+        }
     }
     if (has_stroke_ && stroke_width_ > 0) {
         canvas.set_stroke_color(stroke_color_);

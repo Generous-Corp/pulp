@@ -3123,6 +3123,11 @@ void WidgetBridge::register_api() {
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
             if (clear) w->clear_fill();
             else       w->set_fill_color(parseHexColor(hex));
+            // pulp #932 / #1737 PR-4 — solid color path wins over any
+            // previous gradient. Clear the gradient slot so a later
+            // re-render with a solid fill doesn't accidentally pick
+            // up a stale linear-gradient string.
+            w->clear_fill_gradient();
         } else if (auto* r = dynamic_cast<SvgRectWidget*>(widget(id))) {
             if (clear) r->clear_fill();
             else       r->set_fill_color(parseHexColor(hex));
@@ -3130,6 +3135,24 @@ void WidgetBridge::register_api() {
         // SvgLineWidget has no fill semantics — the call is intentionally
         // a no-op for line widgets so JSX consumers can pass `fill="none"`
         // without bridge-level dispatch failures.
+        return choc::value::Value();
+    });
+
+    // pulp #932 / #1737 PR-4 — gradient-fill bridge fn for SvgPathWidget.
+    // Accepts a CSS linear-gradient string verbatim; the widget parses
+    // it at paint time. Intended JSX usage: `<SvgLinearGradient id="g"
+    // stops={...}>` + `<SvgPath fill="url(#g)" .../>` — prop-applier
+    // resolves the gradient JSX to a CSS string and calls this fn.
+    // Direct C++ consumers can also call it for testing.
+    engine_.register_function("setSvgFillGradient", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto value = args.get<std::string>(1, "");
+        if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
+            if (value.empty()) w->clear_fill_gradient();
+            else               w->set_fill_gradient(std::move(value));
+        }
+        // SvgRect / SvgLine — gradient fills follow up; bridge fn is
+        // a no-op for those widget types so consumers don't crash.
         return choc::value::Value();
     });
 
