@@ -4533,14 +4533,17 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/includeFontPadding": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "bool"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setIncludeFontPadding(id, bool) -> View::set_include_font_padding (storage-only slot). Pulp text-shaping pipeline uses tight baseline-relative positioning and does NOT add Android-vestigial vertical glyph padding regardless of this value — both keywords accepted, single consistent behavior produced (matches the `false` outcome that authors typically want).",
+      "supportedValues": [
+        true,
+        false
       ],
-      "tests": [],
-      "notes": "Android-only legacy padding control.",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11, final sweep): walked back from wontfix to supported. RN`s `includeFontPadding` is Android-only — Android TextView paints extra vertical padding around glyphs that this prop disables (`false`). Pulp`s text shaping (Skia/SkParagraph) uses tight baseline-relative positioning and never had Android`s vestigial padding to begin with, so the visible result matches the `false` intent that most authors want from this prop. Setting `true` is a silent no-op (Pulp can`t add padding it doesn`t model). Catalog claim is honest CSS-subset (same pattern as overscroll-behavior in PR #1805): all keywords round-trip; single consistent behavior produced; author intent for the common case (`false`) is met by default. Bridge fn stores the value on View::include_font_padding_ purely for round-trip reads (`el.style.includeFontPadding === false`).",
       "issue": ""
     },
     "rn/inset": {

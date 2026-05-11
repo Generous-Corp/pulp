@@ -301,8 +301,7 @@
     },
     "includeFontPadding": {
       "kind": "boolean",
-      "platformOnly": "android",
-      "notes": "Android only; vertical font padding workaround"
+      "notes": "Android only; vertical font padding workaround | pulp #1737 RN-OOS-fixup: Pulp accepts the keyword as round-trip storage; text shaping doesn`t add Android-vestigial padding regardless (cross-platform behavior matches the `false` author intent)."
     },
     "inset": {
       "kind": "length-or-percentage",
@@ -697,6 +696,7 @@
       "setFontStyle",
       "setFontVariant",
       "setFontWeight",
+      "setIncludeFontPadding",
       "setLeft",
       "setLetterSpacing",
       "setLineHeight",
