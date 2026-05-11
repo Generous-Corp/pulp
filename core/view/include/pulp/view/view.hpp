@@ -30,6 +30,12 @@ public:
         // pointer that the platform window host would dereference on
         // the next click.
         if (active_overlay_ == this) active_overlay_ = nullptr;
+        // pulp #1708 — clear the input-focus slot if this dying View holds
+        // it. Without this, a React unmount of the focused widget (e.g.,
+        // closing a Settings modal) leaves the platform host's focused-
+        // view pointer dangling; the next keypress crashes via
+        // dynamic_cast on freed memory in -[PulpView focusedTextEditor].
+        if (focused_input_ == this) focused_input_ = nullptr;
     }
 
     View(const View&) = delete;
@@ -599,6 +605,19 @@ public:
     // The ComboBox path remains untouched and has its own state.
     static View* active_overlay_;
     void claim_overlay() { active_overlay_ = this; }
+    /// pulp #1708 — global input-focus slot. The platform window host
+    /// (PulpView on mac, equivalent on other platforms) calls
+    /// `claim_input_focus()` when a click sets focus to a widget, and
+    /// reads `focused_input_` for text-input dispatch. The View destructor
+    /// auto-clears the slot if the focused widget is destroyed before
+    /// focus is moved off it (e.g., React unmount of an open modal).
+    /// Without this, the host's raw View* pointer dangles and the next
+    /// keypress segfaults inside dynamic_cast<TextEditor*>(focused).
+    static View* focused_input_;
+    void claim_input_focus() { focused_input_ = this; }
+    void release_input_focus() {
+        if (focused_input_ == this) focused_input_ = nullptr;
+    }
     /// Clear the global overlay if (and only if) `this` currently holds it.
     /// Idempotent — safe to call on unmount even if claim never happened.
     /// Does NOT fire `on_overlay_dismissed` — used by JSX unmount and the

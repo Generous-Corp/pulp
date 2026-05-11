@@ -1620,6 +1620,11 @@ add_executable(pulp-test-overlay-routing test_overlay_routing.cpp)
 target_link_libraries(pulp-test-overlay-routing PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-overlay-routing)
 
+# pulp #1708 — auto-clearing input-focus slot (View::focused_input_)
+add_executable(pulp-test-focused-input test_focused_input.cpp)
+target_link_libraries(pulp-test-focused-input PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-focused-input)
+
 # pulp #1148 (slice b) — auto-claim active_overlay_ from CSS shape
 # (`position:absolute` + `z-index >= 10`) or `data-overlay` author hint
 # detected by the web-compat layer (web-compat-style-decl.js +

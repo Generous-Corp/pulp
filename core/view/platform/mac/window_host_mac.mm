@@ -235,6 +235,7 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 
 - (void)clearInteractionState {
     _dragTarget = nullptr;
+    if (_focusedView) _focusedView->release_input_focus();
     _focusedView = nullptr;
 }
 
@@ -434,8 +435,10 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                             _focusedView->on_focus_changed(false);
                         _focusedView = _dragTarget;
                         _focusedView->on_focus_changed(true);
+                        _focusedView->claim_input_focus();
                     } else if (_focusedView) {
                         _focusedView->on_focus_changed(false);
+                        _focusedView->release_input_focus();
                         _focusedView = nullptr;
                     }
 
@@ -483,8 +486,10 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                     _focusedView->on_focus_changed(false);
                 _focusedView = _dragTarget;
                 _focusedView->on_focus_changed(true);
+                _focusedView->claim_input_focus();
             } else if (_focusedView) {
                 _focusedView->on_focus_changed(false);
+                _focusedView->release_input_focus();
                 _focusedView = nullptr;
             }
 
@@ -674,9 +679,13 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             else
                 next = pulp::view::View::focus_next(*self.rootView, _focusedView);
             if (next && next != old) {
-                if (old) old->on_focus_changed(false);
+                if (old) {
+                    old->on_focus_changed(false);
+                    old->release_input_focus();
+                }
                 _focusedView = next;
                 _focusedView->on_focus_changed(true);
+                _focusedView->claim_input_focus();
             }
             [self setNeedsDisplay:YES];
             return;
@@ -749,18 +758,29 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 - (void)insertText:(id)string replacementRange:(NSRange)range {
     (void)range;
-    if (_focusedView) {
+    // pulp #1708 — read from View::focused_input_ rather than the raw
+    // _focusedView ivar. The static is auto-cleared by ~View() when the
+    // focused widget is destroyed (e.g., React unmount of an open modal),
+    // so we never dispatch text-input on freed memory.
+    auto* fv = pulp::view::View::focused_input_;
+    if (fv) {
         NSString* str = [string isKindOfClass:[NSAttributedString class]]
             ? [(NSAttributedString*)string string] : (NSString*)string;
         pulp::view::TextInputEvent te;
         te.text = [str UTF8String];
-        _focusedView->on_text_input(te);
+        fv->on_text_input(te);
         [self setNeedsDisplay:YES];
     }
 }
 
 - (pulp::view::TextEditor*)focusedTextEditor {
-    auto* te = dynamic_cast<pulp::view::TextEditor*>(_focusedView);
+    // pulp #1708 — use the auto-clearing static slot. Without this, the
+    // raw _focusedView ivar dangles after the focused widget is freed
+    // (React unmount of an open modal) and dynamic_cast on freed memory
+    // segfaults inside libc++abi during -[NSTextInputContext
+    // hasMarkedTextWithCompletionHandler:] on the next keypress.
+    auto* fv = pulp::view::View::focused_input_;
+    auto* te = dynamic_cast<pulp::view::TextEditor*>(fv);
     return te;
 }
 

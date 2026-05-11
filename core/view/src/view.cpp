@@ -672,6 +672,11 @@ bool View::call_inspector_mouse_hook(const MouseEvent& e) {
 // pulp #1148 — generalized overlay-click routing.
 View* View::active_overlay_ = nullptr;
 
+// pulp #1708 — global input-focus slot. Auto-cleared by ~View() when the
+// focused widget is destroyed, preventing use-after-free in the platform
+// window host's keyDown handler.
+View* View::focused_input_ = nullptr;
+
 // pulp #1361 — dismiss-path release. Pulls the slot, then fires the
 // dismissed View's `on_overlay_dismissed` callback so React state can
 // sync. Order matters: clear the slot FIRST so a callback that calls
