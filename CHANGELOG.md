@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0822"></a>
+## [0.82.2] - 2026-05-10
+
+- fix(view): clear input-focus slot on widget destruction (#1708) ([#1726](https://github.com/danielraffel/pulp/pull/1726))
+- chore(catalog): css/touchAction noop → wontfix (architectural — pointerEvents covers hit-test contract) ([#1794](https://github.com/danielraffel/pulp/pull/1794))
+
 <a id="v0821"></a>
 ## [0.82.1] - 2026-05-10
 
@@ -1572,6 +1578,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.82.2]: https://github.com/danielraffel/pulp/releases/tag/v0.82.2
 [0.82.1]: https://github.com/danielraffel/pulp/releases/tag/v0.82.1
 [0.82.0]: https://github.com/danielraffel/pulp/releases/tag/v0.82.0
 [0.81.0]: https://github.com/danielraffel/pulp/releases/tag/v0.81.0
