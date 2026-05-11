@@ -3163,16 +3163,23 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/touchAction": {
-      "status": "noop",
-      "mapsTo": "stored on element instance; not propagated to bridge (intentional NO-OP -- the C++ hit-test path does not consume touch-action today)",
-      "supportedValues": [
-        "any (stored verbatim)"
-      ],
+      "status": "wontfix",
+      "mapsTo": "architectural — Pulp routes hit-test + pan/zoom intent through CSS pointer-events (View::pointer_events_, fully wired through View::hit_test) and platform gesture-recognizer APIs. touch-action would require a separate per-axis gesture-router slice that doesn't exist in Pulp's input pipeline today.",
+      "supportedValues": [],
       "unsupportedValues": [
-        "actually honored at hit-test"
+        "auto",
+        "none",
+        "manipulation",
+        "pan-x",
+        "pan-y",
+        "pan-left",
+        "pan-right",
+        "pan-up",
+        "pan-down",
+        "pinch-zoom"
       ],
       "tests": [],
-      "notes": "Intentional NO-OP -- bridge accepts the value (stored on the element) but the hit-test layer does not consume it. Full honoring lands when the gesture-routing slice arrives. Re-statused 'partial' -> 'noop' in pulp #1475.",
+      "notes": "Architectural OOS per CLAUDE.md / Pulp input model. The Pulp hit-test contract is `View::hit_test()` consulting `pointer-events: none|auto|box-none|box-only` to decide whether a view participates in hit-testing — this covers the intent of `touch-action: none` (suppress all gestures) and `touch-action: auto` (default participation). The fine-grained per-axis modes (manipulation, pan-x, pan-y, pinch-zoom) presume a Web-style touch-router that splits a single touch stream into pan/zoom/scroll channels per CSS Pointer Events §6, which Pulp does not have — Pulp's gesture model is platform-native (UIKit/AppKit/Android gesture recognizers, audio-plugin custom gesture handlers). Authors targeting Pulp use `pointer-events` for hit-test gating and platform gesture-recognizer APIs for pan/zoom intent, not CSS touch-action. Same architectural-ceiling reclassification pattern as #1785 (rn/isolation — no stacking-context engine) and #1790 (9 css NO-OPs — no block-flow / table / multi-column / float / print primitives). Counts as OOS in achievable-ceiling math; closes the last css NO-OP entry. Originally `partial` (#1475 walked back to `noop` when audit confirmed no hit-test consumption); this entry now records the full architectural rationale rather than implying the gap is implementable.",
       "issue": ""
     },
     "css/transform": {
