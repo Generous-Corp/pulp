@@ -748,6 +748,37 @@ public:
         set_font(family, size);
     }
 
+    // pulp #1737 — OpenType feature flags for font-variant. Each
+    // FontFeature is a 4-byte tag (e.g. "tnum" / "smcp" / "onum" /
+    // "lnum" / "pnum") + an on/off value (0 disables, 1 enables).
+    // Skia's SkShaper accepts these via the 8-arg shape() overload
+    // and applies them at HarfBuzz shape time. The default impl is
+    // a no-op (CG / Recording canvases ignore); SkiaCanvas overrides
+    // to capture into a vector consumed by the shape calls in
+    // fill_text / stroke_text / fill_text_with_max_width.
+    struct FontFeature {
+        uint32_t tag;    // 4-byte big-endian tag (use make_font_feature_tag).
+        uint32_t value;  // 0 = disable, 1 = enable, higher = feature-specific.
+    };
+    /// Builds a SkShaper-compatible 4-byte tag from a 4-char string. Caller
+    /// supplies exactly 4 ASCII chars (e.g. "tnum"). Tags shorter than 4
+    /// chars are right-padded with spaces (HarfBuzz convention).
+    static constexpr uint32_t make_font_feature_tag(const char (&s)[5]) {
+        return (static_cast<uint32_t>(static_cast<uint8_t>(s[0])) << 24) |
+               (static_cast<uint32_t>(static_cast<uint8_t>(s[1])) << 16) |
+               (static_cast<uint32_t>(static_cast<uint8_t>(s[2])) <<  8) |
+                static_cast<uint32_t>(static_cast<uint8_t>(s[3]));
+    }
+    virtual void set_font_features(std::vector<FontFeature> features) {
+        (void)features;
+        // Default: no-op. Backends without HarfBuzz feature support
+        // (recording canvas, CG path) silently drop the request — text
+        // still renders, just without the OpenType feature applied.
+    }
+    virtual void clear_font_features() {
+        // Default: no-op. Same rationale as set_font_features.
+    }
+
     /// Full text metrics for layout and intrinsic sizing.
     /// Mirrors HTML5 TextMetrics — fields beyond width/ascent/descent are
     /// the bounding-box-only metrics required by CanvasRenderingContext2D

@@ -91,6 +91,10 @@ public:
     void set_font(const std::string& family, float size) override;
     void set_font_full(const std::string& family, float size,
                        int weight, int slant, float letter_spacing) override;
+    // pulp #1737 — OpenType feature flags via SkShaper Feature API.
+    // Captured into font_features_ vector and flushed at shape time.
+    void set_font_features(std::vector<FontFeature> features) override;
+    void clear_font_features() override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     // pulp #1525 — Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
@@ -328,6 +332,22 @@ private:
     int font_weight_ = 400;             ///< CSS weight 100..900 (pulp #927)
     int font_slant_ = 0;                ///< 0=upright, 1=italic (pulp #927)
     float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px (pulp #927)
+    // pulp #1737 — OpenType feature flags (e.g. tnum / smcp / onum /
+    // lnum / pnum) for CSS font-variant. Captured by set_font_features
+    // / cleared by clear_font_features. Flushed into SkShaper's 8-arg
+    // shape() overload at fill_text / stroke_text time. Empty vector
+    // → SkShaper's default font features apply.
+    std::vector<FontFeature> font_features_;
+    // Internal helper — routes a shape() call through the 8-arg
+    // overload + trivial RunIterators so font_features_ reaches
+    // HarfBuzz. Defined in skia_canvas.cpp; declared here to keep
+    // private. Forward-declared types (SkShaper, SkFont,
+    // SkTextBlobBuilderRunHandler) come from existing #includes.
+    void shape_with_features(class SkShaper& shaper,
+                             const std::string& text,
+                             const class SkFont& font,
+                             bool ltr,
+                             class SkTextBlobBuilderRunHandler* handler);
     TextAlign text_align_ = TextAlign::left;
 
     // Gradient state

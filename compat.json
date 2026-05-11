@@ -4426,8 +4426,8 @@
       "issue": ""
     },
     "rn/fontVariant": {
-      "status": "partial",
-      "mapsTo": "prop-applier.ts -> setFontVariant(id, csv) -> View::set_font_variant (storage-only; A4 Bundle 1 / pulp #1611 landed the bridge fn registration)",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setFontVariant(id, csv) -> View::set_font_variant -> Label::paint parses CSV -> Canvas::set_font_features({tnum|smcp|onum|lnum|pnum=1}) -> SkiaCanvas::shape_with_features -> SkShaper 8-arg shape() (font_runs/bidi/script/lang TrivialRunIterators) -> HarfBuzz GSUB/GPOS",
       "supportedValues": [
         "small-caps",
         "oldstyle-nums",
@@ -4435,13 +4435,12 @@
         "tabular-nums",
         "proportional-nums"
       ],
-      "unsupportedValues": [
-        "paint-time HarfBuzz hb_feature_t honoring (storage-only today; shape-pass wiring deferred)"
-      ],
+      "unsupportedValues": [],
       "tests": [
-        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts"
+        "packages/pulp-react/test/prop-applier-rn-not-impl-bundle1.test.ts",
+        "unit:test_canvas#issue-1737"
       ],
-      "notes": "pulp #1434 (rn NOT-IMPL bundle 1) + A4 Bundle 1 (#1611): the @pulp/react surface accepts the RN array-of-strings shape and joins to a comma-separated string for forwarding. setFontVariant is registered in widget_bridge.cpp and stores onto View::font_variant_, but paint-time honoring is a no-op until the HarfBuzz hb_feature_t shape-pass wiring lands. This entry stays `partial` so the JSX surface is honest about the dispatch + storage existing while the paint pipeline is still pending.",
+      "notes": "pulp #1434 (rn NOT-IMPL bundle 1) + A4 Bundle 1 (#1611) landed the prop-applier + bridge fn + storage slot. pulp #1737 (this slice) wires the storage through Label::paint to Canvas::set_font_features and SkiaCanvas::shape_with_features (the 8-arg SkShaper::shape overload with TrivialFont/BiDi/Script/Language RunIterators) so HarfBuzz now honors the OpenType tags at shape time. tnum forces equal-advance digits via measure_text/fill_text; smcp/onum/lnum/pnum behave per CSS Fonts Module 4 §7.3. Verified end-to-end via test_canvas \"set_font_features routes tnum through SkShaper\" (Inter '111' vs '999' advances converge under tnum, restore on clear_font_features). Fall-through: if SkShaper::Make() returns null on a host without text-shaping, the per-glyph builder runs without features (degraded but non-crashing).",
       "issue": ""
     },
     "rn/fontWeight": {

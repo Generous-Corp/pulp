@@ -3285,3 +3285,90 @@ TEST_CASE("SkiaCanvas::ellipse with rotation extends current contour (no gap)",
     REQUIRE(any_bridge_pixel_drawn);
 }
 #endif // PULP_HAS_SKIA
+
+// ── pulp #1737 — CSS font-variant → SkShaper Feature plumbing ─────────────
+// Regression coverage for the SkShaper 8-arg shape() overload that the
+// fontVariant slice routes through. The legacy 6-arg shape() ignores the
+// caller's feature array entirely (HarfBuzz applies only the on-by-default
+// features baked into the font, e.g. kerning + rlig). Once the FontFeature
+// vector reaches HarfBuzz at shape time, GSUB/GPOS rules tagged for `tnum`,
+// `smcp`, `pnum`, etc. fire — and the resulting glyph advances diverge
+// from the unfeatured run.
+//
+// The harness tests the contract through the public Canvas API:
+//   1. set_font_features({tnum=1}) must change the rendered shape (or at
+//      minimum the measured advance) for a digit-only string vs the
+//      no-features baseline. Inter ships with `tnum` so '1' and '9'
+//      render at equal advance under tnum but distinct advances without.
+//   2. clear_font_features() must restore the baseline width so feature
+//      state doesn't leak across paint() calls.
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("SkiaCanvas::set_font_features routes tnum through SkShaper",
+          "[canvas][skia][fonts][issue-1737]") {
+    SkImageInfo info = SkImageInfo::Make(128, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    sk_canvas->clear(SK_ColorWHITE);
+
+    SkiaCanvas canvas(sk_canvas);
+    canvas.set_font_full("Inter", 24.0f, 400, FontStyle::normal, 0.0f);
+
+    // Inter has proportional digits by default — '1' is narrower than '9'.
+    // Without tnum, the two strings differ in advance.
+    const std::string ones   = "111";
+    const std::string nines  = "999";
+
+    const float ones_default  = canvas.measure_text(ones);
+    const float nines_default = canvas.measure_text(nines);
+    REQUIRE(ones_default  > 0.0f);
+    REQUIRE(nines_default > 0.0f);
+
+    // Apply tabular-nums. After SkShaper sees the Feature, '1' and '9'
+    // share the same advance — the strings now match width to within the
+    // shaper's sub-pixel rounding.
+    std::vector<Canvas::FontFeature> tnum{
+        {Canvas::make_font_feature_tag("tnum"), 1}
+    };
+    canvas.set_font_features(tnum);
+
+    const float ones_tnum  = canvas.measure_text(ones);
+    const float nines_tnum = canvas.measure_text(nines);
+    REQUIRE(ones_tnum  > 0.0f);
+    REQUIRE(nines_tnum > 0.0f);
+
+    // Either Inter's tnum table is wired (advances now equal) OR the
+    // shape() overload at minimum changed *something* about the run vs
+    // the unfeatured pass. We assert the equal-advance invariant — if a
+    // future Inter build ships without tnum, this case will need a
+    // different probe font, and that's the right time to find out.
+    REQUIRE_THAT(ones_tnum,
+                 Catch::Matchers::WithinAbs(nines_tnum, 0.5f));
+
+    // Clear must restore baseline so feature state doesn't survive
+    // beyond the paint that set it.
+    canvas.clear_font_features();
+    const float ones_cleared  = canvas.measure_text(ones);
+    const float nines_cleared = canvas.measure_text(nines);
+    REQUIRE_THAT(ones_cleared,
+                 Catch::Matchers::WithinAbs(ones_default, 0.001f));
+    REQUIRE_THAT(nines_cleared,
+                 Catch::Matchers::WithinAbs(nines_default, 0.001f));
+}
+
+TEST_CASE("Canvas::make_font_feature_tag packs OpenType four-char tags",
+          "[canvas][fonts][issue-1737]") {
+    // Big-endian packing — 't','n','u','m' → 0x746E756D. SkShaper's
+    // Feature.tag field is a uint32 in the same encoding; if this ever
+    // diverges, every feature silently misses.
+    constexpr uint32_t tnum = Canvas::make_font_feature_tag("tnum");
+    REQUIRE(tnum == 0x746E756Du);
+    constexpr uint32_t smcp = Canvas::make_font_feature_tag("smcp");
+    REQUIRE(smcp == 0x736D6370u);
+    constexpr uint32_t pnum = Canvas::make_font_feature_tag("pnum");
+    REQUIRE(pnum == 0x706E756Du);
+}
+#endif // PULP_HAS_SKIA
