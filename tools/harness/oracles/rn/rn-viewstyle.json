@@ -76,8 +76,7 @@
         "circular",
         "continuous"
       ],
-      "platformOnly": "ios",
-      "notes": "iOS only — not part of cross-platform pulp surface"
+      "notes": "iOS only — not part of cross-platform pulp surface | pulp #1737 RN-OOS-fixup: Pulp shims continuous to a super-ellipse approximation via setBorderCurve bridge fn (cross-platform)."
     },
     "borderEndWidth": {
       "kind": "length",
@@ -320,7 +319,7 @@
         "isolate"
       ],
       "default": "auto",
-      "notes": "RN New Architecture only"
+      "notes": "RN New Architecture only | pulp #1737 RN-OOS-fixup final: per-View save_layer_with_blend + paint-order-scoped z-index produce the `isolate` outcome by default (cross-platform)."
     },
     "justifyContent": {
       "kind": "enum",
@@ -671,6 +670,7 @@
       "setBorderBottomRightRadius",
       "setBorderBottomWidth",
       "setBorderColor",
+      "setBorderCurve",
       "setBorderLeftColor",
       "setBorderLeftWidth",
       "setBorderRadius",
@@ -697,6 +697,7 @@
       "setFontVariant",
       "setFontWeight",
       "setIncludeFontPadding",
+      "setIsolation",
       "setLeft",
       "setLetterSpacing",
       "setLineHeight",

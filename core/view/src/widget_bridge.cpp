@@ -5465,6 +5465,52 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1737 RN-OOS-fixup (#1812) — RN's `borderCurve` corner shape.
+    // `circular` (default) keeps the standard quarter-circle rounded
+    // corner; `continuous` switches View::paint_all to the iOS-style
+    // squircle approximation (super-ellipse path with extension factor
+    // 1.528 and flatter kappa 0.85). Visible difference on large-radius
+    // cards (24px+); subtle below 12px. See view.cpp's
+    // build_continuous_corner_rounded_rect_path for the path math.
+    engine_.register_function("setBorderCurve",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "circular");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (!v) return choc::value::Value();
+            v->set_border_curve(kw == "continuous"
+                                ? View::BorderCurve::continuous
+                                : View::BorderCurve::circular);
+            return choc::value::Value();
+        });
+
+    // pulp #1737 RN-OOS-fixup (final round) — CSS `isolation` + RN
+    // `isolation` honest CSS-subset flip. Pulp's per-View render model
+    // is structurally isolated by default: each View with mix-blend-mode
+    // opens its own save_layer_with_blend composition (PR #1549) and
+    // composites back to its parent normally — there's no
+    // "cross-stacking-context blend leakage" that CSS isolation: isolate
+    // is designed to prevent. Similarly, z-index is paint-order scoped
+    // to siblings within a parent, so a child's z-index can't promote
+    // past the parent in z-order. Both author intents of `isolation:
+    // isolate` (blend-mode containment + stacking-context creation)
+    // happen by default in Pulp.
+    //
+    // Bridge fn stores the keyword on View::isolation_ for round-trip
+    // reads (el.style.isolation === "isolate"). Paint has no special
+    // case because Pulp's existing per-View layering already provides
+    // the isolation contract. Same CSS-subset pattern as
+    // overscrollBehavior, includeFontPadding, scrollBehavior from
+    // earlier this session.
+    engine_.register_function("setIsolation",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "auto");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_isolation(kw);
+            return choc::value::Value();
+        });
+
     // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN's `elevation` is
     // Android-only Material elevation (0–24dp). Pulp catalogs boxShadow
     // as the cross-platform equivalent; this shim translates elevation

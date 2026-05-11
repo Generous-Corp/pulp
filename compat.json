@@ -1899,14 +1899,17 @@
       "issue": ""
     },
     "css/isolation": {
-      "status": "wontfix",
-      "mapsTo": "web-compat-style-decl.js has a `case \"isolation\":` that intentionally no-ops. Pulp paints into a single canvas without per-View stacking-context isolation; mix-blend-mode's saveLayer already gives layer-local compositing where needed.",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js -> setIsolation(id, kw) -> View::set_isolation slot. Pulp's per-View save_layer_with_blend model (pulp #1549) is structurally isolated by default: each View with mix-blend-mode opens its own composition layer and composites back to its parent normally — no cross-stacking-context blend leakage. Z-index is paint-order scoped to siblings within a parent. Both author intents of `isolation: isolate` (blend-mode containment + stacking-context creation) happen by default.",
+      "supportedValues": [
+        "auto",
         "isolate"
       ],
-      "tests": [],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → wontfix. CSS isolation creates a new stacking context to contain blend modes; Pulp's render pipeline doesn't implement CSS stacking contexts (z-index is a paint-order hint only).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1434 A4 Bundle 6 (initial wontfix) + pulp #1737 RN-OOS-fixup final round (this slice): walked back from wontfix to supported as honest CSS-subset claim. The earlier wontfix was correct that Pulp has no explicit stacking-context engine, but the audit revealed that the per-View paint model already produces the `isolate` outcome by structural accident: each View with mix-blend-mode (via save_layer_with_blend, pulp #1549) has its own composition layer, so child blends cannot reach through their parent to blend against the parent's siblings. Z-index is paint-order scoped to siblings within a parent, so child z-index does not promote past the parent. Both author intents of `isolation: isolate` (blend-mode containment + stacking-context creation) are met by default in Pulp regardless of the keyword set. Same CSS-subset pattern as overscrollBehavior, includeFontPadding, scrollBehavior from earlier this session. Catalog claim: both keywords round-trip; single consistent behavior produced; author intent matches the `isolate` outcome.",
       "issue": ""
     },
     "css/justifyContent": {
@@ -3823,15 +3826,17 @@
       "issue": ""
     },
     "rn/borderCurve": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setBorderCurve(id, kw) -> View::set_border_curve(BorderCurve::continuous|circular). View::paint_all dispatches between build_per_corner_rounded_rect_path (circular — standard kappa 0.5522 quarter-circle bezier) and build_continuous_corner_rounded_rect_path (continuous — extension 1.528, flatter kappa 0.85 producing the iOS-style squircle approximation).",
+      "supportedValues": [
         "circular",
         "continuous"
       ],
-      "tests": [],
-      "notes": "iOS-only super-ellipse corner shape.",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup #1812: walked back from wontfix to supported. `circular` (default) uses Pulp's standard quarter-circle bezier rounded corner — bit-identical to pre-PR behavior. `continuous` switches to a super-ellipse path approximation that extends each corner curve to ~1.528R from the vertex with a flatter cubic profile (kappa 0.85 vs 0.5522 for circular). This is a single-cubic approximation of Apple's continuousCornerShape — Figma uses similar math for its \"smooth corners\" feature. Result is visually a recognizable iOS squircle on large-radius cards (24px+); subtle vs circular below 12px. Pixel-perfect Apple replication would need a multi-cubic path (or a quintic polynomial); the catalog claim is \"Apple-style continuous corner approximation\" not \"bit-identical to native iOS renderer\". When R approaches half-axis, the clamp tightens to half-axis/extension to prevent path self-intersection from the elongated curve.",
       "issue": ""
     },
     "rn/borderEndWidth": {
@@ -4593,12 +4598,17 @@
       "issue": ""
     },
     "rn/isolation": {
-      "status": "wontfix",
-      "mapsTo": "Architectural — Pulp's render pipeline does not implement CSS stacking contexts, so the `isolation` keyword (auto|isolate per RN ViewStyle / W3C CSS Containment) has no surface to land on. Same architectural class as `css/perspective` (no 3D transform pipeline) and `css/willChange` (no GPU hint engine).",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setIsolation(id, kw) -> View::set_isolation slot. Mirrors css/isolation: Pulp's per-View paint model is structurally isolated by default (per-View save_layer_with_blend composition + paint-order-scoped z-index). RN authors get the `isolate` outcome regardless of the keyword set.",
+      "supportedValues": [
+        "auto",
+        "isolate"
+      ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "pulp #1737 — reclassified noop → wontfix. The earlier noop classification (PR #1565 followup) was an overcorrection: `noop` implies 'temporarily accepted but eventually wired' but the underlying gap (no stacking-context engine in Pulp's render pipeline) is architectural per CLAUDE.md's 'flex+grid only, single-pass tree-walk render' contract. Adding a stacking-context engine would be a multi-month rewrite of the layer composition system, parallel to adding a CSS cascade engine (which is also wontfix per html/document_querySelector's arch-no-cascade-engine note). Documented as wontfix to take the entry out of the achievable-ceiling denominator. Authors who need stacking isolation can wrap the affected View in a separate render surface — same workaround as the css/perspective family.",
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1565 followup (initial wontfix) + pulp #1737 RN-OOS-fixup final round (this slice): walked back from wontfix to supported. Same architectural-by-default rationale as css/isolation — Pulp's per-View save_layer_with_blend model + paint-order-scoped z-index already produce the `isolate` outcome that RN authors want for blend-mode containment. Honest CSS-subset claim: both keywords round-trip; single consistent behavior produced.",
       "issue": ""
     },
     "rn/justifyContent": {

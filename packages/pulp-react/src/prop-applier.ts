@@ -1366,6 +1366,22 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // an honest CSS-subset claim (same pattern as overscroll-behavior).
         case 'includeFontPadding': return call('setIncludeFontPadding', id, Boolean(value));
 
+        // pulp #1737 RN-OOS-fixup (#1812) — RN's `borderCurve` corner
+        // shape. `circular` (default) keeps Pulp's standard rounded
+        // corner; `continuous` switches the View paint to the iOS-
+        // style squircle approximation (super-ellipse path). Authors
+        // shipping iOS-aesthetic designs with `borderCurve: 'continuous'`
+        // now get the visible squircle on every Pulp platform.
+        case 'borderCurve':       return call('setBorderCurve', id, value as string);
+
+        // pulp #1737 RN-OOS-fixup (final round) — RN's `isolation`.
+        // Pulp's per-View paint model is structurally isolated by
+        // default (per-View save_layer_with_blend composition + paint-
+        // order-scoped z-index), matching the dominant author intent
+        // of `isolation: isolate`. Honest CSS-subset claim: both
+        // keywords round-trip; behavior matches `isolate` regardless.
+        case 'isolation':         return call('setIsolation', id, value as string);
+
         // pulp #1434 (rn NOT-IMPL bundle 1) — RN's `experimental_backgroundImage`
         // (New Architecture only) accepts a CSS gradient string. Route
         // through the existing setBackgroundGradient bridge fn — same

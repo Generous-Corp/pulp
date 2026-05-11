@@ -72,6 +72,68 @@ void build_per_corner_rounded_rect_path(
     canvas.close_path();
 }
 
+// pulp #1737 RN-OOS-fixup (#1812) — iOS "continuous" corner shape
+// (squircle / super-ellipse approximation). Apple's continuousCornerShape
+// extends the corner curve to ~1.528R from each side of the vertex with
+// a flatter cubic profile — visually smoother than the standard
+// quarter-circle rounded corner. We approximate via:
+//
+//   • Extension factor 1.528 — how far the curve reaches along each edge
+//   • Flatter kappa 0.85 — pulls the cubic control points further from
+//     the vertex, producing the gentler curvature falloff that gives
+//     the squircle its characteristic appearance.
+//
+// For a "max radius" (R == half-axis) the extension would otherwise
+// overlap into the adjacent corner. Clamp at half-axis / extension to
+// prevent path self-intersection (slightly more conservative than the
+// circular path's half-axis clamp, but the squircle look needs the
+// elongated curve to read correctly).
+void build_continuous_corner_rounded_rect_path(
+    pulp::canvas::Canvas& canvas,
+    float w, float h,
+    float tl, float tr, float bl, float br) {
+    constexpr float extension = 1.528f;
+    constexpr float k         = 0.85f;
+    const float half_w = w * 0.5f;
+    const float half_h = h * 0.5f;
+    auto clamp = [&](float r) {
+        const float lim = std::min(half_w, half_h) / extension;
+        return std::max(0.0f, std::min(r, lim));
+    };
+    tl = clamp(tl);
+    tr = clamp(tr);
+    bl = clamp(bl);
+    br = clamp(br);
+    const float etl = tl * extension;
+    const float etr = tr * extension;
+    const float ebl = bl * extension;
+    const float ebr = br * extension;
+
+    canvas.begin_path();
+    canvas.move_to(etl, 0.0f);
+    canvas.line_to(w - etr, 0.0f);
+    if (etr > 0.0f)
+        canvas.cubic_to(w - etr + etr * k, 0.0f,
+                        w, etr - etr * k,
+                        w, etr);
+    canvas.line_to(w, h - ebr);
+    if (ebr > 0.0f)
+        canvas.cubic_to(w, h - ebr + ebr * k,
+                        w - ebr + ebr * k, h,
+                        w - ebr, h);
+    canvas.line_to(ebl, h);
+    if (ebl > 0.0f)
+        canvas.cubic_to(ebl - ebl * k, h,
+                        0.0f, h - ebl + ebl * k,
+                        0.0f, h - ebl);
+    canvas.line_to(0.0f, etl);
+    if (etl > 0.0f)
+        canvas.cubic_to(0.0f, etl - etl * k,
+                        etl - etl * k, 0.0f,
+                        etl, 0.0f);
+    canvas.close_path();
+}
+
 } // namespace
 
 void View::paint_all(canvas::Canvas& canvas) {
@@ -272,7 +334,23 @@ void View::paint_all(canvas::Canvas& canvas) {
     // approximating each corner independently. Otherwise we keep using the
     // canvas's optimized fill_rounded_rect / stroke_rounded_rect with the
     // uniform corner_radius_.
-    const bool use_per_corner = has_corner_radii_;
+    //
+    // pulp #1737 RN-OOS-fixup (#1812) — `borderCurve: continuous` (RN
+    // iOS-style squircle) forces the path-based path generator regardless
+    // of per-corner state, because the canvas's optimized
+    // fill_rounded_rect uses circular corners only.
+    const bool use_continuous = (border_curve_ == BorderCurve::continuous);
+    const bool use_per_corner = has_corner_radii_ || use_continuous;
+    // Inline dispatcher: pick the path generator (per-corner circular vs
+    // continuous squircle) based on the active border-curve mode. Each
+    // of the 3 path build sites below uses this same dispatch.
+    auto build_corner_path = [&](float w, float h, float t1, float t2, float t3, float t4) {
+        if (use_continuous) {
+            build_continuous_corner_rounded_rect_path(canvas, w, h, t1, t2, t3, t4);
+        } else {
+            build_per_corner_rounded_rect_path(canvas, w, h, t1, t2, t3, t4);
+        }
+    };
 
     // pulp #1731 Codex P1 — paint sites must read effective_* which honor
     // the percent slots (corner_radius_pct_, corner_radii_pct_[]). Reading
@@ -292,7 +370,7 @@ void View::paint_all(canvas::Canvas& canvas) {
             bg_gradient_colors_.data(), bg_gradient_positions_.data(),
             static_cast<int>(bg_gradient_colors_.size()));
         if (use_per_corner) {
-            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+            build_corner_path(bounds_.width, bounds_.height,
                                                eff_tl, eff_tr, eff_bl, eff_br);
             canvas.fill_current_path();
         } else if (eff_r > 0) {
@@ -307,7 +385,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (has_bg_ && bg_gradient_type_ == 0) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
-            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+            build_corner_path(bounds_.width, bounds_.height,
                                                eff_tl, eff_tr, eff_bl, eff_br);
             canvas.fill_current_path();
         } else if (eff_r > 0) {
@@ -343,7 +421,7 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
 
         if (use_per_corner) {
-            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+            build_corner_path(bounds_.width, bounds_.height,
                                                eff_tl, eff_tr, eff_bl, eff_br);
             canvas.stroke_current_path();
         } else if (eff_r > 0) {

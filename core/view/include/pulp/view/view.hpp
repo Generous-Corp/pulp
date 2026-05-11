@@ -370,6 +370,16 @@ public:
     /// to the plain px slot.
     void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; }
     float corner_radius_pct() const { return corner_radius_pct_; }
+
+    /// pulp #1737 RN-OOS-fixup (#1812) — RN's `borderCurve`: corner
+    /// shape selection. `circular` (default) is the standard quarter-
+    /// circle rounded corner; `continuous` is the iOS-style super-
+    /// ellipse / squircle approximation. View::paint_all picks the
+    /// appropriate path generator based on this slot. Slot has no
+    /// effect when border-radius is 0.
+    enum class BorderCurve { circular, continuous };
+    void set_border_curve(BorderCurve c) { border_curve_ = c; }
+    BorderCurve border_curve() const     { return border_curve_; }
     /// Compute the effective uniform corner radius in px against the
     /// given bounds (called by paint code).
     float effective_corner_radius(float width, float height) const {
@@ -1240,6 +1250,8 @@ private:
     // 0 means "use plain corner_radius_ in px". Same pattern for the
     // per-corner radii_pct_ slots below.
     float corner_radius_pct_ = 0;
+    // pulp #1737 RN-OOS-fixup (#1812) — RN `borderCurve` corner shape.
+    BorderCurve border_curve_ = BorderCurve::circular;
     bool has_border_ = false;
     BorderStyle border_style_ = BorderStyle::solid;
     // pulp #1514 — list-style cluster slots. Stored verbatim; paint-

@@ -12286,3 +12286,48 @@ TEST_CASE("WidgetBridge setIncludeFontPadding stores the keyword on View (round-
     bridge.load_script("setIncludeFontPadding('gain', true)");
     REQUIRE(w->include_font_padding() == true);
 }
+
+// pulp #1737 RN-OOS-fixup #1812 — borderCurve squircle paint dispatch.
+TEST_CASE("WidgetBridge setBorderCurve toggles between circular and continuous",
+          "[view][bridge][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->border_curve() == View::BorderCurve::circular);  // default
+
+    bridge.load_script("setBorderCurve('gain', 'continuous')");
+    REQUIRE(w->border_curve() == View::BorderCurve::continuous);
+
+    bridge.load_script("setBorderCurve('gain', 'circular')");
+    REQUIRE(w->border_curve() == View::BorderCurve::circular);
+
+    // Unknown keyword falls back to circular (matches RN spec: unknown → default).
+    bridge.load_script("setBorderCurve('gain', 'banana')");
+    REQUIRE(w->border_curve() == View::BorderCurve::circular);
+}
+
+// pulp #1737 RN-OOS-fixup (final round) — isolation honest CSS-subset.
+TEST_CASE("WidgetBridge setIsolation round-trips on View slot (no paint impact)",
+          "[view][bridge][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+
+    bridge.load_script("setIsolation('gain', 'isolate')");
+    REQUIRE(w->isolation() == "isolate");
+
+    bridge.load_script("setIsolation('gain', 'auto')");
+    REQUIRE(w->isolation() == "auto");
+}

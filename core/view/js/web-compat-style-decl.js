@@ -1880,10 +1880,18 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             // intentional no-op — see compat.json css/scroll* entries.
             break;
 
-        // Stacking-context isolation — Pulp has no z-buffer or layer
-        // isolation; entry exists for catalog completeness.
+        // pulp #1737 RN-OOS-fixup (final round) — CSS isolation honest
+        // CSS-subset flip. Pulp's per-View save_layer_with_blend model
+        // is structurally isolated by default (each blended View has
+        // its own composition layer; z-index is paint-order scoped to
+        // siblings within a parent), so the keyword round-trips to a
+        // View slot for el.style reads while the paint pipeline's
+        // existing per-View layering already provides the isolation
+        // contract. See compat.json css/isolation notes.
         case "isolation":
-            // intentional no-op — see compat.json css/isolation.
+            if (typeof __pulpBridge__?.setIsolation === "function") {
+                __pulpBridge__.setIsolation(this.__pulpId__, String(value || "auto"));
+            }
             break;
 
         // textarea resize handle — Pulp doesn't render OS-style resize
