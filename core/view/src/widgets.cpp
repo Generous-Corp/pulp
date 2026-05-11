@@ -598,6 +598,16 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     if (vertical) canvas.restore();
+
+    // pulp #1737 (Codex P1 on #1791) — clear font_features at end of
+    // paint so subsequent widgets in the same paint pass don't inherit
+    // this Label's OpenType state. The canvas keeps font_features as
+    // mutable canvas-level state, and TextButton / TextEditor / sibling
+    // Labels that call measure_text/fill_text without setting features
+    // would otherwise pick up tnum/smcp/etc. from the previous
+    // fontVariant-bearing Label, causing unintended typography drift
+    // outside that label's box.
+    canvas.clear_font_features();
 }
 
 // ── Knob ─────────────────────────────────────────────────────────────────────

@@ -1352,3 +1352,70 @@ TEST_CASE("Label getters round-trip font_family", "[view][widget][issue-927]") {
     label.set_font_family("Inter Display");
     REQUIRE(label.font_family() == "Inter Display");
 }
+
+// ── pulp #1737 sweep — Codex P1 on #1791: clear font_features at end ──────
+// Label::paint sets font_features on the shared canvas when fontVariant
+// is non-empty (translates CSV → SkShaper Feature tags so HarfBuzz
+// honors the OpenType lookup). Because the canvas keeps font_features
+// as mutable canvas-level state, leaving them set across paint
+// boundaries leaks the previous Label's typography onto sibling
+// widgets that don't set features themselves (TextButton, TextEditor,
+// adjacent Labels). The fix unconditionally clears at end of paint.
+//
+// We verify by subclassing RecordingCanvas and recording every
+// set/clear call. The expected sequence for any Label::paint that
+// touches the canvas is: setN clears or sets exactly once at the top
+// (the existing fontVariant translation block), then exactly one
+// clear at the bottom. So either the count of clears == 2 (empty
+// fontVariant case: one clear in the translation block, one at end)
+// or the count of clears == 1 with one set (non-empty fontVariant:
+// translation set + end clear). Either way, the LAST call must be a
+// clear so subsequent paints start clean.
+
+namespace {
+struct FontFeatureSpyCanvas : pulp::canvas::RecordingCanvas {
+    enum class Kind { set, clear };
+    std::vector<Kind> calls;
+
+    void set_font_features(std::vector<pulp::canvas::Canvas::FontFeature> features) override {
+        (void)features;
+        calls.push_back(Kind::set);
+    }
+    void clear_font_features() override {
+        calls.push_back(Kind::clear);
+    }
+};
+}
+
+TEST_CASE("Label::paint always ends with clear_font_features (Codex P1 on #1791)",
+          "[view][widget][issue-1737][issue-1791-codex-p1]") {
+    Label label("hello");
+    label.set_bounds({0, 0, 120, 24});
+
+    {
+        // Empty fontVariant — Label still calls clear at the top
+        // (translation block) AND at the end (the new safety clear).
+        FontFeatureSpyCanvas canvas;
+        label.paint(canvas);
+        REQUIRE_FALSE(canvas.calls.empty());
+        // The LAST call MUST be a clear — that's the contract that
+        // prevents leakage onto subsequent widgets.
+        REQUIRE(canvas.calls.back() == FontFeatureSpyCanvas::Kind::clear);
+    }
+
+    {
+        // Non-empty fontVariant — translation block calls set;
+        // end-of-paint MUST then clear so the next widget doesn't
+        // inherit our tnum/smcp/etc.
+        label.set_font_variant("tabular-nums,small-caps");
+        FontFeatureSpyCanvas canvas;
+        label.paint(canvas);
+        REQUIRE_FALSE(canvas.calls.empty());
+        // At least one set somewhere in the trace.
+        bool saw_set = false;
+        for (auto k : canvas.calls) if (k == FontFeatureSpyCanvas::Kind::set) saw_set = true;
+        REQUIRE(saw_set);
+        // The LAST call MUST be a clear regardless.
+        REQUIRE(canvas.calls.back() == FontFeatureSpyCanvas::Kind::clear);
+    }
+}
