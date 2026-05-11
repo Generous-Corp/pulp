@@ -12225,3 +12225,36 @@ TEST_CASE("WidgetBridge setOverscrollBehavior stores the keyword on View",
     bridge.load_script("setOverscrollBehavior('gain', 'none')");
     REQUIRE(w->overscroll_behavior() == "none");
 }
+
+// pulp #1737 RN-OOS-fixup final sweep — rn/elevation Material shim.
+TEST_CASE("WidgetBridge setElevation shims to Material-approx box-shadow",
+          "[view][bridge][issue-1737]") {
+    using Catch::Matchers::WithinAbs;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+
+    // elevation 4 -> offset_y=2, blur=5, alpha≈0.19 (per the formula in
+    // widget_bridge.cpp: offset_y=max(1, n/2), blur=n+1, alpha=clamp(0.15+n*0.01, 0.15, 0.30)).
+    bridge.load_script("setElevation('gain', 4)");
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().offset_x, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(w->box_shadow().offset_y, WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(w->box_shadow().blur,     WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(w->box_shadow().color.a,  WithinAbs(0.19f, 0.01f));
+
+    // elevation 0 -> clears the shadow entirely.
+    bridge.load_script("setElevation('gain', 0)");
+    REQUIRE_FALSE(w->has_box_shadow());
+
+    // elevation 24 (max) -> alpha saturates at 0.30.
+    bridge.load_script("setElevation('gain', 24)");
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().color.a, WithinAbs(0.30f, 0.001f));
+}

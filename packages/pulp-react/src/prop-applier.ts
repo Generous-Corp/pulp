@@ -1345,6 +1345,15 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'shadowOpacity': return call('setShadowOpacity', id, value as number);
         case 'shadowRadius':  return call('setShadowRadius',  id, value as number);
 
+        // pulp #1737 RN-OOS-fixup final sweep — RN's Android-only
+        // `elevation` (Material Design 0..24dp). The bridge shim
+        // translates the elevation value to a Material-approximated
+        // single-shadow BoxShadow so consumers shipping unchanged
+        // RN-Android styles render a visible shadow on every Pulp
+        // platform. Upstream RN ignores `elevation` on iOS entirely;
+        // Pulp's cross-platform translation is a strict improvement.
+        case 'elevation':     return call('setElevation', id, value as number);
+
         // pulp #1434 (rn NOT-IMPL bundle 1) — RN's `experimental_backgroundImage`
         // (New Architecture only) accepts a CSS gradient string. Route
         // through the existing setBackgroundGradient bridge fn — same

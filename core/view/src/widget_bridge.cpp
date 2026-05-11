@@ -5434,6 +5434,45 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN's `elevation` is
+    // Android-only Material elevation (0–24dp). Pulp catalogs boxShadow
+    // as the cross-platform equivalent; this shim translates elevation
+    // to a single-shadow approximation of the Material dual-shadow
+    // spec so consumers shipping unchanged RN-Android styles get a
+    // visible shadow on every Pulp platform.
+    //
+    // Approximation formula (Material Design system, simplified to
+    // Pulp's single-shadow BoxShadow):
+    //   elevation=0 -> clear box-shadow (no shadow)
+    //   elevation N -> offset_y = max(1, N/2)
+    //                  blur     = N + 1        (slightly larger than dp)
+    //                  spread   = 0
+    //                  color    = rgba(0, 0, 0, clamp(0.15+N*0.01, 0.15, 0.30))
+    //
+    // The blur ≈ elevation+1 and offset_y ≈ elevation/2 are the same
+    // ratios Material's `mat-elevation-z*` mixin uses. The alpha ramp
+    // matches Material's umbra-shadow opacity curve well enough to be
+    // recognizable; the catalog notes call out the single-shadow
+    // approximation honestly.
+    engine_.register_function("setElevation",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto e  = static_cast<float>(args.get<double>(1, 0.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (!v) return choc::value::Value();
+            if (e <= 0.0f) {
+                v->clear_box_shadow();
+            } else {
+                const float offset_y = std::max(1.0f, e * 0.5f);
+                const float blur     = e + 1.0f;
+                const float alpha    = std::min(0.30f, std::max(0.15f, 0.15f + e * 0.01f));
+                v->set_box_shadow(0.0f, offset_y, blur, 0.0f,
+                                  canvas::Color::rgba(0.0f, 0.0f, 0.0f, alpha),
+                                  /*inset=*/false);
+            }
+            return choc::value::Value();
+        });
+
     // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior +
     // overscroll-behavior. Stored on the View slot; ScrollView reads
     // scroll_behavior_ in scroll_by (auto → instant, else smooth) and

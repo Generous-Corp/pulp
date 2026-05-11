@@ -185,8 +185,7 @@
     },
     "elevation": {
       "kind": "number",
-      "platformOnly": "android",
-      "notes": "Android 5.0+ only; integer dp"
+      "notes": "Android 5.0+ only; integer dp | pulp #1737 RN-OOS-fixup: Pulp shims elevation to a single-shadow Material approximation via setElevation bridge fn (cross-platform)."
     },
     "end": {
       "kind": "length-or-percentage",
@@ -690,6 +689,7 @@
       "setBoxSizing",
       "setCursor",
       "setDirection",
+      "setElevation",
       "setFilter",
       "setFlex",
       "setFontFamily",

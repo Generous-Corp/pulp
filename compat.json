@@ -4243,14 +4243,16 @@
       "issue": ""
     },
     "rn/elevation": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "number"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setElevation(id, n) -> bridge translates the Material elevation value to a single-shadow approximation via View::set_box_shadow(0, max(1, n/2), n+1, 0, rgba(0,0,0, clamp(0.15+n*0.01, 0.15, 0.30))). Elevation 0 clears the shadow entirely.",
+      "supportedValues": [
+        "0..24 (Material Design dp scale)"
       ],
-      "tests": [],
-      "notes": "Android-only Material elevation. Pulp uses boxShadow as the cross-platform equivalent.",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11, final sweep): walked back from wontfix to supported. RN`s elevation prop is Android-only Material Design depth (0-24dp); upstream RN silently ignores it on iOS. Pulp shims it to a single-shadow approximation of Material`s dual-shadow spec so consumers shipping unchanged RN-Android styles render a visible shadow on every Pulp platform — a strict improvement over upstream RN`s iOS behavior. The catalog had already noted that Pulp uses boxShadow as the cross-platform equivalent; this PR adds the missing translation shim. Material`s exact spec uses umbra + penumbra dual shadows; Pulp`s BoxShadow is a single shadow, so the visual is recognizable Material but not pixel-identical to Android`s native renderer. Consumers needing exact dual-shadow rendering should use boxShadow directly (Pulp fully supports the CSS box-shadow syntax including multi-shadow lists).",
       "issue": ""
     },
     "rn/end": {
