@@ -379,6 +379,42 @@ void Label::paint(canvas::Canvas& canvas) {
     canvas.set_font_full(family, effective_font_size, effective_font_weight,
                           font_style_, effective_letter_spacing);
 
+    // pulp #1737 — translate CSS font-variant CSV → SkShaper Feature
+    // tags. Wires the storage-only View::font_variant_ slot into the
+    // active paint. Empty CSV → clear features so previous view's
+    // settings don't bleed across paint calls. Each CSS keyword maps
+    // to its OpenType feature tag (per CSS Fonts Module 4 §7.3):
+    //   tabular-nums       → tnum
+    //   small-caps         → smcp
+    //   oldstyle-nums      → onum
+    //   lining-nums        → lnum
+    //   proportional-nums  → pnum
+    // Unknown values are silently ignored (forward-compat).
+    const std::string& fv = font_variant();
+    if (fv.empty()) {
+        canvas.clear_font_features();
+    } else {
+        std::vector<canvas::Canvas::FontFeature> features;
+        size_t i = 0;
+        while (i < fv.size()) {
+            while (i < fv.size() && (std::isspace(static_cast<unsigned char>(fv[i])) || fv[i] == ',')) ++i;
+            if (i >= fv.size()) break;
+            size_t end = i;
+            while (end < fv.size() && fv[end] != ',') ++end;
+            std::string token(fv, i, end - i);
+            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.pop_back();
+            if      (token == "tabular-nums")      features.push_back({canvas::Canvas::make_font_feature_tag("tnum"), 1});
+            else if (token == "small-caps")        features.push_back({canvas::Canvas::make_font_feature_tag("smcp"), 1});
+            else if (token == "oldstyle-nums")     features.push_back({canvas::Canvas::make_font_feature_tag("onum"), 1});
+            else if (token == "lining-nums")       features.push_back({canvas::Canvas::make_font_feature_tag("lnum"), 1});
+            else if (token == "proportional-nums") features.push_back({canvas::Canvas::make_font_feature_tag("pnum"), 1});
+            // Unknown token → silently ignored.
+            i = end + 1;
+        }
+        if (!features.empty()) canvas.set_font_features(std::move(features));
+        else                    canvas.clear_font_features();
+    }
+
     // Apply text-transform
     std::string display_text = text_;
     if (text_transform_ == TextTransform::uppercase) {

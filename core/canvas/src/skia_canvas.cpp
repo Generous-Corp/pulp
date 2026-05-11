@@ -1169,6 +1169,52 @@ void SkiaCanvas::set_font_full(const std::string& family, float size,
     letter_spacing_ = letter_spacing;
 }
 
+// pulp #1737 — capture OpenType feature flags (e.g. tnum / smcp) for
+// SkShaper's 8-arg shape() overload. Empty vector clears the active
+// features. Per-feature semantics:
+//   value = 0 → disable the feature
+//   value = 1 → enable the feature
+//   value > 1 → feature-specific (e.g. ss01..ss20 for stylistic sets)
+void SkiaCanvas::set_font_features(std::vector<FontFeature> features) {
+    font_features_ = std::move(features);
+}
+void SkiaCanvas::clear_font_features() {
+    font_features_.clear();
+}
+
+// pulp #1737 — internal helper that routes a shape() call through the
+// SkShaper 8-arg overload so the active font_features_ reach HarfBuzz.
+// Constructs the 4 trivial RunIterators (font / bidi / script /
+// language) — Pulp doesn't yet have script/language detection plumbing
+// so we pass identity values (Latn script, en language, bidi level
+// derived from `ltr`). When/if proper iterator construction lands the
+// trivial wrappers can be swapped for MakeFontMgrRunIterator etc.
+//
+// The font_features_ vector is reinterpret-cast-friendly: our
+// FontFeature struct is layout-compatible with SkShaper::Feature
+// (uint32_t tag + uint32_t value + size_t start + size_t end). We
+// build a temporary vector of SkShaper::Feature values with start=0
+// + end=text.size() so the feature applies to the entire run.
+void SkiaCanvas::shape_with_features(SkShaper& shaper,
+                                     const std::string& text,
+                                     const SkFont& font,
+                                     bool ltr,
+                                     SkTextBlobBuilderRunHandler* handler) {
+    std::vector<SkShaper::Feature> sk_features;
+    sk_features.reserve(font_features_.size());
+    for (const auto& f : font_features_) {
+        sk_features.push_back({f.tag, f.value, 0, text.size()});
+    }
+    SkShaper::TrivialFontRunIterator     font_runs(font, text.size());
+    SkShaper::TrivialBiDiRunIterator     bidi_runs(ltr ? 0 : 1, text.size());
+    SkShaper::TrivialScriptRunIterator   script_runs(SkSetFourByteTag('L','a','t','n'), text.size());
+    SkShaper::TrivialLanguageRunIterator lang_runs("en", text.size());
+    shaper.shape(text.c_str(), text.size(),
+                 font_runs, bidi_runs, script_runs, lang_runs,
+                 sk_features.data(), sk_features.size(),
+                 SK_ScalarInfinity, handler);
+}
+
 void SkiaCanvas::set_text_align(TextAlign align) {
     text_align_ = align;
 }
@@ -1219,8 +1265,18 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // default ltr until per-View writing-direction lookup
             // lands (#1506).
             const bool ltr = (direction_ != TextDirection::rtl);
-            shaper->shape(text.c_str(), text.size(), font,
-                          /*leftToRight=*/ltr, SK_ScalarInfinity, &handler);
+            // pulp #1737 — when font_features_ is non-empty (CSS
+            // font-variant set), route through the 8-arg shape()
+            // overload so the SkShaper Feature array reaches HarfBuzz
+            // at shape time (e.g. tnum, smcp). Empty features → legacy
+            // 6-arg path stays the default to keep existing kerning/
+            // ligature behavior untouched.
+            if (!font_features_.empty()) {
+                shape_with_features(*shaper, text, font, ltr, &handler);
+            } else {
+                shaper->shape(text.c_str(), text.size(), font,
+                              /*leftToRight=*/ltr, SK_ScalarInfinity, &handler);
+            }
             float total_w = handler.endPoint().x();
 
             float draw_x = x;
@@ -1353,8 +1409,15 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
         auto shaper = SkShaper::Make();
         if (shaper) {
             SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
-            shaper->shape(text.c_str(), text.size(), font,
-                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            // pulp #1737 — mirror fill_text: route through 8-arg
+            // shape() when font_features_ has CSS font-variant tags so
+            // strokes track the same shaped output as fills.
+            if (!font_features_.empty()) {
+                shape_with_features(*shaper, text, font, /*ltr=*/true, &handler);
+            } else {
+                shaper->shape(text.c_str(), text.size(), font,
+                              /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            }
             float total_w = handler.endPoint().x();
 
             float draw_x = x;
@@ -1513,8 +1576,16 @@ float SkiaCanvas::measure_text(const std::string& text) {
         auto shaper = SkShaper::Make();
         if (shaper) {
             SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
-            shaper->shape(text.c_str(), text.size(), font,
-                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            // pulp #1737 — keep measure_text consistent with the
+            // shaped width fill_text/stroke_text actually emit when
+            // font_features_ tags change glyph advances (e.g. tnum
+            // forces equal-width digits).
+            if (!font_features_.empty()) {
+                shape_with_features(*shaper, text, font, /*ltr=*/true, &handler);
+            } else {
+                shaper->shape(text.c_str(), text.size(), font,
+                              /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            }
             return handler.endPoint().x();
         }
     }
