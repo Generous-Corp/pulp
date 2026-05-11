@@ -1017,6 +1017,17 @@ public:
     const std::string& scroll_behavior() const     { return scroll_behavior_; }
     void set_overscroll_behavior(std::string kw)   { overscroll_behavior_ = std::move(kw); }
     const std::string& overscroll_behavior() const { return overscroll_behavior_; }
+
+    /// pulp #1737 RN-OOS-fixup (final sweep) — RN's Android-only
+    /// `includeFontPadding`. Pure round-trip storage: Pulp's text-
+    /// shaping pipeline doesn't add Android's vestigial vertical
+    /// padding regardless of this value, so the bridge accepts the
+    /// keyword + stores it (`el.style.includeFontPadding === false`
+    /// reads back) and the paint pipeline ignores it. See compat.json
+    /// rn/includeFontPadding notes for the honest CSS-subset rationale.
+    void set_include_font_padding(bool v) { include_font_padding_ = v; }
+    bool include_font_padding() const     { return include_font_padding_; }
+
     void set_font_variant(std::string kw)          { font_variant_ = std::move(kw); }
     const std::string& font_variant() const        { return font_variant_; }
     void set_writing_mode(std::string kw)          { writing_mode_ = std::move(kw); }
@@ -1329,6 +1340,7 @@ private:
     std::string word_break_;               // partial (HarfBuzz feature deferred)
     std::string scroll_behavior_;          // pulp #1737 RN-OOS-fixup — ScrollView consumes
     std::string overscroll_behavior_;      // pulp #1737 RN-OOS-fixup — ScrollView clamp consumes
+    bool        include_font_padding_ = true;  // pulp #1737 — Android legacy round-trip slot (paint ignores)
     std::string font_variant_;             // partial (HarfBuzz feature deferred)
     std::string writing_mode_;             // noop (Pulp horizontal-only)
     std::string isolation_;                // wontfix (no z-buffer)

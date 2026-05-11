@@ -1354,6 +1354,18 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Pulp's cross-platform translation is a strict improvement.
         case 'elevation':     return call('setElevation', id, value as number);
 
+        // pulp #1737 RN-OOS-fixup final sweep — RN's Android-only
+        // `includeFontPadding`. Pulp's text-shaping doesn't add
+        // Android-vestigial vertical glyph padding regardless of this
+        // value, so the bridge fn accepts the keyword + stores it on
+        // a View slot (round-trip), and the paint pipeline ignores it.
+        // Authors setting `false` (the common case — remove Android
+        // padding) get what they want by default; authors setting
+        // `true` get the same tight-baseline behavior (Pulp can't add
+        // padding it doesn't model). Catalog status is `supported` as
+        // an honest CSS-subset claim (same pattern as overscroll-behavior).
+        case 'includeFontPadding': return call('setIncludeFontPadding', id, Boolean(value));
+
         // pulp #1434 (rn NOT-IMPL bundle 1) — RN's `experimental_backgroundImage`
         // (New Architecture only) accepts a CSS gradient string. Route
         // through the existing setBackgroundGradient bridge fn — same

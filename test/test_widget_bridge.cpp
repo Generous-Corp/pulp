@@ -12258,3 +12258,31 @@ TEST_CASE("WidgetBridge setElevation shims to Material-approx box-shadow",
     REQUIRE(w->has_box_shadow());
     REQUIRE_THAT(w->box_shadow().color.a, WithinAbs(0.30f, 0.001f));
 }
+
+// pulp #1737 RN-OOS-fixup (final sweep) — includeFontPadding round-trip.
+TEST_CASE("WidgetBridge setIncludeFontPadding stores the keyword on View (round-trip only)",
+          "[view][bridge][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+
+    // Default state — Pulp's View has include_font_padding_ = true.
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->include_font_padding() == true);
+
+    // Setting `false` (the common case — remove Android padding):
+    // Pulp accepts the keyword and stores it. Text shaping is
+    // unchanged because Pulp never had Android-vestigial padding.
+    bridge.load_script("setIncludeFontPadding('gain', false)");
+    REQUIRE(w->include_font_padding() == false);
+
+    // Setting `true` round-trips even though Pulp can't add Android-
+    // style padding — author can still query the slot.
+    bridge.load_script("setIncludeFontPadding('gain', true)");
+    REQUIRE(w->include_font_padding() == true);
+}

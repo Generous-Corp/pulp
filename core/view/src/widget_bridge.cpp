@@ -5434,6 +5434,37 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1737 RN-OOS-fixup (audit 2026-05-11, final sweep) — RN's
+    // `includeFontPadding` is an Android-only legacy prop. Android's
+    // TextView paints extra vertical padding around text glyphs;
+    // setting `includeFontPadding: false` removes it. Pulp's text-
+    // shaping pipeline (Skia/SkParagraph) uses tight baseline-relative
+    // positioning and DOESN'T add Android-style vestigial padding, so
+    // Pulp's default behavior already matches the `false` outcome that
+    // most authors want from this prop.
+    //
+    // Setting `true` is a silent no-op: Pulp can't add padding it
+    // doesn't have without restructuring text shaping. Setting `false`
+    // matches Pulp's existing default. Either way, the visible result
+    // is the same — tight glyph layout with no Android-vestigial padding.
+    //
+    // Bridge fn stores the keyword on a View slot purely for round-
+    // trip (element.style / style.X reading the value back). This
+    // mirrors the overscroll-behavior pattern (PR #1805): all keywords
+    // accepted, single consistent behavior produced, honest catalog
+    // claim of "supported as a CSS-spec subset where Pulp's behavior
+    // matches the dominant author intent".
+    engine_.register_function("setIncludeFontPadding",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto v  = id.empty() ? &root_ : widget(id);
+            // Accept the value, store it, no paint impact — Pulp's
+            // text shaping doesn't add Android-vestigial padding
+            // regardless of this flag.
+            if (v) v->set_include_font_padding(args.get<bool>(1, true));
+            return choc::value::Value();
+        });
+
     // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN's `elevation` is
     // Android-only Material elevation (0–24dp). Pulp catalogs boxShadow
     // as the cross-platform equivalent; this shim translates elevation
