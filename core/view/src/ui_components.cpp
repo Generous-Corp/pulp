@@ -452,6 +452,20 @@ void ScrollView::scroll_by(float dx, float dy) {
     target_scroll_x_ += dx;
     target_scroll_y_ += dy;
     clamp_scroll_targets();
+
+    // pulp #1737 RN-OOS-fixup — honor CSS `scroll-behavior`. CSS
+    // default is `auto` (instant); Pulp's historic default has been
+    // smooth, so we treat empty / `smooth` / anything-else as smooth
+    // (preserves the existing scroll feel for callers that don't set
+    // the slot) and only fast-path to instant when the author
+    // explicitly sets `scroll-behavior: auto`.
+    const std::string& sb = scroll_behavior();
+    if (sb == "auto") {
+        smooth_scroll_x_.set(target_scroll_x_);
+        smooth_scroll_y_.set(target_scroll_y_);
+        return;
+    }
+
     auto duration = resolve_dimension("motion.duration.fast", 0.10f);
     if (std::abs(smooth_scroll_x_.value() - target_scroll_x_) < 0.01f)
         smooth_scroll_x_.set(target_scroll_x_);

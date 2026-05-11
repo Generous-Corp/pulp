@@ -1857,9 +1857,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             // intentional no-op — see compat.json css/writingMode.
             break;
 
-        // Scroll-related CSS — Pulp doesn't render scroll viewports
-        // through CSS (ScrollView intrinsic owns scroll state).
+        // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior +
+        // overscroll-behavior route to View slots that ScrollView reads.
+        // Other scroll* properties (scrollMargin / scrollPadding /
+        // scrollSnapType) remain catalog wontfix — they require a scroll-
+        // snap engine Pulp doesn't have.
         case "scrollBehavior":
+            if (typeof __pulpBridge__?.setScrollBehavior === "function") {
+                __pulpBridge__.setScrollBehavior(this.__pulpId__, String(value || "smooth"));
+            }
+            break;
+        case "overscrollBehavior":
+        case "overscrollBehaviorX":
+        case "overscrollBehaviorY":
+            if (typeof __pulpBridge__?.setOverscrollBehavior === "function") {
+                __pulpBridge__.setOverscrollBehavior(this.__pulpId__, String(value || "auto"));
+            }
+            break;
         case "scrollMargin":
         case "scrollPadding":
         case "scrollSnapType":

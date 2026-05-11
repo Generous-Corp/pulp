@@ -5391,6 +5391,73 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
+    // shadow{Color,Offset,Opacity,Radius} per-attribute setters for
+    // box-shadow. Mirrors the textShadow* pattern above so a JSX prop
+    // diff that touches one prop doesn't clobber the others. Modern
+    // RN code uses `boxShadow` (CSS shorthand) — Pulp fully supports
+    // that via setBoxShadow — but the per-attribute API is still in
+    // upstream RN's surface, especially for code carrying iOS-legacy
+    // styling. Each setter mutates one field of View::shadow_ and
+    // flips has_shadow_ on, mirroring how text-shadow longhand works.
+    engine_.register_function("setShadowColor",
+        [this, parseHexColor](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto hex = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_box_shadow_color(parseHexColor(hex));
+            return choc::value::Value();
+        });
+    engine_.register_function("setShadowOffset",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto dx = static_cast<float>(args.get<double>(1, 0.0));
+            auto dy = static_cast<float>(args.get<double>(2, 0.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_box_shadow_offset(dx, dy);
+            return choc::value::Value();
+        });
+    engine_.register_function("setShadowOpacity",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto a  = static_cast<float>(args.get<double>(1, 1.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_box_shadow_opacity(a);
+            return choc::value::Value();
+        });
+    engine_.register_function("setShadowRadius",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto r  = static_cast<float>(args.get<double>(1, 0.0));
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_box_shadow_radius(r);
+            return choc::value::Value();
+        });
+
+    // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior +
+    // overscroll-behavior. Stored on the View slot; ScrollView reads
+    // scroll_behavior_ in scroll_by (auto → instant, else smooth) and
+    // overscroll_behavior_ via the existing clamp_scroll_targets path
+    // (Pulp already clamps at content bounds and doesn't scroll-chain
+    // to parents, so all three keywords [auto/contain/none] behave as
+    // CSS `contain` — a valid subset of the spec).
+    engine_.register_function("setScrollBehavior",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "smooth");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_scroll_behavior(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setOverscrollBehavior",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "auto");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_overscroll_behavior(kw);
+            return choc::value::Value();
+        });
+
     // Wave 5 css.5 — CSS-shorthand setTextShadow(id, dx, dy, blur, color).
     // The JS shim (web-compat-style-decl.js case textShadow) parses
     // `<dx>px <dy>px <blur>px <color>` and calls this with 4 packed args.

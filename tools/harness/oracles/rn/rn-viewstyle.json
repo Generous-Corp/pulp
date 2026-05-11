@@ -513,23 +513,19 @@
     },
     "shadowColor": {
       "kind": "color",
-      "platformOnly": "ios",
-      "notes": "iOS only in RN; web maps to box-shadow color"
+      "notes": "iOS only in RN; web maps to box-shadow color | pulp #1737 RN-OOS-fixup: longhand of boxShadow, mirrors the textShadow longhand pattern; bridge fn writes one BoxShadow field in isolation. Cross-platform in Pulp despite RN iOS-legacy origin."
     },
     "shadowOffset": {
       "kind": "shadow-offset",
-      "platformOnly": "ios",
-      "notes": "iOS only; { width, height }"
+      "notes": "iOS only; { width, height } | pulp #1737 RN-OOS-fixup: longhand of boxShadow, mirrors the textShadow longhand pattern; bridge fn writes one BoxShadow field in isolation. Cross-platform in Pulp despite RN iOS-legacy origin."
     },
     "shadowOpacity": {
       "kind": "number",
-      "platformOnly": "ios",
-      "notes": "iOS only; 0..1"
+      "notes": "iOS only; 0..1 | pulp #1737 RN-OOS-fixup: longhand of boxShadow, mirrors the textShadow longhand pattern; bridge fn writes one BoxShadow field in isolation. Cross-platform in Pulp despite RN iOS-legacy origin."
     },
     "shadowRadius": {
       "kind": "number",
-      "platformOnly": "ios",
-      "notes": "iOS only"
+      "notes": "iOS only | pulp #1737 RN-OOS-fixup: longhand of boxShadow, mirrors the textShadow longhand pattern; bridge fn writes one BoxShadow field in isolation. Cross-platform in Pulp despite RN iOS-legacy origin."
     },
     "start": {
       "kind": "length-or-percentage",
@@ -683,10 +679,10 @@
       "setBorderRightColor",
       "setBorderRightWidth",
       "setBorderSide",
+      "setBorderStyle",
       "setBorderTopColor",
       "setBorderTopLeftRadius",
       "setBorderTopRightRadius",
-      "setBorderStyle",
       "setBorderTopWidth",
       "setBorderWidth",
       "setBottom",
@@ -716,6 +712,10 @@
       "setRight",
       "setRotation",
       "setScale",
+      "setShadowColor",
+      "setShadowOffset",
+      "setShadowOpacity",
+      "setShadowRadius",
       "setSkew",
       "setSvgFill",
       "setSvgFillGradient",

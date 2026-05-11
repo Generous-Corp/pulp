@@ -12107,3 +12107,121 @@ TEST_CASE("WidgetBridge SvgPath compound multi-subpath parses every segment",
     REQUIRE(moves == 10);
     REQUIRE(lines == 10);
 }
+
+// ── pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11) ──────────────────
+// Followup wave: 4 RN box-shadow longhand setters + 2 CSS scroll-behavior
+// slots. All 6 cited in compat.json mapsTo claims — these tests pin the
+// bridge fn surface so the audit's catalog claims are evidence-backed.
+
+TEST_CASE("WidgetBridge setShadowColor mutates View::shadow_.color + activates has_shadow_",
+          "[view][bridge][issue-1737]") {
+    using Catch::Matchers::WithinAbs;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setShadowColor('gain', '#ff0000')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().color.r, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(w->box_shadow().color.g, WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(w->box_shadow().color.b, WithinAbs(0.0f, 0.01f));
+}
+
+TEST_CASE("WidgetBridge setShadowOffset mutates offset_x / offset_y in isolation",
+          "[view][bridge][issue-1737]") {
+    using Catch::Matchers::WithinAbs;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setShadowOffset('gain', 7, 11)");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().offset_x, WithinAbs(7.0f, 0.001f));
+    REQUIRE_THAT(w->box_shadow().offset_y, WithinAbs(11.0f, 0.001f));
+}
+
+TEST_CASE("WidgetBridge setShadowOpacity writes color alpha (0..1)",
+          "[view][bridge][issue-1737]") {
+    using Catch::Matchers::WithinAbs;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setShadowOpacity('gain', 0.5)");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().color.a, WithinAbs(0.5f, 0.001f));
+}
+
+TEST_CASE("WidgetBridge setShadowRadius writes the blur field of View::shadow_",
+          "[view][bridge][issue-1737]") {
+    using Catch::Matchers::WithinAbs;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setShadowRadius('gain', 22)");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    REQUIRE_THAT(w->box_shadow().blur, WithinAbs(22.0f, 0.001f));
+}
+
+TEST_CASE("WidgetBridge setScrollBehavior stores the keyword on View",
+          "[view][bridge][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setScrollBehavior('gain', 'smooth')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->scroll_behavior() == "smooth");
+
+    bridge.load_script("setScrollBehavior('gain', 'auto')");
+    REQUIRE(w->scroll_behavior() == "auto");
+}
+
+TEST_CASE("WidgetBridge setOverscrollBehavior stores the keyword on View",
+          "[view][bridge][issue-1737]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setOverscrollBehavior('gain', 'contain')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->overscroll_behavior() == "contain");
+
+    bridge.load_script("setOverscrollBehavior('gain', 'none')");
+    REQUIRE(w->overscroll_behavior() == "none");
+}

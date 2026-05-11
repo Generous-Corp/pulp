@@ -546,6 +546,35 @@ public:
     bool has_box_shadow() const { return has_shadow_; }
     const BoxShadow& box_shadow() const { return shadow_; }
 
+    /// pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
+    /// shadow* longhand setters. RN 0.71+ added `boxShadow` as the
+    /// cross-platform path (which Pulp fully supports), but the four
+    /// per-attribute setters still appear in legacy code + the React
+    /// Native API surface. Pulp mirrors the per-attribute pattern the
+    /// text-shadow longhand uses (set_text_shadow_color / _offset /
+    /// _radius — see widget_bridge.cpp:5368-5392): each setter mutates
+    /// ONE field of the shared BoxShadow struct so a JSX prop diff
+    /// that touches one prop doesn't clobber the others.
+    ///
+    /// Any of these turns has_shadow_ on (matches React Native's
+    /// behavior — setting any shadow prop activates the shadow paint).
+    void set_box_shadow_color(Color c) {
+        shadow_.color = c; has_shadow_ = true;
+    }
+    void set_box_shadow_offset(float ox, float oy) {
+        shadow_.offset_x = ox; shadow_.offset_y = oy; has_shadow_ = true;
+    }
+    void set_box_shadow_opacity(float a) {
+        // RN's shadowOpacity is 0..1; multiply into the color's alpha
+        // channel (preserves any explicit color alpha the author set
+        // via shadowColor + still respects the 0..1 opacity slider).
+        // Pulp Color stores alpha as 0..255 internally.
+        shadow_.color.a = a; has_shadow_ = true;
+    }
+    void set_box_shadow_radius(float r) {
+        shadow_.blur = r; has_shadow_ = true;
+    }
+
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
@@ -974,6 +1003,20 @@ public:
     float text_indent() const                      { return text_indent_; }
     void set_word_break(std::string kw)            { word_break_ = std::move(kw); }
     const std::string& word_break() const          { return word_break_; }
+
+    /// pulp #1737 RN-OOS-fixup (audit 2026-05-11) — CSS scroll-behavior
+    /// + overscroll-behavior. Slot storage on every View; consumed by
+    /// ScrollView::scroll_by + clamp_scroll_targets (`auto` triggers
+    /// instant scroll, `smooth` enables animated scroll; `contain`/
+    /// `none` for overscroll match Pulp's existing "clamp at content
+    /// bounds, no scroll chaining" behavior). Non-ScrollView views
+    /// round-trip the value but the paint pipeline doesn't act on it
+    /// — matches CSS semantics: a non-scrollable element ignores
+    /// scroll-related properties.
+    void set_scroll_behavior(std::string kw)       { scroll_behavior_ = std::move(kw); }
+    const std::string& scroll_behavior() const     { return scroll_behavior_; }
+    void set_overscroll_behavior(std::string kw)   { overscroll_behavior_ = std::move(kw); }
+    const std::string& overscroll_behavior() const { return overscroll_behavior_; }
     void set_font_variant(std::string kw)          { font_variant_ = std::move(kw); }
     const std::string& font_variant() const        { return font_variant_; }
     void set_writing_mode(std::string kw)          { writing_mode_ = std::move(kw); }
@@ -1284,6 +1327,8 @@ private:
     // pulp #1434 A4 Bundles 5–7 closure — storage-only catalog slots.
     float       text_indent_ = 0.0f;       // partial (paint deferred)
     std::string word_break_;               // partial (HarfBuzz feature deferred)
+    std::string scroll_behavior_;          // pulp #1737 RN-OOS-fixup — ScrollView consumes
+    std::string overscroll_behavior_;      // pulp #1737 RN-OOS-fixup — ScrollView clamp consumes
     std::string font_variant_;             // partial (HarfBuzz feature deferred)
     std::string writing_mode_;             // noop (Pulp horizontal-only)
     std::string isolation_;                // wontfix (no z-buffer)

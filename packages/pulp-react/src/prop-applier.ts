@@ -1324,6 +1324,27 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         }
         case 'textShadowRadius': return call('setTextShadowRadius', id, value as number);
 
+        // pulp #1737 RN-OOS-fixup (audit 2026-05-11) — RN iOS-legacy
+        // box-shadow longhand. Modern RN code uses `boxShadow` (CSS
+        // shorthand) which Pulp fully supports, but upstream RN still
+        // accepts shadowColor / shadowOffset / shadowOpacity /
+        // shadowRadius as cross-platform-ish style props (originally
+        // iOS-only, but Pulp implements them cross-platform via the
+        // unified BoxShadow struct on View). Mirrors the per-attribute
+        // textShadow* fan-out above. Each per-attribute setter writes
+        // ONE slot of View::shadow_ in isolation so a JSX diff that
+        // touches one prop doesn't clobber the others.
+        case 'shadowColor':   return call('setShadowColor',   id, value as string);
+        case 'shadowOffset': {
+            // RN spec: `{ width, height }` (number / number).
+            const o = value as { width?: number; height?: number };
+            const dx = typeof o?.width  === 'number' ? o.width  : 0;
+            const dy = typeof o?.height === 'number' ? o.height : 0;
+            return call('setShadowOffset', id, dx, dy);
+        }
+        case 'shadowOpacity': return call('setShadowOpacity', id, value as number);
+        case 'shadowRadius':  return call('setShadowRadius',  id, value as number);
+
         // pulp #1434 (rn NOT-IMPL bundle 1) — RN's `experimental_backgroundImage`
         // (New Architecture only) accepts a CSS gradient string. Route
         // through the existing setBackgroundGradient bridge fn — same

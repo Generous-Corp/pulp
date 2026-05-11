@@ -2582,14 +2582,18 @@
       "issue": ""
     },
     "css/overscrollBehavior": {
-      "status": "wontfix",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js -> setOverscrollBehavior(id, value) -> View::overscroll_behavior_ slot. ScrollView::clamp_scroll_targets already clamps at content bounds and Pulp does not implement scroll-chaining, so all three keywords (auto / contain / none) behave as CSS contain in Pulp.",
+      "supportedValues": [
+        "auto",
+        "contain",
+        "none"
       ],
-      "tests": [],
-      "notes": "Not in initial scope.",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from wontfix to supported. CSS spec distinguishes auto (chain to parent) vs contain (stop chain, no overscroll) vs none (same plus suppress glow). Pulp does not implement scroll-chaining and has no overscroll glow today, so all three keywords behave as CSS contain — a valid subset of the spec. Specifying contain or none matches CSS behavior exactly; specifying auto gets the stricter contain behavior, which is a no-op surprise but does not violate the spec.",
       "issue": ""
     },
     "css/padding": {
@@ -2950,11 +2954,16 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "wontfix",
-      "mapsTo": "Architectural — Pulp doesn't model CSS scroll viewports; ScrollView is the dedicated scroll-container intrinsic and there's no element→ScrollView promotion path for CSS. The smoothness toggle itself is plausible but has no surface to bind to.",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js -> setScrollBehavior(id, value) -> View::scroll_behavior_ slot. The ScrollView intrinsic reads the slot in scroll_by: auto triggers instant scroll (CSS default), anything else (empty / smooth / etc.) keeps the existing animated scroll (Pulp default). Non-ScrollView views round-trip the keyword but the paint pipeline does not consume it.",
+      "supportedValues": [
+        "auto",
+        "smooth"
+      ],
       "unsupportedValues": [],
-      "tests": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
       "notes": "pulp #1737 (CSS NO-OP audit) — reclassified noop → wontfix. Same \"scroll-via-ScrollView\" rationale as css/overflow scroll/auto/clip.",
       "issue": ""
     },
@@ -5193,47 +5202,55 @@
       "issue": ""
     },
     "rn/shadowColor": {
-      "status": "wontfix",
-      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setShadowColor(id, color) -> View::set_box_shadow_color (widget_bridge.cpp). Mutates View::shadow_.color of the shared BoxShadow struct (mirrors the textShadow longhand pattern at widget_bridge.cpp:5368-5392).",
+      "supportedValues": [
+        "CSS color strings (#rgb / #rrggbb / rgb()/rgba() / named)"
       ],
-      "tests": [],
-      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The earlier wontfix cited \"iOS-only legacy; consumers on modern RN use boxShadow which pulp already supports\" — true but a 1-line shim makes the longhand work too (parallel to how text-shadow longhand was already wired). View::set_box_shadow_color mutates View::shadow_.color and activates has_shadow_; paint_all picks it up via the existing draw_box_shadow path. Bridge fn aliases hex colors through the same parseHexColor used by setSvgFill / setBackgroundColor / etc.",
       "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowOffset": {
-      "status": "wontfix",
-      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setShadowOffset(id, dx, dy) -> View::set_box_shadow_offset. Mutates View::shadow_.{offset_x, offset_y}.",
+      "supportedValues": [
+        "{ width: number, height: number }"
       ],
-      "tests": [],
-      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . RN spec uses  for offset; prop-applier destructures into (dx, dy) args before the bridge call (mirrors textShadowOffset). View::set_box_shadow_offset writes both offset fields and activates has_shadow_. Modern RN uses  shorthand; the longhand is here for legacy compat.",
       "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowOpacity": {
-      "status": "wontfix",
-      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setShadowOpacity(id, opacity) -> View::set_box_shadow_opacity. RN spec 0..1; Pulp Color stores alpha as 0..1 float so the value flows verbatim into View::shadow_.color.a.",
+      "supportedValues": [
+        "0..1 (RN spec range)"
       ],
-      "tests": [],
-      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . RN spec: shadowOpacity is 0..1. View::set_box_shadow_opacity multiplies into the existing color alpha so an author can combine  +  and get half-opacity red. has_shadow_ flips on regardless so the shadow paints even if the author only set opacity without color.",
       "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/shadowRadius": {
-      "status": "wontfix",
-      "mapsTo": "n/a — superseded by `boxShadow` in modern RN (RN 0.71+); pulp implements `boxShadow` (rn/boxShadow=supported). Reclassified per pulp #1546 to drop the iOS-only legacy from the rn denominator.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setShadowRadius(id, radius_px) -> View::set_box_shadow_radius. Mutates View::shadow_.blur (Pulp uses CSS naming for the shadow-blur field).",
+      "supportedValues": [
+        "<length> in px"
       ],
-      "tests": [],
-      "notes": "iOS-only legacy in RN; consumers on modern RN use `boxShadow` (CSS box-shadow syntax) which pulp already supports. Reclassified missing → wontfix per pulp #1546 (PURE CATALOG: zero implementation, zero behavior change).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#issue-1737"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . RN spec: shadowRadius is the blur radius in px (matches CSS box-shadow blur arg). View::shadow_.blur is the same field that boxShadow shorthand writes. Mutating it via setShadowRadius produces identical paint output to setBoxShadow with matching blur arg.",
       "issue": "https://github.com/danielraffel/pulp/issues/1546"
     },
     "rn/start": {
