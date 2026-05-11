@@ -8,6 +8,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0900"></a>
+## [0.90.0]
+
 <a id="v0890"></a>
 ## [0.89.0] - 2026-05-11
 
