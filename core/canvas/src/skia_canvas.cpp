@@ -4,12 +4,24 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
-#include <pulp/canvas/skia_canvas.hpp>
-#include <pulp/canvas/bundled_fonts.hpp>
 
+// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
+// BEFORE `pulp/canvas/skia_canvas.hpp`. The hpp declares:
+//   void shape_with_features(class SkShaper& shaper,
+//                            const class SkFont& font,
+//                            ..., class SkTextBlobBuilderRunHandler*);
+// where each `class X` is an elaborated-type-specifier inside the
+// `pulp::canvas` namespace. Per C++ name lookup rules, if real Skia
+// declarations aren't visible yet, those specifiers INTRODUCE local
+// classes `pulp::canvas::SkShaper` etc. as incomplete types. Including
+// SkShaper.h afterward then adds `::SkShaper` separately, and inside
+// the SkiaCanvas methods (in `pulp::canvas`) unqualified `SkShaper`
+// resolves to the local incomplete type → "incomplete type" errors on
+// `SkShaper::Feature` and the TrivialRunIterator types. Pre-#1791 the
+// hpp had no such helper so this trap was latent; post-#1791 every
+// fresh worktree without the locally-applied include reorder fails to
+// build with PULP_HAS_SKIA. Fix is purely include-order, no API change.
 #ifdef PULP_HAS_SKIA
-
-#include <algorithm>
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
@@ -27,11 +39,6 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
-// SkSurface is forward-declared in skia_canvas.hpp; the implementation
-// here calls members on it (e.g. surface->readPixels). Older Skia
-// pulled the full definition transitively via SkImage.h, but the
-// chrome/m144 prebuilt trimmed that include — the .cpp now needs an
-// explicit SkSurface.h to compile.
 #include "include/core/SkSurface.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/effects/SkRuntimeEffect.h"
@@ -39,9 +46,21 @@
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/core/SkColorFilter.h"
-#include "runtime_effect_cache.hpp"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
+#include "include/effects/SkImageFilters.h"
+#include "include/gpu/graphite/Image.h"
+#include "include/gpu/graphite/BackendTexture.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
+#include "webgpu/webgpu_cpp.h"
+#endif  // PULP_HAS_SKIA
+
+#include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
+
+#ifdef PULP_HAS_SKIA
+
+#include "runtime_effect_cache.hpp"
 #include "include/effects/SkImageFilters.h"
 #include "include/core/SkColorFilter.h"
 #include "include/gpu/graphite/Image.h"
@@ -1190,6 +1209,13 @@ void SkiaCanvas::clear_font_features() {
 // derived from `ltr`). When/if proper iterator construction lands the
 // trivial wrappers can be swapped for MakeFontMgrRunIterator etc.
 //
+// IMPORTANT (Codex P2 on #1791): callers MUST gate this routing on
+// `is_ascii_only(text)` to avoid feeding incorrect script/language
+// metadata into HarfBuzz for non-Latin / mixed-script input. The
+// legacy 6-arg shape() path (which uses Skia's internal script/lang
+// inference) is correct for non-ASCII text and remains the right
+// fallback when font_features are set but the text isn't Latin.
+//
 // The font_features_ vector is reinterpret-cast-friendly: our
 // FontFeature struct is layout-compatible with SkShaper::Feature
 // (uint32_t tag + uint32_t value + size_t start + size_t end). We
@@ -1213,6 +1239,23 @@ void SkiaCanvas::shape_with_features(SkShaper& shaper,
                  font_runs, bidi_runs, script_runs, lang_runs,
                  sk_features.data(), sk_features.size(),
                  SK_ScalarInfinity, handler);
+}
+
+// pulp #1737 (Codex P2 on #1791) — guard for the shape_with_features
+// routing decision. The Trivial{Script,Language}RunIterators we pass
+// hardcode Latn/en, which is only correct for ASCII / pure-Latin text.
+// For non-ASCII input, the legacy 6-arg shape() path uses Skia's
+// internal script/language inference — correct shaping without
+// features beats incorrect glyph selection with features.
+//
+// CSS font-variant features (tnum/smcp/onum/lnum/pnum) are themselves
+// Latin-typography concerns, so the gate matches the realistic
+// audience for these features.
+static bool is_ascii_only(const std::string& s) {
+    for (unsigned char b : s) {
+        if (b > 0x7F) return false;
+    }
+    return true;
 }
 
 void SkiaCanvas::set_text_align(TextAlign align) {
@@ -1271,7 +1314,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
             // at shape time (e.g. tnum, smcp). Empty features → legacy
             // 6-arg path stays the default to keep existing kerning/
             // ligature behavior untouched.
-            if (!font_features_.empty()) {
+            if (!font_features_.empty() && is_ascii_only(text)) {
                 shape_with_features(*shaper, text, font, ltr, &handler);
             } else {
                 shaper->shape(text.c_str(), text.size(), font,
@@ -1412,7 +1455,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
             // pulp #1737 — mirror fill_text: route through 8-arg
             // shape() when font_features_ has CSS font-variant tags so
             // strokes track the same shaped output as fills.
-            if (!font_features_.empty()) {
+            if (!font_features_.empty() && is_ascii_only(text)) {
                 shape_with_features(*shaper, text, font, /*ltr=*/true, &handler);
             } else {
                 shaper->shape(text.c_str(), text.size(), font,
@@ -1580,7 +1623,7 @@ float SkiaCanvas::measure_text(const std::string& text) {
             // shaped width fill_text/stroke_text actually emit when
             // font_features_ tags change glyph advances (e.g. tnum
             // forces equal-width digits).
-            if (!font_features_.empty()) {
+            if (!font_features_.empty() && is_ascii_only(text)) {
                 shape_with_features(*shaper, text, font, /*ltr=*/true, &handler);
             } else {
                 shaper->shape(text.c_str(), text.size(), font,

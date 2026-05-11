@@ -16,6 +16,11 @@ class SkPathBuilder;
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkMatrix.h"
+// SkSamplingOptions appears as the return type of
+// sampling_options_for_image_smoothing(); without the full type the
+// declaration breaks compilation on consumers that include this
+// header without separately bringing in SkSamplingOptions.h.
+#include "include/core/SkSamplingOptions.h"
 #include <vector>
 class SkShader;
 class SkPathEffect;
