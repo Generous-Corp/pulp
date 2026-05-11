@@ -239,7 +239,7 @@ void View::paint_all(canvas::Canvas& canvas) {
                                shadow_.offset_x, shadow_.offset_y,
                                shadow_.blur, shadow_.spread,
                                shadow_.color, /*inset=*/false,
-                               corner_radius_);
+                               effective_corner_radius(bounds_.width, bounds_.height));
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
@@ -274,6 +274,16 @@ void View::paint_all(canvas::Canvas& canvas) {
     // uniform corner_radius_.
     const bool use_per_corner = has_corner_radii_;
 
+    // pulp #1731 Codex P1 — paint sites must read effective_* which honor
+    // the percent slots (corner_radius_pct_, corner_radii_pct_[]). Reading
+    // the raw px slots makes `setBorderRadius('50%')` and per-corner
+    // percent setters silently no-op.
+    const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
+    const float eff_tl = effective_corner_radius_tl(bounds_.width, bounds_.height);
+    const float eff_tr = effective_corner_radius_tr(bounds_.width, bounds_.height);
+    const float eff_bl = effective_corner_radius_bl(bounds_.width, bounds_.height);
+    const float eff_br = effective_corner_radius_br(bounds_.width, bounds_.height);
+
     // Paint background gradient if set (CSS background: linear-gradient)
     if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
         canvas.set_fill_gradient_linear(
@@ -283,11 +293,10 @@ void View::paint_all(canvas::Canvas& canvas) {
             static_cast<int>(bg_gradient_colors_.size()));
         if (use_per_corner) {
             build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
-                                               corner_radii_[0], corner_radii_[1],
-                                               corner_radii_[2], corner_radii_[3]);
+                                               eff_tl, eff_tr, eff_bl, eff_br);
             canvas.fill_current_path();
-        } else if (corner_radius_ > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
         } else {
             canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
         }
@@ -299,11 +308,10 @@ void View::paint_all(canvas::Canvas& canvas) {
         canvas.set_fill_color(bg_color_);
         if (use_per_corner) {
             build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
-                                               corner_radii_[0], corner_radii_[1],
-                                               corner_radii_[2], corner_radii_[3]);
+                                               eff_tl, eff_tr, eff_bl, eff_br);
             canvas.fill_current_path();
-        } else if (corner_radius_ > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
         } else {
             canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
         }
@@ -336,11 +344,10 @@ void View::paint_all(canvas::Canvas& canvas) {
 
         if (use_per_corner) {
             build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
-                                               corner_radii_[0], corner_radii_[1],
-                                               corner_radii_[2], corner_radii_[3]);
+                                               eff_tl, eff_tr, eff_bl, eff_br);
             canvas.stroke_current_path();
-        } else if (corner_radius_ > 0) {
-            canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
+        } else if (eff_r > 0) {
+            canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
         } else {
             canvas.stroke_rect(0, 0, bounds_.width, bounds_.height);
         }
@@ -378,7 +385,7 @@ void View::paint_all(canvas::Canvas& canvas) {
                                shadow_.offset_x, shadow_.offset_y,
                                shadow_.blur, shadow_.spread,
                                shadow_.color, /*inset=*/true,
-                               corner_radius_);
+                               eff_r);
     }
 
     // CSS / RN outline (pulp #1519). Paints OUTSIDE the border-box and
@@ -413,9 +420,9 @@ void View::paint_all(canvas::Canvas& canvas) {
         // Outline corner radius mirrors the border-box corner radius
         // expanded by the same inflate distance — matches CSS UA
         // behavior where the outline follows the box's corner curvature.
-        if (corner_radius_ > 0) {
+        if (eff_r > 0) {
             canvas.stroke_rounded_rect(ox, oy, ow, oh,
-                                       corner_radius_ + inflate);
+                                       eff_r + inflate);
         } else {
             canvas.stroke_rect(ox, oy, ow, oh);
         }

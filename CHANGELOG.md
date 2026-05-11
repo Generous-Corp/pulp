@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0873"></a>
+## [0.88.0]
+
 ## [0.87.3] - 2026-05-10
 
 - fix(canvas2d): DOMMatrix scaleSelf/rotateSelf/inverse spec conformance (Codex P1×2 + P2 on #1730) ([#1754](https://github.com/danielraffel/pulp/pull/1754))

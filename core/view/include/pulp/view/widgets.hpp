@@ -714,16 +714,22 @@ private:
 
 class Panel : public View {
 public:
-    Panel() = default;
+    // pulp #1731 Codex P1 — Panel used to shadow View::corner_radius_
+    // with its own field that paint() never read. Constructor now seeds
+    // the View-side slot so the default 8px rounding actually paints.
+    Panel() { View::set_border_radius(8.0f); }
 
     void set_background_token(std::string token) { bg_token_ = std::move(token); }
     void set_border_token(std::string token) { border_token_ = std::move(token); }
-    void set_corner_radius(float r) { corner_radius_ = r; }
+    // pulp #1731 Codex P1 — route through View::set_border_radius so the
+    // px slot painter actually reads is updated (and the pct slot is
+    // cleared, matching documented semantics).
+    void set_corner_radius(float r) { View::set_border_radius(r); }
     void set_border_width(float w) { border_width_ = w; }
 
     const std::string& background_token() const { return bg_token_; }
     const std::string& border_token() const { return border_token_; }
-    float corner_radius() const { return corner_radius_; }
+    float corner_radius() const { return View::corner_radius(); }
     float border_width() const { return border_width_; }
 
     void paint(canvas::Canvas& canvas) override;
@@ -731,7 +737,6 @@ public:
 private:
     std::string bg_token_ = "bg.surface";
     std::string border_token_ = "control.border";
-    float corner_radius_ = 8.0f;
     float border_width_ = 1.0f;
 };
 

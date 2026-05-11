@@ -1775,3 +1775,141 @@ TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask
     // treated as if no mask were set (no layer overhead, no composite).
     REQUIRE(canvas.mask_calls.empty());
 }
+
+// ── pulp #1731 — Panel & View paint must honor effective_corner_radius ─────
+// Codex P1 #1: Panel had its own corner_radius_ field that paint() never
+// read (it called View::effective_corner_radius which only sees View's
+// slot). Codex P1 #2: View::paint_all used corner_radius_/corner_radii_[]
+// directly, silently ignoring corner_radius_pct_ / corner_radii_pct_[].
+
+TEST_CASE("pulp #1731 P1 — Panel default 8px corner radius actually paints",
+          "[view][issue-1731][panel-radius]") {
+    pulp::view::Panel p;
+    p.set_bounds({0, 0, 100, 50});
+
+    pulp::canvas::RecordingCanvas rc;
+    p.paint(rc);
+
+    // Panel always paints a filled background, so we expect at least one
+    // fill_rounded_rect with the default 8.0f radius.
+    bool saw_default = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect
+                && std::abs(cmd.f[4] - 8.0f) < 1e-4f) {
+            saw_default = true;
+            break;
+        }
+    }
+    REQUIRE(saw_default);
+}
+
+TEST_CASE("pulp #1731 P1 — Panel::set_corner_radius writes the View slot paint reads",
+          "[view][issue-1731][panel-radius]") {
+    pulp::view::Panel p;
+    p.set_bounds({0, 0, 100, 50});
+    p.set_corner_radius(16.0f);
+
+    pulp::canvas::RecordingCanvas rc;
+    p.paint(rc);
+
+    bool saw_16 = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect
+                && std::abs(cmd.f[4] - 16.0f) < 1e-4f) {
+            saw_16 = true;
+            break;
+        }
+    }
+    REQUIRE(saw_16);
+    REQUIRE_THAT(p.corner_radius(), WithinAbs(16.0f, 1e-4f));
+}
+
+TEST_CASE("pulp #1731 P1 — View::paint_all honors percent uniform border-radius",
+          "[view][issue-1731][percent-radius]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 100, 100});
+    v.set_background_color(pulp::canvas::Color::rgba8(10, 20, 30));
+    v.set_border_radius_pct(50.0f);  // 50% of min(100,100) = 50px → circle
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint_all(rc);
+
+    bool saw_50 = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect
+                && std::abs(cmd.f[4] - 50.0f) < 1e-4f) {
+            saw_50 = true;
+            break;
+        }
+    }
+    REQUIRE(saw_50);
+}
+
+TEST_CASE("pulp #1731 P1 — View border stroke honors percent radius",
+          "[view][issue-1731][percent-radius]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 80, 80});
+    v.set_border(pulp::canvas::Color::rgba8(255, 255, 255), 2.0f);
+    v.set_border_radius_pct(50.0f);  // 50% of min(80,80) = 40px
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint_all(rc);
+
+    bool saw_40 = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rounded_rect
+                && std::abs(cmd.f[4] - 40.0f) < 1e-4f) {
+            saw_40 = true;
+            break;
+        }
+    }
+    REQUIRE(saw_40);
+}
+
+TEST_CASE("pulp #1731 P1 — View outline honors percent radius",
+          "[view][issue-1731][percent-radius]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 60, 60});
+    v.set_border_radius_pct(50.0f);  // 50% of min(60,60) = 30px
+    v.set_outline_width(2.0f);
+    v.set_outline_color(pulp::canvas::Color::rgba8(255, 0, 0));
+    v.set_outline_style(pulp::view::View::BorderStyle::solid);
+    // Outline uses outline_offset + outline_width * 0.5f = 0 + 1 = 1 inflate.
+    // Expected stroked radius = 30 + 1 = 31.
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint_all(rc);
+
+    bool saw_31 = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rounded_rect
+                && std::abs(cmd.f[4] - 31.0f) < 1e-4f) {
+            saw_31 = true;
+            break;
+        }
+    }
+    REQUIRE(saw_31);
+}
+
+TEST_CASE("pulp #1731 P1 — px radius still wins when pct is 0 (default)",
+          "[view][issue-1731][regression-guard]") {
+    // Make sure the percent-resolving paint path doesn't silently regress
+    // the px-only case for views that never set a percent.
+    pulp::view::View v;
+    v.set_bounds({0, 0, 200, 200});
+    v.set_background_color(pulp::canvas::Color::rgba8(0, 0, 0));
+    v.set_border_radius(12.0f);
+
+    pulp::canvas::RecordingCanvas rc;
+    v.paint_all(rc);
+
+    bool saw_12 = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect
+                && std::abs(cmd.f[4] - 12.0f) < 1e-4f) {
+            saw_12 = true;
+            break;
+        }
+    }
+    REQUIRE(saw_12);
+}

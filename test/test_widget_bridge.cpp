@@ -947,7 +947,12 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_FALSE(panel->hit_testable());
     REQUIRE(panel->background_token() == "bg.raised");
     REQUIRE(panel->border_token() == "accent.primary");
-    REQUIRE_THAT(panel->corner_radius(), WithinAbs(9.0f, 0.001f));
+    // pulp #1731 P1 — Panel::set_corner_radius now routes through the
+    // same View slot setBorder() writes to. setPanelStyle(..., 9, ...)
+    // on JS line 90 was followed by setBorder(..., 2, 6) on line 92, so
+    // last-write-wins yields 6. Previously Panel kept a shadowed 9 that
+    // paint() never read — the on-screen radius was always the View slot.
+    REQUIRE_THAT(panel->corner_radius(), WithinAbs(6.0f, 0.001f));
     REQUIRE_THAT(panel->border_width(), WithinAbs(2.0f, 0.001f));
     REQUIRE(panel->has_background_color());
     REQUIRE(panel->has_border());
