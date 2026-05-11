@@ -117,6 +117,65 @@ polls the same `StateStore`; there is no explicit broadcast step.
 Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
 `ViewRole::Remote` secondary view.
 
+## ⚠️ STALE-HEADER ABI MISMATCH — silent crash at first paint (2026-05-10)
+
+**Searchable keywords**: silent crash, "Standalone: editor window open"
+then exit, segfault inside `WidgetBridge::register_api()::$_NNN`,
+`byte read Translation fault` at `x9=0` during Promise reaction, JS
+`__dispatch__` from `pump_message_loop`, Spectr exits after CoreAudio
+init, `pointer_registered_`, `wheel_registered_`, link-swap, install
+prefix, `/tmp/pulp-sdk-gpu-latest`, `pulp upgrade --install`.
+
+**The trap**: any PR that adds/removes/reorders **member variables**
+on `WidgetBridge` (or any other class whose layout consumers compile
+against) changes the C++ struct layout. If the **installed SDK
+header** under the consumer's `Pulp_DIR` is OLDER than the
+**installed SDK static library**, the consumer's translation units
+compute member offsets from the old (smaller) layout while the lib's
+own translation units (lambdas registered in `register_api()`) use the
+new (larger) layout. Member access from a lambda points into the
+wrong byte — typically NULL or garbage — and the first access
+SIGSEGVs.
+
+This presents as a "silent crash" because:
+- macOS shows the editor window briefly
+- The first paint frame logs `[gpu-host] first frame: …`
+- Then a Promise reaction (React's commit phase) fires a registered
+  C++ callback that does a member load → segfault → process dies
+- The standalone parent (zsh / shell) reports nothing useful
+
+The macOS crash report tells you everything: open
+`~/Library/Logs/DiagnosticReports/<App>-<date>.ips`, look at thread 0's
+faulting frame. If it's `WidgetBridge::register_api()::$_NNN + <offset>`
+with `Exception Subtype: KERN_INVALID_ADDRESS at 0x…` and `x9=0` (or
+some other register pointing into the bridge struct), you have an ABI
+mismatch.
+
+**Fix**:
+```bash
+# Re-install the header to the SDK consumer's install prefix
+cp core/view/include/pulp/view/widget_bridge.hpp \
+   "$PULP_SDK_INSTALL/include/pulp/view/widget_bridge.hpp"
+
+# Wipe the consumer's stale .o files (they were compiled with old offsets)
+rm -rf "$CONSUMER/build/CMakeFiles/<your-target>.dir"
+
+# Rebuild the consumer from clean
+cmake --build "$CONSUMER/build" --target <your-target> -j
+```
+
+When you `pulp upgrade --install` this is automatic because the SDK
+release lays down headers + libs together from one build. The trap
+only fires when you **link-swap a fresh `libpulp-view.a` into an SDK
+install whose header is stale**, which is the failure mode for local
+SDK-side iteration outside the `pulp upgrade` flow.
+
+**Belt-and-suspenders mitigation** (TODO followup): consider adding a
+build-time assertion in widget_bridge.hpp using `_Static_assert(sizeof(WidgetBridge) == EXPECTED, …)`,
+where `EXPECTED` is generated at SDK release time from the actual
+library build. A stale header would then fail to compile against the
+fresh lib instead of segfaulting at first paint.
+
 ## Common pitfalls
 
 1. **Forgetting `notify_attached()` after a successful attach.** The
