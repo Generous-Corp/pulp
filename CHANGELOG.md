@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0920"></a>
+## [0.93.0]
+
 ## [0.92.0] - 2026-05-11
 
 - feat(view): rn/borderCurve squircle + css/rn isolation flip (RN to 100% PASS) ([#1816](https://github.com/danielraffel/pulp/pull/1816))
