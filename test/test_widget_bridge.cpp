@@ -11965,3 +11965,57 @@ TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lamb
     REQUIRE(engine.evaluate("pointer_fires").getWithDefault<int>(0) == 1);
     REQUIRE(engine.evaluate("wheel_fires").getWithDefault<int>(0) == 1);
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Compound-path SVG icons (Spectr PEAK / AVG / BOTH / OFF analyzer icons)
+//
+// Spectr's analyzer dropdown uses paths like:
+//   "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 ..."
+// which is 10 disjoint subpaths each a vertical/horizontal line. User
+// reports these icons render BLANK while single-subpath icons (e.g. the
+// SCULPT M-Q-T-T-T wave) render correctly. The parser is supposed to
+// emit one move_to + one line_to per pair → 20 segments total.
+//
+// This test pins:
+//  (a) the parser correctly enumerates every M and L
+//  (b) sibling <path> elements inside one <svg> each get their own widget
+// so we can tell parse-time vs paint-time when the icon goes blank.
+// ────────────────────────────────────────────────────────────────────────────
+TEST_CASE("WidgetBridge SvgPath compound multi-subpath parses every segment",
+          "[view][bridge][issue-965][compound-path]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Spectr PEAK analyzer icon — 10 subpaths (5 bars + 5 tick marks).
+    const std::string peak_d =
+        "M 3 20 L 3 14 M 7 20 L 7 10 M 11 20 L 11 6 "
+        "M 15 20 L 15 12 M 19 20 L 19 8 M 1 14 L 5 14 "
+        "M 5 10 L 9 10 M 9 6 L 13 6 M 13 12 L 17 12 M 17 8 L 21 8";
+
+    bridge.load_script(std::string("createSvgPath('peak', '')"));
+    bridge.load_script("setSvgPath('peak', '" + peak_d + "')");
+    // Spectr JSX `<path fill="none" stroke="currentColor" strokeWidth="1.3">`
+    // dispatches setSvgFill('none') before stroke setup:
+    bridge.load_script("setSvgFill('peak', 'none')");
+    bridge.load_script("setSvgStroke('peak', '#ffffff')");
+    bridge.load_script("setSvgStrokeWidth('peak', 1.3)");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("peak"));
+    REQUIRE(w != nullptr);
+    // 10 (M) + 10 (L) = 20 segments — parser MUST emit every M and L.
+    REQUIRE(w->segments().size() == 20);
+    REQUIRE(w->has_stroke());
+    REQUIRE_FALSE(w->has_fill());
+
+    // Count move_to and line_to ops to make sure neither is being
+    // silently merged or dropped.
+    int moves = 0, lines = 0;
+    for (const auto& s : w->segments()) {
+        if (s.op == SvgPathSegment::Op::move_to) ++moves;
+        else if (s.op == SvgPathSegment::Op::line_to) ++lines;
+    }
+    REQUIRE(moves == 10);
+    REQUIRE(lines == 10);
+}
