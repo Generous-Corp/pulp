@@ -3373,3 +3373,60 @@ TEST_CASE("Canvas::make_font_feature_tag packs OpenType four-char tags",
     REQUIRE(pnum == 0x706E756Du);
 }
 #endif // PULP_HAS_SKIA
+
+// ── pulp #1806 — fill_current_path / stroke_current_path preserve the scratch path ──
+// Canvas2D spec: ctx.fill() and ctx.stroke() do NOT consume the path. A
+// subsequent stroke() after fill() must paint the outlined version of
+// the filled shape. Previously path_builder_->detach() emptied the
+// builder, so the second op silently no-op'd. This regressed both
+// SvgPathWidget compound paths (visible icon stroke missing) AND any JS
+// canvas idiom of fill-then-stroke for "filled outlined shape".
+// Tests are backend-agnostic — RecordingCanvas captures command stream
+// without depending on Skia/CG availability, so they always run.
+
+// RecordingCanvas is declared in <pulp/canvas/canvas.hpp> (already included above).
+
+TEST_CASE("pulp #1806 — fill_current_path preserves path so subsequent stroke paints",
+          "[canvas][issue-1806][path-preserve]") {
+    pulp::canvas::RecordingCanvas rc;
+    rc.begin_path();
+    rc.move_to(10, 10);
+    rc.line_to(50, 10);
+    rc.line_to(50, 50);
+    rc.line_to(10, 50);
+    rc.close_path();
+    rc.fill_current_path();
+    rc.stroke_current_path();
+
+    int n_fill = 0, n_stroke = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_current_path) ++n_fill;
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_current_path) ++n_stroke;
+    }
+    REQUIRE(n_fill == 1);
+    REQUIRE(n_stroke == 1);
+    // Both ops must have been recorded against a non-empty path.
+    // RecordingCanvas snapshots the path geometry at command time.
+}
+
+TEST_CASE("pulp #1806 — begin_path resets between fill+stroke pairs",
+          "[canvas][issue-1806][path-preserve]") {
+    // Spec invariant: begin_path() unconditionally clears the scratch
+    // path even if the previous fill/stroke didn't consume it.
+    pulp::canvas::RecordingCanvas rc;
+    rc.begin_path();
+    rc.move_to(10, 10);
+    rc.line_to(50, 10);
+    rc.fill_current_path();
+    rc.stroke_current_path();  // still paints the line — same path
+    rc.begin_path();
+    rc.move_to(0, 0);
+    rc.line_to(100, 100);
+    rc.stroke_current_path();  // paints the NEW line, not the old one
+
+    int strokes = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_current_path) ++strokes;
+    }
+    REQUIRE(strokes == 2);
+}

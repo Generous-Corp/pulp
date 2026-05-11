@@ -847,9 +847,12 @@ void CoreGraphicsCanvas::fill_current_path(FillRule rule) {
             CGContextFillPath(ctx_);
         }
     }
-    // Mirrors SkiaCanvas::fill_current_path which detaches the path on use —
-    // the next draw must begin_path() again, matching Canvas2D semantics.
-    release_path();
+    // pulp #1806 — Canvas2D spec: `ctx.fill()` preserves the scratch path
+    // so a subsequent `ctx.stroke()` paints the outlined version of the
+    // filled shape. Previously this destroyed `path_` via `release_path()`,
+    // which silently dropped strokes after fills (SvgPathWidget compound
+    // paths, common JS canvas idiom). `begin_path()` correctly resets the
+    // path for callers that intend a fresh build.
 }
 
 void CoreGraphicsCanvas::stroke_current_path() {
@@ -857,12 +860,12 @@ void CoreGraphicsCanvas::stroke_current_path() {
     CGContextAddPath(ctx_, path_);
     if (has_stroke_gradient_) {
         stroke_with_active_paint();
-        release_path();
+        // pulp #1806 — preserve path; see fill_current_path comment.
         return;
     }
     apply_stroke_color();
     CGContextStrokePath(ctx_);
-    release_path();
+    // pulp #1806 — preserve path; see fill_current_path comment.
 }
 
 // ── pulp #1521 — native arc / arcTo / ellipse / roundRect path builders ──

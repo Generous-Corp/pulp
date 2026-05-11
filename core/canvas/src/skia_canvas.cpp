@@ -2294,11 +2294,16 @@ void SkiaCanvas::fill_current_path(FillRule rule) {
     paint.setBlendMode(blend_mode_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    // pulp Wave 2 cheap wiring — stamp the JS-supplied fillRule
-    // (`ctx.fill('evenodd')`) onto the detached path so Skia honours it
-    // when computing the filled area. Default 'nonzero' keeps the
-    // historical SkPathFillType::kWinding behaviour.
-    SkPath p = path_builder_->detach();
+    // pulp #1806 — snapshot, not detach. Canvas2D spec: `ctx.fill()` and
+    // `ctx.stroke()` paint the scratch path WITHOUT consuming it. A
+    // subsequent `stroke()` on the same path must produce the outlined
+    // version of the filled shape. `detach()` was leaving the builder
+    // empty, so any caller doing `fill → stroke` (SvgPathWidget compound
+    // paths, common JS canvas idiom) silently dropped the second op.
+    // Stamp the JS-supplied fillRule (`ctx.fill('evenodd')`) onto the
+    // snapshot so Skia honours it when computing the filled area;
+    // default 'nonzero' keeps the SkPathFillType::kWinding behaviour.
+    SkPath p = path_builder_->snapshot();
     p.setFillType(rule == FillRule::evenodd
                       ? SkPathFillType::kEvenOdd
                       : SkPathFillType::kWinding);
@@ -2317,7 +2322,8 @@ void SkiaCanvas::stroke_current_path() {
     apply_line_dash(paint, line_dash_, line_dash_phase_);
     apply_shadow_filter(paint);
     apply_filter(paint);
-    canvas_->drawPath(path_builder_->detach(), paint);
+    // pulp #1806 — snapshot (preserve), not detach. See fill_current_path.
+    canvas_->drawPath(path_builder_->snapshot(), paint);
 }
 
 // ── Static SkSL compilation (accessible from bridge without Canvas instance) ──
