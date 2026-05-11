@@ -70,6 +70,33 @@ struct ShapedLayout {
     int line_count = 0;
 };
 
+/// pulp #1737 — CSS overflow-wrap / word-break break opportunity mode.
+/// Default is `normal` so existing callers keep word-boundary-only wrapping.
+///
+/// CSS Text Module Level 3 §6.1 maps to:
+///   normal      → break only at word boundaries (whitespace). A word
+///                 wider than max_width overflows the box.
+///   break_word  → CSS `overflow-wrap: break-word`. Same as normal, but
+///                 if a word is wider than max_width AND no whitespace
+///                 break is available on the current line, allow a
+///                 break inside the word at the codepoint that fits.
+///   anywhere    → CSS `overflow-wrap: anywhere` (and CSS
+///                 `word-break: break-all`). Treat every codepoint as
+///                 a break opportunity. Used for narrow CJK / mono
+///                 columns where word boundaries don't apply.
+///
+/// The implementation uses a proportional split inside a segment
+/// (`seg.width / utf8_codepoints(seg.text)` per codepoint) — CSS doesn't
+/// require pixel-perfect break positions for soft-wrap; the contract
+/// is "do not overflow when a break opportunity exists." Re-shaping
+/// individual fragments would be more accurate but the cost defeats
+/// PreText's measure-once-reflow-forever invariant.
+enum class BreakMode {
+    normal,
+    break_word,
+    anywhere,
+};
+
 /// Text shaper — the PreText-style measure-once-reflow-forever engine.
 ///
 /// Usage:
@@ -102,11 +129,13 @@ public:
     /// that pair this with #1407's ellipsis truncation can see they
     /// overflow). 0 = unlimited (default).
     ShapedLayout layout(const PreparedText& prepared, float max_width,
-                        float line_height = 0, int max_lines = 0) const;
+                        float line_height = 0, int max_lines = 0,
+                        BreakMode break_mode = BreakMode::normal) const;
 
     /// Layout and materialize line text (slightly more expensive than layout())
     ShapedLayout layout_with_lines(const PreparedText& prepared, float max_width,
-                                    float line_height = 0, int max_lines = 0) const;
+                                    float line_height = 0, int max_lines = 0,
+                                    BreakMode break_mode = BreakMode::normal) const;
 
     /// Quick height calculation (fastest path — just returns height, no line details)
     float measure_height(const PreparedText& prepared, float max_width,

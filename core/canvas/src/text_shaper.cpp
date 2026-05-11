@@ -46,9 +46,41 @@ namespace pulp::canvas {
 // This is the "cheap" path — just arithmetic over cached segment widths.
 // Works identically regardless of how segments were measured.
 
+// Count UTF-8 codepoints in `text`. Used by the BreakMode::break_word /
+// BreakMode::anywhere paths to compute a proportional per-codepoint
+// advance for in-segment splits. Skips continuation bytes (0x80–0xBF)
+// so multi-byte sequences count as a single codepoint.
+static int utf8_codepoint_count(const std::string& text) {
+    int n = 0;
+    for (unsigned char b : text) {
+        if ((b & 0xC0) != 0x80) ++n;
+    }
+    return n;
+}
+
+// Walk `text` to the codepoint boundary that contains at most
+// `target_count` codepoints (returns the byte offset of the first byte
+// AFTER the Nth codepoint, clamped to text.size()). Used to slice a
+// segment without breaking inside a multi-byte UTF-8 sequence.
+static size_t utf8_byte_offset_for_codepoints(const std::string& text, int target_count) {
+    if (target_count <= 0) return 0;
+    int seen = 0;
+    size_t i = 0;
+    while (i < text.size()) {
+        unsigned char b = static_cast<unsigned char>(text[i]);
+        if ((b & 0xC0) != 0x80) {
+            if (seen == target_count) return i;
+            ++seen;
+        }
+        ++i;
+    }
+    return text.size();
+}
+
 static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segments,
                                           float max_width, float line_height, bool materialize,
-                                          int max_lines = 0) {
+                                          int max_lines = 0,
+                                          BreakMode break_mode = BreakMode::normal) {
     ShapedLayout result;
     if (segments.empty()) return result;
 
@@ -137,10 +169,158 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             width_at_break = current_width;
         }
 
-        if (current_width + seg.width > max_width && current_width > 0) {
-            // Wrap: break at last whitespace or force break here
-            int break_at = (last_break > line_start) ? last_break : i;
-            float break_width = (last_break > line_start) ? width_at_break : current_width;
+        // pulp #1737 — break-word / anywhere also need to fire when the
+        // over-wide segment is the FIRST on an empty line (current_width
+        // == 0, but seg.width alone exceeds max_width). The legacy
+        // `normal` path lets that overflow on its own line; break-word
+        // and anywhere are supposed to slice it. Without this, e.g.
+        // a single Lorem-style word longer than the column would render
+        // identically to `normal`.
+        const bool first_seg_overflows =
+            (current_width == 0 && seg.width > max_width &&
+             (break_mode == BreakMode::break_word ||
+              break_mode == BreakMode::anywhere));
+
+        if ((current_width + seg.width > max_width && current_width > 0) ||
+            first_seg_overflows) {
+            // pulp #1737 — overflow-wrap / word-break decision point.
+            // CSS Text Module Level 3 §6.1:
+            //   - If a whitespace break opportunity exists on the current
+            //     line, ALWAYS prefer it (matches `normal`, `break-word`,
+            //     and `anywhere` — none of them split words when a soft
+            //     break is available).
+            //   - Otherwise, the segment-boundary fallback (current
+            //     behavior) takes over for `normal`.
+            //   - For `break-word` / `anywhere`, split THIS segment at
+            //     the codepoint boundary that fits before max_width
+            //     instead of overflowing whole-segment-wise. `anywhere`
+            //     additionally allows mid-segment breaks even when
+            //     subsequent segments would have fit a clean boundary;
+            //     here the two modes coincide because we only enter this
+            //     branch on actual overflow.
+            const bool has_ws_break = (last_break > line_start);
+            const bool allow_inside_segment =
+                !has_ws_break && (break_mode == BreakMode::break_word ||
+                                  break_mode == BreakMode::anywhere);
+
+            if (allow_inside_segment && seg.width > 0) {
+                // Proportional split: assume uniform per-codepoint
+                // advance within this segment. The contract is "do not
+                // overflow when a break opportunity exists" — CSS does
+                // not require pixel-perfect break positions for soft-
+                // wrap. Re-shaping each fragment would be more accurate
+                // but defeats PreText's measure-once-reflow-forever
+                // invariant. Browsers themselves use simplified
+                // heuristics for this case.
+                const float remain = max_width - current_width;
+                const int cps = utf8_codepoint_count(seg.text);
+                if (cps > 0 && remain > 0) {
+                    const float per_cp = seg.width / static_cast<float>(cps);
+                    int fit_cps = static_cast<int>(remain / per_cp);
+                    // Always advance at least one codepoint so an
+                    // unconditional infinite loop is impossible (e.g.
+                    // current_width already at max_width with a wide
+                    // glyph). The next iteration will start a new line.
+                    if (fit_cps < 1) fit_cps = 1;
+                    if (fit_cps > cps) fit_cps = cps;
+                    const size_t cut = utf8_byte_offset_for_codepoints(seg.text, fit_cps);
+                    const std::string head = seg.text.substr(0, cut);
+                    const std::string tail = seg.text.substr(cut);
+                    const float head_w = per_cp * static_cast<float>(fit_cps);
+                    const float tail_w = seg.width - head_w;
+
+                    ShapedLayout::Line line;
+                    line.width = current_width + head_w;
+                    line.y = y;
+                    line.first_segment = line_start;
+                    line.segment_count = i - line_start;  // segments BEFORE this one stay grouped
+                    if (materialize) {
+                        for (int j = line_start; j < i; ++j)
+                            line.text += segments[j].text;
+                        line.text += head;
+                    }
+                    result.lines.push_back(std::move(line));
+                    max_line_width = std::max(max_line_width, current_width + head_w);
+
+                    y += line_height;
+
+                    // Emit the tail in repeated max_width chunks until
+                    // what remains fits on a single line. For a segment
+                    // many multiples wider than max_width (pathological
+                    // input — Lorem-style or non-spaced CJK runs), this
+                    // produces N - 1 max-width-wide intermediate lines
+                    // followed by one trailing line for the remnant.
+                    // `normal` mode would just overflow the entire
+                    // tail on one line; break-word/anywhere have to do
+                    // better than that to honor the CSS contract.
+                    std::string remaining_text = tail;
+                    float remaining_w = tail_w;
+                    int safety = 0;
+                    while (remaining_w > max_width && per_cp > 0 && safety < 1024) {
+                        int chunk_cps = static_cast<int>(max_width / per_cp);
+                        if (chunk_cps < 1) chunk_cps = 1;
+                        const size_t chunk_cut = utf8_byte_offset_for_codepoints(remaining_text, chunk_cps);
+                        const std::string chunk = remaining_text.substr(0, chunk_cut);
+                        const float chunk_w = per_cp * static_cast<float>(chunk_cps);
+                        ShapedLayout::Line chunk_line;
+                        chunk_line.width = chunk_w;
+                        chunk_line.y = y;
+                        chunk_line.first_segment = i;
+                        chunk_line.segment_count = 1;
+                        if (materialize) chunk_line.text = chunk;
+                        result.lines.push_back(std::move(chunk_line));
+                        max_line_width = std::max(max_line_width, chunk_w);
+                        y += line_height;
+                        remaining_text = remaining_text.substr(chunk_cut);
+                        remaining_w -= chunk_w;
+                        ++safety;
+                    }
+
+                    // Final remnant of this segment becomes the start
+                    // of the next "in-progress" line. It fits within
+                    // max_width by construction (loop exit condition);
+                    // accumulate it into current_width so the next
+                    // segment can extend the line if it also fits.
+                    line_start = i + 1;
+                    current_width = remaining_w;
+                    last_break = -1;
+                    // If the segments vector ends here, the final-line
+                    // emit code at the bottom of layout_from_segments
+                    // will materialize the remnant alongside any
+                    // following segments. Otherwise the next iteration
+                    // continues with current_width pre-loaded.
+                    //
+                    // The remnant materialization, however, is a gap:
+                    // the final-line code reads segments[j].text for
+                    // j in [line_start, end), so the remnant itself
+                    // (which logically belongs to segment i, not
+                    // segment line_start) is not in any segment. If no
+                    // following segments materialize, we'd lose the
+                    // remnant. Cover that here by emitting the remnant
+                    // as a single-segment line directly when this is
+                    // the last segment.
+                    if (i == static_cast<int>(segments.size()) - 1) {
+                        ShapedLayout::Line tail_line;
+                        tail_line.width = remaining_w;
+                        tail_line.y = y;
+                        tail_line.first_segment = i;
+                        tail_line.segment_count = 1;
+                        if (materialize) tail_line.text = remaining_text;
+                        result.lines.push_back(std::move(tail_line));
+                        max_line_width = std::max(max_line_width, remaining_w);
+                        y += line_height;
+                        current_width = 0;
+                    }
+                    continue;
+                }
+                // cps == 0 falls through to legacy whole-segment path
+            }
+
+            // Legacy `normal`-mode behavior: break at last whitespace or
+            // segment boundary (no inside-word breaks). Same path as
+            // pre-#1737.
+            int break_at = has_ws_break ? last_break : i;
+            float break_width = has_ws_break ? width_at_break : current_width;
 
             ShapedLayout::Line line;
             line.width = break_width;
@@ -157,7 +337,7 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
             y += line_height;
 
             // Skip whitespace at break point
-            line_start = (last_break > line_start) ? last_break + 1 : i;
+            line_start = has_ws_break ? last_break + 1 : i;
             current_width = 0;
             for (int j = line_start; j <= i; ++j)
                 current_width += segments[j].width;
@@ -423,15 +603,17 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
 }
 
 ShapedLayout TextShaper::layout(const PreparedText& prepared, float max_width,
-                                 float line_height, int max_lines) const {
+                                 float line_height, int max_lines,
+                                 BreakMode break_mode) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines);
+    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines, break_mode);
 }
 
 ShapedLayout TextShaper::layout_with_lines(const PreparedText& prepared, float max_width,
-                                            float line_height, int max_lines) const {
+                                            float line_height, int max_lines,
+                                            BreakMode break_mode) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines);
+    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines, break_mode);
 }
 
 float TextShaper::measure_height(const PreparedText& prepared, float max_width,

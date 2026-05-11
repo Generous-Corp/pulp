@@ -296,3 +296,147 @@ TEST_CASE("Parallelogram contains accepts interior and edge points",
     REQUIRE_FALSE(para.contains(9.0f, 25.0f));
     REQUIRE_FALSE(para.contains(46.0f, 20.0f));
 }
+
+// ── pulp #1737 — CSS overflow-wrap / word-break BreakMode ───────────────
+// PR-1 of 2 in the css/overflowWrap roadmap slice. PR-1 ships the
+// TextShaper API for honoring break-word + anywhere break opportunities;
+// PR-2 wires Label::paint to call this through View::word_break_ and
+// flips the catalog. These tests anchor the contract for PR-2's
+// integration step.
+//
+// Approach: proportional in-segment split (`seg.width / utf8_codepoints`
+// per codepoint) at the codepoint boundary that fits before max_width.
+// CSS Text Module Level 3 §6.1 does not require pixel-perfect break
+// positions for soft-wrap — the contract is "do not overflow when a
+// break opportunity exists." Re-shaping individual fragments would be
+// more accurate but defeats PreText's measure-once-reflow-forever
+// invariant. Browsers themselves use simplified heuristics for this case.
+
+TEST_CASE("TextShaper BreakMode::normal preserves legacy whole-word overflow",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    // A single long unbroken word wider than max_width must overflow on
+    // one line under `normal` mode. This pins the legacy behavior so
+    // the BreakMode plumbing is purely additive — existing consumers
+    // see zero change at the API boundary.
+    auto prepared = shaper.prepare("Supercalifragilisticexpialidocious", "system", 14);
+    auto layout = shaper.layout(prepared, 30.0f, 0, 0, BreakMode::normal);
+    REQUIRE(layout.line_count == 1);
+    REQUIRE(layout.lines[0].width > 30.0f);
+}
+
+TEST_CASE("TextShaper BreakMode::break_word splits inside an over-wide word",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("Supercalifragilisticexpialidocious", "system", 14);
+    auto layout = shaper.layout_with_lines(prepared, 30.0f, 0, 0, BreakMode::break_word);
+    // Must produce at least two lines (one would mean overflow, which
+    // is exactly what break-word is supposed to prevent).
+    REQUIRE(layout.line_count >= 2);
+    // Each emitted line must be at most max_width wide (within the
+    // proportional-split rounding tolerance — one codepoint of slop).
+    for (const auto& line : layout.lines) {
+        REQUIRE(line.width <= 30.0f + 5.0f);  // 5px slop = ~one wide char
+    }
+    // First line's text plus all subsequent lines' text must reconstruct
+    // the original. The shaper materializes line text exactly; no chars
+    // dropped, no chars duplicated.
+    std::string reconstructed;
+    for (const auto& line : layout.lines) reconstructed += line.text;
+    REQUIRE(reconstructed == "Supercalifragilisticexpialidocious");
+}
+
+TEST_CASE("TextShaper BreakMode::break_word still prefers whitespace breaks",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    // Probe text chosen so each individual word fits comfortably within
+    // max_width — break-word only diverges from `normal` when a word is
+    // ALSO over-wide (CSS Text Module §6.1: prefer the best break
+    // opportunity; inside-word breaks only fire on actual overflow with
+    // no whitespace break available).
+    //
+    // "ab cd ef gh" with 14px estimate: each 2-char word ≈ 17px. With
+    // max_width=40, "ab cd" fits (~39px) then "ef gh" wraps to a new
+    // line. NEITHER mode should split a word.
+    auto prepared = shaper.prepare("ab cd ef gh", "system", 14);
+    auto wide_layout = shaper.layout_with_lines(prepared, 1000.0f, 0, 0, BreakMode::break_word);
+    REQUIRE(wide_layout.line_count == 1);
+
+    auto narrow_layout = shaper.layout_with_lines(prepared, 40.0f, 0, 0, BreakMode::break_word);
+    // The break_word verdict here MUST match `normal`'s verdict —
+    // whitespace breaks only.
+    auto narrow_normal = shaper.layout_with_lines(prepared, 40.0f, 0, 0, BreakMode::normal);
+    REQUIRE(narrow_layout.line_count == narrow_normal.line_count);
+    for (size_t k = 0; k < narrow_layout.lines.size(); ++k) {
+        REQUIRE(narrow_layout.lines[k].text == narrow_normal.lines[k].text);
+    }
+}
+
+TEST_CASE("TextShaper BreakMode::anywhere splits at codepoint boundaries",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    // anywhere is a stricter version of break_word: the contract still
+    // applies (don't overflow when a break opportunity exists), but
+    // ALL codepoints are break candidates. In our implementation,
+    // break_word and anywhere coincide on the overflow branch — this
+    // test pins that they both round-trip the same way for an
+    // over-wide single word.
+    auto prepared = shaper.prepare("Antidisestablishmentarianism", "system", 14);
+    auto layout = shaper.layout_with_lines(prepared, 25.0f, 0, 0, BreakMode::anywhere);
+    REQUIRE(layout.line_count >= 2);
+    std::string reconstructed;
+    for (const auto& line : layout.lines) reconstructed += line.text;
+    REQUIRE(reconstructed == "Antidisestablishmentarianism");
+}
+
+TEST_CASE("TextShaper BreakMode never breaks inside a UTF-8 codepoint",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    // Mixed ASCII + multibyte UTF-8 (here: U+00E9 LATIN SMALL LETTER E
+    // WITH ACUTE, encoded as 0xC3 0xA9 — 2 bytes, 1 codepoint).
+    // Splitting inside a multibyte sequence would corrupt the output;
+    // utf8_byte_offset_for_codepoints must always land on a codepoint
+    // boundary. Verify by checking each emitted line's bytes are
+    // valid UTF-8 (no orphan continuation bytes at start/end).
+    // U+00E9 = 0xC3 0xA9. Use string-literal concatenation so each \x
+    // escape doesn't greedily consume subsequent hex characters.
+    auto prepared = shaper.prepare("aaaaa" "\xc3\xa9" "\xc3\xa9" "\xc3\xa9" "aaaaa",
+                                    "system", 14);
+    auto layout = shaper.layout_with_lines(prepared, 20.0f, 0, 0, BreakMode::break_word);
+    for (const auto& line : layout.lines) {
+        if (line.text.empty()) continue;
+        // First byte must NOT be a continuation byte (0x80-0xBF)
+        const unsigned char first = static_cast<unsigned char>(line.text.front());
+        REQUIRE((first & 0xC0) != 0x80);
+        // Last byte either ASCII (top bit 0) or a complete sequence —
+        // walk the string and verify the final codepoint terminates
+        // before end-of-string.
+        size_t i = 0;
+        while (i < line.text.size()) {
+            unsigned char b = static_cast<unsigned char>(line.text[i]);
+            int len = 1;
+            if      ((b & 0x80) == 0)    len = 1;
+            else if ((b & 0xE0) == 0xC0) len = 2;
+            else if ((b & 0xF0) == 0xE0) len = 3;
+            else if ((b & 0xF8) == 0xF0) len = 4;
+            REQUIRE(i + len <= line.text.size());
+            i += len;
+        }
+    }
+}
+
+TEST_CASE("TextShaper BreakMode::normal default-arg matches the no-arg overload",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("hello world how are you", "system", 14);
+    auto without_mode = shaper.layout(prepared, 50.0f);
+    auto with_normal  = shaper.layout(prepared, 50.0f, 0, 0, BreakMode::normal);
+    // The default value of BreakMode must be `normal`. If anyone changes
+    // the default in the header, this test fires before any consumer
+    // notices a behavior change.
+    REQUIRE(without_mode.line_count == with_normal.line_count);
+    for (size_t k = 0; k < without_mode.lines.size(); ++k) {
+        REQUIRE_THAT(without_mode.lines[k].width,
+                     WithinAbs(with_normal.lines[k].width, 0.001f));
+    }
+}
