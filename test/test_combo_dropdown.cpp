@@ -201,3 +201,55 @@ TEST_CASE("ComboBox: opening a second dropdown closes the first [issue-overlay]"
 
     ComboBox::close_active_popup();
 }
+
+// pulp #1818 — when a ComboBox is destroyed while its dropdown is open,
+// `~ComboBox` MUST clear the static `active_popup_` slot. Otherwise the
+// platform window host dereferences a dangling pointer on the next
+// mouseDown (PAC failure on the vtable load — exact crash signature in
+// the issue report). Reproducer: open dropdown (sets active_popup_),
+// drop the ComboBox, assert the slot is nullptr.
+TEST_CASE("ComboBox: dtor clears active_popup_ when destroyed while open [issue-1818]",
+          "[combo][regression][issue-1818]") {
+    ComboBox::close_active_popup();
+    REQUIRE(ComboBox::active_popup_ == nullptr);
+
+    {
+        ComboBox combo;
+        combo.set_items({"one", "two", "three"});
+        combo.set_bounds({0, 0, 100, 28});
+
+        MouseEvent click;
+        click.position = {50.0f, 14.0f};
+        click.is_down = true;
+        combo.on_mouse_event(click);
+
+        REQUIRE(combo.is_open());
+        REQUIRE(ComboBox::active_popup_ == &combo);
+    }
+    // Destructor ran — the static must NOT still hold a freed pointer,
+    // because any subsequent `notify_global_click` / window-host
+    // `active_popup_` deref would crash.
+    REQUIRE(ComboBox::active_popup_ == nullptr);
+
+    // notify_global_click is the hot path called from -[PulpView mouseDown:].
+    // Must be safe to call after the dropdown owner has been freed.
+    ComboBox::notify_global_click(nullptr);
+    REQUIRE(ComboBox::active_popup_ == nullptr);
+}
+
+// pulp #1818 — same shape for `View::active_overlay_`. This regression
+// guard mirrors the pulp #1148 fix already present in `~View()` but
+// asserts it explicitly so a future refactor that drops the clear is
+// caught immediately rather than at the next user click.
+TEST_CASE("View: dtor clears active_overlay_ when destroyed while claimed [issue-1818]",
+          "[view][regression][issue-1818]") {
+    REQUIRE(pulp::view::View::active_overlay_ == nullptr);
+
+    {
+        pulp::view::View v;
+        v.claim_overlay();
+        REQUIRE(pulp::view::View::active_overlay_ == &v);
+    }
+    REQUIRE(pulp::view::View::active_overlay_ == nullptr);
+}
+

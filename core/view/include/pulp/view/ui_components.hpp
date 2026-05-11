@@ -32,6 +32,16 @@ public:
         set_access_role(AccessRole::slider);
     }
 
+    // pulp #1818 — clear the static `active_popup_` slot if this dying
+    // ComboBox holds it. Without this, an unmounted React dropdown leaves
+    // a dangling pointer that the platform window host dereferences on
+    // the next mouseDown (PAC failure on the vtable load — exact crash
+    // signature in the issue). Pattern matches `~View()` for `active_overlay_`
+    // and `focused_input_`.
+    ~ComboBox() override {
+        if (active_popup_ == this) active_popup_ = nullptr;
+    }
+
     void set_items(std::vector<std::string> items) { items_ = std::move(items); }
     const std::vector<std::string>& items() const { return items_; }
 
