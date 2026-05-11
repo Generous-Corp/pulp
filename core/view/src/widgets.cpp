@@ -448,13 +448,50 @@ void Label::paint(canvas::Canvas& canvas) {
 
     // Vertical alignment
     float lh = line_height_ > 0 ? line_height_ : effective_font_size * 1.4f;
+
+    // pulp #1737 PR-2 — CSS `overflow-wrap` / `word-break` soft-wrap path.
+    // When `View::word_break_` opts into break-word or anywhere AND the
+    // Label is multi_line AND we have a bounded width, route the layout
+    // through TextShaper so over-wide words split inside instead of
+    // overflowing. Default (`normal` or empty) keeps the legacy `\n`-only
+    // split below — zero behavior change for existing consumers.
+    //
+    // The shaped layout is computed ONCE here and reused both for the
+    // vertical-align metrics (source_lines / text_h) and the rendering
+    // loop further down. This avoids a double-shape and keeps line-clamp /
+    // ellipsis / vertical-align integration coherent across modes.
+    const std::string wb = word_break();
+    canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
+    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
+    const bool use_shaper_wrap =
+        multi_line_ &&
+        break_mode != canvas::BreakMode::normal &&
+        bounds().width > 0.0f;
+
+    canvas::ShapedLayout shaped_layout;
+    if (use_shaper_wrap) {
+        auto& shaper = canvas::global_text_shaper();
+        auto prepared = shaper.prepare(display_text, family, effective_font_size);
+        shaped_layout = shaper.layout_with_lines(
+            prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+    }
+
     // pulp #1552 — when line-clamp drops source lines, the painted block
     // height must reflect the *visible* line count, not the full newline
     // count. Otherwise vertical-align: center / bottom positions the
     // block as if the hidden lines were still rendered, leaving the
     // visible lines offset upward (Codex P2 on PR #1573).
-    int source_lines = multi_line_ ? static_cast<int>(
-        std::count(display_text.begin(), display_text.end(), '\n')) + 1 : 1;
+    //
+    // pulp #1737 PR-2 — `source_lines` for the soft-wrap path is the
+    // shaped layout's line count (which already accounts for inside-word
+    // breaks). For the legacy path it stays count('\n') + 1.
+    int source_lines = multi_line_
+        ? (use_shaper_wrap
+               ? std::max(1, shaped_layout.line_count)
+               : static_cast<int>(std::count(display_text.begin(),
+                                             display_text.end(), '\n')) + 1)
+        : 1;
     int visible_lines = source_lines;
     if (multi_line_ && line_clamp_ > 0 && line_clamp_ < source_lines)
         visible_lines = line_clamp_;
@@ -548,31 +585,55 @@ void Label::paint(canvas::Canvas& canvas) {
         // 0 disables clamping (matches CSS spec; spec uses `none`).
         // visible_lines / source_lines / text_h are computed earlier so
         // vertical-align positioning reflects the clamped block height.
-        bool need_ellipsis = (line_clamp_ > 0 && source_lines > line_clamp_);
+        const bool need_ellipsis = (line_clamp_ > 0 && source_lines > line_clamp_);
 
         // Start from the clamped baseline so the first visible line
         // sits at the top of the centered/bottom-aligned block.
         float y = baseline_y;
-        size_t pos = 0;
         int emitted = 0;
-        while (pos < display_text.size()) {
-            if (emitted >= visible_lines) break;
-            size_t nl = display_text.find('\n', pos);
-            if (nl == std::string::npos) nl = display_text.size();
-            std::string line = display_text.substr(pos, nl - pos);
-            // Last visible line under a clamp that truncated source lines:
-            // append U+2026 (UTF-8: 0xE2 0x80 0xA6) to signal truncation.
-            // pulp #1552 — matches the CSS "block-axis ellipsis" intent
-            // for line-clamp (the spec ties this to text-overflow: ellipsis;
-            // pulp's Label honors that intent without requiring the
-            // separate text-overflow keyword to also be set).
-            if (need_ellipsis && (emitted + 1 == visible_lines)) {
-                line.append("\xe2\x80\xa6");
+
+        if (use_shaper_wrap) {
+            // pulp #1737 PR-2 — shaped-layout iteration path. TextShaper
+            // already split display_text into shaped_layout.lines using
+            // the active BreakMode (break-word / anywhere). Iterate
+            // those lines instead of `\n`-splitting. Line-clamp +
+            // ellipsis logic is identical — driven by source_lines
+            // (= shaped_layout.line_count) and visible_lines.
+            for (const auto& shaped_line : shaped_layout.lines) {
+                if (emitted >= visible_lines) break;
+                std::string line = shaped_line.text;
+                if (need_ellipsis && (emitted + 1 == visible_lines)) {
+                    line.append("\xe2\x80\xa6");
+                }
+                canvas.fill_text(line, x, y);
+                y += lh;
+                ++emitted;
             }
-            canvas.fill_text(line, x, y);
-            y += lh;
-            pos = nl + 1;
-            ++emitted;
+        } else {
+            // Legacy `\n`-only split path — bit-identical to pre-#1737.
+            // Used when word_break is "normal" (the default) OR when
+            // bounds().width is 0 / unbounded. Existing consumers see
+            // exactly the previous behavior.
+            size_t pos = 0;
+            while (pos < display_text.size()) {
+                if (emitted >= visible_lines) break;
+                size_t nl = display_text.find('\n', pos);
+                if (nl == std::string::npos) nl = display_text.size();
+                std::string line = display_text.substr(pos, nl - pos);
+                // Last visible line under a clamp that truncated source lines:
+                // append U+2026 (UTF-8: 0xE2 0x80 0xA6) to signal truncation.
+                // pulp #1552 — matches the CSS "block-axis ellipsis" intent
+                // for line-clamp (the spec ties this to text-overflow: ellipsis;
+                // pulp's Label honors that intent without requiring the
+                // separate text-overflow keyword to also be set).
+                if (need_ellipsis && (emitted + 1 == visible_lines)) {
+                    line.append("\xe2\x80\xa6");
+                }
+                canvas.fill_text(line, x, y);
+                y += lh;
+                pos = nl + 1;
+                ++emitted;
+            }
         }
     }
 

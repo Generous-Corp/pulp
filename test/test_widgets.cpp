@@ -1419,3 +1419,113 @@ TEST_CASE("Label::paint always ends with clear_font_features (Codex P1 on #1791)
         REQUIRE(canvas.calls.back() == FontFeatureSpyCanvas::Kind::clear);
     }
 }
+
+// ── pulp #1737 PR-2 — Label soft-wrap via TextShaper::layout_with_lines ──
+// PR-1 added the BreakMode plumbing inside TextShaper. PR-2 (this PR)
+// wires Label::paint multi-line path to consume TextShaper when
+// View::word_break_ opts into break-word or anywhere AND bounds().width
+// is bounded. Default (`normal` / empty) keeps the legacy `\n`-only
+// split — these tests pin both paths so a future change can't silently
+// flip semantics for either.
+
+TEST_CASE("Label soft-wrap: word_break='break-word' splits long unbroken word",
+          "[view][widget][issue-1737]") {
+    Label label("Antidisestablishmentarianism");
+    label.set_bounds({0, 0, 60, 100});
+    label.set_multi_line(true);
+    label.set_word_break("break-word");
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    // Single 28-char word at width 60 — should produce >1 line under
+    // break-word. Default `normal` would emit exactly 1 line that
+    // overflows.
+    REQUIRE(text_cmds.size() >= 2);
+
+    // Reconstruction must be lossless for the non-whitespace characters.
+    std::string reconstructed;
+    for (const auto& cmd : text_cmds) reconstructed += cmd.text;
+    REQUIRE(reconstructed == "Antidisestablishmentarianism");
+}
+
+TEST_CASE("Label soft-wrap: word_break='normal' falls through to legacy \\n-split",
+          "[view][widget][issue-1737]") {
+    Label label("Antidisestablishmentarianism");
+    label.set_bounds({0, 0, 60, 100});
+    label.set_multi_line(true);
+    label.set_word_break("normal");  // explicit, but matches default
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    // Legacy path emits exactly one fill_text per `\n`-delimited line.
+    // No newlines in input → exactly 1 fill_text (overflowing — same
+    // behavior as pre-#1737 for `normal`).
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(text_cmds.size() == 1);
+    REQUIRE(text_cmds[0].text == "Antidisestablishmentarianism");
+}
+
+TEST_CASE("Label soft-wrap: word_break='anywhere' also splits, same as break-word for over-wide single word",
+          "[view][widget][issue-1737]") {
+    Label label("Supercalifragilisticexpialidocious");
+    label.set_bounds({0, 0, 50, 100});
+    label.set_multi_line(true);
+    label.set_word_break("anywhere");
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(text_cmds.size() >= 2);
+
+    std::string reconstructed;
+    for (const auto& cmd : text_cmds) reconstructed += cmd.text;
+    REQUIRE(reconstructed == "Supercalifragilisticexpialidocious");
+}
+
+TEST_CASE("Label soft-wrap: line-clamp truncates wrapped lines + appends ellipsis",
+          "[view][widget][issue-1737]") {
+    Label label("Antidisestablishmentarianism");  // single long word
+    label.set_bounds({0, 0, 60, 100});
+    label.set_multi_line(true);
+    label.set_word_break("break-word");
+    label.set_line_clamp(2);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    // line_clamp=2 caps emitted lines at 2 (assuming the word produces
+    // ≥3 shaped lines at width 60).
+    REQUIRE(text_cmds.size() <= 2);
+    if (text_cmds.size() == 2) {
+        // pulp #1552 — last visible line under line-clamp gets the
+        // U+2026 (UTF-8 0xE2 0x80 0xA6) ellipsis appended.
+        const std::string& last = text_cmds.back().text;
+        REQUIRE(last.size() >= 3);
+        REQUIRE((unsigned char)last[last.size()-3] == 0xE2);
+        REQUIRE((unsigned char)last[last.size()-2] == 0x80);
+        REQUIRE((unsigned char)last[last.size()-1] == 0xA6);
+    }
+}
+
+TEST_CASE("Label soft-wrap: bounds().width == 0 falls through to legacy path (no shaper invocation)",
+          "[view][widget][issue-1737]") {
+    Label label("hello world how are you");
+    // NO bounds set — bounds().width defaults to 0
+    label.set_multi_line(true);
+    label.set_word_break("break-word");
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    // With no bounded width, soft-wrap can't decide where to break.
+    // Fall through to the legacy path which emits one fill_text per
+    // \n-delimited line — exactly 1 fill_text since input has no \n.
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(text_cmds.size() == 1);
+    REQUIRE(text_cmds[0].text == "hello world how are you");
+}

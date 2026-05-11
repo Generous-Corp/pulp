@@ -2528,20 +2528,18 @@
       "issue": ""
     },
     "css/overflowWrap": {
-      "status": "partial",
-      "mapsTo": "web-compat-style-decl.js forwards `overflow-wrap` (and the legacy `word-wrap` alias) to setWordBreak(id, value). Storage-only today on View::word_break_; HarfBuzz line-break feature integration is the paint-side follow-up.",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `overflow-wrap` (and the legacy `word-wrap` alias) to setWordBreak(id, value) -> View::set_word_break -> Label::paint reads View::word_break() -> maps to canvas::BreakMode (normal / break_word / anywhere) -> TextShaper::layout_with_lines applies in-segment splits when an over-wide word can't fit on the current line.",
       "supportedValues": [
         "normal",
         "break-word",
         "anywhere"
       ],
-      "unsupportedValues": [
-        "normal",
-        "break-word",
-        "anywhere"
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widgets#issue-1737"
       ],
-      "tests": [],
-      "notes": "pulp #1434 A4 Bundle 4: missing -> partial -> supported. Bridge fn setWordBreak (shared with `word-break` / `word-wrap`) stores the keyword on View::word_break_; all 3 CSS-spec values (normal | break-word | anywhere) round-trip through the bridge. HarfBuzz line-break feature integration at paint time is the behavior-fidelity follow-up; the catalog claim is keyword-coverage complete. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. Bridge stores the value on View::word_break_ for round-trip queries but TextShaper / Label paint paths never consume it; line-break behavior is unchanged from whatever the default is. unsupportedValues lists every accepted keyword because storage-only — no paint-path consumes View::word_break_.",
+      "notes": "pulp #1434 A4 Bundle 4 (initial flip), pulp #1616 (walked back to partial when audit confirmed paint-path didn't consume the value), pulp #1737 PR-1 (#1795 — added BreakMode + codepoint-break logic to TextShaper::layout_from_segments), pulp #1737 PR-2 (this slice — wired Label::paint multi_line path to TextShaper::layout_with_lines when word_break is break-word/anywhere AND bounds().width > 0). Default `normal` keeps the legacy \\n-only split for zero behavior change. Tested end-to-end in test_widgets [issue-1737]: 'Antidisestablishmentarianism' at width 60 with break-word produces multi-line wrapped output (lossless reconstruction), with line-clamp=2 the second line gets the U+2026 ellipsis, and bounds().width==0 falls through to the legacy path (no shaper invocation). The proportional-split heuristic (seg.width / utf8_codepoints per codepoint) trades pixel-perfect break positions for measure-once-reflow-forever cache reuse — CSS Text Module Level 3 §6.1 doesn't require pixel-perfect break positions for soft-wrap.",
       "issue": ""
     },
     "css/overflowX": {
