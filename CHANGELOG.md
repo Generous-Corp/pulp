@@ -15,6 +15,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - chore(catalog): css/touchAction noop → wontfix (architectural — pointerEvents covers hit-test contract) ([#1794](https://github.com/danielraffel/pulp/pull/1794))
 
 <a id="v0821"></a>
+## [0.83.0]
+
 ## [0.82.1] - 2026-05-10
 
 - fix(view): currentColor honors element's own text color (Codex P2 on #1728) ([#1778](https://github.com/danielraffel/pulp/pull/1778))
