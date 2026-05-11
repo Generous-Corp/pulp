@@ -2249,8 +2249,11 @@ void SkiaCanvas::ellipse(float cx, float cy, float rx, float ry,
     SkMatrix m = SkMatrix::I();
     m.preTranslate(cx, cy);
     m.preRotate(rotation * kRadToDeg);
+    // Skia m144 (chrome): SkPath::transform(SkMatrix) is gone — apply
+    // transform on the builder before detaching, instead of mutating
+    // the SkPath after. Same semantics, m144-compatible API.
+    tmp.transform(m);
     SkPath rotated = tmp.detach();
-    rotated.transform(m);
     // Append rotated path into the live builder, preserving the current
     // subpath. kExtend connects the rotated arc's first point to the
     // existing pen position with an implicit lineTo (matching CSS

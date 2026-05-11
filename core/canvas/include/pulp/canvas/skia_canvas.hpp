@@ -441,10 +441,14 @@ private:
     std::string filter_source_ = "none";
     sk_sp<SkImageFilter> filter_image_filter_;
 
+public:
     // pulp #1520 — wrap an arbitrary paint with the active ctx.filter
     // SkImageFilter chain (no-op when filter is "none" or unparsable).
     // Centralised so fill / stroke / text / image draws can opt in
     // without touching every call site.
+    // Public for test_canvas.cpp filter-pipeline tests added in #1791;
+    // the implementation is a pure paint-state mutation, no class
+    // invariant gets violated by external callers.
     void apply_filter(SkPaint& paint) const;
 };
 

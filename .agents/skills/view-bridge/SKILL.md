@@ -117,6 +117,157 @@ polls the same `StateStore`; there is no explicit broadcast step.
 Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
 `ViewRole::Remote` secondary view.
 
+## ⚠️ TRACKPAD / SCROLL-WHEEL ZOOM SILENTLY BROKEN — 3 bugs in one stack (2026-05-10)
+
+**Searchable keywords**: trackpad zoom, scroll-wheel zoom, mouse wheel, "1.00x zoom" stuck, deltaY missing, deltaY=0, wheel event not firing, FilterBank zoom, Spectr zoom, onWheel, addEventListener('wheel'), registerWheel never called, wheel bubble, ancestor not receiving wheel, canvas-child captures wheel, wheel handler short-circuits.
+
+**Symptom**: in Spectr (and likely any @pulp/react consumer that uses a
+canvas child inside a wheel-handling wrap-div), scroll-wheel or
+trackpad scroll over the canvas does NOT trigger the wrap-div's zoom
+handler. The zoom indicator stays "1.00x" no matter how many wheel
+events fire.
+
+**Three independent bugs stacked**, all needed fixing to make zoom work:
+
+### Bug A: `on(id, 'wheel', fn)` never invoked `registerWheel(id)`
+The `on()` JS function in `kJSPreamble` mapped event names to native
+registrars (click → `registerClick`, pointer events → `registerPointer`,
+gesture events → `registerGesture`), but had **no case for `'wheel'`**.
+Spectr's editor.js bound a wheel handler via `addEventListener('wheel',
+fn)` which routes through `on(id, 'wheel', fn)`. The callback was
+stored in `__callbacks__[id + ':wheel']` but the native side was never
+told this view wanted wheel events. Result: `registerWheel` ran for 0
+views, wheel events had no JS receivers.
+
+**Fix**: add a `wheel` case to `on()` + a `wheel` group to
+`__ensureNativeRegistered__()` so `on(id, 'wheel', fn)` calls
+`registerWheel(id)` to wire the native dispatch. (`core/view/src/widget_bridge.cpp` `kJSPreamble`.)
+
+### Bug B: bubble loop short-circuited on the wrong handler
+`window_host_mac.mm::scrollWheel:` walked from the hit-tested deepest
+view up to find the first ancestor with `on_pointer_event` set, then
+delivered the wheel event there and returned. But the deepest hit
+(typically a Canvas2D child) had `on_pointer_event` registered via
+`registerPointer` (for pointerdown/up/move/cancel) — that lambda
+short-circuits on `is_wheel` (it's the pointer-only handler). The
+bubble therefore delivered the wheel event to a no-op handler and
+returned, never reaching the wrap-div ancestor that had registered the
+ZOOM handler via `registerWheel`.
+
+**Fix**: change `scrollWheel:` to deliver to EVERY ancestor with
+`on_pointer_event` set (not stop at the first). Each handler self-
+filters on `me.is_wheel`: `registerPointer`'s lambda short-circuits
+when `is_wheel == true`, `registerWheel`'s short-circuits when `false`.
+So a view that registered both gets both halves; a view that registered
+only one ignores the other. ScrollView ancestor still takes precedence
+and stops the walk. (`core/view/platform/mac/window_host_mac.mm`.)
+
+### Bug C: wheel-event payload missing `clientX/clientY/deltaY` (already fixed in #1792)
+Already addressed earlier in the PR: bridge emits
+`{deltaX, deltaY, clientX, clientY}` as an object (not positional args)
+so the `@pulp/react` synthetic-event shim's `isPlainObject(rawArgs[0])`
+branch can lift the fields. Without this, even after Bugs A+B were
+fixed, `e.deltaY` would be undefined and `e.clientX - rect.left` would
+read 0.
+
+### How to diagnose if zoom is broken again
+
+1. `fprintf(stderr, ...)` in `scrollWheel:` to confirm the NSView even
+   receives the event — if not, accessibility / focus issue.
+2. Confirm `registerWheel('<view_id>')` is being called after the
+   view's editor.js mounts. If never called, Bug A is back.
+3. Confirm the bubble walk reaches the wrap-div, not stopping at the
+   canvas child. Print the chain `target → parent → … → root` and
+   note which have `on_pointer_event` set.
+4. Confirm `__dispatch__(view_id, 'wheel', {deltaX, deltaY, clientX,
+   clientY})` is called with non-zero deltas. If `clientX/clientY` are
+   0, `me.window_position` was not set in `scrollWheel:`.
+5. In Spectr's `native-react/dist/editor.js` bundle, `grep deltaY` —
+   expect ≥3 mentions. If 1 or 0, the bundle was built against an old
+   `@pulp/react` without the synthetic-event delta fields and the
+   bundle needs `npm run build:port`.
+
+### Tooling: drive wheel events programmatically
+
+`cliclick` has no wheel command (`w:N` is WAIT, not WHEEL). Compile a
+tiny tool:
+
+```c
+// /tmp/scroll-event.c
+#include <ApplicationServices/ApplicationServices.h>
+int main(int argc, char** argv) {
+    int count = argc > 1 ? atoi(argv[1]) : 10;
+    int delta = argc > 2 ? atoi(argv[2]) : 5;
+    for (int i = 0; i < count; i++) {
+        CGEventRef ev = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 1, delta);
+        CGEventPost(kCGHIDEventTap, ev);
+        CFRelease(ev);
+        usleep(50000);
+    }
+}
+```
+
+Build: `clang -framework ApplicationServices -o /tmp/scroll-event /tmp/scroll-event.c`. Posts real CGEvent scroll-wheel events that reach `NSView::scrollWheel:`. Use `/tmp/scroll-event 30 5` to inject 30 scroll-up events.
+
+## ⚠️ STALE-HEADER ABI MISMATCH — silent crash at first paint (2026-05-10)
+
+**Searchable keywords**: silent crash, "Standalone: editor window open"
+then exit, segfault inside `WidgetBridge::register_api()::$_NNN`,
+`byte read Translation fault` at `x9=0` during Promise reaction, JS
+`__dispatch__` from `pump_message_loop`, Spectr exits after CoreAudio
+init, `pointer_registered_`, `wheel_registered_`, link-swap, install
+prefix, `/tmp/pulp-sdk-gpu-latest`, `pulp upgrade --install`.
+
+**The trap**: any PR that adds/removes/reorders **member variables**
+on `WidgetBridge` (or any other class whose layout consumers compile
+against) changes the C++ struct layout. If the **installed SDK
+header** under the consumer's `Pulp_DIR` is OLDER than the
+**installed SDK static library**, the consumer's translation units
+compute member offsets from the old (smaller) layout while the lib's
+own translation units (lambdas registered in `register_api()`) use the
+new (larger) layout. Member access from a lambda points into the
+wrong byte — typically NULL or garbage — and the first access
+SIGSEGVs.
+
+This presents as a "silent crash" because:
+- macOS shows the editor window briefly
+- The first paint frame logs `[gpu-host] first frame: …`
+- Then a Promise reaction (React's commit phase) fires a registered
+  C++ callback that does a member load → segfault → process dies
+- The standalone parent (zsh / shell) reports nothing useful
+
+The macOS crash report tells you everything: open
+`~/Library/Logs/DiagnosticReports/<App>-<date>.ips`, look at thread 0's
+faulting frame. If it's `WidgetBridge::register_api()::$_NNN + <offset>`
+with `Exception Subtype: KERN_INVALID_ADDRESS at 0x…` and `x9=0` (or
+some other register pointing into the bridge struct), you have an ABI
+mismatch.
+
+**Fix**:
+```bash
+# Re-install the header to the SDK consumer's install prefix
+cp core/view/include/pulp/view/widget_bridge.hpp \
+   "$PULP_SDK_INSTALL/include/pulp/view/widget_bridge.hpp"
+
+# Wipe the consumer's stale .o files (they were compiled with old offsets)
+rm -rf "$CONSUMER/build/CMakeFiles/<your-target>.dir"
+
+# Rebuild the consumer from clean
+cmake --build "$CONSUMER/build" --target <your-target> -j
+```
+
+When you `pulp upgrade --install` this is automatic because the SDK
+release lays down headers + libs together from one build. The trap
+only fires when you **link-swap a fresh `libpulp-view.a` into an SDK
+install whose header is stale**, which is the failure mode for local
+SDK-side iteration outside the `pulp upgrade` flow.
+
+**Belt-and-suspenders mitigation** (TODO followup): consider adding a
+build-time assertion in widget_bridge.hpp using `_Static_assert(sizeof(WidgetBridge) == EXPECTED, …)`,
+where `EXPECTED` is generated at SDK release time from the actual
+library build. A stale header would then fail to compile against the
+fresh lib instead of segfaulting at first paint.
+
 ## Common pitfalls
 
 1. **Forgetting `notify_attached()` after a successful attach.** The
@@ -293,6 +444,88 @@ Key invariants:
 When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
+
+## Event-bridge dispatch payload contract — the @pulp/react surface
+
+WidgetBridge talks to JS by calling `__dispatch__(id, eventName, ...rawArgs)`.
+The `@pulp/react` synthetic-event shim (`packages/pulp-react/src/synthetic-event.ts`)
+inflates those raw args into a React-DOM-compatible event. **Both sides
+of this contract must move together or JSX handlers silently break.**
+
+The shim's `makeSyntheticEvent` only lifts fields off the first arg when
+`isPlainObject(rawArgs[0])` is true. Positional args (e.g. `wheel(dx, dy)`)
+fall through to the empty default object and `e.deltaY` is `undefined`.
+That class of regression is what cost us multiple PRs on the Spectr
+band-drawing / trackpad-zoom / Escape-modal fixes.
+
+### Required payload shapes
+
+| Event family | Raw shape (object literal) | Why each field |
+|---|---|---|
+| `pointerdown` / `pointerup` / `pointercancel` | `{clientX, clientY, offsetX, offsetY, pointerId, pointerType, isPrimary, pressure, altitudeAngle, azimuthAngle, button (W3C: 0=left, 1=middle, 2=right), ctrlKey, shiftKey, altKey, metaKey}` | JSX reads `e.clientX - rect.left`, hit-tests by `e.button`, and gates UI on modifier booleans |
+| `pointermove` | `{clientX, clientY, offsetX, offsetY, pointerId, pointerType, isPrimary}` | dragged from `on_drag(local pos)`; `clientX/Y` MUST be window-relative — walk parent-chain `bounds()` to compute |
+| `wheel` | `{deltaX, deltaY, clientX, clientY}` **as an object, not positional args** | The synthetic-event shim's plain-object branch is the only one that lifts wheel deltas |
+| `keydown` / `keyup` | `{key (W3C UIEvent.key string: 'Escape', 'ArrowLeft', 'F1', 'a', ' ', etc.), keyCode (raw int), ctrlKey, shiftKey, altKey, metaKey, mods}` | JSX compares `e.key === 'Escape'`; the raw int alone is unusable |
+| `gesturestart` / `gesturechange` / `gestureend` | `{scale, rotation, clientX, clientY}` | matches Safari GestureEvent |
+| `change` / `input` (text) | `rawArgs[0]` is the string value, not an object | the synthetic-event shim treats `typeof === 'string'` as a change event |
+
+### Required JS preamble shape
+
+In `widget_bridge.cpp` the `kJSPreamble` and `kWindowListenerShim`
+strings MUST guarantee:
+
+- `__dispatch__(id, eventName, ...args)` wraps every callback in
+  `try/catch` and surfaces failures via `__dispatchError__` if defined.
+  Otherwise a single throwing handler kills the rAF self-rescheduling
+  loop and the whole animation pipeline dies until the next event
+  restarts it.
+- When `id === '__global__'`, fan the dispatch out to
+  `window._listeners[eventName]` so `window.addEventListener('keydown',
+  fn)` works without the full web-compat bundle.
+- `window` exposes `addEventListener` / `removeEventListener` /
+  `dispatchEvent` and `_listeners` via the minimal shim — install AFTER
+  all preludes so `var window = {...}` in `web-compat-document.js` does
+  not clobber the shim.
+
+### Native-side registrars MUST be idempotent
+
+`registerPointer(id)` / `registerWheel(id)` (and any future
+`registerX(id)`) wrap the previous `on_pointer_event` lambda. If a React
+re-render re-issues the registration, each call stacks a new wrapper —
+N renders → N firings per event. Always gate the registration with a
+per-id set (e.g. `pointer_registered_`, `wheel_registered_`) and
+early-return on duplicates.
+
+### macOS host-side bubbling
+
+`core/view/platform/mac/window_host_mac.mm` is the dispatch source for
+mouse / pointer / wheel on macOS. Every dispatcher MUST:
+
+- Set `me.window_position = pt` for wheel events (clientX/Y derives from
+  this). Without it JSX `e.clientX - rect.left` for anchor-frequency
+  zoom gives the wrong anchor.
+- Bubble `on_pointer_event` up the parent chain (W3C bubbling) so a
+  wrap-div with `registerPointer` subscribed gets events from canvas
+  children that win `hit_test`. The Spectr FilterBank band-drawer is
+  this exact pattern.
+- Leave `on_mouse_down` / `on_mouse_drag` / `on_mouse_up` deepest-wins
+  (those are the JUCE-style click channel, not the W3C bubbling channel).
+
+### Tests that pin the contract
+
+`test/test_widget_bridge.cpp` — `[contract]` tag:
+
+- "Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2"
+- "Event contract: forward_key_event emits W3C UIEvent.key strings + modifier booleans"
+- "Event contract: window.addEventListener('keydown', fn) receives __global__ keydown"
+- "Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws"
+- "Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}"
+- "Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)"
+
+Run with: `./build/test/pulp-test-widget-bridge "[contract]"`
+
+When adding any new event family or fields, add a corresponding
+`[contract]` case AND a row to the payload-shape table above.
 
 ## References
 

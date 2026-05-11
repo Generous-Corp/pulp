@@ -482,10 +482,48 @@ struct WidgetBridge::NativeGpuBridgeState {
 static const char* kJSPreamble = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
+// pulp #1XXX — __dispatch__ used to let any exception thrown from a
+// React handler propagate out of the JS engine's evaluate(), which
+// then unwound the C++ caller and (most damagingly) killed the
+// requestAnimationFrame self-rescheduling chain. Symptom: any tiny
+// throw from a rAF tick (a stale ref, a missing prop) and the whole
+// animation loop went dead, only restarting when an unrelated event
+// (e.g. mouse-move) ran the loop again. Wrap every handler in
+// try/catch and surface the error via __dispatchError__ if defined,
+// so handlers can throw without halting the world.
+//
+// Also fan out events targeting the synthetic '__global__' id into
+// window._listeners[eventName] — `window.addEventListener('keydown',
+// fn)` is the standard DOM API, but without this fan-out the native
+// keydown only fed __callbacks__['__global__:keydown'] (a per-id
+// channel nothing subscribes to). With it, Spectr-style global key
+// listeners just work.
 function __dispatch__(id, eventName) {
+    var args = Array.prototype.slice.call(arguments, 2);
     var key = id + ':' + eventName;
-    if (__callbacks__[key]) {
-        __callbacks__[key].apply(null, Array.prototype.slice.call(arguments, 2));
+    var cb = __callbacks__[key];
+    if (cb) {
+        try { cb.apply(null, args); }
+        catch (e) {
+            if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+        }
+    }
+    if (id === '__global__' && typeof window !== 'undefined' && window._listeners) {
+        var list = window._listeners[eventName];
+        if (list && list.length) {
+            var ev = args && args.length ? args[0] : {};
+            if (ev && typeof ev === 'object') {
+                ev.type = eventName;
+                if (typeof ev.preventDefault !== 'function') ev.preventDefault = function() { this.defaultPrevented = true; };
+                if (typeof ev.stopPropagation !== 'function') ev.stopPropagation = function() {};
+            }
+            for (var i = 0; i < list.length; i++) {
+                try { list[i](ev); }
+                catch (e) {
+                    if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+                }
+            }
+        }
     }
 }
 function __ensureNativeRegistered__(id, group) {
@@ -500,6 +538,8 @@ function __ensureNativeRegistered__(id, group) {
         registerPointer(id);
     } else if (group === 'gesture' && typeof registerGesture === 'function') {
         registerGesture(id);
+    } else if (group === 'wheel' && typeof registerWheel === 'function') {
+        registerWheel(id);
     }
 }
 function on(id, eventName, fn) {
@@ -515,7 +555,50 @@ function on(id, eventName, fn) {
     } else if (eventName === 'gesturestart' || eventName === 'gesturechange' ||
                eventName === 'gestureend') {
         __ensureNativeRegistered__(id, 'gesture');
+    } else if (eventName === 'wheel') {
+        // pulp #1XXX — Spectr's trackpad-zoom handler binds via
+        // addEventListener('wheel', fn) which routes through on(id,
+        // 'wheel', fn). Without this case the JS callback is stored
+        // but the C++ registerWheel(id) is never invoked, so wheel
+        // events never reach the JS handler. Critical for trackpad
+        // zoom on any wrap-div that subscribes via 'wheel'.
+        __ensureNativeRegistered__(id, 'wheel');
     }
+}
+)";
+
+// pulp #1XXX — Window event-listener shim installed AFTER the
+// web-compat-document.js prelude (which re-declares `var window = {...}`
+// and would clobber any addEventListener we installed earlier). This
+// shim is the minimal install needed for `__dispatch__('__global__',
+// 'keydown', ...)` fan-out to reach `window.addEventListener('keydown',
+// fn)` listeners. Spectr's `e.key === 'Escape'` flow depends on this.
+// Idempotent via the `__pulpListenerShim__` marker — re-eval safe.
+static const char* kWindowListenerShim = R"(
+if (typeof globalThis.window === 'undefined') globalThis.window = {};
+if (!globalThis.window.__pulpListenerShim__) {
+    globalThis.window.__pulpListenerShim__ = true;
+    if (!globalThis.window._listeners) globalThis.window._listeners = {};
+    globalThis.window.addEventListener = function(type, fn) {
+        if (!this._listeners[type]) this._listeners[type] = [];
+        this._listeners[type].push(fn);
+    };
+    globalThis.window.removeEventListener = function(type, fn) {
+        var list = this._listeners[type];
+        if (!list) return;
+        for (var i = list.length - 1; i >= 0; i--) if (list[i] === fn) list.splice(i, 1);
+    };
+    globalThis.window.dispatchEvent = function(ev) {
+        var list = this._listeners[ev && ev.type];
+        if (!list) return true;
+        for (var i = 0; i < list.length; i++) {
+            try { list[i](ev); }
+            catch (e) {
+                if (typeof __dispatchError__ === 'function') __dispatchError__('window', ev.type, String(e && e.stack ? e.stack : e));
+            }
+        }
+        return !(ev && ev.defaultPrevented);
+    };
 }
 )";
 
@@ -648,6 +731,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // `globalThis.__pulpImportRuntime__` so non-import scripts don't
     // see new globals.
     eval_or_throw(engine_, "import_runtime", preludes::import_runtime);
+    // Install the window event-listener shim LAST so it survives any
+    // `var window = {...}` reassignment performed by the preludes above
+    // (notably web-compat-document.js). See kWindowListenerShim comment.
+    eval_or_throw(engine_, "kWindowListenerShim", kWindowListenerShim);
 }
 
 WidgetBridge::~WidgetBridge() {
@@ -1610,6 +1697,12 @@ void WidgetBridge::register_api() {
     // registerPointer(id) — enables pointer event dispatch for a widget
     engine_.register_function("registerPointer", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
+        // Idempotency: re-renders re-issue registerPointer for the same id.
+        // Without this gate each call wraps the previous on_pointer_event,
+        // stacking N lambdas and multiplying dispatch cost by render count.
+        if (!pointer_registered_.insert(id).second) {
+            return choc::value::Value();
+        }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
             auto* w = it->second;
@@ -1628,6 +1721,18 @@ void WidgetBridge::register_api() {
                 else type = "pointerup";
                 if (me.is_cancelled) type = "pointercancel";
 
+                // W3C MouseEvent.button: left=0, middle=1, right=2.
+                // MouseButton enum is left=1, right=2, middle=3 — must remap or
+                // every left-click reaches JS as button=1, which fires middle-
+                // click handlers (e.g. Spectr's pan-mode toggle) on every click
+                // and silently breaks left-click drag (e.g. band drawing).
+                int w3c_button = 0;
+                switch (me.button) {
+                    case MouseButton::left:   w3c_button = 0; break;
+                    case MouseButton::middle: w3c_button = 1; break;
+                    case MouseButton::right:  w3c_button = 2; break;
+                    case MouseButton::none:   w3c_button = 0; break;
+                }
                 std::string data = "{"
                     "clientX:" + std::to_string(me.window_position.x) + ","
                     "clientY:" + std::to_string(me.window_position.y) + ","
@@ -1639,7 +1744,7 @@ void WidgetBridge::register_api() {
                     "pressure:" + std::to_string(me.pressure) + ","
                     "altitudeAngle:" + std::to_string(me.altitude_angle) + ","
                     "azimuthAngle:" + std::to_string(me.azimuth_angle) + ","
-                    "button:" + std::to_string(static_cast<int>(me.button)) + ","
+                    "button:" + std::to_string(w3c_button) + ","
                     "ctrlKey:" + (me.isCtrlDown() ? "true" : "false") + ","
                     "shiftKey:" + (me.isShiftDown() ? "true" : "false") + ","
                     "altKey:" + (me.isAltDown() ? "true" : "false") + ","
@@ -1648,9 +1753,23 @@ void WidgetBridge::register_api() {
 
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "pointer");
             };
-            // W3C PointerEvents: forward drag as pointermove
-            w->on_drag = [alive, engine, id](Point pos) {
+            // W3C PointerEvents: forward drag as pointermove.
+            // Include clientX/clientY (window-relative) so JSX drag
+            // handlers reading `e.clientX - rect.left` (the standard
+            // pattern) get real coords. Pre-fix, pointermove only had
+            // offsetX/Y — JSX dragging a slider thumb or drawing a band
+            // column read clientX as 0 and the drag silently broke.
+            // Capture View* `w` so we can accumulate the parent chain
+            // bounds to convert local → window coords.
+            w->on_drag = [alive, engine, id, w](Point pos) {
+                float wx = pos.x, wy = pos.y;
+                for (View* cur = w; cur; cur = cur->parent()) {
+                    wx += cur->bounds().x;
+                    wy += cur->bounds().y;
+                }
                 std::string data = "{"
+                    "clientX:" + std::to_string(wx) + ","
+                    "clientY:" + std::to_string(wy) + ","
                     "offsetX:" + std::to_string(pos.x) + ","
                     "offsetY:" + std::to_string(pos.y) + ","
                     "pointerId:0,pointerType:'mouse',isPrimary:true}";
@@ -3656,6 +3775,12 @@ void WidgetBridge::register_api() {
     // registerWheel(id) — enable wheel event dispatch for scroll/zoom
     engine_.register_function("registerWheel", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
+        // Idempotency: re-renders re-issue registerWheel for the same id.
+        // Without this gate each call wraps the previous on_pointer_event,
+        // stacking N lambdas and multiplying dispatch cost by render count.
+        if (!wheel_registered_.insert(id).second) {
+            return choc::value::Value();
+        }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
             auto* w = it->second;
@@ -3669,7 +3794,20 @@ void WidgetBridge::register_api() {
                 if (!me.is_wheel) {
                     return;
                 }
-                std::string data = std::to_string(me.scroll_delta_x) + "," + std::to_string(me.scroll_delta_y);
+                // Dispatch wheel data as an object so the synthetic-event
+                // shim can lift deltaX/deltaY + clientX/clientY off it.
+                // Pre-fix this sent raw positional args (deltaX,deltaY),
+                // which the synthetic event's isPlainObject(a0) branch
+                // never visited — JSX onWheel handlers read undefined
+                // deltas and trackpad zoom silently broke. Also include
+                // clientX/clientY (window-relative) so handlers reading
+                // `e.clientX - rect.left` work for anchor-frequency.
+                std::string data = "{"
+                    "deltaX:" + std::to_string(me.scroll_delta_x) + ","
+                    "deltaY:" + std::to_string(me.scroll_delta_y) + ","
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) +
+                    "}";
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'wheel', " + data + ")", "wheel");
             };
         }
@@ -8583,6 +8721,48 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     });
 }
 
+// Map a KeyCode enum value to its W3C UIEvent.key string. JSX handlers
+// in @pulp/react consumers read `e.key === 'Escape'` / `'ArrowLeft'` /
+// etc. — the previous implementation sent the raw int, so every such
+// comparison failed silently (e.g. Spectr's `e.key === 'Escape'` modal
+// close, history undo arrows, etc. were dead).
+static std::string keycode_to_w3c_key(int key_code, bool shift_held) {
+    using K = KeyCode;
+    auto kc = static_cast<K>(key_code);
+    switch (kc) {
+        case K::escape:    return "Escape";
+        case K::enter:     return "Enter";
+        case K::tab:       return "Tab";
+        case K::backspace: return "Backspace";
+        case K::delete_:   return "Delete";
+        case K::left:      return "ArrowLeft";
+        case K::right:     return "ArrowRight";
+        case K::up:        return "ArrowUp";
+        case K::down:      return "ArrowDown";
+        case K::home:      return "Home";
+        case K::end_:      return "End";
+        case K::page_up:   return "PageUp";
+        case K::page_down: return "PageDown";
+        case K::space:     return " ";
+        case K::f1:  return "F1";  case K::f2:  return "F2";
+        case K::f3:  return "F3";  case K::f4:  return "F4";
+        case K::f5:  return "F5";  case K::f6:  return "F6";
+        case K::f7:  return "F7";  case K::f8:  return "F8";
+        case K::f9:  return "F9";  case K::f10: return "F10";
+        case K::f11: return "F11"; case K::f12: return "F12";
+        default: break;
+    }
+    // Printable chars: letters lower-case unless shift, digits as-is.
+    if (key_code >= 'a' && key_code <= 'z') {
+        char c = shift_held ? static_cast<char>(key_code - 32) : static_cast<char>(key_code);
+        return std::string(1, c);
+    }
+    if (key_code >= '0' && key_code <= '9') {
+        return std::string(1, static_cast<char>(key_code));
+    }
+    return "Unidentified";
+}
+
 void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
     if (!is_down) return;
 
@@ -8595,9 +8775,27 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
         }
     }
 
+    // W3C UIEvent.key string; modifier booleans match KeyboardEvent
+    // (ctrlKey/shiftKey/altKey/metaKey). `keyCode` retained for legacy.
+    bool shift_held = (modifiers & kModShift) != 0;
+    std::string key_str = keycode_to_w3c_key(key_code, shift_held);
+    // JSON-escape backslash + quote (single-char ascii here is safe but
+    // keep the guard for safety against future printable additions).
+    std::string key_json;
+    key_json.reserve(key_str.size() + 2);
+    for (char c : key_str) {
+        if (c == '\\' || c == '\'') key_json += '\\';
+        key_json += c;
+    }
+
     engine_.evaluate("__dispatch__('__global__', 'keydown', {"
-        "key:" + std::to_string(key_code) +
-        ",mods:" + std::to_string(modifiers) + "})");
+        "key:'" + key_json + "',"
+        "keyCode:" + std::to_string(key_code) + ","
+        "ctrlKey:" + ((modifiers & kModCtrl) ? "true" : "false") + ","
+        "shiftKey:" + ((modifiers & kModShift) ? "true" : "false") + ","
+        "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + ","
+        "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + ","
+        "mods:" + std::to_string(modifiers) + "})");
 }
 
 } // namespace pulp::view
