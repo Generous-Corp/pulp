@@ -693,6 +693,37 @@ public:
         save_layer(x, y, w, h, opacity, blur);
     }
 
+    /// pulp #1737 / #1515 — CSS `mask-image` + `mask-size` paint slice.
+    /// Composes the subtree with a mask shader applied via SkBlendMode::
+    /// kDstIn so the painted result keeps only the alpha that the mask
+    /// permits. The Pulp pipeline:
+    ///   saveLayer(opacity)                       <- subtree paint target
+    ///     ... subtree paints into the layer ...
+    ///   saveLayer(SkBlendMode::kDstIn)           <- mask composite layer
+    ///     drawShader(mask_image, scaled by mask_size)
+    ///   restore()  <- composes the mask alpha onto the subtree
+    ///   restore()  <- composes the masked subtree to the parent
+    ///
+    /// `mask_image` is the CSS value verbatim — typically
+    /// `linear-gradient(...)`, `radial-gradient(...)`, `url(...)`, or
+    /// `none`. `mask_size` is the CSS mask-size value
+    /// (`auto | cover | contain | <length>{1,2}`).
+    ///
+    /// The matching `restore()` call drives the mask composite (the
+    /// canvas tracks pending masks on its save stack). Subclasses that
+    /// can't honor the mask fall back to the plain `save_layer` overload
+    /// (no mask applied — matches the existing behavior for backends
+    /// without shader support). Unrecognized / unparseable mask_image
+    /// values also fall back to the no-mask path so authors don't lose
+    /// their content to a parser error.
+    virtual void save_layer_with_mask(float x, float y, float w, float h,
+                                       float opacity,
+                                       const std::string& mask_image,
+                                       const std::string& mask_size) {
+        (void)mask_image; (void)mask_size;
+        save_layer(x, y, w, h, opacity, 0.0f);
+    }
+
     // ── Text ─────────────────────────────────────────────────────────────
     virtual void set_font(const std::string& family, float size) = 0;
     virtual void set_text_align(TextAlign align) = 0;

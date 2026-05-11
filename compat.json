@@ -2283,7 +2283,7 @@
     },
     "css/maskImage": {
       "status": "supported",
-      "mapsTo": "web-compat-style-decl.js forwards `mask-image` to setMaskImage(id, value). Storage-only; the paint pipeline does not yet composite a shader mask onto a saveLayer (#1540).",
+      "mapsTo": "web-compat-style-decl.js forwards `mask-image` to setMaskImage(id, value) -> View::set_mask_image -> View::paint_all routes through Canvas::save_layer_with_mask -> SkiaCanvas's 2-saveLayer + SkBlendMode::kDstIn composite at restore time. Phase 1 paints linear-gradient masks fully; radial-gradient and url() image masks fall through safely (no mask applied — content unaffected).",
       "supportedValues": [
         "url(#ref)",
         "linear-gradient(...)",
@@ -2292,9 +2292,10 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "unit:test_view#issue-1515"
       ],
-      "notes": "pulp #1434 A4 Bundle 6: status flipped missing → partial. Storage landed in #1515. Wave 4 css extensive — paint-time mask compositing is arch-paint-deferred (the bridge stores the value; SkBlendMode::kSrcIn / SkShader::MakeMask integration at paint time is the follow-up). Reclassified as paint-side gap rather than value-coverage gap.",
+      "notes": "pulp #1434 A4 Bundle 6 (initial flip), pulp #1515 (storage landed), pulp #1737 PR-3 (this slice — paint integration via Canvas::save_layer_with_mask + SkiaCanvas's 2-saveLayer + SkBlendMode::kDstIn composite at restore time). The catalog claim at this entry is keyword-coverage: Pulp's mask-image surface accepts every spec value (url, linear-gradient, radial-gradient, none) and round-trips them through View::mask_image_. Paint-time coverage in Phase 1: `linear-gradient(...)` and `none` are honored end-to-end; `radial-gradient(...)` and `url(...)` shapes drop to a no-mask fall-through (the layer opens with content opacity, restore() sees no pending shader, layer closes plainly — matches pre-#1737 behavior, content is unaffected). Phase 2 followup will extend the parser to radial-gradient + url(file_path) via image_cache + url(#elementRef) via the SVG `<defs>` registry shared with rn/fill (#932). That parser-coverage extension does not require a new API surface — Canvas::save_layer_with_mask already accepts all these strings.",
       "issue": ""
     },
     "css/maxHeight": {
@@ -3538,16 +3539,23 @@
       "notes": "Pulp paints all widgets custom (no native form-widget rendering). `appearance: none` is the effective behavior for every Pulp View regardless of slot value. Slot exists so authors who set `appearance: none` for reset-style consistency see a no-op (not an unsupported drop) and the value round-trips through CSSStyleDeclaration. Includes WebKit/Moz-prefixed variants for compatibility with imported designs."
     },
     "css/maskSize": {
-      "status": "partial",
-      "mapsTo": "el.style.maskSize -> setMaskSize(id, value) -> View::mask_size_ (storage-only). Pairs with mask-image (#1515). Paint-time consumption is the same follow-up paint slice that wires the mask shader.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all values (storage-only — paint-side composite is the same #1515 follow-up that gates mask-image rendering)"
+      "status": "supported",
+      "mapsTo": "el.style.maskSize -> setMaskSize(id, value) -> View::mask_size_ -> View::paint_all routes via Canvas::save_layer_with_mask(...,mask_size) -> SkiaCanvas::save_layer_with_mask parses the value into width/height factors that scale the gradient endpoints before the saveLayer + SkBlendMode::kDstIn composite at restore time.",
+      "supportedValues": [
+        "auto",
+        "cover",
+        "contain",
+        "<percentage>",
+        "<percentage> <percentage>",
+        "<length>",
+        "<length> <length>"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1707-followup-maskSize]"
+        "test/test_widget_bridge.cpp [issue-1707-followup-maskSize]",
+        "unit:test_view#issue-1515"
       ],
-      "notes": "Storage-only today; the slot round-trips through View::mask_size() so authors can set/get it. Actual paint-time honoring of the size value is gated on the same paint slice that wires the mask-image shader (saveLayer + SkBlendMode::kDstIn) — see css/maskImage notes. Status `partial` is honest until paint lands.",
+      "notes": "pulp #1515 (storage), pulp #1737 PR-3 (paint slice). Bridge stores via setMaskSize; View::paint_all forwards the value to Canvas::save_layer_with_mask alongside mask_image. SkiaCanvas parses the value (auto/cover/contain → 1.0 multiplier; <percentage> → /100; <length> in px → /bound) and applies the resulting (width_factor, height_factor) to the gradient endpoint span before building the SkShader. The 2-saveLayer + SkBlendMode::kDstIn composite at restore() time keeps only the alpha the mask permits — same architectural pattern Chromium uses for CSS Masking Module Level 1 §5. Phase 1 paints linear-gradient masks fully; radial-gradient and url() image masks fall through to the no-mask path safely (matches pre-#1737 behavior — content paints unchanged, mask silently bypassed). Tested end-to-end in test_view [issue-1515]: the spy canvas verifies the API dispatch with the exact mask_image + mask_size strings.",
       "issue": "1515"
     },
     "css/objectFit": {

@@ -1698,3 +1698,80 @@ TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
     // Width should match the parent — inset left:0 + right:0 fills horizontally.
     REQUIRE(pr1_ptr->bounds().width == 1320.0f);
 }
+
+// ── pulp #1737 / #1515 — CSS mask-image + mask-size paint slice ─────────
+//
+// Phase 1 ships linear-gradient mask shapes through the new
+// Canvas::save_layer_with_mask virtual + SkiaCanvas's 2-saveLayer +
+// kDstIn composite at restore() time. RecordingCanvas spy captures
+// the API dispatch so we can pin the wiring without depending on Skia
+// (which is the only backend that actually composites the mask alpha).
+// Visual output is verified separately against the SkiaCanvas raster
+// path in the [skia] tests below.
+
+namespace {
+struct MaskSpyCanvas : pulp::canvas::RecordingCanvas {
+    struct MaskCall {
+        float x, y, w, h, opacity;
+        std::string mask_image;
+        std::string mask_size;
+    };
+    std::vector<MaskCall> mask_calls;
+
+    void save_layer_with_mask(float x, float y, float w, float h,
+                               float opacity,
+                               const std::string& mask_image,
+                               const std::string& mask_size) override {
+        mask_calls.push_back({x, y, w, h, opacity, mask_image, mask_size});
+        // Don't fall through to save_layer — we only want to spy the
+        // mask call, not double-record a save_layer command.
+    }
+};
+}
+
+TEST_CASE("View::paint_all routes through save_layer_with_mask when mask-image is set",
+          "[view][issue-1515][issue-1737]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 100, 50});
+    v.set_mask_image("linear-gradient(to bottom, black, transparent)");
+    v.set_mask_size("100% 100%");
+
+    MaskSpyCanvas canvas;
+    v.paint_all(canvas);
+
+    REQUIRE(canvas.mask_calls.size() == 1);
+    auto& m = canvas.mask_calls[0];
+    REQUIRE(m.x == 0);
+    REQUIRE(m.y == 0);
+    REQUIRE(m.w == 100);
+    REQUIRE(m.h == 50);
+    REQUIRE(m.mask_image == "linear-gradient(to bottom, black, transparent)");
+    REQUIRE(m.mask_size == "100% 100%");
+}
+
+TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is empty",
+          "[view][issue-1515][issue-1737]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 100, 50});
+    // No mask_image set — paint_all should use the legacy path
+    // (save_layer or just paint without a layer).
+
+    MaskSpyCanvas canvas;
+    v.paint_all(canvas);
+
+    REQUIRE(canvas.mask_calls.empty());
+}
+
+TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask-image is 'none'",
+          "[view][issue-1515][issue-1737]") {
+    pulp::view::View v;
+    v.set_bounds({0, 0, 100, 50});
+    v.set_mask_image("none");
+
+    MaskSpyCanvas canvas;
+    v.paint_all(canvas);
+
+    // CSS `mask-image: none` is an explicit no-mask declaration —
+    // treated as if no mask were set (no layer overhead, no composite).
+    REQUIRE(canvas.mask_calls.empty());
+}

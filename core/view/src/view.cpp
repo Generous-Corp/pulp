@@ -156,13 +156,33 @@ void View::paint_all(canvas::Canvas& canvas) {
     // requested blend mode at restore() time. Default `BlendMode::normal`
     // is a paint-time no-op (kSrcOver) and stays out of `needs_layer`.
     const bool needs_blend_layer = has_non_default_blend_mode();
+    // pulp #1737 / #1515 — CSS mask-image opens a compositing layer so
+    // the masked subtree paints into an offscreen buffer that the mask
+    // shader composites against via kDstIn at restore time.
+    const bool needs_mask_layer = !mask_image_.empty() && mask_image_ != "none";
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f)
                        || !filter_chain_.empty() || needs_layer_
                        || (effect_ && effect_->needs_layer())
-                       || needs_blend_layer;
+                       || needs_blend_layer
+                       || needs_mask_layer;
     if (needs_layer) {
         if (effect_) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
+        } else if (needs_mask_layer) {
+            // pulp #1737 / #1515 — CSS mask-image + mask-size composite.
+            // SkiaCanvas: opens layer + queues mask shader, restore()
+            // applies the mask via SkBlendMode::kDstIn before closing.
+            // RecordingCanvas / CG / fallback backends route through
+            // the default impl which collapses to plain save_layer
+            // (mask silently bypassed — pre-#1737 behavior). The
+            // mask layer takes precedence over filter / blend wraps
+            // here because the mask is the OUTERMOST composite per
+            // CSS Masking Module Level 1 spec; nested filter/blend
+            // belongs INSIDE the masked content (a follow-up slice
+            // can stack save_layer_with_mask + save_layer_with_filters
+            // when both are set on the same view).
+            canvas.save_layer_with_mask(0, 0, bounds_.width, bounds_.height,
+                                         opacity_, mask_image_, mask_size_);
         } else if (!filter_chain_.empty()) {
             // pulp #1434 Phase A2-4 — full CSS filter chain. Translate
             // View::FilterOp into canvas::FilterChainEntry (parallel

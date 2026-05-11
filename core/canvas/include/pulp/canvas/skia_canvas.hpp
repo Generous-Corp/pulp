@@ -287,6 +287,24 @@ public:
                                   const FilterChainEntry* chain,
                                   int count) override;
 
+    // pulp #1737 / #1515 — CSS mask-image + mask-size paint composite.
+    // SkiaCanvas implements the 2-saveLayer pattern with kDstIn:
+    //   1. open the content layer (saveLayer with opacity)
+    //   2. caller paints the subtree
+    //   3. caller calls restore() — SkiaCanvas::restore() detects this
+    //      layer has a pending mask, draws the mask shader via a kDstIn
+    //      saveLayer first, then closes the content layer
+    // Pending masks are tracked on `pending_masks_` keyed by Skia's
+    // internal save count so the restore-side dispatcher knows which
+    // restore call belongs to which mask layer. The matching restore()
+    // override (declared once at line ~45) handles the deferred mask
+    // composite — it walks pending_masks_ for a matching save count
+    // before delegating to canvas_->restore().
+    void save_layer_with_mask(float x, float y, float w, float h,
+                               float opacity,
+                               const std::string& mask_image,
+                               const std::string& mask_size) override;
+
 private:
     // Build the active fill paint, honoring `gradient_shader_` when set
     // so shape fills (rect / rrect / circle / arc / oval / polygon) render
@@ -353,6 +371,19 @@ private:
                              const class SkFont& font,
                              bool ltr,
                              class SkTextBlobBuilderRunHandler* handler);
+
+    // pulp #1737 / #1515 — pending mask state for save_layer_with_mask.
+    // Each entry is the deferred mask composite to apply when the
+    // matching restore() fires. Tracked by Skia's getSaveCount() so
+    // restore() can look up "is the layer I'm about to close a
+    // mask layer". sk_sp<SkShader> may be null when the mask string
+    // didn't parse — restore() then just closes the layer plainly.
+    struct PendingMask {
+        sk_sp<class SkShader> shader;  // forward-declared at top of file
+        struct { float left, top, right, bottom; } bounds;
+        int save_count_after_open;     // canvas_->getSaveCount() AFTER saveLayer
+    };
+    std::vector<PendingMask> pending_masks_;
     TextAlign text_align_ = TextAlign::left;
 
     // Gradient state
