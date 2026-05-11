@@ -440,3 +440,30 @@ TEST_CASE("TextShaper BreakMode::normal default-arg matches the no-arg overload"
                      WithinAbs(with_normal.lines[k].width, 0.001f));
     }
 }
+
+TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is followed by more text",
+          "[canvas][text_shaper][issue-1737]") {
+    TextShaper shaper;
+    // Codex P1 on PR #1795: when break_word splits an over-wide segment
+    // mid-segment AND that segment is NOT the last one, the remainder
+    // characters were silently dropped. The fix emits the remnant as
+    // its own line unconditionally so materialization downstream sees
+    // every character. Probe: a long unbroken token, then whitespace,
+    // then a normal word — verify reconstruction is bit-exact.
+    auto prepared = shaper.prepare(
+        "Antidisestablishmentarianism follows", "system", 14);
+    auto layout = shaper.layout_with_lines(prepared, 30.0f, 0, 0, BreakMode::break_word);
+
+    std::string reconstructed;
+    for (const auto& line : layout.lines) reconstructed += line.text;
+    // Whitespace handling: the legacy break-at-whitespace code path
+    // skips the whitespace segment when emitting (line_start advances
+    // past it), so the reconstructed string drops the inter-word space.
+    // Accept the canonical "no spaces" reconstruction OR the spaced one
+    // — what matters is that NO non-whitespace characters are lost.
+    std::string canonical = "Antidisestablishmentarianismfollows";
+    std::string with_space = "Antidisestablishmentarianism follows";
+    bool ok = (reconstructed == canonical) || (reconstructed == with_space);
+    INFO("reconstructed='" << reconstructed << "'");
+    REQUIRE(ok);
+}

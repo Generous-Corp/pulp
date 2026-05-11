@@ -276,30 +276,26 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         ++safety;
                     }
 
-                    // Final remnant of this segment becomes the start
-                    // of the next "in-progress" line. It fits within
-                    // max_width by construction (loop exit condition);
-                    // accumulate it into current_width so the next
-                    // segment can extend the line if it also fits.
-                    line_start = i + 1;
-                    current_width = remaining_w;
-                    last_break = -1;
-                    // If the segments vector ends here, the final-line
-                    // emit code at the bottom of layout_from_segments
-                    // will materialize the remnant alongside any
-                    // following segments. Otherwise the next iteration
-                    // continues with current_width pre-loaded.
+                    // Final remnant of this segment must be emitted as
+                    // its own line right now — `current_width` would
+                    // preserve the numeric width into the next iteration
+                    // but the textual content (remaining_text) belongs
+                    // to segment `i`, not to any of segments[i+1..end).
+                    // The materialization loops downstream only walk
+                    // `segments[j].text`, so leaving the remnant in
+                    // current_width would silently drop the characters
+                    // when followed by ANY further segments (Codex P1
+                    // on #1795 / pulp #1737: "Preserve split-word
+                    // remainder before subsequent segments"). The
+                    // tradeoff: the remnant gets its own line instead
+                    // of combining with the following segment on the
+                    // same visual line — minor cosmetic vs. data loss.
                     //
-                    // The remnant materialization, however, is a gap:
-                    // the final-line code reads segments[j].text for
-                    // j in [line_start, end), so the remnant itself
-                    // (which logically belongs to segment i, not
-                    // segment line_start) is not in any segment. If no
-                    // following segments materialize, we'd lose the
-                    // remnant. Cover that here by emitting the remnant
-                    // as a single-segment line directly when this is
-                    // the last segment.
-                    if (i == static_cast<int>(segments.size()) - 1) {
+                    // Also handles the last-segment case correctly: an
+                    // unconditional emit means we always materialize
+                    // the remnant, regardless of whether more segments
+                    // follow.
+                    {
                         ShapedLayout::Line tail_line;
                         tail_line.width = remaining_w;
                         tail_line.y = y;
@@ -309,8 +305,10 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
                         result.lines.push_back(std::move(tail_line));
                         max_line_width = std::max(max_line_width, remaining_w);
                         y += line_height;
-                        current_width = 0;
                     }
+                    line_start = i + 1;
+                    current_width = 0;
+                    last_break = -1;
                     continue;
                 }
                 // cps == 0 falls through to legacy whole-segment path
