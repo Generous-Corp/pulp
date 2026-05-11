@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v100"></a>
+## [0.82.0]
+
 ## [1.0.0] - 2026-05-10
 
 - feat(css): consume object-fit + object-position in ImageView::paint (closes pulp #1707) ([#1755](https://github.com/danielraffel/pulp/pull/1755))
