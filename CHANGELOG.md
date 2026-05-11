@@ -8,11 +8,28 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v100"></a>
-## [0.82.0]
+<a id="v0820"></a>
+## [0.82.0] - 2026-05-10
 
-## [1.0.0] - 2026-05-10
-
+- feat(rn): wire CSS font-variant to SkShaper Feature API (closes rn/fontVariant DIVERGE) ([#1791](https://github.com/danielraffel/pulp/pull/1791))
+- chore(catalog): reclassify 9 css NO-OPs to wontfix (architectural) ([#1790](https://github.com/danielraffel/pulp/pull/1790))
+- fix(css): preserve newlines for white-space: pre + sync legacy setter (Codex P1+P2 on #1786) ([#1788](https://github.com/danielraffel/pulp/pull/1788))
+- feat(css): wire full white-space enum (closes css/whiteSpace DIVERGE) ([#1786](https://github.com/danielraffel/pulp/pull/1786))
+- chore(catalog): rn/isolation noop → wontfix (architectural — no stacking-context engine) ([#1785](https://github.com/danielraffel/pulp/pull/1785))
+- fix(css): tie :root pseudo to body identity, not null parent (Codex P2 on #1779) ([#1783](https://github.com/danielraffel/pulp/pull/1783))
+- feat(rn): SkFontMgr fallback chain for fontFamily list (closes pulp #932 followup) ([#1781](https://github.com/danielraffel/pulp/pull/1781))
+- fix(css): restore :root matcher for stylesheet rules (Codex P2 followup on #1773) ([#1779](https://github.com/danielraffel/pulp/pull/1779))
+- feat(html): catalog flip — html/dialog noop → supported (html → 100%) ([#1775](https://github.com/danielraffel/pulp/pull/1775))
+- fix: 4 Codex sweep findings on #1759/#1761/#1763/#1768 ([#1773](https://github.com/danielraffel/pulp/pull/1773))
+- fix(a11y): surface ARIA state attributes through NSAccessibility + snapshot (Codex P1+P2 on #1766) ([#1771](https://github.com/danielraffel/pulp/pull/1771))
+- test(canvas): backfill direct unit tests for draw_image_from_*_rect (PR #1739 codecov) ([#1770](https://github.com/danielraffel/pulp/pull/1770))
+- feat(harness): verify-tests step — grep TEST_CASE tags + names against catalog refs ([#1768](https://github.com/danielraffel/pulp/pull/1768))
+- feat(html): wire ARIA state attributes (aria-pressed/checked/disabled/hidden) ([#1766](https://github.com/danielraffel/pulp/pull/1766))
+- feat(release): drop example plugin .pkg artifacts from GitHub release page (closes task #49) ([#1764](https://github.com/danielraffel/pulp/pull/1764))
+- guard: strengthen pollution check with positive `project(Pulp` assertion ([#1763](https://github.com/danielraffel/pulp/pull/1763))
+- guard: source-tree pollution check (prevents #1755-class CMakeLists corruption) ([#1761](https://github.com/danielraffel/pulp/pull/1761))
+- feat(html): querySelector evaluates pseudo-classes spec-correctly (closes html DIVERGE) ([#1759](https://github.com/danielraffel/pulp/pull/1759))
+- fix: restore CMakeLists.txt + drop pulp.toml after #1755 corruption ([#1757](https://github.com/danielraffel/pulp/pull/1757))
 - feat(css): consume object-fit + object-position in ImageView::paint (closes pulp #1707) ([#1755](https://github.com/danielraffel/pulp/pull/1755))
 - feat(catalog): hygiene PR — yoga 100%, 5 grace saves, 5 test-ref backfills ([#1752](https://github.com/danielraffel/pulp/pull/1752))
 - fix(canvas): restore text CTM before stroke gradients (Codex P1 on #1736) ([#1750](https://github.com/danielraffel/pulp/pull/1750))
@@ -1550,7 +1567,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
-[1.0.0]: https://github.com/danielraffel/pulp/releases/tag/v1.0.0
+[0.82.0]: https://github.com/danielraffel/pulp/releases/tag/v0.82.0
 [0.81.0]: https://github.com/danielraffel/pulp/releases/tag/v0.81.0
 [0.80.0]: https://github.com/danielraffel/pulp/releases/tag/v0.80.0
 [0.79.25]: https://github.com/danielraffel/pulp/releases/tag/v0.79.25
