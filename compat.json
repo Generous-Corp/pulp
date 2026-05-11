@@ -5295,28 +5295,32 @@
       "issue": ""
     },
     "rn/textAlignVertical": {
-      "status": "wontfix",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setVerticalAlign(id, value) — RN-Android equivalent of  shares the same Label::vertical_align_ slot. Bridge fn at widget_bridge.cpp:5180 accepts top/middle/bottom/baseline (and Pulp's Label paints accordingly). Bridge fn aliases center→VA::center, auto→baseline.",
+      "supportedValues": [
         "auto",
         "top",
         "bottom",
         "center"
       ],
-      "tests": [],
-      "notes": "Android-only in RN; could map to flex align. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#setVerticalAlign"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The earlier note \"could map to flex align\" was wrong — the canonical target is Label::vertical_align_ (text-vertical-align), not flex align-items. Reuses the same setVerticalAlign bridge fn rn/verticalAlign uses, since Pulp's Label models the union of CSS verticalAlign + RN-Android textAlignVertical semantics. Wired through prop-applier.ts in this PR.",
       "issue": ""
     },
     "rn/textDecorationColor": {
-      "status": "wontfix",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setTextDecorationColor(id, color) (widget_bridge.cpp:4271) -> Label::set_text_decoration_color. Mirrors css/textDecorationColor which is  on the same bridge fn.",
+      "supportedValues": [
+        "CSS color strings (#rgb / #rrggbb / rgb()/rgba() / named)"
       ],
-      "tests": [],
-      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#setTextDecorationColor"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The setTextDecorationColor bridge fn was already implemented (widget_bridge.cpp:4271) and css/textDecorationColor was already . Wired through prop-applier.ts in this PR.",
       "issue": ""
     },
     "rn/textDecorationLine": {
@@ -5339,14 +5343,20 @@
       "issue": ""
     },
     "rn/textDecorationStyle": {
-      "status": "wontfix",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setTextDecorationStyle(id, value) (widget_bridge.cpp:4287) -> Label::set_text_decoration_style. Mirrors css/textDecorationStyle which is  on the same bridge fn.",
+      "supportedValues": [
+        "solid",
+        "double",
+        "dotted",
+        "dashed",
+        "wavy"
       ],
-      "tests": [],
-      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#setTextDecorationStyle"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The setTextDecorationStyle bridge fn was already implemented (widget_bridge.cpp:4287) with all 5 spec values, and css/textDecorationStyle was already . Wired through prop-applier.ts in this PR.",
       "issue": ""
     },
     "rn/textShadowColor": {
@@ -5474,14 +5484,19 @@
       "issue": ""
     },
     "rn/verticalAlign": {
-      "status": "wontfix",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setVerticalAlign(id, value) (widget_bridge.cpp:5180) -> Label::set_vertical_align(canvas::TextVerticalAlign). Mirrors css/verticalAlign which is supported on the same bridge fn. Bridge fn aliases auto→baseline (Pulp default).",
+      "supportedValues": [
+        "auto",
+        "top",
+        "bottom",
+        "middle"
       ],
-      "tests": [],
-      "notes": "Not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#setVerticalAlign"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The setVerticalAlign bridge fn was already implemented (widget_bridge.cpp:5180) and css/verticalAlign was already  on the same target. The wontfix entry pre-dated the bridge fn landing. Wired through prop-applier.ts in this PR.",
       "issue": ""
     },
     "rn/viewBox": {
@@ -5515,16 +5530,18 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/writingDirection": {
-      "status": "wontfix",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "auto",
+      "status": "supported",
+      "mapsTo": "prop-applier.ts:952 —  -> setDirection(id, value). RN ViewStyle uses ; CSS uses ; Pulp routes both through the same setDirection bridge fn (widget_bridge.cpp:4944-4953). pulp #1506 landed RTL bidi end-to-end.",
+      "supportedValues": [
         "ltr",
-        "rtl"
+        "rtl",
+        "auto"
       ],
-      "tests": [],
-      "notes": "RTL not modeled. Wave 1 drift cleanup — missing → wontfix (platform-only RN prop, OOS for the cross-platform Pulp surface — see oracle platformOnly flag).",
+      "unsupportedValues": [],
+      "tests": [
+        "unit:test_widget_bridge#setDirection"
+      ],
+      "notes": "pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11): walked back from  to . The earlier wontfix cited \"RTL not modeled\" but pulp #1506 had already landed RTL bidi via setDirection (the same bridge fn the css  prop uses, which is ). The prop-applier route at packages/pulp-react/src/prop-applier.ts:952 was already wired pre-audit; this is purely a stale catalog correction.",
       "issue": ""
     },
     "rn/zIndex": {

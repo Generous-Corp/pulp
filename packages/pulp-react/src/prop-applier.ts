@@ -951,6 +951,27 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // which calls setDirection directly).
         case 'writingDirection': return call('setDirection', id, value as string);
 
+        // pulp #1737 RN-OOS-fixup (catalog audit 2026-05-11) — these 4
+        // RN style props were classified `wontfix` in compat.json despite
+        // having fully-wired bridge fns AND css-side proof on the
+        // matching css/* surfaces (css/verticalAlign, css/textDecoration*
+        // all `supported`). One-line route closes the rn-side gap; the
+        // catalog flips from wontfix → supported on the same JSON edit.
+        //
+        // verticalAlign — RN's cross-platform vertical-align prop.
+        // textAlignVertical — RN-Android equivalent of verticalAlign;
+        //                     same setVerticalAlign target works for
+        //                     both since Pulp's Label::vertical_align_
+        //                     models what both CSS+RN-Android need.
+        // textDecorationColor / textDecorationStyle — text-decoration
+        //                     longhand setters; bridge already routes
+        //                     to Label::set_text_decoration_color /
+        //                     ::set_text_decoration_style.
+        case 'verticalAlign':         return call('setVerticalAlign', id, value as string);
+        case 'textAlignVertical':     return call('setVerticalAlign', id, value as string);
+        case 'textDecorationColor':   return call('setTextDecorationColor', id, value as string);
+        case 'textDecorationStyle':   return call('setTextDecorationStyle', id, value as string);
+
         // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
         // the full shorthand into a list of TransitionSpecs that the
         // dispatcher (PR 2 of the ladder) consults when a property

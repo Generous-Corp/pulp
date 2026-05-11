@@ -5,79 +5,182 @@
   "properties": {
     "alignContent": {
       "kind": "enum",
-      "values": ["flex-start", "flex-end", "center", "stretch", "space-between", "space-around", "space-evenly"],
+      "values": [
+        "flex-start",
+        "flex-end",
+        "center",
+        "stretch",
+        "space-between",
+        "space-around",
+        "space-evenly"
+      ],
       "default": "flex-start"
     },
     "alignItems": {
       "kind": "enum",
-      "values": ["flex-start", "flex-end", "center", "stretch", "baseline"],
+      "values": [
+        "flex-start",
+        "flex-end",
+        "center",
+        "stretch",
+        "baseline"
+      ],
       "default": "stretch"
     },
     "alignSelf": {
       "kind": "enum",
-      "values": ["auto", "flex-start", "flex-end", "center", "stretch", "baseline"],
+      "values": [
+        "auto",
+        "flex-start",
+        "flex-end",
+        "center",
+        "stretch",
+        "baseline"
+      ],
       "default": "auto"
     },
-    "aspectRatio": {"kind": "number", "notes": "width/height ratio"},
+    "aspectRatio": {
+      "kind": "number",
+      "notes": "width/height ratio"
+    },
     "backfaceVisibility": {
       "kind": "enum",
-      "values": ["visible", "hidden"],
+      "values": [
+        "visible",
+        "hidden"
+      ],
       "default": "visible"
     },
-    "backgroundColor": {"kind": "color"},
-    "borderBottomColor": {"kind": "color"},
-    "borderBottomLeftRadius": {"kind": "length-or-percentage"},
-    "borderBottomRightRadius": {"kind": "length-or-percentage"},
-    "borderBottomWidth": {"kind": "length"},
-    "borderColor": {"kind": "color", "notes": "shorthand for all edges"},
+    "backgroundColor": {
+      "kind": "color"
+    },
+    "borderBottomColor": {
+      "kind": "color"
+    },
+    "borderBottomLeftRadius": {
+      "kind": "length-or-percentage"
+    },
+    "borderBottomRightRadius": {
+      "kind": "length-or-percentage"
+    },
+    "borderBottomWidth": {
+      "kind": "length"
+    },
+    "borderColor": {
+      "kind": "color",
+      "notes": "shorthand for all edges"
+    },
     "borderCurve": {
       "kind": "enum",
-      "values": ["circular", "continuous"],
+      "values": [
+        "circular",
+        "continuous"
+      ],
       "platformOnly": "ios",
       "notes": "iOS only — not part of cross-platform pulp surface"
     },
-    "borderEndWidth": {"kind": "length", "notes": "writing-direction relative"},
-    "borderLeftColor": {"kind": "color"},
-    "borderLeftWidth": {"kind": "length"},
-    "borderRadius": {"kind": "length-or-percentage", "notes": "shorthand"},
-    "borderRightColor": {"kind": "color"},
-    "borderRightWidth": {"kind": "length"},
-    "borderStartWidth": {"kind": "length", "notes": "writing-direction relative"},
+    "borderEndWidth": {
+      "kind": "length",
+      "notes": "writing-direction relative"
+    },
+    "borderLeftColor": {
+      "kind": "color"
+    },
+    "borderLeftWidth": {
+      "kind": "length"
+    },
+    "borderRadius": {
+      "kind": "length-or-percentage",
+      "notes": "shorthand"
+    },
+    "borderRightColor": {
+      "kind": "color"
+    },
+    "borderRightWidth": {
+      "kind": "length"
+    },
+    "borderStartWidth": {
+      "kind": "length",
+      "notes": "writing-direction relative"
+    },
     "borderStyle": {
       "kind": "enum",
-      "values": ["solid", "dotted", "dashed"],
+      "values": [
+        "solid",
+        "dotted",
+        "dashed"
+      ],
       "default": "solid"
     },
-    "borderTopColor": {"kind": "color"},
-    "borderTopLeftRadius": {"kind": "length-or-percentage"},
-    "borderTopRightRadius": {"kind": "length-or-percentage"},
-    "borderTopWidth": {"kind": "length"},
-    "borderWidth": {"kind": "length", "notes": "shorthand for all edges"},
-    "bottom": {"kind": "length-or-percentage", "notes": "physical edge"},
-    "boxShadow": {"kind": "string", "notes": "RN New Architecture only; CSS box-shadow syntax"},
+    "borderTopColor": {
+      "kind": "color"
+    },
+    "borderTopLeftRadius": {
+      "kind": "length-or-percentage"
+    },
+    "borderTopRightRadius": {
+      "kind": "length-or-percentage"
+    },
+    "borderTopWidth": {
+      "kind": "length"
+    },
+    "borderWidth": {
+      "kind": "length",
+      "notes": "shorthand for all edges"
+    },
+    "bottom": {
+      "kind": "length-or-percentage",
+      "notes": "physical edge"
+    },
+    "boxShadow": {
+      "kind": "string",
+      "notes": "RN New Architecture only; CSS box-shadow syntax"
+    },
     "boxSizing": {
       "kind": "enum",
-      "values": ["border-box", "content-box"],
+      "values": [
+        "border-box",
+        "content-box"
+      ],
       "default": "border-box",
       "notes": "RN New Architecture only"
     },
-    "color": {"kind": "color", "notes": "TextStyle, but RN ViewStyle accepts it for inheritance"},
-    "columnGap": {"kind": "length-or-percentage"},
+    "color": {
+      "kind": "color",
+      "notes": "TextStyle, but RN ViewStyle accepts it for inheritance"
+    },
+    "columnGap": {
+      "kind": "length-or-percentage"
+    },
     "cursor": {
       "kind": "enum",
-      "values": ["auto", "pointer"],
+      "values": [
+        "auto",
+        "pointer"
+      ],
       "default": "auto"
     },
-    "d": {"kind": "string", "rnExtension": "react-native-svg", "notes": "SVG path data — not core ViewStyle but tracked because @pulp/react routes it"},
+    "d": {
+      "kind": "string",
+      "rnExtension": "react-native-svg",
+      "notes": "SVG path data — not core ViewStyle but tracked because @pulp/react routes it"
+    },
     "direction": {
       "kind": "enum",
-      "values": ["inherit", "ltr", "rtl"],
+      "values": [
+        "inherit",
+        "ltr",
+        "rtl"
+      ],
       "default": "inherit",
       "notes": "writing direction; iOS only in classic RN, cross-platform with Fabric"
     },
     "display": {
       "kind": "enum",
-      "values": ["flex", "none"],
+      "values": [
+        "flex",
+        "none"
+      ],
       "default": "flex"
     },
     "elevation": {
@@ -85,213 +188,559 @@
       "platformOnly": "android",
       "notes": "Android 5.0+ only; integer dp"
     },
-    "end": {"kind": "length-or-percentage", "notes": "writing-direction relative (RTL-aware)"},
-    "experimental_backgroundImage": {"kind": "string", "notes": "linear-gradient / radial-gradient string; New Architecture only"},
-    "fill": {"kind": "color", "rnExtension": "react-native-svg", "notes": "SVG fill — not core ViewStyle"},
-    "filter": {"kind": "string", "notes": "RN New Architecture only; CSS filter syntax"},
-    "flex": {"kind": "number", "notes": "positive=flex-grow, negative=flex-shrink semantics"},
-    "flexBasis": {"kind": "length-or-percentage-or-auto"},
+    "end": {
+      "kind": "length-or-percentage",
+      "notes": "writing-direction relative (RTL-aware)"
+    },
+    "experimental_backgroundImage": {
+      "kind": "string",
+      "notes": "linear-gradient / radial-gradient string; New Architecture only"
+    },
+    "fill": {
+      "kind": "color",
+      "rnExtension": "react-native-svg",
+      "notes": "SVG fill — not core ViewStyle"
+    },
+    "filter": {
+      "kind": "string",
+      "notes": "RN New Architecture only; CSS filter syntax"
+    },
+    "flex": {
+      "kind": "number",
+      "notes": "positive=flex-grow, negative=flex-shrink semantics"
+    },
+    "flexBasis": {
+      "kind": "length-or-percentage-or-auto"
+    },
     "flexDirection": {
       "kind": "enum",
-      "values": ["row", "row-reverse", "column", "column-reverse"],
+      "values": [
+        "row",
+        "row-reverse",
+        "column",
+        "column-reverse"
+      ],
       "default": "column",
       "notes": "RN default is column (CSS default is row)"
     },
-    "flexGrow": {"kind": "number", "default": 0},
-    "flexShrink": {"kind": "number", "default": 0, "notes": "RN default is 0 (CSS default is 1)"},
+    "flexGrow": {
+      "kind": "number",
+      "default": 0
+    },
+    "flexShrink": {
+      "kind": "number",
+      "default": 0,
+      "notes": "RN default is 0 (CSS default is 1)"
+    },
     "flexWrap": {
       "kind": "enum",
-      "values": ["nowrap", "wrap", "wrap-reverse"],
+      "values": [
+        "nowrap",
+        "wrap",
+        "wrap-reverse"
+      ],
       "default": "nowrap"
     },
-    "fontFamily": {"kind": "string"},
-    "fontSize": {"kind": "number"},
+    "fontFamily": {
+      "kind": "string"
+    },
+    "fontSize": {
+      "kind": "number"
+    },
     "fontStyle": {
       "kind": "enum",
-      "values": ["normal", "italic"],
+      "values": [
+        "normal",
+        "italic"
+      ],
       "default": "normal"
     },
     "fontVariant": {
       "kind": "string-array",
-      "values": ["small-caps", "oldstyle-nums", "lining-nums", "tabular-nums", "proportional-nums"],
+      "values": [
+        "small-caps",
+        "oldstyle-nums",
+        "lining-nums",
+        "tabular-nums",
+        "proportional-nums"
+      ],
       "notes": "array of variant strings"
     },
     "fontWeight": {
       "kind": "enum-or-number",
-      "values": ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900", "ultralight", "thin", "light", "medium", "regular", "semibold", "condensedBold", "condensed", "heavy", "black"],
+      "values": [
+        "normal",
+        "bold",
+        "100",
+        "200",
+        "300",
+        "400",
+        "500",
+        "600",
+        "700",
+        "800",
+        "900",
+        "ultralight",
+        "thin",
+        "light",
+        "medium",
+        "regular",
+        "semibold",
+        "condensedBold",
+        "condensed",
+        "heavy",
+        "black"
+      ],
       "default": "normal"
     },
-    "gap": {"kind": "length-or-percentage", "notes": "shorthand for row-gap and column-gap"},
-    "height": {"kind": "length-or-percentage-or-auto"},
+    "gap": {
+      "kind": "length-or-percentage",
+      "notes": "shorthand for row-gap and column-gap"
+    },
+    "height": {
+      "kind": "length-or-percentage-or-auto"
+    },
     "includeFontPadding": {
       "kind": "boolean",
       "platformOnly": "android",
       "notes": "Android only; vertical font padding workaround"
     },
-    "inset": {"kind": "length-or-percentage", "notes": "shorthand top/right/bottom/left"},
-    "insetBlock": {"kind": "length-or-percentage"},
-    "insetInline": {"kind": "length-or-percentage"},
+    "inset": {
+      "kind": "length-or-percentage",
+      "notes": "shorthand top/right/bottom/left"
+    },
+    "insetBlock": {
+      "kind": "length-or-percentage"
+    },
+    "insetInline": {
+      "kind": "length-or-percentage"
+    },
     "isolation": {
       "kind": "enum",
-      "values": ["auto", "isolate"],
+      "values": [
+        "auto",
+        "isolate"
+      ],
       "default": "auto",
       "notes": "RN New Architecture only"
     },
     "justifyContent": {
       "kind": "enum",
-      "values": ["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"],
+      "values": [
+        "flex-start",
+        "flex-end",
+        "center",
+        "space-between",
+        "space-around",
+        "space-evenly"
+      ],
       "default": "flex-start"
     },
-    "left": {"kind": "length-or-percentage", "notes": "physical edge"},
-    "letterSpacing": {"kind": "number"},
-    "lineHeight": {"kind": "number"},
-    "margin": {"kind": "edge-set", "notes": "shorthand for all edges"},
-    "marginBottom": {"kind": "length-or-percentage-or-auto"},
-    "marginEnd": {"kind": "length-or-percentage-or-auto", "notes": "writing-direction relative"},
-    "marginHorizontal": {"kind": "length-or-percentage-or-auto", "notes": "left+right shorthand (RN extension)"},
-    "marginLeft": {"kind": "length-or-percentage-or-auto"},
-    "marginRight": {"kind": "length-or-percentage-or-auto"},
-    "marginStart": {"kind": "length-or-percentage-or-auto", "notes": "writing-direction relative"},
-    "marginTop": {"kind": "length-or-percentage-or-auto"},
-    "marginVertical": {"kind": "length-or-percentage-or-auto", "notes": "top+bottom shorthand (RN extension)"},
-    "maxHeight": {"kind": "length-or-percentage"},
-    "maxWidth": {"kind": "length-or-percentage"},
-    "minHeight": {"kind": "length-or-percentage"},
-    "minWidth": {"kind": "length-or-percentage"},
+    "left": {
+      "kind": "length-or-percentage",
+      "notes": "physical edge"
+    },
+    "letterSpacing": {
+      "kind": "number"
+    },
+    "lineHeight": {
+      "kind": "number"
+    },
+    "margin": {
+      "kind": "edge-set",
+      "notes": "shorthand for all edges"
+    },
+    "marginBottom": {
+      "kind": "length-or-percentage-or-auto"
+    },
+    "marginEnd": {
+      "kind": "length-or-percentage-or-auto",
+      "notes": "writing-direction relative"
+    },
+    "marginHorizontal": {
+      "kind": "length-or-percentage-or-auto",
+      "notes": "left+right shorthand (RN extension)"
+    },
+    "marginLeft": {
+      "kind": "length-or-percentage-or-auto"
+    },
+    "marginRight": {
+      "kind": "length-or-percentage-or-auto"
+    },
+    "marginStart": {
+      "kind": "length-or-percentage-or-auto",
+      "notes": "writing-direction relative"
+    },
+    "marginTop": {
+      "kind": "length-or-percentage-or-auto"
+    },
+    "marginVertical": {
+      "kind": "length-or-percentage-or-auto",
+      "notes": "top+bottom shorthand (RN extension)"
+    },
+    "maxHeight": {
+      "kind": "length-or-percentage"
+    },
+    "maxWidth": {
+      "kind": "length-or-percentage"
+    },
+    "minHeight": {
+      "kind": "length-or-percentage"
+    },
+    "minWidth": {
+      "kind": "length-or-percentage"
+    },
     "mixBlendMode": {
       "kind": "enum",
       "values": [
-        "normal", "multiply", "screen", "overlay", "darken", "lighten",
-        "color-dodge", "color-burn", "hard-light", "soft-light",
-        "difference", "exclusion", "hue", "saturation", "color", "luminosity"
+        "normal",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
       ],
       "default": "normal",
       "notes": "RN New Architecture only"
     },
-    "opacity": {"kind": "number", "notes": "0..1"},
-    "outlineColor": {"kind": "color", "notes": "RN New Architecture only"},
-    "outlineOffset": {"kind": "number", "notes": "RN New Architecture only"},
-    "outlineStyle": {
-      "kind": "enum",
-      "values": ["solid", "dotted", "dashed"],
+    "opacity": {
+      "kind": "number",
+      "notes": "0..1"
+    },
+    "outlineColor": {
+      "kind": "color",
       "notes": "RN New Architecture only"
     },
-    "outlineWidth": {"kind": "number", "notes": "RN New Architecture only"},
+    "outlineOffset": {
+      "kind": "number",
+      "notes": "RN New Architecture only"
+    },
+    "outlineStyle": {
+      "kind": "enum",
+      "values": [
+        "solid",
+        "dotted",
+        "dashed"
+      ],
+      "notes": "RN New Architecture only"
+    },
+    "outlineWidth": {
+      "kind": "number",
+      "notes": "RN New Architecture only"
+    },
     "overflow": {
       "kind": "enum",
-      "values": ["visible", "hidden", "scroll"],
+      "values": [
+        "visible",
+        "hidden",
+        "scroll"
+      ],
       "default": "visible"
     },
-    "overlay": {"kind": "boolean", "pulpExtension": true, "notes": "Pulp-only extension; not part of RN ViewStyle. Routes to claimOverlay/releaseOverlay for popover click routing (pulp #1148)."},
-    "padding": {"kind": "edge-set", "notes": "shorthand for all edges"},
-    "paddingBottom": {"kind": "length-or-percentage"},
-    "paddingEnd": {"kind": "length-or-percentage", "notes": "writing-direction relative"},
-    "paddingHorizontal": {"kind": "length-or-percentage", "notes": "left+right shorthand (RN extension)"},
-    "paddingLeft": {"kind": "length-or-percentage"},
-    "paddingRight": {"kind": "length-or-percentage"},
-    "paddingStart": {"kind": "length-or-percentage", "notes": "writing-direction relative"},
-    "paddingTop": {"kind": "length-or-percentage"},
-    "paddingVertical": {"kind": "length-or-percentage", "notes": "top+bottom shorthand (RN extension)"},
+    "overlay": {
+      "kind": "boolean",
+      "pulpExtension": true,
+      "notes": "Pulp-only extension; not part of RN ViewStyle. Routes to claimOverlay/releaseOverlay for popover click routing (pulp #1148)."
+    },
+    "padding": {
+      "kind": "edge-set",
+      "notes": "shorthand for all edges"
+    },
+    "paddingBottom": {
+      "kind": "length-or-percentage"
+    },
+    "paddingEnd": {
+      "kind": "length-or-percentage",
+      "notes": "writing-direction relative"
+    },
+    "paddingHorizontal": {
+      "kind": "length-or-percentage",
+      "notes": "left+right shorthand (RN extension)"
+    },
+    "paddingLeft": {
+      "kind": "length-or-percentage"
+    },
+    "paddingRight": {
+      "kind": "length-or-percentage"
+    },
+    "paddingStart": {
+      "kind": "length-or-percentage",
+      "notes": "writing-direction relative"
+    },
+    "paddingTop": {
+      "kind": "length-or-percentage"
+    },
+    "paddingVertical": {
+      "kind": "length-or-percentage",
+      "notes": "top+bottom shorthand (RN extension)"
+    },
     "pointerEvents": {
       "kind": "enum",
-      "values": ["auto", "box-none", "box-only", "none"],
+      "values": [
+        "auto",
+        "box-none",
+        "box-only",
+        "none"
+      ],
       "default": "auto"
     },
     "position": {
       "kind": "enum",
-      "values": ["absolute", "relative", "static"],
+      "values": [
+        "absolute",
+        "relative",
+        "static"
+      ],
       "default": "relative",
       "notes": "RN historically only allowed absolute/relative; static added later"
     },
-    "right": {"kind": "length-or-percentage", "notes": "physical edge"},
-    "rowGap": {"kind": "length-or-percentage"},
-    "shadowColor": {"kind": "color", "platformOnly": "ios", "notes": "iOS only in RN; web maps to box-shadow color"},
-    "shadowOffset": {"kind": "shadow-offset", "platformOnly": "ios", "notes": "iOS only; { width, height }"},
-    "shadowOpacity": {"kind": "number", "platformOnly": "ios", "notes": "iOS only; 0..1"},
-    "shadowRadius": {"kind": "number", "platformOnly": "ios", "notes": "iOS only"},
-    "start": {"kind": "length-or-percentage", "notes": "writing-direction relative (RTL-aware)"},
-    "stroke": {"kind": "color", "rnExtension": "react-native-svg", "notes": "SVG stroke — not core ViewStyle"},
-    "strokeWidth": {"kind": "number", "rnExtension": "react-native-svg", "notes": "SVG stroke width — not core ViewStyle"},
+    "right": {
+      "kind": "length-or-percentage",
+      "notes": "physical edge"
+    },
+    "rowGap": {
+      "kind": "length-or-percentage"
+    },
+    "shadowColor": {
+      "kind": "color",
+      "platformOnly": "ios",
+      "notes": "iOS only in RN; web maps to box-shadow color"
+    },
+    "shadowOffset": {
+      "kind": "shadow-offset",
+      "platformOnly": "ios",
+      "notes": "iOS only; { width, height }"
+    },
+    "shadowOpacity": {
+      "kind": "number",
+      "platformOnly": "ios",
+      "notes": "iOS only; 0..1"
+    },
+    "shadowRadius": {
+      "kind": "number",
+      "platformOnly": "ios",
+      "notes": "iOS only"
+    },
+    "start": {
+      "kind": "length-or-percentage",
+      "notes": "writing-direction relative (RTL-aware)"
+    },
+    "stroke": {
+      "kind": "color",
+      "rnExtension": "react-native-svg",
+      "notes": "SVG stroke — not core ViewStyle"
+    },
+    "strokeWidth": {
+      "kind": "number",
+      "rnExtension": "react-native-svg",
+      "notes": "SVG stroke width — not core ViewStyle"
+    },
     "textAlign": {
       "kind": "enum",
-      "values": ["auto", "left", "right", "center", "justify"],
+      "values": [
+        "auto",
+        "left",
+        "right",
+        "center",
+        "justify"
+      ],
       "default": "auto"
     },
     "textAlignVertical": {
       "kind": "enum",
-      "values": ["auto", "top", "bottom", "center"],
-      "platformOnly": "android",
-      "notes": "Android only"
+      "values": [
+        "auto",
+        "top",
+        "bottom",
+        "center"
+      ],
+      "notes": "Android only | pulp #1737 RN-OOS-fixup: Pulp implements cross-platform via Label::vertical_align_ slot (setVerticalAlign bridge fn) (cross-platform in Pulp despite RN platform-only legacy)."
     },
-    "textDecorationColor": {"kind": "color", "platformOnly": "ios", "notes": "iOS only in RN"},
+    "textDecorationColor": {
+      "kind": "color",
+      "notes": "iOS only in RN | pulp #1737 RN-OOS-fixup: Pulp implements cross-platform via Label::set_text_decoration_color (setTextDecorationColor bridge fn) (cross-platform in Pulp despite RN platform-only legacy)."
+    },
     "textDecorationLine": {
       "kind": "enum",
-      "values": ["none", "underline", "line-through", "underline line-through"],
+      "values": [
+        "none",
+        "underline",
+        "line-through",
+        "underline line-through"
+      ],
       "default": "none"
     },
     "textDecorationStyle": {
       "kind": "enum",
-      "values": ["solid", "double", "dotted", "dashed"],
-      "platformOnly": "ios",
-      "notes": "iOS only in RN"
+      "values": [
+        "solid",
+        "double",
+        "dotted",
+        "dashed"
+      ],
+      "notes": "iOS only in RN | pulp #1737 RN-OOS-fixup: Pulp implements cross-platform via Label::set_text_decoration_style (setTextDecorationStyle bridge fn) (cross-platform in Pulp despite RN platform-only legacy)."
     },
-    "textShadowColor": {"kind": "color"},
-    "textShadowOffset": {"kind": "shadow-offset", "notes": "{ width, height }"},
-    "textShadowRadius": {"kind": "number"},
+    "textShadowColor": {
+      "kind": "color"
+    },
+    "textShadowOffset": {
+      "kind": "shadow-offset",
+      "notes": "{ width, height }"
+    },
+    "textShadowRadius": {
+      "kind": "number"
+    },
     "textTransform": {
       "kind": "enum",
-      "values": ["none", "uppercase", "lowercase", "capitalize"],
+      "values": [
+        "none",
+        "uppercase",
+        "lowercase",
+        "capitalize"
+      ],
       "default": "none"
     },
-    "top": {"kind": "length-or-percentage", "notes": "physical edge"},
-    "transform": {"kind": "transform-array", "notes": "[{ translateX }, { translateY }, { rotate }, { scale }, ...]"},
-    "transformOrigin": {"kind": "string", "notes": "default '50% 50% 0'"},
+    "top": {
+      "kind": "length-or-percentage",
+      "notes": "physical edge"
+    },
+    "transform": {
+      "kind": "transform-array",
+      "notes": "[{ translateX }, { translateY }, { rotate }, { scale }, ...]"
+    },
+    "transformOrigin": {
+      "kind": "string",
+      "notes": "default '50% 50% 0'"
+    },
     "userSelect": {
       "kind": "enum",
-      "values": ["auto", "none", "text", "contain", "all"],
+      "values": [
+        "auto",
+        "none",
+        "text",
+        "contain",
+        "all"
+      ],
       "default": "auto"
     },
     "verticalAlign": {
       "kind": "enum",
-      "values": ["auto", "top", "bottom", "middle"],
-      "platformOnly": "android",
-      "notes": "Android only equivalent of textAlignVertical"
+      "values": [
+        "auto",
+        "top",
+        "bottom",
+        "middle"
+      ],
+      "notes": "Android only equivalent of textAlignVertical | pulp #1737 RN-OOS-fixup: Pulp implements cross-platform via Label::vertical_align_ slot (setVerticalAlign bridge fn) (cross-platform in Pulp despite RN platform-only legacy)."
     },
-    "viewBox": {"kind": "tuple", "rnExtension": "react-native-svg", "notes": "SVG viewBox — [width, height] in @pulp/react usage"},
-    "width": {"kind": "length-or-percentage-or-auto"},
+    "viewBox": {
+      "kind": "tuple",
+      "rnExtension": "react-native-svg",
+      "notes": "SVG viewBox — [width, height] in @pulp/react usage"
+    },
+    "width": {
+      "kind": "length-or-percentage-or-auto"
+    },
     "writingDirection": {
       "kind": "enum",
-      "values": ["auto", "ltr", "rtl"],
-      "platformOnly": "ios",
+      "values": [
+        "auto",
+        "ltr",
+        "rtl"
+      ],
       "default": "auto",
-      "notes": "iOS only in RN; superseded by direction on cross-platform"
+      "notes": "iOS only in RN; superseded by direction on cross-platform | pulp #1737 RN-OOS-fixup: Pulp implements cross-platform via setDirection bridge fn (pulp #1506 RTL bidi) (cross-platform in Pulp despite RN platform-only legacy)."
     },
-    "zIndex": {"kind": "number"}
+    "zIndex": {
+      "kind": "number"
+    }
   },
   "bridgeFunctions": {
     "_doc": "List of widget_bridge.cpp register_function setX names referenced by rn entries' mapsTo. Used by the adapter to detect catalog claims about bridge functions that don't actually exist.",
     "registered": [
-      "setBackfaceVisibility", "setBackground", "setBackgroundGradient",
-      "setBorder", "setBorderBottomColor", "setBorderBottomLeftRadius",
-      "setBorderBottomRightRadius", "setBorderBottomWidth", "setBorderColor",
-      "setBorderLeftColor", "setBorderLeftWidth", "setBorderRadius",
-      "setBorderRightColor", "setBorderRightWidth", "setBorderSide",
-      "setBorderTopColor", "setBorderTopLeftRadius", "setBorderTopRightRadius",
-      "setBorderStyle", "setBorderTopWidth", "setBorderWidth", "setBottom",
-      "setBoxShadow", "setBoxSizing",
-      "setCursor", "setDirection", "setFilter", "setFlex",
-      "setFontFamily", "setFontSize", "setFontStyle", "setFontVariant",
-      "setFontWeight", "setLeft", "setLetterSpacing", "setLineHeight",
+      "setBackfaceVisibility",
+      "setBackground",
+      "setBackgroundGradient",
+      "setBorder",
+      "setBorderBottomColor",
+      "setBorderBottomLeftRadius",
+      "setBorderBottomRightRadius",
+      "setBorderBottomWidth",
+      "setBorderColor",
+      "setBorderLeftColor",
+      "setBorderLeftWidth",
+      "setBorderRadius",
+      "setBorderRightColor",
+      "setBorderRightWidth",
+      "setBorderSide",
+      "setBorderTopColor",
+      "setBorderTopLeftRadius",
+      "setBorderTopRightRadius",
+      "setBorderStyle",
+      "setBorderTopWidth",
+      "setBorderWidth",
+      "setBottom",
+      "setBoxShadow",
+      "setBoxSizing",
+      "setCursor",
+      "setDirection",
+      "setFilter",
+      "setFlex",
+      "setFontFamily",
+      "setFontSize",
+      "setFontStyle",
+      "setFontVariant",
+      "setFontWeight",
+      "setLeft",
+      "setLetterSpacing",
+      "setLineHeight",
       "setMixBlendMode",
       "setOpacity",
-      "setOutlineColor", "setOutlineOffset", "setOutlineStyle", "setOutlineWidth",
-      "setOverflow", "setPointerEvents", "setPosition",
-      "setRight", "setRotation", "setScale", "setSkew", "setSvgFill", "setSvgFillGradient",
-      "setSvgPath", "setSvgStroke", "setSvgStrokeWidth", "setSvgViewBox", "setText",
-      "setTextAlign", "setTextColor", "setTextDecoration",
-      "setTextShadowColor", "setTextShadowOffset", "setTextShadowRadius",
-      "setTextTransform", "setTop", "setTransform", "setTransformOrigin",
-      "setTranslate", "setUserSelect", "setVisible", "setZIndex"
+      "setOutlineColor",
+      "setOutlineOffset",
+      "setOutlineStyle",
+      "setOutlineWidth",
+      "setOverflow",
+      "setPointerEvents",
+      "setPosition",
+      "setRight",
+      "setRotation",
+      "setScale",
+      "setSkew",
+      "setSvgFill",
+      "setSvgFillGradient",
+      "setSvgPath",
+      "setSvgStroke",
+      "setSvgStrokeWidth",
+      "setSvgViewBox",
+      "setText",
+      "setTextAlign",
+      "setTextColor",
+      "setTextDecoration",
+      "setTextDecorationColor",
+      "setTextDecorationStyle",
+      "setTextShadowColor",
+      "setTextShadowOffset",
+      "setTextShadowRadius",
+      "setTextTransform",
+      "setTop",
+      "setTransform",
+      "setTransformOrigin",
+      "setTranslate",
+      "setUserSelect",
+      "setVerticalAlign",
+      "setVisible",
+      "setZIndex"
     ]
   }
 }

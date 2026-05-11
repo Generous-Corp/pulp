@@ -5183,10 +5183,12 @@ void WidgetBridge::register_api() {
             auto kw = args.get<std::string>(1, "baseline");
             using VA = pulp::canvas::TextVerticalAlign;
             VA mode = VA::baseline;
-            if      (kw == "top")     mode = VA::top;
-            else if (kw == "middle")  mode = VA::center;
-            else if (kw == "bottom")  mode = VA::bottom;
+            if      (kw == "top")      mode = VA::top;
+            else if (kw == "middle")   mode = VA::center;
+            else if (kw == "center")   mode = VA::center;     // RN-Android textAlignVertical alias for `middle`
+            else if (kw == "bottom")   mode = VA::bottom;
             else if (kw == "baseline") mode = VA::baseline;
+            else if (kw == "auto")     mode = VA::baseline;   // RN verticalAlign / textAlignVertical default
             // sub / super / text-top / text-bottom / length percent →
             // baseline fallback (paint-side gap; future slice can add
             // dedicated slots).
