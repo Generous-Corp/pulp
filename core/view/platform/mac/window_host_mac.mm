@@ -266,6 +266,11 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 
     pulp::view::MouseEvent me;
     me.position = pt;
+    // Set window_position so the WidgetBridge wheel registrar can emit
+    // valid clientX/clientY — without this JSX `onWheel` handlers that
+    // do `e.clientX - rect.left` (e.g. anchor-frequency for trackpad
+    // zoom) get 0 - rect.left and the wrong frequency anchor.
+    me.window_position = pt;
     me.is_wheel = true;
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
     me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
@@ -281,7 +286,14 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
         }
         v = v->parent();
     }
-    target->on_mouse_event(me);
+    // Bubble: dispatch to the deepest hit AND every ancestor that has an
+    // on_pointer_event subscriber (W3C wheel bubbling). Without this,
+    // wrap-divs that subscribe via registerWheel (e.g. Spectr's
+    // FilterBank zoom container around a canvas child) never see wheel
+    // events because the canvas child wins the hit test.
+    for (auto* bubble = target; bubble; bubble = bubble->parent()) {
+        if (bubble->on_pointer_event) bubble->on_pointer_event(me);
+    }
     [self setNeedsDisplay:YES];
 }
 
@@ -502,6 +514,20 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             me.click_count = static_cast<int>(event.clickCount);
             _dragTarget->on_mouse_event(me);
             _dragTarget->on_mouse_down(local);
+
+            // Bubble pointerdown through ancestors that subscribed via
+            // registerPointer. on_mouse_event is the W3C bubbling
+            // channel; on_mouse_down stays deepest-wins. Without this,
+            // a wrap-div around a canvas child (Spectr's FilterBank
+            // band-drawer is this exact pattern) never sees the down
+            // event because the canvas child wins hit_test. Recompute
+            // each ancestor's local-coord position by re-toLocal'ing.
+            for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
+                if (!bubble->on_pointer_event) continue;
+                pulp::view::MouseEvent bme = me;
+                bme.position = toLocal(pt, bubble, self.rootView);
+                bubble->on_pointer_event(bme);
+            }
         }
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
@@ -593,6 +619,26 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                 auto clicked_id = _dragTarget->id();
                 auto modifiers = modifiersFromNSFlags(event.modifierFlags);
                 _dragTarget->on_mouse_up(local);
+
+                // Bubble pointerup through ancestors (W3C pointer event
+                // bubbling — mirrors mouseDown bubble above). Same
+                // rationale: wrap-divs with on_pointer_event subscribed
+                // never see pointerup otherwise, breaking drag-release
+                // for things like FilterBank band finalization.
+                pulp::view::MouseEvent up_me;
+                up_me.position = local;
+                up_me.window_position = pt;
+                up_me.button = pulp::view::MouseButton::left;
+                up_me.modifiers = modifiers;
+                up_me.is_down = false;
+                up_me.click_count = static_cast<int>(event.clickCount);
+                _dragTarget->on_mouse_event(up_me);
+                for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
+                    if (!bubble->on_pointer_event) continue;
+                    pulp::view::MouseEvent bme = up_me;
+                    bme.position = toLocal(pt, bubble, self.rootView);
+                    bubble->on_pointer_event(bme);
+                }
                 if (released_target == _dragTarget && (click_handler || global_click)) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         @try {

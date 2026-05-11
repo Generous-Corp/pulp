@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <mutex>
 #include <atomic>
@@ -127,6 +128,17 @@ private:
 
     // Track widgets by ID for JS access
     std::unordered_map<std::string, View*> widgets_;
+
+    // Idempotency guards for native-event registrations. Each registrar
+    // (registerPointer / registerWheel / etc.) wraps the previous
+    // on_pointer_event so calling N times stacks N lambdas — every
+    // re-render of a React tree that re-runs the registration would
+    // multiply the dispatch cost by the render count. These sets gate
+    // the registrations so each (widget id, channel) wires the native
+    // hook exactly once. See pulp #1XXX (was the silent cause of
+    // Spectr's editor going sluggish over time as components remount).
+    std::unordered_set<std::string> pointer_registered_;
+    std::unordered_set<std::string> wheel_registered_;
 
     // Registered keyboard shortcuts from JS
     struct ShortcutBinding {

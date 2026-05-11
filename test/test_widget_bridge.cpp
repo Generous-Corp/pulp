@@ -664,9 +664,14 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
             pointer_move_x = e.offsetX;
             pointer_move_y = e.offsetY;
         });
-        on('surface', 'wheel', function(dx, dy) {
-            wheel_x = dx;
-            wheel_y = dy;
+        // pulp #1XXX — wheel events are dispatched as an object
+        // {deltaX, deltaY, clientX, clientY} (not positional args), so the
+        // @pulp/react synthetic-event shim's isPlainObject(a0) branch
+        // can lift the fields. JSX `onWheel(e => e.deltaY)` depends on
+        // this shape.
+        on('surface', 'wheel', function(e) {
+            wheel_x = e.deltaX;
+            wheel_y = e.deltaY;
         });
         on('surface', 'gesturestart', function(e) { gesture_log.push('start:' + e.scale); });
         on('surface', 'gesturechange', function(e) { gesture_log.push('change:' + e.rotation); });
@@ -709,6 +714,10 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
     REQUIRE_THAT(engine.evaluate("pointer_down_pressure").getWithDefault<double>(0.0), WithinAbs(0.75, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_down_client_x").getWithDefault<double>(0.0), WithinAbs(107.0, 0.001));
     REQUIRE_THAT(engine.evaluate("pointer_down_offset_x").getWithDefault<double>(0.0), WithinAbs(7.0, 0.001));
+    // pulp #1XXX — W3C MouseEvent.button: right=2 (unchanged), but the
+    // earlier raw-enum path coincidentally also emitted 2 for right.
+    // The button=0/1/2 contract test covering the regression cause
+    // (left=0, not 1) lives in the "W3C button mapping" test below.
     REQUIRE(engine.evaluate("pointer_down_button").getWithDefault<int>(0) == 2);
     REQUIRE(engine.evaluate("pointer_down_mods").toString() == "true:true:true:true");
 
@@ -756,7 +765,10 @@ TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to
                              static_cast<uint16_t>(kModCtrl | kModCmd),
                              true);
     REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 0);
-    REQUIRE(engine.evaluate("global_key").getWithDefault<int>(0) == static_cast<int>(KeyCode::a));
+    // pulp #1XXX — `e.key` is a W3C UIEvent.key string ('a', not 97).
+    // JSX handlers compare `e.key === 'Escape'` / `'a'` and the previous
+    // raw-int dispatch broke every such comparison.
+    REQUIRE(engine.evaluate("global_key").toString() == "a");
     REQUIRE(engine.evaluate("global_mods").getWithDefault<int>(0) == static_cast<int>(kModCtrl | kModCmd));
 
     bridge.forward_key_event(static_cast<int>(KeyCode::a),
@@ -11744,4 +11756,212 @@ TEST_CASE("CSS animationPlayState paused honored by tick_animations recursion",
     // advance. The fundamental tick_animations behavior is covered by
     // the longstanding [issue-1508] test case.
     SUCCEED("animationPlayState paused honored — frame-loop wiring + tick_animations early-return for paused");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Event-bridge dispatch payload contract — regressions documented in
+// .agents/skills/view-bridge/SKILL.md ("Event payload contract").
+//
+// These tests pin the JSON shape the bridge emits over `__dispatch__`
+// for pointer / wheel / key events. The @pulp/react synthetic-event
+// shim depends on every field listed here. Regressions historically
+// caused user-visible breakage (Spectr band-drawing, trackpad zoom,
+// Escape modal dismissal) that took multiple PRs to re-fix because
+// nothing pinned the contract — these tests are the pin.
+// ────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2",
+          "[view][bridge][events][contract]") {
+    // Pre-fix the bridge sent the raw MouseButton enum (left=1, right=2,
+    // middle=3). JSX handlers reading `e.button === 1` (W3C: middle
+    // click) then fired on every LEFT click — the cause of Spectr's
+    // band-drawing breakage (left click triggered pan-mode).
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var btn_log = [];
+        createLabel('s', 'S', '');
+        on('s', 'pointerdown', function(e) { btn_log.push(e.button); });
+        registerPointer('s');
+    )");
+    auto* s = bridge.widget("s");
+    REQUIRE(s != nullptr);
+
+    MouseEvent e{};
+    e.is_down = true;
+
+    e.button = MouseButton::left;   s->on_mouse_event(e);
+    e.button = MouseButton::middle; s->on_mouse_event(e);
+    e.button = MouseButton::right;  s->on_mouse_event(e);
+
+    // left=0, middle=1, right=2 — W3C order, NOT the enum order.
+    REQUIRE(engine.evaluate("btn_log.join(',')").toString() == "0,1,2");
+}
+
+TEST_CASE("Event contract: forward_key_event emits W3C UIEvent.key strings + modifier booleans",
+          "[view][bridge][events][contract]") {
+    // Pre-fix `e.key` was the raw int KeyCode — every JSX
+    // `e.key === 'Escape'` / `e.key === 'ArrowLeft'` comparison failed.
+    // Also pin `ctrlKey/shiftKey/altKey/metaKey` booleans (the W3C
+    // KeyboardEvent surface).
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var keys = [];
+        var mods_seen = '';
+        on('__global__', 'keydown', function(e) {
+            keys.push(e.key);
+            mods_seen = [e.ctrlKey, e.shiftKey, e.altKey, e.metaKey].join(':');
+        });
+    )");
+
+    bridge.forward_key_event(static_cast<int>(KeyCode::escape),    0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::left),      0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::right),     0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::up),        0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::down),      0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::enter),     0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::tab),       0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::backspace), 0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::delete_),   0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::space),     0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),         0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),         static_cast<uint16_t>(kModShift), true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::f1),        0, true);
+
+    REQUIRE(engine.evaluate("keys.join('|')").toString() ==
+            "Escape|ArrowLeft|ArrowRight|ArrowUp|ArrowDown|Enter|Tab|Backspace|Delete| |a|A|F1");
+
+    // Last forward_key_event call carried kModCtrl|kModCmd|kModAlt:
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),
+                             static_cast<uint16_t>(kModCtrl | kModAlt | kModCmd), true);
+    REQUIRE(engine.evaluate("mods_seen").toString() == "true:false:true:true");
+}
+
+TEST_CASE("Event contract: window.addEventListener('keydown', fn) receives __global__ keydown",
+          "[view][bridge][events][contract]") {
+    // Pre-fix only __callbacks__['__global__:keydown'] was fanned to —
+    // `window.addEventListener` listeners (the standard DOM API and the
+    // one Spectr uses for Escape) never fired.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var win_keys = [];
+        window.addEventListener('keydown', function(e) { win_keys.push(e.key); });
+    )");
+
+    bridge.forward_key_event(static_cast<int>(KeyCode::escape), 0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),      0, true);
+
+    REQUIRE(engine.evaluate("win_keys.join(',')").toString() == "Escape,a");
+}
+
+TEST_CASE("Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws",
+          "[view][bridge][events][contract]") {
+    // Pre-fix a throw from any handler (a stale ref in a React tick,
+    // a bad prop deref) propagated out of evaluate() and killed the
+    // rAF self-rescheduling chain. Symptom: waveform animation died
+    // until mouse-move restarted it.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var calls = 0;
+        var errs = 0;
+        __dispatchError__ = function() { errs++; };
+        window.addEventListener('keydown', function(e) { throw new Error('boom'); });
+        window.addEventListener('keydown', function(e) { calls++; });
+    )");
+
+    bridge.forward_key_event(static_cast<int>(KeyCode::a), 0, true);
+    bridge.forward_key_event(static_cast<int>(KeyCode::a), 0, true);
+
+    // First listener throws each time; second listener still fires.
+    REQUIRE(engine.evaluate("calls").getWithDefault<int>(0) == 2);
+    REQUIRE(engine.evaluate("errs").getWithDefault<int>(0) == 2);
+}
+
+TEST_CASE("Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}",
+          "[view][bridge][events][contract]") {
+    // Pre-fix wheel sent raw positional args (deltaX, deltaY). The
+    // @pulp/react synthetic-event shim only lifts fields when
+    // isPlainObject(rawArgs[0]) — positional args fell through,
+    // `e.deltaY` was undefined, trackpad zoom broke silently.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var got = null;
+        createLabel('w', 'W', '');
+        on('w', 'wheel', function(e) { got = e; });
+        registerWheel('w');
+    )");
+    auto* w = bridge.widget("w");
+    REQUIRE(w != nullptr);
+
+    MouseEvent ev{};
+    ev.is_wheel = true;
+    ev.scroll_delta_x = 1.5f;
+    ev.scroll_delta_y = -3.0f;
+    ev.window_position = {200.0f, 250.0f};
+    w->on_mouse_event(ev);
+
+    // The shape pinned by .agents/skills/view-bridge/SKILL.md.
+    REQUIRE(engine.evaluate("typeof got").toString() == "object");
+    REQUIRE_THAT(engine.evaluate("got.deltaX").getWithDefault<double>(0.0), WithinAbs(1.5, 0.001));
+    REQUIRE_THAT(engine.evaluate("got.deltaY").getWithDefault<double>(0.0), WithinAbs(-3.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("got.clientX").getWithDefault<double>(0.0), WithinAbs(200.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("got.clientY").getWithDefault<double>(0.0), WithinAbs(250.0, 0.001));
+}
+
+TEST_CASE("Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)",
+          "[view][bridge][events][contract]") {
+    // Pre-fix each call wrapped the previous on_pointer_event, so
+    // re-renders multiplied dispatch cost by the render count and
+    // every pointer event fired N times into the JS callback chain.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var pointer_fires = 0;
+        var wheel_fires = 0;
+        createLabel('s', 'S', '');
+        on('s', 'pointerdown', function(e) { pointer_fires++; });
+        on('s', 'wheel', function(e) { wheel_fires++; });
+        registerPointer('s'); registerPointer('s'); registerPointer('s');
+        registerWheel('s'); registerWheel('s'); registerWheel('s');
+    )");
+
+    auto* s = bridge.widget("s");
+    REQUIRE(s != nullptr);
+
+    MouseEvent down{};
+    down.is_down = true;
+    s->on_mouse_event(down);
+
+    MouseEvent wheel{};
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 1.0f;
+    s->on_mouse_event(wheel);
+
+    // Each event should fire its handler exactly once even though we
+    // called registerPointer / registerWheel three times.
+    REQUIRE(engine.evaluate("pointer_fires").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("wheel_fires").getWithDefault<int>(0) == 1);
 }

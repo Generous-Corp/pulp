@@ -294,6 +294,88 @@ When you change `core/view/src/editor_bridge.cpp` or its header, the
 skill-sync gate requires updates to either *this* skill or the
 `import-design` skill (or both). The path map maps both to the file.
 
+## Event-bridge dispatch payload contract — the @pulp/react surface
+
+WidgetBridge talks to JS by calling `__dispatch__(id, eventName, ...rawArgs)`.
+The `@pulp/react` synthetic-event shim (`packages/pulp-react/src/synthetic-event.ts`)
+inflates those raw args into a React-DOM-compatible event. **Both sides
+of this contract must move together or JSX handlers silently break.**
+
+The shim's `makeSyntheticEvent` only lifts fields off the first arg when
+`isPlainObject(rawArgs[0])` is true. Positional args (e.g. `wheel(dx, dy)`)
+fall through to the empty default object and `e.deltaY` is `undefined`.
+That class of regression is what cost us multiple PRs on the Spectr
+band-drawing / trackpad-zoom / Escape-modal fixes.
+
+### Required payload shapes
+
+| Event family | Raw shape (object literal) | Why each field |
+|---|---|---|
+| `pointerdown` / `pointerup` / `pointercancel` | `{clientX, clientY, offsetX, offsetY, pointerId, pointerType, isPrimary, pressure, altitudeAngle, azimuthAngle, button (W3C: 0=left, 1=middle, 2=right), ctrlKey, shiftKey, altKey, metaKey}` | JSX reads `e.clientX - rect.left`, hit-tests by `e.button`, and gates UI on modifier booleans |
+| `pointermove` | `{clientX, clientY, offsetX, offsetY, pointerId, pointerType, isPrimary}` | dragged from `on_drag(local pos)`; `clientX/Y` MUST be window-relative — walk parent-chain `bounds()` to compute |
+| `wheel` | `{deltaX, deltaY, clientX, clientY}` **as an object, not positional args** | The synthetic-event shim's plain-object branch is the only one that lifts wheel deltas |
+| `keydown` / `keyup` | `{key (W3C UIEvent.key string: 'Escape', 'ArrowLeft', 'F1', 'a', ' ', etc.), keyCode (raw int), ctrlKey, shiftKey, altKey, metaKey, mods}` | JSX compares `e.key === 'Escape'`; the raw int alone is unusable |
+| `gesturestart` / `gesturechange` / `gestureend` | `{scale, rotation, clientX, clientY}` | matches Safari GestureEvent |
+| `change` / `input` (text) | `rawArgs[0]` is the string value, not an object | the synthetic-event shim treats `typeof === 'string'` as a change event |
+
+### Required JS preamble shape
+
+In `widget_bridge.cpp` the `kJSPreamble` and `kWindowListenerShim`
+strings MUST guarantee:
+
+- `__dispatch__(id, eventName, ...args)` wraps every callback in
+  `try/catch` and surfaces failures via `__dispatchError__` if defined.
+  Otherwise a single throwing handler kills the rAF self-rescheduling
+  loop and the whole animation pipeline dies until the next event
+  restarts it.
+- When `id === '__global__'`, fan the dispatch out to
+  `window._listeners[eventName]` so `window.addEventListener('keydown',
+  fn)` works without the full web-compat bundle.
+- `window` exposes `addEventListener` / `removeEventListener` /
+  `dispatchEvent` and `_listeners` via the minimal shim — install AFTER
+  all preludes so `var window = {...}` in `web-compat-document.js` does
+  not clobber the shim.
+
+### Native-side registrars MUST be idempotent
+
+`registerPointer(id)` / `registerWheel(id)` (and any future
+`registerX(id)`) wrap the previous `on_pointer_event` lambda. If a React
+re-render re-issues the registration, each call stacks a new wrapper —
+N renders → N firings per event. Always gate the registration with a
+per-id set (e.g. `pointer_registered_`, `wheel_registered_`) and
+early-return on duplicates.
+
+### macOS host-side bubbling
+
+`core/view/platform/mac/window_host_mac.mm` is the dispatch source for
+mouse / pointer / wheel on macOS. Every dispatcher MUST:
+
+- Set `me.window_position = pt` for wheel events (clientX/Y derives from
+  this). Without it JSX `e.clientX - rect.left` for anchor-frequency
+  zoom gives the wrong anchor.
+- Bubble `on_pointer_event` up the parent chain (W3C bubbling) so a
+  wrap-div with `registerPointer` subscribed gets events from canvas
+  children that win `hit_test`. The Spectr FilterBank band-drawer is
+  this exact pattern.
+- Leave `on_mouse_down` / `on_mouse_drag` / `on_mouse_up` deepest-wins
+  (those are the JUCE-style click channel, not the W3C bubbling channel).
+
+### Tests that pin the contract
+
+`test/test_widget_bridge.cpp` — `[contract]` tag:
+
+- "Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2"
+- "Event contract: forward_key_event emits W3C UIEvent.key strings + modifier booleans"
+- "Event contract: window.addEventListener('keydown', fn) receives __global__ keydown"
+- "Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws"
+- "Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}"
+- "Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)"
+
+Run with: `./build/test/pulp-test-widget-bridge "[contract]"`
+
+When adding any new event family or fields, add a corresponding
+`[contract]` case AND a row to the payload-shape table above.
+
 ## References
 
 - `core/format/include/pulp/format/view_bridge.hpp` — public API
