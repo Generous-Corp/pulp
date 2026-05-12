@@ -1055,6 +1055,21 @@ TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
         {"saturation",  BM::saturation},
         {"color",       BM::color},
         {"luminosity",  BM::luminosity},
+        // pulp #1549 closure (Tier 2 reclass 2026-05-12): `plus-lighter`
+        // is the W3C draft's additive composite (min(A+B, 1) per channel,
+        // same math as SkBlendMode::kPlus). Bridge mapping to BM::lighter
+        // is spec-correct — reclassed as supported.
+        //
+        // `plus-darker` is a documented DIVERGENCE pinned for honesty
+        // (Codex P2 review on PR #1870): W3C draft defines it as the
+        // MULTIPLICATIVE variant, but Pulp (and Chromium) route it to
+        // additive kPlus along with `plus-lighter`. The View slot ends
+        // up at BM::lighter, but `plus-darker` stays in compat.json's
+        // unsupportedValues because callers don't get the spec
+        // composite. Pin the observable bridge behavior so a future
+        // refactor doesn't silently drop the alias back to BM::normal.
+        {"plus-lighter", BM::lighter},
+        {"plus-darker",  BM::lighter},  // documented divergent alias
     };
     for (const auto& row : table) {
         std::string js = std::string("setMixBlendMode('p', '") + row.keyword + "');";
@@ -1065,6 +1080,20 @@ TEST_CASE("WidgetBridge setMixBlendMode keyword -> BlendMode mapping",
     // Non-default keyword sets has_non_default_blend_mode().
     bridge.load_script("setMixBlendMode('p', 'multiply');");
     REQUIRE(p->has_non_default_blend_mode());
+
+    // plus-lighter is fully supported (additive kPlus). Pin the
+    // non-default mark + the BM::lighter destination slot.
+    bridge.load_script("setMixBlendMode('p', 'plus-lighter');");
+    REQUIRE(p->has_non_default_blend_mode());
+    REQUIRE(p->mix_blend_mode() == BM::lighter);
+
+    // plus-darker — same View slot as plus-lighter today (documented
+    // divergence). Pinned so the additive-vs-multiplicative gap stays
+    // visible in compat.json AND a regression that broke the alias
+    // routing would be caught.
+    bridge.load_script("setMixBlendMode('p', 'plus-darker');");
+    REQUIRE(p->has_non_default_blend_mode());
+    REQUIRE(p->mix_blend_mode() == BM::lighter);  // matches plus-lighter — divergent from W3C multiplicative spec
 
     // Unknown keyword -> normal (paint-time no-op fallback).
     bridge.load_script("setMixBlendMode('p', 'not-a-blend-mode');");

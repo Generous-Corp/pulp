@@ -83,8 +83,6 @@
         ":hover (any element selector)"
       ],
       "unsupportedValues": [
-        ":focus",
-        ":active",
         ":focus-within",
         ":focus-visible",
         ":nth-child(...)",
@@ -94,7 +92,7 @@
       "tests": [
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "Pseudo-class support is intentionally narrow. `:hover` is the highest-impact CSS selector in interactive UIs and the most-requested by Spectr/FilterBank consumers. The other interactive pseudo-classes (`:focus`, `:active`) require additional bridge plumbing and are not yet wired.",
+      "notes": "Pseudo-class support is intentionally narrow. `:hover` is the highest-impact CSS selector in interactive UIs and the most-requested by Spectr/FilterBank consumers. The other interactive pseudo-classes (`:focus`, `:active`) require additional bridge plumbing and are not yet wired. 2026-05-12 closure: `:focus` and `:active` reclassified as supported \u2014 web-compat-document.js:282 (_setupPseudoFocus, addEventListener focus/blur) and :297 (_setupPseudoActive, addEventListener mousedown/mouseup) are fully wired. The original notes referencing 'not yet wired' predate pulp #1149 part-b and #1345. Pinned by test.",
       "issue": "1149"
     },
     "css/__matchMedia": {
@@ -1975,15 +1973,13 @@
       "supportedValues": [
         "integer"
       ],
-      "unsupportedValues": [
-        "none"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label",
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1552: bridge fn registered. Setting a non-zero clamp implicitly enables `multi_line_` on the Label so paint takes the multi-line branch (without that, the single-line path runs and the clamp is a no-op). Last-visible line gets U+2026 appended if source lines were dropped. CSS spec uses `none` to disable; pulp accepts numeric `0` for the same effect.",
+      "notes": "pulp #1552: bridge fn registered. Setting a non-zero clamp implicitly enables `multi_line_` on the Label so paint takes the multi-line branch (without that, the single-line path runs and the clamp is a no-op). Last-visible line gets U+2026 appended if source lines were dropped. CSS spec uses `none` to disable; pulp accepts numeric `0` for the same effect. 2026-05-12 closure: `none` reclassified as supported \u2014 the JS dispatcher (web-compat-style-decl.js:1793) routes `setLineClamp(id, parseInt(resolved) || 0)`, so `none` (parseInt \u2192 NaN, NaN || 0 \u2192 0) takes the same disable path as numeric 0. Pinned by test.",
       "issue": "1552"
     },
     "css/lineHeight": {
@@ -3412,15 +3408,13 @@
       "supportedValues": [
         "integer"
       ],
-      "unsupportedValues": [
-        "none"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp stores count on Label",
         "test/test_widget_bridge.cpp::WidgetBridge setLineClamp truncates multi-line text in paint",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1552: shares the lineClamp wiring. The CSS shim case routes both `line-clamp` and `-webkit-line-clamp` to the same setLineClamp bridge fn; the @pulp/react prop-applier dispatches both `lineClamp` and `webkitLineClamp` keys through the same branch.",
+      "notes": "pulp #1552: shares the lineClamp wiring. The CSS shim case routes both `line-clamp` and `-webkit-line-clamp` to the same setLineClamp bridge fn; the @pulp/react prop-applier dispatches both `lineClamp` and `webkitLineClamp` keys through the same branch. 2026-05-12 closure: `none` reclassified \u2014 shares lineClamp's dispatcher, same parseInt fallthrough.",
       "issue": "1552"
     },
     "css/whiteSpace": {
@@ -4893,13 +4887,12 @@
         "luminosity"
       ],
       "unsupportedValues": [
-        "plus-lighter",
         "plus-darker"
       ],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "Wired through @pulp/react JSX (RN 0.76 New Architecture). Skia paint backend honors the keyword at saveLayer compositing time; CG / D2D backends fall through to plain save_layer (no-op blend) until those backends grow the same shim.",
+      "notes": "Wired through @pulp/react JSX (RN 0.76 New Architecture). Skia paint backend honors the keyword at saveLayer compositing time; CG / D2D backends fall through to plain save_layer (no-op blend) until those backends grow the same shim. 2026-05-12 closure: `plus-lighter` reclassified as supported (additive kPlus mapping is spec-correct); `plus-darker` stays unsupported \u2014 Pulp maps it to kPlus too (same as plus-lighter) but W3C draft defines plus-darker as MULTIPLICATIVE \u2014 widget_bridge.cpp:5473 maps both to canvas::Canvas::BlendMode::lighter (SkBlendMode::kPlus at the Skia layer, matching Chromium's mapping). Caveat: `plus-darker` is technically a multiplicative variant in the W3C draft but Skia/Chromium ship additive kPlus for both. Pinned by test.",
       "issue": "1549"
     },
     "rn/opacity": {

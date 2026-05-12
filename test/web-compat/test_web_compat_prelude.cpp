@@ -1873,3 +1873,98 @@ TEST_CASE("resolveCSSLength: malformed calc-family operands fall through to px",
     REQUIRE(negLeadingDot.first  == "rem");
     REQUIRE(negLeadingDot.second == -0.25);
 }
+
+// ─── Tier 2 + catalog-flip closures (2026-05-12) ────────────────────────────
+
+// css/lineClamp + css/webkitLineClamp honest reclass: the `none` keyword
+// is the CSS-spec way to disable line clamping. The JS dispatcher at
+// web-compat-style-decl.js:1791-1794 routes
+// `setLineClamp(id, parseInt(resolved) || 0)`, which turns 'none' into
+// the bridge's disable signal (0). Pin via the REAL dispatcher path
+// (Codex P2 review on PR #1870): mock `setLineClamp` to record calls,
+// then drive `el.style.lineClamp = 'none'` and assert the bridge was
+// called with id=<elementId> and n=0. Asserting only the parseInt
+// arithmetic in isolation would pass even if the dispatcher stopped
+// routing through setLineClamp at all — this test catches that.
+TEST_CASE("WebCompat: el.style.lineClamp = 'none' routes through dispatcher to setLineClamp(id, 0)",
+          "[webcompat][issue-1552][coverage]") {
+    TestEnvironment env;
+    // Install a recording shim over setLineClamp BEFORE the dispatcher
+    // runs. Captures every (id, n) pair so we can verify the routing.
+    env.eval(R"JS(
+        globalThis.__lcCalls = [];
+        globalThis.setLineClamp = function(id, n) {
+            globalThis.__lcCalls.push([id, n]);
+        };
+        // appendChild flips _nativeCreated so _applyProperty actually
+        // dispatches instead of early-returning at line 80.
+        var __lcEl = document.createElement('div');
+        document.body.appendChild(__lcEl);
+        globalThis.__lcInternalId = __lcEl._id;
+    )JS");
+
+    auto internalId = std::string(env.engine.evaluate("__lcInternalId")
+                                  .getWithDefault<std::string_view>(""));
+    REQUIRE(!internalId.empty());
+
+    // 'none' → bridge call with 0 (the disable signal).
+    env.eval("__lcEl.style.lineClamp = 'none';");
+    auto noneLen = env.engine.evaluate("__lcCalls.length").getWithDefault<double>(-1.0);
+    REQUIRE(noneLen == 1.0);
+    auto noneId = std::string(env.engine.evaluate("__lcCalls[0][0]")
+                              .getWithDefault<std::string_view>(""));
+    REQUIRE(noneId == internalId);
+    auto noneN = env.engine.evaluate("__lcCalls[0][1]").getWithDefault<double>(-1.0);
+    REQUIRE(noneN == 0.0);
+
+    // Same routing for the `-webkit-line-clamp` alias property
+    // (web-compat-style-decl.js:1791-1794 shares the case block).
+    env.eval("__lcEl.style.webkitLineClamp = 'none';");
+    auto webkitLen = env.engine.evaluate("__lcCalls.length").getWithDefault<double>(-1.0);
+    REQUIRE(webkitLen == 2.0);
+    auto webkitN = env.engine.evaluate("__lcCalls[1][1]").getWithDefault<double>(-1.0);
+    REQUIRE(webkitN == 0.0);
+
+    // Numeric input still routes correctly through the same dispatcher.
+    env.eval("__lcEl.style.lineClamp = '3';");
+    auto numLen = env.engine.evaluate("__lcCalls.length").getWithDefault<double>(-1.0);
+    REQUIRE(numLen == 3.0);
+    auto numN = env.engine.evaluate("__lcCalls[2][1]").getWithDefault<double>(-1.0);
+    REQUIRE(numN == 3.0);
+}
+
+// css/__hover_pseudo honest reclass: :focus and :active pseudo-classes
+// route through the StyleSheet engine's `_applyStyles` switch
+// (web-compat-document.js:68-74). The compat.json notes "not yet wired"
+// is stale — both have been wired since pulp #1149 part-b. Pin the
+// end-to-end path: a real StyleSheet with `:focus` / `:active` rules
+// attaches and the pseudo-setup runs.
+TEST_CASE("WebCompat: StyleSheet with :focus rule wires _setupPseudoFocus end-to-end",
+          "[webcompat][issue-1149][coverage]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __ffEl = document.createElement('input');
+        __ffEl.className = 'ff';
+        document.body.appendChild(__ffEl);
+        var __ffSheet = new StyleSheet({ '.ff:focus': { backgroundColor: 'red' } });
+        __ffSheet.attach();
+    )JS");
+    // The dispatcher routes ':focus' parsed pseudo through
+    // _setupPseudoFocus, which sets the element marker.
+    auto setup = env.engine.evaluate("__ffEl._focusSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: StyleSheet with :active rule wires _setupPseudoActive end-to-end",
+          "[webcompat][issue-1149][coverage]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __aaEl = document.createElement('button');
+        __aaEl.className = 'aa';
+        document.body.appendChild(__aaEl);
+        var __aaSheet = new StyleSheet({ '.aa:active': { backgroundColor: 'red' } });
+        __aaSheet.attach();
+    )JS");
+    auto setup = env.engine.evaluate("__aaEl._activeSetup === true");
+    REQUIRE(setup.getWithDefault<bool>(false) == true);
+}
