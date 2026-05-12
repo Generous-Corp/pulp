@@ -364,11 +364,17 @@ if [[ $JSON_OUT -eq 1 ]]; then
   # Pass arrays to Python via base64-encoded env vars — bash command
   # substitution strips NUL bytes, so any other delimiter would break on
   # detail strings containing the delimiter. base64 always survives.
+  #
+  # `base64` on macOS/BSD wraps output at 76 chars by default; long probe
+  # details would then span multiple lines and decode_array() would split
+  # one logical item into several "lines", mis-aligning the
+  # names/states/details arrays via zip(). `tr -d '\n'` works on both GNU
+  # coreutils and BSD base64, unlike `base64 -w0` which is GNU-only.
   encode_array() {
     local out=""
     local item
     for item in "$@"; do
-      out+="$(printf '%s' "$item" | base64)"$'\n'
+      out+="$(printf '%s' "$item" | base64 | tr -d '\n')"$'\n'
     done
     printf '%s' "$out"
   }
