@@ -5391,6 +5391,92 @@ TEST_CASE("setFlex justify_content accepts the alias set",
     REQUIRE(jc("f") == FlexJustify::space_between);
 }
 
+// pulp #1434 Tier 1 (css/alignItems) — `first baseline` is a CSS-spec
+// alternate form of `baseline`. The baseline-set "first" selector is
+// the default Yoga `YGAlignBaseline` already computes, so collapsing it
+// is observable-behaviour-preserving.
+//
+// Codex P1 on PR #1853: `last baseline` is NOT aliased because Yoga
+// has no last-baseline support — aliasing would silently misrender
+// multi-line flex containers that depend on bottom-baseline alignment.
+// `last baseline` stays in compat.json/unsupportedValues with a note.
+// This test pins both the supported alias AND the "last baseline"
+// fall-through (becomes FlexAlign::stretch via the default branch) so
+// a future change that re-introduces the silent alias fails first.
+TEST_CASE("setFlex align_items: first baseline aliases to baseline; last baseline stays unsupported",
+          "[view][bridge][css][issue-1434]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setFlex('a', 'align_items', 'baseline');
+        createPanel('b', '');  setFlex('b', 'align_items', 'first baseline');
+        createPanel('c', '');  setFlex('c', 'align_items', 'last baseline');
+    )");
+
+    auto al = [&](const std::string& id) { return bridge.widget(id)->flex().align_items; };
+    REQUIRE(al("a") == FlexAlign::baseline);
+    REQUIRE(al("b") == FlexAlign::baseline);
+    // `last baseline` falls through to the default (stretch) — it is
+    // documented unsupported. Asserting `!= baseline` is the contract:
+    // we do NOT silently alias to baseline.
+    REQUIRE(al("c") != FlexAlign::baseline);
+    REQUIRE(al("c") == FlexAlign::stretch);
+}
+
+// pulp #1434 Tier 1 (css/justifyContent) — Codex P1 on PR #1853 flagged
+// TWO separate overclaims; tightened scope leaves only the safe sanity
+// pins:
+//
+//   `left` / `right`  — direction-context-dependent. CSS spec: on a row
+//                       container, `right` ≡ flex-end (LTR); on a column
+//                       container, BOTH `left` and `right` behave as
+//                       `start`. A direction-agnostic alias would
+//                       silently misrender vertical flex containers.
+//                       Documented unsupported until direction-aware
+//                       aliasing lands.
+//   `stretch`         — grows AUTO-sized items equally; FlexJustify has
+//                       no equivalent. Documented unsupported.
+//   `normal`          — per spec, "behaves as `stretch`" on flex
+//                       containers. Documented unsupported.
+//
+// All four fall through to the dispatcher's default branch, which sets
+// `FlexJustify::start`. The test pins that contract so any future
+// re-introduction of a silent alias fails first.
+TEST_CASE("setFlex justify_content: left/right/stretch/normal stay unsupported (direction-dep + arch)",
+          "[view][bridge][css][issue-1434]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setFlex('a', 'justify_content', 'left');
+        createPanel('b', '');  setFlex('b', 'justify_content', 'right');
+        createPanel('c', '');  setFlex('c', 'justify_content', 'stretch');
+        createPanel('d', '');  setFlex('d', 'justify_content', 'normal');
+        // Sanity-pin: existing aliases still resolve to the same enum
+        // value so we don't accidentally weaken the spec mapping.
+        createPanel('e', '');  setFlex('e', 'justify_content', 'flex-start');
+        createPanel('f', '');  setFlex('f', 'justify_content', 'flex-end');
+    )");
+
+    auto jc = [&](const std::string& id) { return bridge.widget(id)->flex().justify_content; };
+    // All four direction-dep / arch-unsupported values fall through to
+    // the safe default (start). Asserting equality with the default AND
+    // inequality with the previously-claimed end_ direction would have
+    // caught the original silent overclaim.
+    REQUIRE(jc("a") == FlexJustify::start);
+    REQUIRE(jc("b") == FlexJustify::start);
+    REQUIRE(jc("b") != FlexJustify::end_);
+    REQUIRE(jc("c") == FlexJustify::start);
+    REQUIRE(jc("d") == FlexJustify::start);
+    REQUIRE(jc("e") == FlexJustify::start);        // sanity: existing alias unchanged
+    REQUIRE(jc("f") == FlexJustify::end_);         // sanity: existing alias unchanged
+}
+
 TEST_CASE("CSSStyleDeclaration forwards flex-direction reverse modes verbatim",
           "[view][bridge][css][issue-1434-rn-batch-b]") {
     ScriptEngine engine;

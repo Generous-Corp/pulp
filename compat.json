@@ -372,16 +372,17 @@
         "flex-end",
         "center",
         "stretch",
-        "baseline"
+        "baseline",
+        "first baseline"
       ],
       "unsupportedValues": [
-        "first baseline",
-        "last baseline"
+        "last baseline (requires baseline-set tracking not supported by YGAlignBaseline; aliasing to plain baseline would silently misrender multi-line flex containers)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "test/test_widget_bridge.cpp [issue-1434] (setFlex align_items: first baseline aliases to baseline; last baseline stays unsupported)"
       ],
-      "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support. pulp #1434 rn batch B: baseline now wired via FlexAlign::baseline → YGAlignBaseline.",
+      "notes": "FlexAlign enum has {start, center, end, stretch, auto_, baseline}. pulp #1434 rn batch B wired baseline via FlexAlign::baseline -> YGAlignBaseline. pulp #1434 Tier 1 (PR-B): 'first baseline' aliased to plain 'baseline' (the baseline-set 'first' selector is the default Yoga computes). Codex P1 on PR #1853: 'last baseline' is NOT aliased -- it requires last-baseline tracking that Yoga does not implement; documented unsupported, pinned by [issue-1434].",
       "issue": ""
     },
     "css/alignSelf": {
@@ -1924,15 +1925,16 @@
         "space-evenly"
       ],
       "unsupportedValues": [
-        "left",
-        "right",
-        "stretch",
-        "normal"
+        "left (direction-context-dependent: on a column container both 'left' and 'right' behave as 'start' per CSS Box Alignment; a direction-agnostic alias would silently misrender vertical flex containers)",
+        "right (same direction-context dependency; 'right' is flex-end only on row-LTR containers)",
+        "stretch (CSS spec grows AUTO-sized items equally; FlexJustify has no equivalent enum -- aliasing to flex-start would silently misrender stretching layouts)",
+        "normal (per spec behaves as 'stretch' on flex containers; inherits the same problem)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "test/test_widget_bridge.cpp [issue-1434] (setFlex justify_content: left/right/stretch/normal stay unsupported (direction-dep + arch))"
       ],
-      "notes": "FlexJustify enum covers the 6 RN values.",
+      "notes": "FlexJustify enum: {start, center, end_, space_between, space_around, space_evenly}. pulp #1434 Tier 1 (PR-B): NO new direction-context-dependent aliases were added. Codex P1 on PR #1853 (two findings): 'left'/'right' are NOT aliased because their CSS semantics depend on flex-direction (column containers have both behave as 'start'); 'stretch' and 'normal' are NOT aliased because FlexJustify has no stretch equivalent. The dispatcher's default branch sets FlexJustify::start so unknown values fall through safely. All four are documented in unsupportedValues with rationale; pinned by [issue-1434].",
       "issue": ""
     },
     "css/left": {

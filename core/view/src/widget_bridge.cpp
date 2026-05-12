@@ -2379,7 +2379,17 @@ void WidgetBridge::register_api() {
             if (a=="start" || a=="flex-start") f.align_items=FlexAlign::start;
             else if (a=="center")              f.align_items=FlexAlign::center;
             else if (a=="end" || a=="flex-end") f.align_items=FlexAlign::end;
-            else if (a=="baseline")            f.align_items=FlexAlign::baseline;
+            // pulp #1434 Tier 1 (css/alignItems) — CSS-spec `first baseline`
+            // aliases to plain `baseline`. The baseline-set "first" selector
+            // is the default behaviour (and what Yoga's YGAlignBaseline
+            // computes), so collapsing them is observable-behaviour-preserving.
+            // NOTE: `last baseline` is intentionally NOT aliased — it requires
+            // baseline-set tracking (align children against the LAST baseline
+            // line in a multi-line flex container) that YGAlignBaseline does
+            // not implement. Codex P1 on PR #1853 — keeping `last baseline`
+            // in compat.json/unsupportedValues is the honest answer.
+            else if (a=="baseline" || a=="first baseline")
+                                                f.align_items=FlexAlign::baseline;
             else                               f.align_items=FlexAlign::stretch;
         }
         else if (key == "align_self") {
@@ -2422,12 +2432,39 @@ void WidgetBridge::register_api() {
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");
-            if (j=="start" || j=="flex-start")               f.justify_content=FlexJustify::start;
-            else if (j=="center")                            f.justify_content=FlexJustify::center;
-            else if (j=="end" || j=="flex-end")              f.justify_content=FlexJustify::end_;
-            else if (j=="space-between"||j=="space_between") f.justify_content=FlexJustify::space_between;
-            else if (j=="space-around"||j=="space_around")   f.justify_content=FlexJustify::space_around;
-            else if (j=="space-evenly"||j=="space_evenly")   f.justify_content=FlexJustify::space_evenly;
+            // INTENTIONALLY NOT aliased (Codex P1 on PR #1853, two
+            // separate findings, both kept honest):
+            //
+            //   `left` / `right` — direction-context-dependent. CSS spec:
+            //       on a row container, `right` ≡ flex-end (LTR) /
+            //       flex-start (RTL).
+            //       on a column container, BOTH `left` and `right`
+            //       behave as `start` (per CSS Box Alignment §4.3 —
+            //       "If the property's axis is parallel to the inline
+            //       axis, behaves as flex-end; otherwise behaves as
+            //       start"). A direction-agnostic alias would silently
+            //       misrender vertical flex containers. The fully-correct
+            //       fix would peek at the widget's flex-direction here
+            //       and dispatch accordingly; that's more state coupling
+            //       than this dispatcher carries today. Keep both values
+            //       in compat.json/unsupportedValues until we either
+            //       add direction-aware aliasing or RTL writing-mode
+            //       support arrives.
+            //
+            //   `stretch` — grows AUTO-sized items equally; FlexJustify
+            //       has no equivalent. Aliasing to flex-start would
+            //       silently misrender stretching layouts. Documented
+            //       unsupported.
+            //
+            //   `normal`  — per CSS spec, "behaves as `stretch`" on flex
+            //       containers, so it inherits the same problem.
+            //       Documented unsupported.
+            if (j=="start" || j=="flex-start")                f.justify_content=FlexJustify::start;
+            else if (j=="center")                             f.justify_content=FlexJustify::center;
+            else if (j=="end" || j=="flex-end")               f.justify_content=FlexJustify::end_;
+            else if (j=="space-between"||j=="space_between")  f.justify_content=FlexJustify::space_between;
+            else if (j=="space-around"||j=="space_around")    f.justify_content=FlexJustify::space_around;
+            else if (j=="space-evenly"||j=="space_evenly")    f.justify_content=FlexJustify::space_evenly;
             else                                              f.justify_content=FlexJustify::start;
         }
         v->invalidate_layout();  // auto-invalidation on flex property change

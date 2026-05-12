@@ -34,6 +34,35 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-12 (Tier 1 PR-B — alignItems CSS-spec alias, justifyContent honest reclassification per Codex P1)** —
+  widget_bridge.cpp `setFlex` dispatcher gains exactly ONE new
+  alias plus an honest documentation pass on the rest:
+  * `css/alignItems` — `first baseline` aliases to `FlexAlign::baseline`
+    (the baseline-set "first" selector is the default `YGAlignBaseline`
+    computes). `last baseline` is **NOT aliased** — it requires
+    last-baseline tracking that Yoga does not implement; remains in
+    `unsupportedValues`.
+  * `css/justifyContent` — **no new aliases were added** for `left` /
+    `right` / `stretch` / `normal`. Codex P1 on PR #1853 (two
+    findings):
+    - `left` / `right` are direction-context-dependent. CSS spec: on
+      a column container both behave as `start` (per CSS Box Alignment
+      §4.3 — "If the property's axis is parallel to the inline axis,
+      behaves as flex-end; otherwise behaves as start"). A
+      direction-agnostic alias would silently misrender vertical flex
+      containers.
+    - `stretch` grows AUTO-sized items equally; FlexJustify has no
+      equivalent enum value, and `flex-start` lies about consumer
+      intent.
+    - `normal` resolves to `stretch` per spec, so it inherits the
+      same problem.
+  * Coverage-gap closure for `css/alignItems` (partial impl) and
+    `css/justifyContent` (honest doc-only reclassification: rows
+    move from `unsupportedValues=[]` → `unsupportedValues=[…]` with
+    rationale). Tests pin both the supported alias AND the
+    unsupported fall-through (becomes the safe default enum value)
+    so a future silent re-alias fails first.
+
 - **2026-05-07 (Wave 4 css extensive — DIVERGE sweep)** —
   catalog/oracle paperwork only; no C++ or JS source change. Drove the
   CSS surface from **128 PASS / 49 DIVERGE (60.4%)** to **177 PASS / 0
@@ -713,5 +742,8 @@ function is **not registered**, so the value is silently dropped.
    may not differ from `absolute` (verification follow-up open).
 7. `css/opacity: 50%` — percentage suffix stripped by `parseFloat`,
    yields `50`, clamped to `1`. Visually fine, semantically wrong.
-8. `css/alignItems: baseline` / `css/alignSelf: baseline` — `FlexAlign`
-   enum has no baseline variant.
+8. `css/alignItems: baseline` / `css/alignSelf: baseline` — wired via
+   `FlexAlign::baseline` → `YGAlignBaseline` (pulp #1434 rn batch B).
+   `first baseline` aliases to plain `baseline` (Tier 1 PR-B,
+   2026-05-12); `last baseline` is intentionally unsupported because
+   it requires baseline-set tracking that Yoga does not implement.
