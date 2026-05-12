@@ -64,6 +64,38 @@ case `pulp scan --no-load` exists for. When adding new entry-point
 calls, wrap them too — the goal is "one bad bundle never crashes a
 scan."
 
+### dlerror() must be cached (ASan-only SEGV — pulp #1862 / #1873)
+
+**Never** call `dlerror()` more than once per failure log line. POSIX
+clears dlerror's internal buffer after every call, so a ternary like:
+
+```cpp
+// WRONG — second dlerror() returns nullptr
+runtime::log_warn("dlopen failed: {}",
+                  dlerror() ? dlerror() : "unknown");
+```
+
+calls dlerror() twice and the SECOND call returns `nullptr`.
+`std::format`'s `string_view(char const*)` ctor then runs
+`strlen(nullptr)` and ASan flags a SEGV in `libsystem_platform`'s
+`_platform_strlen`. **The bug is invisible on non-ASan builds** —
+release builds happen to survive the near-null strlen because the
+zero page is read-protected one access deep. Caught on PR #1862's
+macOS ARM64 ASan lane 2026-05-12; fixed in PR #1873.
+
+Correct idiom:
+
+```cpp
+const char* err = dlerror();
+runtime::log_warn("dlopen failed: {}", err ? err : "unknown");
+```
+
+The other format backends (`plugin_slot_vst3.cpp`, `plugin_slot_lv2.cpp`,
+`plugin_slot_clap.cpp`, `core/runtime/src/dynamic_library.cpp`) all
+already cache via a local — the only offender was the defensive #812
+fallback path at `scanner_clap.cpp:90`. When adding a new format
+backend that calls `dlopen`, mirror the cache-into-local pattern.
+
 ## Testing against a real plug-in
 
 Integration tests gate on a compile-time path macro:

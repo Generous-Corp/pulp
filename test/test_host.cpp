@@ -93,6 +93,84 @@ TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {
     REQUIRE(plugins.size() >= 0);
 }
 
+// Regression test for the scanner_clap.cpp `dlerror()` double-call SEGV
+// caught by ASan on PR #1862's macOS ARM64 lane (2026-05-12). The
+// defensive #812 fallback path in `scan_clap_bundle_descriptors` logs
+// the dlerror() string when dlopen fails, but the original code called
+// `dlerror()` TWICE in a `cond ? dlerror() : "..."` ternary. POSIX
+// dlerror() clears its internal buffer after each call, so the second
+// invocation returns nullptr — which `std::format`'s
+// `string_view(char const*)` ctor then passes to `strlen(nullptr)`,
+// crashing under ASan with a SEGV on libsystem_platform's
+// _platform_strlen.
+//
+// Pin: scan a malformed `.clap` bundle and assert (a) it doesn't crash
+// and (b) the filename-fallback path produces a single PluginInfo so
+// users see SOMETHING in the catalog instead of a silent drop.
+TEST_CASE("scan_clap_bundle_descriptors survives malformed bundle (dlopen-fail path)",
+          "[host][scanner][issue-1862][coverage]") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "pulp_clap_dlopen_fail_test.clap";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+
+    // A `.clap` bundle whose binary is a plain text file rather than a
+    // valid dylib. macOS dlopen / Linux dlopen will both fail; the
+    // dlerror() will be non-empty on the first call and (originally)
+    // null on the second. Our fix caches the first call in a local.
+    //
+    // Bundle layout matches what `resolve_clap_binary` expects on each
+    // platform; on macOS, that's `<bundle>.clap/Contents/MacOS/<name>`.
+    // On Linux / Windows the resolver looks for a flat binary path —
+    // either way, `dlopen()` will fail on garbage contents.
+#if defined(__APPLE__)
+    auto inner = tmp / "Contents" / "MacOS";
+    fs::create_directories(inner, ec);
+    REQUIRE(!ec);
+    std::ofstream(inner / "pulp_clap_dlopen_fail_test")
+        << "not a real dylib — should fail dlopen()\n";
+#else
+    fs::create_directories(tmp, ec);
+    REQUIRE(!ec);
+    std::ofstream(tmp / "pulp_clap_dlopen_fail_test.so")
+        << "not a real shared object\n";
+#endif
+
+    // Drive through PluginScanner::scan() with hermetic extra_paths so
+    // the malformed bundle is discovered through the normal scan path
+    // and we exercise the dlopen-fail branch deterministically without
+    // requiring a system CLAP folder. `only_extra_paths = true` keeps
+    // the test from walking the dev's installed CLAP collection (per
+    // Codex 2026-04-21 review on #545).
+    PluginScanner scanner;
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_clap = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths = { tmp.parent_path().string() };
+    auto results = scanner.scan(opts);
+
+    // The fix returns a filename-fallback entry instead of crashing.
+    // Find the entry for our specific test bundle (other CLAP bundles
+    // may exist in tmp on shared CI runners).
+    bool found = false;
+    for (const auto& info : results) {
+        if (info.path == tmp.string()) {
+            REQUIRE(info.format == PluginFormat::CLAP);
+            // make_filename_fallback derives a non-empty name from
+            // the bundle stem.
+            REQUIRE(!info.name.empty());
+            found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
+
+    fs::remove_all(tmp, ec);
+}
+
 // Issue #491 P2: scan_lv2_bundle must set unique_id to the plugin URI
 // parsed from manifest.ttl, not the filesystem stem. This keeps
 // graph_serializer rehydration stable across sessions even when two

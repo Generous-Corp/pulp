@@ -87,8 +87,16 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         // doesn't ship a deliberately-broken CLAP fixture. The user-
         // visible surface is exercised by `pulp scan --no-load`
         // (test_cli_shellout.cpp [issue-812]).
+        //
+        // ASan caught (PR #1862 macOS ARM64 lane, 2026-05-12): cache
+        // `dlerror()` in a local before the format call. POSIX
+        // dlerror() clears its internal state after every call, so a
+        // ternary `dlerror() ? dlerror() : "..."` calls it twice and
+        // the SECOND call returns nullptr. std::format's
+        // string_view(nullptr) ctor then runs strlen on null → SEGV.
+        const char* err = dlerror();
         runtime::log_warn("CLAP scan: dlopen failed for '{}': {}",
-                          binary, dlerror() ? dlerror() : "unknown");
+                          binary, err ? err : "unknown");
         results.push_back(make_filename_fallback(path));
         return results;
     } // LCOV_EXCL_STOP
