@@ -97,6 +97,18 @@ if(UNIX)
     set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
 endif()
 
+# Window-only capture invariants (pulp-internal task #81) —
+# spectr-roundtrip.sh must not silently fall back to full-screen
+# screencapture, because terminal / desktop background then poisons
+# the histogram diff against the REFERENCE render. Static-content
+# regression pins the structural fix.
+if(UNIX)
+    add_test(NAME spectr-roundtrip-window-only-capture
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_spectr_roundtrip_window_only_capture.sh)
+    set_tests_properties(spectr-roundtrip-window-only-capture
+        PROPERTIES TIMEOUT 10)
+endif()
+
 # Debug-SDK perf-killer guard smoke (pulp-internal task #35).
 # Hermetic — runs the guard against a tempdir-fabricated SDK install,
 # exercises the three branches (Debug-no-override → FATAL_ERROR,
