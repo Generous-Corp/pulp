@@ -805,6 +805,33 @@ Element.prototype.getRootNode = function() {
     return this;
 };
 
+// Standard DOM `Node.contains(other)` — returns true if `other` is this
+// element OR a descendant. Walks `_parentElement` upward from `other`
+// until we hit `this`, the root, or a cycle. Required for click-outside
+// detection (the `ref.current.contains(e.target)` pattern in React
+// portals / ContextMenus). Pre-#1859 audit of Spectr's working bundle
+// found this missing from the modular Element shim, would have thrown
+// `TypeError: ref.current.contains is not a function` on
+// ContextMenu dismiss after #1859 lands the DOM-shim path.
+//
+// Treats non-Element arguments (text nodes, null, etc.) as `false` —
+// the contract is loose because most consumers feed e.target which is
+// always an Element in our event system.
+Element.prototype.contains = function(other) {
+    if (other == null) return false;
+    if (other === this) return true;
+    // Guard against pathological cycles even though _parentElement
+    // walks should be acyclic in practice.
+    var seen = 0;
+    var node = other._parentElement;
+    while (node) {
+        if (node === this) return true;
+        if (++seen > 4096) return false;
+        node = node._parentElement;
+    }
+    return false;
+};
+
 // ── Events ───────────────────────────────────────────────────────────────────
 
 Element.prototype.addEventListener = function(type, fn, opts) {

@@ -197,6 +197,48 @@ TEST_CASE("insertBefore(fragment) flattens fragment children in order",
 
 // ── DOM-ops idempotency (#745) ──────────────────────────────────────────
 //
+// pulp pre-#1859 audit: Spectr's ContextMenu uses
+// `ref.current.contains(e.target)` for click-outside dismiss. The
+// modular web-compat-element.js was missing `Element.prototype.contains`
+// — would have thrown `TypeError` post-#1859 when the DOM-shim path
+// is the active one for ref.current. Pin the standard `Node.contains`
+// contract here so future regressions surface in CI, not in Spectr.
+
+TEST_CASE("Element.contains walks _parentElement chain — DOM Node.contains contract",
+          "[view][web-compat][element-contains]") {
+    auto result = run_in_bridge(R"(
+        var grand = document.createElement('div');
+        var parent = document.createElement('div');
+        var child = document.createElement('span');
+        var sibling = document.createElement('span');
+        var detached = document.createElement('span');
+        grand.appendChild(parent);
+        parent.appendChild(child);
+        grand.appendChild(sibling);
+        return [
+            // self
+            'self=' + grand.contains(grand),
+            // direct child
+            'directChild=' + grand.contains(parent),
+            // grandchild
+            'grandchild=' + grand.contains(child),
+            // sibling
+            'sibling=' + grand.contains(sibling),
+            // detached node — not in tree
+            'detached=' + grand.contains(detached),
+            // null/undefined are false
+            'nullArg=' + grand.contains(null),
+            'undefinedArg=' + grand.contains(undefined),
+            // ancestor doesn't contain its own ancestor
+            'childContainsGrand=' + child.contains(grand)
+        ].join('|');
+    )");
+    REQUIRE(result ==
+            "self=true|directChild=true|grandchild=true|sibling=true|"
+            "detached=false|nullArg=false|undefinedArg=false|"
+            "childContainsGrand=false");
+}
+
 // pulp #745 consolidated the inline `kDomOpsInit` C-string in
 // widget_bridge.cpp with the standalone web-compat-dom-ops.js prelude.
 // The JS file now carries an idempotency guard so re-eval'ing the
