@@ -4242,9 +4242,10 @@
         "contents"
       ],
       "tests": [
+        "test/test_widget_bridge.cpp [display-contents]",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent. pulp #1434 (Triage #12): the prop-applier now accepts display: flex / none, mirroring the yoga side wired in #1422. \"contents\" remains unsupported (Yoga has no equivalent).",
+      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent. pulp #1434 (Triage #12): the prop-applier now accepts display: flex / none, mirroring the yoga side wired in #1422. \"contents\" remains unsupported (Yoga has no equivalent). ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out — the dispatcher silently no-ops; pinned by test/test_widget_bridge.cpp [display-contents].",
       "issue": ""
     },
     "rn/elevation": {
@@ -6381,9 +6382,10 @@
         "contents"
       ],
       "tests": [
+        "test/test_widget_bridge.cpp [display-contents]",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1420: claim flex+none as supported. CSS translator at web-compat-style-decl.js:86-118 routes display:none to setVisible(false) and display:flex to setVisible(true)+setFlex(direction). 'flex' is implicit in pulp's layout model; 'none' uses View visibility. Yoga has YGDisplay {flex, none, contents}; pulp doesn't model 'contents'.",
+      "notes": "pulp #1420: claim flex+none as supported. CSS translator at web-compat-style-decl.js:86-118 routes display:none to setVisible(false) and display:flex to setVisible(true)+setFlex(direction). 'flex' is implicit in pulp's layout model; 'none' uses View visibility. Yoga has YGDisplay {flex, none, contents}; pulp doesn't model 'contents'. ARCH-DEFERRED: display: contents requires parallel block/inline-flow layout that CLAUDE.md's flex+grid-only policy (Yoga 3.0 ceiling) explicitly rules out — the dispatcher silently no-ops; pinned by test/test_widget_bridge.cpp [display-contents].",
       "issue": "https://github.com/danielraffel/pulp/issues/1420"
     },
     "yoga/overflow": {
