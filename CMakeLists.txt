@@ -808,6 +808,25 @@ endforeach()
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
 
+# SDK build-type marker (pulp-internal task #35).
+#
+# Records the CMAKE_BUILD_TYPE the SDK was built with so PulpConfig.cmake
+# can refuse — or at least loudly warn — when a downstream plugin tries
+# to consume a Debug-built Pulp SDK. Debug-built Skia + audio framework
+# blow real-time deadlines on every reasonable host, so consumers who
+# stumble into this on a local checkout deserve a clear "this SDK
+# install is unusable for plugin work" message instead of a silently
+# unusable plugin that drops audio.
+#
+# Multi-config generators (Visual Studio, Xcode) don't have a single
+# CMAKE_BUILD_TYPE at configure time; the install step picks one via
+# `cmake --install --config <Type>`. In that case CMAKE_BUILD_TYPE is
+# empty here and the guard in PulpConfig.cmake.in falls back to
+# "unknown" — which it interprets as "trust the user, do not warn".
+file(WRITE "${CMAKE_BINARY_DIR}/sdk_build_type.txt"
+     "${CMAKE_BUILD_TYPE}\n")
+install(FILES "${CMAKE_BINARY_DIR}/sdk_build_type.txt" DESTINATION ".")
+
 # CMake config files for find_package(Pulp)
 install(EXPORT PulpTargets
     FILE PulpTargets.cmake

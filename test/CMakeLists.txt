@@ -97,6 +97,36 @@ if(UNIX)
     set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
 endif()
 
+# Debug-SDK perf-killer guard smoke (pulp-internal task #35).
+# Hermetic — runs the guard against a tempdir-fabricated SDK install,
+# exercises the three branches (Debug-no-override → FATAL_ERROR,
+# Debug-with-override → WARNING+proceed, Release → silent). Runs under
+# `cmake -P` so it works on every platform without building the Pulp
+# tree.
+foreach(_pulp_debug_sdk_scenario
+        "debug-no-override:fail"
+        "debug-with-override:warn"
+        "debug-lowercase:fail"
+        "debug-mixed-case:fail"
+        "release:silent")
+    string(REPLACE ":" ";" _scenario_pair "${_pulp_debug_sdk_scenario}")
+    list(GET _scenario_pair 0 _scenario_name)
+    list(GET _scenario_pair 1 _scenario_outcome)
+    add_test(NAME cmake-debug-sdk-guard-${_scenario_name}
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+            -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/debug-sdk-guard-${_scenario_name}
+            -DSCENARIO=${_scenario_name}
+            -DEXPECTED_OUTCOME=${_scenario_outcome}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_debug_sdk_guard.cmake)
+    set_tests_properties(cmake-debug-sdk-guard-${_scenario_name}
+        PROPERTIES TIMEOUT 30)
+endforeach()
+unset(_pulp_debug_sdk_scenario)
+unset(_scenario_pair)
+unset(_scenario_name)
+unset(_scenario_outcome)
+
 # Android end-to-end smoke (issue #337). Runs the tools/scripts/android_smoke.sh
 # against a locally attached emulator or device. Skipped by default because
 # the smoke requires an already-booted AVD/device and an arm64-v8a APK —
