@@ -110,4 +110,51 @@ describe('prop-applier list-style cluster (pulp #1514)', () => {
         expect(callsFor(bridge, 'setListStyleType').map((c) => c.args[1])).toEqual(['disc']);
         expect(callsFor(bridge, 'setListStylePosition').map((c) => c.args[1])).toEqual(['inside']);
     });
+
+    // pulp #1878 follow-up (2026-05-12): the shorthand parser's typeSet
+    // was widened from 5 keywords to the 15 counter-style keywords
+    // landed in #1878's longhand. Without this widening,
+    // `style={{ listStyle: 'lower-roman' }}` silently dropped the type
+    // token at the shorthand parser even though the longhand path
+    // worked. Pin every new keyword so the routing can't regress.
+    it('listStyle shorthand routes counter-style type keywords (decimal-leading-zero, roman, alpha, latin, greek, armenian, georgian)', () => {
+        const counterStyleKeywords = [
+            'decimal-leading-zero',
+            'lower-roman', 'upper-roman',
+            'lower-alpha', 'upper-alpha',
+            'lower-latin', 'upper-latin',
+            'lower-greek',
+            'armenian', 'georgian',
+        ];
+        for (const kw of counterStyleKeywords) {
+            applyChangedProps(makeInstance(kw), {}, { listStyle: kw });
+        }
+        const dispatched = callsFor(bridge, 'setListStyleType').map((c) => c.args[1]);
+        expect(dispatched).toEqual(counterStyleKeywords);
+    });
+
+    it('listStyle shorthand routes counter-style with position (e.g. "lower-roman inside")', () => {
+        applyChangedProps(makeInstance('roman-inside'), {}, {
+            listStyle: 'lower-roman inside',
+        });
+        expect(callsFor(bridge, 'setListStyleType').map((c) => c.args[1])).toEqual(['lower-roman']);
+        expect(callsFor(bridge, 'setListStylePosition').map((c) => c.args[1])).toEqual(['inside']);
+    });
+
+    it('listStyle shorthand routes counter-style with image (e.g. "upper-alpha url(bullet.png)")', () => {
+        applyChangedProps(makeInstance('alpha-img'), {}, {
+            listStyle: 'upper-alpha url(bullet.png)',
+        });
+        expect(callsFor(bridge, 'setListStyleType').map((c) => c.args[1])).toEqual(['upper-alpha']);
+        expect(callsFor(bridge, 'setListStyleImage').map((c) => c.args[1])).toEqual(['url(bullet.png)']);
+    });
+
+    it('listStyle shorthand still drops genuinely-unknown counter-style keywords', () => {
+        // `tibetan`, `cjk-decimal`, `hebrew`, `hiragana`, `katakana` etc. are
+        // CSS Counter Styles Level 3 keywords NOT yet wired in #1878's
+        // longhand set. The shorthand parser must continue to drop them
+        // until the longhand list is extended (separate follow-up).
+        applyChangedProps(makeInstance('tibetan'), {}, { listStyle: 'tibetan' });
+        expect(callsFor(bridge, 'setListStyleType')).toHaveLength(0);
+    });
 });

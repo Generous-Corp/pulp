@@ -823,8 +823,23 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'listStyle': {
             const sval = String(value).trim();
             const tokens = sval.split(/\s+/);
+            // pulp #1878 follow-up (2026-05-12, carve-out approved
+            // by A 21:50Z): widened from the original 5 keywords to
+            // the 15 counter-style keywords that landed in #1878's
+            // longhand `setListStyleType` keyword table. Without this
+            // widening, `style={{ listStyle: 'lower-roman' }}` silently
+            // drops the type token at the shorthand parser even
+            // though the longhand `listStyleType: 'lower-roman'` path
+            // works correctly. Keep aligned with widget_bridge.cpp
+            // setListStyleType's keyword set.
             const typeSet: Record<string, true> = {
                 none: true, disc: true, circle: true, square: true, decimal: true,
+                'decimal-leading-zero': true,
+                'lower-roman': true, 'upper-roman': true,
+                'lower-alpha': true, 'upper-alpha': true,
+                'lower-latin': true, 'upper-latin': true,
+                'lower-greek': true,
+                armenian: true, georgian: true,
             };
             const posSet: Record<string, true> = { inside: true, outside: true };
             let sawType = false, sawImage = false;
