@@ -34,6 +34,27 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-12 (Tier 2 — listStyleType counter-style extension, storage-only)** —
+  `widget_bridge.cpp::setListStyleType` keyword table and
+  `web-compat-style-decl.js::lsTypes` shorthand parser gain 10 new
+  CSS Counter Styles Level 3 keyword slots backed by new
+  `View::ListStyleType` enum values:
+  * `decimal-leading-zero`
+  * `lower-roman` / `upper-roman`
+  * `lower-alpha` / `upper-alpha`
+  * `lower-latin` / `upper-latin`
+  * `lower-greek` / `armenian` / `georgian`
+  Storage-only round-trip (the bridge stores the keyword on the
+  View's enum; paint-side marker-glyph rendering is the follow-up
+  for the entire list-style-type family, including `decimal`).
+  Closes the `lower-roman / upper-roman / lower-alpha / etc.` line
+  from `unsupportedValues`. Other Counter Styles Level 3 keywords
+  (cjk-decimal, hebrew, hiragana, katakana, etc.) remain a separate
+  storage-only follow-up. Tests pin every new keyword to its enum
+  slot AND assert the shorthand parser routes counter-style tokens
+  through `setListStyleType` (regression guard for the `lsTypes`
+  table). pulp #1514.
+
 - **2026-05-12 (Tier 1 PR-B — alignItems CSS-spec alias, justifyContent honest reclassification per Codex P1)** —
   widget_bridge.cpp `setFlex` dispatcher gains exactly ONE new
   alias plus an honest documentation pass on the rest:

@@ -422,6 +422,22 @@ public:
         circle,   ///< Hollow circle.
         square,   ///< Filled square.
         decimal,  ///< Numeric (default for <ol>) — needs sibling-index, not painted yet.
+        // CSS Counter Styles Level 3 keywords (pulp #1514). Storage-only
+        // today; paint-side glyph rendering is the follow-up. The slots
+        // exist so the bridge can round-trip the consumer's keyword
+        // honestly and the catalog can flip from `missing` to
+        // `supported-with-gaps`. Underscored C++ identifiers map to
+        // hyphenated CSS keywords (e.g. lower_roman ↔ "lower-roman").
+        decimal_leading_zero,  ///< 01, 02, ... 09, 10, 11.
+        lower_roman,           ///< i, ii, iii, iv, v.
+        upper_roman,           ///< I, II, III, IV, V.
+        lower_alpha,           ///< a, b, c — CSS alias of lower-latin.
+        upper_alpha,           ///< A, B, C — CSS alias of upper-latin.
+        lower_latin,           ///< a, b, c.
+        upper_latin,           ///< A, B, C.
+        lower_greek,           ///< α, β, γ.
+        armenian,              ///< Traditional Armenian numbering.
+        georgian,              ///< Traditional Georgian numbering.
     };
     enum class ListStylePosition {
         outside,  ///< Marker hangs in the margin (CSS default).

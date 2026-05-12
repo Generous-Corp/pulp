@@ -780,7 +780,17 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "listStyle": {
             // Parse the space-separated shorthand into the 3 longhands.
             var lsTokens = String(resolved).trim().split(/\s+/);
-            var lsTypes = { "none": 1, "disc": 1, "circle": 1, "square": 1, "decimal": 1 };
+            var lsTypes = {
+                "none": 1, "disc": 1, "circle": 1, "square": 1, "decimal": 1,
+                // Counter-style keywords (pulp #1514). Storage-only on the
+                // bridge today; the shorthand parser still needs to route
+                // them to setListStyleType so the View round-trips honestly.
+                "decimal-leading-zero": 1,
+                "lower-roman": 1, "upper-roman": 1,
+                "lower-alpha": 1, "upper-alpha": 1,
+                "lower-latin": 1, "upper-latin": 1,
+                "lower-greek": 1, "armenian": 1, "georgian": 1,
+            };
             var lsPos = { "inside": 1, "outside": 1 };
             var sawType = false;
             var sawPos = false;

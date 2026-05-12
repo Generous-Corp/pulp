@@ -182,7 +182,15 @@ export interface StyleProps {
     /// rendering is the follow-up. `listStyle` is the shorthand
     /// (`'<type> <position> <image>'` in any order).
     listStyle?: string;
-    listStyleType?: 'none' | 'disc' | 'circle' | 'square' | 'decimal';
+    listStyleType?:
+        | 'none' | 'disc' | 'circle' | 'square' | 'decimal'
+        // CSS Counter Styles Level 3 keywords (pulp #1514). Storage-only
+        // round-trip today; paint-side glyph rendering is the follow-up.
+        | 'decimal-leading-zero'
+        | 'lower-roman' | 'upper-roman'
+        | 'lower-alpha' | 'upper-alpha'
+        | 'lower-latin' | 'upper-latin'
+        | 'lower-greek' | 'armenian' | 'georgian';
     listStyleImage?: string;
     listStylePosition?: 'inside' | 'outside';
     borderTopColor?: string;
