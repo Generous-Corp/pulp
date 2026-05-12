@@ -8036,7 +8036,7 @@
         "test/test_canvas.cpp [skia][filter-chain][drop-shadow]",
         "test/test_canvas2d_shim.cpp [issue-1520]"
       ],
-      "notes": "pulp #1520 — JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up. arch-no-svg-filter-refs — url(#filter-id) SVG filter references are not supported — Pulp doesn't have an SVG filter graph. The 9 filter functions (blur/brightness/contrast/grayscale/hue-rotate/invert/opacity/saturate/sepia) plus drop-shadow are all wired.",
+      "notes": "pulp #1520 — JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up. arch-no-svg-filter-refs — url(#filter-id) SVG filter references are not supported — Pulp doesn't have an SVG filter graph. The 9 filter functions (blur/brightness/contrast/grayscale/hue-rotate/invert/opacity/saturate/sepia) plus drop-shadow are all wired on the Skia (GPU) backend. CG canvas backend (the CPU fallback used when no GPU context is available — `core/canvas/platform/mac/cg_canvas.mm` inherits the base `Canvas::set_filter` no-op) silently drops ALL filter functions; promoting CG to honor the chain requires CGImage filter wiring + a CG color-matrix equivalent (follow-up, tracked alongside the parallel `css/filter` CG-degradation note). For now, ctx.filter is honest-supported only when a Skia context is active; the Skia tests cited above prove that path.",
       "issue": "1520"
     },
     "canvas2d/shadowColor": {
