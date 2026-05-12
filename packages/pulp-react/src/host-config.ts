@@ -118,7 +118,22 @@ function asText(children: unknown): string | undefined {
 
 /// Element types that lower their string children to setText / createLabel
 /// rather than to a child node. shouldSetTextContent reads this set.
-const TEXT_BEARING: Set<Type> = new Set(['Label', 'Button', 'TextEditor']);
+///
+/// pulp #109 — HTML-intrinsic JSX tags ALSO bear their own text. Without
+/// these aliases, React's host-config returned false from
+/// shouldSetTextContent('span', …), causing React to materialize a
+/// synthetic Label child for the string content. That synthetic child
+/// stacked on top of the outer span's own auto-derived text (createWidget
+/// pulls asText(props.children) into the Label dispatch), producing the
+/// 2026-05-11 Spectr regression where every <span>SPECTR</span> rendered
+/// as two overlapping "SPECTR" labels. Fix surfaces for EVERY imported
+/// design with raw HTML text tags, not just Spectr.
+const TEXT_BEARING: Set<Type> = new Set([
+    'Label', 'Button', 'TextEditor',
+    'b', 'button', 'code', 'desc', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'i', 'label', 'li', 'p', 'pre', 'span', 'strong', 'td', 'text', 'th',
+    'title', 'tspan',
+] as Type[]);
 
 // ── HostConfig ──────────────────────────────────────────────────────
 export const PulpHostConfig: HostConfig<

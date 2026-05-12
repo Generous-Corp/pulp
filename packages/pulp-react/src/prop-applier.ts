@@ -565,6 +565,21 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             }
             return call('setFlex', id, 'direction', value as string);
         }
+        // pulp #108 — RN/React-style `flexDirection` (camelCase) is the
+        // canonical key in JSX. Without this case the prop fell through
+        // as unknown, leaving Yoga's column default in place and
+        // collapsing CSS-imported flex rows into vertical stacks. Maps
+        // to the same setFlex(direction, …) dispatch as the `direction`
+        // case for the flex-direction subset of values. Normalizes
+        // `col` / `col-reverse` aliases to `column` / `column-reverse`
+        // for the bridge's expected vocabulary.
+        case 'flexDirection': {
+            const sval = String(value).trim().toLowerCase();
+            const normalized = sval === 'col' ? 'column'
+                : sval === 'col-reverse' ? 'column-reverse'
+                : sval;
+            return call('setFlex', id, 'direction', normalized);
+        }
         case 'gap':             return call('setFlex', id, 'gap', value as number);
         case 'rowGap':          return call('setFlex', id, 'row_gap', value as number);
         case 'columnGap':       return call('setFlex', id, 'column_gap', value as number);
