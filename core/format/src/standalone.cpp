@@ -1,4 +1,5 @@
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
@@ -273,9 +274,14 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts
     // key events through the root view's on_global_click callback for Cmd+I.
+    //
+    // pulp #468 — extract the pre-screenshot idle work into a std::function
+    // so the headless screenshot block (further below) can compose with it
+    // instead of clobbering via a second set_idle_callback.
+    std::function<void()> pre_screenshot_idle;
 #if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
     if (scripted_ui_ptr) {
-        window->set_idle_callback([scripted_ui_ptr, settings_ptr, inspector_ptr, inspector_host] {
+        pre_screenshot_idle = [scripted_ui_ptr, settings_ptr, inspector_ptr, inspector_host] {
             if (scripted_ui_ptr) scripted_ui_ptr->poll();
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
@@ -286,9 +292,10 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                     inspector_host
                 });
             }
-        });
+        };
+        window->set_idle_callback(pre_screenshot_idle);
     } else {
-        window->set_idle_callback([settings_ptr, inspector_ptr, inspector_host] {
+        pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
                 view::View::overlay_queue().push_back({
@@ -298,7 +305,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
                     inspector_host
                 });
             }
-        });
+        };
+        window->set_idle_callback(pre_screenshot_idle);
     }
 
     // Enable inspector by default when PULP_INSPECTOR env var is set
@@ -313,6 +321,37 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     window->show();
 
     detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
+
+    // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
+    //
+    // When `config_.screenshot_path` is non-empty (set via set_config or
+    // parsed from `--screenshot=PATH` argv in the consumer's main), wait
+    // `screenshot_frame_delay` frames, then capture the window via
+    // `WindowHost::capture_png()` and exit. This is the SDK-level shape
+    // so every consumer (Spectr, examples, future plugins) gets headless
+    // visual-regression capture without bespoke per-app code.
+    if (!config_.screenshot_path.empty()) {
+        auto* host = window.get();
+        detail::ScreenshotCapture cap;
+        cap.delay = config_.screenshot_frame_delay > 0
+            ? config_.screenshot_frame_delay : 30;
+        cap.path = config_.screenshot_path;
+        cap.capture_fn = [host] { return host->capture_png(); };
+        cap.close_fn   = [host] { host->request_close(); };
+        cap.on_error   = [out_path = config_.screenshot_path](const std::string& msg) {
+            runtime::log_error("Standalone: screenshot {} ({})", msg, out_path);
+        };
+        // Compose with the pre-screenshot idle callback (inspector +
+        // scripted_ui poll + settings poll). The wrap calls the prior
+        // callback every frame, then on frame N captures + closes.
+        auto prior = pre_screenshot_idle;  // may be empty (Android path)
+        host->set_idle_callback([prior, cap = std::move(cap)]() mutable {
+            if (prior) prior();
+            cap();
+        });
+        runtime::log_info("Standalone: screenshot mode armed — will capture to {} after {} frames",
+                          config_.screenshot_path, cap.delay);
+    }
 
     // Blocks until the window is closed. The close callback above has
     // already fired bridge->close() (before stop() reset processor_),

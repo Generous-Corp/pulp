@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0930"></a>
+## [0.94.0]
+
 ## [0.93.0] - 2026-05-11
 
 - fix(view): mac mouseDown/keyDown stale pointers — PAC crash on react unmount ([#1819](https://github.com/danielraffel/pulp/pull/1819))

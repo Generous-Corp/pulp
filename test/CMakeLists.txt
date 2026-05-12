@@ -973,6 +973,11 @@ add_executable(pulp-test-standalone-editor-chrome test_standalone_editor_chrome.
 target_link_libraries(pulp-test-standalone-editor-chrome PRIVATE pulp::standalone Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-standalone-editor-chrome)
 
+# Headless screenshot capture state machine (pulp #468)
+add_executable(pulp-test-screenshot-capture test_screenshot_capture.cpp)
+target_link_libraries(pulp-test-screenshot-capture PRIVATE pulp::standalone Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-screenshot-capture)
+
 # STFT and audio visualization signal tests
 add_executable(pulp-test-stft test_stft.cpp)
 target_link_libraries(pulp-test-stft PRIVATE pulp::signal Catch2::Catch2WithMain)

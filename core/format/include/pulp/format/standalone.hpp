@@ -24,6 +24,16 @@ struct StandaloneConfig {
     // When false, run_with_editor() hosts the editor directly and omits the
     // built-in Settings tab.
     bool show_settings_tab = true;
+    // When non-empty, run_with_editor() installs a one-shot idle callback
+    // that captures the first painted frame via WindowHost::capture_png()
+    // and writes to this path, then closes the window. Codified in the SDK
+    // (not per-app) so every pulp::format::StandaloneApp consumer gets
+    // headless screenshot capture for free. Set via set_config() or by
+    // parsing `--screenshot=PATH` from argv in main().
+    std::string screenshot_path;
+    // Frames to wait before capture. Default 30 (~0.5s @60fps) gives the
+    // first React-driven layout + effects pass time to settle.
+    int screenshot_frame_delay = 30;
 };
 
 class StandaloneApp {
