@@ -134,22 +134,59 @@ if [[ $SKIP_CAPTURE -eq 0 ]]; then
     end tell
 EOF
   sleep 1
-  # Try window-specific capture; fall back to full screen
-  WID=$(osascript 2>/dev/null <<EOF || echo ""
-    tell application "System Events"
-      tell first process whose unix id is $PID
-        if (count of windows) > 0 then
-          return id of window 1
-        end if
+  # Window-specific capture only. A full-screen fallback was tempting but
+  # poisons the histogram diff against the REFERENCE render (terminal /
+  # desktop background bleeds into the global color distribution and the
+  # similarity score ends up reflecting the wallpaper, not the plugin
+  # UI). See task #81. Retry the window-id query a few times — Cocoa
+  # windows can take a moment to appear in System Events after launch.
+  WID=""
+  for attempt in 1 2 3 4 5; do
+    WID=$(osascript 2>/dev/null <<EOF || echo ""
+      tell application "System Events"
+        tell first process whose unix id is $PID
+          if (count of windows) > 0 then
+            return id of window 1
+          end if
+        end tell
       end tell
-    end tell
 EOF
 )
-  if [[ -n "$WID" && "$WID" =~ ^[0-9]+$ ]]; then
-    screencapture -x -l"$WID" -o "$OUT" 2>&1 || screencapture -x "$OUT"
+    if [[ -n "$WID" && "$WID" =~ ^[0-9]+$ ]]; then break; fi
+    sleep 0.5
+  done
+
+  if [[ -z "$WID" || ! "$WID" =~ ^[0-9]+$ ]]; then
+    red "ERROR: could not query Spectr window id after 5 attempts."
+    red "  pid=$PID — process may have crashed during launch, or System"
+    red "  Events accessibility permission is missing for Terminal."
+    red "  (Full-screen capture intentionally skipped — it would poison"
+    red "  the histogram diff with desktop/terminal background colors."
+    red "  Set PULP_HARNESS_ALLOW_FULLSCREEN=1 to opt back into the"
+    red "  legacy fallback if you really want a fullscreen capture.)"
+    if [[ -n "${PULP_HARNESS_ALLOW_FULLSCREEN:-}" ]]; then
+      yel "  PULP_HARNESS_ALLOW_FULLSCREEN=1 set — falling back to full-screen capture (-o to drop shadow)"
+      screencapture -x -o "$OUT"
+    else
+      kill $PID 2>/dev/null
+      exit 2
+    fi
   else
-    yel "  (could not query window id; full-screen capture)"
-    screencapture -x "$OUT"
+    # -o drops the drop-shadow border (which would otherwise pick up
+    # whatever's behind the window — terminal, desktop, etc. — and
+    # contribute the same kind of background noise to the diff).
+    if ! screencapture -x -l"$WID" -o "$OUT"; then
+      red "ERROR: screencapture -l$WID failed."
+      red "  (Falling back to full-screen capture would poison the diff;"
+      red "  set PULP_HARNESS_ALLOW_FULLSCREEN=1 if that's what you want.)"
+      if [[ -n "${PULP_HARNESS_ALLOW_FULLSCREEN:-}" ]]; then
+        yel "  PULP_HARNESS_ALLOW_FULLSCREEN=1 set — falling back"
+        screencapture -x -o "$OUT"
+      else
+        kill $PID 2>/dev/null
+        exit 2
+      fi
+    fi
   fi
   [[ -f "$OUT" ]] || { red "ERROR: screenshot was not written to $OUT"; kill $PID 2>/dev/null; exit 2; }
   green "  captured to $OUT ($(stat -f %z "$OUT") bytes)"
