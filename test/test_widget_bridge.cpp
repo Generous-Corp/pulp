@@ -11779,6 +11779,213 @@ TEST_CASE("setOutlineColor currentColor honors Label's own text color over paren
     REQUIRE(oc.b < 0.5f);
 }
 
+// pulp #1728 — paint-side coverage for the rn/outlineColor currentColor
+// resolution branch. PR #1728 landed with bridge-level unit tests that
+// asserted `outline_color()` post-setter, but Codecov reported 0% patch
+// coverage because the resolved color is never exercised through the
+// actual paint pipeline. These four cases close that gap by driving
+// the bridge JS path end-to-end, painting via RecordingCanvas, and
+// asserting the set_stroke_color command emitted from View::paint_all
+// carries the resolved currentColor value. Without this evidence a
+// regression in the resolver could leave the bridge tests green while
+// the painted outline diverges from CSS semantics.
+//
+// Cases:
+//   1. implicit-currentColor → outline tracks Label's own text color
+//      via the has_own_text_color() short-circuit (#1728 fix path).
+//   2. explicit-override → setOutlineColor with an explicit hex never
+//      touches the currentColor branch (override path).
+//   3. no-color-set → currentColor with neither own-color nor
+//      inheritable color falls through to the theme text.primary
+//      fallback (`else` branch, lines 3717-3720 of widget_bridge.cpp).
+//   4. dynamic-update → recomputing setOutlineColor('currentColor')
+//      after a setTextColor change follows the new color (currentColor
+//      is resolved at setter time, not cached at paint time, but the
+//      paint reflects whichever Color was last written into outline_color_).
+// Helper: find the stroke color of the outline-specific stroke command.
+// The outline paints OUTSIDE the border box, so its rect origin is negative
+// (offset by -(outline_offset + outline_width/2)). This unambiguously
+// distinguishes it from a Panel/Widget border stroke (positive coords).
+static pulp::canvas::Color outline_stroke_color_from(
+        const pulp::canvas::RecordingCanvas& canvas) {
+    using namespace pulp::canvas;
+    Color last_stroke{};
+    Color outline_stroke{};
+    bool found = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_color) {
+            last_stroke = cmd.color;
+        } else if (cmd.type == DrawCommand::Type::stroke_rect
+                   || cmd.type == DrawCommand::Type::stroke_rounded_rect) {
+            // Origin negative ⇒ outline rect (paints outside bounds).
+            if (cmd.f[0] < 0.0f && cmd.f[1] < 0.0f) {
+                outline_stroke = last_stroke;
+                found = true;
+            }
+        }
+    }
+    REQUIRE(found);
+    return outline_stroke;
+}
+
+TEST_CASE("outline currentColor resolves to Label own text color in painted stroke",
+          "[issue-1728][rn][outlineColor][coverage]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Old-API positional createLabel(id, text, x, y, w, h) so the Label
+    // has non-zero bounds and the paint pipeline actually visits it.
+    bridge.load_script("createLabel('lbl', 'hi', 10, 10, 80, 24)");
+    auto* lbl = bridge.widget("lbl");
+    REQUIRE(lbl != nullptr);
+    REQUIRE(dynamic_cast<Label*>(lbl) != nullptr);
+
+    // Give the Label its own red color, then resolve outline to currentColor.
+    // This drives the has_own_text_color() branch in setOutlineColor.
+    bridge.load_script(R"(
+        setTextColor('lbl', '#ff0000');
+        setOutlineWidth('lbl', 2);
+        setOutlineStyle('lbl', 'solid');
+        setOutlineColor('lbl', 'currentColor');
+    )");
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+    auto stroke = outline_stroke_color_from(canvas);
+    REQUIRE_THAT(stroke.r, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(stroke.g, WithinAbs(0.0f, 0.02f));
+    REQUIRE_THAT(stroke.b, WithinAbs(0.0f, 0.02f));
+}
+
+TEST_CASE("outline explicit color overrides currentColor resolution in painted stroke",
+          "[issue-1728][rn][outlineColor][coverage]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('lbl', 'hi', 10, 10, 80, 24)");
+    auto* lbl = bridge.widget("lbl");
+    REQUIRE(lbl != nullptr);
+
+    // Set color: red (would be currentColor result), then override with
+    // an explicit blue outlineColor. The explicit hex must win — and
+    // it must flow to the painted stroke as blue.
+    bridge.load_script(R"(
+        setTextColor('lbl', '#ff0000');
+        setOutlineWidth('lbl', 2);
+        setOutlineStyle('lbl', 'solid');
+        setOutlineColor('lbl', '#0000ff');
+    )");
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+    auto stroke = outline_stroke_color_from(canvas);
+    // Explicit blue, not red (currentColor would have produced red).
+    REQUIRE_THAT(stroke.b, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(stroke.r, WithinAbs(0.0f, 0.02f));
+    REQUIRE_THAT(stroke.g, WithinAbs(0.0f, 0.02f));
+}
+
+TEST_CASE("outline currentColor with no color set falls back to theme text.primary",
+          "[issue-1728][rn][outlineColor][coverage]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    // Belt-and-braces: ensure no inheritable text color is set anywhere
+    // in the ancestor chain so the resolver MUST take the theme-fallback
+    // branch (the `else` clause in setOutlineColor's currentColor path).
+    root.clear_inheritable_text_color();
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createPanel('p', '')");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    // createPanel has no positional bounds; give it a non-zero rect on
+    // the C++ side so paint_all visits it.
+    panel->set_bounds({10, 10, 80, 24});
+    // No setTextColor: panel is not a Label and has no own text color
+    // slot. No inheritable text color set on root either.
+    bridge.load_script(R"(
+        setOutlineWidth('p', 2);
+        setOutlineStyle('p', 'solid');
+        setOutlineColor('p', 'currentColor');
+    )");
+
+    // The fallback path resolves via View::resolve_color("text.primary", ...).
+    // Whatever the theme returns must be a non-transparent color (the
+    // default rgba(220,220,220) is fully opaque), and the painted stroke
+    // must carry it.
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+    auto stroke = outline_stroke_color_from(canvas);
+    // Fallback color is opaque (theme text.primary is never transparent).
+    REQUIRE(stroke.a > 0.5f);
+    // And it must match what panel->outline_color() now stores —
+    // proves the resolved value flows through paint, not just the setter.
+    REQUIRE_THAT(stroke.r, WithinAbs(panel->outline_color().r, 0.01f));
+    REQUIRE_THAT(stroke.g, WithinAbs(panel->outline_color().g, 0.01f));
+    REQUIRE_THAT(stroke.b, WithinAbs(panel->outline_color().b, 0.01f));
+}
+
+TEST_CASE("outline currentColor follows dynamic Label color update across repaints",
+          "[issue-1728][rn][outlineColor][coverage]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('lbl', 'hi', 10, 10, 80, 24)");
+    auto* lbl = bridge.widget("lbl");
+    REQUIRE(lbl != nullptr);
+
+    // First pass: red.
+    bridge.load_script(R"(
+        setTextColor('lbl', '#ff0000');
+        setOutlineWidth('lbl', 2);
+        setOutlineStyle('lbl', 'solid');
+        setOutlineColor('lbl', 'currentColor');
+    )");
+
+    auto stroke_color_for_outline = [](View& root_view) {
+        RecordingCanvas canvas;
+        root_view.paint_all(canvas);
+        return outline_stroke_color_from(canvas);
+    };
+
+    auto red_stroke = stroke_color_for_outline(root);
+    REQUIRE_THAT(red_stroke.r, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(red_stroke.g, WithinAbs(0.0f, 0.02f));
+
+    // Now change color to green and re-resolve currentColor → green.
+    // currentColor is resolved at setter time, so the JS-side React
+    // renderer is expected to re-call setOutlineColor on color change.
+    // This case pins that contract: a stale outline must NOT survive
+    // a color change if the renderer also re-sets outlineColor.
+    bridge.load_script(R"(
+        setTextColor('lbl', '#00ff00');
+        setOutlineColor('lbl', 'currentColor');
+    )");
+    auto green_stroke = stroke_color_for_outline(root);
+    REQUIRE_THAT(green_stroke.g, WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(green_stroke.r, WithinAbs(0.0f, 0.02f));
+    REQUIRE_THAT(green_stroke.b, WithinAbs(0.0f, 0.02f));
+}
+
 // pulp #1663 — rn/borderRadius % family (5 entries) supports percent
 // values via paint-time bounds resolution. Bridge stores percent in
 // View::corner_radius_pct_ / corner_radii_pct_[4]; paint code calls
