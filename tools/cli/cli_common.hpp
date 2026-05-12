@@ -110,6 +110,10 @@ fs::path pulp_home();
 fs::path sdk_cache_path(const std::string& version);
 fs::path local_sdk_cache_path(const std::string& version);
 std::string detect_platform();
+
+// pulp #1814 — sdk_tarball_filename + legacy_unversioned_sdk_tarball_filename
+// live in tools/cli/sdk_cache_paths.hpp so the matching unit test can
+// link them without the cli_common dep chain.
 fs::path ensure_sdk(const std::string& version);
 fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& version);
 int ensure_checkout_dependencies(const fs::path& repo_root);

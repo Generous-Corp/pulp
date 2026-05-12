@@ -875,3 +875,58 @@ Gotchas:
 - **MSVC transitive-include hygiene.** `migration_runtime.cpp`
   explicitly `#include <cstddef>`, `<sstream>`, `<string>`, `<vector>`,
   `<tuple>`. Don't rely on libc++ giving you those transitively.
+
+## SDK cache filenames — version pin (pulp #1814)
+
+`pulp install` (and the underlying `pulp cache fetch skia`) used to write
+the downloaded SDK tarball to `~/.pulp/cache/pulp-sdk-<platform>.tar.gz` —
+unversioned. The cache-hit path checked only `fs::exists()`, so a stale
+tarball from a prior release would silently shadow a fresh download and
+the CLI would "install" yesterday's SDK without warning. The fix pins the
+SDK version into the filename:
+
+```
+~/.pulp/cache/pulp-sdk-v0.92.0-darwin-arm64.tar.gz
+```
+
+Plumbing:
+
+- `tools/cli/sdk_cache_paths.{hpp,cpp}` — two helpers,
+  `sdk_tarball_filename` and `legacy_unversioned_sdk_tarball_filename`.
+  Standalone TU (no `cli_common` deps) so the unit test
+  `test/test_cli_sdk_tarball_filename.cpp` can link them without dragging
+  in pulp::runtime / pulp::platform. Same pattern as `version_diag` and
+  `fetchcontent_cache`.
+- `tools/cli/cmd_misc.cpp` `cmd_cache` `fetch skia` branch — calls
+  `pulp::cli::sdk_tarball_filename(PULP_SDK_VERSION, platform)` for the
+  local cache filename. GitHub release assets are still uploaded with the
+  unversioned filename (the version lives in the URL path segment), so
+  the remote URL uses `legacy_unversioned_sdk_tarball_filename` only as
+  a *filename component of the URL*, not as a local cache key.
+- Best-effort legacy cleanup — if `~/.pulp/cache/pulp-sdk-<platform>.tar.gz`
+  exists from a pre-#1814 install, the fetch path removes it before
+  resolving the versioned filename, so stale tarballs don't sit in
+  `~/.pulp/cache/` forever. `std::error_code` is used to skip silently
+  on permission / mount errors.
+- User-facing output — both "fresh download" and "cache hit" paths now
+  print the SDK version explicitly: `SDK v0.92.0 (includes Skia) already
+  cached at …` / `Downloading SDK v0.92.0 (Skia binaries for …)`.
+
+Gotchas:
+
+- **Don't compare the local filename against the URL filename.** They're
+  intentionally different — local pins the version (so cache lookup
+  misses on stale tarballs), URL doesn't (because that's the GitHub
+  release-asset shape). The version-pin contract is between cache lookup
+  and cache write, not against the remote.
+- **`pulp install` is the user-facing alias.** It calls
+  `cmd_cache({"fetch", "skia"})` internally — fixing `cache fetch` fixes
+  `install` automatically.
+- **`pulp sdk install` is *not* the same path.** That's the Rust CLI's
+  fall-through to `pulp-cpp sdk install` (see `pulp-rs/src/cmd/sdk.rs`);
+  the C++ `cmd_sdk` is a different code path with its own per-version
+  `~/.pulp/sdk/<version>/` layout. #1814 fix lives only in `cmd_cache`.
+- **If you bump `PULP_SDK_VERSION`, you do NOT need to manually
+  invalidate `~/.pulp/cache`.** The new version means the filename
+  misses on the old cache and the user gets a fresh download
+  automatically.

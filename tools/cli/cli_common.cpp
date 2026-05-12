@@ -601,6 +601,10 @@ fs::path local_sdk_cache_path(const std::string& version) {
     return pulp_home() / "sdk-local" / detect_platform() / version;
 }
 
+// pulp #1814 — sdk_tarball_filename / legacy_unversioned_sdk_tarball_filename
+// live in tools/cli/sdk_cache_paths.cpp so the matching unit test can
+// compile + link them standalone.
+
 std::string detect_platform() {
 #ifdef __APPLE__
     #if defined(__aarch64__) || defined(__arm64__)

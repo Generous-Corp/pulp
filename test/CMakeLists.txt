@@ -296,6 +296,21 @@ target_link_libraries(pulp-test-cli-fetchcontent-cache PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-fetchcontent-cache)
 
+# pulp #1814 — version-pinned SDK tarball filename helper.
+# sdk_cache_paths.cpp is deliberately free of cli_common link deps so
+# the tests link it standalone (same pattern as fetchcontent_cache /
+# version_diag).
+add_executable(pulp-test-cli-sdk-tarball-filename
+    test_cli_sdk_tarball_filename.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/sdk_cache_paths.cpp
+)
+target_include_directories(pulp-test-cli-sdk-tarball-filename PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-sdk-tarball-filename PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
+
 # CLI package commands (#643): local-only tests for target/search/list/
 # update/suggest/audit/add/remove behavior against staged project files
 # and registry fixtures. Stays off remote fetch / archive extraction /

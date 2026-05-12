@@ -69,6 +69,7 @@ add_executable(pulp-cli
     version_diag.cpp
     projects_registry.cpp
     fetchcontent_cache.cpp
+    sdk_cache_paths.cpp
     cmd_projects.cpp
     project_bump.cpp
     cmd_project.cpp

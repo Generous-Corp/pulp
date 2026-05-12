@@ -4,6 +4,7 @@
 // Slice 2 (#547) so the update-check surface can grow independently.
 
 #include "cli_common.hpp"
+#include "sdk_cache_paths.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -313,20 +314,48 @@ int cmd_cache(const std::vector<std::string>& args) {
         }
 
         auto platform = detect_platform();
-        std::string sdk_tarball_name = "pulp-sdk-" + platform + ".tar.gz";
+        const std::string version = PULP_SDK_VERSION;
+
+        // Versioned cache filename — `pulp-sdk-v<version>-<platform>.tar.gz`.
+        // The version pin in the filename is the structural fix for pulp
+        // #1814: a stale tarball from a prior release cannot silently
+        // shadow a fresh download because the filename lookup misses.
+        std::string sdk_tarball_name = pulp::cli::sdk_tarball_filename(version, platform);
         auto sdk_cache = cache_dir / sdk_tarball_name;
 
+        // Best-effort cleanup of the pre-#1814 unversioned tarball so it
+        // doesn't sit in ~/.pulp/cache/ forever eating ~20 MB. Skipped
+        // silently on any error — this is purely housekeeping.
+        {
+            auto legacy_cache = cache_dir / pulp::cli::legacy_unversioned_sdk_tarball_filename(platform);
+            if (fs::exists(legacy_cache)) {
+                std::error_code ec;
+                fs::remove(legacy_cache, ec);
+                if (!ec) {
+                    std::cout << "Removed legacy unversioned cache: "
+                              << legacy_cache.string() << "\n";
+                }
+            }
+        }
+
         if (fs::exists(sdk_cache)) {
-            std::cout << "SDK (includes Skia) already cached at " << sdk_cache.string() << "\n";
+            std::cout << "SDK v" << version << " (includes Skia) already cached at "
+                      << sdk_cache.string() << "\n";
             return 0;
         }
 
         fs::create_directories(cache_dir);
+        // GitHub release assets are uploaded with the unversioned filename;
+        // the version lives in the path segment. Local filename is
+        // versioned so consumers can tell from `ls ~/.pulp/cache/` which
+        // SDK is actually downloaded.
+        std::string remote_filename = pulp::cli::legacy_unversioned_sdk_tarball_filename(platform);
         std::string url = "https://github.com/" + std::string(PULP_GITHUB_REPO)
-                        + "/releases/download/v" + std::string(PULP_SDK_VERSION)
-                        + "/" + sdk_tarball_name;
+                        + "/releases/download/v" + version
+                        + "/" + remote_filename;
 
-        std::cout << "Downloading Skia binaries for " << platform << "...\n";
+        std::cout << "Downloading SDK v" << version << " (Skia binaries for "
+                  << platform << ")...\n";
 
         std::string download_cmd;
 #ifdef _WIN32
@@ -345,7 +374,7 @@ int cmd_cache(const std::vector<std::string>& args) {
             return 1;
         }
 
-        print_ok("Skia binaries cached at " + sdk_cache.string());
+        print_ok("SDK v" + version + " cached at " + sdk_cache.string());
         return 0;
     }
 
