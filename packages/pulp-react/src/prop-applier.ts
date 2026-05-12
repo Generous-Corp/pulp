@@ -726,8 +726,41 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'aspectRatio':     return call('setFlex', id, 'aspect_ratio', value as number);
 
         // Visual style
-        case 'background':         return call('setBackground', id, value as string);
+        // CSS `background` shorthand can carry color, gradient, or url. The
+        // C++ `setBackground` bridge fn (widget_bridge.cpp:3350) only parses
+        // a color token via `set_background_color(parseHexColor(...))`, so
+        // gradient strings collapse to a bogus color (often white). Caught
+        // by Spectr's 2026-05-11 live render — chip strip's
+        // `background: linear-gradient(to bottom, ...)` painted white, making
+        // the white SPECTR / ZOOMABLE FILTER BANK / axis labels invisible.
+        // Mirrors the same gradient-detection fix applied to backgroundImage
+        // below (Codex P1 on #1831).
+        case 'background': {
+            const sval = String(value);
+            if (/(linear|radial|conic)-gradient\(/i.test(sval)) {
+                return call('setBackgroundGradient', id, sval);
+            }
+            if (/^\s*url\s*\(/i.test(sval)) return;
+            return call('setBackground', id, sval);
+        }
         case 'backgroundGradient': return call('setBackgroundGradient', id, value as string);
+        // CSS `background-image` longhand. The C++ `setBackground` bridge fn
+        // only parses a color token (widget_bridge.cpp:3350 →
+        // `set_background_color(parseHexColor(...))`), so we must detect
+        // gradient strings here and route to the gradient bridge instead;
+        // otherwise inputs like `linear-gradient(...)` collapse to a bogus
+        // color parse. `url(...)` has no image bridge today — drop quietly
+        // rather than corrupting the color slot. (Codex P1 on #1831.)
+        case 'backgroundImage': {
+            const sval = String(value);
+            if (/(linear|radial|conic)-gradient\(/i.test(sval)) {
+                return call('setBackgroundGradient', id, sval);
+            }
+            if (/^\s*url\s*\(/i.test(sval)) {
+                return;
+            }
+            return call('setBackground', id, sval);
+        }
         // pulp #1517 — background sub-properties. The bridge stores the
         // keyword on the View slot. Paint impact today is partial:
         //   • `backgroundAttachment` — `scroll` is conformant; `fixed` /
@@ -832,6 +865,18 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'outlineOffset': return call('setOutlineOffset', id, value as number);
         case 'outlineStyle':  return call('setOutlineStyle',  id, value as string);
         case 'outlineWidth':  return call('setOutlineWidth',  id, value as number);
+        // CSS shorthand `outline: <width> <style> <color>` — mirror the
+        // parser already wired in web-compat-style-decl.js so JSX
+        // `style={{ outline: '1px solid red' }}` fans out to the three
+        // per-attribute setters identically to el.style.outline = '...'.
+        case 'outline': {
+            const m = String(value).match(/([\d.]+)px\s+(\w+)\s+(.+)/);
+            if (!m) return;
+            call('setOutlineWidth', id, parseFloat(m[1]));
+            call('setOutlineStyle', id, m[2]);
+            call('setOutlineColor', id, m[3].trim());
+            return;
+        }
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
         // pulp #1434 (rn batch — Triage #12) — `display: 'flex' | 'none'`.
@@ -936,6 +981,37 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Accepts the CSS keyword strings ('hidden' / 'visible' /
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
+        // CSS per-axis overflow. Pulp's View::Overflow is a single-axis
+        // paint-clip flag (same surface as `overflow`); both axes alias
+        // to the same setter. Already-supported in web-compat-style-decl.js
+        // via the same routing — wire the React-applier path so JSX
+        // `style={{ overflowY: 'scroll' }}` (common in scroll containers)
+        // doesn't silently drop.
+        case 'overflowX':
+        case 'overflowY':    return call('setOverflow', id, value as string);
+        // CSS `white-space` — text wrapping behavior (normal | nowrap | pre |
+        // pre-wrap). Bridge stores the slot on View; consumed by TextShaper
+        // when computing line breaks. Mirror el.style path so JSX
+        // `style={{ whiteSpace: 'nowrap' }}` doesn't silently drop.
+        case 'whiteSpace':   return call('setWhiteSpace', id, value as string);
+        // CSS `text-overflow` — clip | ellipsis. Bridge stores the slot for
+        // Label paint to consume.
+        case 'textOverflow': return call('setTextOverflow', id, value as string);
+        // CSS `backdrop-filter: blur(Npx)`. The bridge setter takes a numeric
+        // blur radius in px; mirror the parser in web-compat-style-decl.js
+        // (other filter functions are intentionally ignored — matches the
+        // `unsupportedValues: ["other filter functions"]` compat entry).
+        case 'backdropFilter': {
+            const sval = String(value).trim().toLowerCase();
+            if (sval === '' || sval === 'none') {
+                return call('setBackdropFilter', id, 0);
+            }
+            const bdm = sval.match(/blur\(\s*([\d.]+)\s*(px)?\s*\)/);
+            if (bdm) {
+                return call('setBackdropFilter', id, parseFloat(bdm[1]) || 0);
+            }
+            return;
+        }
         // pulp #1516 — CSS box-sizing. Yoga 3.x honors the spec via
         // YGNodeStyleSetBoxSizing; consumers passing JSX
         // `boxSizing: 'border-box'` get the standard

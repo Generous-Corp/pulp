@@ -355,6 +355,11 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // Spectr import-coverage batch 2 — bridge fns already registered
+        // C++-side (widget_bridge.cpp setWhiteSpace at 2588, setTextOverflow
+        // at 4902); just needed to surface here so the mock-bridge route
+        // captures the applier's calls for unit tests.
+        'setWhiteSpace', 'setTextOverflow',
         // pulp #1434 Phase A2-3 — writing direction.
         'setDirection',
         // pulp #1434 Phase A2-1 — transitions + animations.
