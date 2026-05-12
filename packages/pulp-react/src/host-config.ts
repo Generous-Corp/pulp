@@ -341,6 +341,21 @@ export const PulpHostConfig: HostConfig<
         // Unreachable — see createTextInstance.
     },
 
+    // pulp #1840 P1 (Codex follow-up) — React's mutation reconciler
+    // calls resetTextContent(instance) when shouldSetTextContent flips
+    // from true → false on an existing TEXT_BEARING node. Concretely,
+    // a transition like <span>hi</span> → <span><em>hi</em></span>:
+    // the old commit treated <span> as text-bearing and pushed "hi" via
+    // setText; the new commit needs the inner <em> child mounted, so
+    // React first asks the host to clear the stale text. Without this
+    // hook the reconciler can throw (or leave stale text un-cleared on
+    // hosts that tolerate the missing callback). Clear by calling
+    // setText(id, '') — which the bridge already handles as a no-op for
+    // non-text-capable types, so this is safe for the whole alias set.
+    resetTextContent(instance) {
+        if (typeof g.setText === 'function') call('setText', instance.id, '');
+    },
+
     // ── Per-commit flush ───────────────────────────────────────────
     prepareForCommit(_container) { return null; },
     resetAfterCommit(_container) {
