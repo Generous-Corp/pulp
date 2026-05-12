@@ -232,8 +232,28 @@ export const PulpHostConfig: HostConfig<
         } as unknown as TextInstance;
     },
 
-    shouldSetTextContent(type, _props) {
-        return TEXT_BEARING.has(type);
+    shouldSetTextContent(type, props) {
+        // pulp #1836 P1 (Codex follow-up) — TEXT_BEARING marks a type as
+        // CAPABLE of bearing text directly, but the children must
+        // actually be string/number for React to skip the child-node
+        // path. For nested markup like <span><em>x</em></span>, the
+        // children prop is an element (or array of mixed nodes), so
+        // returning true here would cause React to drop the inner <em>.
+        // Mirror React DOM's behavior: only short-circuit when children
+        // are plain text scalars (string / number) or arrays of only
+        // string/number scalars.
+        if (!TEXT_BEARING.has(type)) return false;
+        const children = props?.children;
+        if (children == null) return true;  // empty container is text-able
+        if (typeof children === 'string' || typeof children === 'number') return true;
+        if (Array.isArray(children)) {
+            for (const c of children) {
+                if (c == null) continue;
+                if (typeof c !== 'string' && typeof c !== 'number') return false;
+            }
+            return true;
+        }
+        return false;
     },
 
     // ── First-mount attachment ──────────────────────────────────────
