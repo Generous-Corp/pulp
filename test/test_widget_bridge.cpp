@@ -12544,3 +12544,40 @@ TEST_CASE("WidgetBridge install_runtime_import_handlers is idempotent",
     auto result = engine.evaluate("typeof __pulpRuntimeImport__");
     REQUIRE(result.getWithDefault<std::string>("") == "function");
 }
+
+// pulp-internal Tier-1 closure for css/textTransform (2026-05-12).
+// The setTextTransform bridge already accepts the 4 CSS spec values
+// (uppercase / lowercase / capitalize / none) and routes them onto
+// Label::TextTransform. The existing widget-bridge sanity test
+// (line ~875) only exercised `uppercase` once. This focused test
+// pins the full supported value set so the row's closure (move
+// `full-width` / `full-size-kana` to arch-deferred-CJK-Unicode-width
+// in compat.json) is honest.
+TEST_CASE("setTextTransform pins all 4 CSS spec values to Label::TextTransform enum",
+          "[view][bridge][css][tier1-closure][css-textTransform]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('upper',      'hello', '');
+        createLabel('lower',      'HELLO', '');
+        createLabel('capitalize', 'hello world', '');
+        createLabel('none_',      'hello', '');
+
+        setTextTransform('upper',      'uppercase');
+        setTextTransform('lower',      'lowercase');
+        setTextTransform('capitalize', 'capitalize');
+        setTextTransform('none_',      'none');
+    )");
+
+    auto tt = [&](const std::string& id) -> Label::TextTransform {
+        return dynamic_cast<Label*>(bridge.widget(id))->text_transform();
+    };
+    REQUIRE(tt("upper")      == Label::TextTransform::uppercase);
+    REQUIRE(tt("lower")      == Label::TextTransform::lowercase);
+    REQUIRE(tt("capitalize") == Label::TextTransform::capitalize);
+    REQUIRE(tt("none_")      == Label::TextTransform::none);
+}

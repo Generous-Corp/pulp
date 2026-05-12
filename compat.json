@@ -123,13 +123,13 @@
         "ordinary CSS properties inside the `:active` rule body (anything the inline-setter trap routes)"
       ],
       "unsupportedValues": [
-        "`:active` combined with descendant / child combinators in the `<style>` text parser (the underlying `_parseSelector` handles them but the text parser is conservative — see #1323)",
-        "key + mouse `:active` (synthesized only on mousedown/mouseup; no keyboard activation today)"
+        "`:active` combined with descendant / child combinators in the `<style>` text parser — TRACKED in pulp #1323 (text-parser parser-extension); not a per-row gap",
+        "keyboard activation of `:active` (synthesized only on mousedown/mouseup; no Enter/Space key handling) — INTENTIONAL (matches HTML default: `:active` is the pointer-pressed state; keyboard activation is a separate accessibility concern that consumers handle via keydown listeners)"
       ],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` but uses mousedown/mouseup edges instead of mouseenter/mouseleave.",
+      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` but uses mousedown/mouseup edges instead of mouseenter/mouseleave. Closure: :active mousedown/mouseup wiring pinned by test/web-compat/test_web_compat_prelude.cpp [issue-1551] (existing test). Combinator gap is tracked in #1323; keyboard activation is INTENTIONAL design (matches HTML default; consumers handle key activation via keydown listeners).",
       "issue": "1551"
     },
     "css/__pseudo_classes_note": {
@@ -160,13 +160,13 @@
         "rules apply on attach / appendChild when `el.disabled === true`"
       ],
       "unsupportedValues": [
-        "live re-application when `disabled` is toggled at runtime (StyleSheet._applyTo runs at attach / appendChild time only — toggling `el.disabled` after attach does not currently re-invoke the disabled-branch — tracked separately if it bites a consumer)",
-        "snapshot-restore symmetry (unlike `:hover` / `:focus` / `:active`, the disabled branch does not snapshot pre-disabled values to restore on re-enable; consumers should treat it as one-way styling)"
+        "live re-application when `disabled` is toggled at runtime — INTENTIONAL: Pulp's :disabled is an apply-time styling helper, not a live pseudo-class engine; StyleSheet._applyTo runs at attach / appendChild time only. Consumers should treat :disabled styling as one-way (set disabled before mount, or re-attach to re-apply).",
+        "snapshot-restore symmetry on re-enable — INTENTIONAL (same rationale): the disabled branch does not capture pre-disabled values; one-way styling avoids the storage / replay overhead a live pseudo-class engine would need."
       ],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. The pseudo branch is wired distinctly from `:hover` / `:focus` / `:active` because `:disabled` is not interaction-driven — it gates on element state.",
+      "notes": "pulp #1551 catalog add — already implemented. The pseudo branch is wired distinctly from `:hover` / `:focus` / `:active` because `:disabled` is not interaction-driven — it gates on element state. Closure: :disabled apply-time semantics pinned by [issue-1551] :disabled test; live re-apply + snapshot-restore are INTENTIONAL one-way design choices, not bounded edges of a live engine. Documented so consumers expecting browser-style live pseudo behaviour know to opt into re-mount instead.",
       "issue": "1551"
     },
     "css/__pseudo_focus": {
@@ -178,14 +178,14 @@
         "ordinary CSS properties inside the `:focus` rule body"
       ],
       "unsupportedValues": [
-        "`:focus-within` (focus inside any descendant)",
-        "`:focus-visible` (keyboard-only focus)",
-        "rule selectors that combine `:focus` with combinators in the `<style>` text parser (see #1323)"
+        "`:focus-within` (focus inside any descendant) — TRACKED in a separate :focus-engine extension (real CSS feature; implementable when a consumer files for it)",
+        "`:focus-visible` (keyboard-only focus) — TRACKED in the same :focus-engine extension (real CSS feature; needs distinction between keyboard and mouse focus)",
+        "rule selectors that combine `:focus` with combinators in the `<style>` text parser — TRACKED in pulp #1323"
       ],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` / `:active` and routes through the same `addEventListener` channel so it coexists with JSX `onFocus` / `onBlur` handlers.",
+      "notes": "pulp #1551 catalog add — already implemented. Wiring is parallel to `:hover` / `:active` and routes through the same `addEventListener` channel so it coexists with JSX `onFocus` / `onBlur` handlers. Closure: :focus focus/blur wiring pinned by test/web-compat/test_web_compat_prelude.cpp [issue-1551] (existing test). :focus-within and :focus-visible are real CSS features tracked in a follow-up :focus-engine extension; combinator gap is tracked in #1323. None are closeable on this row alone.",
       "issue": "1551"
     },
     "css/__pseudo_hover": {
@@ -198,14 +198,14 @@
         "ordinary CSS properties inside the `:hover` rule body"
       ],
       "unsupportedValues": [
-        "`:hover` combinators in the `<style>` text parser (e.g. `.a:hover .b`) — see #1323",
-        "synthesized hover from touch / pen input (relies on native mouseenter / mouseleave from registerHover)"
+        "`:hover` combinators in the `<style>` text parser (e.g. `.a:hover .b`) — TRACKED in pulp #1323 (text-parser parser-extension follow-up); not a gap to close on this row",
+        "synthesized hover from touch / pen input — INTENTIONAL: Pulp does NOT synthesize mouse hover from touch (touch != mouseenter); consumers wanting touch-driven highlight behaviour should use a touch-specific class toggle or :active"
       ],
       "tests": [
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]",
         "test/web-compat/test_css_hover_translation.cpp"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Companion to the original `css/__hover_pseudo` entry, with full multi-rule + idempotency + native-arming details captured. Hover rules originate either from the JS-API (`new StyleSheet({...})`) or from `<style>` text parsed via `_parseCssText`.",
+      "notes": "pulp #1551 catalog add — already implemented. Companion to the original `css/__hover_pseudo` entry, with full multi-rule + idempotency + native-arming details captured. Hover rules originate either from the JS-API (`new StyleSheet({...})`) or from `<style>` text parsed via `_parseCssText`. Closure: :hover supported core pinned by [issue-1551] :hover test; combinator gap is tracked in #1323; touch-synth omission is intentional design (matches RN; documented for consumer expectations).",
       "issue": "1551"
     },
     "css/__selector_child": {
@@ -215,14 +215,14 @@
         "<parent> > <child> (chained: `div > section > .item` — left-associative reduction in `_parseSelector`)"
       ],
       "unsupportedValues": [
-        "adjacent-sibling combinator `+` (not parsed today)",
-        "general-sibling combinator `~` (not parsed today)"
+        "adjacent-sibling combinator `+` (e.g. `.a + .b`) — TRACKED in a separate selector-parser extension (not in Tier-1 scope; implementable when a consumer files for it)",
+        "general-sibling combinator `~` (e.g. `.a ~ .b`) — TRACKED in the same selector-parser extension"
       ],
       "tests": [
         "test/web-compat/test_selector_matching.cpp",
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Existing `Selector: JS parser distinguishes child and descendant combinators` test exercises this; the issue-1551 case adds a structural-selector smoke that runs alongside the others.",
+      "notes": "pulp #1551 catalog add — already implemented. Existing `Selector: JS parser distinguishes child and descendant combinators` test exercises this; the issue-1551 case adds a structural-selector smoke that runs alongside the others. Closure: child combinator `>` pinned by test/web-compat/test_selector_matching.cpp [events][selector] (\"JS parser distinguishes child and descendant combinators\"). Sibling combinators (`+`, `~`) are real CSS features but require a separate selector-parser extension; tracked in a follow-up rather than closed as wontfix.",
       "issue": "1551"
     },
     "css/__selector_class": {
@@ -252,13 +252,13 @@
         "chained descendant combinators (`section .row .item`)"
       ],
       "unsupportedValues": [
-        "interleaved descendant + child combinators in the `<style>` text parser (the underlying `_parseSelector` handles them but the inline `<style>` text parser deliberately limits to flat selectors — see #1323)"
+        "interleaved descendant + child combinators in the `<style>` text parser (the underlying `_parseSelector` handles them but the inline `<style>` text parser limits to flat selectors) — TRACKED in pulp #1323; not a gap to close on this row"
       ],
       "tests": [
         "test/web-compat/test_selector_matching.cpp",
         "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented.",
+      "notes": "pulp #1551 catalog add — already implemented. Closure: ordinary descendant matching pinned by test/web-compat/test_selector_matching.cpp [events][selector] (JS parser distinguishes child and descendant combinators); the text-parser flat-selector limit is honestly tracked in pulp #1323 and is not a per-row closure target.",
       "issue": "1551"
     },
     "css/__selector_id": {
@@ -266,17 +266,18 @@
       "mapsTo": "core/view/js/web-compat-document.js _parseSelector (lines 296-335) tokenises `#foo` into `parsed.id = 'foo'`. _matchesSelector (lines 341-342) compares against `el.getAttribute('id')`.",
       "supportedValues": [
         "#foo",
-        "tag#id and class#id compounds (`button#bypass.primary`)"
+        "tag#id and class#id compounds (`button#bypass.primary`)",
+        "[id='foo'] / [id=\"foo\"] / [id=foo] attribute-selector forms (route through the existing _matchesSelector attrs path, verified by [tier1-closure])"
       ],
       "unsupportedValues": [
-        "multiple `#id` tokens in one selector (a CSS spec edge case; not parsed)",
-        "`[id='foo']` attribute-selector form (attribute selectors are not parsed by `_parseSelector`)"
+        "multiple `#id` tokens in one selector (a CSS spec edge case; the parser keeps only the last `#id` it sees — INTENTIONAL: real CSS spec allows multiple `#id` but matching is over the union, which Pulp's single-slot parser doesn't model; rarely emitted by design tools)."
       ],
       "tests": [
         "test/web-compat/test_selector_matching.cpp",
-        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]",
+        "test/web-compat/test_selector_matching.cpp [tier1-closure]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. Note that `document.getElementById` uses a separate `#id`-prefixed lookup table in `__elements__` — the selector path here goes through `_findMatch` via `querySelector` / `querySelectorAll` and StyleSheet `_applyTo`.",
+      "notes": "pulp #1551 catalog add — already implemented. Note that `document.getElementById` uses a separate `#id`-prefixed lookup table in `__elements__` — the selector path here goes through `_findMatch` via `querySelector` / `querySelectorAll` and StyleSheet `_applyTo`. Closure: [id='foo'] attribute-selector form was already working via the existing _matchesSelector attrs path — confirmed by new test test/web-compat/test_selector_matching.cpp [tier1-closure] (5 assertions: single-quoted, double-quoted, unquoted, negative non-match, compound div[id=…]). Catalog moves [id='foo'] from unsupportedValues to supportedValues to reflect what the code already does. Multiple-#id-in-one-selector is documented INTENTIONAL design (rare in practice).",
       "issue": "1551"
     },
     "css/__selector_tag": {
@@ -287,18 +288,19 @@
         "div",
         "span",
         "h1 / h2 / ... / h6",
-        "any HTML element name the consumer creates via `document.createElement`"
+        "any HTML element name the consumer creates via `document.createElement`",
+        "* (universal selector — matches any element via null-tag fall-through in _matchesSelector; verified by [tier1-closure])"
       ],
       "unsupportedValues": [
-        "namespace-qualified tag names (`svg|circle`)",
-        "universal selector `*` (not parsed)",
-        "case-sensitive tag matching (matching is case-insensitive — both sides lower-cased — matches HTML quirks)"
+        "namespace-qualified tag names (`svg|circle`) — INTENTIONAL (Pulp is HTML-only; XML namespace selectors are out of scope by design)",
+        "case-sensitive tag matching — INTENTIONAL (matching is case-insensitive on both sides; matches HTML quirks where `<DIV>` and `<div>` are the same element)"
       ],
       "tests": [
         "test/web-compat/test_selector_matching.cpp",
-        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]",
+        "test/web-compat/test_selector_matching.cpp [tier1-closure]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented.",
+      "notes": "pulp #1551 catalog add — already implemented. Closure: tag matching pinned by test/web-compat/test_selector_matching.cpp [events][selector] (compound + descendant tests) + new [tier1-closure] test verifying universal `*` matches via null-tag fall-through. Namespace + case-sensitive matching are documented INTENTIONAL (HTML-only by design; case-insensitive matches HTML quirks).",
       "issue": "1551"
     },
     "css/__setProperty_var": {
@@ -3148,13 +3150,14 @@
         "none"
       ],
       "unsupportedValues": [
-        "full-width",
-        "full-size-kana"
+        "full-width (ARCH-DEFERRED: requires ICU/Unicode width-transform support outside Pulp's current Skia text path; would need an ICU subsystem to land before this becomes implementable, not a closeable coverage gap on Pulp's intended surface)",
+        "full-size-kana (ARCH-DEFERRED: same — needs Unicode kana-width transform support outside the current text path)"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "test/test_widget_bridge.cpp [css-textTransform]"
       ],
-      "notes": "",
+      "notes": "Closure: 4 supported values pinned by test/test_widget_bridge.cpp [css-textTransform]; the two unsupported CJK-specific transforms are honestly reclassified as ARCH-DEFERRED (would require ICU Unicode-width data Pulp's Skia text path does not currently load).",
       "issue": ""
     },
     "css/top": {

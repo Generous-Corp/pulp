@@ -163,6 +163,88 @@ TEST_CASE("Selector: JS querySelectorAll walks nested children", "[events][selec
     REQUIRE(descendantCount.getWithDefault<int32_t>(0) == 3);
 }
 
+// pulp-internal Tier-1 closure for css/__selector_id (2026-05-12). The
+// one-pager listed `[id='foo']` as an unsupported attribute-selector
+// form. Code reading shows the existing _parseSelector + _matchesSelector
+// attribute-selector path already handles `[attr=value]`, so by
+// inspection `[id='foo']` should already work via that path. Pin the
+// contract with a regression test so the catalog can move the row
+// from unsupportedValues to supportedValues honestly.
+TEST_CASE("Selector: [id='foo'] attribute form matches via _matchesSelector attrs path",
+          "[events][selector][tier1-closure]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __idEl = document.createElement("div");
+        __idEl.id = "target";
+
+        var __noidEl = document.createElement("div");
+        __noidEl.id = "other";
+    )JS");
+
+    // [id='target'] should match the element whose getAttribute('id')
+    // returns "target". Single-quoted, double-quoted, and unquoted
+    // forms are all valid CSS — exercise all three.
+    auto sq = env.engine.evaluate(R"JS(
+        _matchesSelector(__idEl, _parseSelector("[id='target']"))
+    )JS");
+    auto dq = env.engine.evaluate(R"JS(
+        _matchesSelector(__idEl, _parseSelector("[id=\"target\"]"))
+    )JS");
+    auto uq = env.engine.evaluate(R"JS(
+        _matchesSelector(__idEl, _parseSelector("[id=target]"))
+    )JS");
+    REQUIRE(sq.getWithDefault<bool>(false) == true);
+    REQUIRE(dq.getWithDefault<bool>(false) == true);
+    REQUIRE(uq.getWithDefault<bool>(false) == true);
+
+    // Negative case — another element with a different id must NOT
+    // match `[id='target']`. Pins that the attrs path actually
+    // consults getAttribute('id') rather than always returning true.
+    auto neg = env.engine.evaluate(R"JS(
+        _matchesSelector(__noidEl, _parseSelector("[id='target']"))
+    )JS");
+    REQUIRE(neg.getWithDefault<bool>(true) == false);
+
+    // Compound: `div[id='target']` — tag AND id-via-attribute. Pins
+    // that the attrs path composes correctly with the tag path.
+    auto compound = env.engine.evaluate(R"JS(
+        _matchesSelector(__idEl, _parseSelector("div[id='target']"))
+    )JS");
+    REQUIRE(compound.getWithDefault<bool>(false) == true);
+}
+
+// pulp-internal Tier-1 closure for css/__selector_tag (2026-05-12). The
+// one-pager listed `*` (universal selector) as not parsed. Verify whether
+// it actually works by inspection of _parseSelector: tokenRe drops `*`
+// silently, so parsed.tag stays null and _matchesSelector skips the tag
+// check. Empirically this means `*` already matches everything as a
+// side-effect; pin the contract so it's not accidental.
+TEST_CASE("Selector: * universal selector matches any element (currently via null-tag fall-through)",
+          "[events][selector][tier1-closure]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __uniDiv  = document.createElement("div");
+        var __uniSpan = document.createElement("span");
+        var __uniBtn  = document.createElement("button");
+        __uniBtn.className = "primary";
+    )JS");
+
+    // Bare `*` matches every element (tag-agnostic, attribute-agnostic).
+    auto a = env.engine.evaluate(R"JS(_matchesSelector(__uniDiv,  _parseSelector("*")))JS");
+    auto b = env.engine.evaluate(R"JS(_matchesSelector(__uniSpan, _parseSelector("*")))JS");
+    auto c = env.engine.evaluate(R"JS(_matchesSelector(__uniBtn,  _parseSelector("*")))JS");
+    REQUIRE(a.getWithDefault<bool>(false) == true);
+    REQUIRE(b.getWithDefault<bool>(false) == true);
+    REQUIRE(c.getWithDefault<bool>(false) == true);
+
+    // `*.primary` should match the .primary button but not the others
+    // (tag-agnostic + class-restricted).
+    auto starClass1 = env.engine.evaluate(R"JS(_matchesSelector(__uniBtn,  _parseSelector("*.primary")))JS");
+    auto starClass2 = env.engine.evaluate(R"JS(_matchesSelector(__uniDiv,  _parseSelector("*.primary")))JS");
+    REQUIRE(starClass1.getWithDefault<bool>(false) == true);
+    REQUIRE(starClass2.getWithDefault<bool>(true) == false);
+}
+
 TEST_CASE("Selector: parent() returns correct parent", "[events][selector]") {
     View root;
     auto child = std::make_unique<View>();
