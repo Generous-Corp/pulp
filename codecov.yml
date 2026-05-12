@@ -23,12 +23,28 @@ coverage:
         threshold: 1%          # allow 1% drop without failing
         informational: true    # Phase 1 is measurement; no blocking yet
 
-    # Patch status: "is new code covered?" Advisory in Phase 1; the
-    # authoritative patch gate comes from diff-cover in Phase 3.
+    # Patch status: "is new code covered?" Advisory in the sense that
+    # branch-protection does NOT require this check (so a sub-threshold
+    # PR can still merge), but the check status now accurately reflects
+    # the threshold check — `success` if ≥75%, `failure` if <75%.
+    #
+    # Previously `informational: true` hardwired the status to `success`
+    # even when patch coverage was 0%, which deceived devs reading the
+    # check line. The bot still posted a "❌ Patch coverage is X%"
+    # comment, but the status check itself said success, masking the
+    # gap. Flipping to enforcing makes the signal accurate without
+    # changing merge behavior (codecov/patch is not in
+    # branch-protection's required-status-checks list, so a red
+    # check here lets the dev decide; it does not auto-block).
+    #
+    # To make this a hard merge gate later, add `codecov/patch` to
+    # branch-protection's required contexts via the GitHub API or
+    # repo settings. Authoritative in-tree gate lives in
+    # .github/workflows/coverage.yml ("Diff coverage required") and
+    # is separately tracked.
     patch:
       default:
         target: 75%
-        informational: true
 
 # Exclude lists mirror scripts/run_coverage.sh COVERAGE_IGNORE_REGEX
 # so Codecov and our local tooling count the same set of files.
