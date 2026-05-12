@@ -396,3 +396,23 @@ if (typeof globalThis.registerPointer === 'function') globalThis.registerPointer
 ```
 
 The cleaner long-term fix is for `@pulp/react`'s prop-applier to call `registerPointer` automatically when it sees any pointer-event prop (parallel to its existing `registerHover` wiring) — track that as a follow-up Pulp issue rather than an importer-side workaround if you encounter it on a fresh import.
+
+### 9. Post-parse widget promotion — `<div onClick>` → button
+
+`pulp::import_design::promote_interactive_frames` (in `tools/import-design/widget_promotion.{hpp,cpp}`) walks the IR once after parse + before codegen and re-types any `type == "frame"` carrying an interactive signal to `type == "button"`. Signal priority (highest → lowest):
+
+1. `attributes["onclick"]` / `attributes["onClick"]` — strongest.
+2. `attributes["role"] == "button"` — explicit ARIA semantic.
+3. `style.cursor == "pointer"` — weakest; opt-out via `role="presentation"`.
+
+Conservative on purpose: only frames are promoted; already-typed widgets (`input`, `image`, `button`) are left alone, so a designer who wrote `<input onClick={...}>` keeps the input.
+
+**Gotcha**: the post-pass is source-agnostic, but **only the runtime-import path (`parse_claude_html_with_runtime`) actually populates `IRNode::attributes` with HTML attrs** (it walks the live DOM after React mount). The non-runtime parsers — `parse_stitch_html`, `parse_v0_tsx`, `parse_pencil_json`, `parse_figma_json`'s JSON-attrs path — currently strip `onclick` / `role` before the IR gets handed to the promoter, so promotion silently no-ops on those sources. Tracked as pulp #1823.
+
+When you re-import Spectr's `editor.html` via Claude Design + the runtime path, expect:
+
+```
+Promoted N interactive frame(s) to button widgets.
+```
+
+in the stdout summary. If you see `0 widgets` and no promotion line on a fixture you *know* contains `<div onClick>`, you're either (a) on a non-runtime parser path (#1823 territory) or (b) the React tree didn't mount during the harness eval and `attributes` is empty as a result.
