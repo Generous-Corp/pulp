@@ -4545,6 +4545,53 @@ TEST_CASE("CSSStyleDeclaration display routes none/flex/block/inline-block/inlin
     REQUIRE_FALSE(p_none->visible());
 }
 
+// pulp-internal #105 / rn-display + yoga-display coverage-gap closures —
+// `display: contents` is intentionally NOT implemented in Pulp's display
+// dispatcher. Per CLAUDE.md's flex+grid-only layout policy (Yoga is the
+// engine; CSS block-flow / inline-flow / table-flow are out of scope by
+// design), `display: contents` — which renders an element's children as
+// if they were children of the element's parent — cannot be modeled
+// without a parallel layout engine. Closing the coverage-gap rows means
+// pinning the safe no-op: an unrecognized display value must not crash
+// the dispatch path, must not silently mutate visible() / flex(), and
+// must let consumers fall back to whatever the previous display state
+// was.
+TEST_CASE("CSSStyleDeclaration display: contents is a safe arch-deferred no-op",
+          "[view][bridge][css][issue-1420][display-contents]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Start the panel with display: flex so we have a known baseline:
+    // visible=true, direction=row. Then write display: contents and
+    // assert nothing moves.
+    bridge.load_script(R"((function(){
+        createPanel('p_contents', '');
+        var el = { _id: 'p_contents', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(el);
+        sd._applyProperty('display', 'flex');
+        sd._applyProperty('display', 'contents');
+    })();)");
+
+    auto* p_contents = dynamic_cast<Panel*>(bridge.widget("p_contents"));
+    REQUIRE(p_contents != nullptr);
+
+    // Two invariants:
+    //  1. The bridge did not crash and the widget exists.
+    //  2. `display: contents` did NOT touch visibility — the prior
+    //     `display: flex` state survives. (If a future change adds a
+    //     `contents` branch that calls setVisible(false), this assert
+    //     fails first.)
+    REQUIRE(p_contents->visible());
+
+    // And the flex direction set by the prior `display: flex` is also
+    // intact — `display: contents` is a no-op on the flex direction
+    // because the dispatcher doesn't have a `contents` branch.
+    REQUIRE(p_contents->flex().direction == FlexDirection::row);
+}
+
 // ── pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration ─────────
 //
 // Mirrors the #965 SvgPath bridge tests. Closes Spectr [G] preset
