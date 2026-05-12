@@ -1579,6 +1579,15 @@ add_executable(pulp-test-widget-bridge test_widget_bridge.cpp)
 target_link_libraries(pulp-test-widget-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-widget-bridge)
 
+# Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
+# pulp #1792). Composes the six [contract] invariants from
+# test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
+# PR that keeps each unit-level invariant passing but breaks their
+# *interaction* still fails first.
+add_executable(pulp-test-spectr-regression test_spectr_regression.cpp)
+target_link_libraries(pulp-test-spectr-regression PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-spectr-regression)
+
 # Typography inheritance — pulp #969 (CSS-style cascade)
 add_executable(pulp-test-typography-inheritance test_typography_inheritance.cpp)
 target_link_libraries(pulp-test-typography-inheritance PRIVATE pulp::view Catch2::Catch2WithMain)
