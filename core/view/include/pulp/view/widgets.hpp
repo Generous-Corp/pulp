@@ -26,7 +26,14 @@ namespace pulp::view {
 /// existing canvas backends treat it as `left` until then. Both values
 /// are claimed in the rn/css catalog (Figma exports + Tailwind classes
 /// emit `auto` and `justify` routinely).
-enum class LabelAlign { left, center, right, auto_, justify };
+/// `match_parent` (pulp #1434 follow-up) resolves at paint time by
+/// walking the View parent chain (via `inheritable_text_align()`) and
+/// adopting the first ancestor's resolved value. If no ancestor set
+/// one, falls back to `left` (the CSS spec default for `text-align`).
+/// Symmetric with `auto_` in that the resolution is paint-time, not
+/// setter-time — matches CSS `match-parent` semantics which inherit
+/// from the parent's *computed* (not specified) value.
+enum class LabelAlign { left, center, right, auto_, justify, match_parent };
 
 class Label : public View {
 public:

@@ -5729,6 +5729,182 @@ TEST_CASE("Label paints with TextAlign::left when textAlign='auto' (LTR fallback
     REQUIRE(saw_left);
 }
 
+// ── pulp #1434 follow-up (css/textAlign coverage gap) — match-parent ─────
+//
+// CSS spec: `match-parent` resolves to the parent's *computed*
+// `text-align`. Pulp wires this at paint time by walking the View parent
+// chain via `inheritable_text_align()`. If no ancestor set a value, falls
+// back to `left` (CSS spec default for `text-align`).
+//
+// Implementation lives in:
+//   - widget_bridge.cpp setTextAlign — accepts "match-parent" string
+//   - widgets.hpp LabelAlign::match_parent — new enum value (5)
+//   - widgets.cpp Label::paint — paint-time parent-chain walk
+
+TEST_CASE("setTextAlign accepts match-parent on a Label",
+          "[view][bridge][css][issue-1434][coverage]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('a','match text', '');  setTextAlign('a','match-parent');
+    )");
+
+    REQUIRE(dynamic_cast<Label*>(bridge.widget("a"))->text_align()
+            == LabelAlign::match_parent);
+}
+
+TEST_CASE("Label with textAlign='match-parent' adopts parent's resolved value (center)",
+          "[view][widget][css][issue-1434][coverage]") {
+    // Parent View carries an inheritable text-align (center = 1). Label
+    // child set to match-parent should paint with TextAlign::center.
+    View parent;
+    parent.set_inheritable_text_align(1);  // 1 == LabelAlign::center
+
+    auto child = std::make_unique<Label>("inherited");
+    child->set_bounds({0, 0, 200, 24});
+    child->set_text_align(LabelAlign::match_parent);
+    auto* child_raw = child.get();
+    parent.add_child(std::move(child));
+
+    pulp::canvas::RecordingCanvas canvas;
+    child_raw->paint(canvas);
+
+    bool saw_center = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::center) saw_center = true;
+        }
+    }
+    REQUIRE(saw_center);
+}
+
+TEST_CASE("Label with textAlign='match-parent' falls back to left when no ancestor set a value",
+          "[view][widget][css][issue-1434][coverage]") {
+    // CSS spec: `text-align` defaults to `start` (≡ left under LTR) when
+    // no value is inherited. A match-parent Label with no parent (or a
+    // parent chain that never called set_inheritable_text_align) must
+    // paint left-aligned.
+    Label label("orphan");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_align(LabelAlign::match_parent);
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    bool saw_left = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::left) saw_left = true;
+        }
+    }
+    REQUIRE(saw_left);
+}
+
+// Codex P1 on PR #1879 (2026-05-12): when an INTERMEDIATE ancestor in
+// the chain has text-align: match-parent itself, the walk must
+// continue past it to find the first non-match-parent value upstream.
+// The original implementation stopped at parent.inheritable_text_align()
+// returning 5 and degraded the child to `left` — wrong for a chain
+// like grandparent=center → parent=match-parent → label=match-parent
+// which should resolve to center.
+TEST_CASE("Label with match-parent walks past intermediate match-parent ancestor",
+          "[view][widget][css][issue-1434][issue-1879][coverage]") {
+    // Build: grandparent(center) → parent(match-parent) → label(match-parent).
+    View grandparent;
+    grandparent.set_bounds({0, 0, 600, 200});
+    grandparent.set_inheritable_text_align(1);  // center
+
+    auto parent_owned = std::make_unique<View>();
+    auto* parent_v = parent_owned.get();
+    parent_v->set_bounds({0, 0, 600, 200});
+    parent_v->set_inheritable_text_align(5);    // match-parent
+
+    auto label_owned = std::make_unique<Label>("hi");
+    auto* label = label_owned.get();
+    label->set_bounds({0, 0, 600, 24});
+    label->set_text_align(LabelAlign::match_parent);
+
+    parent_v->add_child(std::move(label_owned));
+    grandparent.add_child(std::move(parent_owned));
+
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+
+    // Should resolve through parent (match-parent → keep walking) →
+    // grandparent (center). Paint must emit a center text-align.
+    bool saw_center = false;
+    bool saw_left   = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::center) saw_center = true;
+            if (enc == pulp::canvas::TextAlign::left)   saw_left   = true;
+        }
+    }
+    REQUIRE(saw_center);
+    REQUIRE_FALSE(saw_left);  // regression guard for the old fall-back-to-left bug
+}
+
+TEST_CASE("Label with match-parent through chain of all match-parent ancestors falls back to left",
+          "[view][widget][css][issue-1434][issue-1879][coverage]") {
+    // Pathological case: every ancestor in the chain has match-parent.
+    // CSS spec says fall back to `start` (≡ left under LTR).
+    View root;
+    root.set_bounds({0, 0, 600, 200});
+    root.set_inheritable_text_align(5);  // match-parent
+
+    auto mid_owned = std::make_unique<View>();
+    auto* mid = mid_owned.get();
+    mid->set_bounds({0, 0, 600, 200});
+    mid->set_inheritable_text_align(5);  // match-parent
+
+    auto label_owned = std::make_unique<Label>("hi");
+    auto* label = label_owned.get();
+    label->set_bounds({0, 0, 600, 24});
+    label->set_text_align(LabelAlign::match_parent);
+
+    mid->add_child(std::move(label_owned));
+    root.add_child(std::move(mid_owned));
+
+    pulp::canvas::RecordingCanvas canvas;
+    label->paint(canvas);
+
+    bool saw_left = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::left) saw_left = true;
+        }
+    }
+    REQUIRE(saw_left);
+}
+
+TEST_CASE("setTextAlign on a container View accepts match-parent (encoded as 5)",
+          "[view][bridge][css][issue-1434][coverage]") {
+    // Non-Label Views store the alignment in the inheritable slot so
+    // descendant Labels pick it up. The match-parent encoding (5) must
+    // round-trip through inheritable_text_align().
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');  setTextAlign('p','match-parent');
+    )");
+
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    auto inh = panel->inheritable_text_align();
+    REQUIRE(inh.has_value());
+    REQUIRE(inh.value() == 5);
+}
+
 // ── pulp #1434 (cross-surface mega-batch) — per-edge margin/padding
 // accept percent strings + auto (margin only). Mirrors width/height
 // (#1426) and top/right/bottom/left (#1451) percent patterns. Yoga

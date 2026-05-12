@@ -3018,15 +3018,15 @@
         "start",
         "end",
         "auto",
-        "justify"
-      ],
-      "unsupportedValues": [
+        "justify",
         "match-parent"
       ],
+      "unsupportedValues": [],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "test/test_widget_bridge.cpp [issue-1434][coverage]"
       ],
-      "notes": "RN supports auto/justify; we don't. pulp #1434 Triage #11: bridge accepts start/end (LTR-only aliases for left/right), auto (LTR fallback), and justify. start/end map symmetrically; auto/justify mirror the rn surface wiring.",
+      "notes": "RN supports auto/justify; we don't. pulp #1434 Triage #11: bridge accepts start/end (LTR-only aliases for left/right), auto (LTR fallback), and justify. pulp #1434 follow-up: match-parent resolves at paint time by walking the View parent chain via inheritable_text_align(); falls back to left when no ancestor set a value (CSS spec default for text-align).",
       "issue": ""
     },
     "css/textDecoration": {
