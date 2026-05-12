@@ -217,6 +217,14 @@ export const PulpHostConfig: HostConfig<
                 const shim = new ElementCtor(type, id);
                 shim._nativeCreated = true;
                 shim.__pulpId = id;  // non-enumerable backref (codex round 5)
+                // Codex P2 follow-up on #1859: Element constructor seeds
+                // internal `_id` but the public `.id` getter
+                // (web-compat-element.js:259) returns `""` until the SETTER
+                // runs (gated on `_userIdSet`). Calling the setter ensures
+                // `ref.current.id` matches the native widget id rather than
+                // appearing as an empty string — preserves prior observable
+                // behavior for any consumer that reads .id off the ref.
+                shim.id = id;
                 domShim = shim;
             }
         } catch { /* Element shim not available — pure-JS test path */ }

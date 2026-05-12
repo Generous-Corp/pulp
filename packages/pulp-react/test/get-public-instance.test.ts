@@ -64,6 +64,11 @@ describe('getPublicInstance returns DOM-shim Element (pulp #468)', () => {
         expect(inst._dom).toBeDefined();
         expect((inst._dom as Record<string, unknown>)._nativeCreated).toBe(true);
         expect((inst._dom as Record<string, unknown>).__pulpId).toBe('k1');
+        // Codex P2 follow-up on #1859: the public .id property must be set
+        // on the shim — Element constructor seeds internal `_id` but the
+        // public `.id` getter is gated on `_userIdSet`, which only flips
+        // through the setter. ref.current.id should match the native id.
+        expect((inst._dom as Record<string, unknown>).id).toBe('k1');
     });
 
     it('createInstance survives when global Element is missing (test sandbox)', () => {
