@@ -5,6 +5,7 @@
 # the test target without dragging the full pulp::view pipeline along.
 add_executable(pulp-import-design
     pulp_import_design.cpp
-    import_detect.cpp)
+    import_detect.cpp
+    widget_promotion.cpp)
 target_include_directories(pulp-import-design PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-import-design PRIVATE pulp::view pulp::state)

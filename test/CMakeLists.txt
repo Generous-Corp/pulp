@@ -1715,6 +1715,20 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import)
 
+# Post-parse widget promotion: <div onClick> / role=button / cursor:pointer
+# → button. Closure of pulp-internal task #84 / follow-up on #1814.
+# Links the importer-side .cpp directly (it's not in pulp::view) so the
+# test exercises the same code path the CLI uses.
+add_executable(pulp-test-widget-promotion
+    test_widget_promotion.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/widget_promotion.cpp)
+target_include_directories(pulp-test-widget-promotion PRIVATE
+    ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-widget-promotion PRIVATE
+    pulp::view
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-promotion)
+
 # pulp #468 — web-compat preludes shipped for bundled-React imports
 # (nodeType / nodeName, observer no-ops, scheduler shims). Uses
 # WidgetBridge to evaluate the same prelude stack the runtime ships.

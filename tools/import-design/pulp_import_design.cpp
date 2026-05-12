@@ -6,6 +6,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/state/store.hpp>
 #include "import_detect.hpp"
+#include "widget_promotion.hpp"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -416,6 +417,20 @@ int main(int argc, char* argv[]) {
     // Store frame/screen selection metadata
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
+
+    // Promote interactive frames to buttons (post-parse, pre-codegen).
+    // Figma / Stitch / v0 / Pencil / Claude Design exporters almost
+    // never emit <button> directly — they emit <div onClick={...}> or
+    // <div role="button"> or cursor:pointer divs. Without this pass
+    // those land as static frames and the user's interactive intent
+    // is dropped. Source-agnostic so every importer benefits. See
+    // task #84 / pulp-internal #1814 follow-up.
+    const std::size_t promoted_widgets =
+        pulp::import_design::promote_interactive_frames(ir.root);
+    if (promoted_widgets > 0) {
+        std::cout << "Promoted " << promoted_widgets
+                  << " interactive frame(s) to button widgets.\n";
+    }
 
     // Generate Pulp JS
     CodeGenOptions opts;
