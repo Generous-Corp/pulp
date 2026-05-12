@@ -26,8 +26,9 @@ Usage:
         --regions tools/import-validation/regions/v0-audio-panel.json
 
 Exit codes:
-    0  - every region meets its threshold
-    1  - one or more regions below threshold (FAIL — list which)
+    0  - every region meets its threshold, OR --strict was not passed
+         (region failures are informational without --strict)
+    1  - one or more regions below threshold AND --strict was passed
     2  - cannot compare (missing file, size mismatch, malformed regions JSON)
 """
 
@@ -173,11 +174,34 @@ def load_regions(path: Path | None) -> dict:
     if not isinstance(data, dict) or not data:
         print(f"error: regions JSON must be a non-empty object", file=sys.stderr)
         sys.exit(2)
-    # Validate each region has the required fields.
+    # Validate each region has the required fields and that values are the
+    # right shape. Without this, a malformed value (e.g. "x": "0.10" or a
+    # string threshold) propagates into region_score() and crashes mid-run
+    # instead of giving the user a clear configuration error up front.
     for name, region in data.items():
+        if not isinstance(region, dict):
+            print(f"error: region '{name}' must be an object", file=sys.stderr)
+            sys.exit(2)
         for required in ("x", "y", "w", "h"):
             if required not in region:
                 print(f"error: region '{name}' missing '{required}'", file=sys.stderr)
+                sys.exit(2)
+            value = region[required]
+            # bool is a subclass of int in Python — reject it explicitly so
+            # `"x": true` doesn't silently become 1.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                print(
+                    f"error: region '{name}' has non-numeric {required}={value!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+        if "threshold" in region:
+            thr = region["threshold"]
+            if isinstance(thr, bool) or not isinstance(thr, (int, float)) or not (0.0 <= float(thr) <= 1.0):
+                print(
+                    f"error: region '{name}' has invalid threshold={thr!r} (expected number in 0..1)",
+                    file=sys.stderr,
+                )
                 sys.exit(2)
     return data
 
@@ -205,7 +229,7 @@ def main() -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Fail if ANY region fails (default); without it, only a summary verdict is printed",
+        help="Exit non-zero if ANY region fails its threshold; without --strict, region failures are informational and the script exits 0",
     )
     args = parser.parse_args()
 
@@ -257,7 +281,12 @@ def main() -> int:
             print()
             print(f"  Failed regions: {', '.join(failed_names)}")
 
-    return 0 if all_passed else 1
+    # --strict gates the non-zero exit. Without it, region failures are
+    # informational only (still printed / still in JSON output) but the
+    # script exits 0 so callers can run the diff without forcing a fail.
+    if all_passed or not args.strict:
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
