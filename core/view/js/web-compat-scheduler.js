@@ -196,6 +196,20 @@
         globalThis.window.postMessage = globalThis.postMessage;
     }
 
+    // ── window.parent (self-reference) ───────────────────────────────────
+    // Real browser frames give nested windows a `parent` that points at the
+    // embedding frame; standalone top-level windows have `window.parent ===
+    // window`. Imported React designs commonly call
+    // `window.parent.postMessage(...)` for cross-frame messaging (4 sites
+    // in Spectr's edit-mode bridge alone); without a self-reference, the
+    // property access throws TypeError and the calling effect is silently
+    // dead. We're always a top-level window in this runtime, so the
+    // self-reference is spec-correct.
+    if (typeof globalThis.window === "object" && globalThis.window !== null
+            && typeof globalThis.window.parent === "undefined") {
+        globalThis.window.parent = globalThis.window;
+    }
+
     // ── URLSearchParams ──────────────────────────────────────────────────
     // Compact, spec-shaped polyfill — covers React's usages (read-only
     // parse + iteration) and the common app-side construct/append/get

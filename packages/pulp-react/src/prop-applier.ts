@@ -1253,6 +1253,11 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 
         // Text
         case 'text':            return call('setText', id, String(value));
+        // CSS-canonical `color` aliases RN-canonical `textColor`. Imported
+        // React designs (JSX `style={{ color: '...' }}`) silently dropped
+        // before this — bridge has `setTextColor`, the dispatch case was
+        // missing the alias.
+        case 'color':
         case 'textColor':       return call('setTextColor', id, value as string);
         // pulp #1434 — widen to include `'auto'` and `'justify'` (CSS /
         // RN canonical). `'auto'` is writing-direction-relative

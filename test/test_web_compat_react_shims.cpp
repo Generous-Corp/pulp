@@ -589,6 +589,24 @@ TEST_CASE("postMessage is available on both globalThis AND window",
     REQUIRE(result == "globalThis=function|window=function|same=true");
 }
 
+// `window.parent` self-reference. Real browser top-level windows have
+// `window.parent === window`; imported React designs commonly call
+// `window.parent.postMessage(...)` for cross-frame messaging (4 sites
+// in Spectr's edit-mode bridge alone). Without the self-reference the
+// property access throws TypeError and the surrounding effect dies
+// silently.
+TEST_CASE("window.parent is a self-reference and supports postMessage",
+          "[view][web-compat][issue-runtime-import]") {
+    auto result = run_in_bridge(R"(
+        return [
+            'defined=' + (typeof window.parent),
+            'self=' + (window.parent === window),
+            'callable=' + (typeof window.parent.postMessage)
+        ].join('|');
+    )");
+    REQUIRE(result == "defined=object|self=true|callable=function");
+}
+
 // ── URLSearchParams ────────────────────────────────────────────────────
 
 TEST_CASE("URLSearchParams parses, mutates, and serialises round-trip",
