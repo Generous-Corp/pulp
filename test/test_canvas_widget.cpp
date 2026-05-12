@@ -2075,3 +2075,141 @@ TEST_CASE("CanvasWidget paint dispatches set_filter to the canvas",
     REQUIRE(saw_filter);
     REQUIRE(observed_string == "blur(5px) sepia(60%)");
 }
+
+// ── pulp #1739 codecov backfill — 9-arg drawImage paint-replay coverage ──
+//
+// PR #1739 wired the canvas2d/drawImage sprite-sheet form
+// (drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh)) end-to-end through the JS
+// shim → WidgetBridge → CanvasWidget::paint() → Canvas::draw_image_*_rect.
+// The end-to-end test in test_widget_bridge.cpp [issue-1737] passes, but
+// codecov reported 0% patch coverage on the new lines because the bridge
+// → JS-shim → widget-paint dispatch chain was too indirect for per-line
+// attribution. These focused tests construct the CanvasDrawCmd directly
+// and call CanvasWidget::paint() against a RecordingCanvas — codecov
+// can attribute the `has_source_rect` branch in canvas_widget.cpp and
+// the `draw_image_from_file_rect` recording in recording_canvas.cpp
+// unambiguously to these test cases.
+
+// 9-arg form: `has_source_rect=true` routes through the `_rect` overload
+// so x2/y2/x3/y3 (sx,sy,sw,sh) ride alongside x/y/w/h (dx,dy,dw,dh) to
+// the canvas backend. Asserting on RecordingCanvas:
+//   - cmd.f[0..3] == dst rect
+//   - cmd.floats[0..3] == src rect
+// proves draw_image_from_file_rect was called (the dst-only path leaves
+// `floats` empty — see test below).
+TEST_CASE("CanvasWidget::paint routes draw_image through _rect overload when has_source_rect",
+          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd img;
+    img.type        = CanvasDrawCmd::Type::draw_image;
+    img.text        = "/sprites/walk.png";   // non-empty, non-data-URI path
+    // Destination rect (paint into 64x32 tile at 10,20):
+    img.x = 10; img.y = 20; img.w = 64; img.h = 32;
+    // Source rect (slice the (32,0)→(64,32) tile out of the sprite strip):
+    img.x2 = 32; img.y2 = 0; img.x3 = 32; img.y3 = 32;
+    img.has_source_rect = true;
+    cw.add_command(img);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    // Find the recorded draw_image command. RecordingCanvas's
+    // draw_image_from_file_rect override stashes the src rect in
+    // `floats[0..3]` — the dst-only draw_image_from_file leaves it empty.
+    int drawIndex = -1;
+    int idx = 0;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::draw_image) {
+            drawIndex = idx;
+            REQUIRE(cmd.text == "/sprites/walk.png");
+            // dst rect in f[0..3].
+            REQUIRE(cmd.f[0] == Catch::Approx(10.0f));
+            REQUIRE(cmd.f[1] == Catch::Approx(20.0f));
+            REQUIRE(cmd.f[2] == Catch::Approx(64.0f));
+            REQUIRE(cmd.f[3] == Catch::Approx(32.0f));
+            // src rect in floats[0..3] — proves the _rect overload fired.
+            REQUIRE(cmd.floats.size() == 4);
+            REQUIRE(cmd.floats[0] == Catch::Approx(32.0f));
+            REQUIRE(cmd.floats[1] == Catch::Approx(0.0f));
+            REQUIRE(cmd.floats[2] == Catch::Approx(32.0f));
+            REQUIRE(cmd.floats[3] == Catch::Approx(32.0f));
+        }
+        ++idx;
+    }
+    REQUIRE(drawIndex >= 0);
+}
+
+// 5-arg form fallback: `has_source_rect=false` must route through the
+// dst-only draw_image_from_file path. RecordingCanvas leaves the
+// `floats` payload empty in that case, which is how the renderer (Skia
+// or CG) distinguishes the two forms downstream. This pins the else
+// branch of canvas_widget.cpp's has_source_rect check.
+TEST_CASE("CanvasWidget::paint routes draw_image through dst-only path when has_source_rect is false",
+          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd img;
+    img.type            = CanvasDrawCmd::Type::draw_image;
+    img.text            = "/icons/play.png";
+    img.x = 5; img.y = 5; img.w = 16; img.h = 16;
+    // x2/y2/x3/y3 stay at zero; flag stays false — dst-only path.
+    img.has_source_rect = false;
+    cw.add_command(img);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    int drawIndex = -1;
+    int idx = 0;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::draw_image) {
+            drawIndex = idx;
+            REQUIRE(cmd.text == "/icons/play.png");
+            REQUIRE(cmd.f[0] == Catch::Approx(5.0f));
+            REQUIRE(cmd.f[1] == Catch::Approx(5.0f));
+            REQUIRE(cmd.f[2] == Catch::Approx(16.0f));
+            REQUIRE(cmd.f[3] == Catch::Approx(16.0f));
+            // dst-only path leaves `floats` untouched — RecordingCanvas's
+            // draw_image_from_file override doesn't populate it.
+            REQUIRE(cmd.floats.empty());
+        }
+        ++idx;
+    }
+    REQUIRE(drawIndex >= 0);
+}
+
+// Empty-path + has_source_rect=true: canvas_widget's draw_image case
+// guards the `_rect` call behind `!src.empty()`, so an empty path falls
+// through to the labeled placeholder fallback. This pins the empty-src
+// early-exit edge of the new branch.
+TEST_CASE("CanvasWidget::paint draws placeholder when image path is empty even with source rect",
+          "[canvas_widget][issue-1739][canvas2d][coverage]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd img;
+    img.type            = CanvasDrawCmd::Type::draw_image;
+    img.text            = "";  // empty path — skip the file-decode branch
+    img.x = 10; img.y = 10; img.w = 32; img.h = 32;
+    img.x2 = 1; img.y2 = 2; img.x3 = 3; img.y3 = 4;
+    img.has_source_rect = true;
+    cw.add_command(img);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    // No draw_image command should land because the empty-path branch
+    // doesn't call canvas.draw_image_from_file_rect — instead the
+    // placeholder fill_rect / fill_text path fires.
+    bool saw_draw_image = false;
+    bool saw_placeholder_fill = false;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::draw_image) saw_draw_image = true;
+        if (cmd.type == DrawCommand::Type::fill_rect) saw_placeholder_fill = true;
+    }
+    REQUIRE_FALSE(saw_draw_image);
+    REQUIRE(saw_placeholder_fill);
+}

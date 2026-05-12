@@ -2941,6 +2941,111 @@ TEST_CASE("WidgetBridge canvasDrawImage 9-arg form plumbs source rect end-to-end
     REQUIRE(drawIndex >= 0);
 }
 
+// pulp #1739 codecov backfill — focused unit test for the bridge-side
+// 9-arg drawImage plumbing. The end-to-end test above (#1737) exercises
+// the same path through the JS shim, but codecov's per-line attribution
+// reported 0% on widget_bridge.cpp lines 7045-7051 (the `args.numArgs
+// >= 10` branch that sets has_source_rect + stashes sx,sy,sw,sh in
+// x2,y2,x3,y3). This test invokes canvasDrawImage directly via JS to
+// pin the bridge plumbing to a tight Catch2 fixture so codecov measures
+// it. Asserts target the CanvasDrawCmd state right at the
+// JS-→-bridge boundary (read back via CanvasWidget::commands()).
+TEST_CASE("WidgetBridge canvasDrawImage 10-arg call sets has_source_rect on the recorded cmd",
+          "[view][bridge][canvas][issue-1739][canvas2d][coverage]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Drive canvasDrawImage directly with the 10-arg shape so the
+    // `args.numArgs >= 10` branch in widget_bridge.cpp fires. Using the
+    // raw bridge function (not the JS shim) keeps the call site tightly
+    // bound to the lines under test for codecov line-attribution.
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'bridge-9arg-canvas';
+        c.width = 256; c.height = 64;
+        document.body.appendChild(c);
+        // 10 args: canvasId, src, dx, dy, dw, dh, sx, sy, sw, sh.
+        // Bridge stashes sx,sy,sw,sh in x2,y2,x3,y3 and flags
+        // has_source_rect=true. Use c._id — the bridge looks up the
+        // CanvasWidget by its internal id, not the DOM `id` attribute.
+        canvasDrawImage(c._id, '/atlas/strip.png',
+                        100, 50, 64, 32,
+                        128, 16, 32, 16);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "bridge-9arg-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+
+    // CanvasWidget::commands() exposes the recorded cmd queue (read-only).
+    // We assert directly on the CanvasDrawCmd to pin the bridge's
+    // x2/y2/x3/y3 + has_source_rect writes — no paint-replay layer in
+    // between for codecov to lose track of.
+    const auto& cmds = canvas->commands();
+    REQUIRE(cmds.size() == 1);
+    const auto& cmd = cmds.front();
+    REQUIRE(cmd.type == CanvasDrawCmd::Type::draw_image);
+    REQUIRE(cmd.text == "/atlas/strip.png");
+    // dst rect (args[2..5])
+    REQUIRE_THAT(cmd.x, WithinAbs(100.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y, WithinAbs(50.0f, 1e-5f));
+    REQUIRE_THAT(cmd.w, WithinAbs(64.0f, 1e-5f));
+    REQUIRE_THAT(cmd.h, WithinAbs(32.0f, 1e-5f));
+    // src rect (args[6..9]) — proves the args.numArgs >= 10 branch fired.
+    REQUIRE(cmd.has_source_rect == true);
+    REQUIRE_THAT(cmd.x2, WithinAbs(128.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y2, WithinAbs(16.0f, 1e-5f));
+    REQUIRE_THAT(cmd.x3, WithinAbs(32.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y3, WithinAbs(16.0f, 1e-5f));
+}
+
+// 6-arg form (canvas-only-dst): the bridge's `args.numArgs >= 10`
+// branch must NOT fire, so has_source_rect stays false. Pins the
+// else-branch of the bridge plumbing.
+TEST_CASE("WidgetBridge canvasDrawImage 6-arg call leaves has_source_rect=false",
+          "[view][bridge][canvas][issue-1739][canvas2d][coverage]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'bridge-6arg-canvas';
+        c.width = 64; c.height = 64;
+        document.body.appendChild(c);
+        // 6 args — dst-only form. has_source_rect must stay false.
+        canvasDrawImage(c._id, '/icons/save.png',
+                        4, 4, 32, 32);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "bridge-6arg-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+
+    const auto& cmd = canvas->commands().front();
+    REQUIRE(cmd.type == CanvasDrawCmd::Type::draw_image);
+    REQUIRE(cmd.text == "/icons/save.png");
+    REQUIRE_THAT(cmd.x, WithinAbs(4.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y, WithinAbs(4.0f, 1e-5f));
+    REQUIRE_THAT(cmd.w, WithinAbs(32.0f, 1e-5f));
+    REQUIRE_THAT(cmd.h, WithinAbs(32.0f, 1e-5f));
+    // Source-rect branch did NOT fire.
+    REQUIRE(cmd.has_source_rect == false);
+    REQUIRE_THAT(cmd.x2, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y2, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(cmd.x3, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(cmd.y3, WithinAbs(0.0f, 1e-5f));
+}
+
 TEST_CASE("WidgetBridge canvasPutImageData records pixel buffer for paint replay",
           "[view][bridge][canvas][issue-916]") {
     ScriptEngine engine;
