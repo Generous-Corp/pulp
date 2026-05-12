@@ -75,6 +75,16 @@ if(UNIX)
     set_tests_properties(retry-git-clone PROPERTIES TIMEOUT 30)
 endif()
 
+# Launcher unit test (pulp #1821) — verifies tools/mcp/pulp-mcp-launcher
+# resolves the source-tree build, falls back to $PATH, and emits a
+# readable diagnostic when neither is present. Hermetic (stages a
+# tempdir layout), no real binary required.
+if(UNIX)
+    add_test(NAME pulp-mcp-launcher
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_launcher.sh)
+    set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
+endif()
+
 # Android end-to-end smoke (issue #337). Runs the tools/scripts/android_smoke.sh
 # against a locally attached emulator or device. Skipped by default because
 # the smoke requires an already-booted AVD/device and an arm64-v8a APK —

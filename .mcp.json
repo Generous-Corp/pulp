@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "pulp": {
-      "command": "./build/tools/mcp/pulp-mcp",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/mcp/pulp-mcp-launcher",
       "env": {}
     }
   }

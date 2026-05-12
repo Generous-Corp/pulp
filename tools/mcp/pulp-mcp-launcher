@@ -1,0 +1,40 @@
+#!/bin/bash
+# pulp-mcp launcher — invoked from .mcp.json so Claude Code can find the
+# pulp-mcp binary regardless of the cwd it spawns the MCP server with.
+#
+# Resolution order:
+#   1. ${CLAUDE_PLUGIN_ROOT-derived}/build/tools/mcp/pulp-mcp  (source-tree build)
+#   2. pulp-mcp on $PATH                                       (installed binary)
+#
+# If neither is found, the launcher emits a readable diagnostic on stderr
+# and exits 127 so Claude Code surfaces the failure rather than treating
+# it as silent. See pulp #1821.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+CANDIDATE_SOURCE_BUILD="$REPO_ROOT/build/tools/mcp/pulp-mcp"
+if [ -x "$CANDIDATE_SOURCE_BUILD" ]; then
+  exec "$CANDIDATE_SOURCE_BUILD" "$@"
+fi
+
+if command -v pulp-mcp >/dev/null 2>&1; then
+  exec pulp-mcp "$@"
+fi
+
+cat >&2 <<EOF
+pulp-mcp-launcher: cannot locate pulp-mcp binary.
+
+Looked in:
+  1. $CANDIDATE_SOURCE_BUILD  (source-tree build)
+  2. \$PATH (no executable named 'pulp-mcp' found)
+
+Fix one of:
+  - Build it: 'cmake --build build --target pulp-mcp' from $REPO_ROOT
+  - Install it on \$PATH so 'pulp-mcp' resolves globally
+
+See https://github.com/danielraffel/pulp/issues/1821 for context.
+EOF
+exit 127
