@@ -197,6 +197,29 @@ export const PulpHostConfig: HostConfig<
         // (Claude/Stitch/Figma/v0/Pencil) reach prop-applier through here.
         const normalizedProps = normalizeHostProps(type, props as Record<string, unknown>);
         const id = (normalizedProps.id as string) ?? autoId(rootContainer);
+        // Phase 7 codex round 5 — public-instance is an Element shim.
+        // The bundle's refs (canvasRef.current, wrapRef.current) need
+        // DOM-element shape: getContext('2d'), getBoundingClientRect(),
+        // style setters, etc. Plain Instance descriptors fail the
+        // bundle's resize useEffect with "not a function" → infinite
+        // re-render loop. We instantiate the existing web-compat
+        // Element class (installed by the C++ runtime-import shims) and
+        // mark its native widget as already created (host-config will
+        // call createWidget later via materializeUnder). _ensureNative
+        // is a no-op once _nativeCreated=true, so DOM-shim methods
+        // route to the existing native widget by id.
+        let domShim: unknown = null;
+        try {
+            const ElementCtor = (globalThis as Record<string, unknown>).Element as
+                | (new (tag: string, nativeId: string) => Record<string, unknown>)
+                | undefined;
+            if (typeof ElementCtor === 'function') {
+                const shim = new ElementCtor(type, id);
+                shim._nativeCreated = true;
+                shim.__pulpId = id;  // non-enumerable backref (codex round 5)
+                domShim = shim;
+            }
+        } catch { /* Element shim not available — pure-JS test path */ }
         return {
             id,
             type,
@@ -205,6 +228,7 @@ export const PulpHostConfig: HostConfig<
             childIds: [],
             onBridge: false,
             pendingChildren: [],
+            _dom: domShim,
         };
     },
 
@@ -376,7 +400,18 @@ export const PulpHostConfig: HostConfig<
     },
 
     // ── Misc required no-ops / passthroughs ────────────────────────
-    getPublicInstance(instance) { return instance; },
+    // Phase 7 codex round 5 — return the DOM-shim element when
+    // available so the bundle's `ref.current.X` calls resolve to
+    // browser-DOM-shape methods (getContext, getBoundingClientRect,
+    // style setters, addEventListener, etc.). Falls back to the
+    // Instance descriptor for tests that run without the C++ shim
+    // chain. The PulpInstance return type is technically wrong (we
+    // return an Element or PulpInstance), but react-reconciler's
+    // types are inflexible here and we cast at the call site.
+    getPublicInstance(instance) {
+        const inst = instance as Instance & { _dom?: unknown };
+        return (inst._dom ?? instance) as Instance;
+    },
     preparePortalMount(_container) { /* no portals in v0 */ },
     detachDeletedInstance(_instance) { /* no extra cleanup needed */ },
     beforeActiveInstanceBlur() { /* no-op */ },

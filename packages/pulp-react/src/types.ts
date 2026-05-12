@@ -629,6 +629,17 @@ export interface PulpInstance {
     /// the bridge. Drained by attach() once onBridge flips true.
     /// Each entry is the child descriptor and the index it should land at.
     pendingChildren: Array<{ child: PulpInstance; index: number }>;
+    /// Phase 7 codex round 5 — DOM-shim element returned from
+    /// `getPublicInstance`. Imported bundles call DOM-style methods
+    /// (`getContext('2d')`, `getBoundingClientRect()`, `style.X=`,
+    /// `addEventListener`) on `ref.current`, which is what
+    /// `getPublicInstance` returns. We instantiate the existing
+    /// web-compat `Element` class bound to this instance's native id,
+    /// so DOM-shim methods forward through the existing bridge wiring
+    /// rather than failing with "not a function" → infinite re-render.
+    /// `null` when the Element shim isn't available (e.g. pure-JS
+    /// unit tests with no bridge engine).
+    _dom?: unknown;
 }
 
 // ── Container ──────────────────────────────────────────────────────
