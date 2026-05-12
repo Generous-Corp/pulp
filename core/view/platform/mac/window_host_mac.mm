@@ -374,6 +374,21 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             }
             auto pt = [self localPoint:event];
 
+            // pulp #1818 — the Obj-C `_focusedView` ivar is a parallel
+            // pointer to `pulp::view::View::focused_input_`. The static is
+            // auto-cleared by ~View() (pulp #1708) when the focused widget
+            // is destroyed (e.g., a React unmount of a clicked widget),
+            // but nothing clears the ivar. The next mouseDown then
+            // dereferences `_focusedView->on_focus_changed(false)` on
+            // freed memory and PAC-faults on the vtable load — this is
+            // the exact crash in pulp #1818 ("-[PulpView mouseDown:] + 664",
+            // KERN_INVALID_ADDRESS, x9 = corrupt high bits). Re-sync from
+            // the auto-clearing static at the top of every mouseDown so
+            // the ivar can never be dangling for any deref below.
+            if (_focusedView && _focusedView != pulp::view::View::focused_input_) {
+                _focusedView = pulp::view::View::focused_input_;
+            }
+
         // Inspector intercept — consume clicks when inspector is active
         {
             auto mods = modifiersFromNSFlags(event.modifierFlags);
@@ -713,6 +728,17 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
         try {
             auto key = keyCodeFromNS(event.keyCode);
             auto mods = modifiersFromNSFlags(event.modifierFlags);
+
+            // pulp #1818 — re-sync the Obj-C `_focusedView` ivar from the
+            // auto-clearing `View::focused_input_` static. Same rationale
+            // as mouseDown: if the focused View was unmounted between the
+            // last input event and this one (~View clears the static),
+            // the ivar still dangles and any deref below (Tab nav at
+            // L749/751 or the final dispatch at L808) would PAC-fault on
+            // freed memory.
+            if (_focusedView && _focusedView != pulp::view::View::focused_input_) {
+                _focusedView = pulp::view::View::focused_input_;
+            }
 
         // Inspector intercept — check before all other key handling
         {
