@@ -331,14 +331,13 @@
         "any CSS property assignment (`width`, `color`, `margin`, etc.) whose string value contains a `var(...)` call"
       ],
       "unsupportedValues": [
-        "nested var inside a fallback (`var(--a, var(--b, 0))`) — the regex is single-pass; nested fallbacks are not re-resolved",
-        "var() inside more elaborate function calls where the captured group breaks on inner commas (`var()` inside `linear-gradient(...)` etc. — works as long as the fallback does not itself contain a comma)",
-        "scoped (per-element) cascading — see notes in `css/__setProperty_var`"
+        "scoped (per-element) cascading — see notes in css/__setProperty_var"
       ],
       "tests": [
-        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]"
+        "test/web-compat/test_web_compat_prelude.cpp [issue-1551]",
+        "test/web-compat/test_web_compat_prelude.cpp [nested-fallback]"
       ],
-      "notes": "pulp #1551 catalog add — already implemented. `var(--name)` is the read side of the bridge motion-token system; `setProperty('--name', value)` is the write side. Together they let consumers parameterise inline styles with named tokens without going through the full CSS-cascade engine.",
+      "notes": "pulp #1551 catalog add — already implemented. `var(--name)` is the read side of the bridge motion-token system; `setProperty('--name', value)` is the write side. Together they let consumers parameterise inline styles with named tokens without going through the full CSS-cascade engine. Coverage-gap closure: nested-fallback (var(--a, var(--b, 0))) and var() inside other CSS functions (calc(var(--x) + 10px)) are now supported via the balanced-paren _resolveVar walker (pinned by [nested-fallback]).",
       "issue": "1551"
     },
     "css/alignContent": {

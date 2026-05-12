@@ -429,15 +429,90 @@ function parseTransition(str) {
     return result;
 }
 
-// Resolve var(--name) or var(--name, fallback) against theme tokens
-function _resolveVar(str) {
+// Maximum recursion depth for nested var() fallbacks. Generous — real
+// design systems top out at depth 2-3. The cap exists only to bound
+// pathological self-referential tokens like `--a: var(--a)`; when the
+// cap is hit, the walker returns the input string unmodified
+// (graceful unresolved passthrough, not silent truncation). Named so
+// the cap behavior is grep-able from tests + Codex review on PR C.
+var _VAR_RESOLVE_MAX_DEPTH = 8;
+
+// Resolve var(--name) or var(--name, fallback) against theme tokens.
+//
+// pulp-internal coverage-gap (`css/__var`): the original single-pass regex
+// couldn't handle nested parens because regex isn't context-free — the
+// `[^)]+` for the fallback would stop at the FIRST `)` (the inner one)
+// and leave the outer `)` as part of the surrounding text, producing
+// garbage on `var(--a, var(--b, 0))` and similar nested-fallback shapes
+// that real design systems emit constantly.
+//
+// Replaced with a manual balanced-paren walker so:
+//   var(--a, var(--b, 0))    →  resolves correctly through fallback chain
+//   var(--a) calc(10px)       →  prefix preserved
+//   calc(var(--a) + 10px)     →  embedded var() inside other functions OK
+function _resolveVar(str, depth) {
     if (!str || typeof str !== "string") return str;
-    return str.replace(/var\(\s*--([^,)]+)(?:\s*,\s*([^)]+))?\s*\)/g, function(_, name, fallback) {
-        var val = getMotionToken(name.trim());
-        if (val !== 0 && val !== undefined) return String(val);
-        if (fallback !== undefined) return fallback.trim();
-        return "0";
-    });
+    depth = depth || 0;
+    if (depth > _VAR_RESOLVE_MAX_DEPTH) return str;
+
+    var out = "";
+    var i = 0;
+    while (i < str.length) {
+        var varStart = str.indexOf("var(", i);
+        if (varStart === -1) {
+            out += str.slice(i);
+            break;
+        }
+        out += str.slice(i, varStart);
+
+        // Walk forward tracking paren depth to find the matching `)`.
+        var pdepth = 1;
+        var j = varStart + 4;
+        while (j < str.length && pdepth > 0) {
+            var ch = str.charAt(j);
+            if (ch === "(") pdepth++;
+            else if (ch === ")") pdepth--;
+            if (pdepth > 0) j++;
+        }
+        if (pdepth !== 0) {
+            // Unbalanced — surface the remainder verbatim and bail.
+            out += str.slice(varStart);
+            break;
+        }
+
+        // Split inner into name + optional fallback at the FIRST top-level
+        // comma (commas inside nested parens stay with the fallback).
+        var inner = str.slice(varStart + 4, j);
+        var commaPos = -1;
+        var nest = 0;
+        for (var k = 0; k < inner.length; k++) {
+            var c = inner.charAt(k);
+            if (c === "(") nest++;
+            else if (c === ")") nest--;
+            else if (c === "," && nest === 0) { commaPos = k; break; }
+        }
+        var name, fallback;
+        if (commaPos >= 0) {
+            name = inner.slice(0, commaPos).trim();
+            fallback = inner.slice(commaPos + 1).trim();
+        } else {
+            name = inner.trim();
+            fallback = undefined;
+        }
+        if (name.indexOf("--") === 0) name = name.slice(2);
+
+        var val = getMotionToken(name);
+        if (val !== 0 && val !== undefined) {
+            out += String(val);
+        } else if (fallback !== undefined) {
+            // Recurse so nested var() in the fallback resolves too.
+            out += _resolveVar(fallback, depth + 1);
+        } else {
+            out += "0";
+        }
+        i = j + 1;
+    }
+    return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

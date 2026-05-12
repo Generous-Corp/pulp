@@ -1294,6 +1294,76 @@ TEST_CASE("WebCompat: var(--name) resolves through motion-token bridge (issue-15
     REQUIRE(std::string(withFallback.getWithDefault<std::string_view>("")) == "12");
 }
 
+// pulp-internal coverage-gap (`css/__var`) — close the listed
+// unsupportedValues for nested-fallback resolution and var() embedded
+// inside other CSS function calls. The original single-pass regex
+// implementation couldn't handle either because regex can't track
+// balanced parens (context-free); the replacement balanced-paren
+// walker can. These cases are the shapes design-system imports
+// emit constantly:
+TEST_CASE("WebCompat: var() with nested var() in fallback resolves through balanced-paren walker",
+          "[webcompat][css-var][issue-1551][nested-fallback]") {
+    TestEnvironment env;
+    env.eval("setMotionToken('vnested-defined', 42);");
+
+    // 1. Nested fallback where outer is missing → falls back to inner var(),
+    //    inner is also missing → falls back to literal "0".
+    auto deepMiss = env.engine.evaluate(
+        "_resolveVar('var(--vnested-miss-a, var(--vnested-miss-b, 8))')");
+    REQUIRE(std::string(deepMiss.getWithDefault<std::string_view>("")) == "8");
+
+    // 2. Nested fallback where outer is missing but inner is defined →
+    //    resolves through to the inner token's value.
+    auto innerResolves = env.engine.evaluate(
+        "_resolveVar('var(--vnested-miss-c, var(--vnested-defined, 0))')");
+    REQUIRE(std::string(innerResolves.getWithDefault<std::string_view>("")) == "42");
+
+    // 3. Triple-nested fallback — the walker handles arbitrary depth
+    //    (cap is 8; this is depth 3 well within budget).
+    auto tripleNest = env.engine.evaluate(
+        "_resolveVar('var(--m1, var(--m2, var(--m3, 7)))')");
+    REQUIRE(std::string(tripleNest.getWithDefault<std::string_view>("")) == "7");
+
+    // 4. var() embedded inside another CSS function call (calc) — the
+    //    prefix `calc(` is preserved verbatim around the resolved var().
+    auto inCalc = env.engine.evaluate(
+        "_resolveVar('calc(var(--vnested-defined) + 10px)')");
+    REQUIRE(std::string(inCalc.getWithDefault<std::string_view>("")) == "calc(42 + 10px)");
+
+    // 5. Unbalanced var( — the walker bails gracefully (no crash, no
+    //    runaway recursion).
+    auto unbalanced = env.engine.evaluate("_resolveVar('var(--oops')");
+    REQUIRE(std::string(unbalanced.getWithDefault<std::string_view>("")) == "var(--oops");
+
+    // 6. Plain text without any var() — passthrough.
+    auto plain = env.engine.evaluate("_resolveVar('16px solid red')");
+    REQUIRE(std::string(plain.getWithDefault<std::string_view>("")) == "16px solid red");
+
+    // 7. Depth-cap behavior (Codex P2 on PR C): a chain that would
+    //    recurse past the cap (8) must NOT crash, must NOT silently
+    //    truncate, must NOT spin forever. It returns the unresolved
+    //    inner fallback as a literal (graceful unresolved
+    //    passthrough). Construct a 10-deep nested fallback chain
+    //    (depth 10 > cap 8) and verify the resolver doesn't blow
+    //    the stack.
+    auto deepBeyondCap = env.engine.evaluate(
+        "_resolveVar('var(--m0, var(--m1, var(--m2, var(--m3, var(--m4, var(--m5, var(--m6, var(--m7, var(--m8, var(--m9, 99))))))))))')");
+    // Allow either a fully-resolved "99" (cap permits depth=9) OR a
+    // partially-resolved string still containing "var(" (cap kicked
+    // in and returned the residual). Both are safe; what we forbid
+    // is a crash, an empty string, or a silent "0".
+    auto deepResult = std::string(deepBeyondCap.getWithDefault<std::string_view>(""));
+    REQUIRE_FALSE(deepResult.empty());
+    REQUIRE(deepResult != "0");
+    // Pathological self-reference must terminate. Without the depth
+    // cap, `var(--cycle, var(--cycle, ...))` could recurse until the
+    // stack blows; the cap returns the residual fallback literal.
+    env.eval("setMotionToken('vcycle-defined', 0);"); // explicitly 0 so resolver hits fallback path
+    auto selfRef = env.engine.evaluate(
+        "_resolveVar('var(--cycle-undef, var(--cycle-undef, var(--cycle-undef, fallback-literal)))')");
+    REQUIRE(std::string(selfRef.getWithDefault<std::string_view>("")) == "fallback-literal");
+}
+
 TEST_CASE("WebCompat: setProperty('--name') routes to motion-token bridge (issue-1551)",
           "[webcompat][css-var][issue-1551]") {
     TestEnvironment env;
