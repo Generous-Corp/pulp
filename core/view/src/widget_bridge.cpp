@@ -2697,9 +2697,21 @@ void WidgetBridge::register_api() {
     });
 
     // getLayoutRect(id) -> {x, y, width, height, top, right, bottom, left}
-    // Returns layout-resolved bounds in root-relative coordinates
+    // Returns layout-resolved bounds in root-relative coordinates.
+    //
+    // pulp #1899 — force a fresh layout pass before reading bounds.
+    // Spectr's editor (and any React-imported tree) calls this via
+    // Element.getBoundingClientRect() in mount-time effects to size
+    // a canvas / SVG / drawing surface. If the JS commit that mounted
+    // the React tree hasn't yet been followed by a yoga_layout pass,
+    // the bounds read back as the View's stale default (0×0) — which
+    // gates the entire canvas paint pipeline (drawSpectrum/drawRulers
+    // bail at getBoundingClientRect == 0). Forcing layout here closes
+    // that timing gap. Layout is internally idempotent if nothing has
+    // changed, so the cost is bounded to one tree walk per call.
     engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
+        root_.layout_children();
         View* v = id.empty() ? &root_ : widget(id);
         return make_layout_rect_value(v);
     });
@@ -6151,8 +6163,14 @@ void WidgetBridge::register_api() {
     // Shell exec (for Claude CLI)
     // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
     // getLayoutRect(id) → {x, y, width, height, top, left, right, bottom}
+    // pulp #1899 — see the matching note on the earlier getLayoutRect
+    // registration. Both bindings must force a layout pass; whichever
+    // wins the engine_.register_function override needs the same
+    // semantics so React-imported trees get correct bounds in mount-
+    // time effects.
     engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
+        root_.layout_children();
         auto* v = widget(id);
         return make_layout_rect_value(v);
     });

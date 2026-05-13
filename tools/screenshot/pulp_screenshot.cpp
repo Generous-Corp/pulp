@@ -88,6 +88,16 @@ int main(int argc, char* argv[]) {
     else if (theme_name == "pro_audio") root.set_theme(Theme::pro_audio());
     else root.set_theme(Theme::dark());
 
+    // pulp #1899 — apply --width/--height to the root's bounds BEFORE
+    // any script runs. Without this, root.local_bounds() is (0,0,0,0)
+    // when yoga_layout reads it; YGNodeStyleSetWidth/Height(root) then
+    // gets 0, and every position:absolute + inset:0 child computes to
+    // 0×0 — blanking any chain of absolute-positioned containers (the
+    // canonical "fill containing block" CSS pattern). First surfaced
+    // via Spectr's editor.generated.tsx: Editor / FilterBank / canvas /
+    // Chrome hierarchy is exactly this chain.
+    root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+
     root.flex().direction = FlexDirection::column;
     // Only set padding/gap for demo mode — scripts manage their own layout
     if (demo) {
@@ -98,6 +108,14 @@ int main(int argc, char* argv[]) {
     // Set up scripting
     ScriptEngine engine;
     WidgetBridge bridge(engine, root, store);
+
+    // pulp #1899 — install runtime-import handlers so React-imported
+    // trees (Spectr's editor.js et al.) can register & drain useEffect /
+    // requestAnimationFrame / setTimeout callbacks. These are registered
+    // conditionally because plain createKnob / createFader scripts don't
+    // need them. Always install in pulp-screenshot since the tool's
+    // raison d'etre includes capturing React-driven imports.
+    bridge.install_runtime_import_handlers();
 
     if (demo) {
         // Built-in demo UI
@@ -128,6 +146,19 @@ int main(int argc, char* argv[]) {
         }
         bridge.load_script(code);
     }
+
+    // pulp #1899 — drain React's useEffect callbacks, requestAnimationFrame
+    // queue, and setTimeout/setInterval timers BEFORE rendering. Without
+    // this, headless captures of React-imported trees show only what
+    // mounts synchronously — any drawing that lives inside useEffect
+    // (canvas paint, dB axis labels, frequency labels, grid lines) never
+    // runs because the underlying message loop doesn't tick between
+    // script-load and render. Spectr's editor uses this pattern for
+    // drawSpectrum / drawRulers; the live host's NSRunLoop ticks them
+    // naturally, but pulp-screenshot's headless path has to pump
+    // explicitly. __pulpRuntimeSettle__ is registered by WidgetBridge
+    // exactly for this case (see widget_bridge.cpp:1144).
+    bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
 
     // Render
     if (output_base64) {
