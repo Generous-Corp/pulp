@@ -291,6 +291,42 @@ Plan source: `planning/2026-05-13-namespace-overflow-implementation.md`
 (reviewed by `/codex` 2026-05-13). Full operator docs:
 `docs/guides/local-ci.md` § "macOS overflow routing".
 
+### Per-PR macOS retargeting: `pulp macos`
+
+The matrix in `build.yml` couples Linux/Windows/macOS into a single
+`workflow_run`. Rerunning macOS via that matrix means re-running
+Linux/Windows too — wasted compute when they already passed.
+
+`build-macos.yml` is a standalone workflow (introduced in pulp task
+#20) that runs JUST the macOS build/test on a chosen runner pool.
+Branch protection's required `macos` check accepts the latest
+same-named check from either workflow, so `build-macos.yml`'s `macos`
+job supersedes the matrix's `macos` job when fresher.
+
+```bash
+# Move a PR's macOS leg to a different runner, without touching Linux/Windows:
+pulp macos retarget --pr <N> --to <local|namespace|github-hosted>
+
+# See where the latest macOS check landed and its state:
+pulp macos status --pr <N>
+```
+
+`retarget` cancels any in-flight macOS-bearing workflow_runs for the
+PR (from both `build.yml` and `build-macos.yml`), then fires a fresh
+`gh workflow run build-macos.yml` with the chosen runner.
+
+**When this is the right tool:**
+
+- Local Mac just freed up and a PR is sitting queued on GH-hosted →
+  `pulp macos retarget --pr N --to local` claws it back to local.
+- One critical PR needs to skip the queue → `--to namespace` (billable).
+- A PR's macOS leg flaked on local; retry on GH-hosted → `--to github-hosted`.
+
+**What it doesn't do:** retargeting only swaps the macOS dispatch.
+Linux/Windows from `build.yml`'s matrix keep running independently.
+For full-workflow rerun (e.g. after force-push), the existing
+close+reopen or `git push --force-with-lease` paths still apply.
+
 ### Path-scoped validation profile: `parser`
 
 `.shipyard/config.toml` defines a `[validation.parser]` lane (pulp

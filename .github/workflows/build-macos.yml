@@ -1,0 +1,164 @@
+name: Build and Test (macOS retarget)
+
+# Dedicated workflow for re-running JUST the macOS leg of CI on a different
+# runner pool, without disturbing the Linux/Windows legs that are part of
+# `build.yml`'s matrix. Triggered manually (`workflow_dispatch`) or via the
+# `pulp macos retarget` CLI wrapper.
+#
+# When this workflow's `macos` job completes successfully, its check supersedes
+# the `macos` check from `build.yml`'s matrix leg (branch protection picks the
+# most recent check by name). That's the per-PR override semantic.
+#
+# Sibling to (not replacement for) `build.yml`. Both workflows produce a job
+# named `macos` so branch protection's required-check stays a stable name.
+#
+# Design source: pulp task #20 / `pulp macos retarget` follow-up.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Where to run the macOS build/test"
+        required: true
+        default: local
+        type: choice
+        options:
+          - local
+          - namespace
+          - github-hosted
+      target_ref:
+        description: "Branch / ref to run against (default: workflow ref)"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  # Independent of build.yml's `build-${{ github.ref }}` group so a manual
+  # retarget doesn't cancel the matrix workflow_run, and vice versa.
+  group: build-macos-${{ inputs.target_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+      route: ${{ steps.resolve.outputs.route }}
+    steps:
+      - id: resolve
+        env:
+          RUNNER_CHOICE: ${{ inputs.runner }}
+          LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
+          NAMESPACE_MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_CHOICE" in
+            local)
+              SELECTOR="${LOCAL_MACOS_RUNS_ON_JSON:-[\"self-hosted\",\"sanitizer\"]}"
+              ;;
+            namespace)
+              if [ -z "${NAMESPACE_MACOS_RUNS_ON_JSON:-}" ]; then
+                echo "::error::PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is not set; cannot route to namespace." >&2
+                exit 1
+              fi
+              SELECTOR="$NAMESPACE_MACOS_RUNS_ON_JSON"
+              ;;
+            github-hosted)
+              SELECTOR='"macos-15"'
+              ;;
+            *)
+              echo "::error::Unknown runner choice: $RUNNER_CHOICE" >&2
+              exit 1
+              ;;
+          esac
+          echo "runs_on_json=$SELECTOR" >> "$GITHUB_OUTPUT"
+          echo "route=$RUNNER_CHOICE" >> "$GITHUB_OUTPUT"
+          echo "resolve-runner: macOS retarget route = $RUNNER_CHOICE; selector = $SELECTOR"
+
+  build-test:
+    needs: resolve-runner
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
+    name: macOS retarget build (${{ needs.resolve-runner.outputs.route }})
+    env:
+      # Use a distinct build dir from build.yml's matrix so caches don't
+      # collide if both run concurrently on the same self-hosted host.
+      PULP_BUILD_DIR: build-macos-retarget
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+          ref: ${{ inputs.target_ref || github.ref }}
+          # Self-hosted runner reuses its workspace across runs so ccache /
+          # FetchContent / CMake configure persist between PRs.
+          clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
+
+      - name: Install ccache
+        run: brew install ccache
+
+      - name: Restore FetchContent sources (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: fetchcontent-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/Pulp/fetchcontent-src
+          key: macOS-macos-retarget-fetchcontent-${{ hashFiles('setup.sh') }}
+          restore-keys: macOS-macos-retarget-fetchcontent-
+
+      - name: Restore ccache (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
+        id: ccache-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: macOS-macos-retarget-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-${{ github.ref }}
+          restore-keys: |
+            macOS-macos-retarget-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
+            macOS-macos-retarget-ccache-
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        run: cmake --build "$PULP_BUILD_DIR" --config Release
+
+      - name: Ccache stats
+        if: always()
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats
+          else
+            echo "ccache not available; skipping stats"
+          fi
+
+      - name: Test
+        # Mirror build.yml's macOS test invocation. The `-LE validation`
+        # exclude keeps auval/pluginval out (they require codesign on the
+        # local runner) — same as the matrix leg.
+        run: ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release -LE validation -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+
+  macos:
+    # Stable required-check name. Branch protection on `main` requires a
+    # context literally named `macos`. When this workflow runs, its `macos`
+    # check supersedes the same-named check from build.yml's matrix leg.
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Gate on retarget build
+        run: |
+          set -euo pipefail
+          case "${{ needs.build-test.result }}" in
+            success)
+              echo "macOS retarget build green — macos gate ✓"
+              exit 0
+              ;;
+            *)
+              echo "macOS retarget build ${{ needs.build-test.result }} — blocking macos gate"
+              exit 1
+              ;;
+          esac

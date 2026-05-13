@@ -61,6 +61,7 @@ static const Command commands[] = {
     // findings on cmd_config.cpp are actually observable behaviour.
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
+    {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);

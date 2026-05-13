@@ -192,6 +192,39 @@ Gotchas:
   run *before* `pulp pr` if you want to see what the gate will say. Same
   script, `--mode=report`.
 
+## `pulp macos` — per-PR macOS-runner retargeting
+
+`tools/cli/cmd_macos.cpp` plus `.github/workflows/build-macos.yml`.
+
+`pulp macos retarget --pr N --to <local|namespace|github-hosted>` cancels
+any in-flight macOS-bearing workflow_runs for PR N (from both `build.yml`'s
+matrix and any prior `build-macos.yml` dispatch) and fires a fresh
+`gh workflow run build-macos.yml --ref <pr-head> --field runner=<choice>`.
+
+Why a separate workflow file (and not just a new `pulp pr --retarget-macos`
+flag): the `build.yml` matrix couples Linux/Windows/macOS into one
+workflow_run. Rerunning macOS via that matrix re-runs Linux/Windows too.
+`build-macos.yml` is independent — it produces its own `macos`-named
+check that supersedes the matrix's `macos` check by recency. Branch
+protection's required-check name stays one stable token.
+
+`pulp macos status --pr N` reads the latest `macos` check from the GitHub
+check-runs API for the PR's head SHA. Useful for confirming a retarget
+landed and which runner pool picked it up.
+
+Repo variables the workflow reads (defined globally for `build.yml`'s
+overflow logic; reused here unchanged):
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON` — `--to local`
+- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` — `--to namespace`
+- (`--to github-hosted` is always `"macos-15"`, no var needed)
+
+When this is the right tool vs. `shipyard rescue`:
+
+| Goal | Tool |
+|------|------|
+| Move one PR's macOS to a different pool without disturbing Linux/Windows | `pulp macos retarget` |
+| Move multiple PRs' workflow_runs to a different provider (cancel + redispatch the WHOLE workflow) | `shipyard rescue` |
+
 ## `pulp upgrade --check-only`
 
 The sandbox E2E harness runs this command with

@@ -195,6 +195,37 @@ gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
 
 **Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
 
+## Per-PR macOS retargeting (`pulp macos`)
+
+For the case where automatic overflow picked the "wrong" pool — e.g. you want to push a specific PR to Namespace for paid-fast turnaround, or pull a queued GH-hosted job back to the local Mac because local just freed up — use the **`build-macos.yml`** workflow + the **`pulp macos`** CLI:
+
+```bash
+# Switch PR's macOS leg to the local self-hosted Mac, freeing the GH-hosted slot:
+pulp macos retarget --pr 1910 --to local
+
+# Pay to skip the queue (Namespace billable, fast parallel):
+pulp macos retarget --pr 1910 --to namespace
+
+# Force GH-hosted macos-15 (free, slower):
+pulp macos retarget --pr 1910 --to github-hosted
+
+# See where the current macOS check is routed:
+pulp macos status --pr 1910
+```
+
+`pulp macos retarget` cancels any in-flight macOS-bearing workflow_run for the PR and fires a fresh `build-macos.yml` dispatch on the chosen runner. Branch protection's required `macos` check is satisfied by whichever workflow most recently produced that check name, so retargeting supersedes the previous macOS leg **without re-running Linux/Windows**.
+
+`build-macos.yml` is independent of `build.yml`'s matrix — they share check names but not workflow_runs. The matrix workflow continues running Linux/Windows as usual; only the macOS leg is replaced.
+
+Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
+
+| Input | Default | Effect |
+|-------|---------|--------|
+| `runner` | `local` | Routes to `PULP_LOCAL_MACOS_RUNS_ON_JSON` |
+| `runner=namespace` | — | Routes to `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` |
+| `runner=github-hosted` | — | Routes to `"macos-15"` (free GH-hosted) |
+| `target_ref` | (workflow's `ref`) | Branch / SHA to build |
+
 ## Required Merge Process (All Agents)
 
 Every change to `main` must go through this workflow — no exceptions:
