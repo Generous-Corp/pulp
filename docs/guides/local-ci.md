@@ -195,6 +195,33 @@ gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
 
 **Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
 
+### `pulp overflow` — operator surface
+
+`tools/cli/cmd_overflow.cpp` wraps the three repo variables behind a discoverable CLI:
+
+```bash
+# Show current routing state (local target, overflow target, threshold,
+# plus self-hosted runner registration if visible to the default token):
+pulp overflow status
+
+# Turn overflow on (defaults to free GH-hosted "macos-15"):
+pulp overflow enable
+pulp overflow enable --to '"namespace-profile-generouscorp-macos"'   # paid Namespace
+
+# Turn overflow off — every macOS leg goes to the local target.
+# In-flight cloud jobs continue to completion; only new dispatches change.
+pulp overflow disable
+
+# Read / set the BUSY threshold (default 2; set to 1 for single-runner setups):
+pulp overflow threshold
+pulp overflow threshold 1
+```
+
+`pulp overflow disable` does not cancel in-flight cloud runs — it's a
+config-change only. To force a currently-routed-to-cloud PR back to local,
+use `pulp macos retarget --pr N --to local` (see "Per-PR macOS retargeting"
+below).
+
 ## Per-PR macOS retargeting (`pulp macos`)
 
 For the case where automatic overflow picked the "wrong" pool — e.g. you want to push a specific PR to Namespace for paid-fast turnaround, or pull a queued GH-hosted job back to the local Mac because local just freed up — use the **`build-macos.yml`** workflow + the **`pulp macos`** CLI:

@@ -744,13 +744,6 @@ function is **not registered**, so the value is silently dropped.
    yields `50`, clamped to `1`. Visually fine, semantically wrong.
 8. `css/alignItems: baseline` / `css/alignSelf: baseline` — wired via
    `FlexAlign::baseline` → `YGAlignBaseline` (pulp #1434 rn batch B).
-<<<<<<< HEAD
    `first baseline` aliases to plain `baseline` (Tier 1 PR-B,
    2026-05-12); `last baseline` is intentionally unsupported because
    it requires baseline-set tracking that Yoga does not implement.
-=======
-   `first baseline` and `last baseline` alias to plain `baseline`
-   (Tier 1 PR-B, 2026-05-12) — the baseline-set distinction only
-   matters for grid + block flow, neither of which Pulp's Yoga-only
-   layout pipeline implements.
->>>>>>> 7c1f373d8 (docs(compat/css): document Tier 1 PR-B align/justify alias additions)

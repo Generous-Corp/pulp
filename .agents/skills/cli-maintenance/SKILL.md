@@ -225,6 +225,35 @@ When this is the right tool vs. `shipyard rescue`:
 | Move one PR's macOS to a different pool without disturbing Linux/Windows | `pulp macos retarget` |
 | Move multiple PRs' workflow_runs to a different provider (cancel + redispatch the WHOLE workflow) | `shipyard rescue` |
 
+## `pulp overflow` — macOS overflow routing
+
+`tools/cli/cmd_overflow.cpp`. Wraps three repo variables that
+`.github/workflows/build.yml`'s resolve-provider reads:
+
+| Var | Purpose |
+|-----|---------|
+| `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Selector when local has capacity |
+| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Selector when local is saturated (overflow target; despite the historical name, this is the generic overflow var) |
+| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | BUSY count that trips overflow |
+
+Surfaces:
+
+- `pulp overflow status` — show current state, including which runner
+  the local target points at, the overflow target, threshold value, and
+  registered self-hosted runners (if the default token can list them).
+- `pulp overflow enable [--to <selector>]` — set the overflow target.
+  Default `--to "macos-15"` for free GH-hosted; pass
+  `--to '"namespace-profile-generouscorp-macos"'` for paid Namespace.
+- `pulp overflow disable` — delete the overflow var. Note this only
+  changes future dispatches; in-flight cloud runs keep running.
+- `pulp overflow threshold [N]` — get (no arg) or set the BUSY count.
+
+The variable is named `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` for
+historical reasons (Plan B in `planning/2026-05-13-namespace-overflow-
+implementation.md` originally targeted Namespace exclusively). It now
+holds the overflow target regardless of provider — rename tracked as a
+future cleanup.
+
 ## `pulp upgrade --check-only`
 
 The sandbox E2E harness runs this command with
