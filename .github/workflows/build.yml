@@ -3,6 +3,14 @@ name: Build and Test
 on:
   pull_request:
     branches: [main, 'develop/**']
+  merge_group:
+    # GitHub Merge Queue: when "Require merge queue" is enabled in branch
+    # protection, GH batches multiple PRs into a temporary integration ref
+    # (refs/heads/gh-readonly-queue/main/pr-X-pr-Y-pr-Z) and dispatches a
+    # `merge_group` event. CI runs ONCE on that combined ref; if green,
+    # all batched PRs merge in order. Drains deep queues 5–10× faster
+    # than serial pull_request runs.
+    branches: [main]
   workflow_dispatch:
     inputs:
       runner_provider:
