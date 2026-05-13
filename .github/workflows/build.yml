@@ -131,28 +131,35 @@ jobs:
           # repo `Administration: Read` scope, which the default workflow
           # GITHUB_TOKEN does not have. The first cut of this probe used
           # that endpoint and fell back to BUSY=0 on every run — overflow
-          # never engaged (pulp #1935 post-merge finding). Switching to
-          # `actions/runs?status=in_progress` is permission-free under
-          # the default `actions:read` scope and acts as a proxy for
-          # "local Mac runner saturated": with one self-hosted Mac, every
-          # in-progress Build-and-Test run except this PR's is occupying
-          # the runner serially. Same end result, no PAT.
+          # never engaged (pulp #1935 post-merge finding). The second cut
+          # (pulp #1942) used `actions/runs?status=in_progress|queued`
+          # filtered to Build-and-Test runs as a proxy for "local Mac
+          # saturated" — but that over-counts: if 20 BAT runs are queued
+          # ALL routing to macos-15 (overflow), local sits idle yet the
+          # probe still reports BUSY=20 and routes the new PR to overflow
+          # too. Local participation drops to zero during deep queues
+          # (user feedback, pulp task #24).
+          #
+          # This probe (pulp task #24) is smarter: it counts only BAT
+          # runs whose macOS job is RUNNING-ON-LOCAL. We enumerate
+          # in_progress + queued BAT runs and for each one inspect its
+          # macOS job's `labels` array. If the labels include
+          # "self-hosted", the run is occupying the local Mac. If the
+          # job hasn't been dispatched yet (resolve-provider still
+          # running for that run), we conservatively count it as BUSY
+          # since we can't yet tell where its macOS leg will land.
+          #
+          # API cost: 1 list-call + N per-run-jobs calls. With typical
+          # N <= ~30 (open PRs cap), the cost is bounded. Probe failure
+          # still falls back to BUSY=0 (safer to under-count than to
+          # always overflow).
           def _count_busy_local_mac_runners() -> int:
               if not REPOSITORY:
                   return 0
               current_run_id = os.environ.get("GITHUB_RUN_ID", "")
+              local_label = (os.environ.get("LOCAL_MAC_RUNNER_LABEL") or "self-hosted").strip()
 
-              # Count Build-and-Test runs that are either `in_progress`
-              # (currently occupying the local Mac runner) OR `queued`
-              # (waiting in line for it). With a single self-hosted Mac,
-              # these serialize, so the sum is the closest token-scoped
-              # proxy for "local saturated."
-              #
-              # First cut counted only `in_progress`, which under deep
-              # queues showed BUSY=0 (one in-progress is excluded as
-              # "this run", everything else is queued, not running) and
-              # the gate never tripped. See pulp #1935 / #1936.
-              def _count(status: str) -> int:
+              def _list_runs(status: str):
                   result = subprocess.run(
                       [
                           "gh", "api",
@@ -161,8 +168,8 @@ jobs:
                           (
                               f'[.workflow_runs[] '
                               f'| select(.name == "Build and Test") '
-                              f'| select((.id | tostring) != "{current_run_id}")] '
-                              f'| length'
+                              f'| select((.id | tostring) != "{current_run_id}") '
+                              f'| .id] | .[]'
                           ),
                       ],
                       check=True,
@@ -170,10 +177,50 @@ jobs:
                       text=True,
                       timeout=15,
                   )
-                  return int((result.stdout or "0").strip() or "0")
+                  return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+              def _macos_job_targets_local(run_id: str) -> bool:
+                  # Returns True if the run's macOS job is dispatching to
+                  # the local self-hosted target. Returns True (pessimistic)
+                  # if the macOS job hasn't been registered yet — we can't
+                  # tell where it will land, so count it as potentially
+                  # local to avoid overcommitting.
+                  try:
+                      result = subprocess.run(
+                          [
+                              "gh", "api",
+                              f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs",
+                              "--jq",
+                              (
+                                  f'[.jobs[] '
+                                  f'| select(.name | startswith("macOS")) '
+                                  f'| .labels] | flatten | join(",")'
+                              ),
+                          ],
+                          check=True,
+                          capture_output=True,
+                          text=True,
+                          timeout=15,
+                      )
+                      labels = (result.stdout or "").strip()
+                      if not labels:
+                          # macOS job not yet registered — pessimistic.
+                          return True
+                      return local_label in labels
+                  except (subprocess.SubprocessError, ValueError):
+                      # Defer to "potentially local" so a single API blip
+                      # doesn't accidentally let two local runs in flight.
+                      return True
 
               try:
-                  return _count("in_progress") + _count("queued")
+                  ids = _list_runs("in_progress") + _list_runs("queued")
+                  local_busy = sum(1 for rid in ids if _macos_job_targets_local(rid))
+                  total_other = len(ids)
+                  sys.stderr.write(
+                      f"resolve-provider: BAT runs other than self: "
+                      f"{total_other} total, {local_busy} targeting local\n"
+                  )
+                  return local_busy
               except (subprocess.SubprocessError, ValueError) as exc:
                   sys.stderr.write(
                       f"resolve-provider: local-busy probe failed; "
