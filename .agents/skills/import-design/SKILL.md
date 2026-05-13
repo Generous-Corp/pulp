@@ -29,6 +29,12 @@ Ask the user or detect from context:
 - Use `com.figma.mcp` to read the current file or selection
 - Extract frames, auto-layout, fills, strokes, effects, text, components
 
+**Figma Make runtime-import parser (Phase 6.6.3)**:
+- The runtime-import lane accepts constrained, sanitized Figma Make React exports through `parse_figma_make_react()` and `source: 'figma'`. It normalizes the TSX file into the same bundle payload shape used by Claude and v0 runtime import.
+- Accepted input is a single `.tsx`/`.jsx` React component with explicit Figma provenance, no `"use client"` directive, React hook imports from `react` only, and inline `style={{ ... }}` objects.
+- Raw Figma Make defaults are intentionally rejected until a preprocessing step exists: unresolved `figma:asset/*` imports, versioned import paths like `<package>@<semver>`, Tailwind `className` utilities, Radix primitives, Code Connect glue files, Next.js wrappers, custom JSX components, non-range inputs, and network/storage/worker APIs.
+- Representative fixtures live under `planning/fixtures/figma/`; the primary one is `level-meter-panel.tsx`. Run `tools/import-validation/figma-roundtrip.sh --parser-only` for the parser/dispatch gate, `tools/import-validation/figma-roundtrip.sh` for parser-emitted screenshot diff, and `tools/import-validation/figma-roundtrip.sh --coverage` before pushing parser PRs.
+
 **Stitch (MCP available)**:
 - Use `mcp__stitch__list_screens` to show available screens
 - Use `mcp__stitch__get_screen` to read the selected screen
