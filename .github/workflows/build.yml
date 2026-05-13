@@ -55,15 +55,37 @@ jobs:
           REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'namespace' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
-          # Falls back to the PULP_LOCAL_MACOS_RUNS_ON_JSON repo var so the
-          # macOS leg routes to the local self-hosted runner (label `sanitizer`)
-          # without a workflow_dispatch input on auto pull_request triggers.
-          # Mirrors Shipyard's local-mac runner pattern; allows Linux + Windows
-          # to fall through to GitHub-hosted defaults via PULP_DEFAULT_RUNNER_PROVIDER='github-hosted'.
-          EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
+          # macOS routing has three layers, evaluated in order (highest
+          # precedence first). The Python block below composes
+          # `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON` from these inputs so the
+          # downstream resolver still sees a single explicit env.
+          #
+          # 1. Operator override (workflow_dispatch input). Always wins.
+          # 2. Namespace overflow (Plan B, pulp planning/2026-05-13-
+          #    namespace-overflow-implementation.md). Activates when the
+          #    local self-hosted Mac runner has at least
+          #    LOCAL_MAC_OVERFLOW_THRESHOLD busy workers AND Namespace is
+          #    configured (NAMESPACE_MACOS_RUNS_ON_JSON non-empty).
+          # 3. Local default (PULP_LOCAL_MACOS_RUNS_ON_JSON). The
+          #    operator's "macOS local runner: primary required gate"
+          #    policy when local is idle.
+          WORKFLOW_DISPATCH_MACOS_SELECTOR: ${{ inputs.macos_runner_selector_json || '' }}
+          LOCAL_MACOS_RUNS_ON_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '' }}
+          # BUSY threshold for macOS overflow. With one local runner,
+          # BUSY >= 1 would overflow as soon as any job is in flight —
+          # Codex flagged that as too aggressive (planning doc Step 2).
+          # Default 2 means "local is fully saturated AND new work is
+          # coming"; when Plan A's 2nd local runner is added, bump to
+          # match the new capacity.
+          LOCAL_MAC_OVERFLOW_THRESHOLD: ${{ vars.PULP_LOCAL_MAC_OVERFLOW_THRESHOLD || '2' }}
+          # The runner label the overflow logic queries for `busy`. Must
+          # match the label PULP_LOCAL_MACOS_RUNS_ON_JSON targets.
+          LOCAL_MAC_RUNNER_LABEL: ${{ vars.PULP_LOCAL_MAC_RUNNER_LABEL || 'sanitizer' }}
           NAMESPACE_LINUX_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON }}
           NAMESPACE_WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON }}
           NAMESPACE_MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          # gh CLI auth for the overflow-busy-count probe.
+          GH_TOKEN: ${{ github.token }}
         # Uses the shared resolver at tools/scripts/resolve_runs_on.py so the
         # same precedence (explicit input → repo var → provider fallback) is
         # reused by sanitizers.yml and any future workflow. See that script's
@@ -81,6 +103,7 @@ jobs:
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
           EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
           RESOLVER = ["python3", "tools/scripts/resolve_runs_on.py"]
+          REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
 
           def run(args):
               result = subprocess.run(
@@ -94,6 +117,79 @@ jobs:
                   sys.stderr.write(result.stderr)
                   sys.exit(result.returncode)
               return result.stdout
+
+          # ─── macOS overflow routing (Plan B, pulp #1916 follow-up) ────────
+          # When the local self-hosted Mac runner is saturated and Namespace
+          # is configured, route the macOS leg to Namespace cloud instead
+          # of waiting in the local queue. Precedence is "operator wins,
+          # then overflow, then local default" — see the env-block comment
+          # above for the layer ordering. Failures of the busy probe fall
+          # back to local (the safer choice — overflow is an optimization,
+          # not a correctness requirement).
+          def _count_busy_local_mac_runners() -> int:
+              label = (os.environ.get("LOCAL_MAC_RUNNER_LABEL") or "").strip()
+              if not label or not REPOSITORY:
+                  return 0
+              try:
+                  result = subprocess.run(
+                      [
+                          "gh", "api",
+                          f"repos/{REPOSITORY}/actions/runners",
+                          "--jq",
+                          f'[.runners[] | select(.busy and (.labels[].name == "{label}"))] | length',
+                      ],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                      timeout=15,
+                  )
+                  return int((result.stdout or "0").strip() or "0")
+              except (subprocess.SubprocessError, ValueError) as exc:
+                  sys.stderr.write(
+                      f"resolve-provider: local-busy probe failed; "
+                      f"falling back to BUSY=0. ({exc})\n"
+                  )
+                  return 0
+
+          workflow_dispatch_selector = (
+              os.environ.get("WORKFLOW_DISPATCH_MACOS_SELECTOR") or ""
+          ).strip()
+          namespace_macos_selector = (
+              os.environ.get("NAMESPACE_MACOS_RUNS_ON_JSON") or ""
+          ).strip()
+          local_macos_selector = (
+              os.environ.get("LOCAL_MACOS_RUNS_ON_JSON") or ""
+          ).strip()
+          try:
+              overflow_threshold = int(
+                  (os.environ.get("LOCAL_MAC_OVERFLOW_THRESHOLD") or "2").strip()
+              )
+          except ValueError:
+              overflow_threshold = 2
+
+          if workflow_dispatch_selector:
+              macos_route = "operator-override"
+              chosen_macos_selector = workflow_dispatch_selector
+          elif namespace_macos_selector and EVENT_NAME == "pull_request":
+              busy = _count_busy_local_mac_runners()
+              if busy >= overflow_threshold:
+                  macos_route = f"overflow (BUSY={busy} >= {overflow_threshold})"
+                  chosen_macos_selector = namespace_macos_selector
+              else:
+                  macos_route = f"local (BUSY={busy} < {overflow_threshold})"
+                  chosen_macos_selector = local_macos_selector
+          else:
+              # workflow_dispatch without an explicit override, or
+              # Namespace not configured. Stay local.
+              macos_route = "local (default)"
+              chosen_macos_selector = local_macos_selector
+
+          os.environ["EXPLICIT_MACOS_RUNNER_SELECTOR_JSON"] = chosen_macos_selector
+          print(
+              f"resolve-provider: macOS route = {macos_route}; "
+              f"selector = {chosen_macos_selector or '(empty → falls through to provider mode)'}",
+              file=sys.stderr,
+          )
 
           linux_runs_on = run([
               "--target-name", "Linux (x64)",

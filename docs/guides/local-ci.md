@@ -156,6 +156,45 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+## macOS overflow routing (Plan B)
+
+When the local self-hosted Mac runner is saturated, `build.yml`'s
+`resolve-provider` job routes new macOS legs to a Namespace cloud
+runner instead of queueing on local. Snap-back is automatic — once
+local clears, fresh dispatches return to local. Source of truth:
+`planning/2026-05-13-namespace-overflow-implementation.md` (Plan B,
+reviewed by `/codex` 2026-05-13).
+
+**Precedence** (highest first, resolved per dispatch):
+
+1. **Operator override** — `gh workflow run build.yml --field macos_runner_selector_json='"<label>"'`. Always wins.
+2. **Overflow** — `BUSY >= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`) AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set AND the trigger is `pull_request`. Routes to `namespace-profile-generouscorp-macos`.
+3. **Local default** — `PULP_LOCAL_MACOS_RUNS_ON_JSON` (currently `["self-hosted","sanitizer"]`).
+
+**Tuning knobs** (repo variables):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `sanitizer` | Label the busy probe filters runners by. Must match `PULP_LOCAL_MACOS_RUNS_ON_JSON`'s target label. |
+| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | (unset) | Namespace selector JSON, e.g. `"namespace-profile-generouscorp-macos"`. When empty, overflow is disabled — everything stays local. |
+
+**Disabling overflow** (revert to local-only):
+
+```bash
+gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo danielraffel/pulp
+```
+
+The next PR's `resolve-provider` falls through to local since condition #2 fails.
+
+**Inspecting routing decisions:** `resolve-provider`'s stderr prints a one-line summary, e.g. `resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"`. Find it via the GitHub Actions UI under the `resolve-provider` job's log, or:
+
+```bash
+gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
+```
+
+**Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
+
 ## Required Merge Process (All Agents)
 
 Every change to `main` must go through this workflow — no exceptions:

@@ -239,6 +239,58 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
+### macOS overflow routing (Plan B)
+
+`.github/workflows/build.yml`'s `resolve-provider` job auto-routes the
+macOS leg to Namespace when the local self-hosted Mac runner is busy.
+With one local runner serving ~15 open PRs serially, this is the
+difference between "PR merges in 20 min" and "PR queues for 5 hours."
+
+**Trigger condition** (all three must hold):
+
+- Local runner BUSY count >= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`)
+- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set on the repo
+- Event is `pull_request` (manual `workflow_dispatch` honors the operator's explicit `macos_runner_selector_json`)
+
+When triggered, the macOS matrix leg dispatches to the Namespace
+runner profile (e.g. `namespace-profile-generouscorp-macos`) instead
+of the local `["self-hosted","sanitizer"]` pool. The stable `macos`
+wrapper job (branch-protection's required check) doesn't change — it
+gates on the matrix leg's conclusion regardless of which runner pool
+served it.
+
+**When this kicks in vs. doesn't:**
+
+```
+push to PR  →  resolve-provider runs
+            →  count busy local "sanitizer" runners
+            →  BUSY >= 2 AND Namespace configured?
+                  ├── yes  →  macOS = namespace-profile-...
+                  └── no   →  macOS = self-hosted,sanitizer (local)
+```
+
+**Inspect the decision:**
+
+```bash
+gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
+# → resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"
+```
+
+**`shipyard rescue <PR>` still works** as a manual override for PRs
+that queued before Plan B was in place, or when overflow conditions
+don't match (e.g., only 1 busy runner) but you want cloud anyway.
+With Plan B routing automatic, rescue is a less common tool.
+
+**Disable temporarily** (revert all PRs to local-only):
+
+```bash
+gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo danielraffel/pulp
+```
+
+Plan source: `planning/2026-05-13-namespace-overflow-implementation.md`
+(reviewed by `/codex` 2026-05-13). Full operator docs:
+`docs/guides/local-ci.md` § "macOS overflow routing".
+
 ### Path-scoped validation profile: `parser`
 
 `.shipyard/config.toml` defines a `[validation.parser]` lane (pulp

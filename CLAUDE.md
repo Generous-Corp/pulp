@@ -874,12 +874,19 @@ advisory unless explicitly required by branch protection.
 
 #### Runner priority (hard rule)
 
-Namespace is decommissioned for Pulp CI. Do not use `--mode namespace` or set
-`*_NAMESPACE_*_RUNS_ON_JSON` repo variables.
+Pulp's macOS leg is local-first with Namespace overflow (Plan B,
+`planning/2026-05-13-namespace-overflow-implementation.md`). The
+`resolve-provider` job in `build.yml` routes the macOS matrix leg to
+Namespace when the local self-hosted Mac runner has >= 2 busy workers
+AND `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set. Otherwise it
+stays local. Linux and Windows continue to route via the existing
+provider machinery (default `github-hosted`). The `macos` wrapper job
+that branch protection requires is unchanged.
 
-1. **macOS local runner**: primary required gate.
-2. **GitHub-hosted Linux/Windows**: advisory cross-platform signal.
-3. **SSH Ubuntu/Windows**: use only when a human explicitly asks for those local hosts.
+1. **macOS local runner**: primary required gate when local has capacity.
+2. **Namespace macOS cloud**: automatic overflow when local is saturated. See `docs/guides/local-ci.md` § "macOS overflow routing".
+3. **GitHub-hosted Linux/Windows**: advisory cross-platform signal.
+4. **SSH Ubuntu/Windows**: use only when a human explicitly asks for those local hosts.
 
 If Shipyard tries to probe SSH Ubuntu or Windows for a macOS-focused PR where
 those hosts are not in scope, use `--skip-target ubuntu --skip-target windows`
