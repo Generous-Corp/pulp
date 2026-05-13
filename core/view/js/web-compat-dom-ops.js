@@ -56,6 +56,19 @@ if (!Element.prototype.appendChild ||
         if (typeof __replayAriaAttributes__ === "function") {
             __replayAriaAttributes__(child);
         }
+        // pulp #1926 — rect / line / circle SVG primitives. React/JSX
+        // commits setAttribute() before appendChild(), so geometry and
+        // fill/stroke land on _attributes before the bridge sees the
+        // native id. Flush them now that the native widget exists.
+        if (typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(child);
+        }
+        if (typeof __replaySvgLineAttributes__ === "function") {
+            __replaySvgLineAttributes__(child);
+        }
+        if (typeof __replaySvgCircleAttributes__ === "function") {
+            __replaySvgCircleAttributes__(child);
+        }
         child.style._flushAll();
         child._reapplyStylesheets();
         // pulp #1323 — `<style>` elements receive CSS via either direct
@@ -118,6 +131,16 @@ if (!Element.prototype.appendChild ||
         }
         if (typeof __replayAriaAttributes__ === "function") {
             __replayAriaAttributes__(newChild);
+        }
+        // pulp #1926 — see appendChild for rationale.
+        if (typeof __replaySvgRectAttributes__ === "function") {
+            __replaySvgRectAttributes__(newChild);
+        }
+        if (typeof __replaySvgLineAttributes__ === "function") {
+            __replaySvgLineAttributes__(newChild);
+        }
+        if (typeof __replaySvgCircleAttributes__ === "function") {
+            __replaySvgCircleAttributes__(newChild);
         }
         newChild.style._flushAll();
         newChild._reapplyStylesheets();

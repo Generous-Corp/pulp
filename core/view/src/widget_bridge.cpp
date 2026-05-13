@@ -2685,6 +2685,26 @@ void WidgetBridge::register_api() {
                 return this->describe_native_canvas_frame(childId);
             });
             child = std::move(canvas);
+        } else if (tag == "rect") {
+            // pulp #1926 — SVG primitives other than <path>. Spectr's
+            // bottom-toolbar mini-icons (segmented mode toggles, analyzer
+            // pills) emit lowercase <rect> / <line> / <circle> inside the
+            // parent <svg>. Without this routing they fall through to the
+            // unknown-tag default and paint nothing.
+            auto r = std::make_unique<SvgRectWidget>();
+            r->set_id(childId);
+            child = std::move(r);
+        } else if (tag == "line") {
+            auto l = std::make_unique<SvgLineWidget>();
+            l->set_id(childId);
+            child = std::move(l);
+        } else if (tag == "circle") {
+            // pulp #1926 — no dedicated SvgCircleWidget; map to SvgPath
+            // and synthesize a `d` arc in JS (web-compat-element.js
+            // __replaySvgCircleAttributes__) from cx/cy/r.
+            auto svg = std::make_unique<SvgPathWidget>();
+            svg->set_id(childId);
+            child = std::move(svg);
         } else {
             auto v = std::make_unique<View>();
             v->set_id(childId);

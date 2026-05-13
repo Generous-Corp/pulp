@@ -74,6 +74,34 @@ Element.prototype._ensureNative = function() {
         // sibling text paints over a blank gutter. Width/height attribute
         // replay happens in the shared block below.
         createCol(id, "");
+    } else if (tag === "rect") {
+        // pulp #1926 — SVG <rect> primitive. Spectr emits these for
+        // toggle-pill backgrounds and segmented-control fills.
+        // Geometry (x/y/width/height) + fill/stroke replayed below
+        // through __replaySvgRectAttributes__.
+        if (typeof createSvgRect === "function") {
+            createSvgRect(id, "");
+        } else {
+            createCol(id, "");
+        }
+    } else if (tag === "line") {
+        // pulp #1926 — SVG <line> primitive. Spectr uses these for
+        // analyzer-line indicators next to PEAK/AVG/BOTH/OFF and as
+        // ruler ticks. Endpoints (x1/y1/x2/y2) + stroke replayed below.
+        if (typeof createSvgLine === "function") {
+            createSvgLine(id, "");
+        } else {
+            createCol(id, "");
+        }
+    } else if (tag === "circle") {
+        // pulp #1926 — SVG <circle> → SvgPath with synthesized `d`
+        // path. The path is computed in __replaySvgCircleAttributes__
+        // from cx/cy/r attributes after mount.
+        if (typeof createSvgPath === "function") {
+            createSvgPath(id, "");
+        } else {
+            createCol(id, "");
+        }
     } else if (tag === "h1") {
         createLabel(id, "", "");
         setFontSize(id, 32); setFontWeight(id, 700);
@@ -155,6 +183,21 @@ Element.prototype._ensureNative = function() {
     if (typeof __replayAriaAttributes__ === "function") {
         __replayAriaAttributes__(this);
     }
+    // pulp #1926 — replay rect / line / circle SVG attributes captured
+    // pre-mount. React/JSX commits attributes before appendChild
+    // materializes the node, so by the time setAttribute('x', ...) /
+    // ('x1', ...) / ('cx', ...) lands the bridge has no native id yet.
+    // The replay functions flush geometry + fill / stroke / stroke-width
+    // from _attributes once `_nativeCreated` flips true.
+    if (typeof __replaySvgRectAttributes__ === "function") {
+        __replaySvgRectAttributes__(this);
+    }
+    if (typeof __replaySvgLineAttributes__ === "function") {
+        __replaySvgLineAttributes__(this);
+    }
+    if (typeof __replaySvgCircleAttributes__ === "function") {
+        __replaySvgCircleAttributes__(this);
+    }
 };
 
 // pulp #1147 — shared helper that maps presentational HTML attributes
@@ -218,6 +261,103 @@ function __replayAriaAttributes__(el) {
                 setAccessibilityState(el._id, states[si], String(val));
             }
         }
+    }
+}
+
+// pulp #1926 — replay <rect> SVG attributes through the SvgRectWidget
+// bridge. Mirrors the pre-mount-replay pattern used for ARIA + media:
+// React/JSX commits setAttribute() before appendChild materializes the
+// node, so the bridge has no native id when the attributes land. We
+// stash them in _attributes (the existing path) and flush them once
+// _nativeCreated flips true. Idempotent — safe to call from
+// _ensureNative AND from the appendChild fast path.
+function __replaySvgRectAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    if (el.tagName !== "RECT") return;
+    var a = el._attributes;
+    if (typeof setSvgRect === "function") {
+        var x  = parseFloat(a.x  || "0");
+        var y  = parseFloat(a.y  || "0");
+        var w  = parseFloat(a.width  || "0");
+        var h  = parseFloat(a.height || "0");
+        if (x === x && y === y && w === w && h === h) {
+            setSvgRect(el._id, x, y, w, h);
+        }
+    }
+    if (a.fill !== undefined && typeof setSvgFill === "function") {
+        setSvgFill(el._id, String(a.fill));
+    }
+    if (a.stroke !== undefined && typeof setSvgStroke === "function") {
+        setSvgStroke(el._id, String(a.stroke));
+    }
+    var sw = a["stroke-width"];
+    if (sw === undefined) sw = a.strokeWidth;
+    if (sw !== undefined && typeof setSvgStrokeWidth === "function") {
+        var psw = parseFloat(sw);
+        if (psw === psw) setSvgStrokeWidth(el._id, psw);
+    }
+}
+
+// pulp #1926 — replay <line> SVG attributes through the SvgLineWidget
+// bridge. SvgLineWidget has no fill semantics — only stroke /
+// stroke-width matter alongside the (x1,y1,x2,y2) endpoints.
+function __replaySvgLineAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    if (el.tagName !== "LINE") return;
+    var a = el._attributes;
+    if (typeof setSvgLine === "function") {
+        var x1 = parseFloat(a.x1 || "0");
+        var y1 = parseFloat(a.y1 || "0");
+        var x2 = parseFloat(a.x2 || "0");
+        var y2 = parseFloat(a.y2 || "0");
+        if (x1 === x1 && y1 === y1 && x2 === x2 && y2 === y2) {
+            setSvgLine(el._id, x1, y1, x2, y2);
+        }
+    }
+    if (a.stroke !== undefined && typeof setSvgStroke === "function") {
+        setSvgStroke(el._id, String(a.stroke));
+    }
+    var sw = a["stroke-width"];
+    if (sw === undefined) sw = a.strokeWidth;
+    if (sw !== undefined && typeof setSvgStrokeWidth === "function") {
+        var psw = parseFloat(sw);
+        if (psw === psw) setSvgStrokeWidth(el._id, psw);
+    }
+}
+
+// pulp #1926 — replay <circle> attributes by synthesizing a `d` path
+// from cx/cy/r and feeding through the SvgPathWidget bridge. Two SVG
+// arc commands (each a half-circle, sweep flag = 0) draw the full
+// circumference and Z closes the loop:
+//   M (cx-r) cy
+//   a r r 0 1 0 ( 2r) 0
+//   a r r 0 1 0 (-2r) 0
+//   Z
+function __replaySvgCircleAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    if (el.tagName !== "CIRCLE") return;
+    var a = el._attributes;
+    var cx = parseFloat(a.cx || "0");
+    var cy = parseFloat(a.cy || "0");
+    var r  = parseFloat(a.r  || "0");
+    if (cx !== cx || cy !== cy || r !== r || r <= 0) return;
+    if (typeof setSvgPath === "function") {
+        var d = "M " + (cx - r) + " " + cy +
+                " a " + r + " " + r + " 0 1 0 " + (2 * r) + " 0" +
+                " a " + r + " " + r + " 0 1 0 " + (-2 * r) + " 0 Z";
+        setSvgPath(el._id, d);
+    }
+    if (a.fill !== undefined && typeof setSvgFill === "function") {
+        setSvgFill(el._id, String(a.fill));
+    }
+    if (a.stroke !== undefined && typeof setSvgStroke === "function") {
+        setSvgStroke(el._id, String(a.stroke));
+    }
+    var sw = a["stroke-width"];
+    if (sw === undefined) sw = a.strokeWidth;
+    if (sw !== undefined && typeof setSvgStrokeWidth === "function") {
+        var psw = parseFloat(sw);
+        if (psw === psw) setSvgStrokeWidth(el._id, psw);
     }
 }
 
