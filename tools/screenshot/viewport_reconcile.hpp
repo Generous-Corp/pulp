@@ -63,13 +63,21 @@ inline void clamp_oversize_absolute_view(pulp::view::View& view,
     if (cw <= 0 && ch <= 0) return;
     // Only act when the size is explicit (preferred_* set) AND the
     // opposite edge isn't anchored — i.e. the source said "size me
-    // explicitly", not "stretch me from edge to edge". If both top
-    // and bottom (or left and right) are set, the size is implicit
-    // and Yoga handles it correctly via the inset → size derivation.
-    const bool size_x_is_explicit =
-        cw > 0 && (!view.has_right() || view.right() == 0.0f);
-    const bool size_y_is_explicit =
-        ch > 0 && (!view.has_bottom() || view.bottom() == 0.0f);
+    // explicitly", not "stretch me from edge to edge".
+    //
+    // pulp #1906 (Codex P2) — distinguish `right:auto` from explicit
+    // `right:0`. The previous predicate `(!has_right() || right==0)`
+    // treated `auto` and `0` identically, so an oversize child pinned
+    // with explicit `right:0` / `bottom:0` got force-clamped even
+    // though the source explicitly anchored it to the opposite edge.
+    // The correct test: only clamp when the opposite edge is truly
+    // unset (`auto`). Any explicit value — including 0 — is the
+    // source declaring edge-anchoring intent, which Yoga will honour
+    // via the inset → size derivation; defer to that.
+    // TODO: pin in #1906 test — Yoga-level fixture with
+    // position:absolute + width:1320 + right:0 must NOT clamp width.
+    const bool size_x_is_explicit = cw > 0 && !view.has_right();
+    const bool size_y_is_explicit = ch > 0 && !view.has_bottom();
     bool clamped = false;
     if (cw > vw && size_x_is_explicit) {
         view.flex().preferred_width = vw;

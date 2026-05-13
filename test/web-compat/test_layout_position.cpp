@@ -501,3 +501,33 @@ TEST_CASE("Viewport reconcile: content already inside viewport is untouched",
     REQUIRE(childPtr->flex().preferred_width == 1000.0f);
     REQUIRE(childPtr->flex().preferred_height == 600.0f);
 }
+
+TEST_CASE("Viewport reconcile: explicit right:0 / bottom:0 is edge-anchored, not clamped",
+          "[layout][viewport-reconcile][screenshot][issue-1906]") {
+    // pulp #1906 Codex P2 — distinguish `right:auto` from explicit `right:0`.
+    // A child with explicit `right:0` / `bottom:0` is anchored to the
+    // opposite edge: the source explicitly declared edge-anchoring intent
+    // and Yoga will honour it via the inset → size derivation. The
+    // reconciler must NOT clamp the explicit preferred_* in that case;
+    // doing so would override source positioning intent.
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_top(0);
+    child->set_left(0);
+    child->set_right(0);   // explicit right:0 — edge-anchored
+    child->set_bottom(0);  // explicit bottom:0 — edge-anchored
+    child->flex().preferred_width = 1320;
+    child->flex().preferred_height = 860;
+    auto* childPtr = child.get();
+    root.add_child(std::move(child));
+
+    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+
+    // preferred_width/height must be untouched — explicit right/bottom
+    // means "anchor to opposite edge", not "auto".
+    REQUIRE(childPtr->flex().preferred_width == 1320.0f);
+    REQUIRE(childPtr->flex().preferred_height == 860.0f);
+}
