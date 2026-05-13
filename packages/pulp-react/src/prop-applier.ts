@@ -1756,6 +1756,37 @@ export function applyChangedProps(
                 call('releaseOverlay', id);
                 mutated = true;
             }
+            // pulp #1925 — visual cluster keys must clear when they fall
+            // out of newProps. The conditional-spread idiom
+            //   style={{ ...base, ...(active ? activeStyle : {}) }}
+            // contributes nothing to the spread on the inactive side, so
+            // the active-only keys vanish from newProps but the bridge
+            // keeps painting them. Reset to the canonical "no visual"
+            // value here so the next paint reflects React's intent.
+            // Spectr's Settings Manager Preset chips + PatternRow rows
+            // are the original repro; any imported design (Stitch / v0 /
+            // Figma) using the same conditional-spread pattern needs it.
+            if (key === 'background' || key === 'backgroundGradient') {
+                call('setBackground', id, 'transparent');
+                mutated = true;
+            }
+            if (key === 'border' || key === 'borderColor' || key === 'borderWidth') {
+                // Width-zero collapses the painted edge regardless of the
+                // color slot; cheaper than a 4-arg setBorder reset and
+                // keeps borderRadius (a separate slot) untouched.
+                call('setBorderWidth', id, 0);
+                mutated = true;
+            }
+            if (key === 'borderTop' || key === 'borderRight' || key === 'borderBottom' || key === 'borderLeft') {
+                const side = key.slice('border'.length).toLowerCase();
+                call('setBorderSide', id, side, 0, 'transparent');
+                mutated = true;
+            }
+            if (key === 'textColor') {
+                // Empty string is the bridge-side "use default" sentinel.
+                call('setTextColor', id, '');
+                mutated = true;
+            }
             // Other setters: no-op — let the next mount cycle handle it
         }
     }
