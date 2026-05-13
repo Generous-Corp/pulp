@@ -1345,12 +1345,11 @@ drift; humans run `shipyard update` to apply.
   PR may need a fresh push to retrigger the version-skill-sync check
   too.
 
-### Anti-pattern (legacy, do not use)
+### Anti-pattern (legacy)
 
-- `planning/scripts/runner-watchdog.sh --fix` — kept for reference but
-  obsolete. Cancels queued runs without redispatching, registering
-  `failure` on required checks. Use `shipyard rescue` (PR-side) or
-  `shipyard runner watch --kill-hung-workers` (host-side) instead.
+- `planning/scripts/runner-watchdog.sh --fix` — superseded. Use
+  `shipyard rescue` (recover, PR-side) or `shipyard runner watch
+  --kill-hung-workers` (prevent, host-side).
 
 ### Composition with `Version-Bump` gate
 
