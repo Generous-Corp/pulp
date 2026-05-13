@@ -1375,6 +1375,56 @@ TEST_CASE("WebCompat: setProperty('--name') routes to motion-token bridge (issue
     REQUIRE(roundTrip.getWithDefault<double>(-1.0) == 128.0);
 }
 
+// pulp #1918 (Codex review P2) — when a custom property is reassigned
+// from one value type to another (string ↔ length) the stale slot
+// from the prior assignment must be cleared. The resolver checks
+// theme.strings before theme.dimensions, so without slot-clearing a
+// prior string-typed assignment shadows a later length-typed one.
+//
+// Note: this test exercises the string ↔ length axis specifically.
+// `red` would route to theme.colors via parseCSSColor before the
+// string-token fallback fires; we use a non-color, non-length value
+// (a font-family name) instead so the first assignment definitely
+// lands in the string slot.
+TEST_CASE("WebCompat: setProperty('--name') clears stale slots on type-change reassignment (issue-1918)",
+          "[webcompat][css-var][issue-1918]") {
+    TestEnvironment env;
+
+    // 1. First assignment is a string-typed custom property (font name
+    //    — not parseable as length or color) — lands in theme.strings
+    //    via setStringToken.
+    env.eval(R"JS(
+        var __relEl = document.createElement('div');
+        __relEl.style.setProperty('--my-var', 'JetBrains Mono');
+    )JS");
+    auto stringSlot1 = env.engine.evaluate("getStringToken('my-var')");
+    REQUIRE(std::string(stringSlot1.getWithDefault<std::string_view>("")) == "JetBrains Mono");
+
+    // 2. Reassign to a length value. The motion slot should now hold
+    //    12, and the string slot must be cleared so the resolver
+    //    doesn't return "JetBrains Mono" for var(--my-var).
+    env.eval("__relEl.style.setProperty('--my-var', '12px');");
+
+    auto stringSlot2 = env.engine.evaluate("getStringToken('my-var')");
+    auto motionSlot2 = env.engine.evaluate("getMotionToken('my-var')");
+    REQUIRE(std::string(stringSlot2.getWithDefault<std::string_view>("")).empty());
+    REQUIRE(motionSlot2.getWithDefault<double>(-1.0) == 12.0);
+
+    // 3. Resolver must pick up the new length — not the stale string —
+    //    when asked to resolve var(--my-var).
+    auto resolved = env.engine.evaluate("_resolveVar('var(--my-var)')");
+    REQUIRE(std::string(resolved.getWithDefault<std::string_view>("")) == "12");
+
+    // 4. Reverse direction: reassign back to a string. The motion slot
+    //    must be cleared so getPropertyValue / resolver don't see a
+    //    stale "12" left from the previous length assignment.
+    env.eval("__relEl.style.setProperty('--my-var', 'SF Mono');");
+    auto stringSlot3 = env.engine.evaluate("getStringToken('my-var')");
+    auto motionSlot3 = env.engine.evaluate("getMotionToken('my-var')");
+    REQUIRE(std::string(stringSlot3.getWithDefault<std::string_view>("")) == "SF Mono");
+    REQUIRE(motionSlot3.getWithDefault<double>(-1.0) == 0.0);
+}
+
 TEST_CASE("WebCompat: StyleSheet attach applies rules to existing elements (issue-1551)",
           "[webcompat][stylesheet][issue-1551]") {
     TestEnvironment env;

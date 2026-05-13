@@ -1992,6 +1992,16 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
     // --custom-property -> set as theme token
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
+        // pulp #1918 (Codex review) — custom-property storage spans
+        // three theme slots: dimensions (motion), colors, strings.
+        // When a var() is reassigned from one value-type to another
+        // (e.g. `--my-var: "red"` → `--my-var: 12px`) the OLD slot
+        // would otherwise retain a stale token, and the React-side
+        // resolver checks strings BEFORE motion — so the stale string
+        // would shadow the new length. Conservatively clear every
+        // non-active slot up front, then write the new value.
+        if (typeof setStringToken === 'function') setStringToken(tokenName, "");
+        if (typeof setMotionToken === 'function') setMotionToken(tokenName, 0);
         var parsed = parseCSSLength(value);
         if (parsed) {
             setMotionToken(tokenName, parsed.value);

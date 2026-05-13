@@ -1537,6 +1537,13 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
     // --custom-property -> set as theme token
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
+        // pulp #1918 (Codex review) — clear every non-active slot
+        // first so a var() reassignment that changes the value type
+        // (string ↔ length ↔ color) doesn't leave a stale token in
+        // one of the other slots. See the matching fix and rationale
+        // in web-compat-style-decl.js.
+        if (typeof setStringToken === 'function') setStringToken(tokenName, "");
+        if (typeof setMotionToken === 'function') setMotionToken(tokenName, 0);
         var parsed = parseCSSLength(value);
         if (parsed) {
             setMotionToken(tokenName, parsed.value);
