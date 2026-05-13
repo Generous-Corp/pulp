@@ -70,8 +70,11 @@
         "ci/**",
         "tools/local-ci/**",
         "tools/shipyard.toml",
+        ".shipyard/config.toml",
         "tools/install-shipyard.sh",
         "tools/scripts/install-githooks.sh",
+        "tools/scripts/validation_profile_select.py",
+        "tools/scripts/test_validation_profile_select.py",
         ".githooks/**"
       ]
     },

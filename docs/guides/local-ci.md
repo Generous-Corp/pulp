@@ -112,6 +112,50 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Validation Profiles
+
+Shipyard validates from a profile (`shipyard run --pipeline <name>`).
+Pulp's `.shipyard/config.toml` defines three:
+
+| Profile | When to use | What it runs |
+|---------|-------------|--------------|
+| `default` | Most PRs. The lane every cross-platform target gates on. | Full `setup → configure → build → test`. Examples ON. Excludes the `slow` ctest label. |
+| `parser` | PRs that only touch runtime-import parser code. | Same stages with `PULP_BUILD_EXAMPLES=OFF`; tests filter to `--label-include parser-import`. Skips plugin validators (auval / pluginval / clap-validator) and the broader format-adapter smoke surface. |
+| `smoke` | Quick downstream-scaffold check after dependency or install-layout edits. | Configure + build only; runs the SDK-smoke export against a downstream scaffold. |
+| `gates` | Version-bump / skill-sync gate scripts. | `tools/scripts/skill_sync_check.py` + `tools/scripts/version_bump_check.py` in report mode. |
+
+`shipyard config profiles` lists what is installed locally and which one is active.
+
+### Auto-selecting the parser profile
+
+`tools/scripts/validation_profile_select.py` classifies the current diff
+and prints `parser` or `default`:
+
+```bash
+# Default: diff HEAD against origin/main
+shipyard run --pipeline "$(python3 tools/scripts/validation_profile_select.py)"
+
+# Explicit diff base
+shipyard run --pipeline "$(python3 tools/scripts/validation_profile_select.py --base origin/develop)"
+
+# Operate on a literal file list (e.g. piped from gh pr diff)
+gh pr diff <PR> --name-only \
+  | python3 tools/scripts/validation_profile_select.py --paths-from -
+
+# JSON envelope (profile + matched + unmatched)
+python3 tools/scripts/validation_profile_select.py --json
+```
+
+The script returns `parser` only when every changed path falls inside
+the explicit parser-only scope (the standalone `tools/import-design`
+tool, `tools/import-validation` scripts, the `packages/pulp-import-ir`
+package, `test/fixtures/imports/**`, the parser test files in `test/`,
+the `core/view/.../design_import*` family, and the import-runtime JS).
+Any path outside that set forces `default` — the safety bias is toward
+broad validation.
+
+To opt out for an individual run, pass `--pipeline default` explicitly.
+
 ## Required Merge Process (All Agents)
 
 Every change to `main` must go through this workflow — no exceptions:

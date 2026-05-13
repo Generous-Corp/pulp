@@ -239,6 +239,42 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
+### Path-scoped validation profile: `parser`
+
+`.shipyard/config.toml` defines a `[validation.parser]` lane (pulp
+#1916) for PRs that only touch runtime-import parser code — the
+standalone `tools/import-design` tool, the `tools/import-validation`
+scripts, the `packages/pulp-import-ir` package, parser fixtures, the
+parser test files, and the `core/view/.../design_import*` family.
+
+The lane configures with `PULP_BUILD_EXAMPLES=OFF` and runs ctest with
+`--label-include parser-import`, so plugin validators (auval /
+pluginval / clap-validator, registered under `examples/pulp-*/`) and
+the broader format-adapter smoke surface stay out of the loop. The
+motivating failure was pulp #1910, where pluginval-PulpGain-VST3
+segfaulted on a Figma Make parser PR that had no business touching the
+VST3 adapter.
+
+```bash
+# Auto-select against origin/main and run the matching lane:
+shipyard run --pipeline "$(python3 tools/scripts/validation_profile_select.py)"
+
+# Inspect what the classifier decided + which paths drove it:
+python3 tools/scripts/validation_profile_select.py --json
+
+# Force the broad lane (useful when the parser scope is technically
+# unchanged but you suspect cross-subsystem fallout):
+shipyard run --pipeline default
+```
+
+The selector returns `parser` only when every changed path lives
+inside the scope; any unrelated edit forces `default`. The bias is
+toward broad validation.
+
+`shipyard pr` does not yet auto-route to the parser lane — for a final
+merge gate, let it default through `[validation.default]`. The
+parser lane is for fast iteration before that final gate.
+
 ### Iterating on a single-platform failure
 
 When CI goes red on exactly one of Pulp's platforms — e.g. only the

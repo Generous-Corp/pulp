@@ -106,7 +106,8 @@ if(UNIX)
     add_test(NAME spectr-roundtrip-window-only-capture
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_spectr_roundtrip_window_only_capture.sh)
     set_tests_properties(spectr-roundtrip-window-only-capture
-        PROPERTIES TIMEOUT 10)
+        PROPERTIES TIMEOUT 10
+        LABELS "parser-import")
 endif()
 
 # Debug-SDK perf-killer guard smoke (pulp-internal task #35).
@@ -167,7 +168,8 @@ add_executable(pulp-test-cli-design-binding test_cli_design_binding.cpp
 )
 target_include_directories(pulp-test-cli-design-binding PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-cli-design-binding PRIVATE Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-cli-design-binding)
+catch_discover_tests(pulp-test-cli-design-binding
+    PROPERTIES LABELS "parser-import")
 
 # CLI create target selection tests
 add_executable(pulp-test-cli-create-targets test_cli_create_targets.cpp
@@ -430,7 +432,8 @@ target_link_libraries(pulp-test-cli-import-detect PRIVATE
 # tests from the repo root so the discovery works regardless of build
 # directory shape.
 catch_discover_tests(pulp-test-cli-import-detect
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PROPERTIES LABELS "parser-import")
 
 # CLI tool registry (#643): local-only coverage for registry parsing,
 # managed binary / Python wrapper discovery, deterministic install exits,
@@ -1750,13 +1753,15 @@ catch_discover_tests(pulp-test-modal)
 # Design export tests
 add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-export)
+catch_discover_tests(pulp-test-design-export
+    PROPERTIES LABELS "parser-import")
 
 # Design import tests (Figma/Stitch/v0/Pencil → Pulp, W3C tokens)
 add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-design-import)
+catch_discover_tests(pulp-test-design-import
+    PROPERTIES LABELS "parser-import")
 
 # Post-parse widget promotion: <div onClick> / role=button / cursor:pointer
 # → button. Closure of pulp-internal task #84 / follow-up on #1814.
@@ -1770,7 +1775,8 @@ target_include_directories(pulp-test-widget-promotion PRIVATE
 target_link_libraries(pulp-test-widget-promotion PRIVATE
     pulp::view
     Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-widget-promotion)
+catch_discover_tests(pulp-test-widget-promotion
+    PROPERTIES LABELS "parser-import")
 
 # pulp #468 — web-compat preludes shipped for bundled-React imports
 # (nodeType / nodeName, observer no-ops, scheduler shims). Uses
@@ -1792,7 +1798,8 @@ catch_discover_tests(pulp-test-web-compat-react-shims
 add_executable(pulp-test-design-import-claude-bundle test_design_import_claude_bundle.cpp)
 target_link_libraries(pulp-test-design-import-claude-bundle
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-claude-bundle)
+catch_discover_tests(pulp-test-design-import-claude-bundle
+    PROPERTIES LABELS "parser-import")
 
 # pulp #1035 — `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary
@@ -1806,7 +1813,9 @@ if(TARGET pulp-cli)
     add_dependencies(pulp-test-cli-import-design pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-import-design
-    PROPERTIES ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}")
+    PROPERTIES
+        ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
+        LABELS "parser-import")
 
 # Direct shell-out coverage for the standalone import-design tool
 # executable. These tests hit tools/import-design/pulp_import_design.cpp
@@ -1817,7 +1826,8 @@ target_link_libraries(pulp-test-import-design-tool
 target_compile_definitions(pulp-test-import-design-tool PRIVATE
     PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
-catch_discover_tests(pulp-test-import-design-tool)
+catch_discover_tests(pulp-test-import-design-tool
+    PROPERTIES LABELS "parser-import")
 
 # pulp #468 — `--execute-bundle` harness end-to-end. Boots the
 # ScriptEngine + WidgetBridge, builds a synthetic React-like bundle on
@@ -1827,7 +1837,8 @@ catch_discover_tests(pulp-test-import-design-tool)
 add_executable(pulp-test-design-import-claude-runtime test_design_import_claude_runtime.cpp)
 target_link_libraries(pulp-test-design-import-claude-runtime
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-claude-runtime)
+catch_discover_tests(pulp-test-design-import-claude-runtime
+    PROPERTIES LABELS "parser-import")
 
 # pulp #758 — inline `<script>` evaluation in the `--execute-bundle`
 # harness. Asserts that inline `text/javascript`, inline `text/babel`
@@ -1839,13 +1850,15 @@ catch_discover_tests(pulp-test-design-import-claude-runtime)
 add_executable(pulp-test-design-import-inline-babel test_design_import_inline_babel.cpp)
 target_link_libraries(pulp-test-design-import-inline-babel
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-inline-babel)
+catch_discover_tests(pulp-test-design-import-inline-babel
+    PROPERTIES LABELS "parser-import")
 
 # Screenshot comparison tests (visual diff for design import validation)
 if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-screenshot-compare)
+    catch_discover_tests(pulp-test-screenshot-compare
+        PROPERTIES LABELS "parser-import")
 endif()
 
 # Parameter attachment tests

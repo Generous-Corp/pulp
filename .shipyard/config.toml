@@ -98,6 +98,36 @@ test      = "ctest --test-dir build -C Release --output-on-failure --exclude-reg
 stages = ["setup"]
 setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report"
 
+[validation.parser]
+# Path-scoped lane for runtime-import parser PRs (pulp #1916).
+#
+# Triggered when a diff only touches the parser-import scope defined in
+# tools/scripts/validation_profile_select.py — the standalone
+# import-design tool, the import-validation scripts, the pulp-import-ir
+# package, parser fixtures, and the parser-specific test surface. Run
+# it explicitly with `shipyard run --pipeline parser`; the selector
+# script prints `parser` or `default` so wrappers can pick the matching
+# lane without rolling their own classifier.
+#
+# Configure step disables PULP_BUILD_EXAMPLES, which keeps the plugin
+# validator CTest entries (auval / pluginval / clap-validator,
+# registered in examples/pulp-*/CMakeLists.txt) out of the test
+# discovery list entirely — those failures motivated #1916 in the first
+# place. The test step filters by the `parser-import` CTest label
+# (test/CMakeLists.txt) so even if a non-example validator slips in,
+# it stays out of the lane. `slow` is excluded for symmetry with
+# [validation.default].
+stages = ["setup", "configure", "build", "test"]
+setup     = "./setup.sh --ci --deps-only"
+configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
+build     = "cmake --build build --parallel"
+test      = "ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
+
+[validation.parser.overrides.windows]
+configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
+build     = "cmake --build build --config Release --parallel"
+test      = "ctest --test-dir build -C Release --output-on-failure --label-include parser-import --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
+
 [validation.smoke]
 # Lighter validation for quick sanity checks. Builds without tests +
 # GPU + examples; the smoke pipeline (SDK install + downstream
