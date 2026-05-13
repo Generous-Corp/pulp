@@ -43,6 +43,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Detect iOS-relevant changes (closes #1887) ─────────────────────────
+  # Companion to #1876, which path-filtered the shipyard validation lane
+  # via `--label-exclude slow` in `.shipyard/config.toml`. The GH-Actions
+  # Coverage workflow runs the Swift coverage step through a different
+  # code path (`tools/scripts/run_swift_coverage.py`) which configures
+  # an iOS try-compile via `cmake -DCMAKE_SYSTEM_NAME=iOS`. That leg
+  # adds ~25-30 min to every PR — including TS-only, doc-only, and
+  # harness-only PRs that can't possibly affect the iOS toolchain.
+  #
+  # On `pull_request`, this job inspects the diff and only sets
+  # `outputs.ios=true` when iOS-relevant files changed. On `push` to
+  # main and `workflow_dispatch`, `outputs.ios` is forced to `true` so
+  # the full iOS try-compile still runs on the canonical lanes (Phase 3
+  # of the spec — "always run on main + nightly"). The downstream
+  # macOS-leg Swift step + Apple LCOV verify/upload all gate on this
+  # output, so a TS-only PR exits the macOS leg in <20 min instead of
+  # ~45-60 min.
+  changed-files:
+    runs-on: ubuntu-latest
+    outputs:
+      # 'true' when the iOS-relevant lane should run on this event:
+      #   - pull_request   → true iff any path under `ios` filter matched
+      #   - push / dispatch → forced to true (full coverage on canonical lanes)
+      ios: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ios == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+      - id: filter
+        # Skip the filter on non-PR events; the job-level output expression
+        # above forces `ios=true` for push + workflow_dispatch. We still
+        # run the action on PR events where it diffs against the base ref.
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          # iOS-relevant surface — keep narrow but inclusive enough that
+          # any CMake/toolchain/iOS-platform change triggers the slow
+          # lane. Mirrors the path list documented in issue #1887.
+          filters: |
+            ios:
+              - 'CMakeLists.txt'
+              - '**/CMakeLists.txt'
+              - 'tools/cmake/**'
+              - '**/*.cmake'
+              - 'apple/**'
+              - 'core/platform/**'
+              - 'tools/scripts/run_swift_coverage.py'
+              - '.github/workflows/coverage.yml'
+
   # ── Resolve per-OS runs-on via shared helper ───────────────────────────
   # Uses tools/scripts/resolve_runs_on.py in `default` mode (same pattern
   # as sanitizers.yml). Each OS resolves to, in priority order:
@@ -110,7 +160,7 @@ jobs:
           } >>"${GITHUB_OUTPUT}"
 
   coverage:
-    needs: resolve-runners
+    needs: [resolve-runners, changed-files]
     name: Coverage report (${{ matrix.label }}, Clang)
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory
@@ -287,7 +337,14 @@ jobs:
         # Keep it on the macOS leg where the Apple package actually
         # builds, and stage repo-relative LCOV for upload plus the
         # original Swift JSON for local summaries/debugging.
-        if: matrix.os == 'macos'
+        #
+        # Gated on `needs.changed-files.outputs.ios` (closes #1887): the
+        # underlying `run_swift_coverage.py` configures an iOS try-compile
+        # via `cmake -DCMAKE_SYSTEM_NAME=iOS`, which adds ~25-30 min to
+        # every PR. Skip it on PRs whose diff doesn't touch iOS-relevant
+        # paths; always run on push-to-main and workflow_dispatch so the
+        # canonical lane still exercises the iOS toolchain daily.
+        if: matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
         shell: bash
         run: python3 tools/scripts/run_swift_coverage.py
@@ -329,7 +386,10 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Apple summary
-        if: always() && matrix.os == 'macos'
+        # Same gate as the Swift coverage step — when the iOS lane is
+        # skipped (closes #1887), there is no apple/summary.txt to
+        # upload and `if-no-files-found: error` would hard-fail the leg.
+        if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
@@ -400,7 +460,12 @@ jobs:
         # Swift coverage is exported to repo-relative LCOV so Codecov
         # can attribute apple/Sources/** files against the git tree
         # instead of discarding LLVM JSON with absolute runner paths.
-        if: always() && matrix.os == 'macos'
+        #
+        # Gated on `needs.changed-files.outputs.ios` (closes #1887): the
+        # Swift apple coverage step above is skipped on PRs whose diff
+        # doesn't touch iOS-relevant paths, so the LCOV file legitimately
+        # won't exist — don't fail the leg in that case.
+        if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         shell: bash
         run: |
           lcov=build-coverage/apple/coverage.apple.lcov
@@ -442,7 +507,10 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Apple LCOV
-        if: always() && matrix.os == 'macos'
+        # Same iOS-lane gate as the verify step above (closes #1887) —
+        # `if-no-files-found: error` would hard-fail the leg when the
+        # Swift step legitimately skipped on a non-iOS PR diff.
+        if: always() && matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: coverage-apple-${{ github.sha }}
