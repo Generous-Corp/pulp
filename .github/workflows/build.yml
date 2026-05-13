@@ -126,17 +126,44 @@ jobs:
           # above for the layer ordering. Failures of the busy probe fall
           # back to local (the safer choice — overflow is an optimization,
           # not a correctness requirement).
+          #
+          # Implementation note: `gh api .../actions/runners` requires
+          # repo `Administration: Read` scope, which the default workflow
+          # GITHUB_TOKEN does not have. The first cut of this probe used
+          # that endpoint and fell back to BUSY=0 on every run — overflow
+          # never engaged (pulp #1935 post-merge finding). Switching to
+          # `actions/runs?status=in_progress` is permission-free under
+          # the default `actions:read` scope and acts as a proxy for
+          # "local Mac runner saturated": with one self-hosted Mac, every
+          # in-progress Build-and-Test run except this PR's is occupying
+          # the runner serially. Same end result, no PAT.
           def _count_busy_local_mac_runners() -> int:
-              label = (os.environ.get("LOCAL_MAC_RUNNER_LABEL") or "").strip()
-              if not label or not REPOSITORY:
+              if not REPOSITORY:
                   return 0
-              try:
+              current_run_id = os.environ.get("GITHUB_RUN_ID", "")
+
+              # Count Build-and-Test runs that are either `in_progress`
+              # (currently occupying the local Mac runner) OR `queued`
+              # (waiting in line for it). With a single self-hosted Mac,
+              # these serialize, so the sum is the closest token-scoped
+              # proxy for "local saturated."
+              #
+              # First cut counted only `in_progress`, which under deep
+              # queues showed BUSY=0 (one in-progress is excluded as
+              # "this run", everything else is queued, not running) and
+              # the gate never tripped. See pulp #1935 / #1936.
+              def _count(status: str) -> int:
                   result = subprocess.run(
                       [
                           "gh", "api",
-                          f"repos/{REPOSITORY}/actions/runners",
+                          f"repos/{REPOSITORY}/actions/runs?status={status}&per_page=100",
                           "--jq",
-                          f'[.runners[] | select(.busy and (.labels[].name == "{label}"))] | length',
+                          (
+                              f'[.workflow_runs[] '
+                              f'| select(.name == "Build and Test") '
+                              f'| select((.id | tostring) != "{current_run_id}")] '
+                              f'| length'
+                          ),
                       ],
                       check=True,
                       capture_output=True,
@@ -144,6 +171,9 @@ jobs:
                       timeout=15,
                   )
                   return int((result.stdout or "0").strip() or "0")
+
+              try:
+                  return _count("in_progress") + _count("queued")
               except (subprocess.SubprocessError, ValueError) as exc:
                   sys.stderr.write(
                       f"resolve-provider: local-busy probe failed; "
