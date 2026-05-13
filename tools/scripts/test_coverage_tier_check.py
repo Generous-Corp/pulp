@@ -233,6 +233,38 @@ class InstrumentedSourceTests(unittest.TestCase):
         ):
             self.assertTrue(ctc.is_instrumented_source(p), msg=p)
 
+    def test_ts_outside_reported_surface_not_instrumented(self) -> None:
+        # Codex P2 on pulp #1886 — JS/TS coverage is scoped to
+        # `packages/pulp-react/**`. A `.ts` / `.tsx` / `.js` / `.jsx`
+        # file outside that surface (`tools/`, `inspect/`, anywhere
+        # else) has no Cobertura row by design; treating it as
+        # instrumented would mark every diff line as uncovered and
+        # falsely fail the tier. Mirror non-source handling instead.
+        for p in (
+            "tools/scripts/foo.ts",
+            "tools/cli/dev.tsx",
+            "inspect/web/legacy/init.js",
+            "core/view/src/widgets/dev_only.jsx",
+            "packages/pulp-import-ir/src/main.ts",  # different package
+        ):
+            self.assertFalse(ctc.is_instrumented_source(p), msg=p)
+
+    def test_ts_outside_surface_does_not_tank_tier(self) -> None:
+        # End-to-end: a `tools/scripts/foo.ts` file under the
+        # infrastructure tier with no Cobertura row used to count as
+        # 100% uncovered. After the fix it's treated as
+        # non-instrumented (same as a `.sh` / `.cmake` / `.py` file)
+        # and the tier reports "no touched lines".
+        results = ctc.aggregate(
+            TIERS,
+            ["tools/scripts/foo.ts"],
+            {},
+            lines_getter=lambda _p: {1, 2, 3, 4, 5},
+        )
+        infra = next(r for r in results if r.tier.name == "infrastructure")
+        self.assertEqual(infra.touched_lines, 0)
+        self.assertTrue(infra.passed)
+
     def test_ts_aggregate_counts_diff_lines(self) -> None:
         # End-to-end shape: a TS file under `packages/pulp-react/**`
         # classified into `user-facing` (70%), with Cobertura hits
