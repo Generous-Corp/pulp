@@ -62,6 +62,12 @@ jobs:
   # ~45-60 min.
   changed-files:
     runs-on: ubuntu-latest
+    # dorny/paths-filter@v3 in PR mode requires pull-requests:read; without
+    # it the action silently returns no changed files, which would defeat
+    # the iOS-relevant path filter that gates the slow Swift coverage leg.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       # 'true' when the iOS-relevant lane should run on this event:
       #   - pull_request   → true iff any path under `ios` filter matched
