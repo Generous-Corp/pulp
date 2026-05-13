@@ -4726,6 +4726,76 @@ TEST_CASE("CSSStyleDeclaration display: contents is a safe arch-deferred no-op",
     REQUIRE(p_contents->flex().direction == FlexDirection::row);
 }
 
+// ── pulp #1434 / Tier-4 — Yoga-arch CSS-property no-op pin ───────────────────
+//
+// Closes 15 arch-deferred coverage-gap rows (planning/coverage-gaps/) by
+// pinning their silent-accept behavior. The bundle covers everything Pulp
+// deliberately doesn't ship per CLAUDE.md's flex+grid-only Yoga layout
+// policy: block-flow (clear, float), table layout (borderCollapse,
+// borderSpacing, captionSide, emptyCells, tableLayout), multi-column
+// (columnCount, columnRule, columnWidth, columns), print pagination
+// (pageBreakAfter, pageBreakBefore, printMargin), and writingMode.
+//
+// Until this regression test, the silent-accept guarantee was implicit —
+// a future refactor of `core/view/js/web-compat-style-decl.js` could have
+// started throwing for unknown properties without anyone noticing, and
+// import sources that emit these properties (e.g. legacy HTML scraped
+// into Pulp) would break loudly. This pins the contract.
+TEST_CASE("CSSStyleDeclaration silent-accepts 15 Yoga-arch CSS properties as no-ops",
+          "[view][bridge][css][issue-1434][arch-deferred][yoga-arch]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Baseline: panel with display:flex + row direction. Apply 15 arch-deferred
+    // properties in sequence; assert state is untouched after the last write.
+    bridge.load_script(R"((function(){
+        createPanel('p_yoga_arch', '');
+        var el = { _id: 'p_yoga_arch', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(el);
+        sd._applyProperty('display', 'flex');
+        sd._applyProperty('flexDirection', 'row');
+
+        // Block flow:
+        sd._applyProperty('clear', 'both');
+        sd._applyProperty('float', 'left');
+        // Table layout:
+        sd._applyProperty('borderCollapse', 'collapse');
+        sd._applyProperty('borderSpacing', '4px');
+        sd._applyProperty('captionSide', 'top');
+        sd._applyProperty('emptyCells', 'show');
+        sd._applyProperty('tableLayout', 'fixed');
+        // Multi-column:
+        sd._applyProperty('columnCount', '3');
+        sd._applyProperty('columnRule', '1px solid black');
+        sd._applyProperty('columnWidth', '120px');
+        sd._applyProperty('columns', '3 120px');
+        // Print pagination:
+        sd._applyProperty('pageBreakAfter', 'always');
+        sd._applyProperty('pageBreakBefore', 'avoid');
+        sd._applyProperty('printMargin', '1cm');
+        // Writing mode (has explicit documented-no-op case):
+        sd._applyProperty('writingMode', 'vertical-rl');
+    })();)");
+
+    auto* p = dynamic_cast<Panel*>(bridge.widget("p_yoga_arch"));
+    REQUIRE(p != nullptr);
+
+    // Invariants after 15 no-op writes:
+    //  - bridge didn't crash (would fail dynamic_cast / widget() lookup)
+    //  - panel still visible (no property touched setVisible)
+    //  - flex direction unchanged from row baseline (no property touched
+    //    Yoga's flex_direction slot)
+    //
+    // If any of the 15 grows a real implementation that touches these state
+    // slots, this assertion fails and the change can be reviewed for arch
+    // alignment per CLAUDE.md's layout-model section.
+    REQUIRE(p->visible());
+    REQUIRE(p->flex().direction == FlexDirection::row);
+}
+
 // ── pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration ─────────
 //
 // Mirrors the #965 SvgPath bridge tests. Closes Spectr [G] preset
