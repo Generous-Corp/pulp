@@ -1304,6 +1304,76 @@ std::string figma_build_runtime_js(const std::string& source,
     return js;
 }
 
+std::string stitch_slug_from_component(std::string name) {
+    std::string out = "stitch";
+    for (char c : name) {
+        if (std::isupper(static_cast<unsigned char>(c)) && !out.empty() && out.back() != '-') {
+            out += '-';
+        }
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        } else if (c == '-' || c == '_') {
+            if (!out.empty() && out.back() != '-') out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out.empty() ? "stitch-runtime-import" : out;
+}
+
+std::string stitch_extract_root_id(const std::string& source,
+                                   const std::string& component_name) {
+    static const std::regex id_re(R"RX(\bid\s*=\s*(?:"([^"]+)"|'([^']+)'))RX");
+    if (auto m = v0_match_first(source, id_re)) return *m;
+    return stitch_slug_from_component(component_name);
+}
+
+bool stitch_uses_only_supported_surfaces(const std::string& source) {
+    if (source.find("[V0_FILE]") != std::string::npos) return false;
+    if (!v0_uses_only_supported_surfaces(source)) return false;
+
+    const auto lower = v0_lower(source);
+    const char* stitch_reject_markers[] = {
+        "\"use client\"", "'use client'", "figma:asset/", "react-native",
+        "mcp__stitch", "\"mcp_response\"", "\"node_tree\"", "\"screen_id\""
+    };
+    for (const char* marker : stitch_reject_markers) {
+        if (lower.find(marker) != std::string::npos) return false;
+    }
+    return true;
+}
+
+std::string stitch_build_runtime_js(const std::string& source,
+                                    const std::string& file_name,
+                                    const std::string& component_name,
+                                    const std::string& root_id) {
+    auto js = v0_build_runtime_js(source, file_name, component_name, root_id);
+    js = replace_all_copy(
+        std::move(js),
+        "v0.dev runtime import requires host React and ReactDOM",
+        "Stitch runtime import requires host React and ReactDOM");
+    js = replace_all_copy(
+        std::move(js),
+        "v0.dev React runtime import",
+        "Stitch React runtime import");
+    js = replace_all_copy(
+        std::move(js),
+        "'data-pulp-source': 'v0'",
+        "'data-pulp-source': 'stitch'");
+    js = replace_all_copy(
+        std::move(js),
+        "sourceFile.indexOf('/') >= 0 ? 'v0' : 'OUT'",
+        "'ST'");
+    js = replace_all_copy(
+        std::move(js),
+        "var panelStyle = { width: 420, minHeight: 280,",
+        "var panelStyle = { width: 420, height: 340,");
+    js = replace_all_copy(
+        std::move(js),
+        "var buttonStyle = { minWidth: 88, minHeight: 36,",
+        "var buttonStyle = { minWidth: 72, minHeight: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',");
+    return js;
+}
+
 void set_runtime_error(ClaudeRuntimeOptions& opts, const std::string& msg) {
     if (opts.error_out) *opts.error_out = msg;
 }
@@ -1821,6 +1891,34 @@ std::optional<ClaudeBundle> parse_figma_make_react(const std::string& tsx) {
         "<div id=\"root\" data-pulp-source=\"figma\" data-figma-root=\"" +
         v0_html_attr_escape(root_id) +
         "\"></div><script src=\"figma-runtime-app\"></script>";
+    return bundle;
+}
+
+std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx) {
+    auto source = v0_trim(tsx);
+    if (source.empty()) return std::nullopt;
+    if (source.find("export default") == std::string::npos) return std::nullopt;
+    if (!v0_contains_ci(source, "react")) return std::nullopt;
+    if (!stitch_uses_only_supported_surfaces(source)) return std::nullopt;
+
+    auto component_name = v0_extract_component_name(source);
+    if (component_name == "V0RuntimeImport") component_name = "StitchRuntimeImport";
+    const auto root_id = stitch_extract_root_id(source, component_name);
+    auto runtime_js = stitch_build_runtime_js(
+        source, "TransportBar.tsx", component_name, root_id);
+
+    ClaudeBundleAsset app;
+    app.uuid = "stitch-runtime-app";
+    app.mime = "text/javascript";
+    app.data.assign(runtime_js.begin(), runtime_js.end());
+
+    ClaudeBundle bundle;
+    bundle.assets.push_back(std::move(app));
+    bundle.javascript_indices.push_back(0);
+    bundle.template_html =
+        "<div id=\"root\" data-pulp-source=\"stitch\" data-stitch-root=\"" +
+        v0_html_attr_escape(root_id) +
+        "\"></div><script src=\"stitch-runtime-app\"></script>";
     return bundle;
 }
 
