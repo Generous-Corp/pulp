@@ -12731,3 +12731,80 @@ TEST_CASE("setTextTransform pins all 4 CSS spec values to Label::TextTransform e
     REQUIRE(tt("capitalize") == Label::TextTransform::capitalize);
     REQUIRE(tt("none_")      == Label::TextTransform::none);
 }
+
+// pulp #1923 — drag-style interactions (FilterBank band drawing, slider
+// thumb drag, scroll gestures) lost state between pointerdown and the
+// immediately-following pointermove because safe_dispatch_eval() didn't
+// pump microtasks after dispatching the JS handler. React's setState
+// commit is queued as a microtask; without an explicit pump_message_loop
+// after engine.evaluate(), the move handler runs against the pre-down
+// state and silently bails. This test pins the contract: any side-effect
+// the pointerdown handler queues via queueMicrotask / Promise.then
+// (which is what React 18's setState uses under the hood) MUST be
+// visible to the next dispatched event on the same widget.
+TEST_CASE("WidgetBridge pumps microtasks after JS dispatch so drag-state commits before next event",
+          "[view][bridge][events][issue-1923]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Pointerdown queues a microtask that mutates `drag_active` (stand-in
+    // for a React setState commit). Pointermove reads `drag_active` and
+    // records what it saw at the time it fired. Pre-fix the recorded
+    // value is `false` (microtask never drained); post-fix it is `true`.
+    bridge.load_script(R"(
+        var drag_active = false;
+        var move_saw_drag_active = null;
+        var move_count = 0;
+
+        createLabel('surface', 'Surface', '');
+        on('surface', 'pointerdown', function(e) {
+            // Stand-in for React's setState commit: queue a microtask
+            // that flips the committed state. React 18's scheduler
+            // uses queueMicrotask / Promise.resolve().then for the
+            // discrete-event lane, so this is the realistic shape.
+            queueMicrotask(function() { drag_active = true; });
+        });
+        on('surface', 'pointermove', function(e) {
+            if (move_saw_drag_active === null) {
+                move_saw_drag_active = drag_active;
+            }
+            move_count++;
+        });
+        registerPointer('surface');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    REQUIRE(surface->on_pointer_event);
+    REQUIRE(surface->on_drag);
+
+    // Sanity: nothing has run yet.
+    REQUIRE_FALSE(engine.evaluate("drag_active").getWithDefault<bool>(true));
+
+    // Dispatch pointerdown. After safe_dispatch_eval returns, the fix
+    // guarantees the queued microtask has drained and `drag_active` is
+    // committed. Pre-fix this assertion fails — the microtask is still
+    // pending in QuickJS' job queue.
+    MouseEvent down{};
+    down.is_down = true;
+    down.position = {10.0f, 10.0f};
+    down.window_position = {110.0f, 110.0f};
+    down.pointer_id = 1;
+    down.pointer_type = PointerType::mouse;
+    down.button = MouseButton::left;
+    surface->on_mouse_event(down);
+
+    REQUIRE(engine.evaluate("drag_active").getWithDefault<bool>(false));
+
+    // Now dispatch pointermove. The handler must observe the committed
+    // drag_active value (true), not the pre-down value (false). This is
+    // the user-visible regression in #1923: pointermove handlers see
+    // stale state and bail.
+    surface->on_drag({12.0f, 14.0f});
+
+    REQUIRE(engine.evaluate("move_count").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("move_saw_drag_active").getWithDefault<bool>(false));
+}
