@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0951"></a>
+## [0.30.0]
+
+## [0.96.0]
+
 ## [0.95.1] - 2026-05-13
 
 - fix(view): Label wraps with CSS default white-space:normal (closes #1924) ([#1933](https://github.com/danielraffel/pulp/pull/1933))
