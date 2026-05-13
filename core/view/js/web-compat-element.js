@@ -314,8 +314,18 @@ function __replaySvgLineAttributes__(el) {
             setSvgLine(el._id, x1, y1, x2, y2);
         }
     }
-    if (a.stroke !== undefined && typeof setSvgStroke === "function") {
-        setSvgStroke(el._id, String(a.stroke));
+    if (typeof setSvgStroke === "function") {
+        // SvgLineWidget's C++ default is has_stroke_=true (opaque
+        // black, 1px), but SVG spec says <line> defaults to
+        // stroke="none". Without explicit clearing, a JSX <line> that
+        // omits `stroke` would paint an unwanted opaque-black stroke.
+        // Explicitly drive the widget to the spec default when the
+        // attribute is absent or empty (#1928 review).
+        if (a.stroke !== undefined && String(a.stroke).length > 0) {
+            setSvgStroke(el._id, String(a.stroke));
+        } else {
+            setSvgStroke(el._id, "none");
+        }
     }
     var sw = a["stroke-width"];
     if (sw === undefined) sw = a.strokeWidth;
