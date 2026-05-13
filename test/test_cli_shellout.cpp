@@ -1560,11 +1560,19 @@ TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
     auto fake_dir = unique_temp_dir("pulp-pr-fake-shipyard");
     fs::create_directories(fake_dir);
     auto fake_shipyard = fake_dir / "shipyard";
+    // Report the version the pulp CLI's skew check expects (tools/shipyard.toml
+    // pin), stripped of the leading 'v' since that's what `shipyard --version`
+    // emits in practice. Reading dynamically keeps the test honest across pin
+    // bumps — the old hardcoded "0.46.0" broke on the v0.56.2 bump.
+    std::string version = pinned_shipyard_version_for_test();
+    if (!version.empty() && version[0] == 'v') version.erase(0, 1);
     {
         std::ofstream f(fake_shipyard);
         f << "#!/bin/sh\n"
              "if [ \"$1\" = \"--version\" ]; then\n"
-             "  echo \"shipyard, version 0.46.0\"\n"
+             "  echo \"shipyard, version "
+          << version
+          << "\"\n"
              "  exit 0\n"
              "fi\n"
              "printf 'fake shipyard args:'\n"
