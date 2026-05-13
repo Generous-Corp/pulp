@@ -2001,6 +2001,14 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
             if (color) {
                 // Use applyTokenDiff for color tokens
                 applyTokenDiff('{"colors":{"' + tokenName + '":"' + color + '"}}');
+            } else if (typeof setStringToken === 'function') {
+                // pulp #1899 (gap #3) — string-valued custom property
+                // (e.g. `--mono: "JetBrains Mono"`). Store on
+                // theme.strings so resolveVar() on the React side and
+                // getPropertyValue() below can read it back. Without
+                // this, fontFamily-shaped custom properties were
+                // silently dropped at setProperty time.
+                setStringToken(tokenName, String(value));
             }
         }
     } else {
@@ -2013,6 +2021,14 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
 CSSStyleDeclaration.prototype.getPropertyValue = function(name) {
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
+        // pulp #1899 (gap #3) — prefer the string-token map for
+        // values that weren't parseable as length / color at set time
+        // (e.g. font families). Fall back to the motion-token value
+        // otherwise to preserve legacy numeric token reads.
+        if (typeof getStringToken === 'function') {
+            var s = getStringToken(tokenName);
+            if (s) return s;
+        }
         return String(getMotionToken(tokenName));
     }
     var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });

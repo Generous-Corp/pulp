@@ -113,6 +113,103 @@ function isWheelEvent(eventName: string): boolean {
     return eventName === 'wheel';
 }
 
+// pulp #1899 (gap #3) — resolve `var(--name [, fallback])` references in
+// string-valued style props before forwarding to the bridge.
+//
+// The HTML-shim path (`core/view/js/css-parser.js`) already resolves
+// var() via the same lookup tiers, but the React-prop-applier lane
+// bypasses that — it forwards the raw `style.fontFamily` value straight
+// into `setFontFamily`. The string "var(--mono)" then reached Skia's
+// font matcher as a literal family name, returned no match, and fell
+// through to a proportional sans (visible as the Spectr top-bar "faint
+// label" symptom — labels rendered in the wrong typeface AND in a layer
+// that degraded the LCD AA, compounding the faintness).
+//
+// Resolution tiers (first hit wins):
+//   1. `globalThis.__pulpCssVars[name]` — developer-set runtime
+//       registry. Apps populate this at mount when they have direct
+//       knowledge of which CSS variables map to which strings.
+//   2. `getStringToken(name)` — bridge call into `theme.strings` (the
+//       same map design-import.cpp writes when loading Stitch / W3C
+//       tokens, and the same map `setStringToken` from the CSS shim
+//       writes for string-valued custom properties).
+//   3. `getMotionToken(name)` — bridge call into `theme.dimensions`
+//       (only useful when the var is numeric — fontFamily callers
+//       won't hit this branch, but length-typed callers might).
+//   4. The literal fallback supplied as `var(--name, FALLBACK)`.
+//   5. The original string, returned unchanged so the caller can decide
+//       how to handle the miss.
+//
+// The regex match is conservative: only top-level `^var(...)` is
+// resolved. Embedded `calc(var(...) + 10px)` is out of scope for the
+// React lane — the bridge consumers for `fontFamily` / `color` /
+// `borderColor` etc. don't accept calc-expressions anyway.
+function _resolveVar(value: unknown): unknown {
+    if (typeof value !== 'string') return value;
+    const s = value.trim();
+    if (!s.startsWith('var(') || !s.endsWith(')')) return value;
+
+    // Find the FIRST top-level comma inside var(...) so a nested
+    // `var(--a, var(--b, default))` is split at the right point.
+    const inner = s.slice(4, s.length - 1);
+    let commaPos = -1;
+    let depth = 0;
+    for (let i = 0; i < inner.length; i++) {
+        const c = inner.charAt(i);
+        if (c === '(') depth++;
+        else if (c === ')') depth--;
+        else if (c === ',' && depth === 0) { commaPos = i; break; }
+    }
+
+    let name: string;
+    let fallback: string | undefined;
+    if (commaPos >= 0) {
+        name = inner.slice(0, commaPos).trim();
+        fallback = inner.slice(commaPos + 1).trim();
+    } else {
+        name = inner.trim();
+    }
+    if (name.startsWith('--')) name = name.slice(2);
+    if (!name) return value;
+
+    // Tier 1: runtime developer-set registry.
+    const reg = (globalThis as Record<string, unknown>).__pulpCssVars as
+        | Record<string, string> | undefined;
+    if (reg && typeof reg[name] === 'string' && reg[name]) {
+        return reg[name];
+    }
+
+    // Tier 2: theme.strings via bridge.
+    const getStr = (globalThis as Record<string, unknown>).getStringToken as
+        | ((n: string) => string) | undefined;
+    if (typeof getStr === 'function') {
+        const sv = getStr(name);
+        if (typeof sv === 'string' && sv) return sv;
+    }
+
+    // Tier 3: theme.dimensions via bridge (numeric tokens).
+    const getNum = (globalThis as Record<string, unknown>).getMotionToken as
+        | ((n: string) => number) | undefined;
+    if (typeof getNum === 'function') {
+        const nv = getNum(name);
+        if (typeof nv === 'number' && nv !== 0 && Number.isFinite(nv)) {
+            return String(nv);
+        }
+    }
+
+    // Tier 4: explicit fallback. Recurse so `var(--a, var(--b, 0))`
+    // walks the chain. Cap recursion via the input shrinking strictly
+    // on each step (we strip one var() wrapper per call).
+    if (fallback !== undefined && fallback.length > 0) {
+        return _resolveVar(fallback);
+    }
+
+    // Tier 5: surface the original unresolved string. Better than ""
+    // because downstream Skia / View code can at least log the unknown
+    // token name.
+    return value;
+}
+
 // pulp #1434 (batch 3) — translate CSS / React-Native fontWeight keyword
 // values to numeric weights before reaching the bridge. Mirrors the same
 // logic in the JS CSS shim (`web-compat-style-decl.js`). Numeric values
@@ -756,7 +853,11 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
                 return call('setBackgroundGradient', id, sval);
             }
             if (/^\s*url\s*\(/i.test(sval)) return;
-            return call('setBackground', id, sval);
+            // pulp #1899 (gap #3) — resolve var() for solid-color backgrounds
+            // (`background: var(--panel)`). Gradient strings keep their
+            // raw value because the gradient parser handles var() itself
+            // via the C++ shim.
+            return call('setBackground', id, _resolveVar(sval) as string);
         }
         case 'backgroundGradient': return call('setBackgroundGradient', id, value as string);
         // CSS `background-image` longhand. The C++ `setBackground` bridge fn
@@ -774,7 +875,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (/^\s*url\s*\(/i.test(sval)) {
                 return;
             }
-            return call('setBackground', id, sval);
+            // pulp #1899 (gap #3) — mirror `background` above.
+            return call('setBackground', id, _resolveVar(sval) as string);
         }
         // pulp #1517 — background sub-properties. The bridge stores the
         // keyword on the View slot. Paint impact today is partial:
@@ -797,7 +899,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // commitUpdate that touches only one of them preserves the others.
         // Lowering them onto the unified `setBorder(id, color, width, radius)`
         // would clobber the unset slots back to 0/empty.
-        case 'borderColor':  return call('setBorderColor', id, value as string);
+        case 'borderColor':  return call('setBorderColor', id, _resolveVar(value) as string);
         case 'borderWidth':  return call('setBorderWidth', id, value as number);
         // Wave 2 rn — `borderRadius` accepts the RN Fabric elliptical
         // form `{ x, y }`. The Skia paint backend currently takes a
@@ -856,10 +958,10 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // RN per-side flat props — route to the per-side bridge setters
         // that already preserve the unrelated attribute (see widget_bridge
         // applyBorderSide helper introduced in pulp #1026).
-        case 'borderTopColor':       return call('setBorderTopColor', id, value as string);
-        case 'borderRightColor':     return call('setBorderRightColor', id, value as string);
-        case 'borderBottomColor':    return call('setBorderBottomColor', id, value as string);
-        case 'borderLeftColor':      return call('setBorderLeftColor', id, value as string);
+        case 'borderTopColor':       return call('setBorderTopColor', id, _resolveVar(value) as string);
+        case 'borderRightColor':     return call('setBorderRightColor', id, _resolveVar(value) as string);
+        case 'borderBottomColor':    return call('setBorderBottomColor', id, _resolveVar(value) as string);
+        case 'borderLeftColor':      return call('setBorderLeftColor', id, _resolveVar(value) as string);
         case 'borderTopWidth':       return call('setBorderTopWidth', id, value as number);
         case 'borderRightWidth':     return call('setBorderRightWidth', id, value as number);
         case 'borderBottomWidth':    return call('setBorderBottomWidth', id, value as number);
@@ -876,7 +978,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // own per-attribute bridge fn so a JSX prop diff that touches one
         // outline-* preserves the others. Style keyword set mirrors
         // borderStyle (CSS spec is identical).
-        case 'outlineColor':  return call('setOutlineColor',  id, value as string);
+        case 'outlineColor':  return call('setOutlineColor',  id, _resolveVar(value) as string);
         case 'outlineOffset': return call('setOutlineOffset', id, value as number);
         case 'outlineStyle':  return call('setOutlineStyle',  id, value as string);
         case 'outlineWidth':  return call('setOutlineWidth',  id, value as number);
@@ -1060,7 +1162,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         //                     ::set_text_decoration_style.
         case 'verticalAlign':         return call('setVerticalAlign', id, value as string);
         case 'textAlignVertical':     return call('setVerticalAlign', id, value as string);
-        case 'textDecorationColor':   return call('setTextDecorationColor', id, value as string);
+        case 'textDecorationColor':   return call('setTextDecorationColor', id, _resolveVar(value) as string);
         case 'textDecorationStyle':   return call('setTextDecorationStyle', id, value as string);
 
         // pulp #1434 Phase A2-1 — CSS transitions. The bridge parses
@@ -1349,7 +1451,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // before this — bridge has `setTextColor`, the dispatch case was
         // missing the alias.
         case 'color':
-        case 'textColor':       return call('setTextColor', id, value as string);
+        case 'textColor':       return call('setTextColor', id, _resolveVar(value) as string);
         // pulp #1434 — widen to include `'auto'` and `'justify'` (CSS /
         // RN canonical). `'auto'` is writing-direction-relative
         // (LTR-only today, degrades to `'left'`); `'justify'` flows to
@@ -1367,7 +1469,13 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // registered with Skia fall through to the platform default.
         // Wiring is independent: when #932 lands, no consumer change
         // is needed — the registry just resolves the same name.
-        case 'fontFamily':      return call('setFontFamily', id, value as string);
+        // pulp #1899 (gap #3) — resolve `var(--mono)` before forwarding.
+        // The bridge expects a real family name; the literal "var(--mono)"
+        // gives Skia's font matcher nothing to match against and silently
+        // falls back to a proportional sans (e.g. Spectr top-bar labels
+        // rendered in the wrong typeface AND inside an opacity layer that
+        // degraded the LCD AA — both fixed in this change).
+        case 'fontFamily':      return call('setFontFamily', id, _resolveVar(value) as string);
         case 'fontSize':        return call('setFontSize', id, value as number);
         case 'fontWeight':      return call('setFontWeight', id, _normalizeFontWeight(value));
         case 'fontStyle':       return call('setFontStyle', id, value as string);
@@ -1410,7 +1518,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // branch) every consumer flips on without a JSX-side change.
         // Each per-attribute setter writes ONE slot in isolation so a
         // diff that touches one prop doesn't clobber the others.
-        case 'textShadowColor':  return call('setTextShadowColor',  id, value as string);
+        case 'textShadowColor':  return call('setTextShadowColor',  id, _resolveVar(value) as string);
         case 'textShadowOffset': {
             // RN spec: `{ width, height }` (number / number).
             const o = value as { width?: number; height?: number };
@@ -1430,7 +1538,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // textShadow* fan-out above. Each per-attribute setter writes
         // ONE slot of View::shadow_ in isolation so a JSX diff that
         // touches one prop doesn't clobber the others.
-        case 'shadowColor':   return call('setShadowColor',   id, value as string);
+        case 'shadowColor':   return call('setShadowColor',   id, _resolveVar(value) as string);
         case 'shadowOffset': {
             // RN spec: `{ width, height }` (number / number).
             const o = value as { width?: number; height?: number };

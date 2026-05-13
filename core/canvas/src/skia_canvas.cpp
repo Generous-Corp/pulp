@@ -305,11 +305,23 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
 
 static SkFont make_font(const std::string& family, float size,
                         int weight = SkFontStyle::kNormal_Weight,
-                        int slant = 0) {
+                        int slant = 0,
+                        bool non_opaque_dst = false) {
     SkFont font;
     font.setSize(size);
     font.setSubpixel(true);                               // Subpixel glyph positioning
-    font.setEdging(SkFont::Edging::kSubpixelAntiAlias);   // LCD-quality anti-aliasing
+    // pulp #1899 (gap #3) — LCD subpixel AA visibly degrades when the
+    // destination surface isn't opaque: Skia's documented behavior is
+    // that subpixel patterns can't antialias correctly into a partially
+    // transparent pixel, so glyphs come out faint inside save_layer
+    // contexts that carry alpha < 1 (e.g. an ancestor View opens
+    // saveLayer(opacity = 0.6) for CSS opacity). Browsers
+    // (Blink / WebKit) flip the same way — greyscale AA inside
+    // non-opaque layers. Callers pass `non_opaque_dst=true` when any
+    // currently-open SkiaCanvas layer was opened with alpha < 1.
+    font.setEdging(non_opaque_dst
+        ? SkFont::Edging::kAntiAlias            // Greyscale AA (browser parity inside opacity layers)
+        : SkFont::Edging::kSubpixelAntiAlias);  // LCD-quality AA on opaque destinations
     font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
@@ -377,6 +389,14 @@ void SkiaCanvas::restore() {
         }
         // Falls through to the outer restore() below.
     }
+    // pulp #1899 (gap #3) — pop the non-opaque layer stack if the
+    // layer we're about to close was tracked. Save count is captured
+    // before delegating to canvas_->restore() so it matches the depth
+    // recorded at push time.
+    if (!non_opaque_layer_stack_.empty() &&
+        non_opaque_layer_stack_.back() == canvas_->getSaveCount()) {
+        non_opaque_layer_stack_.pop_back();
+    }
     canvas_->restore();
 }
 
@@ -397,7 +417,15 @@ void SkiaCanvas::restore_to_count(int target) {
     // match that contract so a CanvasWidget that captured save_count()
     // == 4 at entry and got back depth 7 (three leaked saves) returns
     // to exactly 4 at exit. SkCanvas guards target == 0 internally.
-    canvas_->restoreToCount(target < 1 ? 1 : target);
+    const int safe_target = target < 1 ? 1 : target;
+    // pulp #1899 (gap #3) — drop any tracked non-opaque layers whose
+    // save count is strictly above the target, since SkCanvas is about
+    // to close all of them in one shot.
+    while (!non_opaque_layer_stack_.empty() &&
+           non_opaque_layer_stack_.back() > safe_target) {
+        non_opaque_layer_stack_.pop_back();
+    }
+    canvas_->restoreToCount(safe_target);
 }
 
 void SkiaCanvas::translate(float x, float y) { GUARD_CANVAS; canvas_->translate(x, y); }
@@ -1306,7 +1334,12 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     GUARD_CANVAS;
     if (text.empty()) return;
 
-    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
+    // pulp #1899 (gap #3) — when any currently-open save_layer carries
+    // alpha < 1, Skia's LCD subpixel AA degrades on the non-opaque
+    // destination and glyphs render faint. make_font() falls back to
+    // greyscale AA in that case (browser parity).
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_,
+                            inside_non_opaque_layer());
     if (!font.getTypeface()) return;
 
     // pulp Wave 3 c2d.6 — gradient (and pattern) fillStyle on text. Route
@@ -1459,7 +1492,11 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // — we only swap the paint's style flag.
     GUARD_CANVAS;
     if (text.empty()) return;
-    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
+    // pulp #1899 (gap #3) — see fill_text comment. Mirror the edging
+    // policy so stroked glyphs inside an opacity layer track the
+    // greyscale-AA path that fill_text uses.
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_,
+                            inside_non_opaque_layer());
     if (!font.getTypeface()) return;
 
     auto stroke_paint = make_stroke_paint(stroke_color_, line_width_);
@@ -2794,6 +2831,12 @@ void SkiaCanvas::save_layer(float x, float y, float w, float h,
     }
 
     canvas_->saveLayer(&bounds, &layer_paint);
+
+    // pulp #1899 (gap #3) — record that this layer's destination is
+    // non-opaque so text-paint paths inside it use greyscale AA.
+    if (opacity < 1.0f) {
+        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
+    }
 }
 
 // pulp #1549 — saveLayer with explicit blend mode. The layer-paint's blend
@@ -2820,6 +2863,12 @@ void SkiaCanvas::save_layer_with_blend(float x, float y, float w, float h,
     }
 
     canvas_->saveLayer(&bounds, &layer_paint);
+
+    // pulp #1899 (gap #3) — mirror save_layer(): track non-opaque layer
+    // so text inside it picks greyscale AA over LCD subpixel AA.
+    if (opacity < 1.0f) {
+        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
+    }
 }
 
 
@@ -3034,6 +3083,11 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
     if (opacity < 1.0f) layer_paint.setAlphaf(opacity);
 
     canvas_->saveLayer(&bounds, &layer_paint);
+
+    // pulp #1899 (gap #3) — track non-opaque destination for text-edging.
+    if (opacity < 1.0f) {
+        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
+    }
 }
 
 void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
@@ -3484,6 +3538,12 @@ void SkiaCanvas::save_layer_with_mask(float x, float y, float w, float h,
     SkPaint outer_paint;
     if (opacity < 1.0f) outer_paint.setAlphaf(opacity);
     canvas_->saveLayer(&bounds, &outer_paint);
+
+    // pulp #1899 (gap #3) — non-opaque text-edging tracking, mirrors
+    // the other save_layer* variants.
+    if (opacity < 1.0f) {
+        non_opaque_layer_stack_.push_back(canvas_->getSaveCount());
+    }
 
     // Always push a PendingMask so restore() pops one entry per
     // save_layer_with_mask call. Null shader means "no mask to apply,

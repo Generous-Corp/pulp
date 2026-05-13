@@ -501,14 +501,24 @@ function _resolveVar(str, depth) {
         }
         if (name.indexOf("--") === 0) name = name.slice(2);
 
-        var val = getMotionToken(name);
-        if (val !== 0 && val !== undefined) {
-            out += String(val);
-        } else if (fallback !== undefined) {
-            // Recurse so nested var() in the fallback resolves too.
-            out += _resolveVar(fallback, depth + 1);
+        // pulp #1899 (gap #3) — consult the string-token map first so
+        // font-family-shaped tokens (`--mono: "JetBrains Mono"`)
+        // resolve to the registered string rather than zero. Falls
+        // through to the motion-token (numeric) lookup for legacy
+        // length/spacing tokens.
+        var strVal = (typeof getStringToken === 'function') ? getStringToken(name) : '';
+        if (strVal) {
+            out += String(strVal);
         } else {
-            out += "0";
+            var val = getMotionToken(name);
+            if (val !== 0 && val !== undefined) {
+                out += String(val);
+            } else if (fallback !== undefined) {
+                // Recurse so nested var() in the fallback resolves too.
+                out += _resolveVar(fallback, depth + 1);
+            } else {
+                out += "0";
+            }
         }
         i = j + 1;
     }

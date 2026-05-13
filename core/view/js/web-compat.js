@@ -1546,6 +1546,11 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
             if (color) {
                 // Use applyTokenDiff for color tokens
                 applyTokenDiff('{"colors":{"' + tokenName + '":"' + color + '"}}');
+            } else if (typeof setStringToken === 'function') {
+                // pulp #1899 (gap #3) — string-valued custom property
+                // (font family / arbitrary string). Mirrors
+                // web-compat-style-decl.js.
+                setStringToken(tokenName, String(value));
             }
         }
     } else {
@@ -1558,6 +1563,12 @@ CSSStyleDeclaration.prototype.setProperty = function(name, value) {
 CSSStyleDeclaration.prototype.getPropertyValue = function(name) {
     if (name.indexOf("--") === 0) {
         var tokenName = name.slice(2);
+        // pulp #1899 (gap #3) — string-token round-trip; mirrors
+        // web-compat-style-decl.js.
+        if (typeof getStringToken === 'function') {
+            var s = getStringToken(tokenName);
+            if (s) return s;
+        }
         return String(getMotionToken(tokenName));
     }
     var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });

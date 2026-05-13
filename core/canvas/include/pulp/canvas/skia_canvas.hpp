@@ -384,6 +384,30 @@ private:
         int save_count_after_open;     // canvas_->getSaveCount() AFTER saveLayer
     };
     std::vector<PendingMask> pending_masks_;
+
+public:
+    // pulp #1899 (gap #3 — text edging in opacity layers) — returns true
+    // when at least one currently-open save_layer* has alpha < 1 on its
+    // layer-paint. Text paint paths (fill_text, stroke_text) consult
+    // this at paint time and select greyscale AA over LCD subpixel AA
+    // — Skia's LCD subpixel patterns can't antialias correctly into a
+    // partially transparent pixel, so glyphs render faint inside
+    // CSS-opacity layers without this flip. Browsers (Blink / WebKit)
+    // do the same. Exposed publicly so tests can assert the stack-
+    // tracking around nested save_layer / restore / restore_to_count.
+    bool inside_non_opaque_layer() const {
+        return !non_opaque_layer_stack_.empty();
+    }
+
+private:
+    // pulp #1899 (gap #3) — each entry is Skia's getSaveCount() AFTER
+    // the layer was opened. restore() pops the top entry if its save
+    // count matches the canvas's current save count; restore_to_count()
+    // pops any entries strictly above the target (mirrors
+    // SkCanvas::restoreToCount). Plain save() / save_layer with
+    // opacity == 1 do not push.
+    std::vector<int> non_opaque_layer_stack_;
+
     TextAlign text_align_ = TextAlign::left;
 
     // Gradient state

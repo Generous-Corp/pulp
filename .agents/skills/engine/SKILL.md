@@ -280,3 +280,35 @@ state, follow this checklist or you'll land a silent no-op:
 This pattern landed for shadow* (#1434), miter / image-smoothing
 (#1434 bridge-thin), and direction / filter (#1520). Copy the same
 shape for the next canvas2d catalog setter.
+
+### String-valued custom CSS properties (`var(--mono)` etc., #1899)
+
+`setProperty('--name', value)` in `web-compat-style-decl.js` (and the
+mirror in `web-compat.js`) has THREE tiers, not the original two:
+
+1. **Length** (`parseCSSLength`) → `setMotionToken` writes
+   `theme.dimensions[name]`.
+2. **Color** (`parseCSSColor`) → `applyTokenDiff` writes
+   `theme.colors[color.name]`.
+3. **String fallback** → `setStringToken(name, value)` writes
+   `theme.strings[name]`. This is what catches font families
+   (`--mono: "JetBrains Mono"`) and any other arbitrary string.
+
+Without tier 3, font-family-shaped custom properties were silently
+dropped at set time and `var(--mono)` resolved to `0` (the
+`getMotionToken` empty-token return). `getPropertyValue` mirrors the
+same tier order — string token first, then numeric — so the
+round-trip works.
+
+`getStringToken` and `setStringToken` are bridge fns registered in
+`core/view/src/widget_bridge.cpp` next to `getMotionToken` /
+`setMotionToken`.
+
+The React-side mirror lives in `packages/pulp-react/src/prop-applier.ts`
+as `_resolveVar(value)`, with the same lookup tiers (developer-set
+`__pulpCssVars` registry → `getStringToken` → `getMotionToken` →
+fallback). Call it from every string-valued style prop case that
+might receive `var(--name)` from JSX — see the `fontFamily` /
+`color` / `borderColor*` / `outlineColor` / `textDecorationColor` /
+`textShadowColor` / `shadowColor` / `background` cases for the
+canonical wiring.

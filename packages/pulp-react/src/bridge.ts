@@ -380,6 +380,12 @@ export function createMockBridge(): MockBridge {
         'createSvgLine', 'setSvgLine',
         // pulp #1148 — generalized overlay-click routing
         'claimOverlay', 'releaseOverlay',
+        // pulp #1899 (gap #3) — string-token bridge fns. setStringToken
+        // writes theme.strings[name]; getStringToken reads it back. The
+        // prop-applier _resolveVar helper consults getStringToken to
+        // resolve var(--mono) etc. in fontFamily / color / borderColor
+        // before forwarding to the bridge.
+        'setStringToken', 'getStringToken',
     ];
     const saved: Record<string, unknown> = {};
     return {

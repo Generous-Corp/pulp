@@ -3430,3 +3430,175 @@ TEST_CASE("pulp #1806 — begin_path resets between fill+stroke pairs",
     }
     REQUIRE(strokes == 2);
 }
+
+#ifdef PULP_HAS_SKIA
+// pulp #1899 (gap #3) — SkiaCanvas tracks every currently-open
+// save_layer whose layer-paint alpha is < 1. Text paint paths
+// (fill_text / stroke_text) consult `inside_non_opaque_layer()` at
+// paint time and select greyscale AA over LCD subpixel AA, so glyphs
+// stay legible inside CSS-opacity layers (browser parity). This test
+// asserts the stack state transitions across the four save_layer
+// entry points + plain save + restore + restore_to_count.
+TEST_CASE("SkiaCanvas tracks non-opaque layers for text edging "
+          "(pulp #1899 gap #3)", "[canvas][skia][issue-1899]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    REQUIRE(sk_canvas != nullptr);
+
+    SkiaCanvas canvas(sk_canvas);
+
+    // Baseline: no layer open → not inside non-opaque destination.
+    REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+
+    SECTION("opacity < 1 layer flips the flag; restore clears it") {
+        canvas.save_layer(0, 0, 64, 64, /*opacity=*/0.5f, /*blur=*/0.0f);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    SECTION("opacity == 1 layer does NOT flip the flag") {
+        canvas.save_layer(0, 0, 64, 64, /*opacity=*/1.0f, /*blur=*/0.0f);
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    SECTION("plain save() never touches the stack") {
+        canvas.save();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+        canvas.save_layer(0, 0, 64, 64, 0.25f, 0.0f);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();   // closes the opacity layer
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+        canvas.restore();   // closes the plain save
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    SECTION("nested non-opaque layers stay tracked until each restore") {
+        canvas.save_layer(0, 0, 64, 64, 0.8f, 0.0f);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.save_layer(0, 0, 64, 64, 0.5f, 0.0f);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        // Outer layer still open and non-opaque.
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    SECTION("save_layer_with_blend tracks non-opaque destinations too") {
+        canvas.save_layer_with_blend(0, 0, 64, 64, /*opacity=*/0.6f,
+                                     /*blur=*/0.0f,
+                                     Canvas::BlendMode::multiply);
+        REQUIRE(canvas.inside_non_opaque_layer());
+        canvas.restore();
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+
+    SECTION("restore_to_count drops every non-opaque layer above target") {
+        const int baseline = canvas.save_count();
+        canvas.save_layer(0, 0, 64, 64, 0.5f, 0.0f);
+        canvas.save_layer(0, 0, 64, 64, 0.5f, 0.0f);
+        canvas.save_layer(0, 0, 64, 64, 0.5f, 0.0f);
+        REQUIRE(canvas.inside_non_opaque_layer());
+
+        canvas.restore_to_count(baseline);
+        // All three opacity layers are gone — stack must be empty.
+        REQUIRE_FALSE(canvas.inside_non_opaque_layer());
+    }
+}
+
+// pulp #1899 (gap #3) — end-to-end: render the same glyph twice into
+// the same surface, once inside save_layer(opacity = 0.5) and once
+// outside, and verify the inside-layer pixels show no LCD subpixel
+// pattern. LCD AA produces unequal R / G / B coverage at glyph edges;
+// greyscale AA writes equal R / G / B. Scanning a few rows where the
+// glyph should have an edge and asserting "max channel difference == 0"
+// for the inside-layer block is the simplest cross-platform probe.
+TEST_CASE("SkiaCanvas text inside opacity layer uses greyscale AA "
+          "(pulp #1899 gap #3)", "[canvas][skia][issue-1899]") {
+    // Two side-by-side surfaces — one painted with an opacity layer,
+    // one without — so we can compare per-pixel coverage shapes.
+    auto make_surface = []() {
+        SkImageInfo info = SkImageInfo::Make(96, 32, kN32_SkColorType,
+                                             kPremul_SkAlphaType,
+                                             SkColorSpace::MakeSRGB());
+        return SkSurfaces::Raster(info);
+    };
+    auto opaque_surface = make_surface();
+    auto layer_surface = make_surface();
+    REQUIRE(opaque_surface != nullptr);
+    REQUIRE(layer_surface != nullptr);
+
+    // Opaque-destination text (LCD AA expected — but we don't assert
+    // on that direction; we only assert the layer surface uses uniform
+    // coverage).
+    {
+        auto* sc = opaque_surface->getCanvas();
+        sc->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(sc);
+        canvas.set_font("Inter", 18.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_text("Hg", 4.0f, 24.0f);
+    }
+
+    // Inside an opacity layer (greyscale AA expected — verify glyph
+    // edge pixels have equal R / G / B coverage).
+    {
+        auto* sc = layer_surface->getCanvas();
+        sc->clear(SK_ColorBLACK);
+        SkiaCanvas canvas(sc);
+        canvas.save_layer(0, 0, 96, 32, /*opacity=*/0.5f, /*blur=*/0.0f);
+        canvas.set_font("Inter", 18.0f);
+        canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+        canvas.fill_text("Hg", 4.0f, 24.0f);
+        canvas.restore();
+    }
+
+    // Read back the layer surface and look for a pixel whose
+    // R / G / B coverage isn't uniform. Greyscale AA writes equal
+    // channels at every glyph edge; LCD AA writes unequal channels
+    // by construction. Allow a 1-LSB tolerance for premultiplied
+    // round-trip noise on layer compositing.
+    SkImageInfo info = SkImageInfo::Make(96, 32, kRGBA_8888_SkColorType,
+                                         kUnpremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    std::vector<uint8_t> pixels(96 * 32 * 4, 0);
+    REQUIRE(layer_surface->readPixels(info, pixels.data(), 96 * 4, 0, 0));
+
+    int unequal_channel_pixels = 0;
+    int edge_pixels = 0;
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 96; ++x) {
+            const uint8_t r = pixels[(y * 96 + x) * 4 + 0];
+            const uint8_t g = pixels[(y * 96 + x) * 4 + 1];
+            const uint8_t b = pixels[(y * 96 + x) * 4 + 2];
+            const int max_c = std::max({r, g, b});
+            const int min_c = std::min({r, g, b});
+            // Only inspect partial-coverage pixels (genuine glyph
+            // edges) — fully transparent / fully opaque pixels can't
+            // distinguish edging mode.
+            if (max_c > 4 && max_c < 250) {
+                ++edge_pixels;
+                if (max_c - min_c > 1) {
+                    ++unequal_channel_pixels;
+                }
+            }
+        }
+    }
+
+    // Sanity — we should have found SOME glyph-edge pixels at all.
+    // If the font isn't available on the host, the test would yield
+    // zero edge pixels; bail with a Catch2 message instead of a
+    // false-positive pass.
+    REQUIRE(edge_pixels > 0);
+    // Core assertion — inside the opacity layer, the renderer used
+    // greyscale AA, so glyph-edge pixels carry uniform R / G / B.
+    REQUIRE(unequal_channel_pixels == 0);
+}
+#endif // PULP_HAS_SKIA
