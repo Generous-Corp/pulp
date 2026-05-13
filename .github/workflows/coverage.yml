@@ -47,6 +47,21 @@ concurrency:
   # merges hit this). Letting the older run finish costs some compute on
   # stale commits but guarantees every push ends with a real conclusion
   # (success/failure) for the required `Diff coverage required` check.
+  #
+  # KNOWN LIMITATION (codex P2 on pulp#1911): GitHub Actions concurrency
+  # only exposes `group` and `cancel-in-progress`. There is no
+  # `queue: max` / queue-depth knob — when `cancel-in-progress: false`
+  # and a run is already in progress, only ONE additional run is queued
+  # per group; any further pushes during that window REPLACE the queued
+  # run (they are silently dropped, NOT queued behind it). So a rapid
+  # push, push, push burst is observed as: run #1 active, run #3 queued,
+  # run #2 cancelled before it started. The final commit always runs,
+  # which is what required-gate semantics actually need (we only block
+  # merge on the head SHA), but intermediate SHAs do not get their own
+  # coverage report. If you need a coverage report for an intermediate
+  # SHA, re-run the workflow manually via `workflow_dispatch` after the
+  # active run finishes. Upstream tracking:
+  #   https://github.com/orgs/community/discussions/12835
   group: coverage-${{ github.ref }}
   cancel-in-progress: false
 
