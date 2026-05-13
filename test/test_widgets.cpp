@@ -1450,8 +1450,8 @@ TEST_CASE("Label soft-wrap: word_break='break-word' splits long unbroken word",
     REQUIRE(reconstructed == "Antidisestablishmentarianism");
 }
 
-TEST_CASE("Label soft-wrap: word_break='normal' falls through to legacy \\n-split",
-          "[view][widget][issue-1737]") {
+TEST_CASE("Label soft-wrap: word_break='normal' on a single unbroken word keeps whole-word overflow",
+          "[view][widget][issue-1737][issue-1924]") {
     Label label("Antidisestablishmentarianism");
     label.set_bounds({0, 0, 60, 100});
     label.set_multi_line(true);
@@ -1460,12 +1460,59 @@ TEST_CASE("Label soft-wrap: word_break='normal' falls through to legacy \\n-spli
     RecordingCanvas canvas;
     label.paint(canvas);
 
-    // Legacy path emits exactly one fill_text per `\n`-delimited line.
-    // No newlines in input → exactly 1 fill_text (overflowing — same
-    // behavior as pre-#1737 for `normal`).
+    // pulp #1924: the default (`normal`) path now also routes through
+    // TextShaper for bounded multi_line labels, but TextShaper's
+    // BreakMode::normal preserves the "whole-word overflow for a single
+    // unbroken word" CSS contract (see test_text_shaper.cpp
+    // "BreakMode::normal preserves legacy whole-word overflow"). So an
+    // input with no whitespace still emits exactly one fill_text — the
+    // observable output for this probe is unchanged from pre-#1924.
     auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(text_cmds.size() == 1);
     REQUIRE(text_cmds[0].text == "Antidisestablishmentarianism");
+}
+
+// ── pulp #1924 — Label soft-wraps under CSS default `white-space: normal` ──
+// Pre-#1924 the wrap gate required `word_break != normal` before the shaper
+// fired, so default Labels (no explicit word-break) overflowed their bounds
+// instead of soft-wrapping at whitespace. CSS `white-space: normal` is the
+// default and MUST soft-wrap at word boundaries. Hit on Spectr's dropdowns
+// (Settings / Preset Manager) — text overflowed the parent SChips /
+// PatternRow container.
+
+TEST_CASE("Label default word_break: text with whitespace soft-wraps at word boundaries (#1924)",
+          "[view][widget][issue-1924]") {
+    // Several short words separated by spaces. With bounds().width
+    // narrower than the full string the shaper must break at whitespace,
+    // emitting more than one line. NO explicit word_break is set — this
+    // is the CSS default (`white-space: normal`) path that was broken
+    // pre-#1924 (single overflowing line).
+    Label label("Settings Preset Manager Dropdown");
+    label.set_bounds({0, 0, 60, 200});
+    label.set_multi_line(true);
+    // NOTE: no set_word_break — defaults to "normal" / empty.
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
+    // Expect >1 fill_text — soft-wrap at whitespace inside the bounded
+    // container. Pre-#1924 this would have been exactly 1 (the legacy
+    // `\n`-only path with no newlines in the input).
+    REQUIRE(text_cmds.size() >= 2);
+
+    // Reconstruction across all emitted lines must contain every
+    // non-whitespace character from the original (whitespace at line
+    // boundaries is collapsed under CSS `white-space: normal` — the
+    // exact preservation contract is shaper-defined, but no characters
+    // beyond inter-word spaces should be dropped).
+    std::string concatenated;
+    for (const auto& cmd : text_cmds) concatenated += cmd.text;
+    // Each individual word must still appear in the emitted output.
+    for (const char* word : {"Settings", "Preset", "Manager", "Dropdown"}) {
+        INFO("Expecting word " << word << " in '" << concatenated << "'");
+        REQUIRE(concatenated.find(word) != std::string::npos);
+    }
 }
 
 TEST_CASE("Label soft-wrap: word_break='anywhere' also splits, same as break-word for over-wide single word",

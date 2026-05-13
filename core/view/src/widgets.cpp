@@ -449,12 +449,21 @@ void Label::paint(canvas::Canvas& canvas) {
     // Vertical alignment
     float lh = line_height_ > 0 ? line_height_ : effective_font_size * 1.4f;
 
-    // pulp #1737 PR-2 — CSS `overflow-wrap` / `word-break` soft-wrap path.
-    // When `View::word_break_` opts into break-word or anywhere AND the
-    // Label is multi_line AND we have a bounded width, route the layout
-    // through TextShaper so over-wide words split inside instead of
-    // overflowing. Default (`normal` or empty) keeps the legacy `\n`-only
-    // split below — zero behavior change for existing consumers.
+    // pulp #1737 PR-2 / #1924 — CSS `white-space` / `overflow-wrap` /
+    // `word-break` soft-wrap path. Route any multi-line, bounded-width
+    // Label through TextShaper so CSS default `white-space: normal`
+    // soft-wraps at word boundaries (whitespace), and `break-word` /
+    // `anywhere` additionally split inside over-wide words.
+    //
+    // Pre-#1924 this gate also required `break_mode != normal`, which
+    // meant the default mode skipped the shaper and never soft-wrapped —
+    // dropdown labels (and any other multi_line Label without an
+    // explicit word-break) overflowed their container instead of
+    // wrapping. TextShaper's `BreakMode::normal` already preserves the
+    // legacy "whole-word overflow for a single unbroken word" behavior
+    // (see test_text_shaper.cpp [issue-1737]), so removing the gate
+    // brings Label in line with the CSS spec without regressing the
+    // single-long-word case.
     //
     // The shaped layout is computed ONCE here and reused both for the
     // vertical-align metrics (source_lines / text_h) and the rendering
@@ -466,7 +475,6 @@ void Label::paint(canvas::Canvas& canvas) {
     else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
     const bool use_shaper_wrap =
         multi_line_ &&
-        break_mode != canvas::BreakMode::normal &&
         bounds().width > 0.0f;
 
     canvas::ShapedLayout shaped_layout;
@@ -611,9 +619,9 @@ void Label::paint(canvas::Canvas& canvas) {
             }
         } else {
             // Legacy `\n`-only split path — bit-identical to pre-#1737.
-            // Used when word_break is "normal" (the default) OR when
-            // bounds().width is 0 / unbounded. Existing consumers see
-            // exactly the previous behavior.
+            // Used when bounds().width is 0 / unbounded (the shaper has
+            // no max_width to break against). Existing consumers see
+            // exactly the previous behavior in that case.
             size_t pos = 0;
             while (pos < display_text.size()) {
                 if (emitted >= visible_lines) break;
