@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0951"></a>
+## [0.31.0]
+
 ## [0.30.0]
 
 ## [0.96.0]
