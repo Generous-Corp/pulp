@@ -39,8 +39,16 @@ on:
         type: string
 
 concurrency:
+  # pulp#1884: do NOT cancel in-progress coverage runs on force-push.
+  # Codecov's `after_n_builds: 4` (pulp#1883) waits for all per-OS uploads
+  # before posting; if a force-push cancels the in-flight run mid-upload,
+  # some legs upload and others don't, Codecov gets stuck waiting for the
+  # missing leg, and the PR merges with no coverage signal (~70% of recent
+  # merges hit this). Letting the older run finish costs some compute on
+  # stale commits but guarantees every push ends with a real conclusion
+  # (success/failure) for the required `Diff coverage required` check.
   group: coverage-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # ── Resolve per-OS runs-on via shared helper ───────────────────────────
