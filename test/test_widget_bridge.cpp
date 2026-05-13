@@ -12665,6 +12665,49 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches v0 parser by source lab
     REQUIRE(err_str.find("host React and ReactDOM") != std::string::npos);
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Figma parser by source label",
+          "[view][bridge][runtime-import-dispatch][figma][phase-6.6.3]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string figma_tsx = R"(
+        // Source: Figma Make export (sanitized for Pulp runtime import)
+        import { useState } from "react";
+        export default function DispatchProbe() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="figma-dispatch-probe" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={level}
+                onChange={(event) => setLevel(Number(event.currentTarget.value))}
+              />
+            </div>
+          );
+        }
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(figma_tsx) + "', 'figma'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("Figma Make runtime import requires host React and ReactDOM") != std::string::npos);
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;

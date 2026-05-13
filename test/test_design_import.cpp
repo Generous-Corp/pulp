@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -46,6 +50,114 @@ std::string read_fixture(const std::string& rel_path) {
 
 std::string asset_text(const ClaudeBundleAsset& asset) {
     return std::string(asset.data.begin(), asset.data.end());
+}
+
+const char* minimal_host_react_dom_shim() {
+    return R"JS(
+(function(){
+  function flatten(input, out) {
+    if (input == null || input === false || input === true) return;
+    if (Array.isArray(input)) {
+      for (var i = 0; i < input.length; i++) flatten(input[i], out);
+      return;
+    }
+    out.push(input);
+  }
+
+  function createElement(type, props) {
+    var children = [];
+    for (var i = 2; i < arguments.length; i++) flatten(arguments[i], children);
+    return { type: type, props: props || {}, children: children };
+  }
+
+  function cssValue(key, value) {
+    if (value == null) return "";
+    if (typeof value === "number") {
+      if (key === "flexGrow" || key === "flexShrink" || key === "opacity" ||
+          key === "zIndex" || key === "lineHeight") {
+        return String(value);
+      }
+      return String(value) + "px";
+    }
+    return String(value);
+  }
+
+  function applyProps(el, props) {
+    props = props || {};
+    for (var key in props) {
+      if (key === "children" || key === "key") continue;
+      var value = props[key];
+      if (key === "style" && value) {
+        for (var styleKey in value) el.style[styleKey] = cssValue(styleKey, value[styleKey]);
+      } else if (key === "ref" && value) {
+        value.current = el;
+      } else if (key === "className") {
+        el.setAttribute("class", String(value));
+      } else if (key.slice(0, 2) === "on") {
+        el["__" + key] = value;
+      } else if (value === true) {
+        el.setAttribute(key, "");
+      } else if (value !== false && value != null) {
+        el.setAttribute(key, String(value));
+      }
+    }
+  }
+
+  function renderNode(node) {
+    if (node == null || node === false || node === true) return null;
+    if (typeof node === "string" || typeof node === "number") {
+      return document.createTextNode(String(node));
+    }
+    if (typeof node.type === "function") {
+      var props = Object.assign({}, node.props || {});
+      props.children = node.children;
+      return renderNode(node.type(props));
+    }
+    var el = document.createElement(node.type === globalThis.React.Fragment ? "span" : node.type);
+    applyProps(el, node.props);
+    for (var i = 0; i < node.children.length; i++) {
+      var child = renderNode(node.children[i]);
+      if (child) el.appendChild(child);
+    }
+    return el;
+  }
+
+  var effects = [];
+  globalThis.React = {
+    Fragment: "__fragment",
+    createElement: createElement,
+    useCallback: function(fn) { return fn; },
+    useEffect: function(fn) { effects.push(fn); },
+    useMemo: function(fn) { return fn(); },
+    useRef: function(value) { return { current: value == null ? null : value }; },
+    useState: function(initial) {
+      var value = initial;
+      return [value, function(next) { value = (typeof next === "function") ? next(value) : next; }];
+    }
+  };
+  globalThis.ReactDOM = {
+    createRoot: function(mount) {
+      return {
+        render: function(element) {
+          var node = renderNode(element);
+          if (node) mount.appendChild(node);
+          for (var i = 0; i < effects.length; i++) effects[i]();
+        }
+      };
+    },
+    flushSync: function(fn) { return fn(); }
+  };
+})();
+)JS";
+}
+
+void maybe_write_figma_runtime_script(const std::string& runtime_js) {
+    const char* out = std::getenv("PULP_FIGMA_RUNTIME_JS_OUT");
+    if (out == nullptr || *out == '\0') return;
+
+    std::ofstream file(out, std::ios::binary);
+    REQUIRE(file.good());
+    file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
 }
 
 } // namespace
@@ -1184,6 +1296,151 @@ TEST_CASE("parse_v0_dev_react rejects out-of-matrix v0 default surfaces",
     for (const auto& sample : rejected) {
         CAPTURE(sample);
         REQUIRE_FALSE(parse_v0_dev_react(sample).has_value());
+    }
+}
+
+// ── Figma Make React parsing ────────────────────────────────────────────
+
+TEST_CASE("parse_figma_make_react parses staged Figma runtime fixture",
+          "[view][import][parser][figma][phase-6.6.3]") {
+    const auto primary = read_fixture("planning/fixtures/figma/level-meter-panel.tsx");
+    auto bundle = parse_figma_make_react(primary);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->javascript_indices.front() == 0);
+    REQUIRE(bundle->assets.front().uuid == "figma-runtime-app");
+    REQUIRE(bundle->assets.front().mime == "text/javascript");
+    REQUIRE(bundle->template_html.find("data-pulp-source=\"figma\"") != std::string::npos);
+    REQUIRE(bundle->template_html.find("figma-level-meter-panel") != std::string::npos);
+
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("figma-level-meter-panel") != std::string::npos);
+    REQUIRE(js.find("Figma Make runtime import requires host React and ReactDOM") != std::string::npos);
+    REQUIRE(js.find("'data-pulp-source': 'figma'") != std::string::npos);
+    REQUIRE(js.find("ReactDOM.createRoot") != std::string::npos);
+    REQUIRE(js.find("requestAnimationFrame") != std::string::npos);
+    REQUIRE(js.find("performance.now") != std::string::npos);
+    REQUIRE(js.find("canvas.getContext('2d')") != std::string::npos);
+    REQUIRE(js.find("type: 'range'") != std::string::npos);
+}
+
+TEST_CASE("parse_figma_make_react runtime bundle materializes with host React shim",
+          "[view][import][parser][figma][render][phase-6.6.3]") {
+    const auto primary = read_fixture("planning/fixtures/figma/level-meter-panel.tsx");
+    auto bundle = parse_figma_make_react(primary);
+    REQUIRE(bundle.has_value());
+    const auto runtime_js = asset_text(bundle->assets.front());
+    maybe_write_figma_runtime_script(runtime_js);
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    View root;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.load_script(minimal_host_react_dom_shim()));
+    REQUIRE_NOTHROW(bridge.load_script(runtime_js));
+    bridge.service_frame_callbacks();
+
+    REQUIRE(root.child_count() > 0);
+    REQUIRE(engine.evaluate("!!document.getElementById('figma-level-meter-panel')")
+                .getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate(
+        "(function(){ var el = document.getElementById('figma-level-meter-panel');"
+        "return el ? String(el._id || '') : ''; })()").toString().empty());
+}
+
+TEST_CASE("parse_figma_make_react accepts sanitized Figma Make TSX",
+          "[view][import][parser][figma][phase-6.6.3]") {
+    const std::string sanitized = R"(
+        // Source: Figma Make export (sanitized for Pulp runtime import)
+        import {
+          useState
+        } from "react";
+        export default function MultiLineFigmaPanel() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="figma-multi-line-react-import" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />
+            </div>
+          );
+        }
+    )";
+
+    auto bundle = parse_figma_make_react(sanitized);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->template_html.find("figma-multi-line-react-import") != std::string::npos);
+    REQUIRE(asset_text(bundle->assets.front()).find("figma-multi-line-react-import") != std::string::npos);
+}
+
+TEST_CASE("parse_figma_make_react rejects out-of-matrix Figma defaults",
+          "[view][import][parser][figma][phase-6.6.3]") {
+    const std::vector<std::string> rejected = {
+        R"(
+            "use client";
+            // Source: Figma Make export
+            import { useState } from "react";
+            export default function NextFigmaPanel() {
+              return <div id="figma-next-panel">Next path</div>;
+            }
+        )",
+        R"(
+            // Source: Figma Make export
+            import { useState } from "react";
+            import hero from "figma:asset/a1b2c3d4.png";
+            export default function FigmaAssetPanel() {
+              return <div id="figma-asset-panel">Asset {hero}</div>;
+            }
+        )",
+        R"(
+            // Source: Figma Make export
+            import { Dialog } from "@radix-ui/react-dialog@1.1.6";
+            export default function VersionedImportPanel() {
+              return <div id="figma-versioned-panel">Versioned</div>;
+            }
+        )",
+        R"(
+            import figma from "@figma/code-connect/react";
+            figma.connect(Button, "https://figma.com/file/example", {
+              example: () => <Button />
+            });
+        )",
+        R"(
+            // Source: Figma Make export
+            import { useState } from "react";
+            export default function TailwindPanel() {
+              return <div className="flex rounded-lg">Tailwind</div>;
+            }
+        )",
+        R"(
+            // Source: Figma Make export
+            import { useState } from "react";
+            import Link from "next/link";
+            export default function NextImportPanel() {
+              return <Link href="/">Next</Link>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function GenericReactPanel() {
+              const [level, setLevel] = useState(0.5);
+              return <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />;
+            }
+        )",
+        R"(
+            // Source: Figma Make export
+            import { useState } from "react";
+            export default function TextInputPanel() {
+              const [value, setValue] = useState("");
+              return <input type="text" value={value} onChange={(event) => setValue(event.currentTarget.value)} />;
+            }
+        )"
+    };
+
+    for (const auto& sample : rejected) {
+        CAPTURE(sample);
+        REQUIRE_FALSE(parse_figma_make_react(sample).has_value());
     }
 }
 

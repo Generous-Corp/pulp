@@ -193,6 +193,13 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
 /// APIs, storage APIs, unsupported JSX tags, etc.).
 std::optional<ClaudeBundle> parse_v0_dev_react(const std::string& tsx_or_envelope);
 
+/// Normalize a constrained Figma Make React TSX export into the runtime-import
+/// bundle payload shape. C-2 accepts a sanitized single-file TSX component:
+/// Figma Make provenance must be explicit, versions/assets must already be
+/// stripped, and styling must use inline `style={{...}}` objects rather than
+/// Tailwind/Radix/default Figma Make dependencies.
+std::optional<ClaudeBundle> parse_figma_make_react(const std::string& tsx);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

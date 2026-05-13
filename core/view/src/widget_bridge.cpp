@@ -1060,8 +1060,7 @@ void WidgetBridge::install_runtime_import_handlers() {
 
     // __pulpRuntimeImport__(html, source_label) → void
     //
-    // Parses the bundle envelope (Claude format only for now — figma /
-    // stitch / v0 / pencil can layer on later), evaluates inline
+    // Parses the selected runtime-import source bundle, evaluates inline
     // text/javascript + text/babel scripts on THIS engine, dispatches
     // DOMContentLoaded.
     //
@@ -1088,6 +1087,13 @@ void WidgetBridge::install_runtime_import_handlers() {
                     bundle = parse_v0_dev_react(html);
                     if (!bundle) {
                         set_err("__pulpRuntimeImport__: unsupported v0.dev React export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
+                } else if (source_lc == "figma" || source_lc == "figma-make") {
+                    bundle = parse_figma_make_react(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported Figma Make React export (got '"
                                 + src_label + "')");
                         return choc::value::Value();
                     }

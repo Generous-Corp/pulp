@@ -1095,6 +1095,18 @@ std::string v0_html_attr_escape(const std::string& s) {
     return out;
 }
 
+std::string replace_all_copy(std::string s,
+                             const std::string& needle,
+                             const std::string& replacement) {
+    if (needle.empty()) return s;
+    size_t pos = 0;
+    while ((pos = s.find(needle, pos)) != std::string::npos) {
+        s.replace(pos, needle.size(), replacement);
+        pos += replacement.size();
+    }
+    return s;
+}
+
 std::string v0_build_runtime_js(const std::string& source,
                                 const std::string& file_name,
                                 const std::string& component_name,
@@ -1210,6 +1222,86 @@ std::string v0_build_runtime_js(const std::string& source,
        << "  ReactDOM.createRoot(mount).render(h(App));\n"
        << "})();\n";
     return js.str();
+}
+
+bool figma_has_source_signal(const std::string& source) {
+    const auto lower = v0_lower(source);
+    return lower.find("source: figma") != std::string::npos ||
+           lower.find("figma make") != std::string::npos ||
+           lower.find("figma-make") != std::string::npos ||
+           lower.find("figma:asset/") != std::string::npos ||
+           lower.find("@figma/code-connect") != std::string::npos;
+}
+
+bool figma_has_versioned_import(const std::string& source) {
+    static const std::regex from_re(
+        R"RX(\bfrom\s*["'][^"']+@[0-9]+(?:\.[0-9]+){1,2}[^"']*["'])RX",
+        std::regex::icase);
+    static const std::regex side_effect_re(
+        R"RX(\bimport\s*["'][^"']+@[0-9]+(?:\.[0-9]+){1,2}[^"']*["'])RX",
+        std::regex::icase);
+    return std::regex_search(source, from_re) ||
+           std::regex_search(source, side_effect_re);
+}
+
+bool figma_uses_only_supported_surfaces(const std::string& source) {
+    if (!figma_has_source_signal(source)) return false;
+
+    const auto lower = v0_lower(source);
+    const char* figma_reject_markers[] = {
+        "\"use client\"", "'use client'", "figma:asset/",
+        "@figma/code-connect", "figma.connect(", "@radix-ui", "radix-ui",
+        "tailwind", "classname", "next/", "next\\", "next/dynamic"
+    };
+    for (const char* marker : figma_reject_markers) {
+        if (lower.find(marker) != std::string::npos) return false;
+    }
+    if (figma_has_versioned_import(source)) return false;
+
+    return v0_uses_only_supported_surfaces(source);
+}
+
+std::string figma_slug_from_component(std::string name) {
+    std::string out = "figma";
+    for (char c : name) {
+        if (std::isupper(static_cast<unsigned char>(c)) && !out.empty() && out.back() != '-') {
+            out += '-';
+        }
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        } else if (c == '-' || c == '_') {
+            if (!out.empty() && out.back() != '-') out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out.empty() ? "figma-runtime-import" : out;
+}
+
+std::string figma_extract_root_id(const std::string& source,
+                                  const std::string& component_name) {
+    static const std::regex id_re(R"RX(\bid\s*=\s*(?:"([^"]+)"|'([^']+)'))RX");
+    if (auto m = v0_match_first(source, id_re)) return *m;
+    return figma_slug_from_component(component_name);
+}
+
+std::string figma_build_runtime_js(const std::string& source,
+                                   const std::string& file_name,
+                                   const std::string& component_name,
+                                   const std::string& root_id) {
+    auto js = v0_build_runtime_js(source, file_name, component_name, root_id);
+    js = replace_all_copy(js,
+        "v0.dev runtime import requires host React and ReactDOM",
+        "Figma Make runtime import requires host React and ReactDOM");
+    js = replace_all_copy(js,
+        "v0.dev React runtime import",
+        "Figma Make React runtime import");
+    js = replace_all_copy(js,
+        "'data-pulp-source': 'v0'",
+        "'data-pulp-source': 'figma'");
+    js = replace_all_copy(js,
+        "sourceFile.indexOf('/') >= 0 ? 'v0' : 'OUT'",
+        "sourceFile.indexOf('/') >= 0 ? 'FIGMA' : 'FIG'");
+    return js;
 }
 
 void set_runtime_error(ClaudeRuntimeOptions& opts, const std::string& msg) {
@@ -1701,6 +1793,34 @@ std::optional<ClaudeBundle> parse_v0_dev_react(const std::string& tsx_or_envelop
         "<div id=\"root\" data-pulp-source=\"v0\" data-v0-root=\"" +
         v0_html_attr_escape(root_id) +
         "\"></div><script src=\"v0-runtime-app\"></script>";
+    return bundle;
+}
+
+std::optional<ClaudeBundle> parse_figma_make_react(const std::string& tsx) {
+    auto source = v0_trim(tsx);
+    if (source.empty()) return std::nullopt;
+    if (source.find("export default") == std::string::npos) return std::nullopt;
+    if (!v0_contains_ci(source, "react")) return std::nullopt;
+    if (!figma_uses_only_supported_surfaces(source)) return std::nullopt;
+
+    auto component_name = v0_extract_component_name(source);
+    if (component_name == "V0RuntimeImport") component_name = "FigmaRuntimeImport";
+    const auto root_id = figma_extract_root_id(source, component_name);
+    auto runtime_js = figma_build_runtime_js(
+        source, "App.tsx", component_name, root_id);
+
+    ClaudeBundleAsset app;
+    app.uuid = "figma-runtime-app";
+    app.mime = "text/javascript";
+    app.data.assign(runtime_js.begin(), runtime_js.end());
+
+    ClaudeBundle bundle;
+    bundle.assets.push_back(std::move(app));
+    bundle.javascript_indices.push_back(0);
+    bundle.template_html =
+        "<div id=\"root\" data-pulp-source=\"figma\" data-figma-root=\"" +
+        v0_html_attr_escape(root_id) +
+        "\"></div><script src=\"figma-runtime-app\"></script>";
     return bundle;
 }
 
