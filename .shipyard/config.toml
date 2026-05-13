@@ -49,7 +49,14 @@ stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "cmake --build build --parallel"
-test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup"
+# `--label-exclude slow` skips ctest entries tagged LABELS slow — currently
+# `cmake-ios-auv3-configure` (test/CMakeLists.txt:23, ~25-30 min fresh-cache
+# Xcode/iOS try-compile + FetchContent bootstrap). #1589 added the label
+# for PR validation exclusion; the shipyard test command never picked up
+# the flag, so every PR was paying the slow-iOS cost. Full-CI (push to
+# main, nightly, workflow_dispatch) can still run it via a different
+# stage if needed — this only excludes from per-PR validation.
+test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup --label-exclude slow"
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base
@@ -76,7 +83,7 @@ build     = "cmake --build build --config Release --parallel"
 # undiagnosable crashes. Timing-sensitive tests (EventLoop,
 # BufferingReader, VisualizationBridge) were fixed with proper
 # wait_until patterns and longer timeouts — no longer excluded.
-test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\""
+test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\" --label-exclude slow"
 
 [validation.gates]
 # Layer-3 authoritative gates — same scripts CI runs via
