@@ -4874,6 +4874,61 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 10 OOS 3D/content/scroll propertie
     REQUIRE(p->flex().direction == FlexDirection::row);
 }
 
+// ── pulp #1434 / Tier-4 — perf hints + interaction misc pin (Bundle-C) ───────
+//
+// Closes 7 arch-deferred coverage-gap rows. Final bundle of the Tier-4 sweep.
+// Covers:
+//   perf-hint    (3): contain, contentVisibility, willChange
+//   interaction  (2): resize, touchAction
+//   catch-all    (2): __pseudo_classes_note (meta-row, excluded from JS loop),
+//                     all
+//
+// `__pseudo_classes_note` is a documentation marker in compat.json, not a
+// settable CSS property — its closure is doc-only. The remaining 6 are real
+// CSS properties that Pulp deliberately treats as no-ops (perf hints aren't
+// honored by Skia/Dawn; resize/touchAction don't have native equivalents).
+TEST_CASE("CSSStyleDeclaration silent-accepts 6 perf-hint/interaction CSS properties as no-ops",
+          "[view][bridge][css][issue-1434][arch-deferred][perf-misc]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"((function(){
+        createPanel('p_perfmisc', '');
+        var el = { _id: 'p_perfmisc', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(el);
+        sd._applyProperty('display', 'flex');
+        sd._applyProperty('flexDirection', 'row');
+
+        // Perf hints:
+        sd._applyProperty('contain', 'layout paint');
+        sd._applyProperty('contentVisibility', 'auto');
+        sd._applyProperty('willChange', 'transform, opacity');
+        // Interaction:
+        sd._applyProperty('resize', 'both');
+        sd._applyProperty('touchAction', 'pan-y');
+        // Catch-all shorthand:
+        sd._applyProperty('all', 'unset');
+    })();)");
+
+    auto* p = dynamic_cast<Panel*>(bridge.widget("p_perfmisc"));
+    REQUIRE(p != nullptr);
+
+    // Invariants after 6 no-op writes:
+    //  - bridge didn't crash
+    //  - panel still visible
+    //  - flex direction unchanged from row baseline
+    //
+    // Notably `all: unset` would reset every CSS property to its initial
+    // value in a spec-compliant engine. Pulp's silent no-op for `all` is
+    // safe for any imported CSS that uses it defensively (RN-derived
+    // StyleSheets, reset-stylesheet imports).
+    REQUIRE(p->visible());
+    REQUIRE(p->flex().direction == FlexDirection::row);
+}
+
 // ── pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration ─────────
 //
 // Mirrors the #965 SvgPath bridge tests. Closes Spectr [G] preset
