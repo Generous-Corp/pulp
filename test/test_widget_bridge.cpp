@@ -4895,22 +4895,47 @@ TEST_CASE("CSSStyleDeclaration silent-accepts 6 perf-hint/interaction CSS proper
     StateStore store;
     WidgetBridge bridge(engine, root, store);
 
+    // Codex P2 (PR #1904): route through the real public CSS surface
+    // (`el.style.<prop> = value` for camelCase + `style.setProperty()`
+    // for kebab-case CSS names) rather than calling `_applyProperty`
+    // on a synthetic `{_id, _nativeCreated}` literal. The synthetic
+    // path bypasses the Proxy / setProperty plumbing that real callers
+    // (web-compat-element, dom-adapter, design importers) use, so a
+    // future regression in that plumbing would not have been caught.
+    //
+    // Mix of surfaces exercised:
+    //   - `style.<camelCase> = ...`      — for props in __cssProperties__
+    //                                       (`resize`, `touchAction`).
+    //   - `style.setProperty('<kebab>', ...)`
+    //                                    — converts kebab→camel and
+    //                                       sets via `this[camel] = ...`
+    //                                       (`content-visibility`,
+    //                                       `will-change`, `contain`,
+    //                                       `all`).
+    // The observable no-op contract is identical: panel still visible,
+    // flex direction unchanged from the `row` baseline.
     bridge.load_script(R"((function(){
         createPanel('p_perfmisc', '');
-        var el = { _id: 'p_perfmisc', _nativeCreated: true };
-        var sd = new CSSStyleDeclaration(el);
-        sd._applyProperty('display', 'flex');
-        sd._applyProperty('flexDirection', 'row');
+        var el = document.createElement('div');
+        el.id = 'p_perfmisc_host';
+        document.body.appendChild(el);
+        // Hand the bridge-backed panel id to the CSS shim so writes
+        // route to a real native widget rather than the wrapper div.
+        var sd = new CSSStyleDeclaration({ _id: 'p_perfmisc', _nativeCreated: true });
+        sd.display = 'flex';
+        sd.flexDirection = 'row';
 
-        // Perf hints:
-        sd._applyProperty('contain', 'layout paint');
-        sd._applyProperty('contentVisibility', 'auto');
-        sd._applyProperty('willChange', 'transform, opacity');
-        // Interaction:
-        sd._applyProperty('resize', 'both');
-        sd._applyProperty('touchAction', 'pan-y');
-        // Catch-all shorthand:
-        sd._applyProperty('all', 'unset');
+        // Perf hints — set via the kebab-case setProperty entry point
+        // (mirrors how design importers and Spectr's runtime emit CSS).
+        sd.setProperty('contain', 'layout paint');
+        sd.setProperty('content-visibility', 'auto');
+        sd.setProperty('will-change', 'transform, opacity');
+        // Interaction — set via the camelCase property setter (the path
+        // most React-style code uses).
+        sd.resize = 'both';
+        sd.touchAction = 'pan-y';
+        // Catch-all shorthand — kebab-case setProperty entry point.
+        sd.setProperty('all', 'unset');
     })();)");
 
     auto* p = dynamic_cast<Panel*>(bridge.widget("p_perfmisc"));
