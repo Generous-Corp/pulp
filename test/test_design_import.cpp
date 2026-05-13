@@ -160,6 +160,15 @@ void maybe_write_figma_runtime_script(const std::string& runtime_js) {
     file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
 }
 
+void maybe_write_stitch_runtime_script(const std::string& runtime_js) {
+    const char* out = std::getenv("PULP_STITCH_RUNTIME_JS_OUT");
+    if (out == nullptr || *out == '\0') return;
+
+    std::ofstream file(out, std::ios::binary);
+    REQUIRE(file.good());
+    file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
+}
+
 } // namespace
 
 // ── Design source parsing ───────────────────────────────────────────────
@@ -1441,6 +1450,143 @@ TEST_CASE("parse_figma_make_react rejects out-of-matrix Figma defaults",
     for (const auto& sample : rejected) {
         CAPTURE(sample);
         REQUIRE_FALSE(parse_figma_make_react(sample).has_value());
+    }
+}
+
+// ── Google Stitch React parsing ────────────────────────────────────────
+
+TEST_CASE("parse_stitch_react parses staged Stitch runtime fixture",
+          "[view][import][parser][stitch][phase-6.6.4]") {
+    const auto primary = read_fixture("planning/fixtures/stitch/transport-bar.tsx");
+    auto bundle = parse_stitch_react(primary);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->javascript_indices.front() == 0);
+    REQUIRE(bundle->assets.front().uuid == "stitch-runtime-app");
+    REQUIRE(bundle->assets.front().mime == "text/javascript");
+    REQUIRE(bundle->template_html.find("data-pulp-source=\"stitch\"") != std::string::npos);
+    REQUIRE(bundle->template_html.find("stitch-transport-bar") != std::string::npos);
+
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("stitch-transport-bar") != std::string::npos);
+    REQUIRE(js.find("Stitch runtime import requires host React and ReactDOM") != std::string::npos);
+    REQUIRE(js.find("'data-pulp-source': 'stitch'") != std::string::npos);
+    REQUIRE(js.find("ReactDOM.createRoot") != std::string::npos);
+    REQUIRE(js.find("requestAnimationFrame") != std::string::npos);
+    REQUIRE(js.find("performance.now") != std::string::npos);
+    REQUIRE(js.find("canvas.getContext('2d')") != std::string::npos);
+    REQUIRE(js.find("type: 'range'") != std::string::npos);
+}
+
+TEST_CASE("parse_stitch_react runtime bundle materializes with host React shim",
+          "[view][import][parser][stitch][render][phase-6.6.4]") {
+    const auto primary = read_fixture("planning/fixtures/stitch/transport-bar.tsx");
+    auto bundle = parse_stitch_react(primary);
+    REQUIRE(bundle.has_value());
+    const auto runtime_js = asset_text(bundle->assets.front());
+    maybe_write_stitch_runtime_script(runtime_js);
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    View root;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.load_script(minimal_host_react_dom_shim()));
+    REQUIRE_NOTHROW(bridge.load_script(runtime_js));
+    bridge.service_frame_callbacks();
+
+    REQUIRE(root.child_count() > 0);
+    REQUIRE(engine.evaluate("!!document.getElementById('stitch-transport-bar')")
+                .getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate(
+        "(function(){ var el = document.getElementById('stitch-transport-bar');"
+        "return el ? String(el._id || '') : ''; })()").toString().empty());
+}
+
+TEST_CASE("parse_stitch_react accepts sanitized Stitch TSX",
+          "[view][import][parser][stitch][phase-6.6.4]") {
+    const std::string sanitized = R"(
+        import {
+          useState
+        } from "react";
+        export default function MultiLineStitchPanel() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="stitch-multi-line-react-import" data-stitch-screen="level" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />
+            </div>
+          );
+        }
+    )";
+
+    auto bundle = parse_stitch_react(sanitized);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->template_html.find("stitch-multi-line-react-import") != std::string::npos);
+    REQUIRE(asset_text(bundle->assets.front()).find("stitch-multi-line-react-import") != std::string::npos);
+}
+
+TEST_CASE("parse_stitch_react rejects out-of-matrix Stitch defaults",
+          "[view][import][parser][stitch][phase-6.6.4]") {
+    const std::vector<std::string> rejected = {
+        R"(
+            "use client";
+            import { useState } from "react";
+            export default function NextStitchPanel() {
+              return <div id="stitch-next-panel">Next path</div>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function TailwindPanel() {
+              return <div className="flex rounded-lg">Tailwind</div>;
+            }
+        )",
+        R"(
+            import "./transport.css";
+            import { useState } from "react";
+            export default function ExternalCssPanel() {
+              return <div id="stitch-css-panel">CSS</div>;
+            }
+        )",
+        R"(
+            import { Dialog } from "@radix-ui/react-dialog";
+            export default function RadixPanel() {
+              return <div id="stitch-radix-panel">Radix</div>;
+            }
+        )",
+        R"(
+            import Link from "next/link";
+            export default function NextImportPanel() {
+              return <Link href="/">Next</Link>;
+            }
+        )",
+        R"(
+            import { View } from "react-native";
+            export default function NativePanel() {
+              return <View />;
+            }
+        )",
+        R"({"screen_id":"transport-bar","nodes":[]})",
+        R"(
+            import { useState } from "react";
+            export default function TextInputPanel() {
+              const [value, setValue] = useState("");
+              return <input type="text" value={value} onChange={(event) => setValue(event.currentTarget.value)} />;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function CustomComponentPanel() {
+              return <TransportSlider value={0.5} />;
+            }
+        )"
+    };
+
+    for (const auto& sample : rejected) {
+        CAPTURE(sample);
+        REQUIRE_FALSE(parse_stitch_react(sample).has_value());
     }
 }
 

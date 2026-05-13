@@ -200,6 +200,14 @@ std::optional<ClaudeBundle> parse_v0_dev_react(const std::string& tsx_or_envelop
 /// Tailwind/Radix/default Figma Make dependencies.
 std::optional<ClaudeBundle> parse_figma_make_react(const std::string& tsx);
 
+/// Normalize a constrained Google Stitch React export into the runtime-import
+/// bundle payload shape. Stitch has no reliable standalone file marker, so
+/// callers should route here only from an explicit `source: "stitch"` manifest
+/// or runtime-import source label. Returns nullopt for Tailwind/default Stitch
+/// exports, external CSS, Next/Radix wrappers, RN imports, MCP JSON, or any
+/// surface outside Pulp's supported runtime-import DOM/CSS/API subset.
+std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

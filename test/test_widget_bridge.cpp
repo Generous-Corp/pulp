@@ -12708,6 +12708,48 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Figma parser by source 
     REQUIRE(err_str.find("Figma Make runtime import requires host React and ReactDOM") != std::string::npos);
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Stitch parser by source label",
+          "[view][bridge][runtime-import-dispatch][stitch][phase-6.6.4]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string stitch_tsx = R"(
+        import { useState } from "react";
+        export default function DispatchProbe() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="stitch-dispatch-probe" data-stitch-screen="probe" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={level}
+                onChange={(event) => setLevel(Number(event.currentTarget.value))}
+              />
+            </div>
+          );
+        }
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(stitch_tsx) + "', 'stitch'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("Stitch runtime import requires host React and ReactDOM") != std::string::npos);
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;

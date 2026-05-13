@@ -1107,6 +1107,13 @@ void WidgetBridge::install_runtime_import_handlers() {
                                 + src_label + "')");
                         return choc::value::Value();
                     }
+                } else if (source_lc == "stitch" || source_lc == "google-stitch") {
+                    bundle = parse_stitch_react(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported Stitch React export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
                 } else {
                     bundle = parse_claude_bundle(html);
                 }
