@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace pulp::view;
@@ -15,13 +16,32 @@ namespace {
 #endif
 
 std::string read_fixture(const std::string& rel_path) {
-    const auto path = std::string(PULP_REPO_ROOT) + "/" + rel_path;
-    INFO("reading fixture " << path);
-    std::ifstream in(path, std::ios::binary);
-    REQUIRE(in.good());
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+    const auto root = std::string(PULP_REPO_ROOT);
+    std::vector<std::string> candidates{root + "/" + rel_path};
+    constexpr std::string_view planning_prefix{"planning/fixtures/"};
+    if (rel_path.rfind(std::string(planning_prefix), 0) == 0) {
+        candidates.push_back(root + "/test/fixtures/" + rel_path.substr(planning_prefix.size()));
+    }
+
+    std::ostringstream tried;
+    for (const auto& path : candidates) {
+        if (tried.tellp() > 0) {
+            tried << ", ";
+        }
+        tried << path;
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in.good()) {
+            continue;
+        }
+
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+
+    FAIL("reading fixture failed; tried " << tried.str());
+    return {};
 }
 
 std::string asset_text(const ClaudeBundleAsset& asset) {
