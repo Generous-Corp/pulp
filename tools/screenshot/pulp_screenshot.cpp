@@ -8,6 +8,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/state/store.hpp>
+#include "viewport_reconcile.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -39,61 +40,10 @@ using namespace pulp::state;
 // bar at `top:0` stays at `top:0`; the rail at `bottom:0` stays at
 // `bottom:0` of the now-fitted container.
 //
-// This helper emulates that flex-shrink behaviour for runtime-import
-// captures. For any direct child of root_ with
-// `position:absolute|fixed` AND a `preferred_width|height` exceeding
-// the viewport AND no opposite-edge anchor (`right` for width,
-// `bottom` for height — i.e. the source told us a concrete size, not
-// "stretch me between two edges"), clamp the explicit size down to
-// the viewport size on that axis. Descendants anchored at `bottom:0`
-// / `right:0` then anchor to the visible edge instead of falling off.
-//
-// Scoped strictly to oversize-content + screenshot-tool usage; never
-// fires when content already fits, never modifies anchored content.
-static void reconcile_oversize_absolute_children(View& root,
-                                                  uint32_t viewport_width,
-                                                  uint32_t viewport_height) {
-    const float vw = static_cast<float>(viewport_width);
-    const float vh = static_cast<float>(viewport_height);
-    for (size_t i = 0; i < root.child_count(); ++i) {
-        auto* child = const_cast<View*>(root.child_at(i));
-        if (!child) continue;
-        if (child->position() != View::Position::absolute &&
-            child->position() != View::Position::fixed) {
-            continue;
-        }
-        const float cw = child->flex().preferred_width;
-        const float ch = child->flex().preferred_height;
-        if (cw <= 0 && ch <= 0) continue;
-        // Only act when the size is explicit (preferred_* set) AND the
-        // opposite edge isn't anchored — i.e. the source said "size me
-        // explicitly", not "stretch me from edge to edge". If both top
-        // and bottom (or left and right) are set, the size is implicit
-        // and Yoga handles it correctly via the inset → size derivation.
-        const bool size_x_is_explicit =
-            cw > 0 && (!child->has_right() || child->right() == 0.0f);
-        const bool size_y_is_explicit =
-            ch > 0 && (!child->has_bottom() || child->bottom() == 0.0f);
-        bool clamped = false;
-        if (cw > vw && size_x_is_explicit) {
-            child->flex().preferred_width = vw;
-            clamped = true;
-        }
-        if (ch > vh && size_y_is_explicit) {
-            child->flex().preferred_height = vh;
-            clamped = true;
-        }
-        if (clamped && std::getenv("PULP_DUMP_BOUNDS")) {
-            std::fprintf(stderr,
-                         "[viewport-reconcile] clamped oversize child %zu: "
-                         "(%.0fx%.0f) -> (%.0fx%.0f) in %ux%u viewport\n",
-                         i, cw, ch,
-                         child->flex().preferred_width,
-                         child->flex().preferred_height,
-                         viewport_width, viewport_height);
-        }
-    }
-}
+// The recursive subtree-clamp implementation lives in
+// `viewport_reconcile.hpp` so unit tests can exercise it without
+// linking the screenshot CLI binary. See that header for the full
+// design rationale and the dom-adapter background.
 
 static void print_usage() {
     std::cerr << "Usage: pulp-screenshot [options]\n";
@@ -209,10 +159,13 @@ int main(int argc, char* argv[]) {
         bridge.load_script(code);
 
         // pulp #1899 — after React mount, reconcile any oversize
-        // absolute children with the viewport so bottom-anchored
-        // descendants land within the captured frame. No-op when
-        // content fits.
-        reconcile_oversize_absolute_children(root, width, height);
+        // absolute descendants with the viewport so bottom-anchored
+        // content lands within the captured frame. No-op when content
+        // fits. Walks the entire subtree, not just direct children of
+        // root_, because runtime-import adapters (Spectr's dom-adapter
+        // at tsx:440-441) propagate the hardcoded oversize through
+        // multiple intermediate wrappers.
+        pulp::screenshot::reconcile_oversize_absolute_subtree(root, width, height);
     }
 
     // Render

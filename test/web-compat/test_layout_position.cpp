@@ -366,3 +366,138 @@ TEST_CASE("Yoga: absolute child does not consume flex-line space from siblings",
     REQUIRE(bodyPtr->bounds().y == 44.0f);
     REQUIRE(bodyPtr->bounds().height == 816.0f);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// pulp #1899 — pulp-screenshot viewport reconciliation (recursive subtree clamp)
+//
+// Empirical PULP_DUMP_BOUNDS captures of the Spectr import showed
+// the hardcoded 1320×860 size (originating in `dom-adapter.tsx:440-441`
+// as a workaround for a perceived Yoga absolute-pin bug) propagates
+// several layers deep — the App (depth 1), the FilterBank wrap
+// (depth 2), and individual canvases (depth 3) all carry
+// preferred=(1320,860). The previous direct-children-only clamp left
+// depths 2+ overflowing the 1280×800 viewport.
+//
+// These tests pin the recursive walk so every absolute|fixed-positioned
+// descendant with an explicit oversize preferred_width/height gets
+// clamped, while inset-anchored content (anchored via top+bottom or
+// left+right) stays untouched.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#include "../../tools/screenshot/viewport_reconcile.hpp"
+
+TEST_CASE("Viewport reconcile: 3-level oversize chain clamps every depth",
+          "[layout][viewport-reconcile][screenshot][issue-1899]") {
+    // Build a Spectr-shaped tree: root_ (1280×800) → App (depth 1, 1320×860)
+    //                          → FilterBank wrap (depth 2, 1320×860)
+    //                          → canvas (depth 3, 1320×860)
+    // The dom-adapter hardcode propagates all the way down.
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    auto app = std::make_unique<View>();
+    app->set_position(View::Position::absolute);
+    app->set_top(0);
+    app->set_left(0);
+    app->flex().preferred_width = 1320;
+    app->flex().preferred_height = 860;
+    auto* appPtr = app.get();
+
+    auto wrap = std::make_unique<View>();
+    wrap->set_position(View::Position::absolute);
+    wrap->set_top(0);
+    wrap->set_left(0);
+    wrap->flex().preferred_width = 1320;
+    wrap->flex().preferred_height = 860;
+    auto* wrapPtr = wrap.get();
+
+    auto canvas = std::make_unique<View>();
+    canvas->set_position(View::Position::absolute);
+    canvas->set_top(0);
+    canvas->set_left(0);
+    canvas->flex().preferred_width = 1320;
+    canvas->flex().preferred_height = 860;
+    auto* canvasPtr = canvas.get();
+
+    wrap->add_child(std::move(canvas));
+    app->add_child(std::move(wrap));
+    root.add_child(std::move(app));
+
+    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+
+    // Every depth gets clamped — not just the direct child of root_.
+    REQUIRE(appPtr->flex().preferred_width == 1280.0f);
+    REQUIRE(appPtr->flex().preferred_height == 800.0f);
+    REQUIRE(wrapPtr->flex().preferred_width == 1280.0f);
+    REQUIRE(wrapPtr->flex().preferred_height == 800.0f);
+    REQUIRE(canvasPtr->flex().preferred_width == 1280.0f);
+    REQUIRE(canvasPtr->flex().preferred_height == 800.0f);
+}
+
+TEST_CASE("Viewport reconcile: non-anchored explicit oversize is clamped",
+          "[layout][viewport-reconcile][screenshot][issue-1899]") {
+    // The clamp is gated on "no opposite-edge anchor" — when only
+    // top/left are set with an explicit oversize preferred_width/height,
+    // the reconciler treats the size as concrete and clamps it. This
+    // matches the canonical Spectr dom-adapter shape (top:0, left:0,
+    // width:1320, height:860 — no right/bottom).
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_top(0);
+    child->set_left(0);
+    child->flex().preferred_width = 1320;
+    child->flex().preferred_height = 860;
+    auto* childPtr = child.get();
+    root.add_child(std::move(child));
+
+    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+
+    REQUIRE(childPtr->flex().preferred_width == 1280.0f);
+    REQUIRE(childPtr->flex().preferred_height == 800.0f);
+}
+
+TEST_CASE("Viewport reconcile: non-absolute descendants are not clamped",
+          "[layout][viewport-reconcile][screenshot][issue-1899]") {
+    // Only absolute|fixed descendants are eligible. Static/relative
+    // flow content with oversize preferred dimensions is untouched —
+    // Yoga's normal flex shrink handles it (or the content overflows,
+    // matching the source).
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    auto flow = std::make_unique<View>();
+    flow->set_position(View::Position::relative);
+    flow->flex().preferred_width = 1320;
+    flow->flex().preferred_height = 860;
+    auto* flowPtr = flow.get();
+    root.add_child(std::move(flow));
+
+    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+
+    REQUIRE(flowPtr->flex().preferred_width == 1320.0f);
+    REQUIRE(flowPtr->flex().preferred_height == 860.0f);
+}
+
+TEST_CASE("Viewport reconcile: content already inside viewport is untouched",
+          "[layout][viewport-reconcile][screenshot][issue-1899]") {
+    // No-op when content fits the viewport on both axes.
+    View root;
+    root.set_bounds({0, 0, 1280, 800});
+
+    auto child = std::make_unique<View>();
+    child->set_position(View::Position::absolute);
+    child->set_top(0);
+    child->set_left(0);
+    child->flex().preferred_width = 1000;
+    child->flex().preferred_height = 600;
+    auto* childPtr = child.get();
+    root.add_child(std::move(child));
+
+    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+
+    REQUIRE(childPtr->flex().preferred_width == 1000.0f);
+    REQUIRE(childPtr->flex().preferred_height == 600.0f);
+}
