@@ -327,6 +327,28 @@ Linux/Windows from `build.yml`'s matrix keep running independently.
 For full-workflow rerun (e.g. after force-push), the existing
 close+reopen or `git push --force-with-lease` paths still apply.
 
+### Opportunistic reroute daemon (task #22)
+
+`tools/scripts/macos_reroute_watcher.py` is a long-running watcher
+that automates the "local just freed up; pull a queued cloud job back
+to local" pattern. Install on the host that runs the self-hosted Mac
+GH Actions runner; the launchd template at
+`tools/launchd/pulp-macos-reroute-watcher.plist.template` documents
+the setup steps.
+
+Polling cadence: 30s. Detection: `ps` for Runner.Worker children
+under the actions-runner workspace (no admin token required). When
+local is idle AND a BAT run's macOS job has cloud labels (`macos-15`
+or `nscloud-*` / `namespace-profile-*`) AND hasn't started yet, the
+watcher invokes `pulp macos retarget --pr N --to local`.
+
+Flap-guard: a PR rerouted in the last 5 min is suppressed (avoids
+thrashing). One reroute per tick; the next tick reassesses.
+
+Cooperates with the overflow probe in `build.yml` — they're
+complementary: the probe makes the initial dispatch decision; the
+watcher catches near-misses after the fact.
+
 ### Path-scoped validation profile: `parser`
 
 `.shipyard/config.toml` defines a `[validation.parser]` lane (pulp

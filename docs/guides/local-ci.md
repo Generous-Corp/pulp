@@ -226,6 +226,43 @@ Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 | `runner=github-hosted` | — | Routes to `"macos-15"` (free GH-hosted) |
 | `target_ref` | (workflow's `ref`) | Branch / SHA to build |
 
+### Opportunistic reroute daemon
+
+`tools/scripts/macos_reroute_watcher.py` is a long-running watcher (intended as a launchd agent on the self-hosted Mac) that automates the "when local frees up, claw back queued GH-hosted jobs" pattern. It polls every 30 seconds:
+
+1. Is the local Mac runner idle? (process-based detection via `ps`; no admin token needed.)
+2. Is there a queued Build-and-Test workflow_run whose macOS job has `macos-15` (or `nscloud-*` / `namespace-profile-*`) labels — i.e., dispatched to cloud but not yet picked up?
+
+When both conditions hold, the watcher invokes `pulp macos retarget --pr N --to local` to cancel the cloud dispatch and rerun on local with warm caches. A 5-minute flap-guard prevents repeatedly bouncing the same PR.
+
+**Install (one-time per host):**
+
+```bash
+# Copy the template into LaunchAgents, substituting your Pulp checkout path:
+sed "s|\$PULP_REPO|$PWD|g" \
+  tools/launchd/pulp-macos-reroute-watcher.plist.template \
+  > ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+
+launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+
+# Logs:
+tail -F ~/Library/Logs/pulp/macos-reroute-watcher.log
+```
+
+**Run by hand for testing:**
+
+```bash
+python3 tools/scripts/macos_reroute_watcher.py --interval 30 --log-level DEBUG
+```
+
+**Stop:**
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+```
+
+The watcher is **safe to run alongside the overflow probe in `build.yml`** — they cooperate. The probe decides *where to dispatch initially*; the watcher *opportunistically reroutes* dispatches that landed on cloud while local was busy, once local frees up before the cloud runner has picked up the job. If the cloud runner has already started, the watcher takes no action.
+
 ## Required Merge Process (All Agents)
 
 Every change to `main` must go through this workflow — no exceptions:

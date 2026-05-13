@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the macOS-overflow reroute watcher (pulp task #22).
+
+  Install (one-time, per Mac that hosts a Pulp self-hosted GH Actions runner):
+
+    1. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO with
+       the absolute path to your Pulp checkout (e.g. /Users/me/Code/pulp):
+
+         sed "s|\$PULP_REPO|$PWD|g" \
+           tools/launchd/pulp-macos-reroute-watcher.plist.template \
+           > ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+
+    2. Load it:
+
+         launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+
+    3. Verify:
+
+         launchctl list | grep pulp.macos-reroute-watcher
+
+  Stop:
+
+    launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watcher.plist
+
+  Logs:
+
+    tail -F ~/Library/Logs/pulp/macos-reroute-watcher.log
+
+  Requires:
+
+    * `gh` CLI authenticated for danielraffel/pulp (Administration:Read or
+      default Actions:Read works for the gh api calls; admin scope would
+      help the local-busy probe but the `ps`-based fallback works without).
+    * `pulp` on PATH (the watcher invokes `pulp macos retarget`).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.danielraffel.pulp.macos-reroute-watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>$PULP_REPO/tools/scripts/macos_reroute_watcher.py</string>
+        <string>--interval</string>
+        <string>30</string>
+        <string>--flap-window</string>
+        <string>300</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$PULP_REPO</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$HOME/Library/Logs/pulp/macos-reroute-watcher.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>$HOME/Library/Logs/pulp/macos-reroute-watcher.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Inherit PATH so `gh` and `pulp` resolve. The default launchd
+             PATH is /usr/bin:/bin:/usr/sbin:/sbin which won't include
+             ~/.local/bin or /opt/homebrew/bin. Adjust to match where you
+             installed gh + pulp on this host. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
