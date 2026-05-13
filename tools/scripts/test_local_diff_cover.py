@@ -102,6 +102,14 @@ class DependencyPreflightTests(unittest.TestCase):
         self.assertRegex(text, r"\bllvm-profdata\b")
         # Must check for diff-cover importability via python3.
         self.assertIn("import diff_cover", text)
+        # macOS developer shells often expose llvm tools through xcrun
+        # rather than PATH; the local gate should make that automatic.
+        self.assertIn("xcrun -f llvm-cov", text)
+        self.assertLess(
+            text.index("xcrun -f llvm-cov"),
+            text.index("for tool in clang llvm-profdata llvm-cov"),
+            "xcrun path discovery must happen before the dependency loop.",
+        )
 
 
 class WorkflowSourceOfTruthTests(unittest.TestCase):
@@ -379,6 +387,30 @@ class ObjectDiscoveryParityTests(unittest.TestCase):
                 f"{desc} ({needle!r}); local_diff_cover.sh mirrors this "
                 f"surface set, so dropping it here desyncs both lanes.",
             )
+
+
+class TargetedCtestTests(unittest.TestCase):
+    """Targeted local diff-cover runs must also limit the ctest pass."""
+
+    def test_script_supports_ctest_regex_selector(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn(
+            "PULP_DIFF_COVER_CTEST_REGEX",
+            text,
+            "local_diff_cover.sh needs an env selector so focused parser "
+            "coverage runs don't execute the entire CTest registry.",
+        )
+        self.assertIn(
+            'CTEST_ARGS+=(-R "${PULP_DIFF_COVER_CTEST_REGEX}")',
+            text,
+            "local_diff_cover.sh must pass the regex through ctest -R.",
+        )
+        self.assertIn(
+            'ctest "${CTEST_ARGS[@]}"',
+            text,
+            "local_diff_cover.sh should assemble ctest arguments once so "
+            "the regex selector and default full-suite path share the same call.",
+        )
 
 
 class DiffCoverExcludeContractTests(unittest.TestCase):

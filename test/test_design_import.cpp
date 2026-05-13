@@ -1,7 +1,54 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
 
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
+
 using namespace pulp::view;
+
+namespace {
+
+#ifndef PULP_REPO_ROOT
+#define PULP_REPO_ROOT "."
+#endif
+
+std::string read_fixture(const std::string& rel_path) {
+    const auto root = std::string(PULP_REPO_ROOT);
+    std::vector<std::string> candidates{root + "/" + rel_path};
+    constexpr std::string_view planning_prefix{"planning/fixtures/"};
+    if (rel_path.rfind(std::string(planning_prefix), 0) == 0) {
+        candidates.push_back(root + "/test/fixtures/" + rel_path.substr(planning_prefix.size()));
+    }
+
+    std::ostringstream tried;
+    for (const auto& path : candidates) {
+        if (tried.tellp() > 0) {
+            tried << ", ";
+        }
+        tried << path;
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in.good()) {
+            continue;
+        }
+
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+
+    FAIL("reading fixture failed; tried " << tried.str());
+    return {};
+}
+
+std::string asset_text(const ClaudeBundleAsset& asset) {
+    return std::string(asset.data.begin(), asset.data.end());
+}
+
+} // namespace
 
 // ── Design source parsing ───────────────────────────────────────────────
 
@@ -1012,6 +1059,132 @@ TEST_CASE("parse_v0_tsx accepts JSON IR directly", "[view][import]") {
     auto json = R"({"type": "frame", "name": "V0Screen", "children": []})";
     auto ir = parse_v0_tsx(json);
     REQUIRE(ir.root.name == "V0Screen");
+}
+
+TEST_CASE("parse_v0_dev_react parses staged v0 runtime fixtures",
+          "[view][import][parser][v0][phase-6.6.2]") {
+    const auto primary = read_fixture("planning/fixtures/v0-dev/audio-control-panel.tsx");
+    auto bundle = parse_v0_dev_react(primary);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->javascript_indices.front() == 0);
+    REQUIRE(bundle->assets.front().uuid == "v0-runtime-app");
+    REQUIRE(bundle->assets.front().mime == "text/javascript");
+    REQUIRE(bundle->template_html.find("data-pulp-source=\"v0\"") != std::string::npos);
+    REQUIRE(bundle->template_html.find("v0-audio-control-panel") != std::string::npos);
+
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("v0-audio-control-panel") != std::string::npos);
+    REQUIRE(js.find("ReactDOM.createRoot") != std::string::npos);
+    REQUIRE(js.find("requestAnimationFrame") != std::string::npos);
+    REQUIRE(js.find("performance.now") != std::string::npos);
+    REQUIRE(js.find("canvas.getContext('2d')") != std::string::npos);
+    REQUIRE(js.find("type: 'range'") != std::string::npos);
+
+    const auto settings = read_fixture("planning/fixtures/v0-dev/settings-strip.tsx");
+    auto settings_bundle = parse_v0_dev_react(settings);
+    REQUIRE(settings_bundle.has_value());
+    REQUIRE(asset_text(settings_bundle->assets.front()).find("v0-settings-strip") != std::string::npos);
+
+    const auto transport = read_fixture("planning/fixtures/v0-dev/transport-meter.tsx");
+    auto transport_bundle = parse_v0_dev_react(transport);
+    REQUIRE(transport_bundle.has_value());
+    REQUIRE(asset_text(transport_bundle->assets.front()).find("v0-transport-meter") != std::string::npos);
+
+    const std::string multi_line_import = R"(
+        import {
+          useState
+        } from "react";
+        export default function MultiLineReactPanel() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="v0-multi-line-react-import">
+              <span>Level</span>
+              <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />
+            </div>
+          );
+        }
+    )";
+    auto multi_line_bundle = parse_v0_dev_react(multi_line_import);
+    REQUIRE(multi_line_bundle.has_value());
+    REQUIRE(asset_text(multi_line_bundle->assets.front()).find("v0-multi-line-react-import") != std::string::npos);
+}
+
+TEST_CASE("parse_v0_dev_react accepts a v0 file envelope",
+          "[view][import][parser][v0][phase-6.6.2]") {
+    const auto primary = read_fixture("planning/fixtures/v0-dev/audio-control-panel.tsx");
+    const auto envelope =
+        std::string("[V0_FILE]json:file=\"package.json\"\n{\"dependencies\":{\"react\":\"latest\"}}\n")
+        + "[V0_FILE]tsx:file=\"app/page.tsx\"\n"
+        + primary
+        + "\n[V0_FILE]tsx:file=\"app/ignored.tsx\"\n"
+          "import { useState } from \"react\";\n"
+          "export default function Ignored(){ return <div id=\"ignored\">Ignored</div>; }\n";
+
+    auto bundle = parse_v0_dev_react(envelope);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->template_html.find("v0-audio-control-panel") != std::string::npos);
+    REQUIRE(asset_text(bundle->assets.front()).find("app/page.tsx") != std::string::npos);
+}
+
+TEST_CASE("parse_v0_dev_react rejects out-of-matrix v0 default surfaces",
+          "[view][import][parser][v0][phase-6.6.2]") {
+    const std::vector<std::string> rejected = {
+        R"(
+            import { useState } from "react";
+            export default function TailwindPanel() {
+              return <div className="flex rounded-lg">Tailwind</div>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            import { Button } from "@/components/ui/button";
+            export default function ShadcnPanel() {
+              return <Button>Open</Button>;
+            }
+        )",
+        R"(
+            import {
+              format
+            } from "date-fns";
+            export default function UnsupportedImportPanel() {
+              return <div id="unsupported-import">Unsupported import</div>;
+            }
+        )",
+        R"(
+            import { useEffect } from "react";
+            export default function DynamicImportPanel() {
+              useEffect(() => { import("./meter"); }, []);
+              return <div id="dynamic-import">Dynamic import</div>;
+            }
+        )",
+        R"(
+            import { useEffect } from "react";
+            export default function NetworkPanel() {
+              useEffect(() => { fetch("/api/state"); }, []);
+              return <div id="network">Network</div>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function TextInputPanel() {
+              const [value, setValue] = useState("");
+              return <input type="text" value={value} onChange={(event) => setValue(event.currentTarget.value)} />;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function CustomComponentPanel() {
+              return <Slider value={0.5} />;
+            }
+        )"
+    };
+
+    for (const auto& sample : rejected) {
+        CAPTURE(sample);
+        REQUIRE_FALSE(parse_v0_dev_react(sample).has_value());
+    }
 }
 
 // ── Pencil JSON parsing ─────────────────────────────────────────────────

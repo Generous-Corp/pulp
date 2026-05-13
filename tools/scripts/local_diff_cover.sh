@@ -18,6 +18,7 @@
 # Usage:
 #   tools/scripts/local_diff_cover.sh                      # whole tree (slow, matches CI)
 #   tools/scripts/local_diff_cover.sh pulp-test-state      # targeted (fast)
+#   PULP_DIFF_COVER_CTEST_REGEX='State|WidgetBridge' tools/scripts/local_diff_cover.sh pulp-test-state
 #   PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh   # bypass
 #
 # Exit codes:
@@ -110,6 +111,15 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 # ── Dependency preflight ────────────────────────────────────────────────────
+# Xcode installs llvm-cov/llvm-profdata behind xcrun on many macOS shells.
+if command -v xcrun >/dev/null 2>&1 && xcrun -f llvm-cov >/dev/null 2>&1; then
+    LLVM_TOOL_DIR="$(dirname "$(xcrun -f llvm-cov)")"
+    case ":${PATH}:" in
+        *":${LLVM_TOOL_DIR}:"*) ;;
+        *) export PATH="${LLVM_TOOL_DIR}:${PATH}" ;;
+    esac
+fi
+
 missing=()
 for tool in clang llvm-profdata llvm-cov cmake ctest python3 git; do
     command -v "${tool}" >/dev/null 2>&1 || missing+=("${tool}")
@@ -186,7 +196,12 @@ mkdir -p "${PROFRAW_DIR}"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 
 echo "=== Running tests ==="
-ctest --test-dir "${BUILD_DIR}" --output-on-failure || \
+CTEST_ARGS=(--test-dir "${BUILD_DIR}" --output-on-failure)
+if [ -n "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+    echo "[local_diff_cover] limiting ctest to regex: ${PULP_DIFF_COVER_CTEST_REGEX}" >&2
+    CTEST_ARGS+=(-R "${PULP_DIFF_COVER_CTEST_REGEX}")
+fi
+ctest "${CTEST_ARGS[@]}" || \
     echo "[local_diff_cover] WARN: ctest exited non-zero — generating partial report" >&2
 
 # ── Merge profiles ──────────────────────────────────────────────────────────

@@ -185,6 +185,14 @@ struct ClaudeBundle {
 /// `parse_claude_html` for the static-HTML pipeline.
 std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
 
+/// Normalize a constrained v0.dev React TSX export into the runtime-import
+/// bundle payload shape. Accepts either a bare single-file TSX component or
+/// a v0 code-project envelope with `[V0_FILE]tsx:file="..."` blocks.
+/// Returns nullopt when the artifact uses surfaces outside Pulp's supported
+/// runtime-import DOM/CSS/API subset (Tailwind/shadcn/Next wrappers, network
+/// APIs, storage APIs, unsupported JSX tags, etc.).
+std::optional<ClaudeBundle> parse_v0_dev_react(const std::string& tsx_or_envelope);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

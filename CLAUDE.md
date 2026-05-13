@@ -670,8 +670,12 @@ roundtrip on coverage-only failures.
 # Whole-tree (slow, matches CI)
 tools/scripts/local_diff_cover.sh
 
-# Targeted (fast — build only the named test targets)
+# Targeted build (fast — builds only named test targets)
 tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
+
+# Targeted build + focused CTest pass
+PULP_DIFF_COVER_CTEST_REGEX='WidgetBridge' \
+  tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
 
 # Skip (e.g. workflow-only or doc-only PRs)
 PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh

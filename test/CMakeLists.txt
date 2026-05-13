@@ -1755,6 +1755,7 @@ catch_discover_tests(pulp-test-design-export)
 # Design import tests (Figma/Stitch/v0/Pencil → Pulp, W3C tokens)
 add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import)
 
 # Post-parse widget promotion: <div onClick> / role=button / cursor:pointer

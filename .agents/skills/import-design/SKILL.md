@@ -45,6 +45,12 @@ Ask the user or detect from context:
 - If TSX file, read directly
 - Extract JSX tree, Tailwind classes, shadcn/ui components
 
+**v0.dev runtime-import parser (Phase 6.6.2)**:
+- The runtime-import lane accepts constrained v0 React exports through `parse_v0_dev_react()` and `source: 'v0'`. It normalizes the artifact into the same bundle payload shape used by Claude runtime import.
+- Accepted inputs: a bare single-file `.tsx`/`.jsx` React component, or a v0 code-project envelope containing `[V0_FILE]tsx:file="..."` blocks. Prefer the explicit `source: 'v0'` route; standalone TSX has no reliable v0-only marker.
+- C-1 deliberately rejects default v0 surfaces that are outside the supported matrix: Tailwind `className` output, shadcn/Radix components, Next.js wrappers/imports, custom JSX components, non-range inputs, and network/storage/worker APIs. Use inline React `style` objects plus the supported DOM/CSS/API subset.
+- Representative fixtures live under `planning/fixtures/v0-dev/`; the primary one is `audio-control-panel.tsx` (audio control panel + canvas meter). Run `tools/import-validation/v0-roundtrip.sh --parser-only` for the parser/dispatch gate.
+
 **Claude Design (manual HTML export — pulp #468)**:
 - Anthropic Labs has no MCP / public API. The user runs Claude Design, exports the canvas as Standalone HTML (or "Send to Local Coding Agent"), and hands you the resulting file.
 - Run `pulp import-design --from claude --file <path>` — the parser delegates to the Stitch HTML pipeline and tags the IR as Claude. **This is the static path** — it sees only the loader-shell HTML wrapping the bundled React app (~9 elements: title, bundler placeholders, inline styles, the `<script>` blob).

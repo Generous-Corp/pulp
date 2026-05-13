@@ -254,6 +254,11 @@ at a **75%** floor. Sub-threshold diff coverage hard-fails this check
 and blocks the merge — adding untested code means either adding tests
 or splitting the untested portion into its own PR.
 
+For local pre-submit checks, run `tools/scripts/local_diff_cover.sh`.
+Pass test targets to limit the build, and set
+`PULP_DIFF_COVER_CTEST_REGEX` when the PR has a focused test subset so
+the local coverage run does not execute the entire CTest registry.
+
 **Per-file exclusions (`diff_cover_excludes`).** A small set of files
 can be exempted from the diff-coverage gate when they're thin
 dispatchers / generated code / defensive-only code that is exercised

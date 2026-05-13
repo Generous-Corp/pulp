@@ -12620,6 +12620,51 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ surfaces parse failure as soft err
     REQUIRE(err_str.find("claude bundle") != std::string::npos);
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches v0 parser by source label",
+          "[view][bridge][runtime-import-dispatch][v0][phase-6.6.2]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string v0_tsx = R"(
+        import { useState } from "react";
+        export default function DispatchProbe() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="v0-dispatch-probe" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={level}
+                onChange={(event) => setLevel(Number(event.currentTarget.value))}
+              />
+            </div>
+          );
+        }
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(v0_tsx) + "', 'v0'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    // A bare WidgetBridge test engine has no host React/ReactDOM installed,
+    // so payload eval should soft-fail there. The important contract is that
+    // source='v0' reached the v0 parser instead of the Claude envelope branch.
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("host React and ReactDOM") != std::string::npos);
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;

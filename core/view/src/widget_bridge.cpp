@@ -1079,10 +1079,21 @@ void WidgetBridge::install_runtime_import_handlers() {
             }
 
             try {
-                // For now: claude is the only source with a runtime-eval
-                // path (others are static IR). Future: dispatch on
-                // src_label to parse_figma / parse_stitch / etc.
-                auto bundle = parse_claude_bundle(html);
+                auto source_lc = src_label;
+                std::transform(source_lc.begin(), source_lc.end(), source_lc.begin(),
+                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                std::optional<ClaudeBundle> bundle;
+                if (source_lc == "v0" || source_lc == "v0.dev" || source_lc == "v0-dev") {
+                    bundle = parse_v0_dev_react(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported v0.dev React export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
+                } else {
+                    bundle = parse_claude_bundle(html);
+                }
                 if (!bundle) {
                     set_err("__pulpRuntimeImport__: no claude bundle envelope (got '"
                             + src_label + "')");
