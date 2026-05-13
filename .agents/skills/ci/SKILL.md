@@ -370,6 +370,75 @@ the same `--base` flag for develop branches. Shipyard adds evidence-gated
 merge that checks per-platform proof for the exact merge-candidate SHA, which
 is stricter than `local_ci.py`'s `job.passed` check.
 
+## Recovery + maintenance toolkit (>= v0.56.2)
+
+Three operational commands cover the prevention → recovery → maintenance
+lifecycle for self-hosted-runner CI. The authoritative reference lives in
+Shipyard's own `skills/ci/SKILL.md`; the commands surface from
+`shipyard --help` once the pin is bumped.
+
+### Recover: `shipyard rescue <PR>`
+
+When a PR's matrix is stuck behind a queue jam on the self-hosted local
+runner (the typical 5+ hour backlog scenario), cancel that PR's queued
+runs and redispatch them to GitHub-hosted runners:
+
+```bash
+shipyard rescue 1920                  # cancel + redispatch queued runs to github-hosted
+shipyard rescue 1920 --rerun-failed   # also re-arm completed/cancelled runs (watchdog-cancelled case)
+shipyard rescue 1920 --dry-run        # preview without acting
+shipyard rescue --all-stuck           # repo-wide
+shipyard rescue 1920 --to <provider>  # default: github-hosted
+```
+
+Replaces the older 5-step gh-api cancel + cloud-handoff recipe. Use it
+when a self-hosted runner is healthy but its queue is hours deep —
+`gh api .../actions/runs?status=queued` will show the depth across the
+repo and `ps aux | grep Runner.Worker` confirms the runner itself is
+not the bottleneck.
+
+### Prevent: `shipyard runner watch --kill-hung-workers`
+
+Host-side daemon that runs continuously on each self-hosted host.
+Cancels stale queued runs AND auto-kills hung `Runner.Worker`
+processes via the same recovery sequence as `runner kill --pid <pid>
+--yes`: snapshot → SIGTERM → grace → SIGKILL → reap children →
+quarantine partial builds → verify `Runner.Listener` → optional wait
+for GitHub status flip.
+
+```bash
+shipyard runner watch --kill-hung-workers          # implies --fix
+shipyard runner watch --kill-hung-workers --json   # structured stream
+```
+
+Pair with launchd / systemd so the watchdog survives reboots. JSON
+contract: `runner.watch` envelopes with `event=auto_kill_worker`,
+`phase ∈ {attempt, killed, failed, no-pid-found}`.
+
+Pulp's local macOS runner runs through `actions-runner` (PIDs surfaced
+via `ps aux | grep Runner.Listener`); the daemon co-exists with the
+existing service.
+
+### Keep current: `shipyard update`
+
+```bash
+shipyard update --check --json   # report installed vs available (safe in CI / cron)
+shipyard update                  # apply latest stable
+shipyard update --to v0.56.2     # pin / rollback to a specific version
+shipyard update --dry-run        # plan only
+```
+
+Replaces any documented `curl install.sh | sh` recipes — the bootstrap
+form is only needed when a host has no Shipyard at all. Future
+upgrades on a host that already has Shipyard installed go through
+`shipyard update`.
+
+The repo-side pin lives in `tools/shipyard.toml`; bump it with
+`shipyard pin bump --to vX.Y.Z` (this triggers the ci skill-sync gate,
+which is why this section exists). The pin and a developer's local
+install can drift — `pulp doctor` surfaces that, and `shipyard
+--version` is the local source of truth.
+
 ## Prerequisites Check
 
 Before running any CI command, verify the required tooling AND provider config exists:
