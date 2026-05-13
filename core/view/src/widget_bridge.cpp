@@ -620,6 +620,11 @@ if (!globalThis.window.__pulpListenerShim__) {
 static void safe_dispatch_eval(ScriptEngine& engine, const std::string& js, const char* context) {
     try {
         engine.evaluate(js);
+        // Pump microtasks so React setState commits (and any queueMicrotask /
+        // Promise.then continuations scheduled by the handler) before the next
+        // event arrives. Without this, drag-style interactions see stale state
+        // on the immediately-following pointermove and silently bail; see #1923.
+        engine.pump_message_loop();
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
     } catch (...) {
@@ -635,6 +640,11 @@ static void safe_dispatch_eval(const std::shared_ptr<std::atomic<bool>>& alive,
     try {
         if (!static_cast<bool>(*engine)) return;
         engine->evaluate(js);
+        // Pump microtasks so React setState commits (and any queueMicrotask /
+        // Promise.then continuations scheduled by the handler) before the next
+        // event arrives. Without this, drag-style interactions see stale state
+        // on the immediately-following pointermove and silently bail; see #1923.
+        engine->pump_message_loop();
     } catch (const std::exception& e) {
         std::cerr << "WidgetBridge " << context << " error: " << e.what() << "\n";
     } catch (...) {
