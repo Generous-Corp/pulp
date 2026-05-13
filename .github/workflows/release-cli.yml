@@ -24,7 +24,7 @@ env:
   # same output as the hook that writes CHANGELOG.md. Must track
   # tools/shipyard.toml to avoid split behavior between local flows
   # and release-time jobs (Codex P1 on PR #719).
-  SHIPYARD_VERSION: "0.55.0"
+  SHIPYARD_VERSION: "0.56.2"
 
 jobs:
   build-cli:

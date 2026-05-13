@@ -18,9 +18,10 @@ Validate branches and ship code safely. This skill handles all CI workflows for 
 > One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
 > Continuous prevention is `shipyard runner watch --kill-hung-workers`
 > (v0.54.0+). Keep Shipyard itself current with `shipyard update`
-> (v0.55.0+). All three replace the legacy `planning/scripts/runner-
-> watchdog.sh --fix` workflow, which is now an anti-pattern (cancels
-> queued runs but registers `failure` on required checks).
+> (v0.55.0+; Pulp currently pins v0.56.2+). All three replace the
+> legacy `planning/scripts/runner-watchdog.sh --fix` workflow, which is
+> now an anti-pattern (cancels queued runs but registers `failure` on
+> required checks).
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -1266,9 +1267,11 @@ land in `mergeable_state=blocked`.
 
 Shipyard v0.55.0+ ships a complete operational toolkit for this
 class of problem — **prevent → recover → keep current**. Pulp pins
-Shipyard ≥ 0.55.0 in `tools/shipyard.toml`. The authoritative reference
-lives in Shipyard's `skills/ci/SKILL.md`; this section is the Pulp-side
-quick reference + Pulp-specific gotchas.
+Shipyard ≥ 0.56.2 in `tools/shipyard.toml` so recovery, update, and
+`shipyard wait pr` all have REST fallback paths when GraphQL is rate-limited
+or unavailable. The authoritative reference lives in Shipyard's
+`skills/ci/SKILL.md`; this section is the Pulp-side quick reference +
+Pulp-specific gotchas.
 
 ### Recover — `shipyard rescue <PR>` (v0.53.0+)
 
@@ -1287,6 +1290,10 @@ One command replaces the legacy 5-step recipe (`runner-watchdog --fix`
 manual sweep). Safe under load — does not mark required checks as
 `failure`. Cross-link: Shipyard `skills/ci/SKILL.md#rescuing-wedged-
 runners-shipyard-rescue`.
+
+After a rescue, prefer `shipyard wait pr <PR> --state green` over manual
+polling. Shipyard v0.56.2 adds a REST fallback for this wait path; use
+`--no-fallback` only when a caller must fail instead of polling.
 
 ### Prevent — `shipyard runner watch --kill-hung-workers` (v0.54.0+)
 
@@ -1311,7 +1318,7 @@ watch--kill-hung-workers`.
 ```bash
 shipyard update --check --json   # report installed vs available
 shipyard update                  # apply latest stable
-shipyard update --to v0.53.0     # pin / rollback
+shipyard update --to v0.56.2     # pin / rollback to Pulp's minimum
 shipyard update --dry-run        # plan only
 ```
 

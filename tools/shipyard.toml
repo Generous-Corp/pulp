@@ -250,6 +250,39 @@
 # in `tools/install-shipyard.sh` (v0.22.1+ `SHIPYARD_VERSION` support).
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
+#
+# v0.56.2 (current pin) — completes and hardens the self-hosted-runner
+# operational toolkit (prevent → recover → maintain) shipped 2026-05-13:
+#   v0.53.0 — `shipyard rescue <PR>`: one-shot recovery for queued runs.
+#             Replaces the legacy 5-step `runner-watchdog --fix` →
+#             `gh run rerun --failed` → `shipyard cloud handoff run
+#             --apply` manual sweep. Safe under load — does NOT mark
+#             required checks as `failure`. Modes: `--rerun-failed`,
+#             `--dry-run`, `--all-stuck`, `--to <provider>`.
+#             (Shipyard#286 / PR#287.)
+#   v0.54.0 — `shipyard runner watch --kill-hung-workers`: host-side
+#             daemon that auto-kills hung `Runner.Worker` processes
+#             (snapshot → SIGTERM → grace → SIGKILL → reap children
+#             → quarantine → verify Listener). Implies `--fix`. Pair
+#             with launchd / systemd for unattended ops. JSON envelopes
+#             `event=auto_kill_worker, phase ∈ {attempt,killed,failed,
+#             no-pid-found}`. (Shipyard#288 / PR#291.)
+#   v0.55.0 — `shipyard update`: self-update path. Replaces the legacy
+#             `curl … install.sh | sh` bootstrap-only flow. Subcommands:
+#             `--check --json`, `--to vX.Y.Z`, `--dry-run`. Future pin
+#             bumps after the v0.55.0 bootstrap are one command.
+#             (Shipyard#292 / PR#293.) Phase 2 (native non-install.sh
+#             apply, --channel main, release-notes diff) is upstream
+#             follow-up.
+#   v0.56.0 — hardens the runner toolkit with REST fallback, config.toml
+#             fixes, and daemon idle gating follow-ups.
+#   v0.56.2 — adds REST fallback for `shipyard wait pr`, so post-rescue
+#             waiting keeps working when GraphQL is rate-limited.
+#
+# See `.agents/skills/ci/SKILL.md#self-hosted-runner-ops` for the
+# Pulp-side quick-reference + Pulp-specific wedge gotchas (iOS AUv3
+# try-compile, dev-mac window popups). Authoritative reference lives
+# in Shipyard's own `skills/ci/SKILL.md`.
 version = "v0.56.2"
 
 # Public release source. The bootstrap script downloads from

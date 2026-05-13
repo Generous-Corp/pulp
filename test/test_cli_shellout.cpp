@@ -160,7 +160,7 @@ std::string pinned_shipyard_version_for_test() {
             return value.substr(first + 1, last - first - 1);
         }
     }
-    return "v0.46.0";
+    return "v0.56.2";
 }
 
 fs::path write_fake_shipyard(const fs::path& dir, const std::string& version) {

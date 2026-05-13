@@ -822,7 +822,7 @@ Use Shipyard for all merges. Current Pulp branch protection requires the
 macOS lane; Linux and Windows still run in GitHub Actions but are advisory
 unless branch protection changes. When the macOS lane wedges or
 Shipyard itself drifts, see the `ci` skill's *Self-hosted runner ops*
-section for the v0.55.0+ toolkit (`shipyard rescue` / `runner watch
+section for the v0.56.2+ toolkit (`shipyard rescue` / `runner watch
 --kill-hung-workers` / `update`).
 
 #### The `ship` workflow (primary path for all agents)
