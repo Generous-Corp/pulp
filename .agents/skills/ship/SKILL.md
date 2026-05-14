@@ -376,6 +376,18 @@ If the lib path has a NEW level (not arch — e.g. a config subdir like
 `Release/optimized/`), the flatten heuristic needs extending. The flat
 + single-arch-subdir layouts are the only two seen to date.
 
+**Also eyeball exposed symbols.** chrome/m144 broke release-cli's Linux
+leg a second way (#1970): the new Skia static lib re-exposes fontconfig
+symbols (`FcInitLoadConfigAndFonts`, `FcConfigGetSysRoot`,
+`FcPatternGetString` et al.) that the previous release kept private.
+`core/canvas/CMakeLists.txt` already has the
+`pkg_check_modules(FONTCONFIG fontconfig)` block, but the runner
+needs `libfontconfig1-dev` installed for `pkg_check_modules` to find
+the library. Both `release-cli.yml` and `build.yml` Linux deps steps
+now include it. When bumping Skia, run `nm -D` on the new `libskia.a`
+and grep for `Fc[A-Z]\|Hb[a-z]\|FT_` — any new symbol class means
+a matching system package needs to be added to the apt step.
+
 ### Backfilling a stuck release tag
 
 `auto-release.yml` creates the tag immediately on merge, but
