@@ -462,3 +462,23 @@ Promoted N interactive frame(s) to button widgets.
 ```
 
 in the stdout summary. If you see `0 widgets` and no promotion line on a fixture you *know* contains `<div onClick>`, you're either (a) on a non-runtime parser path (#1823 territory) or (b) the React tree didn't mount during the harness eval and `attributes` is empty as a result.
+
+## Live-host pump contract (pulp-internal #71)
+
+Every live-host main loop that drives a `WidgetBridge` for a runtime-imported app **must call BOTH halves of the idle pump on every tick**:
+
+```cpp
+bridge->poll_async_results();      // async-exec results + queued frame callbacks
+bridge->service_frame_callbacks(); // setTimeout / setInterval drain via __flushTimers__
+```
+
+`scripted_ui.cpp:67-81` documents the contract; `examples/design-tool/main.cpp` wires it through a GCD timer; `examples/ui-preview` does the equivalent. Skipping `service_frame_callbacks()` is a silent foot-gun — `setInterval(fn, N)` returns a valid id but `fn` never fires, so any imported app's polling-state-update path freezes. The chart/canvas (which paints from a separate ref-based store) keeps updating, but every React label that reads polled state stays at its initial value forever. Confirmed regression in design-tool when only the first half ran (Spectr's bands trigger frozen at "32" and zoom indicator frozen at "1.00×" — both drive their text from a 150ms `setInterval`).
+
+Two safety nets enforce the contract going forward:
+
+- **CI lint** at `tools/scripts/host_pump_lint.py` greps every host main.cpp listed in `HOST_FILES` for any `poll_async_results()` call not paired with `service_frame_callbacks()` within the same handler block. Fails CI on violation. Single-line bypass: append `// host-pump-lint: skip — <reason>` for genuine one-shot CLI tools.
+- **Runtime smoke** at `tools/import-validation/live-host-pump-smoke.sh` launches each live-host binary against a tiny script that schedules `setInterval(fire, 50)`, runs for 2s, and asserts ≥5 fires landed. Generic — adding a new live host = one row in the `HOSTS=()` table; everything else is reused.
+
+When adding a new live host (e.g. a future `examples/<thing>` binary), update **both**: append the new host to `HOST_FILES` in `host_pump_lint.py` AND to `HOSTS` in `live-host-pump-smoke.sh`. The lint catches source-level regressions at PR time; the smoke catches runtime breakage where the source pairing is correct but the run loop is misconfigured.
+
+For unobtrusive smoke / CI runs, the design-tool exposes `--no-show-window` (uses `WindowOptions.initially_hidden` to skip Dock icon + window display while keeping the full bridge run loop active) and `--exit-after-ms <N>` (clean `request_close()` after N ms). Both flags compose, so `pulp-design-tool --script <probe.js> --no-show-window --exit-after-ms 2000` runs the full live-host code path with no GUI flash.

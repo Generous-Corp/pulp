@@ -128,11 +128,15 @@ static void print_usage() {
     std::cerr << "  --automation-apply-summary-out <f> Save applyDesignChatResponse() summary\n";
     std::cerr << "  --automation-delay-ms <ms>         Delay before baseline capture (default: 350)\n";
     std::cerr << "  --automation-after-delay-ms <ms>   Delay before post-apply capture (default: 350)\n";
+    std::cerr << "  --no-show-window                   Run with no visible window (live-host smoke / CI)\n";
+    std::cerr << "  --exit-after-ms <N>                Auto request_close() after N ms (live-host smoke / CI)\n";
 }
 
 int main(int argc, char* argv[]) {
     fs::path js_path;
     AutomationOptions automation;
+    uint64_t exit_after_ms = 0;     // pulp-internal #71 — 0 = disabled (normal interactive use)
+    bool no_show_window = false;    // pulp-internal #71 — true = skip Dock icon + window display
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -183,6 +187,10 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--automation-after-delay-ms" && i + 1 < argc) {
             automation.enabled = true;
             automation.after_delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+        } else if (arg == "--no-show-window") {
+            no_show_window = true;
+        } else if (arg == "--exit-after-ms" && i + 1 < argc) {
+            exit_after_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
         } else if ((arg == "--help" || arg == "-h")) {
             print_usage();
             return 0;
@@ -291,6 +299,7 @@ int main(int argc, char* argv[]) {
     opts.min_height = 600;
     opts.resizable = true;
     opts.use_gpu = true;
+    opts.initially_hidden = no_show_window;  // pulp-internal #71
 
     // pulp #1899 — clamp any oversize absolute-positioned descendants
     // to the initial window viewport before first layout, so
@@ -383,7 +392,17 @@ int main(int argc, char* argv[]) {
     dispatch_source_set_event_handler(reload_timer, ^{
         try {
             if (*bridge_slot) {
+                // pulp-internal #71 — full per-tick bridge pump. Both halves
+                // are required: poll_async_results drains async-exec
+                // results + queued frame callbacks; service_frame_callbacks
+                // drains JS setTimeout / setInterval timers via
+                // __flushTimers__. Skipping the second call leaves every
+                // imported app's polling-state-update path frozen — the
+                // app's React tree never re-evaluates because setInterval
+                // callbacks queue forever (see scripted_ui.cpp:67-81 +
+                // tools/scripts/host_pump_lint.py).
                 (*bridge_slot)->poll_async_results();
+                (*bridge_slot)->service_frame_callbacks();
             }
             reloader_ptr->poll_reload();
         } catch (const std::exception& e) {
@@ -393,6 +412,20 @@ int main(int argc, char* argv[]) {
         }
     });
     dispatch_resume(reload_timer);
+
+    // pulp-internal #71 — auto-exit support for live-host smoke tests
+    // (tools/import-validation/live-host-pump-smoke.sh). dispatch_after on
+    // the main queue calls window->request_close() cleanly so the run loop
+    // exits via the normal close path rather than SIGTERM. No-op when
+    // exit_after_ms == 0 (the default for interactive use).
+    if (exit_after_ms > 0) {
+        auto* window_ptr = window.get();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                      static_cast<int64_t>(exit_after_ms) * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            if (window_ptr) window_ptr->request_close();
+        });
+    }
 
     {
         auto* bridge_slot = &bridge;

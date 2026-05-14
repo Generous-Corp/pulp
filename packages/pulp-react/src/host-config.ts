@@ -113,6 +113,25 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
 function asText(children: unknown): string | undefined {
     if (typeof children === 'string') return children;
     if (typeof children === 'number') return String(children);
+    // pulp #71 — React passes `<button>{count}{" bands"}</button>` as the
+    // array `[count, " bands"]`. shouldSetTextContent already accepts mixed
+    // string/number arrays (it lowers them to text), but asText used to bail
+    // and return undefined, so commitUpdate's setText branch never fired and
+    // the button label froze at its first-render value (Spectr "32 bands"
+    // never advancing when the user picked a new count). Mirror
+    // shouldSetTextContent: skip null/undefined/boolean entries (React's
+    // standard "skip" sentinels), recurse on the rest, and bail only when an
+    // entry is a real element we can't flatten to a string.
+    if (Array.isArray(children)) {
+        const parts: string[] = [];
+        for (const c of children) {
+            if (c == null || typeof c === 'boolean') continue;
+            const part = asText(c);
+            if (part === undefined) return undefined;
+            parts.push(part);
+        }
+        return parts.join('');
+    }
     return undefined;
 }
 
