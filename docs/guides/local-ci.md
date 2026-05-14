@@ -17,6 +17,9 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 shipyard run                              # validate current branch
 shipyard pr                               # create, track, validate, and merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
+shipyard rescue <PR>                      # recover a wedged PR
+shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
+shipyard update --check --json            # report installed vs latest
 ```
 
 Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
@@ -289,6 +292,54 @@ launchctl unload ~/Library/LaunchAgents/com.danielraffel.pulp.macos-reroute-watc
 ```
 
 The watcher is **safe to run alongside the overflow probe in `build.yml`** — they cooperate. The probe decides *where to dispatch initially*; the watcher *opportunistically reroutes* dispatches that landed on cloud while local was busy, once local frees up before the cloud runner has picked up the job. If the cloud runner has already started, the watcher takes no action.
+
+### Self-hosted runner operations: prevent, recover, maintain
+
+Shipyard v0.55.0+ is the minimum pin for the full self-hosted-runner
+operational toolkit, and Pulp pins v0.56.2+ so rescue, update, and
+`shipyard wait pr` have REST fallback paths when GraphQL is rate-limited. The
+commands are discoverable from `shipyard --help` and replace the legacy
+`planning/scripts/runner-watchdog.sh` + manual reinstall workflow.
+
+```bash
+# Recover one PR whose required macOS check is wedged or stale
+shipyard rescue <PR>                      # cancel queued runs + redispatch to github-hosted
+shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard rescue <PR> --dry-run            # preview without acting
+shipyard rescue --all-stuck               # repo-wide stuck-run sweep
+shipyard rescue <PR> --to github-hosted   # explicit destination provider
+
+# Prevent future wedges on a self-hosted runner host
+shipyard runner watch --kill-hung-workers # implies --fix; pair with launchd/systemd
+
+# Keep the installed Shipyard CLI current
+shipyard update --check --json            # report installed vs available
+shipyard update                           # apply latest stable
+shipyard update --to v0.56.2              # pin or roll back to Pulp's minimum
+shipyard update --dry-run                 # plan only
+
+# Wait after handoff/rescue without depending solely on GraphQL
+shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
+```
+
+Use `shipyard rescue` when a PR is otherwise ready but blocked by queued,
+cancelled, or failed runner contexts caused by a self-hosted-runner wedge. It is
+the PR-side recovery path and avoids the old failure mode where cancelling
+queued runs left required checks stuck as `failure`.
+
+Use `shipyard runner watch --kill-hung-workers` on the runner host itself. It
+auto-cancels stale queued runs and kills hung `Runner.Worker` processes through
+Shipyard's safe recovery sequence: snapshot, SIGTERM, grace period, SIGKILL,
+child reaping, partial-build quarantine, Listener verification, and optional
+wait for GitHub status to flip. Its JSON output uses `runner.watch` envelopes
+with `event=auto_kill_worker` and `phase` values of `attempt`, `killed`,
+`failed`, or `no-pid-found`.
+
+Use `shipyard update` instead of the old ad hoc `curl install.sh | sh` path
+once a machine already has Shipyard installed. Pulp still records the canonical
+repo pin in `tools/shipyard.toml`; `shipyard update --check --json` is the
+machine-local drift check, while `shipyard pin bump --to vX.Y.Z` is the repo
+pin-change workflow.
 
 ## Required Merge Process (All Agents)
 

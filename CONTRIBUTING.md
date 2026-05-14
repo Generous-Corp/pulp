@@ -24,7 +24,7 @@ If you're interested in the rationale behind these rules, see [Astral's open-sou
 
 1. Fork the repo (or create a feature branch if you have write access).
 2. Make your changes on a branch named `feature/short-description` or `fix/short-description`.
-3. **Pre-PR validation** (optional but recommended): install the pinned source-checkout Shipyard tool with `./tools/install-shipyard.sh`, then run `shipyard run` to validate on macOS + Linux + Windows without creating a PR.
+3. **Pre-PR validation** (optional but recommended): install the pinned source-checkout Shipyard tool with `./tools/install-shipyard.sh` (after the first install, `shipyard update` is the preferred in-tool upgrade path), then run `shipyard run` to validate on macOS + Linux + Windows without creating a PR.
 4. Open and ship the PR with `shipyard pr`. This is the canonical path because it runs Pulp's skill-sync and version-bump gates, pushes the branch, creates the PR, records Shipyard tracking state, validates, and merges on green.
 5. Avoid `gh pr create` for normal work. Use it only when the maintainer explicitly chooses an emergency/manual bypass; in that case, call out that the PR may not appear in Shipyard-managed state until it is reconciled or re-shipped through Shipyard. Contributors who do not want Shipyard in their local checkout can make that explicit with `pulp config set pr.workflow github` or `pulp config set pr.workflow manual`; `pulp status` reports the active choice.
 6. CI will run automatically on macOS, Linux, and Windows.

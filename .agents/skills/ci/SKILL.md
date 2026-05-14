@@ -12,6 +12,17 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+> **If a PR's required `macos` check has been queued >30 min** or the
+> repo's PRs are all in `mergeable_state=blocked` with no movement,
+> jump to **"Self-hosted runner ops"** near the end of this file.
+> One-shot recovery is `shipyard rescue <PR>` (Shipyard v0.53.0+).
+> Continuous prevention is `shipyard runner watch --kill-hung-workers`
+> (v0.54.0+). Keep Shipyard itself current with `shipyard update`
+> (v0.55.0+; Pulp currently pins v0.56.2+). All three replace the
+> legacy `planning/scripts/runner-watchdog.sh --fix` workflow, which is
+> now an anti-pattern (cancels queued runs but registers `failure` on
+> required checks).
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately
@@ -198,6 +209,11 @@ shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch to Namespace
+shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
+shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
+shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners
+shipyard update --check --json            # installed vs latest Shipyard drift report
+shipyard update                           # apply latest stable Shipyard
 
 # Target management
 shipyard targets                          # list targets with reachability
@@ -1239,3 +1255,130 @@ In all three cases, set `PULP_VIA_SHIPYARD=1` on the direct-push
 command to record the push as supervised AND suppress the warning.
 
 After the obstacle clears, resume `shipyard pr` on the next PR.
+
+## Self-hosted runner ops
+
+Pulp's required `macos` branch-protection check on `main` routes
+through the local self-hosted `sanitizer` runner (via the
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` repo variable, consumed by
+`.github/workflows/build.yml` → `resolve-provider`). When that runner
+wedges, every PR's `macos` check sits queued indefinitely and all PRs
+land in `mergeable_state=blocked`.
+
+Shipyard v0.55.0+ ships a complete operational toolkit for this
+class of problem — **prevent → recover → keep current**. Pulp pins
+Shipyard ≥ 0.56.2 in `tools/shipyard.toml` so recovery, update, and
+`shipyard wait pr` all have REST fallback paths when GraphQL is rate-limited
+or unavailable. The authoritative reference lives in Shipyard's
+`skills/ci/SKILL.md`; this section is the Pulp-side quick reference +
+Pulp-specific gotchas.
+
+### Recover — `shipyard rescue <PR>` (v0.53.0+)
+
+```bash
+shipyard rescue <PR>                # cancel queued runs + redispatch
+                                    # to github-hosted (default)
+shipyard rescue <PR> --rerun-failed # also re-arm completed/cancelled
+                                    # runs (watchdog-cancellation case)
+shipyard rescue <PR> --dry-run      # preview without acting
+shipyard rescue --all-stuck         # repo-wide sweep
+shipyard rescue <PR> --to github-hosted   # explicit provider
+```
+
+One command replaces the legacy 5-step recipe (`runner-watchdog --fix`
+→ `gh run rerun --failed` → `shipyard cloud handoff run --apply`
+manual sweep). Safe under load — does not mark required checks as
+`failure`. Cross-link: Shipyard `skills/ci/SKILL.md#rescuing-wedged-
+runners-shipyard-rescue`.
+
+After a rescue, prefer `shipyard wait pr <PR> --state green` over manual
+polling. Shipyard v0.56.2 adds a REST fallback for this wait path; use
+`--no-fallback` only when a caller must fail instead of polling.
+
+### Prevent — `shipyard runner watch --kill-hung-workers` (v0.54.0+)
+
+```bash
+# One-time setup on a self-hosted runner host (Daniels-MacBook-Pro):
+shipyard runner watch --kill-hung-workers
+# Pair with launchd / systemd for unattended ops.
+```
+
+Host-side daemon that auto-cancels stale queued runs AND auto-kills
+hung `Runner.Worker` processes (snapshot → SIGTERM → grace → SIGKILL
+→ reap children → quarantine partial builds → verify Runner.Listener
+→ optionally wait for GitHub status flip). Implies `--fix`. Emits
+`runner.watch` JSON envelopes (`event=auto_kill_worker`,
+`phase ∈ {attempt, killed, failed, no-pid-found}`) for telemetry.
+
+Cross-link: Shipyard `skills/ci/SKILL.md#preventing-wedges-runner-
+watch--kill-hung-workers`.
+
+### Keep current — `shipyard update` (v0.55.0+)
+
+```bash
+shipyard update --check --json   # report installed vs available
+shipyard update                  # apply latest stable
+shipyard update --to v0.56.2     # pin / rollback to Pulp's minimum
+shipyard update --dry-run        # plan only
+```
+
+Replaces the bootstrap-only `curl … install.sh | sh` workflow. Pulp's
+CI / daily cron should run `shipyard update --check --json` to surface
+drift; humans run `shipyard update` to apply.
+
+### Pulp-specific gotchas (real wedge patterns)
+
+- **iOS AUv3 try-compile hangs.** `test/cmake/test_ios_auv3_configure.sh`
+  shells `xcodebuild CMAKE_TRY_COMPILE.xcodeproj build` which can
+  deadlock on `simctl` / keychain / codesign on the self-hosted host
+  (observed 2026-05-13). The `runner watch --kill-hung-workers` daemon
+  detects the stall via `Runner.Worker` not making progress for >5 min
+  and kills it cleanly.
+- **Test binaries open real windows on the dev mac.** Several
+  `pulp-test-*` binaries (auval validation, headless-view variants,
+  iOS AUv3 try-compile, visual-harness tests) create macOS surfaces
+  during CI. Because the runner runs as the human's user account,
+  those windows pop on the dev mac's display. Either move the runner
+  to a dedicated user account, or accept the brief popups.
+- **PRs that touch CI/runner workflows need a manual handoff.** If the
+  PR's macOS lane was cancelled by the wedge, even after `rescue` the
+  PR may need a fresh push to retrigger the version-skill-sync check
+  too.
+
+### Anti-pattern (legacy)
+
+- `planning/scripts/runner-watchdog.sh --fix` — superseded. Use
+  `shipyard rescue` (recover, PR-side) or `shipyard runner watch
+  --kill-hung-workers` (prevent, host-side).
+
+### Composition with `Version-Bump` gate
+
+`shipyard rescue` does not interact with the `Enforce version & skill
+sync` check. If a PR title starts with `fix:` / `feat:` and the branch
+lacks either a `chore: bump versions` commit OR a
+`Version-Bump: skip reason="..."` trailer on the tip commit, the
+version-skill-sync check fails independently. The trailer block must
+be CONTIGUOUS (no blank line between `Version-Bump:` and any other
+trailer like `Co-Authored-By:`) or git's `interpret-trailers` won't
+recognize it. Verify with
+`tools/scripts/version_bump_check.py --mode=report --base=origin/main
+--require-bump-for-fix-feat --pr-title="..."` which prints
+`bypass honored` when the trailer parses correctly.
+
+### Manual machine-side recovery (true last resort)
+
+If `shipyard rescue` doesn't help (e.g. the runner's host OS itself is
+unresponsive, not just the Worker), the machine-side recovery is:
+
+1. SSH the runner host (or open Terminal locally if it's the dev mac).
+2. `ps -ef | grep '[R]unner.Worker'` — confirm orphan Worker PIDs.
+3. `kill <pid>` (gentle), `kill -9` after 30 s grace.
+4. Restart via `~/actions-runner/svc.sh restart` or `launchctl
+   kickstart -k gui/$(id -u)/actions.runner.<owner>-<repo>.<name>`.
+5. After restart: `shipyard runner watch --kill-hung-workers` (one-time
+   foreground) verifies the host is healthy before enabling the
+   permanent daemon.
+
+Agents should NOT do step 1–4 themselves; ask the human via
+`PushNotification`. Agents CAN and SHOULD run `shipyard rescue` for
+the PR-side recovery without waiting.

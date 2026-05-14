@@ -16,8 +16,12 @@
 # supply-chain story as any other pinned dep.
 #
 # Usage:
-#   ./tools/install-shipyard.sh           # install pinned version
+#   ./tools/install-shipyard.sh           # install pinned version (first-time setup)
 #   ./tools/install-shipyard.sh --status  # show installed vs pinned
+#
+# After the first install, `shipyard update` (Shipyard v0.55.0+) is
+# the preferred in-tool upgrade path. This wrapper is only needed
+# for the initial bootstrap and for `--status` checks against the pin.
 #
 # Exit codes:
 #   0   success (or already installed and matching pin)

@@ -185,7 +185,7 @@ shipyard run                              # validate current branch
 shipyard pr                               # create, track, validate, and merge on green
 ```
 
-Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. Public Pulp installs include the Pulp CLI only. Source-checkout contributors install the pinned Shipyard tool with `./tools/install-shipyard.sh`; GitHub CLI (`gh`) is only needed for GitHub-facing contributor workflows. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
+Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. Public Pulp installs include the Pulp CLI only. Source-checkout contributors install the pinned Shipyard tool with `./tools/install-shipyard.sh` for the first install, then use `shipyard update` (Shipyard v0.55.0+) as the preferred in-tool upgrade path; GitHub CLI (`gh`) is only needed for GitHub-facing contributor workflows. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
 
 ### Security & CI policy
 
