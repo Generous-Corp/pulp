@@ -166,6 +166,45 @@ public:
     /// Keep window above all others.
     virtual void set_always_on_top(bool on_top) { (void)on_top; }
 
+    /// Set a fixed "design viewport". When set, the root view's bounds are
+    /// pinned to (design_w x design_h) and paint applies an aspect-correct
+    /// scale + letterbox translate to fit the current window size. Input
+    /// coordinates receive the inverse transform before hit-testing.
+    /// Pass (0, 0) to disable.
+    ///
+    /// Use this for content authored at a known fixed size (e.g. an editor
+    /// imported from Figma / Stitch / v0 / Pencil) that must resize
+    /// proportionally without re-layout. Combine with
+    /// set_fixed_aspect_ratio(design_w / design_h) so the OS enforces the
+    /// aspect on user drag and letterbox bars only appear as a backstop
+    /// during in-flight drag.
+    ///
+    /// Why this exists (pulp #59 / #63 / #64 / #65 — 2026-05-14):
+    /// the "obvious" alternatives all failed for native-react renderers
+    /// like Spectr:
+    ///   * Per-child set_scale() on root children scales chrome but
+    ///     canvas widgets record their draw commands at the original
+    ///     size, so contents clip on shrink.
+    ///   * Yoga absolute+inset:0 propagation: chains of position:absolute
+    ///     + inset:0 collapse to 0×0 in Pulp's runtime-import because
+    ///     Yoga only fills a containing block when the parent has a
+    ///     definite POINTS size — the cascade root→body→wrap→canvas
+    ///     never satisfies that.
+    ///   * JS-driven canvas refit via React refs: even with refs wired
+    ///     correctly through getPublicInstance, Spectr's resize() bails
+    ///     on wrapRef.current/canvasRef.current existence checks and
+    ///     never runs.
+    /// The design-viewport approach sidesteps all of these by doing the
+    /// resize at the renderer (paint-time scale of the design surface),
+    /// which is what a browser webview effectively does at the layer
+    /// level. The root view always thinks it's at design size; canvases
+    /// record commands at design size; chrome lays out at design size.
+    /// The WindowHost does the fitting on paint, and inverse-maps mouse
+    /// coords so hit-test still works.
+    virtual void set_design_viewport(float design_w, float design_h) {
+        (void)design_w; (void)design_h;
+    }
+
     // ── D.3 DPI / Monitor utilities ─────────────────────────────────────
     /// Get the DPI scale factor for this window.
     virtual float dpi_scale() const { return 1.0f; }

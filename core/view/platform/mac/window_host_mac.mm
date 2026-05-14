@@ -202,6 +202,10 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 @property (nonatomic, assign) pulp::view::FrameClock* frameClock;
 @property (nonatomic, strong) NSTimer* animationTimer;
 @property (nonatomic, strong) NSTrackingArea* trackingArea;
+// Inverse design-viewport transform applied to every window-space input
+// point before hit_test. Set by WindowHost::set_design_viewport; nil
+// when no design viewport is in effect (identity).
+@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 @end
 
 @implementation PulpView {
@@ -255,7 +259,12 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     // NSView is not flipped, so Y=0 is bottom. Convert to top-down for the view tree.
     float viewHeight = static_cast<float>(self.bounds.size.height);
-    return {static_cast<float>(p.x), viewHeight - static_cast<float>(p.y)};
+    pulp::view::Point pt{static_cast<float>(p.x), viewHeight - static_cast<float>(p.y)};
+    // pulp #59/#63/#64/#65 — when a design viewport is in effect, inverse-
+    // transform window-space coords into root-space before hit_test sees
+    // them. Identity when no viewport is set.
+    if (self.pointTransform) pt = self.pointTransform(pt);
+    return pt;
 }
 
 - (void)scrollWheel:(NSEvent*)event {
@@ -1931,6 +1940,46 @@ public:
             [window_ setContentAspectRatio:NSMakeSize(ratio, 1.0)];
     }
 
+    void set_design_viewport(float design_w, float design_h) override {
+        design_viewport_w_ = design_w;
+        design_viewport_h_ = design_h;
+        if (metal_view_) {
+            if (design_w > 0.0f && design_h > 0.0f) {
+                __block MacGpuWindowHost* host = this;
+                metal_view_.pointTransform = ^pulp::view::Point(pulp::view::Point pt) {
+                    return host->map_window_to_root(pt);
+                };
+            } else {
+                metal_view_.pointTransform = nil;
+            }
+        }
+        needs_repaint_ = true;
+    }
+
+    // Compute the active design->window transform.
+    // Returns true and fills sx, sy, tx, ty when a viewport is in effect.
+    bool design_transform(float& sx, float& sy, float& tx, float& ty) const {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f ||
+            width_ <= 0.0f || height_ <= 0.0f) {
+            return false;
+        }
+        const float s = std::min(width_ / design_viewport_w_,
+                                 height_ / design_viewport_h_);
+        sx = s;
+        sy = s;
+        tx = (width_  - design_viewport_w_ * s) * 0.5f;
+        ty = (height_ - design_viewport_h_ * s) * 0.5f;
+        return true;
+    }
+
+    // Map a window-space point (e.g. mouse) into root view coordinates.
+    Point map_window_to_root(Point pt) const {
+        float sx, sy, tx, ty;
+        if (!design_transform(sx, sy, tx, ty)) return pt;
+        if (sx <= 0.0f || sy <= 0.0f) return pt;
+        return { (pt.x - tx) / sx, (pt.y - ty) / sy };
+    }
+
     void set_client_decoration(bool enabled) override {
         if (!window_) return;
         if (enabled) {
@@ -1978,6 +2027,15 @@ private:
     int frame_fail_count_ = 0;
     int frame_ok_count_ = 0;
     float width_ = 0, height_ = 0;
+    // ── Design viewport (see WindowHost::set_design_viewport) ──────────
+    // When set (> 0), root_ is laid out at design size and paint applies
+    // an aspect-correct scale + letterbox translate to fit the window.
+    // Mouse coords are inverse-mapped before hit_test (via the metal
+    // view's pointTransform block). Used by content authored at a fixed
+    // size (e.g. native-react renderers from Figma / Stitch / v0 /
+    // Pencil) that needs proportional resize without re-layout.
+    float design_viewport_w_ = 0.0f;
+    float design_viewport_h_ = 0.0f;
     ResizeCallback resize_callback_;
     // pulp #1387 gap #3 — idle callback wiring. CVDisplayLink reads
     // has_idle_callback_ on the display thread; idle_callback_ is
@@ -2106,14 +2164,40 @@ private:
     }
 
     void paint_scene(canvas::Canvas& canvas) {
-        root_.set_bounds({0, 0, width_, height_});
+        // pulp #59/#63/#64/#65 — when a design viewport is set, the root
+        // is pinned at design size and paint applies an aspect-correct
+        // scale + letterbox translate to fit the current window. The
+        // letterbox fill covers the entire window first so the
+        // letterbox bars (visible only when the OS aspect-lock briefly
+        // diverges during user drag) are the same color as the design
+        // background. Overlays paint in window space (outside the
+        // transform) so dropdowns/inspector hit-test against the
+        // un-transformed window coords.
+        float sx, sy, tx, ty;
+        const bool has_viewport = design_transform(sx, sy, tx, ty);
+
+        if (has_viewport) {
+            root_.set_bounds({0, 0, design_viewport_w_, design_viewport_h_});
+        } else {
+            root_.set_bounds({0, 0, width_, height_});
+        }
         root_.layout_children();
 
         canvas.set_fill_color(canvas::Color::rgba8(30, 30, 46));
         canvas.fill_rect(0, 0, width_, height_);
 
-        root_.paint_all(canvas);
-        pulp::view::View::paint_overlays(canvas);
+        if (has_viewport) {
+            const int saved = canvas.save_count();
+            canvas.save();
+            canvas.translate(tx, ty);
+            canvas.scale(sx, sy);
+            root_.paint_all(canvas);
+            canvas.restore_to_count(saved);
+            pulp::view::View::paint_overlays(canvas);
+        } else {
+            root_.paint_all(canvas);
+            pulp::view::View::paint_overlays(canvas);
+        }
 
         // Inspector overlay is painted automatically via View::paint_overlays()
     }

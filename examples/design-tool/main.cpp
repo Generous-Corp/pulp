@@ -323,29 +323,49 @@ int main(int argc, char* argv[]) {
         }
         opts.title = title;
     }
-    opts.width = 1100;
-    opts.height = 700;
-    opts.min_width = 1000;  // Issue 5: prevent scrollbar overlap
-    opts.min_height = 600;
+    // pulp #59/#63/#64/#65 — design-viewport metadata (see
+    // WindowHost::set_design_viewport). Spectr's editor.js is authored
+    // at 1320x860 with chains of position:absolute+inset:0 children
+    // that Yoga can't size into a fill, so per-child scale and JS
+    // canvas-refit both fail. The window host instead pins the root
+    // at design size and applies an aspect-correct paint-time fit.
+    // TODO(pulp-internal #70): read these from runtime-import metadata
+    // declared by the imported HTML/JS instead of hardcoding here.
+    constexpr float kDesignWidth  = 1320.0f;
+    constexpr float kDesignHeight = 860.0f;
+    opts.width  = static_cast<uint32_t>(kDesignWidth);
+    opts.height = static_cast<uint32_t>(kDesignHeight);
+    opts.min_width  = static_cast<uint32_t>(kDesignWidth  * 0.5f);
+    opts.min_height = static_cast<uint32_t>(kDesignHeight * 0.5f);
     opts.resizable = true;
     opts.use_gpu = true;
     opts.initially_hidden = no_show_window;  // pulp-internal #71
 
     // pulp #1899 — clamp any oversize absolute-positioned descendants
-    // to the initial window viewport before first layout, so
-    // runtime-imported trees with hardcoded oversize roots (e.g.
-    // Spectr's 1320x860 abs-positioned wrap) don't lay their
-    // bottom-anchored children off-screen until a manual window
-    // resize triggers re-layout.
-    pulp::view::reconcile_oversize_absolute_subtree(root, opts.width, opts.height);
+    // to the design viewport before first layout, so runtime-imported
+    // trees with hardcoded oversize roots don't lay their bottom-
+    // anchored children off-screen.
+    pulp::view::reconcile_oversize_absolute_subtree(
+        root,
+        static_cast<uint32_t>(kDesignWidth),
+        static_cast<uint32_t>(kDesignHeight));
 
     auto window = WindowHost::create(root, opts);
+    // Design viewport: pins root at design size, paint scales/letterboxes
+    // to fit. Aspect-lock makes macOS enforce the aspect on user drag so
+    // letterbox bars only appear as a brief in-flight backstop.
+    window->set_design_viewport(kDesignWidth, kDesignHeight);
+    window->set_fixed_aspect_ratio(kDesignWidth / kDesignHeight);
     bridge->set_repaint_callback([&window] {
         if (window) window->repaint();
     });
     window->set_close_callback([] {
         std::cout << "Window closed\n";
     });
+
+    // No resize callback is needed: paint_scene reads design_viewport_w_/h_
+    // every frame and re-pins root bounds at design size, so the window
+    // can change size all it wants — the design surface stays put.
 
     // Hot reload
     HotReloader reloader(js_path, [&](const std::string& new_code) {

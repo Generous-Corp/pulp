@@ -264,6 +264,44 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
 - Use `createCol`/`createRow` for containers (NOT `createPanel` which adds glass overlay)
 - Row height = max child height; Column height = sum of child heights + gaps
 
+### Proportional resize for fixed-design native-react imports (pulp #59/#63/#64/#65)
+
+When you import a design that was authored at a known fixed size (Spectr's
+editor.js at 1320×860, a Figma frame at 1440×900, etc.) and want the live
+window to resize proportionally **without** re-layout, the right primitive
+is `WindowHost::set_design_viewport(w, h)`:
+
+```cpp
+auto window = WindowHost::create(root, opts);
+window->set_design_viewport(kDesignWidth, kDesignHeight);
+window->set_fixed_aspect_ratio(kDesignWidth / kDesignHeight);
+```
+
+What it does: pins root.bounds at design size on every paint, applies an
+aspect-correct scale + letterbox translate so the design fits inside the
+current window, inverse-maps mouse coords before hit-test. The window can
+change size; root never knows.
+
+**Do not** try to solve proportional resize for fixed-design imports with:
+
+1. **Per-child `set_scale()` on root children.** Scales chrome but
+   `CanvasWidget` records its draw commands at the original size, so
+   `<canvas>` content gets clipped on shrink. Tried and burned through 2026-05-13/14.
+2. **Yoga `absolute + inset:0` propagation.** Chains of
+   `position:absolute + inset:0` collapse to 0×0 in Pulp's runtime-import
+   because Yoga only fills a containing block when the parent has a
+   definite POINTS size — the cascade root→body→wrap→canvas never gets
+   one. This is **architectural** (Yoga is flex+grid only), not a bug.
+3. **JS-driven canvas refit via React refs.** Even with `getPublicInstance`
+   correctly returning a DOM-shim Element so refs match the element that
+   `getBoundingClientRect` queries, many native-react `resize()` functions
+   (Spectr's included) bail on `wrapRef.current`/`canvasRef.current`
+   existence checks and never run.
+
+The design-viewport approach sidesteps all three by doing the resize at the
+renderer (paint-time scale of the design surface), which is what a browser
+webview effectively does at the layer level.
+
 ## CLI Alternative
 
 The deterministic import tool is also available:
