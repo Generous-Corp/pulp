@@ -619,7 +619,16 @@ jobs:
     # Runs only on pull_request events — the gate question "of the lines
     # this PR adds, how many are covered?" is meaningless on a direct
     # push to main where there is no diff to compute against.
-    name: Diff coverage required (${{ needs.coverage.result == 'success' && '75%' || 'coverage job failed' }})
+    #
+    # NOTE: the previous dynamic name `Diff coverage required (${{ ... }})`
+    # did NOT evaluate at runtime — GitHub Actions renders `name:` at
+    # job-creation time, before `needs.coverage.result` is available, so
+    # the literal `${{ }}` template appeared in the check name on every
+    # PR and the gate stayed `[cancelled]` (zero enforcement value).
+    # The static name below renders correctly, lets us add the check to
+    # branch-protection's required-status-checks list, and shows the
+    # threshold inside the rendered PR comment body instead of the name.
+    name: Diff coverage required
     runs-on: ubuntu-24.04
     needs: coverage
     if: always() && github.event_name == 'pull_request'

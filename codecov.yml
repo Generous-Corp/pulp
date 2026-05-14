@@ -12,6 +12,32 @@
 # Phase 2 adds ci/coverage-targets.yaml alongside this for the diff-cover
 # gate; Phase 4 introduces doc_path_map.json to prevent drift.
 
+# Notification gating — wait for all 4 platform coverage uploads before
+# the bot computes + posts the patch coverage report. Without this,
+# Codecov posts as soon as it sees ANY upload (often Linux first, since
+# its build is fastest), which means Apple-only or Windows-only tested
+# paths get reported as 0% covered against partial data. PR #1873 was a
+# textbook example: a CLAP-fixture test that ran only on macOS was
+# reported as "0% patch coverage" by the bot because the macOS upload
+# hadn't arrived (and never did — see follow-up issue on the coverage
+# workflow's `cancel-in-progress: true` concurrency policy that wipes
+# in-flight runs on force-push).
+#
+# Expected uploaders today (matches .github/workflows/coverage.yml jobs
+# + flag tags in the Codecov upload step):
+#   1. Linux Clang  (Cobertura XML)
+#   2. macOS Clang  (Cobertura XML)
+#   3. Windows Clang (Cobertura XML)
+#   4. Android Kotlin (jacoco)
+#
+# If you add or remove a coverage uploader, bump this number to match
+# or Codecov will silently wait forever for the missing one and never
+# post. After 7d it gives up and posts whatever it has — by then the
+# PR has long since merged with a stale report.
+codecov:
+  notify:
+    after_n_builds: 4
+
 coverage:
   status:
     # Project-wide status: "did we get worse?" Not a hard gate — we
@@ -23,12 +49,28 @@ coverage:
         threshold: 1%          # allow 1% drop without failing
         informational: true    # Phase 1 is measurement; no blocking yet
 
-    # Patch status: "is new code covered?" Advisory in Phase 1; the
-    # authoritative patch gate comes from diff-cover in Phase 3.
+    # Patch status: "is new code covered?" Advisory in the sense that
+    # branch-protection does NOT require this check (so a sub-threshold
+    # PR can still merge), but the check status now accurately reflects
+    # the threshold check — `success` if ≥75%, `failure` if <75%.
+    #
+    # Previously `informational: true` hardwired the status to `success`
+    # even when patch coverage was 0%, which deceived devs reading the
+    # check line. The bot still posted a "❌ Patch coverage is X%"
+    # comment, but the status check itself said success, masking the
+    # gap. Flipping to enforcing makes the signal accurate without
+    # changing merge behavior (codecov/patch is not in
+    # branch-protection's required-status-checks list, so a red
+    # check here lets the dev decide; it does not auto-block).
+    #
+    # To make this a hard merge gate later, add `codecov/patch` to
+    # branch-protection's required contexts via the GitHub API or
+    # repo settings. Authoritative in-tree gate lives in
+    # .github/workflows/coverage.yml ("Diff coverage required") and
+    # is separately tracked.
     patch:
       default:
         target: 75%
-        informational: true
 
 # Exclude lists mirror scripts/run_coverage.sh COVERAGE_IGNORE_REGEX
 # so Codecov and our local tooling count the same set of files.
