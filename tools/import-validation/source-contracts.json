@@ -1,0 +1,575 @@
+{
+  "registry-schema-version": "0.1",
+  "notes": [
+    "This registry is additive. compat.json remains the owner of import detection fingerprints, parser-version, format-version, and compat-schema-version.",
+    "The parser field records the C++ runtime/static import lane. Provider MCP rows describe input acquisition only; current runtime parsers do not accept raw provider MCP JSON."
+  ],
+  "contracts": [
+    {
+      "source": "claude",
+      "display_name": "Claude Design",
+      "kind": "screen-export",
+      "trust": "absent",
+      "last_verified": "2026-05-14",
+      "recheck_interval": "manual",
+      "compat": {
+        "mode": "foreign-key",
+        "source": "claude",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "claude"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "manual-html-export",
+        "notes": "Anthropic Labs has no public MCP/API surface for Claude Design; Pulp supports manual standalone HTML exports and runtime bundle execution."
+      },
+      "upstream": [
+        {
+          "url": "test/fixtures/imports/claude/2024.10/example.html",
+          "kind": "fixture",
+          "proves": "Observed Claude Design standalone HTML bundle shape for parser-version 2.1 / format-version 2024.10.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": null
+        }
+      ],
+      "detected_artifact_shape": "Manual standalone HTML export or Send to Local Coding Agent bundle.",
+      "runtime_export_shape": "HTML bundle with encoded asset map evaluated by parse_claude_html_with_runtime when requested.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_claude_html_with_runtime",
+        "static": "parse_claude_html"
+      },
+      "format_versions": [
+        {
+          "version": "2024.10",
+          "fixture_paths": [
+            "test/fixtures/imports/claude/2024.10/example.html"
+          ],
+          "expected_paths": [
+            "test/fixtures/imports/claude/2024.10/expected.json",
+            "test/fixtures/imports/claude/2024.10/expected-classnames.json"
+          ]
+        }
+      ],
+      "validation": {
+        "fixtures": [
+          "test/fixtures/imports/claude/2024.10/example.html"
+        ],
+        "roundtrip_script": null,
+        "test_targets": [
+          "pulp-test-design-import"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp"
+        ],
+        "test_tags": [
+          "[view][import][issue-709][issue-468]"
+        ],
+        "pulp_render_reference": {
+          "status": "not-applicable",
+          "path": null
+        }
+      }
+    },
+    {
+      "source": "stitch",
+      "display_name": "Google Stitch",
+      "kind": "screen-export",
+      "trust": "observed",
+      "last_verified": "2026-05-14",
+      "recheck_interval_days": 90,
+      "compat": {
+        "mode": "foreign-key",
+        "source": "stitch",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "stitch"
+      },
+      "mcp": {
+        "provider_server": "mcp__stitch__*",
+        "available": true,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "offline-adapter-or-skill-flow",
+        "notes": "Stitch SDK/MCP can acquire screen data; current runtime parser accepts constrained React TSX, not raw MCP JSON."
+      },
+      "upstream": [
+        {
+          "url": "https://stitch.withgoogle.com/docs",
+          "kind": "docs",
+          "proves": "Official Stitch product documentation anchor.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        },
+        {
+          "url": "https://github.com/google-labs-code/stitch-sdk",
+          "kind": "sdk",
+          "proves": "SDK exposes generated screen HTML and screenshot artifacts.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "Stitch SDK HTML plus screenshot artifacts.",
+      "runtime_export_shape": "Constrained plain React TSX with inline styles.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_stitch_react",
+        "static": "parse_stitch_html"
+      },
+      "format_versions": [
+        {
+          "version": "2025.04",
+          "fixture_paths": [
+            "test/fixtures/imports/stitch/2025.04/code.html",
+            "test/fixtures/imports/stitch/2025.04/DESIGN.md"
+          ],
+          "expected_paths": [
+            "test/fixtures/imports/stitch/2025.04/expected.json"
+          ]
+        }
+      ],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/stitch/transport-bar.tsx",
+          "test/fixtures/stitch/transport-bar.tsx",
+          "test/fixtures/imports/stitch/2025.04/code.html"
+        ],
+        "roundtrip_script": "tools/import-validation/stitch-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][stitch][phase-6.6.4]",
+          "[view][bridge][runtime-import-dispatch][stitch][phase-6.6.4]"
+        ],
+        "pulp_render_reference": {
+          "status": "present",
+          "path": "planning/screenshots/REFERENCE-stitch-transport-bar.png"
+        }
+      }
+    },
+    {
+      "source": "designmd",
+      "display_name": "DESIGN.md",
+      "kind": "system-tokens",
+      "trust": "official",
+      "last_verified": "2026-05-14",
+      "recheck_interval_days": 90,
+      "compat": {
+        "mode": "foreign-key",
+        "source": "designmd",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "designmd"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "static-file-import",
+        "notes": "DESIGN.md is a static design-system token spec, not a live screen or runtime bundle."
+      },
+      "upstream": [
+        {
+          "url": "https://github.com/google-labs-code/design.md",
+          "kind": "spec",
+          "proves": "Official DESIGN.md YAML frontmatter plus Markdown design-system shape.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        },
+        {
+          "url": "https://stitch.withgoogle.com/docs/design-md/specification",
+          "kind": "docs",
+          "proves": "Stitch-adjacent DESIGN.md specification documentation.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "Static DESIGN.md file with YAML frontmatter and Markdown body.",
+      "runtime_export_shape": "No runtime screen export; emits tokens.json only.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:imports",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import_designmd.cpp",
+        "runtime": null,
+        "static": "parse_designmd"
+      },
+      "format_versions": [
+        {
+          "version": "alpha",
+          "fixture_paths": [
+            "test/fixtures/imports/designmd/alpha/DESIGN.md"
+          ],
+          "expected_paths": [
+            "test/fixtures/imports/designmd/alpha/expected.json",
+            "test/fixtures/imports/designmd/alpha/expected-detect.json"
+          ]
+        }
+      ],
+      "validation": {
+        "fixtures": [
+          "test/fixtures/imports/designmd/alpha/DESIGN.md"
+        ],
+        "roundtrip_script": "tools/import-validation/designmd-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import-designmd"
+        ],
+        "test_files": [
+          "test/test_design_import_designmd.cpp"
+        ],
+        "test_tags": [
+          "[view][import][designmd][issue-1434]"
+        ],
+        "pulp_render_reference": {
+          "status": "not-applicable",
+          "path": null
+        }
+      }
+    },
+    {
+      "source": "pencil",
+      "display_name": "Pencil / OpenPencil",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "2026-05-14",
+      "recheck_interval_days": 90,
+      "compat": {
+        "mode": "foreign-key",
+        "source": "pencil",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "pencil"
+      },
+      "mcp": {
+        "provider_server": "mcp__pencil__*",
+        "available": true,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "offline-adapter-or-skill-flow",
+        "notes": "Pencil MCP reads .pen state and variables; current runtime parser accepts only sanitized JSX with inline styles and resolved tokens."
+      },
+      "upstream": [
+        {
+          "url": "https://openpencil.dev/programmable/cli/exporting",
+          "kind": "docs",
+          "proves": "OpenPencil CLI export modes and JSX/Tailwind shape.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        },
+        {
+          "url": "https://openpencil.dev/programmable/jsx-renderer",
+          "kind": "docs",
+          "proves": "OpenPencil JSX renderer element vocabulary.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "OpenPencil JSX/Tailwind export or MCP node tree.",
+      "runtime_export_shape": "Sanitized single-file JSX/TSX with Tailwind expanded to inline styles and --pencil-* tokens resolved.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_pencil_react",
+        "static": "parse_pencil_json"
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/pencil/gain-stage-card.tsx",
+          "test/fixtures/pencil/gain-stage-card.tsx"
+        ],
+        "roundtrip_script": "tools/import-validation/pencil-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][pencil][phase-6.6.6]",
+          "[view][bridge][runtime-import-dispatch][pencil][phase-6.6.6]"
+        ],
+        "pulp_render_reference": {
+          "status": "present",
+          "path": "planning/screenshots/REFERENCE-pencil-gain-stage-card.png"
+        }
+      }
+    },
+    {
+      "source": "figma",
+      "display_name": "Figma Make",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "unverified",
+      "compat": {
+        "mode": "foreign-key",
+        "source": "figma",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "figma"
+      },
+      "mcp": {
+        "provider_server": "com.figma.mcp",
+        "available": true,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "offline-adapter-or-skill-flow",
+        "notes": "Figma MCP can acquire live nodes; current runtime parser accepts constrained Figma Make React exports, not raw Figma JSON."
+      },
+      "upstream": [
+        {
+          "url": "https://developers.figma.com/docs/code",
+          "kind": "docs",
+          "proves": "Figma Code / Make React project model.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "Figma Make React project files or Figma JSON via offline paths.",
+      "runtime_export_shape": "Constrained single-file React TSX with inline styles.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_figma_make_react",
+        "static": "parse_figma_json"
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/figma/level-meter-panel.tsx",
+          "test/fixtures/figma/level-meter-panel.tsx"
+        ],
+        "roundtrip_script": "tools/import-validation/figma-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][figma][phase-6.6.3]",
+          "[view][bridge][runtime-import-dispatch][figma][phase-6.6.3]"
+        ],
+        "pulp_render_reference": {
+          "status": "present",
+          "path": "planning/screenshots/REFERENCE-figma-level-meter-panel.png"
+        }
+      }
+    },
+    {
+      "source": "v0",
+      "display_name": "v0.dev",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "unverified",
+      "compat": {
+        "mode": "foreign-key",
+        "source": "v0",
+        "parser_version_owner": "compat.json"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "v0"
+      },
+      "mcp": {
+        "provider_server": "v0 MCP",
+        "available": true,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "offline-adapter-or-skill-flow",
+        "notes": "v0 MCP/project access is acquisition only; current runtime parser accepts constrained React exports and rejects Tailwind/shadcn defaults."
+      },
+      "upstream": [
+        {
+          "url": "https://v0.app/docs/design-systems",
+          "kind": "docs",
+          "proves": "v0 design-system and React/Tailwind/shadcn default surface.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        },
+        {
+          "url": "https://ui.shadcn.com/docs/registry",
+          "kind": "docs",
+          "proves": "shadcn registry shape that Pulp's v0 parser deliberately rejects in PR1.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "v0 React project envelope or single TSX component.",
+      "runtime_export_shape": "Constrained bare React TSX with inline styles; Tailwind and shadcn/Radix are rejected.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_v0_dev_react",
+        "static": "parse_v0_tsx"
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/v0-dev/audio-control-panel.tsx",
+          "test/fixtures/v0-dev/audio-control-panel.tsx"
+        ],
+        "roundtrip_script": "tools/import-validation/v0-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][v0][phase-6.6.2]",
+          "[view][bridge][runtime-import-dispatch][v0][phase-6.6.2]"
+        ],
+        "pulp_render_reference": {
+          "status": "pending",
+          "path": "planning/screenshots/REFERENCE-v0-dev-audio-control-panel.png"
+        }
+      }
+    },
+    {
+      "source": "rn",
+      "display_name": "React Native",
+      "kind": "screen-export",
+      "trust": "official",
+      "last_verified": "unverified",
+      "compat": {
+        "mode": "not-applicable",
+        "source": null,
+        "parser_version_owner": "runtime-import"
+      },
+      "dispatch": {
+        "kind": "explicit-runtime-parser",
+        "parser": "parse_react_native_export"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "runtime-import-parser",
+        "notes": "React Native import shape is a code contract, not a design-provider MCP lane."
+      },
+      "upstream": [
+        {
+          "url": "https://reactnative.dev/docs/components-and-apis",
+          "kind": "docs",
+          "proves": "React Native core component vocabulary.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 180
+        },
+        {
+          "url": "https://reactnative.dev/docs/flexbox",
+          "kind": "docs",
+          "proves": "React Native Flexbox defaults including column direction.",
+          "last_verified": "2026-05-14",
+          "recheck_interval_days": 180
+        }
+      ],
+      "detected_artifact_shape": "Single-file React Native TSX component importing from react-native.",
+      "runtime_export_shape": "Constrained RN TSX normalized to Pulp DOM-compatible JS.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_react_native_export",
+        "static": null
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/rn/gain-stage.tsx",
+          "test/fixtures/rn/gain-stage.tsx"
+        ],
+        "roundtrip_script": "tools/import-validation/rn-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][rn][phase-6.6.5]",
+          "[view][bridge][runtime-import-dispatch][rn][phase-6.6.5]"
+        ],
+        "pulp_render_reference": {
+          "status": "present",
+          "path": "planning/screenshots/REFERENCE-rn-gain-stage.png"
+        }
+      }
+    }
+  ]
+}

@@ -95,6 +95,10 @@ class CoveragercTests(unittest.TestCase):
     def test_default_test_globs_include_targeted_top_level_tooling_tests(self) -> None:
         self.assertIn("tools/test_check_format_validation.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertIn("tools/test_check_status_ladder.py", rpc.DEFAULT_TEST_GLOBS)
+        self.assertIn(
+            "tools/import-validation/test_source_contracts.py",
+            rpc.DEFAULT_TEST_GLOBS,
+        )
         self.assertNotIn("tools/test_*.py", rpc.DEFAULT_TEST_GLOBS)
 
     def test_normalized_source_roots_drop_nested_tools_paths(self) -> None:
@@ -396,6 +400,18 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(
             [surface.source_roots for surface in surfaces],
             [("tools/scripts",), ("tools", "core/view/js")],
+        )
+
+    def test_import_validation_slice_runs_its_tests_and_omits_test_modules(self) -> None:
+        tests = [rpc.REPO_ROOT / "tools/import-validation/test_source_contracts.py"]
+        surfaces = rpc._selected_surfaces(tests)
+        self.assertEqual(
+            [surface.source_roots for surface in surfaces],
+            [("tools/import-validation",), ("tools", "core/view/js")],
+        )
+        self.assertIn(
+            "tools/import-validation/test_*.py",
+            rpc._resolved_omit_globs(surfaces),
         )
 
     def test_broader_slice_is_not_duplicated_when_targeted_test_matches(self) -> None:

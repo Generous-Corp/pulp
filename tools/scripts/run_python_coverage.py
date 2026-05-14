@@ -59,6 +59,10 @@ COVERAGE_SURFACES = (
     CoverageSurface(("tools/scripts",), ("tools/scripts/test_*.py",)),
     CoverageSurface(("tools/deps",), ("tools/deps/test_*.py",)),
     CoverageSurface(("tools/local-ci",), ("tools/local-ci/test_*.py",)),
+    CoverageSurface(
+        ("tools/import-validation",),
+        ("tools/import-validation/test_source_contracts.py",),
+    ),
     # Keep the broader first-party tooling roots represented while the
     # executed test set stays on the established tooling roots plus
     # targeted top-level tooling tests.
@@ -74,10 +78,12 @@ COVERAGE_SURFACES = (
             "tools/scripts/test_*.py",
             "tools/deps/test_*.py",
             "tools/local-ci/test_*.py",
+            "tools/import-validation/test_*.py",
             "tools/packages/test_*.py",
             "tools/scripts/_*.py",
             "tools/deps/_*.py",
             "tools/local-ci/_*.py",
+            "tools/import-validation/_*.py",
             "tools/packages/_*.py",
             # tools/sandbox-e2e/ is end-to-end CLI test harness
             # (pulp#732). It's invoked by .github/workflows/sandbox-e2e.yml

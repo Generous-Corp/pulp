@@ -107,6 +107,28 @@ Ask the user or detect from context:
 **File-based fallback**:
 - Read the file and parse based on --from source type
 
+## Source-Contracts Registry
+
+Pulp keeps a permissive, machine-checkable source-contract registry at
+`tools/import-validation/source-contracts.json`. It records each provider's
+upstream anchors, runtime/static parser symbols, fixture paths, roundtrip
+script, test tags, MCP lane, and minimum runtime surface references. This file
+does not replace `compat.json`: `compat.json` still owns detection fingerprints,
+parser-version, format-version, and compat-schema-version.
+
+Run the warn-only checker after changing import parsers, source fixtures, or
+roundtrip scripts:
+
+```bash
+python3 tools/import-validation/check-source-contracts.py
+python3 tools/import-validation/check-source-contracts.py --format markdown
+python3 -m pytest tools/import-validation/test_source_contracts.py -v
+```
+
+Provider MCP lanes are input-acquisition lanes only unless the source contract
+explicitly says otherwise. Current runtime parsers reject raw Figma/Stitch/Pencil
+MCP JSON and accept only their constrained exported artifacts.
+
 ### Step 3: Translate to Pulp code
 
 Use the appropriate mapping document as your translation reference:

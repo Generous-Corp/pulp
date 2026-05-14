@@ -73,6 +73,11 @@ class DiscoveryExtraTests(unittest.TestCase):
                 [rpc.REPO_ROOT / "tools/scripts/test_alpha.py"]
             )
         )
+        self.assertTrue(
+            rpc._has_selected_test_surface(
+                [rpc.REPO_ROOT / "tools/import-validation/test_source_contracts.py"]
+            )
+        )
         self.assertFalse(
             rpc._has_selected_test_surface(
                 [rpc.REPO_ROOT / "tools/packages/test_registry.py"]

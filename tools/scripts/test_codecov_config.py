@@ -269,15 +269,16 @@ class CodecovYamlStructure(unittest.TestCase):
                     "entries must be `!`-prefix exclusions.",
                 )
 
-    def test_advisory_statuses_stay_informational(self):
-        # Phase 3 local checks should keep Codecov statuses advisory; the
-        # authoritative local gate lives outside Codecov status settings.
+    def test_status_policy_matches_enforcement_model(self):
+        # Project-wide Codecov remains advisory, but patch coverage should
+        # report a real failure below 75%. Branch protection decides whether
+        # that status is a hard merge gate.
         coverage_status = self.doc["coverage"]["status"]
         self.assertIs(coverage_status["project"]["default"]["informational"], True)
         self.assertEqual(coverage_status["project"]["default"]["target"], "auto")
         self.assertEqual(coverage_status["project"]["default"]["threshold"], "1%")
-        self.assertIs(coverage_status["patch"]["default"]["informational"], True)
         self.assertEqual(coverage_status["patch"]["default"]["target"], "75%")
+        self.assertNotIn("informational", coverage_status["patch"]["default"])
 
         component_statuses = (
             self.doc["component_management"]["default_rules"]["statuses"]

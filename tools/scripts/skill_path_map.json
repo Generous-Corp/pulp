@@ -142,6 +142,7 @@
     "import-design": {
       "paths": [
         "tools/import-design/**",
+        "tools/import-validation/**",
         "tools/design/**",
         "core/view/src/design_import*",
         "core/view/include/pulp/view/design_import.hpp",
