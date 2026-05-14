@@ -99,19 +99,21 @@ if(PULP_HAS_SKIA)
     elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig)
         if(PkgConfig_FOUND)
-            pkg_check_modules(FONTCONFIG fontconfig)
+            # IMPORTED_TARGET makes pkg-config build a proper INTERFACE
+            # `PkgConfig::FONTCONFIG` target that CMake transitively
+            # propagates through INTERFACE_LINK_LIBRARIES — including
+            # the actual `-lfontconfig` flag and link directories.
+            # Without this, the bare `FONTCONFIG_LIBRARIES=fontconfig`
+            # string can fall through CMake's static-lib transitive
+            # propagation without producing a `-lfontconfig` on the
+            # consumer's final ld line, and the chrome/m144 Skia
+            # archive's `SkFontMgr_New_FontConfig` (FcInit*, FcConfig*,
+            # FcPattern*, FcGetVersion, FcFontSet*) fails to resolve at
+            # pulp-cpp link time. Closes the linux-x64 leg of release-cli's
+            # backfill matrix (#1962, #1970 follow-up).
+            pkg_check_modules(FONTCONFIG IMPORTED_TARGET fontconfig)
             if(FONTCONFIG_FOUND)
-                target_include_directories(pulp-canvas PRIVATE ${FONTCONFIG_INCLUDE_DIRS})
-                # Use PUBLIC so the fontconfig dependency propagates to
-                # downstream executables (e.g. `pulp-cpp` in
-                # release-cli.yml). pulp-canvas is a STATIC library, so
-                # CMake does NOT automatically inherit PRIVATE link deps
-                # — the executable's link line wouldn't include
-                # `-lfontconfig` and the chrome/m144 Skia archive's
-                # `SkFontMgr_New_FontConfig` symbol fails to resolve.
-                # Closes the linux-x64 Build leg of release-cli's
-                # backfill matrix (#1962, #1970 follow-up).
-                target_link_libraries(pulp-canvas PUBLIC ${FONTCONFIG_LIBRARIES})
+                target_link_libraries(pulp-canvas PUBLIC PkgConfig::FONTCONFIG)
             endif()
         endif()
     # Android: Skia bundles FreeType + HarfBuzz, no system fontconfig needed
