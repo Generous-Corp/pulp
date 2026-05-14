@@ -23,6 +23,16 @@ struct WindowOptions {
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
 
+    /// pulp-internal #71 follow-up — when true, the window is created and
+    /// the run loop drives the bridge per-vsync as usual, but the window
+    /// is never made visible / brought to front / activated. The app also
+    /// skips the Dock-icon and focus-stealing activation steps. Intended
+    /// for headless smoke tests (live-host-pump-smoke.sh) and any
+    /// validation flow that wants the full live-host code path without a
+    /// GUI window flashing on screen. Backends that don't honour the
+    /// flag fall back to normal behaviour.
+    bool initially_hidden = false;
+
     // ── Multi-window hints (Phase 6) ────────────────────────────────────
     // These are used by WindowManager to configure platform-specific
     // window behavior. Callers creating standalone windows can ignore them.

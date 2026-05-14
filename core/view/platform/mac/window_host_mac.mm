@@ -317,10 +317,28 @@ static uint16_t modifiersFromNSFlags(NSEventModifierFlags flags) {
 }
 
 static pulp::view::Point toLocal(pulp::view::Point pos, pulp::view::View* target, pulp::view::View* root) {
+    // pulp-internal #69 — convert window-space `pos` into `target`'s
+    // local-pre-scale coordinates, accounting for any ancestor's
+    // set_scale transform. The forward render chain is:
+    //   visual_pos = sum over ancestors A of (A.bounds * scale_chain_above_A)
+    //              + (target_local * scale_chain_above_target)
+    // Inverse: walk root→target, peel off each ancestor's offset
+    // (scaled by the chain above it), then divide the residual by the
+    // final scale_chain to get target-local coords.
+    std::vector<pulp::view::View*> chain;
+    for (auto* v = target; v && v != root; v = v->parent()) chain.push_back(v);
+    // chain is target..root_child. Reverse to root_child..target.
+    std::reverse(chain.begin(), chain.end());
     auto local = pos;
-    for (auto* v = target; v && v != root; v = v->parent()) {
-        local.x -= v->bounds().x;
-        local.y -= v->bounds().y;
+    float scale_chain = 1.0f;  // accumulated scale from root down to current ancestor
+    for (auto* v : chain) {
+        local.x -= v->bounds().x * scale_chain;
+        local.y -= v->bounds().y * scale_chain;
+        scale_chain *= v->scale();
+    }
+    if (scale_chain != 0.0f && scale_chain != 1.0f) {
+        local.x /= scale_chain;
+        local.y /= scale_chain;
     }
     return local;
 }
@@ -1511,6 +1529,8 @@ public:
             if (options.min_width > 0 || options.min_height > 0)
                 [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
+            options_initially_hidden_ = options.initially_hidden;
+
             view_ = [[PulpView alloc] initWithFrame:frame];
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
@@ -1630,10 +1650,15 @@ public:
     void run_event_loop() override {
         @autoreleasepool {
             [NSApplication sharedApplication];
-            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-            install_app_menu([window_ title]);
-            show();
-            [NSApp activateIgnoringOtherApps:YES];
+            // pulp-internal #71 follow-up — see header for initially_hidden.
+            if (options_initially_hidden_) {
+                [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+            } else {
+                [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+                install_app_menu([window_ title]);
+                show();
+                [NSApp activateIgnoringOtherApps:YES];
+            }
             [NSApp run];
         }
     }
@@ -1648,6 +1673,7 @@ private:
     std::function<void()> close_callback_;
     std::function<void()> idle_callback_;
     ResizeCallback resize_callback_;
+    bool options_initially_hidden_ = false;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -1678,6 +1704,8 @@ public:
 
             if (options.min_width > 0 || options.min_height > 0)
                 [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
+
+            options_initially_hidden_ = options.initially_hidden;
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
@@ -1845,15 +1873,27 @@ public:
     void run_event_loop() override {
         @autoreleasepool {
             [NSApplication sharedApplication];
-            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-            install_app_menu([window_ title]);
+            // pulp-internal #71 follow-up — when initially_hidden is set,
+            // skip Dock icon, focus stealing, and the show() call. Window
+            // is created and the run loop drives the bridge per-vsync as
+            // usual; just don't put glass on the user's screen. Used by
+            // live-host smoke tests that need to exercise the per-vsync
+            // pump without flashing a window during CI / local validation.
+            if (options_initially_hidden_) {
+                [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+            } else {
+                [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+                install_app_menu([window_ title]);
+            }
 
             // Start display-linked render loop
             start_display_link();
 
-            show();
-            [window_ makeFirstResponder:metal_view_];
-            [NSApp activateIgnoringOtherApps:YES];
+            if (!options_initially_hidden_) {
+                show();
+                [window_ makeFirstResponder:metal_view_];
+                [NSApp activateIgnoringOtherApps:YES];
+            }
             [NSApp run];
         }
     }
@@ -1927,6 +1967,7 @@ private:
     PulpMetalView* metal_view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
     std::function<void()> close_callback_;
+    bool options_initially_hidden_ = false;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
