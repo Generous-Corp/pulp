@@ -1084,6 +1084,15 @@ canonical subject `chore: bump versions`.
 
 **Per-tag release-cli watchdog (#1375):** `.github/workflows/release-cli-watchdog.yml` triggers on `workflow_run` for `release-cli.yml`. It resolves the tag from `head_branch`, queries the GitHub release for `pulp-sdk-*` and `pulp-{darwin,linux,windows}-*` assets via `gh release view`, and opens a per-tag tracker on three failure shapes: `run_failure`, `success_with_missing_assets` (the v0.74.0 pattern — release exists with only plugin .pkg files from `sign-and-release.yml`), `no_release` (the v0.74.1 pattern — `release-cli`'s `release` job never ran because `build-cli`/`smoke-cli` failed). The tracker's body suggests `gh workflow run release-cli.yml --ref vX.Y.Z -f version=vX.Y.Z` to backfill, and auto-closes when the SDK assets land. This is documented as Layer 2b in `docs/guides/release-watchdog.md`.
 
+**Safe backfill of a stuck release-cli tag (#1962):** raw `gh workflow run release-cli.yml --ref vX.Y.Z` re-runs the BROKEN workflow file from the tag's source — useless when the breakage is in the workflow or the scripts it calls. `release-cli.yml` now exposes a `source_ref` `workflow_dispatch` input plus a `build-cli` step that overlays the current `main` copy of `tools/scripts/fetch_skia_for_release.py` over the in-tree copy on every dispatch with `source_ref` set. To backfill a tag whose source predates a fetch-script fix on main:
+
+```
+gh workflow run release-cli.yml --ref main \
+    -f version=v0.97.0 -f source_ref=v0.97.0
+```
+
+The workflow file comes from main (fixed), the source tree comes from the tag (correct content), and the overlay step picks up post-tag script fixes automatically. `release-guard.yml` and `release-cli-watchdog.yml` will auto-close their trackers when the SDK assets land. This was the fix for the four-day stall on v0.95.0..v0.97.0 caused by a skia-builder chrome/m144 zip layout drift (`Release/<arch>/libskia.a` instead of `Release/libskia.a`). The fetch script flattens the arch subdir; regression coverage lives in `tools/scripts/test_fetch_skia_for_release.py`.
+
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
 
 ## Coverage workflow (`#566` Phase 1)
