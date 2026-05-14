@@ -52,7 +52,14 @@ while IFS= read -r expected; do
   ref_total=$((ref_total + 1))
   if grep -Fxq "$expected" "$captured"; then
     hit=$((hit + 1))
-  elif grep -Fq "$expected" "$captured"; then
+  elif [[ ${#expected} -ge 4 ]] && grep -Fq "$expected" "$captured"; then
+    # Codex P1 follow-up on PR #1847: limit the substring fallback to
+    # labels of >= 4 characters. Short labels like "A" / "B" / "?" /
+    # "⋯" would otherwise match as substrings inside unrelated longer
+    # labels ("▸ A", "BANDS", etc), inflating coverage and letting
+    # missing controls slip past the 70% gate. Exact-match path
+    # (grep -Fxq above) still works for every length — short labels
+    # are detected, just not via substring promotion.
     fuzzy=$((fuzzy + 1))
     hit=$((hit + 1))
   else
