@@ -8,7 +8,15 @@
 set -euo pipefail
 
 PULP_DIR="${PULP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-FIXTURE="${PULP_STITCH_FIXTURE:-$PULP_DIR/planning/fixtures/stitch/transport-bar.tsx}"
+DEFAULT_PLANNING_FIXTURE="$PULP_DIR/planning/fixtures/stitch/transport-bar.tsx"
+DEFAULT_TEST_FIXTURE="$PULP_DIR/test/fixtures/stitch/transport-bar.tsx"
+if [[ -n "${PULP_STITCH_FIXTURE:-}" ]]; then
+  FIXTURE="$PULP_STITCH_FIXTURE"
+elif [[ -f "$DEFAULT_PLANNING_FIXTURE" ]]; then
+  FIXTURE="$DEFAULT_PLANNING_FIXTURE"
+else
+  FIXTURE="$DEFAULT_TEST_FIXTURE"
+fi
 BUILD_DIR="${PULP_BUILD_DIR:-$PULP_DIR/build-stitch-import}"
 BUILD_TYPE="${PULP_BUILD_TYPE:-Debug}"
 BUILD_JOBS="${PULP_BUILD_JOBS:-1}"
@@ -31,7 +39,8 @@ Env:
   PULP_BUILD_DIR        CMake build dir
   PULP_BUILD_TYPE       CMake build type (default: Debug)
   PULP_BUILD_JOBS       CMake build parallelism (default: 1)
-  PULP_STITCH_FIXTURE   Stitch TSX fixture path
+  PULP_STITCH_FIXTURE   Stitch TSX fixture path (defaults to planning fixture,
+                        falls back to test fixture when planning is unavailable)
   PULP_STITCH_REFERENCE reference screenshot path
   PULP_STITCH_OUT       candidate screenshot path
   PULP_HARNESS_THRESHOLD screenshot similarity threshold
@@ -142,4 +151,3 @@ fi
 
 python3 "$PULP_DIR/tools/import-validation/diff_against_reference.py" \
   "$REFERENCE" "$OUT" --threshold "$THRESHOLD"
-
