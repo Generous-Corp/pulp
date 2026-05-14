@@ -66,11 +66,19 @@ void print_overflow_usage() {
 
 std::string capture(const std::string& cmd) {
     std::string out;
+#if defined(_WIN32)
+    FILE* p = _popen(cmd.c_str(), "r");
+#else
     FILE* p = popen(cmd.c_str(), "r");
+#endif
     if (!p) return out;
     char buf[1024];
     while (fgets(buf, sizeof(buf), p)) out += buf;
+#if defined(_WIN32)
+    _pclose(p);
+#else
     pclose(p);
+#endif
     while (!out.empty() && (out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) {
         out.pop_back();
     }
