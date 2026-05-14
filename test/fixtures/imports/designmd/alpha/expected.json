@@ -1,0 +1,10 @@
+{
+  "_comment": "pulp #1031 detection expectations for the designmd/alpha fixture (Google DESIGN.md). All-of match across the four fingerprint clauses (filename, frontmatter-fence, frontmatter-key=name, frontmatter-key any-of=[colors,typography,rounded,spacing,components]).",
+  "source": "designmd",
+  "format-version": "alpha",
+  "parser-version": "0.1",
+  "matched-clauses": 4,
+  "total-clauses": 4,
+  "min-confidence-pct": 95,
+  "fingerprint-kinds": ["filename", "frontmatter-fence", "frontmatter-key"]
+}

@@ -267,7 +267,10 @@ void run_fixture(const fs::path& fixture_dir,
     // Choose the input target deterministically. Prefer directory scans
     // for fixtures that model directory exports; otherwise scan the
     // first HTML payload by sorted path so Linux/macOS directory order
-    // cannot change the expected detector result.
+    // cannot change the expected detector result. Markdown fixtures
+    // (e.g., DESIGN.md) have no HTML payload — fall through to a
+    // canonical filename match (DESIGN.md or design.md) so the
+    // detector's frontmatter probe runs against the expected file.
     fs::path scan_target = fixture_dir;
     if (!fs::exists(fixture_dir / "code.html")) {
         std::vector<fs::path> html_payloads;
@@ -282,8 +285,14 @@ void run_fixture(const fs::path& fixture_dir,
                 html_payloads.push_back(entry.path());
         }
         std::sort(html_payloads.begin(), html_payloads.end());
-        if (!html_payloads.empty())
+        if (!html_payloads.empty()) {
             scan_target = html_payloads.front();
+        } else {
+            for (auto candidate : {"DESIGN.md", "design.md"}) {
+                auto p = fixture_dir / candidate;
+                if (fs::exists(p)) { scan_target = p; break; }
+            }
+        }
     }
 
     auto snap = det::snapshot_input(scan_target);
