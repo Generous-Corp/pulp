@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Pulp pre-push hook (agent-agnostic).
 #
-# Runs the versioning + skill-sync + compat-sync + deps-audit + diff-coverage
-# gates against origin/main before pushing. **Enforcing by default** as of
+# Runs the versioning + skill-sync + compat-sync + source-contract +
+# deps-audit + diff-coverage gates against origin/main before pushing.
+# **Enforcing by default** as of
 # pulp #1144 — gate failures block the push locally so contributors don't
 # burn 20-min CI roundtrips on the same problem.
 #
@@ -10,7 +11,7 @@
 #   git config core.hooksPath .githooks
 #
 # Bypass knobs (use sparingly — CI runs the same gates):
-#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/deps)
+#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/source-contract/deps)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
 #
@@ -64,8 +65,8 @@ unset _drift_origin _drift_branch _drift_sha _drift_ts
 if [ "${SHIPYARD_PR_RUNNING:-0}" != "1" ] && [ "${PULP_VIA_SHIPYARD:-0}" != "1" ]; then
     echo "" >&2
     echo "⚠ Direct push detected (not via 'shipyard pr')." >&2
-    echo "   Local validation gates (skill-sync, version-bump, diff-cover, build/test on" >&2
-    echo "   macOS+Ubuntu+Windows VMs) get skipped, so CI becomes the discovery channel." >&2
+    echo "   Local validation gates (skill-sync, version-bump, source-contract, diff-cover," >&2
+    echo "   build/test on macOS+Ubuntu+Windows VMs) get skipped, so CI becomes the discovery channel." >&2
     echo "" >&2
     echo "   Acceptable temporary fallbacks:" >&2
     echo "   - GraphQL rate limit (run: gh api rate_limit --jq .resources.graphql)" >&2
@@ -82,6 +83,8 @@ PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+SCC="$ROOT/tools/import-validation/check-source-contracts.py"
+SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 
@@ -132,6 +135,26 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] compat_sync_check: internal error" >&2 ;;
+    esac
+fi
+
+# Import source-contract registry (#1434 follow-up). The checker is no-build
+# and `--strict` only fails warning/error findings; optional planning-submodule
+# paths remain informational so normal worktree checkouts can run it.
+if [ -f "$SCC" ]; then
+    "$PYTHON" "$SCC" --strict
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] check-source-contracts: internal error" >&2 ;;
+    esac
+fi
+if [ -f "$SCT" ]; then
+    "$PYTHON" "$SCT"
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] test_source_contracts: internal error" >&2 ;;
     esac
 fi
 

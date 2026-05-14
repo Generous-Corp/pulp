@@ -96,7 +96,7 @@ test      = "ctest --test-dir build -C Release --output-on-failure --exclude-reg
 # errors; the Python scripts inspect the same env var for parity.
 # See docs/guides/versioning.md for the full three-layer design.
 stages = ["setup"]
-setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report"
+setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report && python3 tools/import-validation/check-source-contracts.py --strict && python3 tools/import-validation/test_source_contracts.py"
 
 [validation.parser]
 # Path-scoped lane for runtime-import parser PRs (pulp #1916).

@@ -56,10 +56,14 @@ in `tools/shipyard.toml`). It:
 2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK,
    Claude plugin, and marketplace versions consistently, honoring any
    `Version-Bump:` trailers.
-3. Commits the bump (if any) as `chore: bump <surfaces>`.
-4. Pushes the branch, creates the PR, and records Shipyard tracking state.
-5. Runs cross-platform validate + merge on green.
-6. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
+3. Runs the no-build source-contract registry gate:
+   `tools/import-validation/check-source-contracts.py --strict` plus
+   `tools/import-validation/test_source_contracts.py`. This mirrors the
+   GitHub `Versioning & Skill-Sync` workflow and the local pre-push hook.
+4. Commits the bump (if any) as `chore: bump <surfaces>`.
+5. Pushes the branch, creates the PR, and records Shipyard tracking state.
+6. Runs cross-platform validate + merge on green.
+7. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
    publishes binaries on merge.
 
 Never run `gh pr create` + `shipyard ship` separately for a normal ship

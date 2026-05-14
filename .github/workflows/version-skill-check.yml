@@ -115,6 +115,15 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --mode=report --enforce
 
+      - name: Source-contract registry check
+        # Lightweight import-provider contract gate. The registry linter is
+        # intentionally no-build and treats optional planning-submodule paths
+        # as informational, so it can run on ordinary PR checkouts without
+        # initializing the private planning submodule.
+        run: |
+          python3 tools/import-validation/check-source-contracts.py --strict
+          python3 tools/import-validation/test_source_contracts.py
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
