@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0970"></a>
+## [0.33.0]
+
+## [0.98.0]
+
 ## [0.97.0] - 2026-05-13
 
 - feat(view+pulp-react+tools): live-host parity hardening — drive setInterval, recursive asText, lint+smoke, hidden-window flag ([#1960](https://github.com/danielraffel/pulp/pull/1960))
