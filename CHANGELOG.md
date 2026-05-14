@@ -32,6 +32,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(css): nested var() fallback + var-in-calc resolution via balanced-paren walker (closes coverage-gap css/__var) ([#1855](https://github.com/danielraffel/pulp/pull/1855))
 
 <a id="v0950"></a>
+## [0.96.0]
+
 ## [0.95.0] - 2026-05-12
 
 - feat(view): SDK C++ runtime-import API — install_runtime_import_handlers ([#1856](https://github.com/danielraffel/pulp/pull/1856))

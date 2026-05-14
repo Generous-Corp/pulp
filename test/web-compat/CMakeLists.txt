@@ -171,3 +171,21 @@ elseif(UNIX)
     target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-popover-row-template-1147)
+
+# pulp #1926 — SVG primitives other than <path> (rect / line / circle)
+# routing via the web-compat shim + __domAppend fast path + attribute
+# replay. Exercises document.createElement('rect'|'line'|'circle')
+# round-trips through the bridge — same DOM-shim stack-depth profile as
+# the rest of the web-compat suite, so match the 16 MB stack.
+add_executable(pulp-test-svg-primitives-1926 test_svg_primitives_1926.cpp)
+target_link_libraries(pulp-test-svg-primitives-1926 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-svg-primitives-1926 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-svg-primitives-1926 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-svg-primitives-1926 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-svg-primitives-1926 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-svg-primitives-1926)
