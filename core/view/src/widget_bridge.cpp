@@ -1130,6 +1130,20 @@ void WidgetBridge::install_runtime_import_handlers() {
                                 + src_label + "')");
                         return choc::value::Value();
                     }
+                } else if (source_lc == "rn" || source_lc == "react-native" ||
+                           source_lc == "reactnative") {
+                    bundle = parse_react_native_export(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported React Native export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
+                } else if ((source_lc == "auto" || source_lc.empty()) &&
+                           html.find("react-native") != std::string::npos) {
+                    bundle = parse_react_native_export(html);
+                    if (!bundle) {
+                        bundle = parse_claude_bundle(html);
+                    }
                 } else {
                     bundle = parse_claude_bundle(html);
                 }

@@ -208,6 +208,14 @@ std::optional<ClaudeBundle> parse_figma_make_react(const std::string& tsx);
 /// surface outside Pulp's supported runtime-import DOM/CSS/API subset.
 std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx);
 
+/// Normalize a constrained React Native single-file component export into the
+/// runtime-import bundle payload shape. RN has an unambiguous envelope
+/// (`from "react-native"`), so the runtime dispatch may auto-detect it when
+/// the source label is omitted. Returns nullopt for native/device APIs,
+/// navigation/Expo wrappers, images, style arrays, DOM tags, or any surface
+/// outside Pulp's supported runtime-import DOM/CSS/API subset.
+std::optional<ClaudeBundle> parse_react_native_export(const std::string& tsx);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

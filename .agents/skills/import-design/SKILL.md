@@ -1,11 +1,11 @@
 ---
 name: import-design
-description: Import designs from Figma, Stitch, v0, Pencil, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file (pulp #709). Versioned (parser-version / format-version / compat-schema-version) detection lives behind `--detect-only` and `--report-new-format` (pulp #1031).
+description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file (pulp #709). Versioned (parser-version / format-version / compat-schema-version) detection lives behind `--detect-only` and `--report-new-format` (pulp #1031).
 ---
 
 # Import Design
 
-Import a design from an external tool (Figma, Stitch, v0, Pencil, Claude Design) into this Pulp project.
+Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design) into this Pulp project.
 
 Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
@@ -20,7 +20,7 @@ Detect which design source the user wants by checking:
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
-- **Source**: figma, stitch, v0, pencil, or claude
+- **Source**: figma, stitch, v0, pencil, rn, or claude
 - **Input**: file path, URL, or MCP live data (manual file only for claude)
 
 ### Step 2: Read the design data
@@ -62,6 +62,12 @@ Ask the user or detect from context:
 - Accepted input is a single-component React TSX module from Stitch's vanilla/inline-style export path. The default Tailwind export is out of scope until the shared Tailwind-to-inline-style preprocessor exists.
 - C-3 deliberately rejects Tailwind `className`, external CSS imports, Next.js wrappers or `"use client"`, Radix/shadcn components, React Native imports, Stitch MCP JSON node trees, custom JSX components, non-range inputs, and network/storage/worker APIs.
 - Representative fixtures live under `planning/fixtures/stitch/`; the primary one is `transport-bar.tsx` (transport controls + range sliders + canvas VU meter). Run `tools/import-validation/stitch-roundtrip.sh --parser-only` for the parser/dispatch gate.
+
+**React Native runtime-import parser (Phase 6.6.5)**:
+- The runtime-import lane accepts constrained single-file RN component exports through `parse_react_native_export()` and `source: 'rn'`. The import `from 'react-native'` is unambiguous, so runtime dispatch may auto-detect RN when the source label is omitted.
+- Accepted input is a single TSX component with React imports from `react`, RN imports from `react-native`, RN element vocabulary (`View`, `Text`, `Pressable`/`Touchable*`, `ScrollView`, `TextInput`), and `StyleSheet.create({...})` styles. Numeric RN style values are treated as CSS pixels.
+- C-4 deliberately rejects native/device APIs and wrappers outside the matrix: `Animated`, Reanimated, Linking, Alert, AsyncStorage, Dimensions/Platform branching, Modal, virtualized lists, navigation, Expo modules, `NativeModules`, `requireNativeComponent`, image sources, DOM tags, and array-form styles.
+- RN defaults `flexDirection` to column; the parser-emitted bundle preserves that by injecting column flex semantics into the normalized DOM surface. Representative fixtures live under `planning/fixtures/rn/`; the primary one is `gain-stage.tsx`. Run `tools/import-validation/rn-roundtrip.sh --parser-only` for the parser/dispatch gate, `tools/import-validation/rn-roundtrip.sh` for parser-emitted screenshot diff, and `tools/import-validation/rn-roundtrip.sh --coverage` before pushing parser PRs.
 
 **Claude Design (manual HTML export — pulp #468)**:
 - Anthropic Labs has no MCP / public API. The user runs Claude Design, exports the canvas as Standalone HTML (or "Send to Local Coding Agent"), and hands you the resulting file.

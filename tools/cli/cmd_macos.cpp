@@ -22,11 +22,17 @@
 
 #include "cli_common.hpp"
 
+#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#  define popen  _popen
+#  define pclose _pclose
+#endif
 
 namespace {
 

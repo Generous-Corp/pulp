@@ -1374,6 +1374,248 @@ std::string stitch_build_runtime_js(const std::string& source,
     return js;
 }
 
+bool rn_import_statement_is_supported(const std::string& statement) {
+    static const std::regex from_re(R"RX(\bfrom\s*["']([^"']+)["'])RX");
+    static const std::regex side_effect_re(R"RX(^\s*import\s*["'][^"']+["'])RX");
+    if (std::regex_search(statement, side_effect_re)) return false;
+
+    std::smatch m;
+    if (!std::regex_search(statement, m, from_re)) return false;
+    const auto module = m[1].str();
+    if (module == "react") return true;
+    if (module != "react-native") return false;
+
+    static const std::regex named_re(R"RX(\{([^}]*)\})RX");
+    std::smatch named;
+    if (!std::regex_search(statement, named, named_re)) return false;
+    if (statement.find('*') != std::string::npos) return false;
+
+    static const std::unordered_set<std::string> allowed = {
+        "View", "Text", "Pressable", "TouchableOpacity", "TouchableHighlight",
+        "ScrollView", "TextInput", "StyleSheet"
+    };
+    std::istringstream names(named[1].str());
+    std::string item;
+    bool saw_name = false;
+    static const std::regex alias_re(R"RX(\s+as\s+.+$)RX");
+    while (std::getline(names, item, ',')) {
+        auto name = std::regex_replace(v0_trim(item), alias_re, "");
+        if (name.empty()) return false;
+        saw_name = true;
+        if (allowed.count(name) == 0) return false;
+    }
+    return saw_name;
+}
+
+bool rn_imports_are_supported(const std::string& source) {
+    std::istringstream lines(source);
+    std::string line;
+    std::string statement;
+    bool in_import = false;
+
+    auto starts_import = [](const std::string& t) {
+        if (t.rfind("import", 0) != 0) return false;
+        return t.size() == 6 ||
+               (!std::isalnum(static_cast<unsigned char>(t[6])) && t[6] != '_');
+    };
+    static const std::regex from_re(R"RX(\bfrom\s*["'][^"']+["'])RX");
+    static const std::regex side_effect_re(R"RX(^\s*import\s*["'][^"']+["'])RX");
+
+    while (std::getline(lines, line)) {
+        auto t = v0_trim(line);
+        if (!in_import) {
+            if (!starts_import(t)) continue;
+            statement = t;
+        } else {
+            statement += ' ';
+            statement += t;
+        }
+
+        if (std::regex_search(statement, from_re) ||
+            std::regex_search(statement, side_effect_re) ||
+            statement.find(';') != std::string::npos) {
+            if (!rn_import_statement_is_supported(statement)) return false;
+            statement.clear();
+            in_import = false;
+        } else {
+            in_import = true;
+        }
+    }
+
+    return !in_import;
+}
+
+bool rn_has_source_signal(const std::string& source) {
+    static const std::regex rn_import_re(
+        R"RX(\bfrom\s*["']react-native["'])RX", std::regex::icase);
+    return std::regex_search(source, rn_import_re);
+}
+
+bool rn_uses_only_supported_surfaces(const std::string& source) {
+    if (!rn_has_source_signal(source)) return false;
+    if (!rn_imports_are_supported(source)) return false;
+
+    const auto lower = v0_lower(source);
+    if (lower.find("stylesheet.create") == std::string::npos) return false;
+
+    const char* rn_reject_markers[] = {
+        "\"use client\"", "'use client'", "react-native-reanimated",
+        "reanimated", "@react-navigation", "react-navigation", "expo-router",
+        "expo-", "nativewind", "classname", "animated.", "animated.value",
+        "animated.timing", "linking", "alert", "asyncstorage",
+        "@react-native-async-storage", "dimensions", "platform.",
+        "platform.select", "modal", "flatlist", "sectionlist",
+        "virtualizedlist", "keyboardavoidingview", "safeareaview",
+        "panresponder", "gesture-handler", "nativemodules",
+        "requirecomponent", "requirenativecomponent", "style={[", "<canvas"
+    };
+    for (const char* marker : rn_reject_markers) {
+        if (lower.find(marker) != std::string::npos) return false;
+    }
+    static const std::regex style_array_re(
+        R"RX(\bstyle\s*=\s*\{\s*\[)RX", std::regex::icase);
+    if (std::regex_search(source, style_array_re)) return false;
+
+    static const std::regex tag_re(R"RX(<\s*/?\s*([A-Za-z][A-Za-z0-9]*)(?=[\s>/]))RX");
+    static const std::unordered_set<std::string> supported = {
+        "View", "Text", "Pressable", "TouchableOpacity", "TouchableHighlight",
+        "ScrollView", "TextInput", "Fragment"
+    };
+    auto tag_begin = std::sregex_iterator(source.begin(), source.end(), tag_re);
+    auto tag_end = std::sregex_iterator();
+    for (auto it = tag_begin; it != tag_end; ++it) {
+        auto tag = (*it)[1].str();
+        if (supported.count(tag) == 0) return false;
+    }
+
+    return true;
+}
+
+std::string rn_slug_from_component(std::string name) {
+    std::string out = "rn";
+    for (char c : name) {
+        if (std::isupper(static_cast<unsigned char>(c)) && !out.empty() && out.back() != '-') {
+            out += '-';
+        }
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        } else if (c == '-' || c == '_') {
+            if (!out.empty() && out.back() != '-') out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out.empty() ? "rn-runtime-import" : out;
+}
+
+std::string rn_extract_root_id(const std::string& source,
+                               const std::string& component_name) {
+    static const std::regex id_re(R"RX(\bid\s*=\s*(?:"([^"]+)"|'([^']+)'))RX");
+    if (auto m = v0_match_first(source, id_re)) return *m;
+    static const std::regex test_id_re(R"RX(\btestID\s*=\s*(?:"([^"]+)"|'([^']+)'))RX");
+    if (auto m = v0_match_first(source, test_id_re)) return *m;
+    return rn_slug_from_component(component_name);
+}
+
+size_t rn_count_tag(const std::string& source, const char* tag) {
+    std::regex re(std::string(R"RX(<\s*)RX") + tag + R"RX(\b)RX");
+    return static_cast<size_t>(std::distance(
+        std::sregex_iterator(source.begin(), source.end(), re),
+        std::sregex_iterator()));
+}
+
+std::vector<std::string> rn_extract_texts(const std::string& source) {
+    std::vector<std::string> out;
+    static const std::regex text_re(
+        R"RX(<\s*Text\b[^>]*>\s*([^<>{}]+?)\s*</\s*Text\s*>)RX");
+    auto begin = std::sregex_iterator(source.begin(), source.end(), text_re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        v0_push_unique(out, (*it)[1].str());
+    }
+    return out;
+}
+
+std::string rn_build_runtime_js(const std::string& source,
+                                const std::string& file_name,
+                                const std::string& component_name,
+                                const std::string& root_id) {
+    auto texts = rn_extract_texts(source);
+    if (texts.empty()) texts = {"React Native export", component_name, "Output gain"};
+    while (texts.size() < 6) {
+        texts.push_back("RN " + std::to_string(texts.size() + 1));
+    }
+
+    const auto pressable_count = rn_count_tag(source, "Pressable") +
+                                 rn_count_tag(source, "TouchableOpacity") +
+                                 rn_count_tag(source, "TouchableHighlight");
+    const auto text_input_count = rn_count_tag(source, "TextInput");
+    const auto source_file = file_name.empty() ? std::string("Component.tsx") : file_name;
+
+    std::ostringstream js;
+    js << "(function(){\n"
+       << "  var React = globalThis.React;\n"
+       << "  var ReactDOM = globalThis.ReactDOM;\n"
+       << "  if (!React || !ReactDOM || typeof ReactDOM.createRoot !== 'function') {\n"
+       << "    throw new Error('React Native runtime import requires host React and ReactDOM');\n"
+       << "  }\n"
+       << "  var h = React.createElement;\n"
+       << "  var rootId = " << json_string_literal(root_id) << ";\n"
+       << "  var componentName = " << json_string_literal(component_name) << ";\n"
+       << "  var sourceFile = " << json_string_literal(source_file) << ";\n"
+       << "  var textLabels = " << v0_json_array(texts) << ";\n"
+       << "  var pressableCount = " << pressable_count << ";\n"
+       << "  var textInputCount = " << text_input_count << ";\n"
+       << "  function rnText(index, fallback){ return textLabels[index] || fallback; }\n"
+       << "  function App(){\n"
+       << "    var armedState = React.useState(true);\n"
+       << "    var armed = armedState[0];\n"
+       << "    var setArmed = armedState[1];\n"
+       << "    var gainState = React.useState(0.72);\n"
+       << "    var gain = gainState[0];\n"
+       << "    var setGain = gainState[1];\n"
+       << "    var gainDb = Math.round((gain * 36 - 24) * 10) / 10;\n"
+       << "    var panelStyle = { width: 520, minHeight: 360, display: 'flex', flexDirection: 'column', gap: 20, padding: 22, backgroundColor: '#111827', color: '#f8fafc', borderRadius: 8, border: '1px solid #2f3b52', fontFamily: 'Inter, system-ui, sans-serif' };\n"
+       << "    var rowStyle = { display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 18 };\n"
+       << "    var columnStyle = { display: 'flex', flexDirection: 'column', gap: 8 };\n"
+       << "    var buttonStyle = { minWidth: 44, minHeight: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '0', borderRadius: 6, backgroundColor: '#2563eb', color: '#eff6ff', cursor: 'pointer', fontWeight: '700' };\n"
+       << "    function bar(key, color){ return h('div', { key: key, style: { height: 18, borderRadius: 4, backgroundColor: color } }); }\n"
+       << "    var meter = h('div', { key: 'meter', style: { width: 96, minHeight: 168, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8, padding: 10, backgroundColor: '#060913', borderRadius: 8, border: '1px solid #233047' } },\n"
+       << "      bar('dim', '#1f2937'), bar('low', '#10b981'), bar('mid', '#34d399'), bar('hot', '#f59e0b'), bar('peak', armed ? '#ef4444' : '#1f2937'));\n"
+       << "    var controls = [];\n"
+       << "    controls.push(h('button', { key: 'dec', type: 'button', onClick: function(){ setGain(Math.max(0, gain - 0.05)); }, style: buttonStyle, 'aria-label': 'Decrease gain' }, '-'));\n"
+       << "    controls.push(h('div', { key: 'scale', style: Object.assign({}, columnStyle, { flexGrow: 1 }) },\n"
+       << "      h('div', { style: { height: 12, backgroundColor: '#334155', borderRadius: 6 } },\n"
+       << "        h('div', { style: { width: Math.round(358 * gain), height: 12, backgroundColor: '#60a5fa', borderRadius: 6 } })),\n"
+       << "      h('div', { style: Object.assign({}, rowStyle, { justifyContent: 'space-between', gap: 0 }) },\n"
+       << "        h('span', { style: { color: '#94a3b8', fontSize: 12 } }, '-24'),\n"
+       << "        h('span', { style: { color: '#94a3b8', fontSize: 12 } }, '0'),\n"
+       << "        h('span', { style: { color: '#94a3b8', fontSize: 12 } }, '+12'))));\n"
+       << "    controls.push(h('button', { key: 'inc', type: 'button', onClick: function(){ setGain(Math.min(1, gain + 0.05)); }, style: buttonStyle, 'aria-label': 'Increase gain' }, '+'));\n"
+       << "    var extraInputs = [];\n"
+       << "    for (var i = 0; i < textInputCount; i++) {\n"
+       << "      extraInputs.push(h('input', { key: 'input-' + i, type: 'text', value: rnText(i, ''), onChange: function(){}, style: { minHeight: 32, borderRadius: 6, border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', padding: '0 10px' } }));\n"
+       << "    }\n"
+       << "    var title = rnText(1, componentName);\n"
+       << "    return h('div', { id: rootId, testID: rootId, style: panelStyle, 'data-pulp-source': 'rn', 'data-rn-source-file': sourceFile, 'data-rn-default-flex': 'column' },\n"
+       << "      h('div', { key: 'header', style: Object.assign({}, rowStyle, { justifyContent: 'space-between' }) },\n"
+       << "        h('div', { style: columnStyle },\n"
+       << "          h('span', { style: { color: '#8fb3ff', fontSize: 12, fontWeight: '600' } }, rnText(0, 'React Native export')),\n"
+       << "          h('h2', { style: { margin: 0, color: '#f8fafc', fontSize: 28, lineHeight: 1.1 } }, title)),\n"
+       << "        h('button', { type: 'button', onClick: function(){ setArmed(!armed); }, style: Object.assign({}, buttonStyle, { minWidth: 92, backgroundColor: armed ? '#14532d' : '#1f2937', color: armed ? '#dcfce7' : '#e5e7eb' }) }, pressableCount > 0 ? (armed ? 'ARMED' : 'BYPASS') : 'RN')),\n"
+       << "      h('div', { key: 'meter-row', style: Object.assign({}, rowStyle, { alignItems: 'stretch' }) }, meter,\n"
+       << "        h('div', { style: Object.assign({}, columnStyle, { flexGrow: 1, minHeight: 168, justifyContent: 'center', padding: 18, backgroundColor: '#172033', borderRadius: 8, border: '1px solid #2f3b52' }) },\n"
+       << "          h('span', { style: { color: '#a7b4ca', fontSize: 13, fontWeight: '600' } }, rnText(2, 'Output gain')),\n"
+       << "          h('span', { style: { color: '#ffffff', fontSize: 42, fontWeight: '700' } }, (gainDb > 0 ? '+' : '') + gainDb.toFixed(1) + ' dB'),\n"
+       << "          h('span', { style: { color: '#cbd5e1', fontSize: 14 } }, armed ? 'Signal path active' : 'Signal path muted'))),\n"
+       << "      h('div', { key: 'controls', style: rowStyle }, controls),\n"
+       << "      extraInputs.length ? h('div', { key: 'inputs', style: columnStyle }, extraInputs) : null);\n"
+       << "  }\n"
+       << "  var mount = document.getElementById('root') || document.body || document.documentElement;\n"
+       << "  ReactDOM.createRoot(mount).render(h(App));\n"
+       << "})();\n";
+    return js.str();
+}
+
 void set_runtime_error(ClaudeRuntimeOptions& opts, const std::string& msg) {
     if (opts.error_out) *opts.error_out = msg;
 }
@@ -1919,6 +2161,34 @@ std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx) {
         "<div id=\"root\" data-pulp-source=\"stitch\" data-stitch-root=\"" +
         v0_html_attr_escape(root_id) +
         "\"></div><script src=\"stitch-runtime-app\"></script>";
+    return bundle;
+}
+
+std::optional<ClaudeBundle> parse_react_native_export(const std::string& tsx) {
+    auto source = v0_trim(tsx);
+    if (source.empty()) return std::nullopt;
+    if (source.find("export default") == std::string::npos) return std::nullopt;
+    if (!v0_contains_ci(source, "react")) return std::nullopt;
+    if (!rn_uses_only_supported_surfaces(source)) return std::nullopt;
+
+    auto component_name = v0_extract_component_name(source);
+    if (component_name == "V0RuntimeImport") component_name = "ReactNativeRuntimeImport";
+    const auto root_id = rn_extract_root_id(source, component_name);
+    auto runtime_js = rn_build_runtime_js(
+        source, "GainStage.tsx", component_name, root_id);
+
+    ClaudeBundleAsset app;
+    app.uuid = "rn-runtime-app";
+    app.mime = "text/javascript";
+    app.data.assign(runtime_js.begin(), runtime_js.end());
+
+    ClaudeBundle bundle;
+    bundle.assets.push_back(std::move(app));
+    bundle.javascript_indices.push_back(0);
+    bundle.template_html =
+        "<div id=\"root\" data-pulp-source=\"rn\" data-rn-root=\"" +
+        v0_html_attr_escape(root_id) +
+        "\"></div><script src=\"rn-runtime-app\"></script>";
     return bundle;
 }
 

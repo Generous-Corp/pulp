@@ -13510,6 +13510,117 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Stitch parser by source
     REQUIRE(err_str.find("Stitch runtime import requires host React and ReactDOM") != std::string::npos);
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches RN parser by source label",
+          "[view][bridge][runtime-import-dispatch][rn][phase-6.6.5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string rn_tsx = R"(
+        import React, { useState } from "react";
+        import { Pressable, StyleSheet, Text, View } from "react-native";
+        export default function DispatchProbe() {
+          const [armed, setArmed] = useState(true);
+          return (
+            <View id="rn-dispatch-probe" style={styles.panel}>
+              <Text>React Native export</Text>
+              <Text>Gain Stage</Text>
+              <Pressable onPress={() => setArmed(!armed)} style={styles.button}>
+                <Text>{armed ? "ARMED" : "BYPASS"}</Text>
+              </Pressable>
+            </View>
+          );
+        }
+        const styles = StyleSheet.create({
+          panel: { padding: 18, backgroundColor: "#111827" },
+          button: { minHeight: 36 }
+        });
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(rn_tsx) + "', 'rn'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("React Native runtime import requires host React and ReactDOM") != std::string::npos);
+}
+
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ auto-detects RN parser",
+          "[view][bridge][runtime-import-dispatch][rn][phase-6.6.5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string rn_tsx = R"(
+        import React from "react";
+        import { StyleSheet, Text, View } from "react-native";
+        export default function AutoNativeProbe() {
+          return (
+            <View id="rn-auto-dispatch-probe" style={styles.panel}>
+              <Text>React Native export</Text>
+              <Text>Auto detected</Text>
+            </View>
+          );
+        }
+        const styles = StyleSheet.create({
+          panel: { padding: 18, backgroundColor: "#111827" }
+        });
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(rn_tsx) + "'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("React Native runtime import requires host React and ReactDOM") != std::string::npos);
+}
+
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ auto-detects RN only when parse succeeds",
+          "[view][bridge][runtime-import-dispatch][rn][phase-6.6.5]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string claude_bundle_with_rn_text = R"(
+        <script type="__bundler/manifest">{"main.js":{"mime":"text/javascript","data":"Z2xvYmFsVGhpcy5fX2NsYXVkZUZhbGxiYWNrSGl0ID0gJ3JlYWN0LW5hdGl2ZSBmYWxsYmFjayc7"}}</script>
+        <script type="__bundler/template">"\u003cdiv id=\"root\"\u003eClaude bundle mentions react-native\u003c/div\u003e\u003cscript src=\"main.js\"\u003e\u003c/script\u003e"</script>
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "globalThis.__claudeFallbackHit = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(claude_bundle_with_rn_text) + "'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("React Native export") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(engine.evaluate("String(globalThis.__claudeFallbackHit || '')")
+                .getWithDefault<std::string>("") == "react-native fallback");
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;

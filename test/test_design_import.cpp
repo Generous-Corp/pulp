@@ -169,6 +169,15 @@ void maybe_write_stitch_runtime_script(const std::string& runtime_js) {
     file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
 }
 
+void maybe_write_rn_runtime_script(const std::string& runtime_js) {
+    const char* out = std::getenv("PULP_RN_RUNTIME_JS_OUT");
+    if (out == nullptr || *out == '\0') return;
+
+    std::ofstream file(out, std::ios::binary);
+    REQUIRE(file.good());
+    file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
+}
+
 } // namespace
 
 // ── Design source parsing ───────────────────────────────────────────────
@@ -1587,6 +1596,212 @@ TEST_CASE("parse_stitch_react rejects out-of-matrix Stitch defaults",
     for (const auto& sample : rejected) {
         CAPTURE(sample);
         REQUIRE_FALSE(parse_stitch_react(sample).has_value());
+    }
+}
+
+// ── React Native export parsing ────────────────────────────────────────
+
+TEST_CASE("parse_react_native_export parses staged RN runtime fixture",
+          "[view][import][parser][rn][phase-6.6.5]") {
+    const auto primary = read_fixture("planning/fixtures/rn/gain-stage.tsx");
+    auto bundle = parse_react_native_export(primary);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->javascript_indices.front() == 0);
+    REQUIRE(bundle->assets.front().uuid == "rn-runtime-app");
+    REQUIRE(bundle->assets.front().mime == "text/javascript");
+    REQUIRE(bundle->template_html.find("data-pulp-source=\"rn\"") != std::string::npos);
+    REQUIRE(bundle->template_html.find("rn-gain-stage") != std::string::npos);
+
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("rn-gain-stage") != std::string::npos);
+    REQUIRE(js.find("React Native runtime import requires host React and ReactDOM") != std::string::npos);
+    REQUIRE(js.find("'data-pulp-source': 'rn'") != std::string::npos);
+    REQUIRE(js.find("'data-rn-default-flex': 'column'") != std::string::npos);
+    REQUIRE(js.find("flexDirection: 'column'") != std::string::npos);
+    REQUIRE(js.find("ReactDOM.createRoot") != std::string::npos);
+    REQUIRE(js.find("canvas.getContext") == std::string::npos);
+    REQUIRE(js.find("requestAnimationFrame") == std::string::npos);
+}
+
+TEST_CASE("parse_react_native_export runtime bundle materializes with host React shim",
+          "[view][import][parser][rn][render][phase-6.6.5]") {
+    const auto primary = read_fixture("planning/fixtures/rn/gain-stage.tsx");
+    auto bundle = parse_react_native_export(primary);
+    REQUIRE(bundle.has_value());
+    const auto runtime_js = asset_text(bundle->assets.front());
+    maybe_write_rn_runtime_script(runtime_js);
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    View root;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.load_script(minimal_host_react_dom_shim()));
+    REQUIRE_NOTHROW(bridge.load_script(runtime_js));
+    bridge.service_frame_callbacks();
+
+    REQUIRE(root.child_count() > 0);
+    REQUIRE(engine.evaluate("!!document.getElementById('rn-gain-stage')")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "(function(){ var el = document.getElementById('rn-gain-stage');"
+        "return el && el.getAttribute('data-rn-default-flex') === 'column'; })()")
+        .getWithDefault<bool>(false));
+}
+
+TEST_CASE("parse_react_native_export accepts sanitized RN TSX",
+          "[view][import][parser][rn][phase-6.6.5]") {
+    const std::string sanitized = R"(
+        import React, {
+          useState
+        } from "react";
+        import {
+          Pressable,
+          StyleSheet,
+          Text,
+          View
+        } from "react-native";
+        export default function MultiLineNativePanel() {
+          const [armed, setArmed] = useState(true);
+          return (
+            <View id="rn-multi-line-react-import" style={styles.panel}>
+              <Text style={styles.label}>React Native export</Text>
+              <Text style={styles.title}>Gain Stage</Text>
+              <Pressable onPress={() => setArmed(!armed)} style={styles.button}>
+                <Text>{armed ? "ARMED" : "BYPASS"}</Text>
+              </Pressable>
+            </View>
+          );
+        }
+        const styles = StyleSheet.create({
+          panel: { padding: 18, backgroundColor: "#111827" },
+          label: { color: "#8fb3ff" },
+          title: { color: "#f8fafc", fontSize: 24 },
+          button: { minHeight: 36 }
+        });
+    )";
+
+    auto bundle = parse_react_native_export(sanitized);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->template_html.find("rn-multi-line-react-import") != std::string::npos);
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("rn-multi-line-react-import") != std::string::npos);
+    REQUIRE(js.find("flexDirection: 'column'") != std::string::npos);
+}
+
+TEST_CASE("parse_react_native_export rejects out-of-matrix RN surfaces",
+          "[view][import][parser][rn][phase-6.6.5]") {
+    const std::vector<std::string> rejected = {
+        R"(
+            import { useState } from "react";
+            export default function GenericReactPanel() {
+              return <div id="generic">Generic</div>;
+            }
+        )",
+        R"(
+            "use client";
+            import { View } from "react-native";
+            export default function SolitoPanel() {
+              return <View />;
+            }
+        )",
+        R"(
+            import { Animated, View } from "react-native";
+            export default function AnimatedPanel() {
+              return <Animated.View />;
+            }
+        )",
+        R"(
+            import Animated from "react-native-reanimated";
+            import { View } from "react-native";
+            export default function WorkletPanel() {
+              return <View />;
+            }
+        )",
+        R"(
+            import { Linking, View } from "react-native";
+            export default function LinkingPanel() {
+              Linking.openURL("https://example.com");
+              return <View />;
+            }
+        )",
+        R"(
+            import { Alert, View } from "react-native";
+            export default function AlertPanel() {
+              Alert.alert("Nope");
+              return <View />;
+            }
+        )",
+        R"(
+            import { Dimensions, View } from "react-native";
+            export default function DimensionsPanel() {
+              const width = Dimensions.get("window").width;
+              return <View />;
+            }
+        )",
+        R"(
+            import { Platform, View } from "react-native";
+            export default function PlatformPanel() {
+              return <View />;
+            }
+        )",
+        R"(
+            import { Animated, View } from "react-native";
+            export default function AnimatedImportPanel() {
+              return <View />;
+            }
+        )",
+        R"(
+            import ReactNative from "react-native";
+            export default function DefaultNativePanel() {
+              return <ReactNative.View />;
+            }
+        )",
+        R"(
+            import * as ReactNative from "react-native";
+            export default function NamespaceNativePanel() {
+              return <ReactNative.View />;
+            }
+        )",
+        R"(
+            import { FlatList } from "react-native";
+            export default function ListPanel() {
+              return <FlatList data={[]} renderItem={() => null} />;
+            }
+        )",
+        R"(
+            import { Image } from "react-native";
+            export default function ImagePanel() {
+              return <Image source={{ uri: "https://example.com/a.png" }} />;
+            }
+        )",
+        R"(
+            import { View } from "react-native";
+            export default function StyleArrayPanel() {
+              return <View style={[styles.base, styles.hot]} />;
+            }
+            const styles = { base: {}, hot: {} };
+        )",
+        R"(
+            import { View } from "react-native";
+            import { NavigationContainer } from "@react-navigation/native";
+            export default function NavigationPanel() {
+              return <View />;
+            }
+        )",
+        R"(
+            import { View } from "react-native";
+            export default function DomPanel() {
+              return <div id="dom">DOM</div>;
+            }
+        )"
+    };
+
+    for (const auto& sample : rejected) {
+        CAPTURE(sample);
+        REQUIRE_FALSE(parse_react_native_export(sample).has_value());
     }
 }
 
