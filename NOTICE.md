@@ -761,6 +761,36 @@ copies or substantial portions of the Software.
 
 ---
 
+## DESIGN.md format (google/design.md)
+
+Copyright 2025 Google LLC
+
+Apache License, Version 2.0
+
+https://github.com/google/design.md
+
+Pulp adopts Google's DESIGN.md format as a first-class import source
+(`pulp import-design --from designmd`). The format specification at
+docs/spec.md (upstream) is referenced by Pulp's documentation and
+reimplemented in C++; no upstream source code is vendored. One
+example file from the upstream `examples/paws-and-paths/` directory
+is redistributed verbatim under this license as the test fixture
+`test/fixtures/imports/designmd/alpha/DESIGN.md`.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
 ## yaml-cpp
 
 Copyright (c) 2008-2015 Jesse Beder.
