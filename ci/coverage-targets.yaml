@@ -23,10 +23,13 @@
 # Consumed by `tools/scripts/coverage_tier_check.py`, invoked from the
 # `coverage-diff-gate` job alongside the existing diff-cover invocation.
 #
-# Coverage scope (#1056):
-#   This file gates the Cobertura/Clang-instrumented native diff lane.
-#   `coverage_tier_check.py::is_instrumented_source` filters non-C/C++/
-#   Obj-C files at aggregate time, so Kotlin (`.kt`) and Swift (`.swift`)
+# Coverage scope (#1056, #1886):
+#   This file gates two Cobertura lanes that share one per-tier YAML:
+#     1. The Clang-instrumented native diff lane (C / C++ / Obj-C).
+#     2. The vitest v8 JS/TS lane in `packages/pulp-react/**`
+#        (pulp #1886 Phase 1 — measure-only at first).
+#   `coverage_tier_check.py::is_instrumented_source` filters non-Cobertura
+#   files at aggregate time, so Kotlin (`.kt`) and Swift (`.swift`)
 #   sources never bias a tier score even if their paths match a glob.
 #   We classify them anyway (under `infrastructure`) so the audit recipe
 #   reports zero unmatched first-party files — non-instrumented sources
@@ -59,6 +62,13 @@ tiers:
       - core/render/**
       - inspect/**
       - tools/cli/**
+      # pulp #1886 Phase 1 — JS/TS sources in @pulp/react are user-visible
+      # SDK surface. Coverage data comes from the vitest v8 → Cobertura
+      # pipeline in `.github/workflows/pulp-react-build.yml`, not from
+      # scripts/run_coverage.sh. The per-tier gate runs continue-on-error
+      # in coverage.yml so this entry is measure-only at first; Phase 2
+      # flips enforcement once a stable baseline is observed.
+      - packages/pulp-react/**
 
   - name: infrastructure
     line_target: 50

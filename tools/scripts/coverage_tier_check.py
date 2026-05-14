@@ -194,24 +194,84 @@ def parse_cobertura(xml_path: pathlib.Path) -> dict[str, FileCoverage]:
 # ── Source filtering ───────────────────────────────────────────────────────
 
 
-# Extensions that the Clang source-based coverage pipeline actually
-# instruments. Scripts, CMake modules, YAML, shell, Python etc. in the
-# tier map (ship/**, tools/**) can't produce Cobertura entries, so the
-# old "missing file = fully uncovered" path would fail the infrastructure
+# Extensions whose coverage data shows up in a Cobertura XML the gate
+# can read. Two sources feed this set:
+#
+#   1. The Clang source-based coverage pipeline (scripts/run_coverage.sh)
+#      emits Cobertura rows for C / C++ / Obj-C / Obj-C++ sources.
+#   2. The vitest v8 coverage pipeline in `packages/pulp-react/**` emits
+#      Cobertura rows for `.ts` / `.tsx` / `.js` / `.jsx` — wired by
+#      pulp #1886 Phase 1 (measure-only). Phase 2 layers enforcement.
+#
+# Scripts, CMake modules, YAML, shell, Python etc. in the tier map
+# (ship/**, tools/**) can't produce Cobertura entries, so the old
+# "missing file = fully uncovered" path would fail the infrastructure
 # tier for any PR that only touched those files. Codex #612 P1.
+#
+# Codex P2 (pulp #1886): JS/TS coverage is NOT global. Vitest only emits
+# Cobertura rows for `packages/pulp-react/**`. A `.ts` file outside that
+# surface (e.g. `tools/foo.ts`, `inspect/src/dev.tsx`) has no Cobertura
+# row by design, so the "missing file = uncovered" path would falsely
+# fail the tier. The `_REPORTED_SURFACES` table below scopes each
+# extension to the path prefixes its coverage lane actually reports for.
+# Files with the right extension but outside the reporting surface are
+# treated as not-instrumented (mirroring how a `.sh` or `.cmake` file
+# is handled — present in the diff, but unable to contribute to the
+# Cobertura aggregate either way).
 _INSTRUMENTED_EXTS = frozenset({
+    # Clang source-based coverage (scripts/run_coverage.sh):
     ".c", ".cc", ".cpp", ".cxx", ".c++",
     ".h", ".hh", ".hpp", ".hxx", ".h++",
     ".m", ".mm",
+    # Vitest v8 coverage (packages/pulp-react/**) — pulp #1886 Phase 1.
+    # `.mts` / `.cts` deliberately omitted for now; @pulp/react is pure
+    # `.ts` and there's no measured surface for the other variants yet.
+    # Add them here when a real source file lands.
+    ".ts", ".tsx", ".js", ".jsx",
 })
 
 
+# Path prefixes (repo-relative, "/" suffix) under which a given extension
+# is actually instrumented. `None` means "no scope restriction — the
+# extension is instrumented anywhere it appears" (the Clang pipeline's
+# behavior). A tuple of prefixes restricts the extension to those
+# subtrees; anything outside is treated as not-instrumented.
+#
+# When you add a new JS/TS coverage lane (or move @pulp/react to a
+# different folder), update this table in lock-step with the lane.
+_REPORTED_SURFACES: dict[str, Optional[tuple[str, ...]]] = {
+    # Clang C-family: any path the build compiles.
+    ".c": None,    ".cc": None,   ".cpp": None,  ".cxx": None,  ".c++": None,
+    ".h": None,    ".hh": None,   ".hpp": None,  ".hxx": None,  ".h++": None,
+    ".m": None,    ".mm": None,
+    # Vitest v8: only `packages/pulp-react/**` is wired into the
+    # Cobertura output today.
+    ".ts":  ("packages/pulp-react/",),
+    ".tsx": ("packages/pulp-react/",),
+    ".js":  ("packages/pulp-react/",),
+    ".jsx": ("packages/pulp-react/",),
+}
+
+
 def is_instrumented_source(relpath: str) -> bool:
-    """True iff the path has an extension the coverage pipeline instruments."""
+    """True iff this path has an extension AND lives under a reported surface.
+
+    A file with an extension in `_INSTRUMENTED_EXTS` but outside the
+    reporting surface for that extension (per `_REPORTED_SURFACES`) is
+    NOT counted as instrumented — its diff lines won't be aggregated as
+    "uncovered" against any tier. This matches how non-source files
+    (shell, CMake, Python, YAML) are handled. Codex P2 on pulp #1886.
+    """
     dot = relpath.rfind(".")
     if dot < 0:
         return False
-    return relpath[dot:].lower() in _INSTRUMENTED_EXTS
+    ext = relpath[dot:].lower()
+    if ext not in _INSTRUMENTED_EXTS:
+        return False
+    surfaces = _REPORTED_SURFACES.get(ext)
+    if surfaces is None:
+        return True
+    return any(relpath.startswith(prefix) for prefix in surfaces)
 
 
 # ── Per-tier aggregation ───────────────────────────────────────────────────

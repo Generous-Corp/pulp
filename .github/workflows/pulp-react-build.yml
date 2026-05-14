@@ -38,6 +38,58 @@ jobs:
         run: npm run build
         working-directory: packages/pulp-react
 
-      - name: Test
-        run: npm test
+      - name: Test (with coverage)
+        # pulp #1886 Phase 1 — measure-only. The vitest v8 lane emits a
+        # Cobertura XML under `packages/pulp-react/coverage/`; Codecov
+        # consumes it via the upload step below. No thresholds enforced
+        # at this step (`coverage.yml` runs the diff-cover gate with the
+        # per-tier `continue-on-error` policy through Phase 1).
+        run: npm run test:coverage
         working-directory: packages/pulp-react
+
+      - name: Verify Cobertura XML exists
+        # Mirror the assertion the native coverage lane uses. A silent
+        # failure (e.g. v8 provider missing → vitest skips coverage but
+        # exits 0) would otherwise upload nothing and the Codecov
+        # dashboard would stay empty.
+        shell: bash
+        run: |
+          xml=packages/pulp-react/coverage/cobertura-coverage.xml
+          test -s "$xml" || {
+            echo "::error::cobertura-coverage.xml is missing or empty."
+            echo "::error::Vitest coverage step likely failed — check the 'Test (with coverage)' step above."
+            exit 1
+          }
+          size=$(wc -c < "$xml")
+          echo "cobertura-coverage.xml size: ${size} bytes"
+          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
+          if [ "${lines_valid}" = "0" ]; then
+            echo "::error::cobertura-coverage.xml is structurally empty (lines-valid=0)."
+            exit 1
+          fi
+          echo "cobertura-coverage.xml has lines-valid=${lines_valid}"
+
+      - name: Upload pulp-react coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pulp-react-coverage-${{ github.sha }}
+          path: packages/pulp-react/coverage/cobertura-coverage.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload pulp-react coverage to Codecov
+        # pulp #1886 Phase 1 — measure-only. Flag `pulp-react` lets
+        # Codecov slice the dashboard by SDK surface without changing
+        # the existing per-OS flag semantics on coverage.yml. No
+        # threshold enforcement here; Phase 2 will layer per-tier
+        # enforcement once a baseline is observed.
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: packages/pulp-react/coverage/cobertura-coverage.xml
+          flags: pulp-react
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true

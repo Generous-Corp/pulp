@@ -18,21 +18,34 @@ TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 
 # First-party source roots audited by `ci/coverage-targets.yaml`.
 # Mirrors the audit recipe in issue #1056. Every C/C++/Obj-C/Kotlin/
-# Swift file under these prefixes must classify into exactly one tier
-# OR appear in `_TIER_COMPLETENESS_ALLOWLIST` with a documented reason.
-_FIRST_PARTY_PREFIXES = ("core/", "tools/", "apple/", "android/", "inspect/")
+# Swift/TS/JS file under these prefixes must classify into exactly one
+# tier OR appear in `_TIER_COMPLETENESS_ALLOWLIST` with a documented
+# reason. `packages/` was added in pulp #1886 Phase 1 alongside the
+# vitest v8 lane in `packages/pulp-react/**`.
+_FIRST_PARTY_PREFIXES = (
+    "core/", "tools/", "apple/", "android/", "inspect/",
+    # Only the JS/TS package wired to vitest coverage is audited in
+    # Phase 1. Other entries under `packages/` (e.g. pulp-import-ir)
+    # join the audit when their coverage lane lands — adding them to
+    # the prefix list without a coverage source would silently fail
+    # the completeness check for files that genuinely have no Cobertura
+    # data yet.
+    "packages/pulp-react/",
+)
 # Extension list MUST stay in lock-step with the
 # `coverage_tier_check.py::_INSTRUMENTED_EXTS` set + every
 # Kotlin/Swift extension we audit. A drift between the two means the
 # completeness gate silently skips files that the coverage pipeline
-# DOES instrument. See `test_first_party_extensions_match_coverage_pipeline`
+# DOES instrument. See `test_audit_suffixes_cover_every_instrumented_extension`
 # below for the structural assertion. Codex P2 on PR #1154.
 _FIRST_PARTY_SUFFIXES = (
-    # C/C++/Obj-C/Obj-C++ — every extension in
+    # C/C++/Obj-C/Obj-C++ — every C-family extension in
     # coverage_tier_check._INSTRUMENTED_EXTS:
     ".c", ".cc", ".cpp", ".cxx", ".c++",
     ".h", ".hh", ".hpp", ".hxx", ".h++",
     ".m", ".mm",
+    # JS / TS — measured by the vitest v8 lane (pulp #1886 Phase 1):
+    ".ts", ".tsx", ".js", ".jsx",
     # Non-C-family first-party sources (Kotlin / Swift) audited here
     # but classified by the Kotlin / Swift coverage lanes, not by
     # `is_instrumented_source`:
@@ -204,6 +217,89 @@ class InstrumentedSourceTests(unittest.TestCase):
                   "tools/scripts/coverage_tier_check.py",
                   "ship/templates/appcast.xml.in", "README.md"):
             self.assertFalse(ctc.is_instrumented_source(p), msg=p)
+
+    def test_ts_js_sources_are_instrumented(self) -> None:
+        # pulp #1886 Phase 1 — the vitest v8 lane in
+        # `packages/pulp-react/**` emits Cobertura rows for these
+        # extensions, so the tier gate must treat them as instrumented.
+        # Without this, a TS-only PR like the one that motivated #1886
+        # has its diff lines filtered out of the per-tier aggregate
+        # entirely and the gate silently reports "no touched lines".
+        for p in (
+            "packages/pulp-react/src/host-config.ts",
+            "packages/pulp-react/src/components/Knob.tsx",
+            "packages/pulp-react/src/index.js",
+            "packages/pulp-react/src/legacy/foo.jsx",
+        ):
+            self.assertTrue(ctc.is_instrumented_source(p), msg=p)
+
+    def test_ts_outside_reported_surface_not_instrumented(self) -> None:
+        # Codex P2 on pulp #1886 — JS/TS coverage is scoped to
+        # `packages/pulp-react/**`. A `.ts` / `.tsx` / `.js` / `.jsx`
+        # file outside that surface (`tools/`, `inspect/`, anywhere
+        # else) has no Cobertura row by design; treating it as
+        # instrumented would mark every diff line as uncovered and
+        # falsely fail the tier. Mirror non-source handling instead.
+        for p in (
+            "tools/scripts/foo.ts",
+            "tools/cli/dev.tsx",
+            "inspect/web/legacy/init.js",
+            "core/view/src/widgets/dev_only.jsx",
+            "packages/pulp-import-ir/src/main.ts",  # different package
+        ):
+            self.assertFalse(ctc.is_instrumented_source(p), msg=p)
+
+    def test_ts_outside_surface_does_not_tank_tier(self) -> None:
+        # End-to-end: a `tools/scripts/foo.ts` file under the
+        # infrastructure tier with no Cobertura row used to count as
+        # 100% uncovered. After the fix it's treated as
+        # non-instrumented (same as a `.sh` / `.cmake` / `.py` file)
+        # and the tier reports "no touched lines".
+        results = ctc.aggregate(
+            TIERS,
+            ["tools/scripts/foo.ts"],
+            {},
+            lines_getter=lambda _p: {1, 2, 3, 4, 5},
+        )
+        infra = next(r for r in results if r.tier.name == "infrastructure")
+        self.assertEqual(infra.touched_lines, 0)
+        self.assertTrue(infra.passed)
+
+    def test_ts_aggregate_counts_diff_lines(self) -> None:
+        # End-to-end shape: a TS file under `packages/pulp-react/**`
+        # classified into `user-facing` (70%), with Cobertura hits
+        # supplied, contributes touched + covered lines to the tier.
+        # This guards against regressions where a future refactor of
+        # `is_instrumented_source` or `_INSTRUMENTED_EXTS` accidentally
+        # drops the JS/TS branch.
+        tiers = [
+            ctc.Tier(
+                name="user-facing",
+                line_target=70,
+                paths=("packages/pulp-react/**",),
+            ),
+        ]
+        cov = {
+            "packages/pulp-react/src/host-config.ts": ctc.FileCoverage(
+                path="packages/pulp-react/src/host-config.ts",
+                hits={10: 5, 11: 0, 12: 3, 13: 1, 14: 0},
+            ),
+        }
+        results = ctc.aggregate(
+            tiers,
+            ["packages/pulp-react/src/host-config.ts"],
+            cov,
+            lines_getter=lambda _p: {10, 11, 12, 13, 14},
+        )
+        uf = next(r for r in results if r.tier.name == "user-facing")
+        self.assertEqual(uf.touched_lines, 5)
+        self.assertEqual(uf.covered_lines, 3)
+        self.assertAlmostEqual(uf.percent, 60.0, places=1)
+        # 60% < 70% floor — used to fail; under Phase 1's measure-only
+        # gate (`continue-on-error` in the workflow) the failure is
+        # advisory, not blocking. The assertion here verifies the
+        # *aggregation* math, independent of enforcement policy.
+        self.assertFalse(uf.passed)
 
 
 class FirstPartySuffixDriftTests(unittest.TestCase):
