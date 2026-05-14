@@ -7,8 +7,38 @@
 #include <yoga/Yoga.h>
 #include <vector>
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 
 namespace pulp::view {
+
+// pulp #1899 — diagnostic: dump computed bounds tree after Yoga layout.
+// Gated by PULP_DUMP_BOUNDS env var so it never runs in production.
+static void dump_bounds_tree(const View& view, int depth) {
+    auto b = view.bounds();
+    const char* pos_str = "static";
+    switch (view.position()) {
+        case View::Position::absolute: pos_str = "abs"; break;
+        case View::Position::fixed:    pos_str = "fix"; break;
+        case View::Position::relative: pos_str = "rel"; break;
+        case View::Position::sticky:   pos_str = "sticky"; break;
+        default: break;
+    }
+    std::fprintf(stderr, "[bounds] %*s%-3s bounds=(%.0f,%.0f,%.0fx%.0f)",
+                 depth * 2, "", pos_str, b.x, b.y, b.width, b.height);
+    if (view.has_top())    std::fprintf(stderr, " top=%.0f%s",    view.top(),    view.top_unit()==DimensionUnit::percent?"%":"");
+    if (view.has_right())  std::fprintf(stderr, " right=%.0f%s",  view.right(),  view.right_unit()==DimensionUnit::percent?"%":"");
+    if (view.has_bottom()) std::fprintf(stderr, " bottom=%.0f%s", view.bottom(), view.bottom_unit()==DimensionUnit::percent?"%":"");
+    if (view.has_left())   std::fprintf(stderr, " left=%.0f%s",   view.left(),   view.left_unit()==DimensionUnit::percent?"%":"");
+    if (view.flex().preferred_width > 0)  std::fprintf(stderr, " pw=%.0f", view.flex().preferred_width);
+    if (view.flex().preferred_height > 0) std::fprintf(stderr, " ph=%.0f", view.flex().preferred_height);
+    if (view.flex().dim_width.value != 0)  std::fprintf(stderr, " dw=%.0f%s", view.flex().dim_width.value, view.flex().dim_width.unit==DimensionUnit::percent?"%":"px");
+    if (view.flex().dim_height.value != 0) std::fprintf(stderr, " dh=%.0f%s", view.flex().dim_height.value, view.flex().dim_height.unit==DimensionUnit::percent?"%":"px");
+    std::fprintf(stderr, " children=%zu\n", view.child_count());
+    for (size_t i = 0; i < view.child_count(); ++i) {
+        dump_bounds_tree(*view.child_at(i), depth + 1);
+    }
+}
 
 // Map Pulp FlexDirection to Yoga.
 // pulp #1434 (rn batch B) — row_reverse / column_reverse now route
@@ -553,6 +583,13 @@ void yoga_layout(View& root) {
     }
     YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
     apply_yoga_results(root, ygRoot);
+
+    if (std::getenv("PULP_DUMP_BOUNDS")) {
+        std::fprintf(stderr, "\n=== [PULP_DUMP_BOUNDS] root @ %.0fx%.0f ===\n",
+                     rootBounds.width, rootBounds.height);
+        dump_bounds_tree(root, 0);
+        std::fprintf(stderr, "=== [PULP_DUMP_BOUNDS] end ===\n\n");
+    }
 
     YGNodeFreeRecursive(ygRoot);
 }

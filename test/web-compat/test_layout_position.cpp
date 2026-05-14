@@ -331,6 +331,61 @@ TEST_CASE("Yoga: layered absolute canvases (filterbank+overlay) both fill parent
     REQUIRE(overlayPtr->bounds().height == 860.0f);
 }
 
+// pulp #1899 — documents Spectr's actual mount shape. The App component
+// in `spectr-editor-extracted.js:4140` is a literal-CSS hardcoded
+// `position:absolute; top:0; left:0; width:1320; height:860`. When pulp-
+// screenshot renders into a smaller viewport (e.g. the default 1280x800
+// at @2x to match the captured webview baseline), Spectr's App
+// overflows by 40 horizontally and 60 vertically, clipping the bottom
+// action rail (App-y=804..860 → viewport-y=804..860 → off-screen).
+//
+// This test pins the current Yoga behaviour so a future fix that
+// changes viewport-vs-content reconciliation (e.g. flex-centering body-
+// equivalent, or auto-clamping oversize absolute children to viewport)
+// has a regression anchor. Today the App is placed at (0,0,1320,860)
+// inside a 1280x800 viewport — overflowing, not centered.
+TEST_CASE("Yoga: Spectr-shape — hardcoded-size App inside smaller viewport overflows",
+          "[layout][yoga][absolute][spectr][issue-1899]") {
+    View viewport;
+    viewport.set_bounds({0, 0, 1280, 800});
+
+    // Spectr's App: position:absolute, top:0, left:0, hardcoded 1320x860
+    auto app = std::make_unique<View>();
+    app->set_position(View::Position::absolute);
+    app->set_top(0);
+    app->set_left(0);
+    app->flex().preferred_width = 1320;
+    app->flex().preferred_height = 860;
+    auto* appPtr = app.get();
+
+    // Bottom action rail inside the App
+    auto rail = std::make_unique<View>();
+    rail->set_position(View::Position::absolute);
+    rail->set_bottom(0);
+    rail->set_left(0);
+    rail->set_right(0);
+    rail->flex().preferred_height = 56;
+    auto* railPtr = rail.get();
+    app->add_child(std::move(rail));
+
+    viewport.add_child(std::move(app));
+    viewport.layout_children();
+
+    // App lands at viewport (0,0,1320,860) — overflowing
+    REQUIRE(appPtr->bounds().x == 0.0f);
+    REQUIRE(appPtr->bounds().y == 0.0f);
+    REQUIRE(appPtr->bounds().width == 1320.0f);
+    REQUIRE(appPtr->bounds().height == 860.0f);
+
+    // Rail is correctly anchored at bottom:0 of the App (App-y=804) —
+    // proves Yoga DOES propagate position:absolute + bottom:0 + height
+    // correctly. The visual bug is purely the viewport mismatch.
+    REQUIRE(railPtr->bounds().x == 0.0f);
+    REQUIRE(railPtr->bounds().y == 804.0f);
+    REQUIRE(railPtr->bounds().width == 1320.0f);
+    REQUIRE(railPtr->bounds().height == 56.0f);
+}
+
 TEST_CASE("Yoga: absolute child does not consume flex-line space from siblings",
           "[layout][yoga][absolute][issue-1379]") {
     // Inverse check: if absolute children leak into the flex line, the
