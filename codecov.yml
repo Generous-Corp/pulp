@@ -101,6 +101,27 @@ ignore:
   # with scripts/run_coverage.sh IGNORE and
   # tools/scripts/run_python_coverage.py omit_globs.
   - "tools/sandbox-e2e/**"
+  # ── Aligned with tools/scripts/coverage_config.json `diff_cover_excludes` ──
+  # The Pulp gate (`Diff coverage required` in coverage.yml) excludes these
+  # files because they're either thin dispatchers exercised end-to-end via
+  # shell-out tests (so direct line coverage doesn't propagate cleanly), or
+  # platform-specific renderer code that the cross-platform coverage matrix
+  # can't instrument uniformly. Without aligning the Codecov bot's ignore
+  # list to the same set, the bot's `codecov/patch` check fires red on PRs
+  # whose diff is mostly in these files (e.g. PR #1984's viewport-fit lived
+  # almost entirely in window_host_mac.mm — Pulp gate silent, bot screamed
+  # 8.64% patch coverage). Both sides MUST count the same set.
+  #
+  # Drift between this list and coverage_config.json is detected by
+  # tools/scripts/test_codecov_config_sync.py — keep them in sync.
+  - "**/cmd_loop.cpp"
+  - "**/pulp_import_design.cpp"
+  - "**/cg_canvas.mm"
+  - "**/window_host_mac.mm"
+  - "**/scanner_clap.cpp"
+  - "**/cmd_projects.cpp"
+  - "**/canvas.hpp"
+  - "**/skia_canvas.cpp"
 
 # PR comment. Focused on reach + diff + flags + tree so contributors
 # see "how many lines of THIS PR are covered by THIS PR's tests"

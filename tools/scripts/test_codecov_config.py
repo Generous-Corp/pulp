@@ -370,6 +370,33 @@ class CodecovYamlStructure(unittest.TestCase):
         self.assertEqual(comment["behavior"], "default")
         self.assertIs(comment["require_changes"], True)
 
+    def test_ignore_aligned_with_diff_cover_excludes(self):
+        """Codecov bot's `ignore` MUST mirror coverage_config.json's
+        `diff_cover_excludes`. Drift causes the `codecov/patch` check to
+        scream below-threshold on PRs whose diff is mostly in files the
+        Pulp gate (`Diff coverage required`) silently excludes — which is
+        what happened on PR #1984 (8.64% bot vs Pulp gate happy). Both
+        sides MUST count the same set of files.
+        """
+        import json
+
+        repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
+        gate_config = json.loads(
+            (repo_root / "tools/scripts/coverage_config.json").read_text()
+        )
+        gate_excludes = set(gate_config["diff_cover_excludes"])
+        bot_ignore = set(self.doc["ignore"])
+
+        missing = gate_excludes - bot_ignore
+        self.assertFalse(
+            missing,
+            f"codecov.yml `ignore:` is missing entries from "
+            f"coverage_config.json `diff_cover_excludes`: {sorted(missing)}\n"
+            f"Add them to codecov.yml's ignore list (under the "
+            f"'Aligned with...' comment) or both gates will count the "
+            f"same lines differently.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
