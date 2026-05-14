@@ -212,6 +212,43 @@ if(PULP_ENABLE_GPU)
     endif()
 endif()
 
+# pulp-internal #62 — LOUD perf-regression guard. PULP_ENABLE_GPU=ON
+# but no Skia found silently falls back to CoreGraphics CPU rendering.
+# That fallback is ~5-10× slower than Skia/Dawn for live JS-driven UIs
+# (Spectr's editor.js drag went from 7% CPU on Skia to 100% CPU on CG
+# fallback — 2026-05-13 regression). The fallback is the right
+# behavior for offline tooling and CI bot builds that don't render
+# windows, but for ANY local interactive developer session it produces
+# a UX that looks broken with no obvious build-output explanation.
+#
+# Print a screaming WARNING banner whenever GPU is requested but
+# Skia is not linked, with concrete instructions on how to recover.
+# The release path keeps the hard FATAL_ERROR below
+# (PULP_REQUIRE_GPU_FOR_SDK); local dev gets the loud warning instead
+# so an incremental rebuild without skia-build still works.
+if(PULP_ENABLE_GPU AND NOT PULP_HAS_SKIA)
+    message(WARNING
+        "\n"
+        "  ╔══════════════════════════════════════════════════════════════════════╗\n"
+        "  ║  PERF REGRESSION RISK — Skia is NOT linked into this build           ║\n"
+        "  ║                                                                      ║\n"
+        "  ║  PULP_ENABLE_GPU=ON but FindSkia.cmake could not locate libskia.a    ║\n"
+        "  ║  at the configured SKIA_DIR ('${SKIA_DIR}').                          \n"
+        "  ║                                                                      ║\n"
+        "  ║  Live windows (pulp-design-tool, pulp-ui-preview, pulp-screenshot    ║\n"
+        "  ║  with use_gpu=true) will silently fall back to CoreGraphics CPU      ║\n"
+        "  ║  rendering — ~5-10× slower for animated / JS-driven UIs.             ║\n"
+        "  ║                                                                      ║\n"
+        "  ║  Recover:                                                            ║\n"
+        "  ║    1. Run tools/build-skia.sh (or fetch the pinned tarball) to       ║\n"
+        "  ║       populate external/skia-build/build/<platform>-gpu/lib/Release/ ║\n"
+        "  ║    2. Or pass -DSKIA_DIR=/abs/path/to/external/skia-builder when     ║\n"
+        "  ║       the libs live at external/skia-builder/build/<plat>-gpu/...    ║\n"
+        "  ║    3. Or pass -DPULP_ENABLE_GPU=OFF if you genuinely want a          ║\n"
+        "  ║       CoreGraphics-only build (offline tooling, CI bots).            ║\n"
+        "  ╚══════════════════════════════════════════════════════════════════════╝")
+endif()
+
 # SDK-release safety net for pulp #1817. The release workflow turns this
 # option ON via -DPULP_REQUIRE_GPU_FOR_SDK=ON so a missing Skia tarball
 # is a hard configure error instead of a silent CG-only build that ships

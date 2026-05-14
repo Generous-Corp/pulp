@@ -9,6 +9,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/hot_reload.hpp>
+#include <pulp/view/viewport_reconcile.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/runtime/system.hpp>
 #include <filesystem>
@@ -291,6 +292,14 @@ int main(int argc, char* argv[]) {
     opts.resizable = true;
     opts.use_gpu = true;
 
+    // pulp #1899 — clamp any oversize absolute-positioned descendants
+    // to the initial window viewport before first layout, so
+    // runtime-imported trees with hardcoded oversize roots (e.g.
+    // Spectr's 1320x860 abs-positioned wrap) don't lay their
+    // bottom-anchored children off-screen until a manual window
+    // resize triggers re-layout.
+    pulp::view::reconcile_oversize_absolute_subtree(root, opts.width, opts.height);
+
     auto window = WindowHost::create(root, opts);
     bridge->set_repaint_callback([&window] {
         if (window) window->repaint();
@@ -345,6 +354,12 @@ int main(int argc, char* argv[]) {
     });
 
     // Poll hot-reload and async bridge results on a GCD timer (main thread).
+    // poll_async_results() drains BOTH the async_exec_results_ queue
+    // (setTimeout / IO / async-fn callbacks — required for React state
+    // commits to land during drag) AND the pending_frame_ids queue
+    // (RAF). CVDisplayLink alone doesn't drain the async-results
+    // queue, so removing this call breaks drag-driven setState (drawing
+    // filter bands silently stops mid-drag).
     auto* reload_timer = dispatch_source_create(
         DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(reload_timer,

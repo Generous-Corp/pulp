@@ -439,7 +439,7 @@ TEST_CASE("Yoga: absolute child does not consume flex-line space from siblings",
 // left+right) stays untouched.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#include "../../tools/screenshot/viewport_reconcile.hpp"
+#include <pulp/view/viewport_reconcile.hpp>
 
 TEST_CASE("Viewport reconcile: 3-level oversize chain clamps every depth",
           "[layout][viewport-reconcile][screenshot][issue-1899]") {
@@ -478,7 +478,7 @@ TEST_CASE("Viewport reconcile: 3-level oversize chain clamps every depth",
     app->add_child(std::move(wrap));
     root.add_child(std::move(app));
 
-    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+    pulp::view::reconcile_oversize_absolute_subtree(root, 1280, 800);
 
     // Every depth gets clamped — not just the direct child of root_.
     REQUIRE(appPtr->flex().preferred_width == 1280.0f);
@@ -508,7 +508,7 @@ TEST_CASE("Viewport reconcile: non-anchored explicit oversize is clamped",
     auto* childPtr = child.get();
     root.add_child(std::move(child));
 
-    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+    pulp::view::reconcile_oversize_absolute_subtree(root, 1280, 800);
 
     REQUIRE(childPtr->flex().preferred_width == 1280.0f);
     REQUIRE(childPtr->flex().preferred_height == 800.0f);
@@ -530,7 +530,7 @@ TEST_CASE("Viewport reconcile: non-absolute descendants are not clamped",
     auto* flowPtr = flow.get();
     root.add_child(std::move(flow));
 
-    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+    pulp::view::reconcile_oversize_absolute_subtree(root, 1280, 800);
 
     REQUIRE(flowPtr->flex().preferred_width == 1320.0f);
     REQUIRE(flowPtr->flex().preferred_height == 860.0f);
@@ -551,7 +551,7 @@ TEST_CASE("Viewport reconcile: content already inside viewport is untouched",
     auto* childPtr = child.get();
     root.add_child(std::move(child));
 
-    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+    pulp::view::reconcile_oversize_absolute_subtree(root, 1280, 800);
 
     REQUIRE(childPtr->flex().preferred_width == 1000.0f);
     REQUIRE(childPtr->flex().preferred_height == 600.0f);
@@ -579,7 +579,7 @@ TEST_CASE("Viewport reconcile: explicit right:0 / bottom:0 is edge-anchored, not
     auto* childPtr = child.get();
     root.add_child(std::move(child));
 
-    pulp::screenshot::reconcile_oversize_absolute_subtree(root, 1280, 800);
+    pulp::view::reconcile_oversize_absolute_subtree(root, 1280, 800);
 
     // preferred_width/height must be untouched — explicit right/bottom
     // means "anchor to opposite edge", not "auto".

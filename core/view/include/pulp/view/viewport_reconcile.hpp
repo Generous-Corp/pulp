@@ -1,14 +1,14 @@
 // pulp #1899 — viewport reconciliation for runtime-imported content.
 //
-// Extracted into a header so unit tests can exercise the recursive
-// clamp without linking the screenshot CLI binary. Intentionally
-// header-only — the logic is small, pure (no I/O beyond an env-gated
-// diagnostic), and all of its dependencies (pulp::view::View) are
-// already in the include path of any consumer that wants it.
+// Header-only helper for clamping oversize absolute-positioned
+// descendants to fit a viewport. Generic enough to live in core/view
+// because both the headless screenshot tool and the live host (and
+// any future live host running runtime-imported React trees) need
+// the same reconciliation.
 //
 // Background: imports (Spectr, v0.dev, Stitch, Figma exports) routinely
 // ship a top-level container with literal-CSS hardcoded dimensions that
-// exceed the screenshot viewport. Canonical Spectr case
+// exceed the runtime viewport. Canonical Spectr case
 // (`spectr-editor-extracted.js:4140`, originating in
 // `dom-adapter.tsx:440-441` as a workaround for what dom-adapter
 // perceived as a Yoga absolute-pin bug):
@@ -27,7 +27,7 @@
 // main axis to fit the body's content box.
 //
 // This helper emulates that flex-shrink behaviour for runtime-import
-// captures. For any descendant of root_ with
+// hosts. For any descendant of root_ with
 // `position:absolute|fixed` AND a `preferred_width|height` exceeding
 // the viewport AND no opposite-edge anchor (`right` for width,
 // `bottom` for height — i.e. the source told us a concrete size, not
@@ -35,7 +35,7 @@
 // the viewport size on that axis. Descendants anchored at `bottom:0`
 // / `right:0` then anchor to the visible edge instead of falling off.
 //
-// Scoped strictly to oversize-content + screenshot-tool usage; never
+// Scoped strictly to oversize-content + runtime-import usage; never
 // fires when content already fits, never modifies anchored content.
 
 #pragma once
@@ -45,7 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace pulp::screenshot {
+namespace pulp::view {
 
 inline void clamp_oversize_absolute_view(pulp::view::View& view,
                                           float vw, float vh,
@@ -74,8 +74,6 @@ inline void clamp_oversize_absolute_view(pulp::view::View& view,
     // unset (`auto`). Any explicit value — including 0 — is the
     // source declaring edge-anchoring intent, which Yoga will honour
     // via the inset → size derivation; defer to that.
-    // TODO: pin in #1906 test — Yoga-level fixture with
-    // position:absolute + width:1320 + right:0 must NOT clamp width.
     const bool size_x_is_explicit = cw > 0 && !view.has_right();
     const bool size_y_is_explicit = ch > 0 && !view.has_bottom();
     bool clamped = false;
@@ -138,4 +136,4 @@ inline void reconcile_oversize_absolute_subtree(pulp::view::View& root,
     }
 }
 
-} // namespace pulp::screenshot
+} // namespace pulp::view

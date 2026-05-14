@@ -8,7 +8,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/state/store.hpp>
-#include "viewport_reconcile.hpp"
+#include <pulp/view/viewport_reconcile.hpp>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -244,7 +244,7 @@ int main(int argc, char* argv[]) {
         // root_, because runtime-import adapters (Spectr's dom-adapter
         // at tsx:440-441) propagate the hardcoded oversize through
         // multiple intermediate wrappers.
-        pulp::screenshot::reconcile_oversize_absolute_subtree(root, width, height);
+        pulp::view::reconcile_oversize_absolute_subtree(root, width, height);
     }
 
     // pulp #1899 — drain React's useEffect callbacks, requestAnimationFrame
