@@ -239,6 +239,63 @@ TEST_CASE("Label intrinsic_height counts explicit newlines on multi_line labels"
     REQUIRE_THAT(single_with_newlines.intrinsic_height(), WithinAbs(lh_single, 0.01f));
 }
 
+TEST_CASE("Label intrinsic_height ignores a trailing newline (no phantom line)",
+          "[view][widget][internal-74][issue-1969]") {
+    // PR #1969 Codex P2 — a string ending with `\n` used to count an
+    // extra line in the `\n`-count loop ("Title\n" → 2). But
+    // Label::paint()'s split-and-emit loop stops once `pos ==
+    // display_text.size()`, so it draws exactly one line. Yoga was
+    // reserving phantom whitespace that the paint pass never filled,
+    // breaking vertical centering / sibling layout. Mirrors CSS
+    // `white-space: pre` line-box counting (a trailing `\n` is the end
+    // of a paragraph, not the start of a new empty line).
+    const float fs = 12.0f;
+    const float lh = fs * 1.4f;
+
+    // "Title\n" — counts as ONE line, not two.
+    Label trailing("Title\n");
+    trailing.set_multi_line(true);
+    trailing.set_font_size(fs);
+    REQUIRE_THAT(trailing.intrinsic_height(), WithinAbs(lh, 0.01f));
+
+    // "Title\nSubtitle" — no trailing `\n`, two real lines.
+    Label two_real("Title\nSubtitle");
+    two_real.set_multi_line(true);
+    two_real.set_font_size(fs);
+    REQUIRE_THAT(two_real.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // "Title\nSubtitle\n" — two visible lines, trailing `\n` shaves
+    // the phantom third.
+    Label two_with_trailing("Title\nSubtitle\n");
+    two_with_trailing.set_multi_line(true);
+    two_with_trailing.set_font_size(fs);
+    REQUIRE_THAT(two_with_trailing.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // Just a single `\n` — empty content, one (empty) line reserved.
+    // We don't try to claim height 0; an empty line still occupies
+    // one line-height of vertical space in CSS block-flow semantics.
+    Label only_newline("\n");
+    only_newline.set_multi_line(true);
+    only_newline.set_font_size(fs);
+    REQUIRE_THAT(only_newline.intrinsic_height(), WithinAbs(lh, 0.01f));
+
+    // "\nFoo" — leading `\n` keeps both lines (the leading newline
+    // is a real empty line; only TRAILING is dropped).
+    Label leading_newline("\nFoo");
+    leading_newline.set_multi_line(true);
+    leading_newline.set_font_size(fs);
+    REQUIRE_THAT(leading_newline.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // Trailing-newline shave interacts correctly with line_clamp: the
+    // count is shaved BEFORE clamp comparison, so a clamp of 2 on
+    // "a\nb\n" still gives 2 lines (not clamped from a phantom 3).
+    Label clamped_trailing("a\nb\n");
+    clamped_trailing.set_multi_line(true);
+    clamped_trailing.set_font_size(fs);
+    clamped_trailing.set_line_clamp(2);
+    REQUIRE_THAT(clamped_trailing.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+}
+
 TEST_CASE("Label intrinsic_height honors line_clamp on multi_line labels",
           "[view][widget][internal-74][issue-1552]") {
     // pulp-internal #74 + pulp #1552 — when a clamp is set, paint() only
@@ -316,7 +373,10 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     // off so single-line widgets pay no extra cost.
     Label snap("SNAPSHOT");
     snap.set_font_size(10.0f);
-    const float snap_lh = 10.0f * 1.4f;
+    // pulp-internal #76: small fonts (<12pt) use the 1.6 line-height
+    // multiplier so glyphs don't clip in compact toolbars; the measure
+    // path mirrors that to keep Yoga reservation in sync with paint.
+    const float snap_lh = 10.0f * 1.6f;
     REQUIRE_THAT(snap.measured_height(50.0f),    WithinAbs(snap_lh, 0.01f));
     REQUIRE_THAT(snap.measured_height(10000.0f), WithinAbs(snap_lh, 0.01f));
 }

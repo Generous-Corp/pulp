@@ -285,6 +285,15 @@ float Label::intrinsic_height() const {
         for (char c : text_) {
             if (c == '\n') ++line_count;
         }
+        // pulp #1969 Codex P2 — don't reserve a phantom line for a trailing
+        // newline. Label::paint()'s `\n`-split loop emits one line per
+        // *non-trailing* `\n` plus the final segment, so `"Title\n"` paints
+        // exactly one visible line. If we keep the naive `\n`-count + 1
+        // here, Yoga reserves extra vertical whitespace that paint never
+        // fills, breaking CSS-style vertical-align centering and shifting
+        // siblings down. Matches the line-box counting CSS uses for
+        // `white-space: pre`.
+        if (text_.back() == '\n') --line_count;
         // Honor line-clamp if explicitly set — paint() will only emit
         // `line_clamp_` lines, so reserving more height is wasteful and
         // confuses CSS vertical-align centering.
@@ -615,11 +624,20 @@ void Label::paint(canvas::Canvas& canvas) {
     // pulp #1737 PR-2 — `source_lines` for the soft-wrap path is the
     // shaped layout's line count (which already accounts for inside-word
     // breaks). For the legacy path it stays count('\n') + 1.
+    //
+    // pulp #1969 Codex P2 — drop a trailing newline before counting in the
+    // legacy path. The split-and-emit loop below stops once `pos ==
+    // display_text.size()`, so a trailing `\n` doesn't actually paint an
+    // extra line — but feeding the inflated count into `text_h` would
+    // mis-position vertical-align: center/bottom. The shaper path doesn't
+    // need a fix here because shaped_layout.line_count is the count the
+    // shaper actually produced.
     int source_lines = multi_line_
         ? (use_shaper_wrap
                ? std::max(1, shaped_layout.line_count)
                : static_cast<int>(std::count(display_text.begin(),
-                                             display_text.end(), '\n')) + 1)
+                                             display_text.end(), '\n')) + 1
+                 - (!display_text.empty() && display_text.back() == '\n' ? 1 : 0))
         : 1;
     int visible_lines = source_lines;
     if (multi_line_ && line_clamp_ > 0 && line_clamp_ < source_lines)
