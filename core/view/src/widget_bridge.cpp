@@ -1138,6 +1138,14 @@ void WidgetBridge::install_runtime_import_handlers() {
                                 + src_label + "')");
                         return choc::value::Value();
                     }
+                } else if (source_lc == "pencil" || source_lc == "openpencil" ||
+                           source_lc == "open-pencil") {
+                    bundle = parse_pencil_react(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported Pencil React export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
                 } else if ((source_lc == "auto" || source_lc.empty()) &&
                            html.find("react-native") != std::string::npos) {
                     bundle = parse_react_native_export(html);

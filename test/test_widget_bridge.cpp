@@ -13621,6 +13621,68 @@ TEST_CASE("WidgetBridge __pulpRuntimeImport__ auto-detects RN only when parse su
                 .getWithDefault<std::string>("") == "react-native fallback");
 }
 
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ dispatches Pencil parser by source label",
+          "[view][bridge][runtime-import-dispatch][pencil][phase-6.6.6]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+
+    const std::string pencil_tsx = R"(
+        import { useState } from "react";
+        export default function DispatchProbe() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="pencil-dispatch-probe" data-pencil-export="tailwind-jsx-sanitized" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={level}
+                onChange={(event) => setLevel(Number(event.currentTarget.value))}
+              />
+            </div>
+          );
+        }
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(pencil_tsx) + "', 'pencil'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto err_str = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(err_str.find("threw:") == std::string::npos);
+    REQUIRE(err_str.find("claude bundle") == std::string::npos);
+    REQUIRE(err_str.find("Pencil runtime import requires host React and ReactDOM") != std::string::npos);
+
+    const std::string unsupported_pencil_tsx = R"(
+        import { useState } from "react";
+        export default function UnsupportedPencilProbe() {
+          const [value, setValue] = useState("");
+          return <textarea value={value} onChange={(event) => setValue(event.currentTarget.value)} />;
+        }
+    )";
+
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = null;"
+        "try { __pulpRuntimeImport__('" + js_single_quoted(unsupported_pencil_tsx) + "', 'open-pencil'); }"
+        "catch (e) { globalThis.__pulpRuntimeImportErr__ = 'threw:' + String(e); }");
+
+    const auto unsupported_err = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(unsupported_err.find("threw:") == std::string::npos);
+    REQUIRE(unsupported_err.find("unsupported Pencil React export (got 'open-pencil')") != std::string::npos);
+}
+
 TEST_CASE("WidgetBridge __pulpRuntimeSettle__ pumps without crashing",
           "[view][bridge][runtime-import]") {
     ScriptEngine engine;

@@ -942,20 +942,24 @@ bool v0_imports_are_supported(const std::string& source) {
     return !in_import;
 }
 
-bool v0_uses_only_supported_surfaces(const std::string& source) {
+bool v0_uses_only_supported_surfaces_with_tailwind_policy(const std::string& source,
+                                                          bool reject_tailwind_marker) {
     if (!v0_imports_are_supported(source)) return false;
 
     const auto lower = v0_lower(source);
     const char* unsupported_markers[] = {
         "classname", "@/components", "@radix-ui", "radix-ui", "shadcn",
         "next/", "next\\", "next/dynamic", "lucide-react", "framer-motion",
-        "tailwind", "clsx(", "cva(", "cn(", "fetch(", "xmlhttprequest",
+        "clsx(", "cva(", "cn(", "fetch(", "xmlhttprequest",
         "localstorage", "sessionstorage", "indexeddb", "websocket",
         "serviceworker", "sharedworker", "new worker", "broadcastchannel",
         "settimeout(", "setinterval(", "document.", "window.", "navigator.",
         "history.", "location.", "dangerouslysetinnerhtml",
         "<form", "<select", "<textarea", "<iframe"
     };
+    if (reject_tailwind_marker && lower.find("tailwind") != std::string::npos) {
+        return false;
+    }
     for (const char* marker : unsupported_markers) {
         if (lower.find(marker) != std::string::npos) return false;
     }
@@ -980,7 +984,7 @@ bool v0_uses_only_supported_surfaces(const std::string& source) {
     }
     if (typed_input_count != input_tag_count) return false;
 
-    static const std::regex tag_re(R"RX(<\s*/?\s*([A-Za-z][A-Za-z0-9]*)(?=[\s>/]))RX");
+    static const std::regex tag_re(R"RX(</?([A-Za-z][A-Za-z0-9]*)(?=[\s>/]))RX");
     static const std::unordered_set<std::string> supported = {
         "div", "span", "button", "canvas", "svg", "path", "rect", "circle",
         "image", "input", "img", "p", "h1", "h2", "h3", "h4", "h5", "h6"
@@ -1002,6 +1006,10 @@ bool v0_uses_only_supported_surfaces(const std::string& source) {
     }
 
     return true;
+}
+
+bool v0_uses_only_supported_surfaces(const std::string& source) {
+    return v0_uses_only_supported_surfaces_with_tailwind_policy(source, true);
 }
 
 std::optional<std::string> v0_match_first(const std::string& source, const std::regex& re) {
@@ -1618,6 +1626,70 @@ std::string rn_build_runtime_js(const std::string& source,
     return js.str();
 }
 
+std::string pencil_slug_from_component(std::string name) {
+    std::string out = "pencil";
+    for (char c : name) {
+        if (std::isupper(static_cast<unsigned char>(c)) && !out.empty() && out.back() != '-') {
+            out += '-';
+        }
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        } else if (c == '-' || c == '_') {
+            if (!out.empty() && out.back() != '-') out += '-';
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out.empty() ? "pencil-runtime-import" : out;
+}
+
+std::string pencil_extract_root_id(const std::string& source,
+                                   const std::string& component_name) {
+    static const std::regex id_re(R"RX(\bid\s*=\s*(?:"([^"]+)"|'([^']+)'))RX");
+    if (auto m = v0_match_first(source, id_re)) return *m;
+    return pencil_slug_from_component(component_name);
+}
+
+bool pencil_uses_only_supported_surfaces(const std::string& source) {
+    if (source.find("[V0_FILE]") != std::string::npos) return false;
+    if (!v0_uses_only_supported_surfaces_with_tailwind_policy(source, false)) return false;
+
+    const auto lower = v0_lower(source);
+    const char* pencil_reject_markers[] = {
+        "\"use client\"", "'use client'", "figma:asset/", "react-native",
+        "--pencil-", "mcp__pencil", "\"mcp_response\"", "\"node_tree\"",
+        "\"batch_get\"", "\"get_variables\"", "\"get_style_guide\"",
+        ".pen", ".fig", "open-pencil export", "pencil.dev/mcp"
+    };
+    for (const char* marker : pencil_reject_markers) {
+        if (lower.find(marker) != std::string::npos) return false;
+    }
+    return true;
+}
+
+std::string pencil_build_runtime_js(const std::string& source,
+                                    const std::string& file_name,
+                                    const std::string& component_name,
+                                    const std::string& root_id) {
+    auto js = v0_build_runtime_js(source, file_name, component_name, root_id);
+    js = replace_all_copy(
+        std::move(js),
+        "v0.dev runtime import requires host React and ReactDOM",
+        "Pencil runtime import requires host React and ReactDOM");
+    js = replace_all_copy(
+        std::move(js),
+        "v0.dev React runtime import",
+        "Pencil React runtime import");
+    js = replace_all_copy(
+        std::move(js),
+        "'data-pulp-source': 'v0'",
+        "'data-pulp-source': 'pencil'");
+    js = replace_all_copy(
+        std::move(js),
+        "sourceFile.indexOf('/') >= 0 ? 'v0' : 'OUT'",
+        "'PCL'");
+    return js;
+}
+
 void set_runtime_error(ClaudeRuntimeOptions& opts, const std::string& msg) {
     if (opts.error_out) *opts.error_out = msg;
 }
@@ -2191,6 +2263,34 @@ std::optional<ClaudeBundle> parse_react_native_export(const std::string& tsx) {
         "<div id=\"root\" data-pulp-source=\"rn\" data-rn-root=\"" +
         v0_html_attr_escape(root_id) +
         "\"></div><script src=\"rn-runtime-app\"></script>";
+    return bundle;
+}
+
+std::optional<ClaudeBundle> parse_pencil_react(const std::string& tsx) {
+    auto source = v0_trim(tsx);
+    if (source.empty()) return std::nullopt;
+    if (source.find("export default") == std::string::npos) return std::nullopt;
+    if (!v0_contains_ci(source, "react")) return std::nullopt;
+    if (!pencil_uses_only_supported_surfaces(source)) return std::nullopt;
+
+    auto component_name = v0_extract_component_name(source);
+    if (component_name == "V0RuntimeImport") component_name = "PencilRuntimeImport";
+    const auto root_id = pencil_extract_root_id(source, component_name);
+    auto runtime_js = pencil_build_runtime_js(
+        source, "gain-stage-card.tsx", component_name, root_id);
+
+    ClaudeBundleAsset app;
+    app.uuid = "pencil-runtime-app";
+    app.mime = "text/javascript";
+    app.data.assign(runtime_js.begin(), runtime_js.end());
+
+    ClaudeBundle bundle;
+    bundle.assets.push_back(std::move(app));
+    bundle.javascript_indices.push_back(0);
+    bundle.template_html =
+        "<div id=\"root\" data-pulp-source=\"pencil\" data-pencil-root=\"" +
+        v0_html_attr_escape(root_id) +
+        "\"></div><script src=\"pencil-runtime-app\"></script>";
     return bundle;
 }
 

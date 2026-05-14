@@ -316,6 +316,15 @@ std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx);
 /// outside Pulp's supported runtime-import DOM/CSS/API subset.
 std::optional<ClaudeBundle> parse_react_native_export(const std::string& tsx);
 
+/// Normalize a constrained Pencil/OpenPencil sanitized Tailwind-JSX export
+/// into the runtime-import bundle payload shape. The initial runtime-import
+/// slice requires the caller to pass source="pencil" and expects Tailwind
+/// utilities plus `--pencil-*` tokens to have already been resolved into
+/// inline React styles. Returns nullopt for unresolved tokens, MCP JSON, binary
+/// `.pen`/`.fig` references, external CSS, framework wrappers, or any surface
+/// outside Pulp's supported runtime-import DOM/CSS/API subset.
+std::optional<ClaudeBundle> parse_pencil_react(const std::string& tsx);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

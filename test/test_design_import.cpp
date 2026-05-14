@@ -178,6 +178,15 @@ void maybe_write_rn_runtime_script(const std::string& runtime_js) {
     file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
 }
 
+void maybe_write_pencil_runtime_script(const std::string& runtime_js) {
+    const char* out = std::getenv("PULP_PENCIL_RUNTIME_JS_OUT");
+    if (out == nullptr || *out == '\0') return;
+
+    std::ofstream file(out, std::ios::binary);
+    REQUIRE(file.good());
+    file << minimal_host_react_dom_shim() << "\n" << runtime_js << "\n";
+}
+
 } // namespace
 
 // ── Design source parsing ───────────────────────────────────────────────
@@ -1802,6 +1811,174 @@ TEST_CASE("parse_react_native_export rejects out-of-matrix RN surfaces",
     for (const auto& sample : rejected) {
         CAPTURE(sample);
         REQUIRE_FALSE(parse_react_native_export(sample).has_value());
+    }
+}
+
+// ── Pencil React export parsing ─────────────────────────────────────────
+
+TEST_CASE("parse_pencil_react parses staged Pencil runtime fixture",
+          "[view][import][parser][pencil][phase-6.6.6]") {
+    const auto primary = read_fixture("planning/fixtures/pencil/gain-stage-card.tsx");
+    auto bundle = parse_pencil_react(primary);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->assets.size() == 1);
+    REQUIRE(bundle->javascript_indices.size() == 1);
+    REQUIRE(bundle->javascript_indices.front() == 0);
+    REQUIRE(bundle->assets.front().uuid == "pencil-runtime-app");
+    REQUIRE(bundle->assets.front().mime == "text/javascript");
+    REQUIRE(bundle->template_html.find("data-pulp-source=\"pencil\"") != std::string::npos);
+    REQUIRE(bundle->template_html.find("pencil-gain-stage-card") != std::string::npos);
+
+    const auto js = asset_text(bundle->assets.front());
+    REQUIRE(js.find("pencil-gain-stage-card") != std::string::npos);
+    REQUIRE(js.find("Pencil runtime import requires host React and ReactDOM") != std::string::npos);
+    REQUIRE(js.find("'data-pulp-source': 'pencil'") != std::string::npos);
+    REQUIRE(js.find("ReactDOM.createRoot") != std::string::npos);
+    REQUIRE(js.find("requestAnimationFrame") != std::string::npos);
+    REQUIRE(js.find("canvas.getContext('2d')") != std::string::npos);
+    REQUIRE(js.find("type: 'range'") != std::string::npos);
+}
+
+TEST_CASE("parse_pencil_react runtime bundle materializes with host React shim",
+          "[view][import][parser][pencil][render][phase-6.6.6]") {
+    const auto primary = read_fixture("planning/fixtures/pencil/gain-stage-card.tsx");
+    auto bundle = parse_pencil_react(primary);
+    REQUIRE(bundle.has_value());
+    const auto runtime_js = asset_text(bundle->assets.front());
+    maybe_write_pencil_runtime_script(runtime_js);
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    View root;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.load_script(minimal_host_react_dom_shim()));
+    REQUIRE_NOTHROW(bridge.load_script(runtime_js));
+    bridge.service_frame_callbacks();
+
+    REQUIRE(root.child_count() > 0);
+    REQUIRE(engine.evaluate("!!document.getElementById('pencil-gain-stage-card')")
+                .getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate(
+        "(function(){ var el = document.getElementById('pencil-gain-stage-card');"
+        "return el ? String(el._id || '') : ''; })()").toString().empty());
+}
+
+TEST_CASE("parse_pencil_react accepts sanitized Pencil TSX",
+          "[view][import][parser][pencil][phase-6.6.6]") {
+    const std::string sanitized = R"(
+        import {
+          useState
+        } from "react";
+        export default function MultiLinePencilPanel() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div id="pencil-multi-line-react-import" data-pencil-export="tailwind-jsx-sanitized" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Level</span>
+              <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />
+            </div>
+          );
+        }
+    )";
+
+    auto bundle = parse_pencil_react(sanitized);
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->template_html.find("pencil-multi-line-react-import") != std::string::npos);
+    REQUIRE(asset_text(bundle->assets.front()).find("pencil-multi-line-react-import") != std::string::npos);
+    REQUIRE_FALSE(parse_v0_dev_react(sanitized).has_value());
+
+    const std::string no_id = R"(
+        import { useState } from "react";
+        export default function Meter_Panel() {
+          const [level, setLevel] = useState(0.5);
+          return (
+            <div data-pencil-export="tailwind-jsx-sanitized" style={{ display: "flex", flexDirection: "column" }}>
+              <span>Meter</span>
+              <input type="range" value={level} onChange={(event) => setLevel(Number(event.currentTarget.value))} />
+            </div>
+          );
+        }
+    )";
+
+    auto fallback_bundle = parse_pencil_react(no_id);
+    REQUIRE(fallback_bundle.has_value());
+    REQUIRE(fallback_bundle->template_html.find("pencil-meter-panel") != std::string::npos);
+    REQUIRE(asset_text(fallback_bundle->assets.front()).find("pencil-meter-panel") != std::string::npos);
+}
+
+TEST_CASE("parse_pencil_react rejects out-of-matrix Pencil defaults",
+          "[view][import][parser][pencil][phase-6.6.6]") {
+    const std::vector<std::string> rejected = {
+        R"(
+            "use client";
+            import { useState } from "react";
+            export default function NextPencilPanel() {
+              return <div id="pencil-next-panel">Next path</div>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function TailwindPanel() {
+              return <div className="flex rounded-lg bg-[--pencil-color-primary]">Tailwind</div>;
+            }
+        )",
+        R"PULP(
+            import { useState } from "react";
+            export default function TokenPanel() {
+              return <div id="pencil-token-panel" style={{ backgroundColor: "var(--pencil-color-primary)" }}>Token</div>;
+            }
+        )PULP",
+        R"(
+            import "./pencil.css";
+            import { useState } from "react";
+            export default function ExternalCssPanel() {
+              return <div id="pencil-css-panel">CSS</div>;
+            }
+        )",
+        R"(
+            import { Dialog } from "@radix-ui/react-dialog";
+            export default function RadixPanel() {
+              return <div id="pencil-radix-panel">Radix</div>;
+            }
+        )",
+        R"(
+            import Link from "next/link";
+            export default function NextImportPanel() {
+              return <Link href="/">Next</Link>;
+            }
+        )",
+        R"(
+            import { View } from "react-native";
+            export default function NativePanel() {
+              return <View />;
+            }
+        )",
+        R"({"mcp_response":{"node_tree":[],"source":"pencil"}})",
+        R"({"batch_get":[{"id":"node-1"}]})",
+        R"(
+            import design from "./control.pen";
+            export default function BinaryPenPanel() {
+              return <div id="pencil-pen-panel">Binary</div>;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function TextInputPanel() {
+              const [value, setValue] = useState("");
+              return <input type="text" value={value} onChange={(event) => setValue(event.currentTarget.value)} />;
+            }
+        )",
+        R"(
+            import { useState } from "react";
+            export default function CustomComponentPanel() {
+              return <PencilWidget value={0.5} />;
+            }
+        )"
+    };
+
+    for (const auto& sample : rejected) {
+        CAPTURE(sample);
+        REQUIRE_FALSE(parse_pencil_react(sample).has_value());
     }
 }
 
