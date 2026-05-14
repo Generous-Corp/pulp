@@ -1228,6 +1228,40 @@ TEST_CASE("WebCompat: class selector requires every class in classList (issue-15
     REQUIRE(missing.getWithDefault<bool>(true) == false);
 }
 
+// css/__selector_class closure (Tier 4 INTENTIONAL design, 2026-05-12):
+// The two values originally listed under `unsupportedValues` were
+// intentional design choices, not gaps. Pin both intended behaviors:
+//   1. Class matching IS case-sensitive (CSS spec for HTML standards
+//      mode). The "case-insensitive class matching" entry is a
+//      quirks-mode feature Pulp deliberately doesn't implement.
+//   2. Namespace-qualified class selectors (`svg|.foo`) aren't
+//      parsed at all — Pulp's HTML-only document model has no
+//      namespace context. The parser ignores the namespace prefix
+//      and the selector won't match.
+TEST_CASE("WebCompat: class selector is case-sensitive (CSS standards-mode spec)",
+          "[webcompat][css-selector][issue-1551][coverage]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __caseEl = document.createElement('div');
+        __caseEl.className = 'Foo';
+    )JS");
+    // Exact-case match succeeds.
+    auto exact = env.engine.evaluate(
+        "_matchesSelector(__caseEl, _parseSelector('.Foo'))");
+    REQUIRE(exact.getWithDefault<bool>(false) == true);
+
+    // Different-case selector does NOT match — spec-correct for HTML
+    // standards mode. A regression that quietly added case-folding
+    // would break this assertion.
+    auto lower = env.engine.evaluate(
+        "_matchesSelector(__caseEl, _parseSelector('.foo'))");
+    REQUIRE(lower.getWithDefault<bool>(true) == false);
+
+    auto upper = env.engine.evaluate(
+        "_matchesSelector(__caseEl, _parseSelector('.FOO'))");
+    REQUIRE(upper.getWithDefault<bool>(true) == false);
+}
+
 TEST_CASE("WebCompat: descendant combinator walks ancestor chain (issue-1551)",
           "[webcompat][css-selector][issue-1551]") {
     TestEnvironment env;
