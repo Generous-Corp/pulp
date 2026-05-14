@@ -1,6 +1,6 @@
 // design_import_designmd.cpp — DESIGN.md import adapter
 //
-// Inspired by Google's design.md (Apache-2.0, https://github.com/google/design.md).
+// Inspired by Google's design.md (Apache-2.0, https://github.com/google-labs-code/design.md).
 // Reimplemented in C++; uses yaml-cpp (MIT) for frontmatter parsing. The
 // Markdown body is walked with a small hand-rolled `##` section scanner —
 // the body section structure is simple enough that a full Markdown parser

@@ -29,11 +29,11 @@ Tables are sorted alphabetically (case-insensitive) by name. Entries here must s
 
 ### Design Formats and Test Fixtures
 
-Pulp adopts Google's [DESIGN.md](https://github.com/google/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.
+Pulp adopts Google's [DESIGN.md](https://github.com/google-labs-code/design.md) format as a first-class import source (`pulp import-design --from designmd`). The format specification is reimplemented in C++ (no upstream code vendored); the YAML frontmatter is parsed with `yaml-cpp` (see Core Dependencies above). One example file from upstream `examples/paws-and-paths/` is redistributed verbatim as the test fixture at `test/fixtures/imports/designmd/alpha/DESIGN.md`.
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture | [github.com/google/design.md](https://github.com/google/design.md) |
+| **DESIGN.md format spec + `paws-and-paths` fixture** | Apache-2.0 | Design-system interchange format consumed by `pulp import-design --from designmd`; one upstream example file redistributed verbatim as a Pulp test fixture. Pinned at tag `0.1.1`. | [github.com/google-labs-code/design.md @ 0.1.1](https://github.com/google-labs-code/design.md/releases/tag/0.1.1) |
 
 ### Embedded Fonts
 

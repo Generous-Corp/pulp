@@ -1,7 +1,7 @@
 # DESIGN.md import
 
 `pulp import-design --from designmd` reads Google's
-[DESIGN.md](https://github.com/google/design.md) format (Apache-2.0) — a
+[DESIGN.md](https://github.com/google-labs-code/design.md) format (Apache-2.0) — a
 YAML-frontmatter + Markdown-body description of a design *system* — and
 emits a W3C Design Tokens Community Group (DTCG) `tokens.json`. The
 upstream spec is the source of truth for the format; this page documents
@@ -175,7 +175,7 @@ from `components.*` into Pulp widgets lands in the same phase.
 - Widget scaffolding from `components.*` — Phase 3.
 - An `npx @google/design.md spec` equivalent — out of scope. Pulp
   ships the format documentation as this page; the upstream spec at
-  [github.com/google/design.md](https://github.com/google/design.md)
+  [github.com/google-labs-code/design.md](https://github.com/google-labs-code/design.md)
   remains authoritative for the format itself.
 
 ## Attribution
@@ -186,6 +186,6 @@ from `components.*` into Pulp widgets lands in the same phase.
 - The `paws-and-paths` test fixture under
   `test/fixtures/imports/designmd/alpha/DESIGN.md` is copied verbatim
   from the upstream
-  [google/design.md](https://github.com/google/design.md) repository
+  [google/design.md](https://github.com/google-labs-code/design.md) repository
   (Apache-2.0). `NOTICE.md` carries the upstream attribution alongside
   the project's other third-party notices.

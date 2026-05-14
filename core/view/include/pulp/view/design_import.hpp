@@ -160,7 +160,7 @@ DesignIR parse_claude_html(const std::string& html);
 // parser populates IR token maps; the IR root node is left empty (no
 // children, type "frame"). Phase 1 deliberately does NOT scaffold a
 // placeholder UI tree; that would imply scaffold quality Pulp cannot yet
-// deliver. Spec: https://github.com/google/design.md
+// deliver. Spec: https://github.com/google-labs-code/design.md
 //
 // Diagnostics use a structured shape so the CLI can emit them as JSON
 // with line/column info supplied by yaml-cpp.

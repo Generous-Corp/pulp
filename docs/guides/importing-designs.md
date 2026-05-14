@@ -110,7 +110,7 @@ pulp import-design --from v0 --file component.tsx --output my-ui.js
 `DESIGN.md` is Google's YAML-frontmatter + Markdown format for
 describing a design *system* (colors, typography, spacing, component
 recipes), not a screen. The format is Apache-2.0; the upstream spec
-lives at [github.com/google/design.md](https://github.com/google/design.md).
+lives at [github.com/google-labs-code/design.md](https://github.com/google-labs-code/design.md).
 
 ```bash
 pulp import-design --from designmd --file path/to/DESIGN.md

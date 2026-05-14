@@ -761,21 +761,28 @@ copies or substantial portions of the Software.
 
 ---
 
-## DESIGN.md format (google/design.md)
+## DESIGN.md format (google-labs-code/design.md)
 
 Copyright 2025 Google LLC
 
 Apache License, Version 2.0
 
-https://github.com/google/design.md
+https://github.com/google-labs-code/design.md
+
+Upstream pin: tag `0.1.1` (commit `6589f05166473ddc54ca01a615254a673add492c`,
+published 2026-04-21). Update this pin together with `compat.json`'s
+`imports.designmd.detected-formats[].format-version` and the upstream
+attribution in `docs/reference/licensing.md` whenever the format spec
+moves to a new tag.
 
 Pulp adopts Google's DESIGN.md format as a first-class import source
 (`pulp import-design --from designmd`). The format specification at
-docs/spec.md (upstream) is referenced by Pulp's documentation and
+`docs/spec.md` (upstream) is referenced by Pulp's documentation and
 reimplemented in C++; no upstream source code is vendored. One
 example file from the upstream `examples/paws-and-paths/` directory
 is redistributed verbatim under this license as the test fixture
-`test/fixtures/imports/designmd/alpha/DESIGN.md`.
+`test/fixtures/imports/designmd/alpha/DESIGN.md` (byte-identical to
+the upstream copy at tag `0.1.1`).
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
