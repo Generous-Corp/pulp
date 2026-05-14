@@ -1064,8 +1064,24 @@ void WidgetBridge::install_runtime_import_handlers() {
     };
 
     auto clear_err = [this]() {
-        try { engine_.evaluate("globalThis.__pulpRuntimeImportErr__ = '';void 0"); }
-        catch (...) { /* best-effort */ }
+        // Codex P1 + P2 follow-ups on #1856: a stale error from a
+        // previous runtime-import attempt would otherwise leak into
+        // the next aggregation. Clear EVERY transient error global the
+        // aggregator reads: __pulpRuntimeImportErr__ itself, the
+        // babel-transform / flushSync / createRoot-render slots, and
+        // any per-payload __pulpPayloadErr_*.
+        try {
+            engine_.evaluate(
+                "(function(){"
+                "  globalThis.__pulpRuntimeImportErr__ = '';"
+                "  globalThis.__pulpEvalErr__ = '';"
+                "  globalThis.__pulpFlushSyncErr__ = '';"
+                "  globalThis.__pulpCreateRootRenderErr__ = '';"
+                "  for (var k in globalThis) {"
+                "    if (k.indexOf('__pulpPayloadErr_') === 0) globalThis[k] = '';"
+                "  }"
+                "})();void 0");
+        } catch (...) { /* best-effort */ }
     };
 
     // __pulpRuntimeImport__(html, source_label) → void
@@ -1151,6 +1167,12 @@ void WidgetBridge::install_runtime_import_handlers() {
                         "    errs.push('babel-transform: ' + globalThis.__pulpEvalErr__);"
                         "  if (typeof globalThis.__pulpFlushSyncErr__ === 'string' && globalThis.__pulpFlushSyncErr__.length)"
                         "    errs.push('flushSync: ' + globalThis.__pulpFlushSyncErr__);"
+                        // Codex P2 on #1856: run_claude_bundle_payload_pipeline
+                        // (design_import.cpp:1054) writes createRoot/render
+                        // failures here. Without this branch, render-time
+                        // exceptions never propagate to onError/lastError.
+                        "  if (typeof globalThis.__pulpCreateRootRenderErr__ === 'string' && globalThis.__pulpCreateRootRenderErr__.length)"
+                        "    errs.push('createRoot/render: ' + globalThis.__pulpCreateRootRenderErr__);"
                         "  for (var key in globalThis) {"
                         "    if (key.indexOf('__pulpPayloadErr_') === 0) {"
                         "      var pe = globalThis[key];"

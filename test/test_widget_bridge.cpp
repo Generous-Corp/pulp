@@ -12987,6 +12987,75 @@ TEST_CASE("WidgetBridge install_runtime_import_handlers is idempotent",
     REQUIRE(result.getWithDefault<std::string>("") == "function");
 }
 
+// Codex P1 follow-up on PR #1856 — every transient error global cleared.
+// Reason: the aggregator (in the runtime-import callback path) joins
+// __pulpRuntimeImportErr__, __pulpEvalErr__, __pulpFlushSyncErr__, and
+// any __pulpPayloadErr_<key>__. If clear_err() only resets the first
+// one, an error from a previous import attempt would silently leak into
+// the next aggregation and surface as a false-positive failure.
+TEST_CASE("__pulpRuntimeImport__ clears all transient error globals before each call",
+          "[view][bridge][runtime-import][codex-p1-1856]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.install_runtime_import_handlers();
+
+    // Seed every transient error global with a stale value, simulating
+    // a previous import attempt that surfaced via every code path.
+    engine.evaluate(
+        "globalThis.__pulpRuntimeImportErr__ = 'stale-import-err';"
+        "globalThis.__pulpEvalErr__ = 'stale-eval-err';"
+        "globalThis.__pulpFlushSyncErr__ = 'stale-flush-err';"
+        "globalThis.__pulpCreateRootRenderErr__ = 'stale-render-err';"
+        "globalThis.__pulpPayloadErr_block0__ = 'stale-payload-err';"
+        "globalThis.__pulpPayloadErr_block1__ = 'stale-payload-err-2';"
+        "void 0");
+
+    // Trigger __pulpRuntimeImport__ with an HTML that has no claude
+    // envelope — this exercises clear_err() at the top of the handler
+    // BEFORE set_err() runs, so any leaked stale value would survive
+    // *only if* clear_err is incomplete.
+    engine.evaluate(
+        "__pulpRuntimeImport__('<html><body>plain</body></html>', 'plain');"
+        "void 0");
+
+    // Read every slot back. clear_err runs first → all should be empty,
+    // then set_err writes the new no-envelope error to __pulpRuntimeImportErr__.
+    auto eval_after = engine.evaluate(
+        "String(globalThis.__pulpEvalErr__ || '')")
+        .getWithDefault<std::string>("");
+    auto flush_after = engine.evaluate(
+        "String(globalThis.__pulpFlushSyncErr__ || '')")
+        .getWithDefault<std::string>("");
+    auto render_after = engine.evaluate(
+        "String(globalThis.__pulpCreateRootRenderErr__ || '')")
+        .getWithDefault<std::string>("");
+    auto payload0_after = engine.evaluate(
+        "String(globalThis.__pulpPayloadErr_block0__ || '')")
+        .getWithDefault<std::string>("");
+    auto payload1_after = engine.evaluate(
+        "String(globalThis.__pulpPayloadErr_block1__ || '')")
+        .getWithDefault<std::string>("");
+
+    REQUIRE(eval_after.empty());
+    REQUIRE(flush_after.empty());
+    REQUIRE(render_after.empty());
+    REQUIRE(payload0_after.empty());
+    REQUIRE(payload1_after.empty());
+
+    // __pulpRuntimeImportErr__ should contain the NEW error (no envelope),
+    // NOT the stale value. Distinguishes "did clear_err run?" from
+    // "did set_err overwrite later?".
+    auto import_after = engine.evaluate(
+        "String(globalThis.__pulpRuntimeImportErr__ || '')")
+        .getWithDefault<std::string>("");
+    REQUIRE(import_after.find("stale-import-err") == std::string::npos);
+    REQUIRE(import_after.find("no claude bundle envelope") != std::string::npos);
+}
+
+
 // pulp-internal Tier-1 closure for css/textTransform (2026-05-12).
 // The setTextTransform bridge already accepts the 4 CSS spec values
 // (uppercase / lowercase / capitalize / none) and routes them onto
