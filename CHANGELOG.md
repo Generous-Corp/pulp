@@ -8,11 +8,54 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0970"></a>
+## [0.97.0] - 2026-05-13
+
+- feat(view+pulp-react+tools): live-host parity hardening — drive setInterval, recursive asText, lint+smoke, hidden-window flag ([#1960](https://github.com/danielraffel/pulp/pull/1960))
+- feat(import,design): DESIGN.md adoption — Phase 1 + 2 + Phase 3 scaffold ([#1934](https://github.com/danielraffel/pulp/pull/1934))
+- fix(view+cmake): port viewport_reconcile to core/view; LOUD perf-regression guard when Skia not linked (#1957) ([#1959](https://github.com/danielraffel/pulp/pull/1959))
+- feat(import): add React Native export parser (Phase 6.6.5) ([#1949](https://github.com/danielraffel/pulp/pull/1949))
+- fix(design-tool): install runtime-import handlers + deferred settle pump for React imports ([#1956](https://github.com/danielraffel/pulp/pull/1956))
+- feat(view): extend listStyleType with roman/alpha keywords (storage-only, Tier 2) ([#1878](https://github.com/danielraffel/pulp/pull/1878))
+- test(view): pin 6 perf-hint/interaction CSS no-op properties + close 7 coverage-gap rows (Bundle-C, finishes Tier-4 sweep) ([#1904](https://github.com/danielraffel/pulp/pull/1904))
+- docs(ci): adopt Shipyard v0.56.2 runner ops toolkit ([#1908](https://github.com/danielraffel/pulp/pull/1908))
+- fix(view+web-compat): route <path> to SvgPathWidget; <input type=range> defaults horizontal (closes gaps #4+#5 of #1899) ([#1917](https://github.com/danielraffel/pulp/pull/1917))
+- feat(import-validation): per-region masked diff for runtime-import validation ([#1871](https://github.com/danielraffel/pulp/pull/1871))
+- feat(tools): add coordination scripts (health-check, quick-spectr-cycle, capture-webview-baseline) ([#1912](https://github.com/danielraffel/pulp/pull/1912))
+- fix(ci): path-filter iOS auv3 try-compile (closes #1887) ([#1913](https://github.com/danielraffel/pulp/pull/1913))
+- feat(pulp-screenshot): default to Skia backend; expose --backend flag (closes #1899 harness divergence) ([#1919](https://github.com/danielraffel/pulp/pull/1919))
+- fix(react): display:flex defaults to flex-direction:row in flat-prop path (closes #1894) ([#1898](https://github.com/danielraffel/pulp/pull/1898))
+- fix(view+canvas): accept 4-arg canvasFillText + auto-inject set_font for third-party shims (partial #1899) ([#1901](https://github.com/danielraffel/pulp/pull/1901))
+- fix(pulp-react): clear disappearing style keys in applyChangedProps (closes #1925) ([#1932](https://github.com/danielraffel/pulp/pull/1932))
+- feat(pulp-screenshot): viewport-shift for oversize absolute children (#1899) ([#1906](https://github.com/danielraffel/pulp/pull/1906))
+- test(view): pin 10 OOS-3D/content/scroll CSS no-op properties + close 10 coverage-gap rows (Bundle-B) ([#1903](https://github.com/danielraffel/pulp/pull/1903))
+- test(view): pin 15 Yoga-arch CSS no-op properties + close 15 coverage-gap rows (Bundle-A) ([#1902](https://github.com/danielraffel/pulp/pull/1902))
+- test(view/css): close 6 coverage-gap rows (Tier 2 trivial + catalog-flip honest reclass) ([#1870](https://github.com/danielraffel/pulp/pull/1870))
+- fix(css): resolve calc/min/max/clamp everywhere via resolveCSSLength + 3 Codex closeouts (replaces stale pulp #1576) ([#1862](https://github.com/danielraffel/pulp/pull/1862))
+- feat(view): support text-align: match-parent via paint-time parent walk ([#1879](https://github.com/danielraffel/pulp/pull/1879))
+- feat(view): wire 5 CSS cursor keywords to macOS NSCursor (alias/copy/zoom-in/zoom-out/context-menu) ([#1877](https://github.com/danielraffel/pulp/pull/1877))
+- test(view/css): close css/__selector_class as INTENTIONAL design (Tier 4) ([#1874](https://github.com/danielraffel/pulp/pull/1874))
+- feat(ci): vitest v8 coverage + Cobertura upload for packages/pulp-react (Phase 1, refs #1886) ([#1915](https://github.com/danielraffel/pulp/pull/1915))
+- fix(canvas/cg): implement setLineDash on macOS CoreGraphics backend ([#1914](https://github.com/danielraffel/pulp/pull/1914))
+- fix(ci): scope concurrency cancel-in-progress to protect coverage uploads (closes #1884) ([#1911](https://github.com/danielraffel/pulp/pull/1911))
+- diag(view/yoga): PULP_DUMP_BOUNDS env + Spectr-shape regression anchor (#1899) ([#1905](https://github.com/danielraffel/pulp/pull/1905))
+- feat(view): add Element.prototype.contains — DOM Node.contains contract ([#1872](https://github.com/danielraffel/pulp/pull/1872))
+- fix(tooling): chmod +x tools/scripts/verify_gpu_build.sh (Codex P2 on #1847) ([#1865](https://github.com/danielraffel/pulp/pull/1865))
+- fix(import-validation): length-gate substring-fallback in check_label_coverage (Codex P1 on #1847) ([#1864](https://github.com/danielraffel/pulp/pull/1864))
+- fix(view-bridge): aggregate ALL transient runtime-import error globals (Codex P1+P2 on #1856) ([#1863](https://github.com/danielraffel/pulp/pull/1863))
+- test(view): pin borderRadius % effective radius + paint for #1731 ([#1867](https://github.com/danielraffel/pulp/pull/1867))
+- test(view): pin outlineColor currentColor resolution for #1728 ([#1869](https://github.com/danielraffel/pulp/pull/1869))
+- feat(import-validation): semantic-probe vector for runtime-import harness ([#1875](https://github.com/danielraffel/pulp/pull/1875))
+- fix(ci): static name for Diff coverage required gate so it actually enforces ([#1883](https://github.com/danielraffel/pulp/pull/1883))
+- fix(view+screenshot): drive runtime-import event loop in pulp-screenshot for headless React captures (#1899) ([#1900](https://github.com/danielraffel/pulp/pull/1900))
+- fix(canvas+pulp-react): disable LCD subpixel AA inside non-opaque layers; resolve var() in React fontFamily/color (closes gap #3 of #1899) ([#1918](https://github.com/danielraffel/pulp/pull/1918))
+- feat(view+web-compat): route <rect> <line> <circle> SVG primitives + attribute replay (closes #1926) ([#1928](https://github.com/danielraffel/pulp/pull/1928))
+- feat(import): add Stitch React export parser (Phase 6.6.4) ([#1946](https://github.com/danielraffel/pulp/pull/1946))
+- feat(ci): pulp overflow CLI for macOS-runner overflow routing ([#1942](https://github.com/danielraffel/pulp/pull/1942))
+- feat(ci): opportunistic macOS-overflow reroute watcher ([#1944](https://github.com/danielraffel/pulp/pull/1944))
+- fix(ci): macOS overflow probe counts queued-to-local only ([#1943](https://github.com/danielraffel/pulp/pull/1943))
+
 <a id="v0960"></a>
-## [0.32.0]
-
-## [0.97.0]
-
 ## [0.96.0] - 2026-05-13
 
 - feat(ci): pulp macos retarget — per-PR macOS-runner override without full rerun ([#1941](https://github.com/danielraffel/pulp/pull/1941))
@@ -36,8 +79,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(css): nested var() fallback + var-in-calc resolution via balanced-paren walker (closes coverage-gap css/__var) ([#1855](https://github.com/danielraffel/pulp/pull/1855))
 
 <a id="v0950"></a>
-## [0.96.0]
-
 ## [0.95.0] - 2026-05-12
 
 - feat(view): SDK C++ runtime-import API — install_runtime_import_handlers ([#1856](https://github.com/danielraffel/pulp/pull/1856))
@@ -1711,6 +1752,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.97.0]: https://github.com/danielraffel/pulp/releases/tag/v0.97.0
 [0.96.0]: https://github.com/danielraffel/pulp/releases/tag/v0.96.0
 [0.95.1]: https://github.com/danielraffel/pulp/releases/tag/v0.95.1
 [0.95.0]: https://github.com/danielraffel/pulp/releases/tag/v0.95.0
