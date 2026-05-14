@@ -345,6 +345,60 @@ workflow, do the same. The regression test
 `tools/scripts/test_release_workflow_test_step.py` now includes
 `SignAndReleaseContentsWriteTest` to block reintroduction.
 
+### Skia-builder zip layout drift breaks the release matrix (#1962)
+
+`release-cli.yml` fetches prebuilt Skia binaries via
+`tools/scripts/fetch_skia_for_release.py` after `setup.sh --deps-only`.
+The upstream skia-builder zip layout is **not** stable — older series
+shipped libs flat under `build/<plat>-gpu/lib/Release/libskia.a`, but
+the chrome/m144 series moved them one directory deeper under an arch
+subdir: `build/mac-gpu/lib/Release/arm64/libskia.a`, similarly
+`linux-gpu/lib/Release/x64/`. Every release after v0.94.0 (v0.95.0..
+v0.97.0) failed silently on this for four days, with `release-guard.yml`
+opening a per-tag tracking issue but no published GitHub Release.
+
+The fetch script now flattens any single-arch subdir back up into
+`Release/` after unpack, so `FindSkia.cmake`'s layout probe keeps
+working unchanged. Regression coverage lives in
+`tools/scripts/test_fetch_skia_for_release.py` (covers flat layout,
+arch-subdir flatten for both mac-arm64 and linux-x64, missing-lib,
+sha256 mismatch). Wired into `workflow-lint.yml`.
+
+When `tools/deps/manifest.json` bumps `Skia` to a new skia-builder
+release tag, eyeball the zip layout once:
+
+```bash
+curl -sL <new asset URL> -o /tmp/skia.zip
+unzip -l /tmp/skia.zip | grep -oE '^.*/lib/Release/[^/]+/' | sort -u
+```
+
+If the lib path has a NEW level (not arch — e.g. a config subdir like
+`Release/optimized/`), the flatten heuristic needs extending. The flat
++ single-arch-subdir layouts are the only two seen to date.
+
+### Backfilling a stuck release tag
+
+`auto-release.yml` creates the tag immediately on merge, but
+`release-cli.yml` only publishes after the matrix is green. If matrix
+fails (as in #1962), the tag exists with no Release — and
+`workflow_dispatch` against that tag re-runs the BROKEN workflow file
+from the tag's source. Two safe options:
+
+1. **Source-ref dispatch (#1962):** Run the *fixed* workflow from main
+   while building the *tag's* source:
+
+       gh workflow run release-cli.yml --ref main \
+           -f version=v0.97.0 -f source_ref=v0.97.0
+
+   The build-cli job overlays `tools/scripts/fetch_skia_for_release.py`
+   from main automatically, so a backfill picks up post-tag fetch-script
+   fixes even though the tag's tree predates them.
+
+2. **Cherry-pick fix + retag:** Only if the build itself needs to change.
+   Pulp doesn't retag immutable releases — use option 1 unless the
+   broken release artifacts would have been wrong even with a green
+   build.
+
 ## Doctor Checks
 
 `pulp doctor` validates Android toolchain:

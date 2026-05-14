@@ -7,8 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v0.1.0)'
+        description: 'Version tag to publish as (e.g., v0.97.0)'
         required: true
+      source_ref:
+        description: |
+          Git ref to BUILD from. Leave blank to build from `version` (the
+          tag itself, normal backfill). Set to `main` only when you want
+          to publish current `main` content under the `version` label —
+          ill-advised unless you understand the risk. Added in #1962 so
+          backfilling a broken release can run the FIXED workflow from
+          `main` while still checking out the broken TAG's source code.
+        required: false
+        default: ''
 
 # Never cancel an in-flight release. If two tags push back-to-back,
 # serialize rather than cancel — interrupting a binary build halfway
@@ -55,6 +65,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           lfs: true
+          # On `workflow_dispatch`, prefer `source_ref` if the user supplied
+          # one; otherwise check out the `version` tag they typed. On
+          # push-tag triggers, fall through to the default (the tag ref).
+          # See pulp #1962 for the backfill safety rationale.
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -83,6 +98,26 @@ jobs:
       # (linux-arm64, windows-*) print INFO and continue without GPU;
       # PULP_REQUIRE_GPU_FOR_SDK is gated on the same condition so
       # configure doesn't trip on them.
+
+      # Backfill safety net (pulp #1962): when a workflow_dispatch
+      # backfill is checking out a tag that pre-dates the chrome/m144
+      # layout flatten fix, the script in that tag's source tree is the
+      # OLD version and will fail. Pull the current `main` copy of the
+      # script over the in-tree copy so the workflow's fetch step picks
+      # up the fix regardless of when the tag was cut. This is a no-op
+      # for tag-push triggers (the dispatched source_ref is empty so we
+      # skip).
+      - name: Overlay latest fetch-skia script (workflow_dispatch backfill)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          url="https://raw.githubusercontent.com/${repo}/main/tools/scripts/fetch_skia_for_release.py"
+          echo "Overlaying tools/scripts/fetch_skia_for_release.py from ${url}"
+          curl -fsSL "$url" -o tools/scripts/fetch_skia_for_release.py
+          python3 -c "import pathlib; print(pathlib.Path('tools/scripts/fetch_skia_for_release.py').stat().st_size, 'bytes')"
+
       - name: Fetch Skia binaries
         run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
         shell: bash

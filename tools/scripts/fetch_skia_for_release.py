@@ -27,6 +27,24 @@ expected library on disk) or the script exits non-zero.
 
 This script intentionally avoids stderr-only output so the workflow log
 shows progress on stdout for either bash or PowerShell.
+
+### Skia-builder zip layout (pulp #1962)
+
+Earlier skia-builder chrome/* releases unpacked libs flat under
+`build/<plat>-gpu/lib/Release/libskia.a`. Starting in the chrome/m144
+series (the pinned release for Pulp), libs ship under an **arch
+subdirectory** — e.g. `build/mac-gpu/lib/Release/arm64/libskia.a` and
+`build/linux-gpu/lib/Release/x64/libskia.a`. This regression caused
+release-cli to fail for v0.95.0..v0.97.0 with `expected library not
+found at <flat path> after unpack`, leaving every SDK/CLI release after
+v0.94.0 unpublished.
+
+Fix: after extracting, if the libraries are in an arch subdir, move
+them up to the flat `Release/` directory so `FindSkia.cmake`'s existing
+`${SKIA_DIR}/build/<plat>-gpu/lib/Release` probe (line 61) finds them
+without further changes. This keeps the FindSkia surface stable for
+both fresh release-cli unpacks AND existing local checkouts that were
+arranged manually.
 """
 from __future__ import annotations
 
@@ -155,6 +173,44 @@ def main(argv: list[str]) -> int:
 
     # Free the ~hundreds-of-MiB download once unpacked.
     zip_path.unlink(missing_ok=True)
+
+    # Normalize skia-builder chrome/m144+ layout (pulp #1962).
+    #
+    # The expected library lives at:
+    #   external/skia-build/build/<plat>-gpu/lib/Release/<lib>
+    # but chrome/m144 zips place it one directory deeper, under an arch
+    # subdir:
+    #   external/skia-build/build/<plat>-gpu/lib/Release/<arch>/<lib>
+    # Flatten that arch directory into Release/ so FindSkia.cmake's
+    # existing layout probe matches without further changes.
+    if not expected_lib.is_file():
+        release_dir = expected_lib.parent
+        if release_dir.is_dir():
+            arch_subdirs = [p for p in release_dir.iterdir() if p.is_dir()]
+            # Walk only direct subdirs of Release/ — the upstream layout
+            # is exactly one arch level deep. Move every regular file
+            # inside up to Release/, then drop the now-empty arch dir.
+            for arch_dir in arch_subdirs:
+                moved = 0
+                for item in arch_dir.iterdir():
+                    if item.is_file():
+                        target = release_dir / item.name
+                        # Refuse to clobber an already-flat duplicate.
+                        if target.exists():
+                            continue
+                        item.rename(target)
+                        moved += 1
+                if moved:
+                    print(
+                        f"Flattened skia-builder arch layout: moved "
+                        f"{moved} file(s) from {arch_dir} → {release_dir}"
+                    )
+                # rmdir succeeds only if empty; that's exactly what we want.
+                try:
+                    arch_dir.rmdir()
+                except OSError:
+                    # Non-empty (e.g. obj/ subfolder) — leave in place.
+                    pass
 
     # Sanity check: the expected library MUST be on disk now. If not, the
     # zip layout drifted from FindSkia.cmake's expectations and the SDK
