@@ -189,3 +189,19 @@ elseif(UNIX)
     target_link_options(pulp-test-svg-primitives-1926 PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-svg-primitives-1926)
+
+# #1899 regression: Spectr import-flow gaps #4 + #5 — `<path>` must
+# route to SvgPathWidget with d / stroke / stroke-width / fill /
+# viewBox replay, and `<input type=range>` must default to horizontal.
+add_executable(pulp-test-svg-path-range-orientation-1899 test_svg_path_range_orientation_1899.cpp)
+target_link_libraries(pulp-test-svg-path-range-orientation-1899 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-svg-path-range-orientation-1899 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-svg-path-range-orientation-1899 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-svg-path-range-orientation-1899 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-svg-path-range-orientation-1899 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-svg-path-range-orientation-1899)

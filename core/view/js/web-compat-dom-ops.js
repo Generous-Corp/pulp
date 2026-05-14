@@ -35,7 +35,24 @@ if (!Element.prototype.appendChild ||
         child._parentElement = this;
         this._children.push(child);
         this._ensureNative();
-        __domAppend(this._id, child._id, child.tagName.toLowerCase());
+        // pulp #1899 — pass an optional widget-type hint to the C++
+        // __domAppend fast path so it can route `<input>` to the right
+        // native widget (Fader for type=range, Checkbox for type=checkbox).
+        // Computing the hint here is cheaper than re-entering JS from C++
+        // and avoids the QuickJS stack-overflow risk that motivated the
+        // __domAppend fast path in the first place.
+        var __domAppendHint = "";
+        if (child.tagName === "INPUT") {
+            if (child._type === "range") {
+                __domAppendHint = "range:" +
+                    ((typeof __resolveRangeOrientation__ === "function")
+                        ? __resolveRangeOrientation__(child)
+                        : "horizontal");
+            } else if (child._type === "checkbox") {
+                __domAppendHint = "checkbox";
+            }
+        }
+        __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
         // pulp #1147 — replay presentational `width`/`height` HTML
@@ -68,6 +85,14 @@ if (!Element.prototype.appendChild ||
         }
         if (typeof __replaySvgCircleAttributes__ === "function") {
             __replaySvgCircleAttributes__(child);
+        }
+        // pulp #1899 — replay SvgPath attributes (d / stroke /
+        // stroke-width / fill / viewBox-from-parent) for `<path>`
+        // elements. React commits these via setAttribute BEFORE the
+        // appendChild that materializes the native widget, so the
+        // SvgPathWidget is empty until this replay runs.
+        if (typeof __replaySvgPathAttributes__ === "function") {
+            __replaySvgPathAttributes__(child);
         }
         child.style._flushAll();
         child._reapplyStylesheets();
@@ -141,6 +166,10 @@ if (!Element.prototype.appendChild ||
         }
         if (typeof __replaySvgCircleAttributes__ === "function") {
             __replaySvgCircleAttributes__(newChild);
+        }
+        // pulp #1899 — see appendChild for rationale.
+        if (typeof __replaySvgPathAttributes__ === "function") {
+            __replaySvgPathAttributes__(newChild);
         }
         newChild.style._flushAll();
         newChild._reapplyStylesheets();

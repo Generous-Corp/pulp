@@ -2764,6 +2764,41 @@ void WidgetBridge::register_api() {
             auto svg = std::make_unique<SvgPathWidget>();
             svg->set_id(childId);
             child = std::move(svg);
+        } else if (tag == "path") {
+            // pulp #1899 — mirror the JS-side _ensureNative routing:
+            // `<path>` (typically inside an `<svg>`) materializes as the
+            // SvgPathWidget so the d / stroke / stroke-width / fill /
+            // viewBox attribute replay actually paints. Without this
+            // branch the React/JSX commit path (which goes through
+            // __domAppend, bypassing _ensureNative) would silently
+            // create a plain View and the SVG glyph never renders.
+            auto svg = std::make_unique<SvgPathWidget>();
+            svg->set_id(childId);
+            child = std::move(svg);
+        } else if (tag == "input") {
+            // pulp #1899 — `<input>` needs the JS-side `_type` to pick a
+            // widget. JS callers pass it through the optional 4th `hint`
+            // arg ("range:horizontal", "range:vertical", "checkbox").
+            // Without the hint, fall back to a plain View so the element
+            // still receives child/style ops (text inputs are not yet
+            // first-class on the bridge).
+            auto hint = args.get<std::string>(3, "");
+            if (hint == "range:horizontal" || hint == "range:vertical") {
+                auto fader = std::make_unique<Fader>();
+                fader->set_id(childId);
+                if (hint == "range:horizontal") {
+                    fader->set_orientation(Fader::Orientation::horizontal);
+                }
+                child = std::move(fader);
+            } else if (hint == "checkbox") {
+                auto cb = std::make_unique<Checkbox>();
+                cb->set_id(childId);
+                child = std::move(cb);
+            } else {
+                auto v = std::make_unique<View>();
+                v->set_id(childId);
+                child = std::move(v);
+            }
         } else {
             auto v = std::make_unique<View>();
             v->set_id(childId);

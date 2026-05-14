@@ -102,6 +102,22 @@ Element.prototype._ensureNative = function() {
         } else {
             createCol(id, "");
         }
+    } else if (tag === "path") {
+        // pulp #1899 — Spectr's React-rendered icon glyphs emit raw
+        // `<svg><path d="..." stroke="currentColor" .../></svg>` JSX. The
+        // SvgPath native widget + bridge surface (createSvgPath /
+        // setSvgPath / setSvgStroke / setSvgFill / setSvgStrokeWidth)
+        // already exist (pulp #994 / #1416), but the web-compat shim
+        // routed `<path>` into the unknown-tag default (createCol),
+        // producing an empty box. Wire <path> directly to createSvgPath
+        // and replay `d` / `stroke` / `stroke-width` / `fill` /
+        // `viewBox` (inherited from the parent <svg>) through
+        // __replaySvgPathAttributes__ at the end of this function.
+        if (typeof createSvgPath === "function") {
+            createSvgPath(id, "");
+        } else {
+            createCol(id, "");
+        }
     } else if (tag === "h1") {
         createLabel(id, "", "");
         setFontSize(id, 32); setFontWeight(id, 700);
@@ -125,7 +141,19 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "input") {
         var t = this._type || "text";
         if (t === "range") {
-            createFader(id, "vertical", "");
+            // pulp #1899 — `<input type="range">` defaults to HORIZONTAL.
+            // HTML semantics (and Spectr's MorphSlider, Web Audio demos,
+            // CSS-Tricks / MDN examples) treat the range slider as
+            // horizontal unless an explicit hint says otherwise. Pulp
+            // previously hard-coded "vertical" which collapsed every
+            // imported web slider to a tall fader, painting nothing in
+            // the typical 90px-wide flex row.
+            //
+            // Heuristic (in priority order):
+            //   1. `aria-orientation="vertical"` → vertical
+            //   2. inline `style.height > style.width` → vertical
+            //   3. otherwise → horizontal (HTML default)
+            createFader(id, __resolveRangeOrientation__(this), "");
         } else if (t === "checkbox") {
             createCheckbox(id, "");
         } else {
@@ -198,7 +226,67 @@ Element.prototype._ensureNative = function() {
     if (typeof __replaySvgCircleAttributes__ === "function") {
         __replaySvgCircleAttributes__(this);
     }
+    // pulp #1899 — replay <path> SVG attributes captured pre-mount
+    // (React/JSX commits attributes before appendChild materializes the
+    // node, so by the time setAttribute('d', ...) lands the bridge has
+    // no native id yet). __replaySvgPathAttributes__ flushes d / stroke
+    // / stroke-width / fill from _attributes and inherits viewBox from
+    // the parent <svg>.
+    if (typeof __replaySvgPathAttributes__ === "function") {
+        __replaySvgPathAttributes__(this);
+    }
 };
+
+// pulp #1899 — orientation heuristic for <input type="range">. Returns
+// "horizontal" (HTML default) or "vertical". Priority:
+//   1. aria-orientation attribute explicitly says "vertical" (or "horizontal")
+//   2. inline style.height > inline style.width — BOTH must be inline-set;
+//      otherwise width may come from a flex parent (not visible here) and
+//      the comparison is meaningless. The earlier "hasH && !hasW → vertical"
+//      shortcut regressed horizontal sliders whose width came from layout
+//      (Codex P1 review of #1917).
+//   3. otherwise horizontal (the HTML / Web-Audio convention).
+// TODO: add test for #1917 P1 regression (horizontal slider with
+//       inline style.height but width supplied by flex parent).
+function __resolveRangeOrientation__(el) {
+    if (!el) return "horizontal";
+    var aria = el._attributes && el._attributes["aria-orientation"];
+    if (aria === "vertical") return "vertical";
+    if (aria === "horizontal") return "horizontal";
+    // Read pre-mount inline-style props captured on the CSSStyleDeclaration.
+    // Both width AND height must be inline-explicit before we trust the
+    // comparison — see header comment for the flex-width regression.
+    var s = el.style && el.style._props;
+    if (s) {
+        var w = parseFloat(s.width);
+        var h = parseFloat(s.height);
+        var hasW = w === w && w > 0;          // NaN-safe
+        var hasH = h === h && h > 0;
+        if (hasH && hasW && h > w) return "vertical";
+    }
+    return "horizontal";
+}
+
+// pulp #1917 (Codex P1) — SVG `currentColor` resolution.
+//
+// The SVG spec resolves `stroke="currentColor"` / `fill="currentColor"`
+// to the element's CSS `color` property at render time. The C++
+// SvgPathWidget bridge does not parse the literal token, so without
+// resolution the stroke renders transparent/black/garbage depending on
+// the backend. Walk up the parent chain looking for an inline
+// `style.color` (color is inherited per CSS); fall back to "black" per
+// SVG spec when nothing is set anywhere on the chain.
+function __resolveCurrentColor__(el) {
+    var anc = el;
+    while (anc) {
+        var col = anc.style && anc.style._props && anc.style._props.color;
+        if (typeof col === "string" && col.length > 0 && col !== "inherit") {
+            return col;
+        }
+        anc = anc._parentElement;
+    }
+    return "black"; // SVG spec default
+}
 
 // pulp #1147 — shared helper that maps presentational HTML attributes
 // (width, height) on layout-leaf media tags (<svg>, <img>, <canvas>,
@@ -368,6 +456,82 @@ function __replaySvgCircleAttributes__(el) {
     if (sw !== undefined && typeof setSvgStrokeWidth === "function") {
         var psw = parseFloat(sw);
         if (psw === psw) setSvgStrokeWidth(el._id, psw);
+    }
+}
+
+// pulp #1899 — replay <path> SVG attributes captured pre-mount through
+// the SvgPathWidget bridge surface. React/JSX commits attributes before
+// `appendChild` materializes the node, mirroring the aria / media-attr
+// patterns above. Idempotent — safe to call from _ensureNative AND from
+// the appendChild fast path. Also inherits the parent <svg>'s viewBox
+// when set, matching the SVG spec (path coordinates live in the parent
+// viewBox's coordinate space).
+//
+// Attribute name handling: HTML attribute names lowercase via
+// setAttribute, but JSX often serializes camelCase `strokeWidth`. We
+// accept either spelling so the host-config (React intrinsic) and the
+// raw HTML/JSX path both work.
+function __replaySvgPathAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    if (el.tagName !== "PATH") return;
+    var a = el._attributes;
+
+    // d — required for the path to paint at all.
+    if (a.d !== undefined && typeof setSvgPath === "function") {
+        setSvgPath(el._id, String(a.d));
+    }
+    // stroke — color string. "none" / "" clears the stroke.
+    // pulp #1917 (Codex P1) — resolve `currentColor` against the CSS
+    // color cascade before dispatch; the C++ widget doesn't parse the
+    // literal token. Fallback is "black" per SVG spec.
+    if (a.stroke !== undefined && typeof setSvgStroke === "function") {
+        var strokeVal = String(a.stroke);
+        if (strokeVal === "currentColor") {
+            strokeVal = __resolveCurrentColor__(el);
+        }
+        setSvgStroke(el._id, strokeVal);
+    }
+    // stroke-width / strokeWidth — width in viewBox units.
+    var sw = a["stroke-width"];
+    if (sw === undefined) sw = a.strokeWidth;
+    if (sw !== undefined && typeof setSvgStrokeWidth === "function") {
+        var psw = parseFloat(sw);
+        if (psw === psw) setSvgStrokeWidth(el._id, psw);
+    }
+    // fill — color string. "none" clears. Same currentColor handling as stroke.
+    if (a.fill !== undefined && typeof setSvgFill === "function") {
+        var fillVal = String(a.fill);
+        if (fillVal === "currentColor") {
+            fillVal = __resolveCurrentColor__(el);
+        }
+        setSvgFill(el._id, fillVal);
+    }
+    // viewBox — inherited from the parent <svg>. The SVG spec attaches
+    // viewBox to the outer <svg>, but the SvgPathWidget needs the (w,h)
+    // pair to scale path coordinates into widget bounds. Walk up until
+    // we hit an <svg> ancestor (or the root) and lift its viewBox.
+    if (typeof setSvgViewBox === "function") {
+        var anc = el._parentElement;
+        while (anc) {
+            if (anc.tagName === "SVG") break;
+            anc = anc._parentElement;
+        }
+        if (anc && anc._attributes) {
+            var vb = anc._attributes.viewBox;
+            if (typeof vb === "string") {
+                var toks = vb.trim().split(/[\s,]+/).map(parseFloat);
+                var clean = [];
+                for (var ti = 0; ti < toks.length; ti++) {
+                    if (toks[ti] === toks[ti]) clean.push(toks[ti]);
+                }
+                if (clean.length === 4) {
+                    // SVG-spec form `min-x min-y w h` — bridge consumes w + h.
+                    setSvgViewBox(el._id, clean[2], clean[3]);
+                } else if (clean.length === 2) {
+                    setSvgViewBox(el._id, clean[0], clean[1]);
+                }
+            }
+        }
     }
 }
 
@@ -860,6 +1024,28 @@ Element.prototype.setAttribute = function(name, value) {
             setAccessibilityState(this._id, name.slice(5), String(value));
         }
     }
+    // pulp #1899 — `<path d=... stroke=... stroke-width=... fill=...>`
+    // routes through the SvgPathWidget bridge. Idempotent: also replayed
+    // by __replaySvgPathAttributes__ in the appendChild-after-setAttribute
+    // path. We forward immediately if the widget already exists, and let
+    // the replay flush from _attributes for the pre-mount case.
+    else if (this.tagName === "PATH" &&
+             (name === "d" || name === "stroke" || name === "fill" ||
+              name === "stroke-width" || name === "strokeWidth")) {
+        if (this._nativeCreated) {
+            if (name === "d" && typeof setSvgPath === "function") {
+                setSvgPath(this._id, String(value));
+            } else if (name === "stroke" && typeof setSvgStroke === "function") {
+                setSvgStroke(this._id, String(value));
+            } else if (name === "fill" && typeof setSvgFill === "function") {
+                setSvgFill(this._id, String(value));
+            } else if ((name === "stroke-width" || name === "strokeWidth") &&
+                       typeof setSvgStrokeWidth === "function") {
+                var p = parseFloat(value);
+                if (p === p) setSvgStrokeWidth(this._id, p);
+            }
+        }
+    }
 };
 
 Element.prototype.getAttribute = function(name) {
@@ -1309,11 +1495,21 @@ function _reparentNative(child, parentId) {
         // attach. The width/height attributes are replayed by the
         // shared helper at the end of this function.
         createCol(id, parentId);
+    } else if (tag === "path") {
+        // pulp #1899 — `<path>` reparent path mirrors _ensureNative.
+        // SvgPath attribute replay runs at the end of this function.
+        if (typeof createSvgPath === "function") {
+            createSvgPath(id, parentId);
+        } else {
+            createCol(id, parentId);
+        }
     } else if (tag === "button") {
         createToggleButton(id, parentId);
     } else if (tag === "input") {
         var t = child._type || "text";
-        if (t === "range") createFader(id, "vertical", parentId);
+        // pulp #1899 — horizontal-by-default range slider. See
+        // __resolveRangeOrientation__ in _ensureNative.
+        if (t === "range") createFader(id, __resolveRangeOrientation__(child), parentId);
         else if (t === "checkbox") createCheckbox(id, parentId);
         else createTextEditor(id, parentId);
     } else if (tag === "textarea") {
@@ -1352,6 +1548,12 @@ function _reparentNative(child, parentId) {
     // pulp Wave 3 html.2 / #1476 — replay ARIA attributes after reparent.
     if (typeof __replayAriaAttributes__ === "function") {
         __replayAriaAttributes__(child);
+    }
+    // pulp #1899 — replay SvgPath attributes after reparent so the
+    // SvgPathWidget bridge sees d / stroke / stroke-width / fill /
+    // viewBox even if the path was constructed before mount.
+    if (typeof __replaySvgPathAttributes__ === "function") {
+        __replaySvgPathAttributes__(child);
     }
 
     // Recursively reparent children
