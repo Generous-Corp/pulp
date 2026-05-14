@@ -3223,30 +3223,38 @@ void WidgetBridge::register_api() {
         auto* v = widget(args.get<std::string>(0, ""));
         auto a = args.get<std::string>(1, "left");
         if (!v) return choc::value::Value();
-        // pulp #1434 — accept all five CSS / RN textAlign values:
-        //   "left"/"start"   → LabelAlign::left   (0)
-        //   "center"         → LabelAlign::center (1)
-        //   "right"/"end"    → LabelAlign::right  (2)
-        //   "auto"           → LabelAlign::auto_  (3, paint-time resolved
-        //                      to left under LTR; pulp doesn't model RTL
-        //                      yet so this is currently equivalent to left)
-        //   "justify"        → LabelAlign::justify (4, canvas TextAlign::
-        //                      justify; SkParagraph kJustify lands in a
-        //                      follow-up — backends fall back to left-
-        //                      alignment math today)
+        // pulp #1434 — accept all six CSS / RN textAlign values:
+        //   "left"/"start"     → LabelAlign::left         (0)
+        //   "center"           → LabelAlign::center       (1)
+        //   "right"/"end"      → LabelAlign::right        (2)
+        //   "auto"             → LabelAlign::auto_        (3, paint-time
+        //                        resolved to left under LTR; pulp doesn't
+        //                        model RTL yet so this is currently
+        //                        equivalent to left)
+        //   "justify"          → LabelAlign::justify      (4, canvas
+        //                        TextAlign::justify; SkParagraph kJustify
+        //                        lands in a follow-up — backends fall back
+        //                        to left-alignment math today)
+        //   "match-parent"     → LabelAlign::match_parent (5, paint-time
+        //                        resolved by walking the View parent chain
+        //                        via inheritable_text_align(); falls back
+        //                        to `left` when no ancestor set a value.
+        //                        Matches CSS spec: inherit the parent's
+        //                        *computed* text-align value).
         int aligned;
         LabelAlign label_a;
         if      (a == "center")               { aligned = 1; label_a = LabelAlign::center; }
         else if (a == "right" || a == "end")  { aligned = 2; label_a = LabelAlign::right; }
         else if (a == "auto")                 { aligned = 3; label_a = LabelAlign::auto_; }
         else if (a == "justify")              { aligned = 4; label_a = LabelAlign::justify; }
+        else if (a == "match-parent")         { aligned = 5; label_a = LabelAlign::match_parent; }
         else                                  { aligned = 0; label_a = LabelAlign::left; }
         if (auto* l = dynamic_cast<Label*>(v)) {
             l->set_text_align(label_a);
         } else {
             // issue-969: container Views store the alignment in the
             // inheritable slot for descendant Labels. Encoding extends
-            // 0..4 to cover the new auto / justify cases — Label::paint
+            // 0..5 to cover auto / justify / match-parent — Label::paint
             // decodes the slot via the same numeric mapping.
             v->set_inheritable_text_align(aligned);
         }

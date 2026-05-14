@@ -652,6 +652,19 @@ specifics are out of scope.
   `css/animationPlayState` stays `missing` because its `mapsTo` is
   `"no branch"` — the bridge has no entry point for it at all, which
   is NOT_IMPL semantics, not NO-OP.
+- **2026-05-12 (pulp #1434 follow-up)** — `css/textAlign` now also
+  accepts `match-parent`, closing the last value gap on this property.
+  CSS spec: `match-parent` resolves to the parent's *computed*
+  `text-align`. Implementation reuses the existing View parent-chain
+  walker (`View::inheritable_text_align()`, originally wired for
+  issue-969 typography inheritance): at paint time, a Label set to
+  `LabelAlign::match_parent` walks from `parent()` up the ancestor chain
+  and adopts the first ancestor's resolved value, falling back to `left`
+  when no ancestor set one (the CSS spec default for `text-align`).
+  Symmetric with the existing paint-time `auto` resolution. Bridge
+  encoding extends 0..4 → 0..5 to cover container Views storing the new
+  value in the inheritable slot. `unsupportedValues` for `css/textAlign`
+  now empty — coverage-gap closed.
 - **2026-05-05 (pulp #1434 Triage #11)** — `css/textAlign` now accepts
   `start`, `end`, `auto`, and `justify` alongside the existing `left`,
   `center`, `right`. `start`/`end` map symmetrically to `left`/`right`
@@ -659,7 +672,8 @@ specifics are out of scope.
   gracefully until pulp's RTL slice lands). `justify` reaches canvas
   `TextAlign::justify`; full SkParagraph kJustify rendering is a
   follow-up (backends approximate as left until then). `match-parent`
-  remains unsupported. Reclassified DIVERGE → PASS.
+  remains unsupported (closed in the follow-up entry dated 2026-05-12).
+  Reclassified DIVERGE → PASS.
 - **2026-05-05 (pulp #1434 Triage #15)** — `css/boxShadow` status
   flipped `supported` → `partial`. The single-shadow CSS-spec format
   (`[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`) has been
