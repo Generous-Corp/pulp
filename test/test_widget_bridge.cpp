@@ -6313,6 +6313,51 @@ TEST_CASE("setCursor maps the full CSS keyword set",
     REQUIRE(bridge.widget("j")->cursor() == CS::default_);
 }
 
+// pulp #1550 Tier-4 macOS partial 2026-05-12: five CSS cursor keywords
+// (`alias` / `copy` / `zoom-in` / `zoom-out` / `context-menu`) now
+// route to dedicated `View::CursorStyle` slots so the macOS dispatch
+// in `window_host_mac.mm` can pick a real `NSCursor`. The other four
+// previously-unsupported keywords (`wait` / `help` / `progress` /
+// `cell`) stay collapsed to `default_` because macOS has no native
+// cursor for them. Pin both halves.
+TEST_CASE("setCursor wires 5 macOS-backed keywords to dedicated CursorStyle slots",
+          "[view][bridge][issue-1550][coverage]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        // The 5 keywords with native NSCursor mappings.
+        createPanel('al', ''); setCursor('al', 'alias');
+        createPanel('cp', ''); setCursor('cp', 'copy');
+        createPanel('zi', ''); setCursor('zi', 'zoom-in');
+        createPanel('zo', ''); setCursor('zo', 'zoom-out');
+        createPanel('cm', ''); setCursor('cm', 'context-menu');
+        // The 4 keywords that genuinely have no macOS cursor — these
+        // must STAY collapsed to default_ (catalog still lists them
+        // as unsupported for honesty).
+        createPanel('wt', ''); setCursor('wt', 'wait');
+        createPanel('hp', ''); setCursor('hp', 'help');
+        createPanel('pg', ''); setCursor('pg', 'progress');
+        createPanel('cl', ''); setCursor('cl', 'cell');
+    )");
+
+    using CS = View::CursorStyle;
+    // Newly-wired keywords route to dedicated slots.
+    REQUIRE(bridge.widget("al")->cursor() == CS::alias);
+    REQUIRE(bridge.widget("cp")->cursor() == CS::copy);
+    REQUIRE(bridge.widget("zi")->cursor() == CS::zoom_in);
+    REQUIRE(bridge.widget("zo")->cursor() == CS::zoom_out);
+    REQUIRE(bridge.widget("cm")->cursor() == CS::context_menu);
+    // No-native-cursor keywords stay at default_ — pinning prevents
+    // a future change from silently flipping them.
+    REQUIRE(bridge.widget("wt")->cursor() == CS::default_);
+    REQUIRE(bridge.widget("hp")->cursor() == CS::default_);
+    REQUIRE(bridge.widget("pg")->cursor() == CS::default_);
+    REQUIRE(bridge.widget("cl")->cursor() == CS::default_);
+}
+
 TEST_CASE("setCursor accepts axis-aligned aliases",
           "[view][bridge][css][issue-1434-bundle]") {
     ScriptEngine engine;
@@ -11209,14 +11254,26 @@ TEST_CASE("Wave5 css/cursor maps CSS keywords to View::CursorStyle",
     auto* p = bridge.widget("p");
     REQUIRE(p->cursor() == View::CursorStyle::pointer);
 
-    // arch-platform-cursor-set caveat — alias / copy / cell / zoom-in /
-    // zoom-out / help / wait map onto `default` since pulp's enum
-    // doesn't model them. Must not crash.
+    // pulp #1550 Tier-4 macOS partial 2026-05-12: `alias`, `copy`,
+    // `zoom-in`, `zoom-out`, `context-menu` now route to dedicated
+    // CursorStyle slots (NSCursor-backed on macOS). The remaining
+    // `wait` / `help` / `progress` / `cell` keywords still fall
+    // through to `default_` — no native macOS cursor exists for them.
+    // Pin BOTH halves to catch regressions either way.
     bridge.load_script(R"(
         var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s2.cursor = 'zoom-in';
     )");
-    // Falls through to default per arch caveat.
+    // Now routes to the dedicated slot (was: fell through to default_).
+    REQUIRE(p->cursor() == View::CursorStyle::zoom_in);
+
+    // `cell` is one of the 4 that genuinely has no macOS NSCursor —
+    // still falls through to `default_`. Pin so a future "fix" doesn't
+    // silently route it somewhere else.
+    bridge.load_script(R"(
+        var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s3.cursor = 'cell';
+    )");
     REQUIRE(p->cursor() == View::CursorStyle::default_);
 }
 

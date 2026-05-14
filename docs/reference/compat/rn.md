@@ -26,6 +26,25 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-12 (pulp #1550 Tier-4 macOS partial — `rn/cursor` 5 of 9
+  keywords)** — five CSS cursor keywords previously listed as
+  unsupported now wire to dedicated `View::CursorStyle` slots backed
+  by real `NSCursor` objects on macOS:
+  * `alias` → `NSCursor.dragLinkCursor` (10.6+)
+  * `copy` → `NSCursor.dragCopyCursor` (10.6+)
+  * `zoom-in` → `NSCursor.zoomInCursor` (10.15+, defensive
+    `respondsToSelector:` check with `arrowCursor` fallback)
+  * `zoom-out` → `NSCursor.zoomOutCursor` (same defensive pattern)
+  * `context-menu` → `NSCursor.contextualMenuCursor` (10.6+)
+  The remaining 4 (`wait`, `help`, `progress`, `cell`) stay in
+  `unsupportedValues` for honesty — macOS has no native `NSCursor`
+  for any of them (`wait`/`progress` are owned by the system spinning
+  beachball, not exposable as a settable cursor; `help` and `cell`
+  have no AppKit counterpart). They continue to fall through to
+  `default_`. Linux + Windows + web platform bridges would add their
+  own per-keyword mappings later; iOS / Android don't have visible
+  cursors so the question doesn't apply.
+
 - **2026-05-07 (Wave 4 extensive DIVERGE sweep)** — closes the rn
   drift bundle (16 DIVERGE → 0 DIVERGE; PASS 89 → 105; 74.2% → 87.5%
   PASS, no remaining drift). Two real wires + reclassification:

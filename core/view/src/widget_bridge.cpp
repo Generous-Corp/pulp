@@ -5220,16 +5220,18 @@ void WidgetBridge::register_api() {
         if (!v) return choc::value::Value();
         // pulp #1434 Triage #7 — cursor enum fan-out. Map the full CSS
         // cursor keyword set to the View::CursorStyle slots that exist
-        // today (4 base + 7 resize + invisible + multi-directional =
-        // ~12 distinct visuals). Where multiple CSS keywords map to the
+        // today (4 base + 7 resize + invisible + multi-directional = 12
+        // distinct visuals). Where multiple CSS keywords map to the
         // same visual (n/s/e/w-resize all map to the axis-aligned
-        // resize cursor; help/wait/progress all alias to default until
-        // OS-specific glyphs are wired), we collapse to the closest
-        // existing slot. CSS keywords with no semantic match (alias,
-        // copy, no-drop, all-scroll, zoom-*, cell, vertical-text,
-        // context-menu) currently fall back to default — tracked for a
-        // follow-up that adds dedicated CursorStyle slots and
-        // platform-specific glyph dispatch.
+        // resize cursor), we collapse to the closest existing slot.
+        //
+        // pulp #1550 Tier-4 macOS partial 2026-05-12 — added dedicated
+        // slots for `alias` / `copy` / `zoom-in` / `zoom-out` /
+        // `context-menu` (5 keywords with real NSCursor backings on
+        // macOS — see core/view/platform/mac/window_host_mac.mm).
+        // `wait` / `help` / `progress` / `cell` stay routed to default
+        // because macOS has no native cursor for them — listed in
+        // compat.json unsupportedValues for honesty.
         using CS = View::CursorStyle;
         if (c == "pointer")              v->set_cursor(CS::pointer);
         else if (c == "crosshair")       v->set_cursor(CS::crosshair);
@@ -5257,6 +5259,12 @@ void WidgetBridge::register_api() {
         else if (c == "move" || c == "all-scroll") {
             v->set_cursor(CS::multi_directional_resize);
         }
+        // pulp #1550 — 5 CSS cursor keywords with macOS NSCursor backings.
+        else if (c == "alias")           v->set_cursor(CS::alias);
+        else if (c == "copy")            v->set_cursor(CS::copy);
+        else if (c == "zoom-in")         v->set_cursor(CS::zoom_in);
+        else if (c == "zoom-out")        v->set_cursor(CS::zoom_out);
+        else if (c == "context-menu")    v->set_cursor(CS::context_menu);
         else                             v->set_cursor(CS::default_);
         return choc::value::Value();
     });

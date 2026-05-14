@@ -1012,6 +1012,35 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                         [[NSCursor crosshairCursor] set]; break;
                     case pulp::view::View::CursorStyle::multi_directional_resize:
                         [[NSCursor openHandCursor] set]; break;
+                    // pulp #1550 Tier-4 macOS partial 2026-05-12 — 5
+                    // CSS cursor keywords with native NSCursor backings.
+                    //   alias → dragLinkCursor (macOS 10.6+).
+                    //   copy → dragCopyCursor (macOS 10.6+).
+                    //   zoom-in / zoom-out → zoomInCursor / zoomOutCursor
+                    //     (macOS 10.15+; defensive respondsToSelector
+                    //     check in case the symbol is weak-linked or
+                    //     unavailable on the runtime OS).
+                    //   context-menu → contextualMenuCursor (macOS 10.6+).
+                    case pulp::view::View::CursorStyle::alias:
+                        [[NSCursor dragLinkCursor] set]; break;
+                    case pulp::view::View::CursorStyle::copy:
+                        [[NSCursor dragCopyCursor] set]; break;
+                    case pulp::view::View::CursorStyle::zoom_in:
+                        if ([NSCursor respondsToSelector:@selector(zoomInCursor)]) {
+                            [[NSCursor performSelector:@selector(zoomInCursor)] set];
+                        } else {
+                            [[NSCursor arrowCursor] set];
+                        }
+                        break;
+                    case pulp::view::View::CursorStyle::zoom_out:
+                        if ([NSCursor respondsToSelector:@selector(zoomOutCursor)]) {
+                            [[NSCursor performSelector:@selector(zoomOutCursor)] set];
+                        } else {
+                            [[NSCursor arrowCursor] set];
+                        }
+                        break;
+                    case pulp::view::View::CursorStyle::context_menu:
+                        [[NSCursor contextualMenuCursor] set]; break;
                     default:
                         [[NSCursor arrowCursor] set]; break;
                 }

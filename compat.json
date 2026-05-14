@@ -4187,19 +4187,14 @@
         "wait",
         "help",
         "progress",
-        "alias",
-        "copy",
-        "zoom-in",
-        "zoom-out",
-        "cell",
-        "context-menu"
+        "cell"
       ],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts",
         "packages/pulp-react/test/prop-applier-wave2.test.ts",
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` \u2014 they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup \u2014 `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot. Wave 2 rn \u2014 added 'auto' regression coverage in the wave2 test bundle.",
+      "notes": "pulp #1550 catalog hygiene: flipped partial \u2192 supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` \u2014 they're listed in unsupportedValues for catalog accuracy. Wave 1 drift cleanup \u2014 `auto` keyword falls back to default (View::CursorStyle::default_); arch-platform-cursor-set means we don't add a dedicated 'auto' slot. Wave 2 rn \u2014 added 'auto' regression coverage in the wave2 test bundle. 2026-05-12 macOS partial (pulp #1550): `alias` (NSCursor.dragLinkCursor), `copy` (NSCursor.dragCopyCursor), `zoom-in` / `zoom-out` (NSCursor.zoomInCursor / zoomOutCursor on macOS 10.15+ with defensive respondsToSelector), `context-menu` (NSCursor.contextualMenuCursor) now wire to real native cursors via View::CursorStyle slots and window_host_mac.mm dispatch. The remaining 4 (`wait`, `help`, `progress`, `cell`) have no native macOS cursor and stay catalog-unsupported \u2014 they fall through to default. Linux / Windows / web-platform-bridge implementations would add their own per-keyword mapping later.",
       "issue": ""
     },
     "rn/d": {

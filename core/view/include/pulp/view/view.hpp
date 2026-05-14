@@ -1183,7 +1183,17 @@ public:
         top_right_resize,         ///< ↗↙ Diagonal resize (NE-SW)
         bottom_left_resize,       ///< ↗↙ Diagonal resize (alias for top_right)
         bottom_right_resize,      ///< ↖↘ Diagonal resize (alias for top_left)
-        multi_directional_resize  ///< ✥ All-direction move/resize
+        multi_directional_resize, ///< ✥ All-direction move/resize
+        // CSS cursor keywords with native macOS NSCursor mappings
+        // (pulp #1550 Tier-4 macOS partial 2026-05-12). Other CSS
+        // keywords without dedicated visuals (wait / help / progress /
+        // cell) stay catalog-unsupported because no native cursor
+        // exists on macOS.
+        alias,                    ///< CSS `alias` → NSCursor.dragLinkCursor
+        copy,                     ///< CSS `copy` → NSCursor.dragCopyCursor
+        zoom_in,                  ///< CSS `zoom-in` → NSCursor.zoomInCursor (macOS 10.15+)
+        zoom_out,                 ///< CSS `zoom-out` → NSCursor.zoomOutCursor (macOS 10.15+)
+        context_menu              ///< CSS `context-menu` → NSCursor.contextualMenuCursor
     };
     void set_cursor(CursorStyle c) { cursor_ = c; }
     CursorStyle cursor() const { return cursor_; }
