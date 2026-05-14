@@ -240,6 +240,8 @@ int main(int argc, char* argv[]) {
         bridge->set_ai_cli_command(*ai_cli);
     }
 
+    bridge->install_runtime_import_handlers();
+
     // Load library scripts first (oklch.js)
     auto js_dir = js_path.parent_path();
     auto load_library_scripts = [&](WidgetBridge& target) {
@@ -309,6 +311,7 @@ int main(int argc, char* argv[]) {
             StateStore probe_store;
             auto probe_engine = make_engine("reload:");
             auto probe_bridge = std::make_unique<WidgetBridge>(*probe_engine, probe_root, probe_store);
+            probe_bridge->install_runtime_import_handlers();
             load_library_scripts(*probe_bridge);
             probe_bridge->load_script(new_code);
 
@@ -324,6 +327,7 @@ int main(int argc, char* argv[]) {
             } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {
                 next_bridge->set_ai_cli_command(*ai_cli);
             }
+            next_bridge->install_runtime_import_handlers();
             load_library_scripts(*next_bridge);
             next_bridge->load_script(new_code);
             next_bridge->restore_values(saved);
@@ -361,6 +365,22 @@ int main(int argc, char* argv[]) {
         }
     });
     dispatch_resume(reload_timer);
+
+    {
+        auto* bridge_slot = &bridge;
+        auto* window_ptr = window.get();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            if (*bridge_slot) {
+                try {
+                    (*bridge_slot)->load_script(
+                        "if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(4);");
+                } catch (...) {
+                }
+                if (window_ptr) window_ptr->repaint();
+            }
+        });
+    }
 
     int automation_exit_code = 0;
     if (automation.enabled) {
