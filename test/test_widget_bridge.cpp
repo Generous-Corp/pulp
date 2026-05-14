@@ -7150,11 +7150,74 @@ TEST_CASE("setListStyleType unknown keyword falls back to disc (issue-1514)",
     WidgetBridge bridge(engine, root, store);
     bridge.load_script(R"(
         createPanel('x', '');
-        setListStyleType('x', 'lower-roman');
+        setListStyleType('x', 'tibetan');
     )");
-    // 'lower-roman' isn't in the supported set; bridge defaults to disc
-    // (the CSS spec default for <ul>).
+    // 'tibetan' isn't in the supported counter-style set; bridge defaults
+    // to disc (the CSS spec default for <ul>). The keyword choice
+    // intentionally tracks a CSS counter-style we don't have an enum slot
+    // for, so the fallback path stays exercised even as Pulp grows new
+    // counter-style slots.
     REQUIRE(bridge.widget("x")->list_style_type() == View::ListStyleType::disc);
+}
+
+// pulp #1514 — extend the counter-style keyword set (lower-roman /
+// upper-roman / lower-alpha / etc.). Storage-only round-trip; paint-side
+// glyph rendering is the follow-up. The bar for this slice is the bridge
+// stores each keyword on its own View::ListStyleType slot so the catalog
+// can flip from `missing` to `supported-with-gaps`.
+TEST_CASE("setListStyleType maps counter-style keywords to enum slots (issue-1514)",
+          "[view][bridge][css][issue-1514][coverage]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('dz', ''); setListStyleType('dz', 'decimal-leading-zero');
+        createPanel('lr', ''); setListStyleType('lr', 'lower-roman');
+        createPanel('ur', ''); setListStyleType('ur', 'upper-roman');
+        createPanel('la', ''); setListStyleType('la', 'lower-alpha');
+        createPanel('ua', ''); setListStyleType('ua', 'upper-alpha');
+        createPanel('ll', ''); setListStyleType('ll', 'lower-latin');
+        createPanel('ul', ''); setListStyleType('ul', 'upper-latin');
+        createPanel('lg', ''); setListStyleType('lg', 'lower-greek');
+        createPanel('am', ''); setListStyleType('am', 'armenian');
+        createPanel('ge', ''); setListStyleType('ge', 'georgian');
+    )");
+    using L = View::ListStyleType;
+    REQUIRE(bridge.widget("dz")->list_style_type() == L::decimal_leading_zero);
+    REQUIRE(bridge.widget("lr")->list_style_type() == L::lower_roman);
+    REQUIRE(bridge.widget("ur")->list_style_type() == L::upper_roman);
+    REQUIRE(bridge.widget("la")->list_style_type() == L::lower_alpha);
+    REQUIRE(bridge.widget("ua")->list_style_type() == L::upper_alpha);
+    REQUIRE(bridge.widget("ll")->list_style_type() == L::lower_latin);
+    REQUIRE(bridge.widget("ul")->list_style_type() == L::upper_latin);
+    REQUIRE(bridge.widget("lg")->list_style_type() == L::lower_greek);
+    REQUIRE(bridge.widget("am")->list_style_type() == L::armenian);
+    REQUIRE(bridge.widget("ge")->list_style_type() == L::georgian);
+}
+
+// pulp #1514 — listStyle shorthand routes counter-style keywords to
+// setListStyleType (not silently dropped). Regression guard for the
+// `lsTypes` table in web-compat-style-decl.js.
+TEST_CASE("listStyle shorthand routes counter-style keywords (issue-1514)",
+          "[view][bridge][css][issue-1514][coverage]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('listStyle', 'lower-roman inside');
+
+        createPanel('b', '');
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        sb._applyProperty('listStyle', 'georgian');
+    )");
+    using L = View::ListStyleType;
+    REQUIRE(bridge.widget("a")->list_style_type() == L::lower_roman);
+    REQUIRE(bridge.widget("a")->list_style_position() == View::ListStylePosition::inside);
+    REQUIRE(bridge.widget("b")->list_style_type() == L::georgian);
 }
 
 TEST_CASE("setListStyleImage stores url and clears on 'none' (issue-1514)",

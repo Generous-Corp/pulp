@@ -77,7 +77,12 @@
       "default": "outside"
     },
     "listStyleType": {
-      "values": ["none", "disc", "circle", "square", "decimal"],
+      "values": [
+        "none", "disc", "circle", "square", "decimal",
+        "decimal-leading-zero", "lower-roman", "upper-roman",
+        "lower-alpha", "upper-alpha", "lower-latin", "upper-latin",
+        "lower-greek", "armenian", "georgian"
+      ],
       "default": "disc"
     },
     "overflow": {
