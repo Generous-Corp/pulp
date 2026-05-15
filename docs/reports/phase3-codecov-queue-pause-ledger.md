@@ -4613,3 +4613,28 @@ lines 44-48 and 56-58. Pushed #2048 to GitHub-hosted CI at
 diff-cover path and hit an unrelated local FetchContent `mbedtls` tag
 checkout failure, but the push completed with that gate demoted; do not
 rely on that advisory run as validation.
+
+2026-05-15 15:31 PDT: added another release/package automation slice to
+the held local batch `feature/phase3-codecov-ship-package-batch-661`.
+Commit `6d6c011fd` (`test(release): cover mcp package and bump guard
+edges`) extends package CLI coverage for Linux tarballs that include all
+three binaries (`pulp`, `pulp-cpp`, and `pulp-mcp`) and verifies all three
+get Linux rpath rewriting. It also extends version-bump coverage for
+metadata-stripped config loading, default trailer-key selection, JSON-path
+array/scalar miss handling, and accepted vs near-miss bump-marker commit
+subjects. While running adjacent release workflow tests, the existing
+test still looked for the old two-binary smoke step names; updated it to
+assert the current `pulp`/`pulp-cpp`/`pulp-mcp --version` package and
+smoke contract from `release-cli.yml`.
+
+Validation for the held slice passed locally:
+`python3 tools/scripts/test_package_cli_extra.py` (18 tests),
+`python3 tools/scripts/test_version_bump_check_extra.py` (36 tests),
+`python3 tools/scripts/test_release_workflow_test_step.py` (9 tests),
+`python3 tools/scripts/test_package_cli.py` (17 tests),
+`python3 tools/scripts/test_auto_release_decision.py` (27 tests), and
+`git diff --check`. The held batch is now 11 commits ahead of
+`origin/main`, touches 14 files, and adds 1195 lines of focused
+ship/package/release/local-CI coverage. It remains local-only and
+intentionally unpushed so it can land as one substantial GitHub-hosted CI
+run instead of many small PRs.
