@@ -63,7 +63,45 @@ build, test, run, validate, ship, version, doctor, create, docs, status, design,
 ### 7. Validate sync
 ```bash
 python3 tools/scripts/cli_sync_check.py
+python3 tools/scripts/check_cli_mcp_parity.py --mode=report
 ```
+
+### 8. Decide: does this need an MCP tool? (pulp #1997)
+
+Every top-level CLI command is checked for MCP parity by
+`tools/scripts/check_cli_mcp_parity.py`. The check enforces an
+invariant: a new CLI command must either land alongside a
+`pulp_<command>` tool in `tools/mcp/pulp_mcp.cpp` (with both a
+`tools_list_json()` entry AND a `handle_request()` dispatch arm),
+OR it must be added to `tools/scripts/cli_mcp_parity_baseline.json`
+under `cli_only` with a one-line reason.
+
+Decision heuristics for "does this deserve MCP exposure":
+
+- One-shot RPC-shaped command (build, test, validate) → **YES**, add the MCP tool.
+- Long-running watch/loop (dev, loop, run, host) → **NO**, baseline it.
+- Trivial Bash equivalent (clean, version, config) → **NO**, baseline it.
+- Interactive surface (design, ship) → **NO**, baseline it.
+- Subcommand under an umbrella tool already present (audio, docs, inspect) → **NO**, baseline it (the umbrella's sub-tools cover the surface).
+
+The gate runs in three places, all pinned to the same script:
+
+1. `hooks/scripts/cli-plugin-sync.sh` — advisory `--mode=hint` after Edit/Write of
+   `pulp_cli.cpp`, `pulp_mcp.cpp`, or the baseline JSON.
+2. `.github/workflows/version-skill-check.yml` — enforcing `--mode=report`
+   on every PR. Hard-fails if a new CLI command lacks both an MCP tool and
+   a baseline entry.
+3. The shipping pre-push gate stack (skill-sync / version-bump / compat-sync)
+   — the parity check rides alongside.
+
+Naming convention: hyphenated CLI command `import-design` ↔ underscored
+MCP tool name `pulp_import_design`. The script handles the conversion
+automatically; baselines should use the form natural to each side
+(`cli_only` is hyphenated, `mcp_only` carries the full `pulp_` prefix).
+
+When promoting an entry off the `cli_only` list, add the matching
+`pulp_<command>` tool to `tools/mcp/pulp_mcp.cpp` and the parity check
+will auto-detect the new coverage; remove the baseline entry in the same PR.
 
 ## Modifying a CLI Command
 

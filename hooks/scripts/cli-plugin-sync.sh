@@ -22,6 +22,12 @@ case "$FILE" in
         ;;
     */tools/mcp/pulp_mcp.cpp)
         echo "CLI SYNC: MCP server modified. Verify MCP tools still map to CLI commands."
+        echo "  Run: python3 tools/scripts/check_cli_mcp_parity.py --mode=report"
+        echo "  If you intentionally diverged, update tools/scripts/cli_mcp_parity_baseline.json."
+        ;;
+    */tools/scripts/cli_mcp_parity_baseline.json)
+        echo "CLI SYNC: parity baseline modified. Verify the change is intentional."
+        echo "  Run: python3 tools/scripts/check_cli_mcp_parity.py --mode=report"
         ;;
     */.claude/commands/*.md)
         echo "CLI SYNC: Slash command modified. Verify it matches cli-commands.yaml and CLI source."
@@ -65,5 +71,16 @@ if [ -n "$REPO_ROOT" ]; then
     # by default; advisory only — same shape as the version/skill hints.
     if [ -x "$CSC" ]; then
         "$CSC" --base origin/main --mode=hint 2>/dev/null || true
+    fi
+
+    # CLI ↔ MCP parity hint (pulp #1997). Advisory only — surfaces drift
+    # while iterating in agent loops so the authoritative gate in
+    # .github/workflows/version-skill-check.yml rarely hard-fails on push.
+    # Anything new in cli_only or mcp_only baseline is intentional;
+    # anything missing from BOTH is a fresh gap that should be either
+    # promoted to MCP or recorded in the baseline with a one-line reason.
+    PARITY="$REPO_ROOT/tools/scripts/check_cli_mcp_parity.py"
+    if [ -x "$PARITY" ]; then
+        "$PARITY" --mode=hint --no-color 2>/dev/null || true
     fi
 fi
