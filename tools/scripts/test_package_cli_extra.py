@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 
@@ -187,6 +188,143 @@ class StageBinaryExtraTests(unittest.TestCase):
 
 
 class MainExtraTests(unittest.TestCase):
+    def test_main_rejects_missing_cpp_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            binary = root / "pulp-built"
+            binary.write_text("binary", encoding="utf-8")
+
+            with argv(
+                [
+                    "package_cli.py",
+                    "--binary",
+                    str(binary),
+                    "--cpp-binary",
+                    str(root / "missing-pulp-cpp"),
+                    "--build-dir",
+                    str(root / "build"),
+                    "--platform",
+                    "linux-x64",
+                    "--out",
+                    str(root / "pulp-linux-x64.tar.gz"),
+                ]
+            ):
+                with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    rc = pc.main()
+
+            self.assertEqual(rc, 2)
+            self.assertIn("FAIL: --cpp-binary not at", stderr.getvalue())
+
+    def test_main_rejects_missing_wgpu_library(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            binary = root / "pulp-built"
+            binary.write_text("binary", encoding="utf-8")
+            out = root / "pulp-linux-x64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=None):
+                with argv(
+                    [
+                        "package_cli.py",
+                        "--binary",
+                        str(binary),
+                        "--build-dir",
+                        str(root / "build"),
+                        "--platform",
+                        "linux-x64",
+                        "--out",
+                        str(out),
+                    ]
+                ):
+                    with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                        rc = pc.main()
+
+            self.assertEqual(rc, 1)
+            self.assertFalse(out.exists())
+            self.assertIn("wgpu native library not found", stderr.getvalue())
+
+    def test_main_packages_windows_zip_with_delegate_and_dll(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            binary = root / "pulp-built.exe"
+            cpp_binary = root / "pulp-cpp-built.exe"
+            wgpu = root / "wgpu_native.dll"
+            binary.write_text("binary", encoding="utf-8")
+            cpp_binary.write_text("cpp", encoding="utf-8")
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-windows-x64.zip"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_macos") as mac_rpath:
+                    with mock.patch.object(pc, "fix_rpath_linux") as linux_rpath:
+                        with argv(
+                            [
+                                "package_cli.py",
+                                "--binary",
+                                str(binary),
+                                "--cpp-binary",
+                                str(cpp_binary),
+                                "--build-dir",
+                                str(root / "build"),
+                                "--platform",
+                                "windows-x64",
+                                "--out",
+                                str(out),
+                            ]
+                        ):
+                            rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            mac_rpath.assert_not_called()
+            linux_rpath.assert_not_called()
+            with zipfile.ZipFile(out) as z:
+                self.assertEqual(
+                    sorted(z.namelist()),
+                    ["pulp-cpp.exe", "pulp.exe", "wgpu_native.dll"],
+                )
+
+    def test_main_rewrites_linux_rpath_for_primary_and_delegate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            binary = root / "pulp-built"
+            cpp_binary = root / "pulp-cpp-built"
+            wgpu = root / "libwgpu_native.so"
+            binary.write_text("binary", encoding="utf-8")
+            cpp_binary.write_text("cpp", encoding="utf-8")
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-linux-x64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_linux") as fix_rpath:
+                    with argv(
+                        [
+                            "package_cli.py",
+                            "--binary",
+                            str(binary),
+                            "--cpp-binary",
+                            str(cpp_binary),
+                            "--build-dir",
+                            str(root / "build"),
+                            "--platform",
+                            "linux-x64",
+                            "--out",
+                            str(out),
+                        ]
+                    ):
+                        rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(fix_rpath.call_count, 2)
+            self.assertEqual(
+                [call.args[0].name for call in fix_rpath.call_args_list],
+                ["pulp", "pulp-cpp"],
+            )
+            with tarfile.open(out, "r:gz") as tar:
+                self.assertEqual(
+                    sorted(tar.getnames()),
+                    ["libwgpu_native.so", "pulp", "pulp-cpp"],
+                )
+
     def test_main_packages_macos_tarball_and_rewrites_rpath(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
