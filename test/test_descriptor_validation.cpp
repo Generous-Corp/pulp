@@ -35,6 +35,16 @@ bool has_warning_on(const std::vector<DescriptorIssue>& issues,
     return false;
 }
 
+std::size_t warning_count_on(const std::vector<DescriptorIssue>& issues,
+                             const std::string& field) {
+    std::size_t count = 0;
+    for (const auto& i : issues) {
+        if (i.severity == DescriptorIssueSeverity::Warning && i.field == field)
+            ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 TEST_CASE("DescriptorValidation: well-formed effect passes with no issues",
@@ -221,6 +231,19 @@ TEST_CASE("DescriptorValidation: supports_ump follows the accepts_midi sidecar w
         REQUIRE_FALSE(has_warning_on(issues, "accepts_midi"));
         REQUIRE(descriptor_is_valid(issues));
     }
+}
+
+TEST_CASE("DescriptorValidation: MIDI capability warnings accumulate without invalidating descriptor",
+          "[format][descriptor-validation][coverage][issue-646]") {
+    auto d = well_formed_effect();
+    d.category = PluginCategory::MidiEffect;
+    d.accepts_midi = false;
+    d.supports_mpe = true;
+    d.supports_ump = true;
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(warning_count_on(issues, "accepts_midi") == 2);
+    REQUIRE(descriptor_is_valid(issues));
 }
 
 TEST_CASE("DescriptorValidation: MidiEffect without audio output is valid",

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/state/binding.hpp>
+#include <vector>
 
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
@@ -61,6 +62,41 @@ TEST_CASE("Binding normalized", "[binding]") {
     REQUIRE_THAT(b.get(), WithinAbs(24.0, 0.1));
 }
 
+TEST_CASE("Binding unknown parameter operations stay inert",
+          "[binding][coverage][issue-646]") {
+    auto store = make_store();
+    Binding b(*store,999);
+    int call_count = 0;
+    b.on_change([&](float) { ++call_count; });
+
+    REQUIRE(b.is_bound());
+    REQUIRE(b.id() == 999);
+    REQUIRE(b.info() == nullptr);
+    REQUIRE_THAT(b.get(), WithinAbs(0.0, 0.01));
+    REQUIRE_THAT(b.get_normalized(), WithinAbs(0.0, 0.01));
+
+    b.set(12.0f);
+    b.set_normalized(0.75f);
+    REQUIRE_FALSE(b.poll());
+    REQUIRE(call_count == 0);
+}
+
+TEST_CASE("Binding set_normalized clamps and quantizes through store",
+          "[binding][coverage][issue-646]") {
+    auto store = make_store();
+    Binding b(*store,1); // range -60..24, step 0.1
+
+    b.set_normalized(-0.25f);
+    REQUIRE_THAT(b.get(), WithinAbs(-60.0, 0.01));
+
+    b.set_normalized(1.25f);
+    REQUIRE_THAT(b.get(), WithinAbs(24.0, 0.01));
+
+    b.set_normalized(0.1234f);
+    REQUIRE_THAT(b.get(), WithinAbs(-49.6, 0.01));
+    REQUIRE_THAT(b.get_normalized(), WithinAbs(0.1238, 0.001));
+}
+
 TEST_CASE("Binding set_normalized only notifies when value changes", "[binding]") {
     auto store = make_store();
     Binding b(*store,2); // range 0..100, default 50
@@ -85,6 +121,29 @@ TEST_CASE("Binding on_change fires", "[binding]") {
 
     b.set(6.0f);
     REQUIRE_THAT(received, WithinAbs(6.0, 0.01));
+}
+
+TEST_CASE("Binding on_change callbacks fire in registration order",
+          "[binding][coverage][issue-646]") {
+    auto store = make_store();
+    Binding b(*store,1);
+    std::vector<int> calls;
+    std::vector<float> values;
+
+    b.on_change([&](float v) {
+        calls.push_back(1);
+        values.push_back(v);
+    });
+    b.on_change([&](float v) {
+        calls.push_back(2);
+        values.push_back(v);
+    });
+
+    b.set(3.5f);
+    REQUIRE(calls == std::vector<int>{1, 2});
+    REQUIRE(values.size() == 2);
+    REQUIRE_THAT(values[0], WithinAbs(3.5, 0.01));
+    REQUIRE_THAT(values[1], WithinAbs(3.5, 0.01));
 }
 
 TEST_CASE("Binding on_change does not fire for same value", "[binding]") {

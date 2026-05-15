@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/state/state.hpp>
+#include <cstring>
 #include <vector>
 
 using namespace pulp::state;
@@ -13,6 +14,33 @@ static ParamInfo make_param_info(ParamID id, const char* name, const char* unit,
     info.unit = unit;
     info.range = range;
     return info;
+}
+
+static uint32_t read_u32_le(const std::vector<uint8_t>& data, std::size_t offset) {
+    return static_cast<uint32_t>(data[offset])
+        | (static_cast<uint32_t>(data[offset + 1]) << 8)
+        | (static_cast<uint32_t>(data[offset + 2]) << 16)
+        | (static_cast<uint32_t>(data[offset + 3]) << 24);
+}
+
+static void write_u32_le(std::vector<uint8_t>& data, std::size_t offset, uint32_t value) {
+    data[offset] = static_cast<uint8_t>(value & 0xffu);
+    data[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xffu);
+    data[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xffu);
+    data[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xffu);
+}
+
+static uint32_t crc32_simple_for_test(const std::vector<uint8_t>& data,
+                                      std::size_t len) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (std::size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j) {
+            const uint32_t mask = (crc & 1u) ? 0xFFFFFFFFu : 0u;
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
 }
 
 TEST_CASE("ParamRange normalization", "[state][range]") {
@@ -32,6 +60,26 @@ TEST_CASE("ParamRange with step", "[state][range]") {
 
     REQUIRE_THAT(range.denormalize(0.33f), WithinAbs(3.0, 0.5));
     REQUIRE_THAT(range.denormalize(0.77f), WithinAbs(8.0, 0.5));
+}
+
+TEST_CASE("ParamRange clamps normalized conversions at range boundaries",
+          "[state][range][coverage][issue-646]") {
+    ParamRange range{-10.0f, 30.0f, 5.0f, 0.0f};
+
+    REQUIRE_THAT(range.normalize(-100.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.normalize(100.0f), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(range.denormalize(-0.5f), WithinAbs(-10.0, 0.001));
+    REQUIRE_THAT(range.denormalize(1.5f), WithinAbs(30.0, 0.001));
+}
+
+TEST_CASE("ParamRange zero-width ranges normalize safely",
+          "[state][range][coverage][issue-646]") {
+    ParamRange range{7.0f, 7.0f, 7.0f, 0.0f};
+
+    REQUIRE_THAT(range.normalize(7.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.normalize(100.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.denormalize(0.25f), WithinAbs(7.0, 0.001));
+    REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(7.0, 0.001));
 }
 
 TEST_CASE("StateStore basic operations", "[state][store]") {
@@ -158,6 +206,53 @@ TEST_CASE("StateStore serialization", "[state][serialize]") {
     SECTION("Too-short data rejected") {
         REQUIRE_FALSE(store.deserialize(std::span<const uint8_t>{}));
     }
+}
+
+TEST_CASE("StateStore serialization records header fields and rejects future versions",
+          "[state][serialize][coverage][issue-646]") {
+    StateStore store;
+    auto p1 = make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f});
+    auto p2 = make_param_info(20, "Tone", "", {-1.0f, 1.0f, 0.0f});
+    store.add_parameter(p1);
+    store.add_parameter(p2);
+    store.set_value(10, 0.75f);
+
+    auto data = store.serialize();
+    REQUIRE(data.size() == 32);
+    REQUIRE(std::memcmp(data.data(), "PULP", 4) == 0);
+    REQUIRE(read_u32_le(data, 4) == 1);
+    REQUIRE(read_u32_le(data, 8) == 2);
+    REQUIRE(read_u32_le(data, 12) == 10);
+    REQUIRE(read_u32_le(data, 20) == 20);
+
+    auto future = data;
+    write_u32_le(future, 4, 999u);
+    const auto payload_size = future.size() - 4;
+    write_u32_le(future, payload_size, crc32_simple_for_test(future, payload_size));
+
+    StateStore target;
+    target.add_parameter(p1);
+    target.set_value(10, 0.1f);
+    REQUIRE_FALSE(target.deserialize(future));
+    REQUIRE_THAT(target.get_value(10), WithinAbs(0.1, 0.001));
+}
+
+TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
+          "[state][store][coverage][issue-646]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Steps", "", {0.0f, 10.0f, 5.0f, 2.0f}));
+
+    store.set_normalized(1, -1.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.0, 0.001));
+
+    store.set_normalized(1, 0.34f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(4.0, 0.001));
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.4, 0.001));
+
+    store.set_normalized(1, 4.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(10.0, 0.001));
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0, 0.001));
 }
 
 TEST_CASE("StateStore change listener", "[state][listener]") {
