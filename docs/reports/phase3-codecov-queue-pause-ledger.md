@@ -4377,3 +4377,18 @@ Resume action: keep monitoring #2048, #2049, #2050, and #2051. Merge only
 after required GitHub checks and Codecov are green. If a rerun produces a
 new deterministic failure, inspect logs and patch the root cause on the
 owning consolidated branch.
+
+2026-05-15 11:20 PDT: swept all currently open `codecov` PRs. There are
+four: #2048, #2049, #2050, and #2051. No non-bot review/issue comments
+needed action on #2048, #2049, or #2050. #2051 had two actionable Codex
+review comments against `core/host/src/graph_serializer.cpp`: preserve the
+serialized display name for unresolved plugin nodes, and avoid a second
+`PluginSlot::load()` after deserialization already observed a load failure.
+Patched #2051 in commit `6fc610acd` (`fix(host): preserve unresolved graph
+plugin labels`) by adding an explicit unresolved-plugin node path in
+`SignalGraph`, switching `GraphSerializer::from_json()` to use it, and
+adding a focused graph serializer regression test. Local validation passed:
+built `pulp-test-graph-serializer`, ran focused unresolved-plugin display
+name and identity tests, then ran the full graph serializer binary (394
+assertions / 17 cases). Pushed the branch and commented on #2051 with the
+validation summary. Fresh GitHub-hosted CI is running for the updated head.
