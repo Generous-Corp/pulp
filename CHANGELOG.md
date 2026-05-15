@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0990"></a>
+## [0.36.0]
+
+## [0.100.0]
+
 ## [0.99.0] - 2026-05-14
 
 - fix(view): reserve Yoga height for multi-line Labels (pulp-internal #74) ([#1969](https://github.com/danielraffel/pulp/pull/1969))
