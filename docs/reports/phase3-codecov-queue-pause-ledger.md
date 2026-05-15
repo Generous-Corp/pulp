@@ -4553,3 +4553,17 @@ passed `python3 tools/scripts/test_android_target.py` (18 tests),
 `git diff --check`. The held batch is now eight commits ahead of current
 `origin/main`, touches 11 files, and adds 1007 lines of package/release/CI
 helper coverage while remaining unpushed.
+
+2026-05-15 13:51 PDT: rebased the held ship/package/local-CI batch onto
+current `origin/main` `52288609a` and added commit `18e981bfb`
+(`test(ci): cover local ci state path edges`). The new slice extends
+`tools/local-ci/test_local_ci_extra.py` for macOS/Linux state-directory
+fallbacks, desktop artifact-root fallbacks, state directory creation, and
+target-log preparation. Local validation passed
+`python3 tools/local-ci/test_local_ci_extra.py` (19 tests),
+`python3 tools/local-ci/test_local_ci.py` (213 tests), and
+`git diff --check`. The held batch is now nine commits ahead of current
+`origin/main`, touches 12 files, and adds 1045 lines of package/release/CI
+helper coverage. It remains local-only and intentionally unpushed until it
+is large enough to justify one GitHub-hosted PR or the current PR queue
+clears.
