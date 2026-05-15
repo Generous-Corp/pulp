@@ -14,6 +14,7 @@ using namespace pulp::runtime;
 
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     SpscQueue<int, 16> q;
+    REQUIRE(SpscQueue<int, 16>::capacity() == 16);
 
     SECTION("Empty queue") {
         REQUIRE(q.empty());
@@ -80,6 +81,18 @@ TEST_CASE("SpscQueue cross-thread", "[runtime][spsc]") {
 
     int expected = (count - 1) * count / 2;
     REQUIRE(sum.load() == expected);
+}
+
+TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage][phase3]") {
+    SpscQueue<std::string, 2> q;
+
+    REQUIRE(q.try_push(std::string("alpha")));
+    REQUIRE(q.size_approx() == 1);
+
+    auto value = q.try_pop();
+    REQUIRE(value.has_value());
+    REQUIRE(*value == "alpha");
+    REQUIRE(q.empty());
 }
 
 TEST_CASE("ScopeGuard executes on exit", "[runtime][scope_guard]") {
