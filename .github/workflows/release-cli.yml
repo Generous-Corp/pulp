@@ -211,6 +211,9 @@ jobs:
         run: |
           strip build/pulp
           strip build/tools/cli/pulp-cpp
+          # #2067: pulp-mcp ships in the CLI tarball so the Claude Code
+          # plugin's MCP launcher can resolve it on $PATH after install.
+          strip build/tools/mcp/pulp-mcp
 
       - name: Install Linux rpath helper
         if: runner.os == 'Linux'
@@ -227,12 +230,17 @@ jobs:
       # bundles `pulp-cpp` alongside `pulp` in the same tarball so the
       # Rust binary's fallthrough paths can find their delegate after
       # the user extracts and runs.
+      #
+      # `--mcp-binary` (#2067) bundles `pulp-mcp` so the Claude Code
+      # plugin's MCP launcher can resolve it on $PATH after install —
+      # the plugin itself ships no binaries, it relies on the CLI install.
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
           python3 tools/scripts/package_cli.py \
             --binary build/pulp \
             --cpp-binary build/tools/cli/pulp-cpp \
+            --mcp-binary build/tools/mcp/pulp-mcp \
             --build-dir build \
             --platform ${{ matrix.platform }} \
             --out pulp-${{ matrix.platform }}.tar.gz
@@ -244,6 +252,7 @@ jobs:
           python tools/scripts/package_cli.py `
             --binary build/pulp.exe `
             --cpp-binary build/tools/cli/Release/pulp-cpp.exe `
+            --mcp-binary build/tools/mcp/Release/pulp-mcp.exe `
             --build-dir build `
             --platform ${{ matrix.platform }} `
             --out pulp-${{ matrix.platform }}.zip
@@ -433,18 +442,31 @@ jobs:
       # so we can grep stderr for the diagnostic patterns even when
       # pulp itself exits 0 (defense-in-depth — some runtime loaders
       # warn but don't fail).
-      - name: Smoke `pulp help` + `pulp-cpp help` (Unix)
+      - name: Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          # Phase 8: tarball ships both `pulp` (Rust) and `pulp-cpp`
-          # (C++) side by side. Smoke both — a broken pulp-cpp delegate
-          # would silently break every fallthrough subcommand the
-          # moment users invoke `pulp ship`, `pulp validate`, etc.
-          for ART in pulp pulp-cpp; do
+          # Phase 8: tarball ships `pulp` (Rust), `pulp-cpp` (C++ delegate),
+          # and pulp-mcp (#2067 — Claude plugin's MCP server) side by side.
+          # Smoke all three. A broken pulp-cpp silently breaks every
+          # fallthrough subcommand; a broken pulp-mcp silently breaks the
+          # Claude Code plugin's `/mcp` integration on every clean install.
+          #
+          # pulp-mcp speaks JSON-RPC over stdin/stdout, so `help` is not a
+          # meaningful smoke — we send `--version` instead. The binary must
+          # at minimum load (no dyld/ld.so errors) and exit cleanly.
+          smoke_cmd() {
+            case "$1" in
+              pulp-mcp) echo "--version" ;;
+              *)        echo "help" ;;
+            esac
+          }
+          for ART in pulp pulp-cpp pulp-mcp; do
             BIN=/tmp/pulp-smoke/$ART
-            echo "===== Testing $BIN ====="
+            CMD=$(smoke_cmd "$ART")
+            echo "===== Testing $BIN $CMD ====="
+            test -x "$BIN" || { echo "FAIL: $BIN is missing or not executable (tarball did not ship it)"; exit 1; }
             file "$BIN" || true
             if [ "$RUNNER_OS" = "macOS" ]; then
               echo "--- otool -L (load commands) ---"
@@ -455,16 +477,16 @@ jobs:
               echo "--- ldd ---"
               ldd "$BIN" || true
             fi
-            echo "--- $ART help ---"
+            echo "--- $ART $CMD ---"
             set +e
-            "$BIN" help > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
+            "$BIN" $CMD > /tmp/$ART-smoke.out 2> /tmp/$ART-smoke.err
             rc=$?
             set -e
             echo "exit=$rc"
             echo "--- stdout ---"; cat /tmp/$ART-smoke.out || true
             echo "--- stderr ---"; cat /tmp/$ART-smoke.err || true
             if [ "$rc" -ne 0 ]; then
-              echo "FAIL: $ART help returned exit $rc"
+              echo "FAIL: $ART $CMD returned exit $rc"
               exit 1
             fi
             # Belt + suspenders: dyld/ld.so warnings shouldn't appear even on rc=0.
@@ -477,23 +499,33 @@ jobs:
               echo "FAIL: loader error in stdout"
               exit 1
             fi
-            echo "OK: $ART help is portable on ${{ matrix.platform }}."
+            echo "OK: $ART is portable on ${{ matrix.platform }}."
           done
 
-      - name: Smoke `pulp help` + `pulp-cpp help` (Windows)
+      - name: Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # Phase 8: tarball ships both `pulp.exe` (Rust) and
-          # `pulp-cpp.exe` (C++) side by side. Smoke both.
-          foreach ($art in @("pulp.exe", "pulp-cpp.exe")) {
+          # Phase 8: tarball ships `pulp.exe`, `pulp-cpp.exe`, and
+          # `pulp-mcp.exe` (#2067) side by side. Smoke all three.
+          $artCmd = @{
+              "pulp.exe"      = "help"
+              "pulp-cpp.exe"  = "help"
+              "pulp-mcp.exe"  = "--version"
+          }
+          foreach ($art in $artCmd.Keys) {
+              $cmd = $artCmd[$art]
               $bin = Join-Path $env:TEMP "pulp-smoke\$art"
-              Write-Host "===== Testing $bin ====="
+              Write-Host "===== Testing $bin $cmd ====="
+              if (-not (Test-Path $bin)) {
+                  Write-Error "FAIL: $bin missing from tarball"
+                  exit 1
+              }
               try { dumpbin /dependents $bin 2>$null } catch { Write-Host "(dumpbin unavailable; skipping)" }
               $stdout = New-TemporaryFile
               $stderr = New-TemporaryFile
-              $proc = Start-Process -FilePath $bin -ArgumentList "help" `
+              $proc = Start-Process -FilePath $bin -ArgumentList $cmd `
                   -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait -NoNewWindow
               Write-Host "exit=$($proc.ExitCode)"
               Write-Host "--- stdout ---"
@@ -502,14 +534,14 @@ jobs:
               $err = Get-Content $stderr -ErrorAction SilentlyContinue
               $err
               if ($proc.ExitCode -ne 0) {
-                  Write-Error "FAIL: $art help returned exit $($proc.ExitCode)"
+                  Write-Error "FAIL: $art $cmd returned exit $($proc.ExitCode)"
                   exit 1
               }
               if ($err -match "DLL was not found|side-by-side|ImportError|missing.*\.dll") {
                   Write-Error "FAIL: missing-DLL error in stderr (artifact is non-portable)"
                   exit 1
               }
-              Write-Host "OK: $art help is portable on ${{ matrix.platform }}."
+              Write-Host "OK: $art is portable on ${{ matrix.platform }}."
           }
 
   release:

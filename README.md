@@ -27,6 +27,13 @@ The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use
 claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
 ```
 
+> **Install the CLI first.** The plugin's MCP server is `pulp-mcp`, which
+> ships with the CLI tarball (above) into `~/.pulp/bin/`. The plugin itself
+> contains no binaries — it locates `pulp-mcp` on `$PATH`. If you install
+> the plugin before running `install.sh`, `/mcp` will report `pulp-mcp:
+> cannot locate binary`. Run `pulp doctor` to confirm `pulp-mcp` is found
+> and matches your CLI version.
+
 See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
 
 <details>

@@ -19,10 +19,20 @@ the tarball also ships `pulp-cpp[.exe]` so the post-swap layout
 one upgrade. Without `--cpp-binary` the script keeps the legacy
 single-binary contract, so pre-swap release lanes stay byte-identical.
 
+MCP binary support (#2067): when `--mcp-binary` is passed, the tarball
+also ships `pulp-mcp[.exe]` next to `pulp`. The Claude Code plugin's
+`.mcp.json` invokes `tools/mcp/pulp-mcp-launcher`, which falls back to
+`pulp-mcp` on `$PATH` — so once `~/.pulp/bin/` is on PATH (the existing
+install.sh / install.ps1 behavior) the plugin's MCP server "just
+works" without the plugin shipping the binary itself. Without
+`--mcp-binary` the script omits it, keeping older release lanes
+byte-identical.
+
 Usage (called from .github/workflows/release-cli.yml):
     python3 tools/scripts/package_cli.py \\
         --binary build/pulp \\
         --cpp-binary build/tools/cli/pulp-cpp \\
+        --mcp-binary build/tools/mcp/pulp-mcp \\
         --build-dir build \\
         --platform darwin-arm64 \\
         --out pulp-darwin-arm64.tar.gz
@@ -30,11 +40,13 @@ Usage (called from .github/workflows/release-cli.yml):
 Layout produced inside the tarball:
     pulp                        (the binary, rpath rewritten)
     pulp-cpp                    (optional, post-swap; rpath rewritten)
+    pulp-mcp                    (optional, plugin-MCP server; rpath rewritten)
     libwgpu_native.dylib        (or libwgpu_native.so / wgpu_native.dll)
 
 The smoke gate from PR #395 verifies the output runs on a runner
 that did NOT build the binary. Phase 8 extends the smoke check to
-exercise pulp-cpp too when the dual-binary flag is set.
+exercise pulp-cpp too when the dual-binary flag is set, and #2067
+extends it again to exercise pulp-mcp.
 """
 
 from __future__ import annotations
@@ -199,6 +211,8 @@ def main() -> int:
                    help="Primary user-facing pulp binary (Rust post-swap, C++ pre-swap).")
     p.add_argument("--cpp-binary", required=False, type=Path, default=None,
                    help="Optional pulp-cpp delegate binary (Phase 8 dual-binary tarball).")
+    p.add_argument("--mcp-binary", required=False, type=Path, default=None,
+                   help="Optional pulp-mcp server binary (#2067 — Claude plugin MCP).")
     p.add_argument("--build-dir", required=True, type=Path)
     p.add_argument("--platform", required=True)
     p.add_argument("--out", required=True, type=Path)
@@ -209,6 +223,9 @@ def main() -> int:
         return 2
     if args.cpp_binary is not None and not args.cpp_binary.exists():
         print(f"FAIL: --cpp-binary not at {args.cpp_binary}", file=sys.stderr)
+        return 2
+    if args.mcp_binary is not None and not args.mcp_binary.exists():
+        print(f"FAIL: --mcp-binary not at {args.mcp_binary}", file=sys.stderr)
         return 2
 
     is_windows = args.platform.startswith("windows-")
@@ -234,6 +251,19 @@ def main() -> int:
             files.append(staged_cpp)
             names.append(cpp_name)
             print(f"bundled: {args.cpp_binary} -> {cpp_name}", flush=True)
+
+        # #2067: bundle pulp-mcp so `curl install.sh | sh` drops it into
+        # ~/.pulp/bin/, where the Claude Code plugin's MCP launcher
+        # picks it up off $PATH. Without this the plugin's MCP server
+        # fails with "cannot locate pulp-mcp binary" on every fresh
+        # macOS install.
+        staged_mcp: Path | None = None
+        if args.mcp_binary is not None:
+            mcp_name = "pulp-mcp.exe" if is_windows else "pulp-mcp"
+            staged_mcp = stage_binary(args.mcp_binary, stage, mcp_name, is_windows)
+            files.append(staged_mcp)
+            names.append(mcp_name)
+            print(f"bundled: {args.mcp_binary} -> {mcp_name}", flush=True)
 
         wgpu = find_wgpu_lib(args.build_dir, args.platform)
         if wgpu is not None and wgpu.exists():
@@ -268,12 +298,18 @@ def main() -> int:
             if staged_cpp is not None:
                 print("rewriting macOS rpath: pulp-cpp", flush=True)
                 fix_rpath_macos(staged_cpp)
+            if staged_mcp is not None:
+                print("rewriting macOS rpath: pulp-mcp", flush=True)
+                fix_rpath_macos(staged_mcp)
         elif is_linux:
             print("rewriting Linux rpath: pulp", flush=True)
             fix_rpath_linux(staged_bin)
             if staged_cpp is not None:
                 print("rewriting Linux rpath: pulp-cpp", flush=True)
                 fix_rpath_linux(staged_cpp)
+            if staged_mcp is not None:
+                print("rewriting Linux rpath: pulp-mcp", flush=True)
+                fix_rpath_linux(staged_mcp)
 
         if is_windows:
             write_zip(args.out, files, names)

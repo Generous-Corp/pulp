@@ -3,16 +3,20 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <sstream>
 #include <filesystem>
 #include <functional>
 #include <unordered_map>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
 #include <pulp/tools/audio/service.hpp>
+
+#include "pulp_mcp_version.h"
 
 namespace fs = std::filesystem;
 
@@ -328,7 +332,15 @@ static std::string handle_request(const std::string& json) {
     if (id.empty()) id = "null";
 
     if (method == "initialize") {
-        return json_result(id, R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"pulp-mcp","version":"0.1.0"}})JSON");
+        // serverInfo.version tracks the SDK/CLI release (#2067).
+        // Held constant at "0.1.0" pre-fix; now wired to PROJECT_VERSION
+        // via tools/mcp/pulp_mcp_version.h.in so doctor/launcher can see
+        // real drift between an old installed pulp-mcp and a newer plugin.
+        std::string payload =
+            std::string(R"JSON({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"pulp-mcp","version":")JSON")
+            + PULP_MCP_SERVER_VERSION
+            + std::string(R"JSON("}})JSON");
+        return json_result(id, payload);
     }
 
     if (method == "notifications/initialized") {
@@ -481,7 +493,34 @@ static std::string handle_request(const std::string& json) {
 
 // ── Main: stdio JSON-RPC transport ───────────────────────────────────────────
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Flag-only invocations short-circuit the JSON-RPC loop so the
+    // release-CLI smoke gate and `pulp doctor` can probe the binary
+    // without speaking MCP framing. Keep this list narrow — anything
+    // that consumes stdin must fall through to the loop below.
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg{argv[i]};
+        if (arg == "--version" || arg == "-V") {
+            std::cout << "pulp-mcp " << PULP_MCP_SERVER_VERSION << "\n";
+            return 0;
+        }
+        if (arg == "--help" || arg == "-h") {
+            std::cout
+                << "pulp-mcp " << PULP_MCP_SERVER_VERSION << "\n"
+                << "MCP (Model Context Protocol) server for Pulp.\n"
+                << "Speaks JSON-RPC 2.0 over stdin/stdout — normally\n"
+                << "invoked by .mcp.json via tools/mcp/pulp-mcp-launcher.\n"
+                << "\n"
+                << "Flags:\n"
+                << "  --version, -V   Print version and exit\n"
+                << "  --help, -h      Show this help\n";
+            return 0;
+        }
+        std::cerr << "pulp-mcp: unknown flag '" << arg
+                  << "'. Try --help.\n";
+        return 2;
+    }
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;

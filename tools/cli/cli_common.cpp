@@ -1982,6 +1982,84 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         }
     }
 
+    // pulp-mcp presence (#2067). Optional: the binary is only needed by
+    // users running the Claude Code plugin (or another MCP client), so
+    // never gate the doctor exit code on it. Just tell the user where
+    // the gap is so the plugin's "/mcp" doesn't fail mysteriously.
+    //
+    // Probe in three places, in order:
+    //   1. `pulp-mcp` on $PATH (the steady-state after `curl install.sh`).
+    //   2. `~/.pulp/bin/pulp-mcp` (the install location, in case PATH
+    //      didn't get reloaded yet in this shell).
+    //   3. `<repo_root>/build/tools/mcp/pulp-mcp` (source builds).
+    //
+    // When found, surface the binary's `--version` output alongside the
+    // CLI's own PULP_SDK_VERSION so the user can see drift between an
+    // older installed pulp-mcp and a newer CLI.
+    {
+        DoctorCheck c{"pulp-mcp", false, {}, {}, true};
+
+        auto trim = [](std::string s) {
+            while (!s.empty() && (s.back() == '\n' || s.back() == '\r' ||
+                                  s.back() == ' '  || s.back() == '\t')) {
+                s.pop_back();
+            }
+            return s;
+        };
+
+        fs::path found;
+#ifdef _WIN32
+        const char* mcp_basename = "pulp-mcp.exe";
+#else
+        const char* mcp_basename = "pulp-mcp";
+#endif
+
+        auto path_resolved = trim(first_line(exec_output(
+#ifdef _WIN32
+            "where pulp-mcp 2>nul"
+#else
+            "command -v pulp-mcp 2>/dev/null"
+#endif
+        )));
+        if (!path_resolved.empty() && fs::exists(path_resolved)) {
+            found = path_resolved;
+        } else if (const char* home = std::getenv(
+#ifdef _WIN32
+                       "USERPROFILE"
+#else
+                       "HOME"
+#endif
+                   )) {
+            fs::path installed = fs::path(home) / ".pulp" / "bin" / mcp_basename;
+            if (fs::exists(installed)) found = installed;
+        }
+        if (found.empty() && !repo_root.empty()) {
+            fs::path source_build = repo_root / "build" / "tools" / "mcp"
+                                  / mcp_basename;
+            if (fs::exists(source_build)) found = source_build;
+        }
+
+        if (!found.empty()) {
+            auto ver = trim(first_line(exec_output(
+                shell_quote(found.string()) + " --version 2>&1")));
+            c.passed = true;
+            c.detail = found.string()
+                     + (ver.empty() ? std::string{}
+                                    : (std::string(" (") + ver + ")"))
+                     + "  [CLI " + std::string(PULP_SDK_VERSION) + "]";
+        } else {
+            c.detail = "not found — the Claude Code plugin's MCP server "
+                       "will fail with 'cannot locate pulp-mcp binary'";
+            c.fix = "Install or refresh the CLI tarball:\n"
+                    "      curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh\n"
+                    "    or, in a source checkout:\n"
+                    "      cmake --build build --target pulp-mcp\n"
+                    "    Run the CLI install BEFORE `claude plugin install pulp` so\n"
+                    "    pulp-mcp is on $PATH when the plugin's launcher resolves it.";
+        }
+        checks.push_back(c);
+    }
+
     return checks;
 }
 

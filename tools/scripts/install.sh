@@ -102,6 +102,16 @@ else
     info "No pulp-cpp delegate found; this is expected only for pre-0.78.0 releases."
 fi
 
+# #2067: pulp-mcp is the Claude Code plugin's MCP server. The plugin's
+# .mcp.json invokes tools/mcp/pulp-mcp-launcher which resolves pulp-mcp
+# from PATH — so once ${INSTALL_DIR} is on PATH (added below), the
+# plugin "just works". Pre-#2067 releases do not ship pulp-mcp; in that
+# case the plugin's /mcp panel will report "cannot locate pulp-mcp
+# binary" until the user upgrades the CLI.
+if [ -x "${INSTALL_DIR}/pulp-mcp" ]; then
+    info "Installed: pulp-mcp (Claude Code plugin MCP server)"
+fi
+
 # ── Add to PATH ─────────────────────────────────────────────────────────────
 
 add_to_path() {

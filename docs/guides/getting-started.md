@@ -20,6 +20,31 @@ The installer installs Pulp CLI artifacts only. It does not install Shipyard
 or GitHub CLI (`gh`); ordinary Pulp users do not need either tool to create,
 build, run, or upgrade a plugin project.
 
+### Claude Code plugin: install the CLI first
+
+If you plan to use the Pulp [Claude Code plugin](claude-code-plugin.md), run
+`install.sh` **before** `claude plugin install pulp`. The plugin's MCP server
+is `pulp-mcp`, which ships in the CLI tarball into `~/.pulp/bin/` — the
+plugin itself ships no binaries and locates `pulp-mcp` on `$PATH`. Reversing
+the order leaves the plugin's `/mcp` panel reporting `pulp-mcp: cannot locate
+binary` on first connect.
+
+```bash
+# 1. CLI first (drops pulp-mcp into ~/.pulp/bin/ and onto PATH).
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+
+# 2. Plugin second (its MCP launcher resolves pulp-mcp from PATH).
+claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
+
+# 3. Verify the wiring.
+pulp doctor          # expects: pulp-mcp — <path> (pulp-mcp <version>)
+```
+
+`pulp upgrade --install` carries `pulp-mcp` forward to `~/.pulp/bin/` on
+upgrade, so the plugin keeps working across CLI bumps without reinstalling
+the plugin. Drift between an older installed `pulp-mcp` and a newer CLI is
+advisory — `pulp doctor` reports the version pairing so you can see it.
+
 Then create your first plugin:
 
 ```bash

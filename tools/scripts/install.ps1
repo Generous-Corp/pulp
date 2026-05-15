@@ -100,6 +100,14 @@ if (Test-Path $PulpCppExe) {
     Write-Host "  No pulp-cpp delegate found; this is expected only for pre-0.78.0 releases."
 }
 
+# #2067: pulp-mcp is the Claude Code plugin's MCP server. The plugin
+# resolves it from PATH via its launcher; pre-#2067 release zips do not
+# ship pulp-mcp.
+$PulpMcpExe = Join-Path $InstallDir "pulp-mcp.exe"
+if (Test-Path $PulpMcpExe) {
+    Write-Host "  Installed: pulp-mcp (Claude Code plugin MCP server)"
+}
+
 # ── Add to PATH ─────────────────────────────────────────────────────────────
 
 $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
