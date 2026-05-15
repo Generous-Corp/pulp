@@ -4520,3 +4520,22 @@ library name. Local validation passed
 `git diff --check`. The batch is now five commits ahead of current
 `origin/main` and remains local-only/unpushed while the active GitHub PR
 queue drains.
+
+2026-05-15 12:38 PDT: added two more held local release coverage slices
+to `feature/phase3-codecov-ship-package-batch-661`: commit `b3d29bc75`
+(`test(release): cover package cli selection edges`) covers WGPU library
+build-dir precedence over cache roots plus macOS dual-binary rpath
+rewriting; commit `5186458da` (`test(release): cover auto-release parser
+edges`) covers auto-release semver parsing, malformed-version comparison,
+and CLI help behavior. Local validation passed the focused and adjacent
+Python suites:
+`python3 tools/scripts/test_auto_release_decision.py` (27 tests),
+`python3 tools/scripts/test_package_cli_extra.py` (17 tests),
+`python3 tools/scripts/test_fetch_skia_for_release.py` (17 tests),
+`python3 tools/scripts/test_release_workflow_test_step.py` (9 tests),
+`python3 tools/scripts/test_validate_registry_extra.py` (10 tests),
+`python3 tools/packages/test_package_validation_tools.py` (14 tests), and
+`git diff --check`. The held batch is now seven commits ahead of current
+`origin/main`, touches 9 files, adds 947 lines of release/package/ship
+coverage, and remains intentionally unpushed until it reaches a substantial
+PR-sized corpus or the active GitHub queue clears.
