@@ -4663,3 +4663,25 @@ its advisory local diff-cover path and hit the unrelated local
 FetchContent `mbedtls` tag checkout failure; do not treat that advisory
 run as validation. Live PR rollup check was deferred because `gh pr view`
 hit the GitHub GraphQL API rate limit immediately after push.
+
+2026-05-15 15:47 PDT: added a pure coverage-gate script slice to the held
+local batch `feature/phase3-codecov-ship-package-batch-661`. Commit
+`77833ea33` (`test(coverage): cover coverage gate script edges`) extends
+`tools/scripts/test_coverage_tier_check_extra.py` with missing-instrumented
+source aggregation, unclassified-source skipping, non-instrumented tier
+skipping without diff-line shellout, case-insensitive C-family extension
+classification, exact React-package surface matching, and failed-tier
+rendering assertions. It also extends
+`tools/scripts/test_coverage_diff_comment_extra.py` with required-mode
+empty-report rendering, heading-only report normalization, and direct
+`main(... --no-advisory ...)` output coverage.
+
+Validation for this held slice passed locally:
+`python3 tools/scripts/test_coverage_tier_check_extra.py` (23 tests),
+`python3 tools/scripts/test_coverage_tier_check.py` (24 tests),
+`python3 tools/scripts/test_coverage_diff_comment.py` (11 tests),
+`python3 tools/scripts/test_coverage_diff_comment_extra.py` (8 tests),
+and `git diff --check`. The ship/package/release/local-CI batch is now
+12 commits ahead of `origin/main` and remains intentionally local-only
+until it is large enough, or the active GitHub-hosted CI queue clears
+enough, to justify one substantial PR instead of smaller CI runs.
