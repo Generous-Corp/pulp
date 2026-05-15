@@ -314,6 +314,23 @@ TEST_CASE("Android SDK discovery falls back to SDK root and dedicated NDK home",
     REQUIRE(find_android_ndk() == standalone_ndk);
 }
 
+TEST_CASE("Android SDK discovery skips invalid primary env roots",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = make_fake_sdk(temp.path);
+    auto invalid_sdk = temp.path / "invalid-sdk";
+    auto invalid_ndk = temp.path / "invalid-ndk";
+    fs::create_directories(invalid_sdk);
+    fs::create_directories(invalid_ndk);
+
+    ScopedEnvVar android_home("ANDROID_HOME", invalid_sdk.string());
+    ScopedEnvVar android_sdk_root("ANDROID_SDK_ROOT", sdk.string());
+    ScopedEnvVar android_ndk_home("ANDROID_NDK_HOME", invalid_ndk.string());
+
+    REQUIRE(detect_android_sdk() == sdk);
+    REQUIRE(find_android_ndk() == sdk / "ndk" / "27.0.12077973");
+}
+
 TEST_CASE("Android SDK discovery returns empty for invalid env roots",
           "[ship][android][coverage][issue-644]") {
     TempDir temp;
@@ -364,6 +381,24 @@ TEST_CASE("Android SDK discovery treats malformed revisions as zero",
 
     REQUIRE(android_build_tools_version() == "1.0.1");
     REQUIRE(find_android_ndk() == sdk / "ndk" / "1.0.1");
+}
+
+TEST_CASE("Android SDK discovery handles very large revision components",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = temp.path / "sdk";
+    const std::string huge = "999999999999999999999999999999";
+    fs::create_directories(sdk / "build-tools" / "100.0.0");
+    fs::create_directories(sdk / "build-tools" / huge);
+    fs::create_directories(sdk / "ndk" / "100.0.0" / "toolchains");
+    fs::create_directories(sdk / "ndk" / huge / "toolchains");
+
+    ScopedEnvVar android_home("ANDROID_HOME", sdk.string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedUnsetEnvVar android_ndk_home("ANDROID_NDK_HOME");
+
+    REQUIRE(android_build_tools_version() == huge);
+    REQUIRE(find_android_ndk() == sdk / "ndk" / huge);
 }
 
 TEST_CASE("Android Java version detection parses quoted java output",
