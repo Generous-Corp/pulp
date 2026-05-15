@@ -3914,7 +3914,7 @@ Resume action: monitor #2040 required checks and merge directly when
 green.
 
 2026-05-15 02:39 PDT: created the #650 canvas text/SDF batch
-`feature/phase3-canvas-text-batch-650` at `9e0ac01`, PR #2041, from
+`feature/phase3-canvas-text-batch-650` at `9b518b1`, PR #2041, from
 current `origin/main` `ce86d9f`. It adds test-only coverage in
 `test/test_sdf_atlas.cpp`, `test/test_msdf_atlas.cpp`,
 `test/test_psdf_atlas.cpp`, `test/test_sdf_atlas_cache.cpp`, and
@@ -3923,11 +3923,20 @@ state retention, overflow cleanup, MsdfAtlas move semantics, channel mode
 reset, overflow cleanup, PsdfAtlas lookup and move behavior, vector
 fallback threshold strictness, SdfAtlasCache empty initialization and
 resident-glyph recency updates, and path_to_sdf one-pixel island
-saturation. Local macOS validation passed: configure `cmake -S . -B build
+saturation. It was expanded before CI settled with additional test-only
+coverage in `test/test_sdf_effects.cpp`, `test/test_sdf_text.cpp`, and
+`test/test_sdf_software_renderer.cpp` for SdfEffectParams defaults,
+manual active masks, explicit zero-dimension presets, SdfTextOptions
+defaults, empty/zero-size quad building, wrapper option forwarding,
+software-renderer invalid output bounds, and custom edge thresholds. Local
+macOS validation passed: configure `cmake -S . -B build
 -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF
 -DPULP_BUILD_EXAMPLES=OFF`, build `cmake --build build --target
 pulp-test-sdf-atlas pulp-test-msdf-atlas pulp-test-psdf-atlas
 pulp-test-sdf-atlas-cache pulp-test-path-to-sdf -j$(sysctl -n hw.ncpu)`,
+build `cmake --build build --target pulp-test-sdf-effects
+pulp-test-sdf-text pulp-test-sdf-software-renderer -j$(sysctl -n
+hw.ncpu)`,
 focused `./build/test/pulp-test-sdf-atlas "[coverage][issue-650]" -r
 compact` passing 20 assertions in 2 cases, focused
 `./build/test/pulp-test-msdf-atlas "[coverage][issue-650]" -r compact`
@@ -3942,10 +3951,23 @@ assertions in 12 cases, full `pulp-test-msdf-atlas` passing 93
 assertions in 12 cases, full `pulp-test-psdf-atlas` passing 23
 assertions in 4 cases, full `pulp-test-sdf-atlas-cache` passing 69
 assertions in 11 cases, full `pulp-test-path-to-sdf` passing 536
-assertions in 7 cases, exact `ctest --test-dir build -R "(SdfAtlas
+assertions in 7 cases, focused `./build/test/pulp-test-sdf-effects
+"[coverage][issue-650]" -r compact` passing 19 assertions in 3 cases,
+focused `./build/test/pulp-test-sdf-text "[coverage][issue-650]" -r
+compact` passing 17 assertions in 3 cases, focused
+`./build/test/pulp-test-sdf-software-renderer "[coverage][issue-650]" -r
+compact` passing 5 assertions in 2 cases, full `pulp-test-sdf-effects`
+passing 37 assertions in 8 cases, full `pulp-test-sdf-text` passing 62
+assertions in 11 cases, full `pulp-test-sdf-software-renderer` passing
+1049 assertions in 9 cases, exact `ctest --test-dir build -R "(SdfAtlas
 move|SdfAtlas invalid rebuild|MsdfAtlas move|MsdfAtlas rebuild|PsdfAtlas
 keeps|vector_fallback equality|SdfAtlasCache can initialize|SdfAtlasCache
 touching|path_to_sdf: one-pixel)" --output-on-failure` passing 9/9,
+exact `ctest --test-dir build -R "(SdfEffectParams default|SdfEffect
+bitmask accepts|SDF effect presets preserve|SdfTextOptions
+default|build_text_quads handles empty|named SDF text wrappers forward
+options|software SDF render leaves output untouched for invalid|software
+SDF render honors custom)" --output-on-failure` passing 8/8,
 `git diff --check`, and `./tools/check-docs.sh` passed with existing
 warnings. Branch pushed with GitHub-hosted PR workflow only; no Namespace
 dispatch and no SSH targets.
