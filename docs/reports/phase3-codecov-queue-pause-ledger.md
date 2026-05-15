@@ -4300,3 +4300,30 @@ submit one broad PR per related area instead of small PR fan-out. Target
 roughly a dozen discrete slices per PR when practical, validate locally
 on macOS, push only GitHub-hosted CI, avoid Namespace, and record both
 the held local queue and any submitted replacement PR mapping here.
+
+2026-05-15 05:25 PDT: started the next held local batch under the updated
+large-PR policy. Worktree:
+`/private/tmp/pulp-phase3-codecov-ship-package-batch-661`, branch
+`feature/phase3-codecov-ship-package-batch-661`, commit `342260bf1`
+(`test(ship): cover package edge cases`). This branch has not been
+pushed and has no PR yet. Scope: ship/package coverage for appcast XML
+fallbacks and parsing edges, Android SDK/tool discovery and package
+failure branches, NSIS installer script generation branches, and
+codesign/notarization/pkg failure paths. Also includes adjacent release
+package CLI coverage for rpath handling, binary staging, and archive
+packaging branches, plus Skia release-fetch manifest and archive layout
+coverage. Local macOS validation:
+configured with `-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`, built
+`pulp-test-appcast`, `pulp-test-android-package`,
+`pulp-test-nsis-installer`, and `pulp-test-codesign`, then directly ran
+all four binaries. Passing totals: appcast 89 assertions / 16 cases,
+Android package 129 assertions / 18 cases, NSIS installer 57 assertions /
+19 cases, codesign 19 assertions / 10 cases. Python release packaging
+validation also passed through unittest entrypoints:
+`tools/scripts/test_package_cli.py` (13 tests) and
+`tools/scripts/test_package_cli_extra.py` (11 tests), plus
+`tools/scripts/test_fetch_skia_for_release.py` (14 tests). `git diff
+--check` passed. Resume action: keep holding this branch locally and continue
+adding coherent ship/package or adjacent release coverage until it is
+large enough to justify one GitHub-hosted CI run, then push as a single
+batched PR.
