@@ -1,0 +1,137 @@
+name: Release-path PR gate
+
+# PR-time pre-tag check that runs the actual release-cli.yml build
+# steps for the platforms most likely to surface
+# Skia/dependency/link-order regressions. Catches the class of breakage
+# that would otherwise only fire post-tag (when the ship has sailed).
+#
+# Motivated by pulp #1962 (2026-05-12..2026-05-14): Skia chrome/m144
+# fontconfig + SkUnicode-split breakage sailed through every PR's CI
+# because PR `build.yml` builds from source via FetchContent and never
+# touches `fetch_skia_for_release.py` or the prebuilt-Skia link path.
+# Five tags drafted then rotted as drafts because release-cli.yml was
+# the only thing that exercised the prebuilt path, and it only runs
+# post-tag.
+#
+# Scope: only triggers on PRs touching files that can affect the
+# release path. Most PRs (view / canvas / docs / examples) skip this
+# gate entirely. Linux-x64 is the canonical leg — it's where:
+#   - GNU ld surfaces archive-link-order bugs first (fontconfig, skunicode)
+#   - the "no PULP_REQUIRE_GPU_FOR_SDK" gate trips silently on bad pins
+#   - the WebView=OFF split path runs (issue #720)
+#
+# darwin-arm64 is included as a cross-platform sanity check so we
+# don't ship a Linux-only release-path gate that misses macOS-only
+# regressions (e.g. metal framework drift).
+
+on:
+  pull_request:
+    paths:
+      - 'tools/scripts/fetch_skia_for_release.py'
+      - 'tools/deps/manifest.json'
+      - 'tools/cmake/Find*.cmake'
+      - 'tools/cmake/Pulp*.cmake'
+      - 'tools/cli/CMakeLists.txt'
+      - 'tools/scripts/package_cli.py'
+      - 'core/canvas/CMakeLists.txt'
+      - 'core/render/CMakeLists.txt'
+      - 'core/view/CMakeLists.txt'
+      - 'CMakeLists.txt'
+      - '.github/workflows/release-cli.yml'
+      - '.github/workflows/release-path-pr-gate.yml'
+  workflow_dispatch:
+
+# Multiple PRs touching the same release-path files can stack up;
+# cancel older in-flight runs of THIS workflow when a new commit
+# lands. Does not cancel release-cli.yml itself (different concurrency
+# group), only this PR-time gate.
+concurrency:
+  group: release-path-pr-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-build:
+    name: Release-path build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: macos-15
+            platform: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      # Mirror release-cli.yml's Linux deps step verbatim. If this list
+      # ever drifts from release-cli.yml, the gate is lying — keep them
+      # in sync (or pull both from a shared composite action).
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
+            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols \
+            libfontconfig1-dev
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      # The whole point — exercise the prebuilt-Skia path that
+      # release-cli.yml uses. PR build.yml does NOT do this, which is
+      # exactly why fontconfig + skunicode breakage went undetected
+      # at PR time (#1962).
+      - name: Fetch Skia binaries (release path)
+        run: python3 tools/scripts/fetch_skia_for_release.py ${{ matrix.platform }}
+        shell: bash
+
+      # Mirror release-cli.yml's CLI configure exactly so this gate
+      # surfaces the same flag combinations that get exercised at
+      # release time (PULP_REQUIRE_GPU_FOR_SDK=ON, WebView=OFF on
+      # Linux to keep the CLI portable).
+      - name: Configure (CLI, no WebView on Linux, GPU required)
+        run: |
+          REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=OFF"
+          case "${{ matrix.platform }}" in
+            darwin-arm64|linux-x64)
+              REQUIRE_GPU="-DPULP_REQUIRE_GPU_FOR_SDK=ON"
+              ;;
+          esac
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            $REQUIRE_GPU \
+            ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
+        shell: bash
+
+      # Build the same target release-cli.yml builds. The link step
+      # is where the SkUnicode core/icu order bug surfaces (and where
+      # the fontconfig undefineds surfaced in the previous Skia bump).
+      - name: Build pulp-cli (release path)
+        run: |
+          jobs=$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          cmake --build build --config Release --target pulp-cli -j"$jobs"
+        shell: bash
+
+      # Sanity: the binary actually runs. release-cli.yml has a
+      # smoke-cli matrix that does this on a separate clean runner —
+      # we do a lightweight `--version` here to catch the dynamic
+      # loader failures that linker bugs hide (e.g. missing rpath /
+      # missing dependency symbol resolution).
+      - name: Smoke pulp-cpp --version
+        run: |
+          ./build/tools/cli/pulp-cpp --version || ./build/tools/cli/pulp-cpp version
+        shell: bash

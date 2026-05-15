@@ -1,10 +1,11 @@
 # Release Watchdog
 
-Three layers of protection against silent release failures (plus a
-PR-time prevention layer added for issue #1009). All use only standard,
-agent-agnostic tooling (GitHub Actions, `gh` CLI, `yamllint`,
-`actionlint`, Python) — any contributor or automation (Claude, Codex,
-a human) can understand and invoke them.
+Three layers of protection against silent release failures (plus two
+PR-time prevention layers — `fix/feat-needs-bump` for #1009 and the
+release-path PR gate for #1962). All use only standard, agent-agnostic
+tooling (GitHub Actions, `gh` CLI, `yamllint`, `actionlint`, Python) —
+any contributor or automation (Claude, Codex, a human) can understand
+and invoke them.
 
 ## Why three layers
 
@@ -21,10 +22,12 @@ Each layer catches a different failure mode:
 
 | Layer | Trigger | Failure mode caught | Median detection |
 |---|---|---|---|
+| 0. release-path PR gate | PR touching release-path files | prebuilt-Skia / link-order / CMake breakage at PR time (#1962) | 5-15 min (pre-merge) |
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
 | 2. Auto-release watchdog | `workflow_run` completion | runtime failure (any cause) | 1-2 minutes |
 | 2b. Release-CLI watchdog | `workflow_run` completion | per-tag missing SDK/CLI assets (#1375) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | any outcome drift — even unknown-unknowns | ≤45 min |
+| 3b. Draft-stuck check | `schedule` every 30 min | tag exists, Release stuck as draft (#1962) | ≤90 min |
 
 ## Layer 1 — Workflow lint (pre-merge)
 
@@ -123,6 +126,85 @@ YAML bug (Layer 1 would catch), a runtime job failure (Layer 2 would
 catch), a missing secret (neither of the above might catch), a
 forgotten manual step, or a GitHub outage — the invariant fires because
 the *symptom* (missing release) appears.
+
+## Layer 3b — Release draft stuck check (invariant, sibling to Layer 3)
+
+**File:** `.github/workflows/release-draft-stuck-check.yml`
+
+Runs every 30 minutes (plus `workflow_dispatch`). Sibling to Layer 3:
+where Layer 3 catches "VERSION bump landed, no tag", Layer 3b catches
+"tag exists, GitHub Release still `draft: true`". Both are
+cause-agnostic, both watch the symptom rather than the cause.
+
+For each Release returned by `gh api releases?per_page=100` that is
+within the lookback window (default 14 days), checks:
+
+1. Is the corresponding git tag present?
+2. Is the Release flagged `draft: true`?
+3. Has the Release been drafted longer than the grace window
+   (default 60 min — release-cli + sign-and-release together can take
+   30–45 min cold-cache; 60 leaves slack)?
+
+If yes-yes-yes → add to findings and open/update a tracking issue
+titled `Release pipeline: tag exists but GitHub Release is draft`.
+Auto-closes on the next sweep when every recent tag is published.
+
+**Motivating incident (#1962, 2026-05-12..2026-05-14):** Five tags
+(v0.95.0..v0.98.0) were drafted by `sign-and-release.yml` (which
+creates `draft: true`) but never promoted to published because
+`release-cli.yml`'s linux-x64 leg failed for 5 consecutive runs on a
+Skia chrome/m144 link-order bug. The `release` job that flips
+`draft: false` and uploads the SDK assets is gated on the matrix
+being green, so it skipped each time. Existing layers were quiet:
+`auto-release.yml` and the cadence check both saw "tag exists" and
+moved on; the per-tag release-cli watchdog (Layer 2b) opened
+trackers but those got buried in the issue list and the actual user-
+visible signal — `https://github.com/danielraffel/pulp/releases`
+showing 5 "Draft" rows — wasn't surfaced anywhere actionable.
+
+## release-path PR gate (pre-tag prevention, issue #1962)
+
+**File:** `.github/workflows/release-path-pr-gate.yml`
+
+Sibling to fix/feat-needs-bump. fix/feat-needs-bump catches "user-
+facing change merged without a bump"; the release-path PR gate
+catches the bigger structural gap that #1962 surfaced: **the
+release-build path is never tested at PR time.**
+
+PR `build.yml` builds Pulp from source via FetchContent — it never
+runs `tools/scripts/fetch_skia_for_release.py`, never builds the SDK
+tarball, never links the prebuilt Skia archives. So every breakage
+to the prebuilt-Skia path (chrome/m144 fontconfig undefineds,
+SkUnicode core/icu link-order, future Skia bumps that change asset
+layout) sails through PR green and only detonates post-tag, when
+release-cli.yml is the only workflow exercising that code path.
+
+The PR gate runs the exact `release-cli.yml` build steps —
+`fetch_skia_for_release.py`, the `PULP_REQUIRE_GPU_FOR_SDK=ON`
+configure, `cmake --build … --target pulp-cli`, and a
+`pulp-cpp --version` smoke — for the two platforms that surface
+release-path regressions first:
+
+- `linux-x64` — GNU ld is the strictest static-link environment.
+  fontconfig undefineds, SkUnicode core/icu order bugs, anything
+  involving missing `--start-group`/`--end-group` shows up here
+  before macOS or Windows even notice.
+- `darwin-arm64` — sanity check that we don't ship a Linux-only
+  gate that misses macOS-only regressions (Metal framework drift,
+  AppKit symbol changes, etc.).
+
+Triggered only when a PR touches files in the release-path scope:
+`tools/scripts/fetch_skia_for_release.py`, `tools/deps/manifest.json`,
+`tools/cmake/Find*.cmake`, `tools/cmake/Pulp*.cmake`,
+`tools/cli/CMakeLists.txt`, `core/{canvas,render,view}/CMakeLists.txt`,
+`CMakeLists.txt`, `release-cli.yml`. Most PRs (view / docs / examples /
+plugin) skip this gate entirely so iteration speed is unaffected.
+
+If `release-cli.yml`'s job structure ever drifts from this gate, the
+gate is lying. Mirror any structural change to release-cli.yml here
+(or refactor both into a shared composite action). The "Mirror
+release-cli.yml's Linux deps step verbatim" comment in the workflow
+calls this out.
 
 ## fix/feat-needs-bump (PR-time prevention, issue #1009)
 

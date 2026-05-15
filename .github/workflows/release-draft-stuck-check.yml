@@ -1,0 +1,258 @@
+name: Release draft stuck check
+
+# Layer-3 watchdog for the "release tag exists but the GitHub Release
+# is still draft" invariant. Sibling to release-cadence-check.yml
+# (which catches "tag missing after VERSION bump"). Together they
+# cover the two ways a release can silently rot:
+#
+#   - bump landed, tag missing      → release-cadence-check.yml
+#   - tag exists, release == draft  → THIS FILE
+#
+# Motivated by pulp #1962 (2026-05-12..2026-05-14): five tags
+# (v0.95.0..v0.98.0) sat as draft GitHub Releases for 48+ hours
+# with only `appcast.xml` attached because release-cli.yml's
+# linux-x64 leg failed each time and the `release` job (which
+# flips `draft: false` and uploads the SDK assets) was gated on
+# the full matrix being green. Nothing watched for the symptom —
+# only auto-release-watchdog.yml fires on auto-release.yml
+# completion, and only release-cadence-check.yml fires on missing
+# tags. Result: every consumer of the v0.95.0..v0.98.0 SDK was
+# broken for 3 days, and the only visible signal was
+# https://github.com/danielraffel/pulp/releases showing "Draft"
+# next to several rows — which nobody was reading.
+#
+# Cadence: every 30 minutes (matches release-cadence-check). The
+# grace window defaults to 60 minutes (release-cli.yml runs the
+# full SDK matrix and can take 30-45 min on cold caches; 60 leaves
+# slack).
+#
+# Output: a single tracking issue ("Release stuck as draft …")
+# that lists every offending tag. The issue is reopened when new
+# stuck drafts appear and auto-closes on the next sweep when
+# every recent tag is published.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: 'Days of release history to scan'
+        required: false
+        default: '14'
+      grace_minutes:
+        description: 'Minutes a release can stay draft before flagging'
+        required: false
+        default: '60'
+      dry_run:
+        description: 'Log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-draft-stuck-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Check tag-vs-published-release invariant
+
+    env:
+      LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '14' }}
+      GRACE_MINUTES: ${{ github.event.inputs.grace_minutes || '60' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'Release pipeline: tag exists but GitHub Release is draft'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags explicitly
+        run: git fetch --tags --force
+
+      - name: Scan stuck drafts
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          lookback="${LOOKBACK_DAYS}"
+          grace="${GRACE_MINUTES}"
+          repo='${{ github.repository }}'
+
+          grace_cutoff=$(date -u -d "${grace} minutes ago" +%s 2>/dev/null \
+              || python3 -c "import datetime; print(int((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=${grace})).timestamp()))")
+          window_cutoff=$(date -u -d "${lookback} days ago" +%s 2>/dev/null \
+              || python3 -c "import datetime; print(int((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=${lookback})).timestamp()))")
+
+          # List recent releases. Pagination capped at 100 — a 14-day
+          # window at Pulp's release cadence is well under that.
+          gh api "repos/${repo}/releases?per_page=100" > releases.json
+
+          findings='[]'
+
+          # Process each release. We care about those whose tag exists
+          # in git AND draft == true AND age > grace AND landed inside
+          # the lookback window.
+          mapfile -t release_lines < <(
+              python3 - <<'PY'
+          import json, sys
+          rels = json.load(open('releases.json'))
+          for r in rels:
+              tag = r.get('tag_name') or ''
+              draft = bool(r.get('draft'))
+              created = r.get('created_at') or ''
+              if not tag:
+                  continue
+              # Emit one TSV row per release for downstream awk.
+              print('\t'.join([tag, str(draft).lower(), created]))
+          PY
+          )
+
+          for line in "${release_lines[@]}"; do
+              tag=$(echo "$line" | cut -f1)
+              draft=$(echo "$line" | cut -f2)
+              created=$(echo "$line" | cut -f3)
+
+              if [ "$draft" != "true" ]; then continue; fi
+
+              # Tag must exist in git — drafts on deleted tags are
+              # someone-else's-problem (likely a deletion in flight).
+              if ! git rev-parse --verify --quiet "refs/tags/${tag}" > /dev/null; then
+                  echo "  skip ${tag} — draft but tag absent from git"
+                  continue
+              fi
+
+              created_ts=$(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('${created}'.replace('Z','+00:00')).timestamp()))")
+
+              if [ "$created_ts" -lt "$window_cutoff" ]; then
+                  echo "  skip ${tag} — outside lookback window"
+                  continue
+              fi
+              if [ "$created_ts" -gt "$grace_cutoff" ]; then
+                  echo "  skip ${tag} — within grace window (${grace} min)"
+                  continue
+              fi
+
+              age_min=$(( ($(date -u +%s) - created_ts) / 60 ))
+              echo "  STUCK ${tag} draft=true age=${age_min}min"
+
+              findings=$(echo "$findings" | python3 -c "
+          import json, sys
+          arr = json.load(sys.stdin)
+          arr.append({
+              'tag': '${tag}',
+              'created_at': '${created}',
+              'age_minutes': ${age_min},
+          })
+          print(json.dumps(arr))
+          ")
+          done
+
+          echo "$findings" > findings.json
+          count=$(python3 -c "import json; print(len(json.load(open('findings.json'))))")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Stuck-draft count: ${count}"
+
+      - name: Render issue body
+        if: env.DRY_RUN != 'true' && steps.scan.outputs.count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > body.md
+          import json, datetime
+          findings = json.load(open('findings.json'))
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+          lines = []
+          lines.append(f"_Auto-generated by `.github/workflows/release-draft-stuck-check.yml` on {now}._")
+          lines.append("")
+          lines.append("**Invariant violated:** one or more git tags have a corresponding "
+                       "GitHub Release that is still `draft: true` past the grace window. "
+                       "Anyone consuming the SDK at those versions sees no published artifacts.")
+          lines.append("")
+          lines.append("Likely root causes:")
+          lines.append("- `release-cli.yml` matrix leg failed (Linux/macOS/Windows build), "
+                       "so the `release` job that flips `draft: false` was skipped")
+          lines.append("- `sign-and-release.yml` created the draft but a downstream uploader "
+                       "(SDK tarball, plugin .pkg, appcast) did not attach assets")
+          lines.append("- Manual draft from a previous experiment that should have been deleted")
+          lines.append("")
+          lines.append("### Stuck draft releases")
+          lines.append("")
+          for f in findings:
+              lines.append(f"- **`{f['tag']}`** — drafted {f['created_at']} "
+                           f"({f['age_minutes']} min ago), still `draft: true`")
+          lines.append("")
+          lines.append("**Resolution path** (one of):")
+          lines.append("1. Re-fire the failed `release-cli.yml` run via `workflow_dispatch` "
+                       "with the offending tag once the underlying breakage is fixed; "
+                       "the `release` job will attach SDK assets and flip `draft: false`.")
+          lines.append("2. If the tag was abandoned, delete both the tag and the draft "
+                       "Release manually so this tracker auto-closes.")
+          lines.append("3. If `draft: true` was intentional (rare), file a follow-up issue "
+                       "explaining why and re-trigger this check with `dry_run=true` "
+                       "until the grace window is widened to fit.")
+          lines.append("")
+          lines.append("This tracker closes automatically on the next sweep when every "
+                       "recent tag has a published Release.")
+          print('\n'.join(lines))
+          PY
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          COUNT: ${{ steps.scan.outputs.count }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Stuck-draft invariant restored — closing #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Sweep on $(date -u +%Y-%m-%d\ %H:%M) found no stuck draft Releases. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "No findings and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label ci,blocks-release 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-draft-stuck-findings
+          path: findings.json
+          retention-days: 14
+          if-no-files-found: ignore
