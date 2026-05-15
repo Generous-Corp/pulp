@@ -107,6 +107,12 @@ TEST_CASE("Uuid ordering and hashing cover deterministic values", "[runtime][ide
     REQUIRE(ids.size() == 2);
 }
 
+TEST_CASE("Uuid parsing rejects malformed dashed layout",
+          "[runtime][identity][coverage][issue-656]") {
+    auto parsed = Uuid::from_string("0011223344556677-8899-aabb-ccdd-eeff");
+    REQUIRE(parsed.is_nil());
+}
+
 TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
           "[runtime][identity][issue-641]") {
     Uuid id;

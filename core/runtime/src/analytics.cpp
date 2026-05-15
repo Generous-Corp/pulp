@@ -10,13 +10,18 @@ std::string json_escape(std::string_view value) {
     std::string escaped;
     escaped.reserve(value.size());
     for (char c : value) {
-        switch (c) {
-            case '\\': escaped += "\\\\"; break;
-            case '"': escaped += "\\\""; break;
-            case '\n': escaped += "\\n"; break;
-            case '\r': escaped += "\\r"; break;
-            case '\t': escaped += "\\t"; break;
-            default: escaped += c; break;
+        if (c == '\\') {
+            escaped += "\\\\";
+        } else if (c == '"') {
+            escaped += "\\\"";
+        } else if (c == '\n') {
+            escaped += "\\n";
+        } else if (c == '\r') {
+            escaped += "\\r";
+        } else if (c == '\t') {
+            escaped += "\\t";
+        } else {
+            escaped += c;
         }
     }
     return escaped;
