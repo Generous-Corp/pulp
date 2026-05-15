@@ -5,6 +5,7 @@
 #include <pulp/runtime/temporary_file.hpp>
 
 #include <fstream>
+#include <utility>
 
 using namespace pulp::runtime;
 
@@ -75,6 +76,20 @@ TEST_CASE("BigInteger large numbers", "[crypto][bigint]") {
     auto b = BigInteger::from_string("1");
     auto c = a + b;
     REQUIRE(c.to_string() == "1000000000000000000");
+}
+
+TEST_CASE("BigInteger copy and move assignment preserve values",
+          "[crypto][bigint][coverage][phase3]") {
+    auto original = BigInteger::from_hex("2A");
+    BigInteger copied;
+    copied = original;
+    REQUIRE(copied == original);
+    REQUIRE(copied.to_string() == "42");
+
+    BigInteger moved;
+    moved = std::move(copied);
+    REQUIRE(moved.to_hex() == "2A");
+    REQUIRE_FALSE(moved.is_zero());
 }
 
 // ── License ─────────────────────────────────────────────────────────────
