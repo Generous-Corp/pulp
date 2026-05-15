@@ -4805,3 +4805,20 @@ pulp-test-nsis-installer -j$(sysctl -n hw.ncpu)` succeeded, followed by
 `ctest --test-dir build --output-on-failure -R "Android|Appcast|codesign|NSIS"`
 with 55/55 tests passing. The held branch was clean after validation and
 remains queued locally for one future substantial GitHub-hosted CI run.
+
+2026-05-15 16:13 PDT: published the held batch as #2097,
+`test: batch ship package coverage helpers`, on
+`feature/phase3-codecov-ship-package-batch-661`. This intentionally turns
+the accumulated 16 local commits into one GitHub-hosted CI run rather than
+many small PRs. Before opening the PR, the tip commit was amended from
+`98c14db9d` to `89de2d8ba` to add the required
+`Skill-Update: skip skill=ci reason="test-only local CI and coverage helper
+edge coverage; CI workflow guidance unchanged"` trailer. The branch was
+force-with-lease pushed, then #2097 was opened with the `codecov` label.
+
+Initial #2097 check-rollup after PR creation showed 12 pending, 0 failing,
+and 3 successful check-runs. The local pre-push hook had clean
+skill/version/compat/docs-noise/deps gates after the trailer amendment, but
+its advisory diff-cover path still hit the unrelated local FetchContent
+`mbedtls` `v3.6.2` checkout failure in fresh `build-cov`; the broader
+validation listed above is the local validation source of record.
