@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-14 22:58 PDT
+Last updated: 2026-05-14 23:04 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -150,8 +150,9 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | local chorus/reverb edges | `e6b5c6bc` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local oscillator edges | `5e3a1db3` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local signal helper edges | `431a3c5d` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
-| local Environment dispatch | `33565a65` | `92e83b37` | clean, test-only, platform target, behind latest base | rebase/re-smoke before #640 platform wave |
-| local ChildProcess output | `4c474115` | `92e83b37` | clean, test-only, platform target, behind latest base | rebase/re-smoke before #640 platform wave |
+| local platform/runtime batch | `b77c6979` | `c98896db` | locally validated on `feature/phase3-platform-runtime-batch-640`; test-only batch superseding Environment dispatch and ChildProcess output; held to avoid deepening hosted CI queue while #2012/#2014 are active | push/open PR when active hosted batch pressure drops |
+| local Environment dispatch | `33565a65` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
+| local ChildProcess output | `4c474115` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
 
 2026-05-14 22:58 PDT: created the larger #645 signal DSP batch
 `feature/phase3-signal-dsp-batch-645` at `3bb753ac`, PR #2014,
@@ -179,6 +180,30 @@ skill-sync report, version-bump report, docs-sync report, and
 compat-sync report. Branch pushed with GitHub-hosted PR workflow only;
 no Namespace dispatch and no SSH targets. Resume action: monitor #2014
 required checks and merge directly when green.
+
+2026-05-14 23:04 PDT: prepared the next larger #640 platform/runtime
+batch locally as `feature/phase3-platform-runtime-batch-640` at
+`b77c6979`, based on current `origin/main` `c98896dbc`. It batches
+`local/phase3-platform-environment-dispatch-640` and
+`local/phase3-child-process-read-output-640` into one test-only diff
+touching `test/test_environment.cpp` and `test/test_child_process.cpp`.
+Local macOS validation passed: configure with
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=/Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/mbedtls-v3.6.2-tar`,
+build `cmake --build build --target pulp-test-environment
+pulp-test-child-process -j$(sysctl -n hw.ncpu)`, focused
+`./build/test/pulp-test-environment "[environment][issue-640]" -r compact`
+passing 61 assertions in 10 test cases, focused
+`./build/test/pulp-test-child-process "[child_process][issue-640]" -r compact`
+passing 44 assertions in 9 test cases, full `pulp-test-environment`
+passing 106 assertions in 21 test cases, full `pulp-test-child-process`
+passing 65 assertions in 21 test cases, exact `ctest --test-dir build
+-R "Environment: token self move|Environment: listener removed before|Environment: reset during dispatch|read_available_output drains stdout" --output-on-failure`
+passing 4/4, `git diff --check`, `git diff --cached --check`,
+skill-sync report, version-bump report, docs-sync report, and
+compat-sync report. This batch is intentionally committed locally but
+not pushed yet while #2012 and #2014 are still consuming hosted CI.
+Resume action: push/open as one GitHub-hosted PR when active hosted
+batch pressure drops; do not run Namespace or SSH targets.
 
 ## Snapshot Summary
 
