@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-14 23:04 PDT
+Last updated: 2026-05-14 23:42 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -142,7 +142,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | local AudioFileData shape | `eac19fe2` | `92e83b37` | superseded by #2012 batch | no standalone CI action |
 | local AIFF PCM edges | `74774950` | `92e83b37` | superseded by #2012 batch | no standalone CI action |
 | local StreamingWriter reopen | `5e1d020d` | `92e83b37` | superseded by #2012 batch | no standalone CI action |
-| local frame-fill edges | `8467c68d` | `92e83b37` | clean, test-only, standalone audio target, behind latest base | rebase/re-smoke before #640 audio wave |
+| local frame-fill edges | `8467c68d` | `92e83b37` | duplicate coverage now present on `origin/main` in `test/test_frame_fill.cpp`; intentionally pruned from the broad wave | no standalone CI action |
 | #2014 signal DSP batch | `3bb753ac` | `c98896db` | open PR on `feature/phase3-signal-dsp-batch-645`; test-only GitHub-hosted batch superseding six local #645 tranches; local macOS target build, focused tag runs, full binaries, exact CTest selector, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local Linkwitz-Riley edges | `3deafcfe` | `bd036171` | superseded by #2014 batch | no standalone CI action |
 | local ADSR edges | `0c9e7d4d` | `bd036171` | superseded by #2014 batch | no standalone CI action |
@@ -150,9 +150,18 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | local chorus/reverb edges | `e6b5c6bc` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local oscillator edges | `5e3a1db3` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local signal helper edges | `431a3c5d` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
-| local platform/runtime batch | `b77c6979` | `c98896db` | locally validated and pushed on `feature/phase3-platform-runtime-batch-640`; test-only batch superseding Environment dispatch and ChildProcess output; PR intentionally not opened yet to avoid deepening hosted CI queue while #2012/#2014 are active | push/open PR when active hosted batch pressure drops |
-| local Environment dispatch | `33565a65` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
-| local ChildProcess output | `4c474115` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
+| #2016 CLI/platform/tooling wave | `4167e133` | `7a532c59` | open PR on `feature/phase3-tools-cli-batch-643`; broad test-only GitHub-hosted wave across audio tools, CLI shellout/config, FetchContent cache, environment, child process, SDL3 surface fallback, ruleset drift config, auto-release decision, format validation, and package freshness tests; local macOS build/focused/full test validation and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
+| local platform/runtime batch | `b77c6979` | `c98896db` | pushed durability branch `feature/phase3-platform-runtime-batch-640`; intentionally superseded by #2016 so these tests land on `main` through the larger wave PR, not a standalone PR | no standalone CI action; close/delete branch after #2016 lands if no longer needed |
+| local Environment dispatch | `33565a65` | `92e83b37` | superseded by #2016 via the platform/runtime batch | no standalone CI action |
+| local ChildProcess output | `4c474115` | `92e83b37` | superseded by #2016 via the platform/runtime batch | no standalone CI action |
+| local audio tools/model-store | `75ed3a63` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local CLI config command | `08308f66` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local ruleset drift config | `145cd195` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local FetchContent cache edges | `5cbf2d87` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local auto-release extra | `26076d92` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local format validation extra | `96b9dfd8` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| local package freshness extra | `55bee1c5` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| #646 SDL3 surface fallback | `d81b03cc` | `92e83b37` | superseded by #2016 | no standalone CI action |
 
 2026-05-14 22:58 PDT: created the larger #645 signal DSP batch
 `feature/phase3-signal-dsp-batch-645` at `3bb753ac`, PR #2014,
@@ -203,6 +212,44 @@ skill-sync report, version-bump report, docs-sync report, and
 compat-sync report. This batch is committed and pushed as `feature/phase3-platform-runtime-batch-640`, but no PR is open yet while #2012 and #2014 are still consuming hosted CI.
 Resume action: push/open as one GitHub-hosted PR when active hosted
 batch pressure drops; do not run Namespace or SSH targets.
+
+2026-05-14 23:42 PDT: created the broad GitHub-hosted coverage wave
+`feature/phase3-tools-cli-batch-643` at `4167e133`, PR #2016, based on
+current `origin/main` `7a532c59` after #2009 and the 0.100.0 changelog
+landed. This intentionally supersedes the smaller pushed
+`feature/phase3-platform-runtime-batch-640` durability branch, plus
+`local/phase3-audio-tools-model-store-643`,
+`local/phase3-cli-config-command-643`,
+`local/phase3-ruleset-drift-config-643`,
+`local/phase3-fetchcontent-cache-edges-643`,
+`local/phase3-auto-release-extra-643`,
+`local/phase3-check-format-validation-coverage-643`,
+`local/phase3-pkg-freshness-extra-643`, and
+`feature/phase3-sdl3-surface-fallback-646`. `local/phase3-frame-fill-edges-640`
+was checked but pruned because equivalent frame-fill coverage is already
+on `origin/main` in `test/test_frame_fill.cpp`.
+
+Local macOS validation passed on the combined #2016 branch: target build
+`cmake --build build --target pulp-test-audio-tools
+pulp-test-cli-shellout pulp-test-cli-fetchcontent-cache
+pulp-test-environment pulp-test-child-process pulp-test-sdl3-surface
+-j$(sysctl -n hw.ncpu)`, focused runs for
+`[audio][tools][issue-643]`, `[cli][shellout][config][issue-643]`,
+`[fetchcontent_cache][issue-643]`, `[environment][issue-640]`,
+`[child_process][edge][issue-640]`, and `[render][sdl3][issue-646]`,
+full touched binaries for audio tools, FetchContent cache, environment,
+child process, and SDL3 surface, plus direct Python unit tests for
+`tools/scripts/test_auto_release_decision_extra.py`,
+`tools/scripts/test_check_format_validation.py`,
+`tools/scripts/test_ruleset_drift_config.py`, and
+`tools/packages/test_freshness_check_extra.py`. `git diff --check`,
+skill-sync, version-bump, docs-sync, and compat-sync reports passed.
+The pre-push local diff-cover gate was demoted with
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` because its local coverage configure
+could not fetch the pinned Highway tree; GitHub Actions remains the
+authoritative CI gate for this PR. Resume action: monitor #2016 required
+GitHub-hosted checks and merge directly when green; do not use Namespace
+or SSH targets.
 
 ## Snapshot Summary
 
