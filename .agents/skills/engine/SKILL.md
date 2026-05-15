@@ -40,9 +40,9 @@ similar frameworks) feature-detect on construction:
 | `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable (pulp #915) |
 | Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names (pulp #915) |
 
-When adding new framework support, check the gap matrix in pulp #468
-before assuming a polyfill is missing — the entry above is exhaustive
-for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
+When adding new framework support, check the engine capability
+comparison before assuming a polyfill is missing — the entry above is
+exhaustive for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
 `PULP_JS_PRELUDES` list AND to the `eval_or_throw` block in
 `core/view/src/widget_bridge.cpp` (`embed_js.cmake` only embeds the
 constants; the bridge constructor evaluates them).

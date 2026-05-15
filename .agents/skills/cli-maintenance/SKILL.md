@@ -533,7 +533,7 @@ is maintained by `tools/cli/projects_registry.{hpp,cpp}` and is
 populated automatically from `cmd_create.cpp` on successful scaffold
 via `pulp::cli::projects_registry::add_project(...)`.
 
-Design decision (2026-04-21, locked in): **registry is authoritative.**
+Design decision: **registry is authoritative.**
 `pulp create` writes to it; `pulp projects add/remove` is the user
 surface; `pulp doctor --versions --scan-parents` walks CWD ancestors
 as an opt-in diagnostic but never mutates the registry. No silent
@@ -686,8 +686,8 @@ Gotchas:
   becomes meaningful from the first release that needs it; before
   then it's silently absent and skew analysis skips. Don't
   retroactively add it to every `pulp.toml` in the repo.
-- **Plugin `min_cli_version` mirrors the same semantics (Slice 6,
-  #551).** A plugin `plugin.json` with no `min_cli_version` skips the
+- **Plugin `min_cli_version` mirrors the same semantics.** A plugin
+  `plugin.json` with no `min_cli_version` skips the
   check silently; a newer `min_cli_version` emits the same advisory
   WARN finding in `analyze()` and an inline "needs CLI: >= vX.Y.Z"
   line under the Plugin entry in the human report. The JSON surface
@@ -695,16 +695,16 @@ Gotchas:
   `plugin` — do not rename it; `tools/scripts/cli_version_check.sh`
   and the `upgrade` skill parse it by key.
 
-Slice 1b (#552) extended the diagnostic with `--scan-parents` and
-`--json` plus the `~/.pulp/projects.json` registry — see the section
-above for registry gotchas. The `--versions` core remains pure-logic
-and scoped to `version_diag.{hpp,cpp}`.
+The diagnostic also supports `--scan-parents` and `--json` plus the
+`~/.pulp/projects.json` registry — see the section above for registry
+gotchas. The `--versions` core remains pure-logic and scoped to
+`version_diag.{hpp,cpp}`.
 
-Follow-up slices tracked against #499: Slice 2 (update-check), Slice 3
-(migration docs), Slice 4 (`/upgrade` skill), Slice 5 (mode
-enforcement), Slice 6 (plugin ↔ CLI skew — `min_cli_version` +
-`plugin_min_cli` JSON + `tools/scripts/cli_version_check.sh`). Do not
-land them piecemeal under Slice 1's PR; file new issues and PRs.
+Keep follow-up version-diagnostic work independently reviewable: update
+checks, migration docs, `/upgrade` skill changes, mode enforcement, and
+plugin ↔ CLI skew fields (`min_cli_version`, `plugin_min_cli`, and
+`tools/scripts/cli_version_check.sh`) should land as focused issues and
+PRs.
 
 ## `pulp doctor --caches` — FetchContent cache health (#744)
 
@@ -820,13 +820,12 @@ Gotchas:
 - **Anonymous GitHub API only.** 60 req/hr/IP. The 24h cache default
   keeps us well under that. Do NOT add authenticated fetches — the
   design is explicit about "no GitHub App, no auth".
-- **Background refresh is a detached `std::thread`.** Codex 2026-04-21
-  wave 2 P1 flagged the original `std::async` + static-future
-  pattern as blocking on destructor; the current
-  `std::thread(...).detach()` is correct. Do NOT regress this back
-  to `std::async` without understanding the Windows CRT finalization
-  path — the process must be able to exit while the fetch thread is
-  still in-flight.
+- **Background refresh is a detached `std::thread`.** The original
+  `std::async` + static-future pattern can block on destructor; the
+  current `std::thread(...).detach()` is correct. Do NOT regress this
+  back to `std::async` without understanding the Windows CRT
+  finalization path — the process must be able to exit while the fetch
+  thread is still in-flight.
 - **Cache file is atomic via `.tmp` + rename.** A torn write just
   forces a re-fetch on the next invocation, not corruption. Cross-device
   rename falls back to `copy_file` + `remove`.

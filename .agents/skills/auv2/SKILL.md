@@ -80,7 +80,7 @@ The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `p
 
 `AUMIDIBase::HandleSysEx(data, length)` does not carry a per-event sample offset at this SDK layer. We enqueue the payload with `sample_offset == 0` so it is delivered at the leading edge of the current `ProcessBufferLists()` block.
 
-## Current Gaps (2026-04-22)
+## Current Gaps
 
 - **MIDI output from AU v2 effects** is not wired yet (tracked as #626). `Processor::process()` can write to `midi_out`, but `PulpAUEffect` has no render-notify callback / `MIDIOutput` mixin that emits those events back to the host. Effects that declare `produces_midi = true` work in CLAP / VST3 but stay silent on AU v2. `descriptor.produces_midi` is *not* wired to a CMake flag yet — the AU type selection is driven entirely by `accepts_midi`.
 

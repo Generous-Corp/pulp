@@ -26,8 +26,7 @@ source "$(git rev-parse --show-toplevel)/tools/scripts/cli_version_check.sh"
 pulp_cli_version_check
 ```
 
-Advisory only. Full contract in the `upgrade` skill. Release-discovery
-Slice 6 (#551).
+Advisory only. Full release-discovery contract in the `upgrade` skill.
 
 ## Architecture Overview
 
@@ -168,11 +167,11 @@ same way. It is **not** Gemini-locked.
 
 ### Empirical note
 
-Tested 2026-04-18 against this repo: the Android CLI binary
-itself installs cleanly and `android info` / `android emulator
-list` / `android skills list` work. But `android run --apks=...`
-needs a successfully-built APK first, and Pulp's `./gradlew
-assembleDebug` can fail for reasons outside the CLI's reach
+The Android CLI binary itself installs cleanly and `android info` /
+`android emulator list` / `android skills list` work. But
+`android run --apks=...` needs a successfully-built APK first, and
+Pulp's `./gradlew assembleDebug` can fail for reasons outside the
+CLI's reach
 (stale local checkout missing `tools/cmake/PulpInstrumentation.cmake`,
 NDK version mismatch with AGP, etc.). Treat the CLI as a
 post-build amplifier; it doesn't fix build-stage breakage.
@@ -913,12 +912,9 @@ Hard to unit-test on Android (no emulator path → integration tests gated). The
 
 ---
 
-*Android CLI integration last verified against Google's docs:
-2026-04-21 (spike #355 follow-up, CLI 0.7.15232955). Spike report:
-`planning/android-cli-agent-control-spike-2026-04-21.md` —
-confirms 0.7.15232955 has no `logcat`/`pm`/`am`/`input`/`build`
-wrappers, so `android_smoke.sh` and `pulp build` stay on raw
-adb/Gradle. Useful adopt-opportunistically surfaces: `layout -p`
+*Android CLI integration note: CLI 0.7.15232955 has no
+`logcat`/`pm`/`am`/`input`/`build` wrappers, so
+`android_smoke.sh` and `pulp build` stay on raw adb/Gradle. Useful adopt-opportunistically surfaces: `layout -p`
 (JSON UI hierarchy), `screen capture --annotate` + `screen
 resolve` (label-based tap coords), `describe` (JSON project
 metadata). New CLI commands, install-URL changes, and

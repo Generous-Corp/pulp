@@ -80,8 +80,9 @@ calls dlerror() twice and the SECOND call returns `nullptr`.
 `strlen(nullptr)` and ASan flags a SEGV in `libsystem_platform`'s
 `_platform_strlen`. **The bug is invisible on non-ASan builds** —
 release builds happen to survive the near-null strlen because the
-zero page is read-protected one access deep. Caught on PR #1862's
-macOS ARM64 ASan lane 2026-05-12; fixed in PR #1873.
+zero page is read-protected one access deep. The fixed behavior caches
+`dlerror()` before formatting so the null-returning second call cannot
+reach `std::format`.
 
 Correct idiom:
 

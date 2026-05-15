@@ -34,20 +34,20 @@ Do **not** trigger for: bugfixes, cross-platform refactors, or final-landing flo
 analyze → file → prototype (ar-swap) → monitor → bump → ship
 ```
 
-Each step has tooling. Some ships in Slice 1 (this PR), some lands in follow-up slices.
+Each step has tooling. The CLI loop is available now; deeper archive-splice, issue-monitoring, and analyzer-lift work should land separately.
 
-## Slice status (as of 2026-04-27)
+## Current surface
 
-| # | Surface | Status | Issue |
-|---|---------|--------|-------|
-| 1 | `pulp loop` CLI + skill + slash command + docs | shipped | [#940](https://github.com/danielraffel/pulp/issues/940) |
-| 2 | `pulp-ar-swap.sh` ABI-checked archive splice | deferred | [#946](https://github.com/danielraffel/pulp/issues/946) |
-| 3 | `pulp loop --watch-issues` PR-monitor | deferred | [#947](https://github.com/danielraffel/pulp/issues/947) |
-| 4 | Lift `@pulp/css-adapt`, `pulp-css-analyze`, `extract-html-bundle` | deferred | [#948](https://github.com/danielraffel/pulp/issues/948) |
+| Surface | Status |
+|---------|--------|
+| `pulp loop` CLI + skill + slash command + docs | available |
+| `pulp-ar-swap.sh` ABI-checked archive splice | deferred |
+| `pulp loop --watch-issues` PR-monitor | deferred |
+| Lift `@pulp/css-adapt`, `pulp-css-analyze`, `extract-html-bundle` | deferred |
 
 ## Step 1 — AOT analyze the consumer's bundle
 
-Run `pulp-css-analyze` (Slice 4, lifting from `spectr/native-react/tools/pulp-css-analyze` until then) over the consumer's pre-built React bundle. The output is a coverage report listing unmapped CSS props with occurrence counts.
+Run `pulp-css-analyze` over the consumer's pre-built React bundle. The output is a coverage report listing unmapped CSS props with occurrence counts.
 
 Reference output shape:
 ```
@@ -61,7 +61,7 @@ The occurrence counts are how you prioritize — file the `14×` issue first.
 
 ## Step 2 — File framework issues with the right shape
 
-Each gap deserves its own issue. The shape that worked on 2026-04-28:
+Each gap deserves its own issue. Use this shape:
 
 - **One-line title** — e.g. "Label.font_family_ accessor missing from public surface".
 - **Occurrence count** — "Used in 14 places across the Spectr bundle (see analyzer report URL)".
