@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-15 00:56 PDT
+Last updated: 2026-05-15 01:04 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -167,6 +167,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | #2022 host graph/serializer batch | `276f7f7f` | `a29cb7dc` | open PR on `feature/phase3-host-graph-batch-493`; GitHub-hosted batch covering SignalGraph invalid/duplicate edge variants, live gain updates, release/clear helper behavior, GraphSerializer unresolved-plugin identity reserialization, and plugin-field error cleanup; includes a narrow source fix preserving placeholder plugin identity by using the existing `add_plugin_node(info)` path; local macOS target build, focused tag runs, full touched binaries, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2024 tools Python control-plane batch | `50acc069` | `a29cb7dc` | open PR on `feature/phase3-tools-python-batch-643`; test-only GitHub-hosted batch covering host-pump linting, release Skia fetcher extra paths, and macOS reroute watcher control-plane behavior; local unittest, direct script, py_compile, diff, skill/version/docs guards passed; local Python coverage runner was unavailable because the installed coverage.py is below the repo's required 7.10 floor; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2025 runtime/state utility batch | `dda4d1e` | `a29cb7dc` | open PR on `feature/phase3-runtime-state-batch-641`; test-only GitHub-hosted batch covering PropertiesFile JSON/save/no-op edges, StateTree typed getter/listener/child/JSON/deep-copy edges, StateTreeSynchroniser reattach/truncated-batch edges, TemporaryFile move/extension behavior, MemoryMappedFile reopen, and Range boundaries; local macOS target build, focused tag runs, full touched binaries, exact CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
+| #2026 events/runtime IPC batch | `bad6149` | `a29cb7dc` | open PR on `feature/phase3-events-runtime-batch-642`; test-only GitHub-hosted batch covering IPC endpoint malformed-port paths, endpoint disconnect reset, NetworkServiceDiscovery backend/cache lifecycle edges, callback-less discovery storage, ActionBroadcaster no-listener sends, MultiTimer restart behavior, and LockingAsyncUpdater synchronous trigger-and-wait behavior; local macOS target build, focused tag runs, full touched binaries, exact CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
@@ -3559,3 +3560,35 @@ Reconciliation on 2026-05-02: GitHub now reports the older paused rows below as 
 3. Re-dispatch in small batches, starting with the most merge-ready PRs.
 4. After each batch, merge only PRs with required checks green and `mergeStateStatus` clean enough for normal merge.
 5. Update this ledger with resumed run IDs and merge SHAs.
+
+2026-05-15 01:04 PDT: created the #642 events/runtime IPC batch
+`feature/phase3-events-runtime-batch-642` at `bad61495`, PR #2026,
+from current `origin/main` `a29cb7dc`. It adds test-only coverage in
+`test/test_ipc_endpoints.cpp`, `test/test_network_service_discovery.cpp`,
+and `test/test_events_async_helpers.cpp` for malformed IPC endpoint port
+strings, connection/listener rejection paths, endpoint failure reset,
+NetworkServiceDiscovery backend/cache lifecycle behavior, callback-less
+service storage, ActionBroadcaster empty/no-listener sends, MultiTimer
+restart behavior, and LockingAsyncUpdater synchronous trigger-and-wait
+behavior. Local macOS validation passed: configure with
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=/Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/mbedtls-v3.6.2-tar`,
+build `cmake --build build --target pulp-test-ipc-endpoints
+pulp-test-network-service-discovery pulp-test-events-async-helpers
+pulp-test-events -j$(sysctl -n hw.ncpu)`, focused
+`./build/test/pulp-test-ipc-endpoints "[issue-642]" -r compact`
+passing 109 assertions in 6 cases, focused
+`./build/test/pulp-test-network-service-discovery "[issue-642]" -r
+compact` passing 47 assertions in 11 cases, focused
+`./build/test/pulp-test-events-async-helpers "[issue-642]" -r compact`
+passing 39 assertions in 9 cases, focused
+`./build/test/pulp-test-events "[issue-642]" -r compact` passing 38
+assertions in 8 cases, full `pulp-test-ipc-endpoints` passing 109
+assertions in 6 cases, full `pulp-test-network-service-discovery`
+passing 90 assertions in 21 cases, full `pulp-test-events-async-helpers`
+passing 39 assertions in 9 cases, full `pulp-test-events` passing 99
+assertions in 24 cases, exact `ctest --test-dir build -R "IPC socket|NSD|ActionBroadcaster|MultiTimer|LockingAsyncUpdater|InterprocessConnection|ChildProcessManager|AsyncUpdater|EventLoop|Timer" --output-on-failure`
+passing 55/55, `git diff --check`, `git diff --cached --check`,
+skill-sync report, version-bump report, and docs-sync report. Branch
+pushed with GitHub-hosted PR workflow only; no Namespace dispatch and no
+SSH targets. Resume action: monitor #2026 required checks and merge
+directly when green.
