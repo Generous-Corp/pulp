@@ -434,27 +434,37 @@ jobs:
               ("sign-and-release.yml", "sign-and-release"),
           ]
 
+          # Sweep ALL non-completed run states (codex P2 on #2076): the
+          # ?status= filter splits queued / in_progress / requested /
+          # waiting / pending into separate buckets, and a run may sit
+          # in any of them at the moment we read. Listing the full
+          # workflow runs page and filtering client-side by status is
+          # more robust than querying each named status separately.
+          NON_COMPLETED = {
+              "queued", "in_progress", "requested", "waiting", "pending",
+          }
           for wf_file, wf_label in workflows:
-              for status in ("queued", "in_progress"):
-                  raw = gh([
-                      f"/repos/{REPO}/actions/workflows/{wf_file}/runs?status={status}&per_page=50",
-                      "--jq", ".workflow_runs[] | {id, head_branch}",
-                  ])
-                  if not raw:
+              raw = gh([
+                  f"/repos/{REPO}/actions/workflows/{wf_file}/runs?per_page=100",
+                  "--jq", ".workflow_runs[] | {id, head_branch, status}",
+              ])
+              if not raw:
+                  continue
+              for line in raw.strip().splitlines():
+                  run = json.loads(line)
+                  if run.get("status") not in NON_COMPLETED:
                       continue
-                  for line in raw.strip().splitlines():
-                      run = json.loads(line)
-                      tag = run["head_branch"]
-                      old_ver = parse(tag)
-                      if not old_ver:
-                          continue
-                      if old_ver >= new_ver:
-                          continue
-                      print(f"  superseding {wf_label} run {run['id']} (tag {tag} < {NEW_TAG})")
-                      subprocess.run([
-                          "gh", "api", "-X", "POST",
-                          f"/repos/{REPO}/actions/runs/{run['id']}/cancel",
-                      ], capture_output=True)
+                  tag = run["head_branch"]
+                  old_ver = parse(tag)
+                  if not old_ver:
+                      continue
+                  if old_ver >= new_ver:
+                      continue
+                  print(f"  superseding {wf_label} run {run['id']} (tag {tag} < {NEW_TAG}, status={run.get('status')})")
+                  subprocess.run([
+                      "gh", "api", "-X", "POST",
+                      f"/repos/{REPO}/actions/runs/{run['id']}/cancel",
+                  ], capture_output=True)
 
           # Delete strictly-older draft releases. Never touch published.
           raw = gh([
