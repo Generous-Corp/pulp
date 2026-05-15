@@ -1103,6 +1103,18 @@ The workflow file comes from main (fixed), the source tree comes from the tag (c
 
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
 
+**Tarball smoke matrix exercises `pulp-mcp` too.** The CLI
+tarball now ships three user-facing binaries (`pulp`, `pulp-cpp`,
+`pulp-mcp`). `release-cli.yml`'s `smoke-cli` job invokes
+`pulp-mcp --version` (not `pulp-mcp help` — pulp-mcp is a JSON-RPC
+stdin server and `--version` is the only short-circuit that exits
+cleanly without consuming stdin). When adding a new user-facing
+tarball binary, follow the same pattern: pick a flag that exits 0
+without touching stdin, add it to the smoke matrix's `artCmd` /
+`smoke_cmd` table on BOTH the Unix and Windows steps, and confirm the
+binary is stripped on Unix. Smoke-gating a real protocol exchange
+would make CI flakier than it needs to be.
+
 ## Coverage workflow (`#566` Phase 1)
 
 `.github/workflows/coverage.yml` has three jobs:

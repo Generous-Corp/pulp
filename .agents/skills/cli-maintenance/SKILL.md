@@ -729,6 +729,39 @@ plugin ↔ CLI skew fields (`min_cli_version`, `plugin_min_cli`, and
 `tools/scripts/cli_version_check.sh`) should land as focused issues and
 PRs.
 
+### `pulp doctor` — `pulp-mcp` advisory row
+
+
+
+`run_doctor_checks()` in `tools/cli/cli_common.cpp` ends with an
+**optional** check for the Claude Code plugin's MCP server binary. The
+check is purely advisory (never gates the doctor exit code) and resolves
+the binary in this order:
+
+1. `pulp-mcp` on `$PATH` (the steady-state after `curl install.sh | sh`).
+2. `~/.pulp/bin/pulp-mcp` (the install location, in case `$PATH` didn't
+   reload yet in this shell).
+3. `<repo_root>/build/tools/mcp/pulp-mcp` (source builds).
+
+When found, the row prints the binary's own `--version` output alongside
+`PULP_SDK_VERSION` so users see drift between an old installed
+`pulp-mcp` and a newer CLI. **Never escalate this to a hard gate** — the
+plugin must remain tolerant of older installed `pulp-mcp` so users on an
+older project SDK aren't blocked. Cross-version compatibility belongs in
+per-tool feature detection inside `pulp-mcp` itself.
+
+`pulp-mcp` accepts `--version` / `-V` and `--help` / `-h` short-circuit
+flags before entering its JSON-RPC stdin loop (`tools/mcp/pulp_mcp.cpp
+main()`). Both flags exit cleanly without consuming stdin so the
+release-CLI smoke gate and `pulp doctor` can probe the binary without
+speaking MCP framing. **Anything new that needs stdin must NOT short-
+circuit here** — fall through to the main loop instead.
+
+`serverInfo.version` returned from the MCP `initialize` method is wired
+to `PROJECT_VERSION` via `tools/mcp/pulp_mcp_version.h.in`. Hardcoding a
+new version string there will be silently overridden by the configure
+step; bump the project version instead.
+
 ## `pulp doctor --caches` — FetchContent cache health (#744)
 
 Like `--versions`, `--caches` is a dedicated diagnostic that

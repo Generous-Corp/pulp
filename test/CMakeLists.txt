@@ -1179,6 +1179,13 @@ catch_discover_tests(pulp-test-audio-tools)
 # MCP server protocol tests
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
 target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+# test_mcp_server.cpp #include's ../tools/mcp/pulp_mcp.cpp directly (via
+# `#define main pulp_mcp_main_for_test`), so it picks up the same
+# generated version header pulp-mcp itself sees. The generated header
+# lives under the binary tree's tools/mcp/ directory.
+target_include_directories(pulp-test-mcp-server PRIVATE
+    "${CMAKE_BINARY_DIR}/tools/mcp")
+add_dependencies(pulp-test-mcp-server pulp-mcp)
 catch_discover_tests(pulp-test-mcp-server)
 
 # MIDI tests

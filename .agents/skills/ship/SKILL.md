@@ -228,6 +228,43 @@ Rust binary, then exercise a C++-owned command through
 directly. This preserves rollback/debug workflows such as
 `PULP_USE_CPP=1 pulp <args>` for existing Pulp projects.
 
+### CLI tarball also ships `pulp-mcp`
+
+The release tarball is **three** binaries — `pulp`,
+`pulp-cpp`, and `pulp-mcp`. `pulp-mcp` is the Claude Code plugin's MCP
+server. The plugin ships no binaries; its `.mcp.json` invokes
+`tools/mcp/pulp-mcp-launcher`, which `exec`s `pulp-mcp` from `$PATH`. If
+the CLI tarball is missing `pulp-mcp`, every fresh
+`claude plugin install pulp` produces a `/mcp` panel reporting `cannot
+locate pulp-mcp binary` — even though the plugin itself installed
+cleanly.
+
+Contract that must hold across release lanes:
+
+- `tools/scripts/package_cli.py` is called with `--mcp-binary
+  build/tools/mcp/pulp-mcp` (Unix) or
+  `build/tools/mcp/Release/pulp-mcp.exe` (Windows).
+- `.github/workflows/release-cli.yml` strips `pulp-mcp` and adds it to
+  the smoke matrix as `pulp-mcp --version` (its JSON-RPC stdin loop is
+  not meaningfully testable from CI; the flag short-circuits before
+  reading stdin).
+- `tools/scripts/install.sh` / `install.ps1` log `pulp-mcp` landing in
+  `~/.pulp/bin/` so users see the binary that the plugin will use.
+- `pulp upgrade --install` extracts the whole tarball, so refreshing
+  the CLI also refreshes `pulp-mcp`.
+
+**Document and enforce install order in user-facing docs**:
+`curl install.sh | sh` BEFORE `claude plugin install pulp`. The
+reverse order leaves `/mcp` broken until the user upgrades the CLI.
+
+**Do not lock-step plugin and `pulp-mcp` versions.** The plugin and
+`pulp-mcp` are installed via separate channels and a project may pin an
+older SDK. `pulp-mcp` advertises its real `PROJECT_VERSION` in
+`serverInfo.version`, but the launcher must remain version-tolerant —
+backwards compat is the MCP server's responsibility (per-tool feature
+detection), not the launcher's. `pulp doctor` surfaces drift advisory-
+only.
+
 ### Released SDK is missing WebView symbols
 
 Symptom: a consumer links against a downloaded `pulp-sdk-<platform>`
