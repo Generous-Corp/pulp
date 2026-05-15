@@ -97,6 +97,17 @@ if(UNIX)
     set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
 endif()
 
+# Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh
+# handles the three "is pulp available" states (on PATH / source-tree
+# build / nothing) plus three invariants (always exits 0, banner goes
+# to stderr, stale non-executable build/pulp doesn't false-positive).
+# Hermetic (stages a tempdir layout per case), no real binary required.
+if(UNIX)
+    add_test(NAME check-pulp-cli-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_check_pulp_cli_hook.sh)
+    set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
+endif()
+
 # Window-only capture invariants (pulp-internal task #81) —
 # spectr-roundtrip.sh must not silently fall back to full-screen
 # screencapture, because terminal / desktop background then poisons

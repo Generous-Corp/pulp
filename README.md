@@ -1,10 +1,36 @@
 # Pulp
 
+[![SDK](https://img.shields.io/github/v/release/danielraffel/pulp?label=SDK%20%2F%20CLI)](https://github.com/danielraffel/pulp/releases)
+[![Claude plugin](https://img.shields.io/github/v/tag/danielraffel/pulp?filter=plugin-v*&label=Claude%20plugin)](https://github.com/danielraffel/pulp/tags)
 [![Coverage](https://codecov.io/gh/danielraffel/pulp/branch/main/graph/badge.svg)](https://app.codecov.io/gh/danielraffel/pulp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
 A cross-platform audio plugin and application framework. MIT licensed, C++20 core, Swift on Apple, JS-scripted GPU UIs.
 
-> **What version is Pulp?** The SDK / CLI version is the `project(Pulp VERSION …)` number in `CMakeLists.txt`. The Claude Code plugin has its own version (`.claude-plugin/plugin.json`). Full explanation: [docs/reference/versioning.md](docs/reference/versioning.md).
+## Install
+
+```bash
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+```
+
+Then:
+
+```bash
+pulp create my-plugin && cd my-plugin && pulp run
+```
+
+Three commands from zero to a working plugin in all formats.
+
+The CLI works great with any AI coding agent (Claude, Codex, Cursor). If you use **Claude Code**, you can additionally install the [Pulp plugin](docs/agent-integrations.md#claude-code-with-the-optional-plugin) for slash-command shortcuts (`/build`, `/test`, `/ship`) and a native MCP server:
+
+```bash
+claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
+```
+
+See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each agent path.
+
+<details>
+<summary><strong>What you get</strong> (click to expand)</summary>
 
 ## Features
 
@@ -74,27 +100,10 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 - JSFX — bounded subset support via QuickJS
 - Three.js bridge for 3D rendering in Dawn without a browser
 
-## Quick Start
+</details>
 
-**Install:**
-```bash
-curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
-```
-
-The public installer installs Pulp CLI artifacts only. It does not install
-Shipyard or GitHub CLI (`gh`); those are optional source-checkout contributor
-tools for PR/CI workflows.
-
-**Create and run your first plugin:**
-```bash
-pulp create my-plugin
-cd my-plugin
-pulp run
-```
-
-Three commands from zero to a working plugin in all formats.
-
-### From Source
+<details>
+<summary><strong>Build from source</strong> (contributors)</summary>
 
 ```bash
 git clone https://github.com/danielraffel/pulp.git
@@ -105,6 +114,8 @@ ctest --test-dir build --output-on-failure    # test
 ```
 
 **Prerequisites:** CMake 3.24+, C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+), git-lfs.
+
+</details>
 
 ## Example
 
@@ -139,30 +150,19 @@ pulp_add_plugin(MyGain
 )
 ```
 
-## Claude Code Plugin
+## Agent integrations
 
-Pulp ships with a Claude Code plugin for the full development lifecycle.
+Pulp's CLI works with any AI coding agent. Skills (`.agents/skills/`) are auto-loaded by Claude Code and Codex; `AGENTS.md` redirects Codex to the same `CLAUDE.md` Claude reads. No agent-specific install is required to use the CLI.
 
-**Install:**
+**Claude Code users** can additionally install the Pulp plugin for slash-command shortcuts and a native MCP server:
+
 ```bash
-claude plugin marketplace add danielraffel/pulp
-claude plugin install pulp
+claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
 ```
 
-The plugin also activates automatically when you open the Pulp repo in Claude Code.
+The plugin extends Claude Code with `/build`, `/test`, `/create`, `/design`, `/ship`, `/import-design`, `/version`, `/upgrade` plus an MCP server exposing build/test/inspect tools (highest value: the live-plugin inspector tools).
 
-Use slash commands directly in your Claude Code session:
-
-- `/build` — configure, build, and test
-- `/test` — run the test suite with filtering
-- `/create` — scaffold a new plugin project
-- `/design` — generate UI from a text prompt
-- `/ship` — sign, package, and notarize
-- `/import-design` — import from Figma, Stitch, or Pencil
-
-Available skills: `ci` (PR creation, local/cloud CI, merge workflow), `import-design` (design tool integration), `aax` (AAX format support), `engine` (audio engine internals), `webview-ui` (web-based UI targets).
-
-See [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md) for setup.
+Full breakdown of which agent gets what: [docs/agent-integrations.md](docs/agent-integrations.md). Plugin-specific setup details: [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md).
 
 ## Documentation
 
