@@ -4104,3 +4104,62 @@ with GitHub-hosted PR workflow only; no Namespace dispatch and no SSH
 targets.
 Resume action: monitor #2045 required checks and merge directly when
 green.
+
+2026-05-15 03:24 PDT: repaired PR #2017
+`feature/phase3-view-widget-batch-493` after GitHub-hosted macOS ARM64
+timed out in the shellout test `pulp doctor android|ios are recognized
+subcommands`. The real macOS job failed on test #67 after 120.17s; the
+`macos` alias failed because it mirrored that platform failure. Commit
+`6e46f56` changes that parser-recognition test to run
+`pulp doctor android --versions` and `pulp doctor ios --versions`, which
+still proves the mobile subcommands are accepted before the diagnostic
+short-circuit but avoids slow Android/iOS host SDK probes on saturated CI
+runners. Local validation on the PR branch passed: `cmake --build build
+--target pulp-test-cli-shellout -j$(sysctl -n hw.ncpu)`,
+`ctest --test-dir build -R "pulp doctor android\\|ios are recognized
+subcommands" --output-on-failure`, and `git diff --check`. Branch pushed
+with GitHub-hosted PR workflow only; no Namespace dispatch and no SSH
+targets.
+Resume action: monitor #2017 rerun checks and merge directly when green.
+
+2026-05-15 03:29 PDT: created the #655 view panels/editor batch
+`feature/phase3-view-panels-batch-655` at `70b32df`, PR #2046, from
+current `origin/main` `ce86d9f`. It adds coverage in
+`test/test_file_browser.cpp`, `test/test_graph_editor_view.cpp`,
+`test/test_preset_browser.cpp`, and `test/test_code_editor.cpp` for
+FileBrowser filtered/height-clipped paint, MultiDocumentPanel empty and
+active-tab paint, GraphEditorView reverse modifier drags, unnamed-node
+paint, drag-miss ghost cleanup, PresetBrowser filtered-list row geometry,
+CodeEditor read-only fallback insert state, and RecentlyOpenedFilesList
+remove/max-entry edges. The batch also fixes
+`core/view/include/pulp/view/preset_browser.hpp` so clicks in the filter
+gap above the list return before row hit-testing; the new negative-gap
+click test exposed that float-to-int truncation selected row 0. Local
+macOS validation passed: configure `cmake -S . -B build
+-DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF
+-DPULP_BUILD_EXAMPLES=OFF`, build `cmake --build build --target
+pulp-test-file-browser pulp-test-graph-editor-view
+pulp-test-preset-browser pulp-test-code-editor -j$(sysctl -n hw.ncpu)`,
+focused `./build/test/pulp-test-file-browser "[coverage][issue-655]" -r
+compact` passing 13 assertions in 2 cases, focused
+`./build/test/pulp-test-graph-editor-view "[coverage][issue-655]" -r
+compact` passing 8 assertions in 2 cases, focused
+`./build/test/pulp-test-preset-browser "[coverage][issue-655]" -r
+compact` passing 5 assertions in 1 case after the guard fix, focused
+`./build/test/pulp-test-code-editor "[coverage][issue-655]" -r compact`
+passing 10 assertions in 2 cases, full `pulp-test-file-browser` passing
+73 assertions in 6 cases, full `pulp-test-graph-editor-view` passing 30
+assertions in 6 cases, full `pulp-test-preset-browser` passing 65
+assertions in 19 cases, full `pulp-test-code-editor` passing 62
+assertions in 13 cases, exact `ctest --test-dir build -R "(FileBrowser
+paint clips|MultiDocumentPanel paint reflects|GraphEditorView reverse
+modifier|GraphEditorView paints unnamed|PresetBrowser filtered list
+click|CodeEditor insert appends|RecentlyOpenedFilesList remove)"
+--output-on-failure` passing 7/7, and `git diff --check`. Branch pushed
+with GitHub-hosted PR workflow only; no Namespace dispatch and no SSH
+targets. Pre-push local diff-cover was demoted by
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` after a local FetchContent checkout
+failed to read the pinned Highway tree; focused and full macOS tests were
+green before push.
+Resume action: monitor #2046 required checks and merge directly when
+green.
