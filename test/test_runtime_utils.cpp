@@ -347,6 +347,26 @@ TEST_CASE("HTTP helpers reject invalid numeric URL ports",
     REQUIRE(too_large_port.error == "Invalid URL");
 }
 
+TEST_CASE("HttpResponse ok helper follows 2xx status range",
+          "[runtime][http][coverage][phase3]") {
+    HttpResponse response;
+
+    response.status_code = 199;
+    REQUIRE_FALSE(response.ok());
+
+    response.status_code = 200;
+    REQUIRE(response.ok());
+
+    response.status_code = 204;
+    REQUIRE(response.ok());
+
+    response.status_code = 299;
+    REQUIRE(response.ok());
+
+    response.status_code = 300;
+    REQUIRE_FALSE(response.ok());
+}
+
 // ── Text Diff ────────────────────────────────────────────────────────────
 
 TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff][issue-641]") {
