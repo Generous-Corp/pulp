@@ -143,3 +143,41 @@ TEST_CASE("load_from and save_to report unavailable paths",
     fs::create_directories(f.path);
     REQUIRE_FALSE(bl.save_to(f.path.string()));
 }
+
+TEST_CASE("from_text accepts empty/comment-only files and clears previous entries",
+          "[host][blacklist][issue-493]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/old|1|2|stale\n"));
+    REQUIRE(bl.size() == 1);
+
+    REQUIRE(bl.from_text("# only comments\n\n   \n"));
+    REQUIRE(bl.size() == 0);
+    REQUIRE_FALSE(bl.is_blacklisted("/old"));
+}
+
+TEST_CASE("from_text preserves reasons containing delimiter-like escaped data",
+          "[host][blacklist][issue-493]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/plugin.vst3|10|20|first%7Csecond%25third\n"));
+
+    auto entry = bl.entries().find("/plugin.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.mtime == 10);
+    REQUIRE(entry->second.size == 20);
+    REQUIRE(entry->second.reason == "first|second%third");
+
+    const auto text = bl.to_text();
+    REQUIRE(text.find("first%7Csecond%25third") != std::string::npos);
+}
+
+TEST_CASE("from_text tolerates signed stamp values from old blacklist files",
+          "[host][blacklist][issue-493]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/plugin.vst3|-1|-2|old stamp\n"));
+
+    auto entry = bl.entries().find("/plugin.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.mtime == -1);
+    REQUIRE(entry->second.size == -2);
+    REQUIRE(entry->second.reason == "old stamp");
+}
