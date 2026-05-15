@@ -90,6 +90,30 @@ add_executable(pulp-cli
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
+
+# Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1962).
+#
+# `libskia.a` (pulled in by `pulp::canvas`'s PUBLIC `skia::skia` dep)
+# contains `SkFontMgr_New_FontConfig` which references `FcInit*`,
+# `FcConfig*`, `FcPattern*`, `FcGetVersion`, `FcFontSet*` etc. GNU ld
+# processes static archives left-to-right and only pulls in symbols
+# that are unresolved AT THE TIME the archive is processed; symbols
+# referenced AFTER the archive go unresolved even if a later library
+# would have satisfied them. Adding `fontconfig` again here ensures it
+# appears AFTER `libskia.a` in the final link line. (`PkgConfig::FONTCONFIG`
+# is already wired PUBLIC on `pulp-canvas` per pulp #1962 follow-up, so
+# the include dirs and -L flags are already correct — this just nails
+# the link-line position down for ld.)
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(_PULP_CLI_FONTCONFIG IMPORTED_TARGET fontconfig)
+        if(_PULP_CLI_FONTCONFIG_FOUND)
+            target_link_libraries(pulp-cli PRIVATE PkgConfig::_PULP_CLI_FONTCONFIG)
+        endif()
+    endif()
+endif()
+
 target_include_directories(pulp-cli PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR})

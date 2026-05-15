@@ -130,16 +130,20 @@ jobs:
         #   - tools/scripts/fetch_skia_for_release.py: chrome/m144 zip
         #     arch-subdir layout flatten (#1962).
         #   - core/canvas/CMakeLists.txt: fontconfig propagation from
-        #     pulp-canvas STATIC lib to downstream executables — `PUBLIC`
-        #     instead of `PRIVATE`. Without this, the chrome/m144 Skia
-        #     archive's SkFontMgr_New_FontConfig symbol fails to resolve
-        #     in pulp-cpp's link step (#1962 follow-up).
+        #     pulp-canvas STATIC lib via PkgConfig::FONTCONFIG IMPORTED
+        #     target (#1962 follow-up).
+        #   - tools/cli/CMakeLists.txt: re-link fontconfig in pulp-cli
+        #     so it appears AFTER libskia.a in the GNU ld link line
+        #     (left-to-right archive resolution; the chrome/m144 Skia
+        #     archive references Fc* symbols that ld won't resolve from
+        #     an earlier-positioned -lfontconfig). #1962 follow-up.
         run: |
           set -euo pipefail
           repo='${{ github.repository }}'
           for path in \
               tools/scripts/fetch_skia_for_release.py \
               core/canvas/CMakeLists.txt \
+              tools/cli/CMakeLists.txt \
               ; do
             url="https://raw.githubusercontent.com/${repo}/main/${path}"
             echo "Overlaying ${path} from ${url}"
