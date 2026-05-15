@@ -61,6 +61,7 @@ if [ -n "$REPO_ROOT" ]; then
     VBC="$REPO_ROOT/tools/scripts/version_bump_check.py"
     SSC="$REPO_ROOT/tools/scripts/skill_sync_check.py"
     CSC="$REPO_ROOT/tools/scripts/compat_sync_check.py"
+    DNL="$REPO_ROOT/tools/scripts/docs_noise_lint.py"
     if [ -x "$VBC" ]; then
         "$VBC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
     fi
@@ -71,6 +72,12 @@ if [ -n "$REPO_ROOT" ]; then
     # by default; advisory only — same shape as the version/skill hints.
     if [ -x "$CSC" ]; then
         "$CSC" --base origin/main --mode=hint 2>/dev/null || true
+    fi
+
+    # Docs-noise lint. Advisory only — flags newly edited reference docs / shared
+    # skills that reintroduce issue/PR/wave/handoff breadcrumbs.
+    if [ -f "$DNL" ]; then
+        python3 "$DNL" --root "$REPO_ROOT" --mode=hint "$FILE" 2>/dev/null || true
     fi
 
     # CLI ↔ MCP parity hint (pulp #1997). Advisory only — surfaces drift

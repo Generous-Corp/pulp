@@ -11,7 +11,7 @@
 #   git config core.hooksPath .githooks
 #
 # Bypass knobs (use sparingly — CI runs the same gates):
-#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/source-contract/deps)
+#   PULP_DISABLE_PREPUSH_GATES=1   # demote ALL gates to advisory (skill/version/compat/docs-noise/source-contract/deps)
 #   PULP_DISABLE_PREPUSH_DIFF_COVER=1  # demote diff-cover gate only
 #   PULP_SKIP_PREPUSH=1            # skip ALL gates entirely (true emergencies)
 #
@@ -83,6 +83,7 @@ PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 CSC="$ROOT/tools/scripts/compat_sync_check.py"
+DNL="$ROOT/tools/scripts/docs_noise_lint.py"
 SCC="$ROOT/tools/import-validation/check-source-contracts.py"
 SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
@@ -135,6 +136,18 @@ if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] compat_sync_check: internal error" >&2 ;;
+    esac
+fi
+
+# Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
+# lines in changed docs/reference files and shared skills, with ci/SKILL.md and
+# archival/report/policy/contract paths allowlisted by the script.
+if [ -f "$DNL" ]; then
+    "$PYTHON" "$DNL" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] docs_noise_lint: internal error" >&2 ;;
     esac
 fi
 
@@ -227,7 +240,7 @@ if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
 fi
 
 # pulp #1144 — defaults are flipped: gate failures BLOCK the push.
-# `PULP_DISABLE_PREPUSH_GATES=1` demotes the four primary gates back
+# `PULP_DISABLE_PREPUSH_GATES=1` demotes the primary gates back
 # to advisory; `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes the
 # diff-cover gate only.
 
@@ -251,7 +264,7 @@ if [ "$compat_flip_failed" = "1" ] && [ "$disable_main" = "1" ]; then
 fi
 
 if [ "$fail" = "1" ] && [ "$disable_main" = "1" ]; then
-    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/deps gate failures DEMOTED to advisory." >&2
+    echo "[pre-push] PULP_DISABLE_PREPUSH_GATES=1 — skill/version/compat/docs-noise/deps gate failures DEMOTED to advisory." >&2
     fail=0
 fi
 
@@ -262,7 +275,7 @@ fi
 
 echo "[pre-push] gate failure(s) above; blocking push." >&2
 echo "[pre-push] To bypass (use sparingly; CI still runs the same gates):" >&2
-echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/deps/flip" >&2
+echo "[pre-push]   PULP_DISABLE_PREPUSH_GATES=1 git push          # demote skill/version/compat/docs-noise/deps/flip" >&2
 echo "[pre-push]   PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push     # demote diff-cover only" >&2
 echo "[pre-push]   PULP_SKIP_PREPUSH=1 git push                   # skip ALL gates (emergencies)" >&2
 exit 1
