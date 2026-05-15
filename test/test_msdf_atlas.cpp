@@ -23,6 +23,26 @@ TEST_CASE("MsdfAtlas default state is empty", "[canvas][msdf][issue-641]") {
     REQUIRE(atlas.glyph(U'A') == nullptr);
 }
 
+TEST_CASE("MsdfAtlas move operations preserve channel mode and glyph lookup",
+          "[canvas][msdf][coverage][issue-650]") {
+    MsdfAtlas original;
+    REQUIRE(original.build("stub", {U'A', U'B'}, 18, 3, 128,
+                           /*include_alpha*/ true));
+    REQUIRE(original.channels() == 4);
+
+    MsdfAtlas moved(std::move(original));
+    REQUIRE(moved.channels() == 4);
+    REQUIRE(moved.glyph_count() == 2);
+    REQUIRE(moved.glyph(U'A') != nullptr);
+    REQUIRE(moved.pixels() != nullptr);
+
+    MsdfAtlas assigned;
+    assigned = std::move(moved);
+    REQUIRE(assigned.channels() == 4);
+    REQUIRE(assigned.glyph(U'B') != nullptr);
+    REQUIRE(assigned.glyph(U'Z') == nullptr);
+}
+
 TEST_CASE("MsdfAtlas packs the requested glyphs", "[canvas][msdf]") {
     MsdfAtlas atlas;
     std::vector<char32_t> chars = {U'A', U'B', U'C', U'D'};
@@ -52,6 +72,29 @@ TEST_CASE("MsdfAtlas empty build records base size and channel mode",
     REQUIRE(atlas.channels() == 4);
     REQUIRE(atlas.width() == 0);
     REQUIRE(atlas.height() == 0);
+}
+
+TEST_CASE("MsdfAtlas rebuild resets channels and overflow failure clears glyphs",
+          "[canvas][msdf][coverage][issue-650]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A'}, 20, 2, 128,
+                        /*include_alpha*/ true));
+    REQUIRE(atlas.channels() == 4);
+    REQUIRE(atlas.glyph_count() == 1);
+
+    REQUIRE(atlas.build("stub", {}, 12, 1, 128,
+                        /*include_alpha*/ false));
+    REQUIRE(atlas.channels() == 3);
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.pixels() == nullptr);
+
+    std::vector<char32_t> many;
+    for (char32_t c = 0; c < 100; ++c) many.push_back(c);
+    REQUIRE_FALSE(atlas.build("stub", many, 128, 8, 256,
+                              /*include_alpha*/ true));
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.channels() == 3);
+    REQUIRE(atlas.pixels() == nullptr);
 }
 
 TEST_CASE("MsdfAtlas packs glyphs into deterministic tile coordinates",

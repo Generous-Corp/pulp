@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,9 @@ struct TempDir {
 
     TempDir() {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / ("pulp-midi-file-test-" + std::to_string(stamp));
+        const auto entropy = std::random_device{}();
+        path = fs::temp_directory_path() / ("pulp-midi-file-test-"
+            + std::to_string(stamp) + "-" + std::to_string(entropy));
         fs::create_directories(path);
     }
 

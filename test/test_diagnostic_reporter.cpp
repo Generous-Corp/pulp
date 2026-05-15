@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/diagnostic_reporter.hpp>
+#include <pulp/format/host_type.hpp>
 #include <pulp/state/store.hpp>
 
 using namespace pulp::format;
@@ -135,4 +136,60 @@ TEST_CASE("DiagnosticReporter instrument type", "[format][diagnostic]") {
 
     auto report = diag.generate_report();
     REQUIRE(report.find("Instrument") != std::string::npos);
+}
+
+TEST_CASE("DiagnosticReporter default report omits optional sections until set",
+          "[format][diagnostic][issue-493]") {
+    DiagnosticReporter diag;
+    auto report = diag.generate_report();
+    auto json = diag.generate_json();
+
+    REQUIRE(report.find("--- Plugin ---") != std::string::npos);
+    REQUIRE(report.find("Format:") == std::string::npos);
+    REQUIRE(report.find("Host:") == std::string::npos);
+    REQUIRE(report.find("CPU Load:") == std::string::npos);
+    REQUIRE(report.find("--- Custom ---") == std::string::npos);
+    REQUIRE(report.find("--- Parameters (0) ---") != std::string::npos);
+    REQUIRE(json.find("\"parameters\": [") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"\"") != std::string::npos);
+}
+
+TEST_CASE("DiagnosticReporter JSON reflects instrument/effect type and parameter values",
+          "[format][diagnostic][issue-493]") {
+    DiagnosticReporter diag;
+    auto desc = make_desc();
+    desc.category = PluginCategory::Instrument;
+    StateStore store;
+    setup_store(store);
+    store.set_value(1, -18.0f);
+    store.set_value(2, 25.0f);
+
+    diag.set_plugin_info(desc, store);
+    diag.set_audio_config(96000, 128, 0, 2);
+
+    auto json = diag.generate_json();
+    REQUIRE(json.find("\"type\": \"instrument\"") != std::string::npos);
+    REQUIRE(json.find("\"sampleRate\": 96000") != std::string::npos);
+    REQUIRE(json.find("\"bufferSize\": 128") != std::string::npos);
+    REQUIRE(json.find("\"inputChannels\": 0") != std::string::npos);
+    REQUIRE(json.find("\"outputChannels\": 2") != std::string::npos);
+    REQUIRE(json.find("\"value\": -18.0000") != std::string::npos);
+    REQUIRE(json.find("\"value\": 25.0000") != std::string::npos);
+}
+
+TEST_CASE("HostType names and feature heuristics cover fixed-size and no-sidechain hosts",
+          "[format][host-type][issue-493]") {
+    REQUIRE(host_type_name(HostType::Unknown) == "Unknown");
+    REQUIRE(host_type_name(HostType::Other) == "Other");
+    REQUIRE(host_type_name(static_cast<HostType>(255)) == "Unknown");
+
+    REQUIRE_FALSE(host_supports_resize(HostType::ProTools));
+    REQUIRE_FALSE(host_supports_resize(HostType::GarageBand));
+    REQUIRE(host_supports_resize(HostType::LogicPro));
+    REQUIRE(host_supports_resize(HostType::Unknown));
+
+    REQUIRE_FALSE(host_supports_sidechain(HostType::GarageBand));
+    REQUIRE_FALSE(host_supports_sidechain(HostType::AudacityTenacity));
+    REQUIRE(host_supports_sidechain(HostType::Reaper));
+    REQUIRE(host_supports_sidechain(HostType::Unknown));
 }

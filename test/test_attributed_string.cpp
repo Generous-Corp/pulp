@@ -116,6 +116,34 @@ TEST_CASE("AttributedString empty span has zero text length but remains a span",
     REQUIRE(str.spans().size() == 1);
 }
 
+TEST_CASE("AttributedString bulk style setters are no-ops on empty strings",
+          "[canvas][text][issue-644]") {
+    AttributedString str;
+    str.set_font("mono", 22.0f);
+    str.set_color(Color::rgba(1, 2, 3));
+
+    REQUIRE(str.empty());
+    REQUIRE(str.length() == 0);
+    REQUIRE(str.plain_text().empty());
+}
+
+TEST_CASE("AttributedString clear drops spans and accepts reuse",
+          "[canvas][text][issue-644]") {
+    AttributedString str("before");
+    str.append(" after", Color::rgba(9, 8, 7));
+    REQUIRE(str.spans().size() == 2);
+
+    str.clear();
+    REQUIRE(str.empty());
+
+    str.append("again", 18.0f, Color::rgba(1, 2, 3));
+    REQUIRE_FALSE(str.empty());
+    REQUIRE(str.plain_text() == "again");
+    REQUIRE(str.spans().size() == 1);
+    REQUIRE(str.spans()[0].font_size == 18.0f);
+    REQUIRE(str.spans()[0].color.g == 2);
+}
+
 // ── TextLayout word wrapping ────────────────────────────────────────────
 
 TEST_CASE("TextLayout empty string", "[canvas][layout]") {
@@ -221,6 +249,18 @@ TEST_CASE("TextLayout empty span creates blank line", "[canvas][layout]") {
     REQUIRE(layout.lines[0].width == 0);
     REQUIRE_THAT(layout.lines[0].height, WithinAbs(12.0f, 1e-5));
     REQUIRE_THAT(layout.total_height, WithinAbs(12.0f, 1e-5));
+}
+
+TEST_CASE("TextLayout skips the delimiter that triggered word wrapping",
+          "[canvas][layout][issue-644]") {
+    AttributedString str("alpha beta gamma");
+    auto layout = layout_attributed_string(str, 48.0f, 10.0f);
+
+    REQUIRE(layout.lines.size() == 3);
+    REQUIRE(layout.lines[0].spans[0].text == "alpha");
+    REQUIRE(layout.lines[1].spans[0].text == "beta");
+    REQUIRE(layout.lines[2].spans[0].text == "gamma");
+    REQUIRE_THAT(layout.total_height, WithinAbs(30.0f, 1e-5));
 }
 
 TEST_CASE("TextLayout narrow width forces word break", "[canvas][layout]") {

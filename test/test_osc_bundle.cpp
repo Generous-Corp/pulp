@@ -54,6 +54,13 @@ TEST_CASE("OSC TimeTag equality", "[osc][bundle]") {
     REQUIRE(a == b);
 }
 
+TEST_CASE("OSC TimeTag keeps fractional unix seconds near one-second boundary",
+          "[osc][bundle][issue-644]") {
+    auto tt = TimeTag::from_unix(12345.999);
+    REQUIRE_THAT(tt.to_unix(), WithinAbs(12345.999, 0.001));
+    REQUIRE_FALSE(tt == TimeTag::from_unix(12345.0));
+}
+
 // ── Bundle construction ─────────────────────────────────────────────────
 
 TEST_CASE("OSC Bundle add message", "[osc][bundle]") {
@@ -81,6 +88,15 @@ TEST_CASE("OSC Bundle add nested bundle", "[osc][bundle]") {
     REQUIRE(outer.elements.size() == 1);
     REQUIRE(outer.elements[0].is_bundle());
     REQUIRE(outer.elements[0].bundle().elements.size() == 1);
+}
+
+TEST_CASE("OSC default BundleElement is an empty message element",
+          "[osc][bundle][issue-644]") {
+    BundleElement elem;
+    REQUIRE(elem.is_message());
+    REQUIRE_FALSE(elem.is_bundle());
+    REQUIRE(elem.message().address.empty());
+    REQUIRE(elem.message().args.empty());
 }
 
 // ── Bundle serialization ────────────────────────────────────────────────
@@ -146,6 +162,13 @@ TEST_CASE("OSC address wildcard ?", "[osc][bundle]") {
     REQUIRE(address_matches("/foo/ba?", "/foo/bar"));
     REQUIRE(address_matches("/foo/ba?", "/foo/baz"));
     REQUIRE_FALSE(address_matches("/foo/ba?", "/foo/ba"));
+}
+
+TEST_CASE("OSC address wildcard question mark does not cross path separator",
+          "[osc][bundle][pattern][issue-644]") {
+    REQUIRE_FALSE(address_matches("/foo/?/bar", "/foo//bar"));
+    REQUIRE_FALSE(address_matches("/foo/?", "/foo//"));
+    REQUIRE(address_matches("/foo/?", "/foo/a"));
 }
 
 // ── TimeTag edges ──────────────────────────────────────────────────────
@@ -375,4 +398,17 @@ TEST_CASE("Malformed address patterns fail closed",
     REQUIRE_FALSE(address_matches("/note/[ab", "/note/a"));
     REQUIRE_FALSE(address_matches("/note/[!0-9", "/note/a"));
     REQUIRE_FALSE(address_matches("/{foo,bar/gain", "/foo/gain"));
+}
+
+TEST_CASE("Address pattern alternatives support first and later branches",
+          "[osc][bundle][pattern][issue-644]") {
+    REQUIRE(address_matches("/{foo,bar,baz}/gain", "/foo/gain"));
+    REQUIRE(address_matches("/{foo,bar,baz}/gain", "/baz/gain"));
+    REQUIRE_FALSE(address_matches("/{foo,bar,baz}/gain", "/ba/gain"));
+}
+
+TEST_CASE("Address pattern character class negated enumeration",
+          "[osc][bundle][pattern][issue-644]") {
+    REQUIRE(address_matches("/pad/[!abc]", "/pad/z"));
+    REQUIRE_FALSE(address_matches("/pad/[!abc]", "/pad/b"));
 }

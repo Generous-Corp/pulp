@@ -75,6 +75,23 @@ TEST_CASE("FirFilter order returns tap count", "[signal][fir]") {
     REQUIRE(fir.order() == 3);
 }
 
+TEST_CASE("FirFilter empty coefficients pass samples through and reset safely",
+          "[signal][fir][issue-645]") {
+    FirFilter fir;
+    REQUIRE(fir.order() == 0);
+    REQUIRE_THAT(fir.process(-0.25f), WithinAbs(-0.25f, 1e-6f));
+
+    float buffer[] = {0.25f, -0.5f, 0.75f};
+    fir.process(buffer, 3);
+    REQUIRE_THAT(buffer[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(0.75f, 1e-6f));
+
+    fir.reset();
+    REQUIRE(fir.order() == 0);
+    REQUIRE_THAT(fir.process(0.5f), WithinAbs(0.5f, 1e-6f));
+}
+
 // ── BallisticsFilter ─────────────────────────────────────────────────────
 
 TEST_CASE("BallisticsFilter tracks rising signal", "[signal][ballistics]") {
@@ -370,6 +387,28 @@ TEST_CASE("LookupTable buffer processing", "[signal][lookup]") {
     REQUIRE_THAT(buf[0], WithinAbs(0.0, 0.01));
     REQUIRE_THAT(buf[1], WithinAbs(1.0, 0.01));
     REQUIRE_THAT(buf[2], WithinAbs(1.0, 0.01));
+}
+
+TEST_CASE("LookupTable indexed access clamps and zero-length buffers are no-ops",
+          "[signal][lookup][issue-645]") {
+    LookupTable table(5, 0.0f, 1.0f, [](float x) { return 10.0f + x; });
+
+    REQUIRE_THAT(table[-100], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(table[0], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(table[2], WithinAbs(10.5f, 1e-6f));
+    REQUIRE_THAT(table[99], WithinAbs(11.0f, 1e-6f));
+
+    float samples[] = {-1.0f, 0.5f, 2.0f};
+    table.process(samples, 0);
+    table.process(samples, -3);
+    REQUIRE_THAT(samples[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(2.0f, 1e-6f));
+
+    table.process(samples, 3);
+    REQUIRE_THAT(samples[0], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(10.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(11.0f, 1e-6f));
 }
 
 // ── TptFilter ────────────────────────────────────────────────────────────
