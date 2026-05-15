@@ -4,6 +4,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -178,6 +179,206 @@ TEST_CASE("Label intrinsic_width yields zero for multi-line", "[view][widget][is
     Label ml("ZOOMABLE FILTER BANK\nWITH SUBTITLE");
     ml.set_multi_line(true);
     REQUIRE(ml.intrinsic_width() == 0);
+}
+
+TEST_CASE("Label intrinsic_height counts explicit newlines on multi_line labels",
+          "[view][widget][internal-74]") {
+    // pulp-internal #74 — Spectr's Settings modal section subtitles and
+    // any multi-line description text rendered as `<p>foo\nbar</p>` were
+    // having every line past the first clipped because Label always
+    // reported a one-line height regardless of how many `\n`-delimited
+    // lines paint() emitted. Yoga then reserved exactly one line and the
+    // parent's overflow / sibling layout truncated the rest.
+    //
+    // The fix in widgets.cpp counts `\n` and multiplies by `lh` so the
+    // intrinsic height returned to Yoga matches paint()'s line count.
+
+    // Sanity: single-line behavior is unchanged (regression guard).
+    Label single("just one line");
+    single.set_font_size(12.0f);
+    const float lh_single = 12.0f * 1.4f;
+    REQUIRE_THAT(single.intrinsic_height(), WithinAbs(lh_single, 0.01f));
+
+    // Multi-line label with no newlines and no width — still a single
+    // line until a soft-wrap path actually wraps (handled separately by
+    // measured_height(available_width) below).
+    Label ml_short("just one line");
+    ml_short.set_multi_line(true);
+    ml_short.set_font_size(12.0f);
+    REQUIRE_THAT(ml_short.intrinsic_height(), WithinAbs(lh_single, 0.01f));
+
+    // Two explicit lines.
+    Label two("line one\nline two");
+    two.set_multi_line(true);
+    two.set_font_size(12.0f);
+    REQUIRE_THAT(two.intrinsic_height(), WithinAbs(lh_single * 2.0f, 0.01f));
+
+    // Three explicit lines — generalizes to N.
+    Label three("Smooths transitions between filter states.\n"
+                "Reduces clicks and zipper noise during automation.\n"
+                "Adjustable per modulation source.");
+    three.set_multi_line(true);
+    three.set_font_size(13.0f);
+    const float lh_13 = 13.0f * 1.4f;
+    REQUIRE_THAT(three.intrinsic_height(), WithinAbs(lh_13 * 3.0f, 0.01f));
+
+    // Explicit line_height beats font_size * 1.4 default — multi-line
+    // count still multiplies through.
+    Label four("a\nb\nc\nd");
+    four.set_multi_line(true);
+    four.set_font_size(12.0f);
+    four.set_line_height(20.0f);
+    REQUIRE_THAT(four.intrinsic_height(), WithinAbs(20.0f * 4.0f, 0.01f));
+
+    // multi_line=false keeps the legacy one-line height even when the
+    // text contains `\n` (single-line paint draws the whole string in
+    // one fill_text call — the count must reflect that contract).
+    Label single_with_newlines("hidden\nnewlines");
+    single_with_newlines.set_multi_line(false);
+    single_with_newlines.set_font_size(12.0f);
+    REQUIRE_THAT(single_with_newlines.intrinsic_height(), WithinAbs(lh_single, 0.01f));
+}
+
+TEST_CASE("Label intrinsic_height ignores a trailing newline (no phantom line)",
+          "[view][widget][internal-74][issue-1969]") {
+    // PR #1969 Codex P2 — a string ending with `\n` used to count an
+    // extra line in the `\n`-count loop ("Title\n" → 2). But
+    // Label::paint()'s split-and-emit loop stops once `pos ==
+    // display_text.size()`, so it draws exactly one line. Yoga was
+    // reserving phantom whitespace that the paint pass never filled,
+    // breaking vertical centering / sibling layout. Mirrors CSS
+    // `white-space: pre` line-box counting (a trailing `\n` is the end
+    // of a paragraph, not the start of a new empty line).
+    const float fs = 12.0f;
+    const float lh = fs * 1.4f;
+
+    // "Title\n" — counts as ONE line, not two.
+    Label trailing("Title\n");
+    trailing.set_multi_line(true);
+    trailing.set_font_size(fs);
+    REQUIRE_THAT(trailing.intrinsic_height(), WithinAbs(lh, 0.01f));
+
+    // "Title\nSubtitle" — no trailing `\n`, two real lines.
+    Label two_real("Title\nSubtitle");
+    two_real.set_multi_line(true);
+    two_real.set_font_size(fs);
+    REQUIRE_THAT(two_real.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // "Title\nSubtitle\n" — two visible lines, trailing `\n` shaves
+    // the phantom third.
+    Label two_with_trailing("Title\nSubtitle\n");
+    two_with_trailing.set_multi_line(true);
+    two_with_trailing.set_font_size(fs);
+    REQUIRE_THAT(two_with_trailing.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // Just a single `\n` — empty content, one (empty) line reserved.
+    // We don't try to claim height 0; an empty line still occupies
+    // one line-height of vertical space in CSS block-flow semantics.
+    Label only_newline("\n");
+    only_newline.set_multi_line(true);
+    only_newline.set_font_size(fs);
+    REQUIRE_THAT(only_newline.intrinsic_height(), WithinAbs(lh, 0.01f));
+
+    // "\nFoo" — leading `\n` keeps both lines (the leading newline
+    // is a real empty line; only TRAILING is dropped).
+    Label leading_newline("\nFoo");
+    leading_newline.set_multi_line(true);
+    leading_newline.set_font_size(fs);
+    REQUIRE_THAT(leading_newline.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // Trailing-newline shave interacts correctly with line_clamp: the
+    // count is shaved BEFORE clamp comparison, so a clamp of 2 on
+    // "a\nb\n" still gives 2 lines (not clamped from a phantom 3).
+    Label clamped_trailing("a\nb\n");
+    clamped_trailing.set_multi_line(true);
+    clamped_trailing.set_font_size(fs);
+    clamped_trailing.set_line_clamp(2);
+    REQUIRE_THAT(clamped_trailing.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+}
+
+TEST_CASE("Label intrinsic_height honors line_clamp on multi_line labels",
+          "[view][widget][internal-74][issue-1552]") {
+    // pulp-internal #74 + pulp #1552 — when a clamp is set, paint() only
+    // emits `line_clamp_` lines, so the reserved height must match.
+    // Otherwise Yoga reserves space for lines that will never be drawn
+    // and the surrounding flex layout has dead vertical whitespace.
+    Label clamped("a\nb\nc\nd\ne");
+    clamped.set_multi_line(true);
+    clamped.set_font_size(12.0f);
+    clamped.set_line_clamp(2);
+    const float lh = 12.0f * 1.4f;
+    REQUIRE_THAT(clamped.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+
+    // line_clamp_ == 0 disables clamping — all source lines counted.
+    Label unclamped("a\nb\nc\nd\ne");
+    unclamped.set_multi_line(true);
+    unclamped.set_font_size(12.0f);
+    unclamped.set_line_clamp(0);
+    REQUIRE_THAT(unclamped.intrinsic_height(), WithinAbs(lh * 5.0f, 0.01f));
+
+    // line_clamp_ >= source line count is effectively no clamp.
+    Label looseclamp("a\nb");
+    looseclamp.set_multi_line(true);
+    looseclamp.set_font_size(12.0f);
+    looseclamp.set_line_clamp(99);
+    REQUIRE_THAT(looseclamp.intrinsic_height(), WithinAbs(lh * 2.0f, 0.01f));
+}
+
+TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width",
+          "[view][widget][internal-74]") {
+    // pulp-internal #74 — Spectr's Settings-modal subtitle paragraphs
+    // (and the equivalent SNAPSHOT-style chrome) live inside flex parents
+    // with a fixed/computed width. The bridge does NOT inject `\n` into
+    // a description like `"How bands and colors render in the analyzer
+    // panel."` — instead the Label is multi_line, the parent gives it a
+    // width, and paint()'s shaped-wrap loop emits 2–3 lines. Until this
+    // PR, intrinsic_height() returned ONE line, so Yoga clipped lines 2+.
+    //
+    // measured_height(available_width) consults the same shaper paint()
+    // uses, so the line count returned to Yoga matches the line count
+    // actually drawn.
+
+    const std::string long_text =
+        "Smooths transitions between filter states. Reduces clicks "
+        "and zipper noise during automation by interpolating the "
+        "filter coefficients between two snapshots in real time.";
+    Label desc(long_text);
+    desc.set_multi_line(true);
+    desc.set_font_size(13.0f);
+    const float lh = 13.0f * 1.4f;
+
+    // Very wide: the text fits on one line → measured height collapses
+    // to one line (= ceil(lh), since the shaper path ceils to a sub-
+    // pixel-safe integer).
+    REQUIRE_THAT(desc.measured_height(10000.0f), WithinAbs(std::ceil(lh), 0.5f));
+
+    // Bounded narrow width forces wrap to several lines — measured
+    // height must reflect 2+ lines, never just one.
+    float narrow_h = desc.measured_height(220.0f);
+    REQUIRE(narrow_h >= lh * 2.0f);
+    REQUIRE(narrow_h <= lh * 10.0f);  // sanity: bounded above
+
+    // Tighter width → at least as many lines as the wider case.
+    float tighter_h = desc.measured_height(140.0f);
+    REQUIRE(tighter_h >= narrow_h);
+
+    // available_width <= 0 falls back to intrinsic_height() — measure
+    // callback gives 0 when Yoga has no constraint yet, and the caller
+    // would otherwise feed garbage to the shaper.
+    REQUIRE_THAT(desc.measured_height(0.0f),  WithinAbs(lh, 0.01f));
+    REQUIRE_THAT(desc.measured_height(-1.0f), WithinAbs(lh, 0.01f));
+
+    // Single-line label: measured_height matches intrinsic_height
+    // regardless of width — the multi_line gate keeps the shaper path
+    // off so single-line widgets pay no extra cost.
+    Label snap("SNAPSHOT");
+    snap.set_font_size(10.0f);
+    // pulp-internal #76: small fonts (<12pt) use the 1.6 line-height
+    // multiplier so glyphs don't clip in compact toolbars; the measure
+    // path mirrors that to keep Yoga reservation in sync with paint.
+    const float snap_lh = 10.0f * 1.6f;
+    REQUIRE_THAT(snap.measured_height(50.0f),    WithinAbs(snap_lh, 0.01f));
+    REQUIRE_THAT(snap.measured_height(10000.0f), WithinAbs(snap_lh, 0.01f));
 }
 
 TEST_CASE("Label intrinsic_width is sane for typical chrome strings",

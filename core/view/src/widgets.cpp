@@ -262,7 +262,119 @@ float Label::intrinsic_height() const {
     // ~12pt buys 16px of box room for fs=10, fully containing the glyph
     // extent. Larger sizes keep 1.4 — they have plenty of absolute slack.
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
-    return line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
+    const float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
+
+    // pulp-internal #74 — when the Label is multi_line, the reserved
+    // height must reflect the number of lines paint() will emit, not a
+    // hard-coded one-line metric. Otherwise Yoga reserves only `lh` of
+    // vertical room and the parent (overflow:hidden on the toolbar / row
+    // gap on Settings-modal section subtitles) clips every line after
+    // the first. Spectr's Settings-modal description paragraphs are the
+    // motivating case.
+    //
+    // The \n count is the lower bound here. Soft-wrap (no \n but text
+    // exceeds the available width) needs the width Yoga passes to the
+    // measure callback — see `measured_height(available_width)` below.
+    //
+    // Single-line labels (multi_line_ == false) keep the legacy one-line
+    // return so single-line widths/heights match exactly what paint()
+    // computes for `text_h = effective_font_size` (the contract every
+    // existing test depends on).
+    if (multi_line_ && !text_.empty()) {
+        int line_count = 1;
+        for (char c : text_) {
+            if (c == '\n') ++line_count;
+        }
+        // pulp #1969 Codex P2 — don't reserve a phantom line for a trailing
+        // newline. Label::paint()'s `\n`-split loop emits one line per
+        // *non-trailing* `\n` plus the final segment, so `"Title\n"` paints
+        // exactly one visible line. If we keep the naive `\n`-count + 1
+        // here, Yoga reserves extra vertical whitespace that paint never
+        // fills, breaking CSS-style vertical-align centering and shifting
+        // siblings down. Matches the line-box counting CSS uses for
+        // `white-space: pre`.
+        if (text_.back() == '\n') --line_count;
+        // Honor line-clamp if explicitly set — paint() will only emit
+        // `line_clamp_` lines, so reserving more height is wasteful and
+        // confuses CSS vertical-align centering.
+        if (line_clamp_ > 0 && line_clamp_ < line_count)
+            line_count = line_clamp_;
+        return lh * static_cast<float>(line_count);
+    }
+    return lh;
+}
+
+float Label::measured_height(float available_width) const {
+    // pulp-internal #74 — width-aware height for multi_line Labels with
+    // soft-wrap. The Yoga measure callback receives the available width
+    // during layout, which is the only place we can run the shaper to
+    // figure out how many lines a soft-wrap block will actually produce.
+    // Without this hook, Yoga reserves exactly one line `lh` and any
+    // wrapped line past the first paints into sibling territory and is
+    // visually clipped (Spectr Settings modal section subtitles, any
+    // dropdown label, any flex-row chrome that uses bounded-width
+    // multi-line text).
+    //
+    // Contract:
+    //   • single-line labels                 → intrinsic_height() (legacy).
+    //   • multi-line + zero/unbounded width  → intrinsic_height() (\n only).
+    //   • multi-line + finite width          → shaper line count * lh.
+    //
+    // The shaper itself is the same one paint() uses, so the count we
+    // return here matches what paint() draws — no off-by-one, no
+    // double-shape penalty (TextShaper::prepare() caches per
+    // (text, family, size); paint will hit the same cache entry).
+    if (!multi_line_ || text_.empty() || available_width <= 0.0f)
+        return intrinsic_height();
+
+    float effective_font_size = font_size_;
+    if (!has_own_font_size_) {
+        if (auto inh = inheritable_font_size(); inh.has_value())
+            effective_font_size = inh.value();
+    }
+    // Match intrinsic_height's small-font multiplier (pulp-internal #76)
+    // so the measured line height is consistent with what paint() draws.
+    const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
+    const float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
+
+    // Mirror paint()'s text-transform — the line count for an
+    // ALL-CAPS-via-text-transform string can differ from the source
+    // string's because uppercase advances are typically wider.
+    std::string display_text = text_;
+    if (text_transform_ == TextTransform::uppercase) {
+        for (auto& ch : display_text)
+            ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::lowercase) {
+        for (auto& ch : display_text)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::capitalize) {
+        bool cap_next = true;
+        for (auto& ch : display_text) {
+            if (cap_next && std::isalpha(static_cast<unsigned char>(ch))) {
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                cap_next = false;
+            }
+            if (ch == ' ') cap_next = true;
+        }
+    }
+
+    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    auto& shaper = canvas::global_text_shaper();
+    auto prepared = shaper.prepare(display_text, family, effective_font_size);
+
+    // Use the same break_mode pulp paint uses (CSS word-break / overflow-
+    // wrap; Label paint reads `View::word_break()` at draw time, the
+    // measure path mirrors that decision).
+    const std::string wb = word_break();
+    canvas::BreakMode break_mode = canvas::BreakMode::normal;
+    if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
+    else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
+    auto layout = shaper.layout(prepared, available_width, lh, /*max_lines=*/0, break_mode);
+
+    int line_count = std::max(1, layout.line_count);
+    if (line_clamp_ > 0 && line_clamp_ < line_count)
+        line_count = line_clamp_;
+    return std::ceil(lh * static_cast<float>(line_count));
 }
 
 float Label::intrinsic_width() const {
@@ -512,11 +624,20 @@ void Label::paint(canvas::Canvas& canvas) {
     // pulp #1737 PR-2 — `source_lines` for the soft-wrap path is the
     // shaped layout's line count (which already accounts for inside-word
     // breaks). For the legacy path it stays count('\n') + 1.
+    //
+    // pulp #1969 Codex P2 — drop a trailing newline before counting in the
+    // legacy path. The split-and-emit loop below stops once `pos ==
+    // display_text.size()`, so a trailing `\n` doesn't actually paint an
+    // extra line — but feeding the inflated count into `text_h` would
+    // mis-position vertical-align: center/bottom. The shaper path doesn't
+    // need a fix here because shaped_layout.line_count is the count the
+    // shaper actually produced.
     int source_lines = multi_line_
         ? (use_shaper_wrap
                ? std::max(1, shaped_layout.line_count)
                : static_cast<int>(std::count(display_text.begin(),
-                                             display_text.end(), '\n')) + 1)
+                                             display_text.end(), '\n')) + 1
+                 - (!display_text.empty() && display_text.back() == '\n' ? 1 : 0))
         : 1;
     int visible_lines = source_lines;
     if (multi_line_ && line_clamp_ > 0 && line_clamp_ < source_lines)

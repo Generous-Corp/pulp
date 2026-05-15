@@ -135,7 +135,21 @@ public:
     /// Intrinsic height based on font size and line height.
     /// issue-969: walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.
+    /// pulp-internal #74: returns lh × (newline-count + 1) for
+    /// multi_line labels so Yoga reserves space for every explicit
+    /// `\n`-delimited line. Soft-wrap (multi_line + bounded width) is
+    /// handled by the width-aware `measured_height()` overload below.
     float intrinsic_height() const override;
+
+    /// Width-aware height: shaper-true line count × line-height for a
+    /// multi_line Label given the parent's available content width.
+    /// pulp-internal #74 — invoked by the Yoga measure callback when a
+    /// multi-line Label is laid out in a bounded-width parent (CSS
+    /// `flex: 1`, `width: 100%`, fixed-width section subtitles). Falls
+    /// back to `intrinsic_height()` when `multi_line_` is false or
+    /// `available_width <= 0`, so single-line labels and unbounded
+    /// containers keep the legacy one-line metric.
+    float measured_height(float available_width) const;
 
 private:
     std::string text_;

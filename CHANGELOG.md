@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0980"></a>
+## [0.99.0]
+
 ## [0.98.0] - 2026-05-14
 
 - feat(import): add Pencil React export parser (Phase 6.6.6) ([#1964](https://github.com/danielraffel/pulp/pull/1964))

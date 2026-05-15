@@ -4,6 +4,7 @@
 #ifdef PULP_HAS_YOGA
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
 #include <yoga/Yoga.h>
 #include <vector>
 #include <algorithm>
@@ -395,6 +396,20 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     float w = view->intrinsic_width();
     float h = view->intrinsic_height();
     if (w <= 0) w = width;
+
+    // pulp-internal #74 — Label-specific width-aware height. When a
+    // multi-line Label is laid out in a bounded-width parent, the
+    // intrinsic (\n-counted) height is a lower bound that misses
+    // soft-wrap line additions. `measured_height(width)` consults the
+    // TextShaper to count actual wrapped lines and returns the true
+    // painted block height so Yoga reserves enough room for every line.
+    // For single-line labels (multi_line_ == false), measured_height()
+    // returns the same `intrinsic_height()` value — no behavior change.
+    if (auto* label = dynamic_cast<Label*>(view)) {
+        float wrapped = label->measured_height(w);
+        if (wrapped > h) h = wrapped;
+    }
+
     if (h <= 0) h = height;
     return {w, h};
 }
