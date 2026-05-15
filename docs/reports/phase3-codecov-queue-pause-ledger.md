@@ -3716,3 +3716,35 @@ mode|clear keeps closed|TcpStream closed|HttpStream invalid)"
 GitHub-hosted PR workflow only; no Namespace dispatch and no SSH targets.
 Resume action: monitor #2032 required checks and merge directly when
 green.
+
+2026-05-15 01:48 PDT: created the #640/#641 runtime/platform primitives
+batch `feature/phase3-runtime-platform-primitives-batch-641` at
+`8644004`, PR #2033, from current `origin/main` `a29cb7dc`. It adds
+test-only coverage in `test/test_runtime_utils.cpp`,
+`test/test_runtime.cpp`, and `test/test_environment.cpp` for
+MemoryMappedFile ReadWrite persistence and failure reset, InterProcessLock
+idempotent unlock/reacquire, explicit byte-pointer base64 encoding and
+quartet decoding, repeated-line text diff stability, range boundary
+intersection behavior, SpscQueue slot reuse after wrap-around, the
+`PULP_ON_SCOPE_EXIT` macro, SafeAreaInsets zero detection, and idempotent
+Environment token reset behavior. Local macOS validation passed: configure
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF
+-DPULP_BUILD_EXAMPLES=OFF`, build `cmake --build build --target
+pulp-test-runtime-utils pulp-test-runtime pulp-test-environment
+-j$(sysctl -n hw.ncpu)`, focused `./build/test/pulp-test-runtime-utils
+"[coverage][issue-641]" -r compact` passing 61 assertions in 9 cases,
+focused `./build/test/pulp-test-runtime "[coverage][issue-641]" -r
+compact` passing 50 assertions in 2 cases, focused
+`./build/test/pulp-test-environment "[coverage][issue-640]" -r compact`
+passing 11 assertions in 2 cases, full `pulp-test-runtime-utils` passing
+175 assertions in 43 cases, full `pulp-test-runtime` passing 127
+assertions in 17 cases, full `pulp-test-environment` passing 100
+assertions in 20 cases, exact `ctest --test-dir build -R
+"(MemoryMappedFile ReadWrite|MemoryMappedFile open failure|InterProcessLock
+unlock|base64 handles explicit|text_diff keeps repeated|Range
+boundary|SpscQueue reuses|PULP_ON_SCOPE_EXIT|SafeAreaInsets zero|token
+reset is idempotent)" --output-on-failure` passing 10/10, `git diff
+--check`, and `./tools/check-docs.sh` passed with existing warnings.
+Branch pushed with GitHub-hosted PR workflow only; no Namespace dispatch
+and no SSH targets. Resume action: monitor #2033 required checks and
+merge directly when green.
