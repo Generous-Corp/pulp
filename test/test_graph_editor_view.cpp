@@ -32,6 +32,14 @@ MouseEvent modifier_event(uint16_t modifiers) {
     return event;
 }
 
+bool has_text(const RecordingCanvas& canvas, const std::string& text) {
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text && cmd.text == text)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("GraphEditorView paints graph nodes connections and drag ghost",
@@ -122,6 +130,35 @@ TEST_CASE("GraphEditorView modifier drags create feedback and midi edges",
     REQUIRE_FALSE(midi_graph.connections()[0].feedback);
 }
 
+TEST_CASE("GraphEditorView reverse modifier drags create feedback and midi edges",
+          "[view][graph_editor][coverage][issue-655]") {
+    SignalGraph feedback_graph;
+    const auto feedback_input = feedback_graph.add_input_node(1, "Input");
+    const auto feedback_output = feedback_graph.add_output_node(1, "Output");
+    GraphEditorView feedback(feedback_graph);
+    feedback.set_node_position(feedback_input, 10.0f, 10.0f);
+    feedback.set_node_position(feedback_output, 240.0f, 10.0f);
+
+    feedback.on_mouse_down(input_port(240.0f));
+    feedback.on_mouse_event(modifier_event(kModShift));
+    feedback.on_mouse_up(output_port(10.0f));
+    REQUIRE(feedback_graph.connections().size() == 1);
+    REQUIRE(feedback_graph.connections()[0].feedback);
+
+    SignalGraph midi_graph;
+    const auto midi_in = midi_graph.add_midi_input_node("Keys");
+    const auto midi_out = midi_graph.add_midi_output_node("Sink");
+    GraphEditorView midi(midi_graph);
+    midi.set_node_position(midi_in, 10.0f, 10.0f);
+    midi.set_node_position(midi_out, 240.0f, 10.0f);
+
+    midi.on_mouse_down(input_port(240.0f));
+    midi.on_mouse_event(modifier_event(kModAlt));
+    midi.on_mouse_up(output_port(10.0f));
+    REQUIRE(midi_graph.connections().size() == 1);
+    REQUIRE(midi_graph.connections()[0].midi);
+}
+
 TEST_CASE("GraphEditorView selection and miss handling are stable",
           "[view][graph_editor][issue-493]") {
     SignalGraph graph;
@@ -141,4 +178,32 @@ TEST_CASE("GraphEditorView selection and miss handling are stable",
     editor.on_mouse_drag({1000.0f, 1000.0f});
     editor.on_mouse_up({1000.0f, 1000.0f});
     REQUIRE(graph.connections().empty());
+}
+
+TEST_CASE("GraphEditorView paints unnamed nodes and clears drag ghost after miss",
+          "[view][graph_editor][coverage][issue-655]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "");
+    const auto output = graph.add_output_node(1, "Output");
+
+    GraphEditorView editor(graph);
+    editor.set_node_position(input, 10.0f, 10.0f);
+    editor.set_node_position(output, 240.0f, 10.0f);
+
+    RecordingCanvas initial;
+    editor.paint(initial);
+    REQUIRE(has_text(initial, "(unnamed)"));
+
+    editor.on_mouse_down(output_port(10.0f));
+    editor.on_mouse_drag({180.0f, 90.0f});
+    RecordingCanvas dragging;
+    editor.paint(dragging);
+    REQUIRE(dragging.count(DrawCommand::Type::cubic_to) == 1);
+
+    editor.on_mouse_up({900.0f, 900.0f});
+    REQUIRE(graph.connections().empty());
+
+    RecordingCanvas released;
+    editor.paint(released);
+    REQUIRE(released.count(DrawCommand::Type::cubic_to) == 0);
 }

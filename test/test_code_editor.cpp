@@ -94,6 +94,20 @@ TEST_CASE("CodeEditor insert text", "[gui][code-editor]") {
     REQUIRE(editor.text() == "hello world");
 }
 
+TEST_CASE("CodeEditor insert appends in read-only fallback mode",
+          "[gui][code-editor][coverage][issue-655]") {
+    CodeEditor editor;
+    editor.set_read_only(true);
+    editor.set_text("alpha");
+    editor.insert_text("\nbeta");
+    editor.go_to_line(99);
+
+    REQUIRE(editor.text() == "alpha\nbeta");
+    REQUIRE(editor.cursor_line() == 99);
+    REQUIRE(editor.cursor_column() == 1);
+    REQUIRE(editor.selected_text().empty());
+}
+
 TEST_CASE("CodeEditor go to line", "[gui][code-editor]") {
     CodeEditor editor;
     editor.set_text("line1\nline2\nline3");
@@ -258,4 +272,26 @@ TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",
     REQUIRE(reloaded.files()[1] == "/saved/a.txt");
 
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("RecentlyOpenedFilesList remove and max-entry edge paths",
+          "[gui][code-editor][coverage][issue-655]") {
+    RecentlyOpenedFilesList mru;
+    mru.add("/a.txt");
+    mru.add("/b.txt");
+    mru.add("/c.txt");
+
+    mru.remove("/b.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/c.txt");
+    REQUIRE(mru.files()[1] == "/a.txt");
+
+    mru.remove("/missing.txt");
+    REQUIRE(mru.files().size() == 2);
+
+    mru.set_max_entries(0);
+    REQUIRE(mru.files().empty());
+
+    mru.add("/d.txt");
+    REQUIRE(mru.files().empty());
 }
