@@ -4842,3 +4842,23 @@ hw.ncpu)`; `ctest --test-dir build --output-on-failure -R
 accumulates more runtime/audio coverage into a larger GitHub-hosted batch PR.
 The current PR queue sweep showed #2048, #2049, #2050, #2051, and #2097
 with no failing check-runs; several required checks are still pending.
+
+2026-05-15 16:21 PDT: extended the same held local runtime/audio batch to
+three commits ahead of `origin/main`, current head `e0bc4ca4d`
+(`test(runtime): cover message callback clearing`). New commits after the
+initial runtime utility slice are `2074e68e3` (`test(runtime): cover json
+rpc protocol edges`) and `e0bc4ca4d`. The JSON-RPC slice covers string
+request-id response preservation, omitted-params dispatch as an empty
+params payload, and failed notification sends. The message-channel slice
+covers clearing a previously installed in-memory message callback.
+
+Validation for the accumulated held batch passed locally:
+`cmake --build build --target pulp-test-runtime-utils pulp-test-json-rpc
+pulp-test-memory-message-channel -j$(sysctl -n hw.ncpu)`;
+`ctest --test-dir build --output-on-failure -R
+"PULP_ON_SCOPE_EXIT|TemporaryFile|ScopeGuard|JsonRpcPeer|MemoryMessageChannel"`
+with 25/25 tests passing; and `git diff --check`. The branch remains
+local-only so it can keep accumulating into one larger GitHub-hosted CI
+batch. REST queue sweep after validation showed #2048, #2049, #2050,
+#2051, and #2097 still with no failing check-runs; #2048/#2051 each had
+one fewer pending check than the prior sweep.
