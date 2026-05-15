@@ -109,6 +109,9 @@ public:
     NodeId add_input_node(int channels, const std::string& name = "Input");
     NodeId add_output_node(int channels, const std::string& name = "Output");
     NodeId add_plugin_node(const PluginInfo& info);
+    NodeId add_unresolved_plugin_node(const PluginInfo& info,
+                                      int num_inputs, int num_outputs,
+                                      const std::string& name);
 
     // Add a plugin node wrapping a caller-provided slot. Useful for tests
     // (mock latency, mock processing) and for hosts that build their own

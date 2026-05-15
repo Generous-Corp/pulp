@@ -253,7 +253,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                             std::string(format_str(info.format)) + ":" + info.unique_id);
                         // Still create a placeholder Plugin node with no slot so
                         // connection IDs remain stable.
-                        new_id = graph.add_plugin_node(info);
+                        new_id = graph.add_unresolved_plugin_node(info, in_ch, out_ch, name);
                     } else {
                         if (pv.hasObjectMember("state_b64")) {
                             auto blob = b64_decode(pv["state_b64"].getString());

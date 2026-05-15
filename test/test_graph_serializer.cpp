@@ -474,6 +474,52 @@ TEST_CASE("GraphSerializer preserves unresolved plugin identity when reserializi
     REQUIRE(second_json.find("\"state_b64\"") == std::string::npos);
 }
 
+TEST_CASE("GraphSerializer preserves unresolved plugin display name",
+          "[host][serializer][issue-493]") {
+    const auto json = R"({
+      "format_version": 1,
+      "nodes": [
+        {
+          "id": 7,
+          "type": "plugin",
+          "name": "User Label",
+          "num_input_ports": 1,
+          "num_output_ports": 1,
+          "plugin": {
+            "format": "clap",
+            "unique_id": "pulp.test.renamed.missing",
+            "name": "Plugin Metadata Name",
+            "manufacturer": "PulpTest",
+            "version": "1.0.0",
+            "last_path": "/nonexistent/Plugin Metadata Name.clap"
+          }
+        }
+      ],
+      "connections": []
+    })";
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.renamed.missing"));
+    REQUIRE(dst.nodes().size() == 1);
+
+    const auto& node = dst.nodes().front();
+    REQUIRE(node.type == NodeType::Plugin);
+    REQUIRE(node.plugin == nullptr);
+    REQUIRE(node.name == "User Label");
+    REQUIRE(node.plugin_info.name == "Plugin Metadata Name");
+    REQUIRE(node.plugin_info.unique_id == "pulp.test.renamed.missing");
+
+    const auto second_json = GraphSerializer::to_json(dst);
+    REQUIRE(second_json.find("\"name\": \"User Label\"") != std::string::npos);
+    REQUIRE(second_json.find("\"name\": \"Plugin Metadata Name\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"unique_id\": \"pulp.test.renamed.missing\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"state_b64\"") == std::string::npos);
+}
+
 TEST_CASE("GraphSerializer clears partially loaded graphs after plugin field errors",
           "[host][serializer][issue-493]") {
     SignalGraph dst;
