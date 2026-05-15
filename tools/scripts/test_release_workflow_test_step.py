@@ -211,6 +211,7 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn("tools/scripts/package_cli.py", run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
+        self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/pulp-mcp")
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
 
     def test_windows_package_step_bundles_cpp_delegate(self) -> None:
@@ -218,19 +219,27 @@ class ReleaseCliDualBinaryPackaging(unittest.TestCase):
         self.assertIn("tools/scripts/package_cli.py", run_block)
         self.assertRegex(run_block, r"--binary\s+build/pulp\.exe")
         self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/Release/pulp-cpp\.exe")
+        self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
         self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
 
-    def test_unix_smoke_step_exercises_both_cli_binaries(self) -> None:
-        run_block = self._find_step_run("Smoke `pulp help` + `pulp-cpp help` (Unix)")
-        self.assertRegex(run_block, r"for\s+ART\s+in\s+pulp\s+pulp-cpp")
-        self.assertIn('"$BIN" help', run_block)
+    def test_unix_smoke_step_exercises_all_cli_binaries(self) -> None:
+        run_block = self._find_step_run(
+            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)"
+        )
+        self.assertRegex(run_block, r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp")
+        self.assertIn('pulp-mcp) echo "--version"', run_block)
+        self.assertIn('"$BIN" $CMD', run_block)
         self.assertIn("Library not loaded", run_block)
         self.assertIn("cannot open shared object", run_block)
 
-    def test_windows_smoke_step_exercises_both_cli_binaries(self) -> None:
-        run_block = self._find_step_run("Smoke `pulp help` + `pulp-cpp help` (Windows)")
-        self.assertIn('@("pulp.exe", "pulp-cpp.exe")', run_block)
-        self.assertIn('-ArgumentList "help"', run_block)
+    def test_windows_smoke_step_exercises_all_cli_binaries(self) -> None:
+        run_block = self._find_step_run(
+            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)"
+        )
+        self.assertIn('"pulp.exe"      = "help"', run_block)
+        self.assertIn('"pulp-cpp.exe"  = "help"', run_block)
+        self.assertIn('"pulp-mcp.exe"  = "--version"', run_block)
+        self.assertIn("-ArgumentList $cmd", run_block)
         self.assertIn("DLL was not found", run_block)
         self.assertIn("missing.*\\.dll", run_block)
 

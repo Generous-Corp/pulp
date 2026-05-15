@@ -381,6 +381,52 @@ class MainExtraTests(unittest.TestCase):
                     ["libwgpu_native.so", "pulp", "pulp-cpp"],
                 )
 
+    def test_main_rewrites_linux_rpath_for_mcp_binary_too(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            binary = root / "pulp-built"
+            cpp_binary = root / "pulp-cpp-built"
+            mcp_binary = root / "pulp-mcp-built"
+            wgpu = root / "libwgpu_native.so"
+            binary.write_text("binary", encoding="utf-8")
+            cpp_binary.write_text("cpp", encoding="utf-8")
+            mcp_binary.write_text("mcp", encoding="utf-8")
+            wgpu.write_text("wgpu", encoding="utf-8")
+            out = root / "pulp-linux-x64.tar.gz"
+
+            with mock.patch.object(pc, "find_wgpu_lib", return_value=wgpu):
+                with mock.patch.object(pc, "fix_rpath_linux") as fix_rpath:
+                    with argv(
+                        [
+                            "package_cli.py",
+                            "--binary",
+                            str(binary),
+                            "--cpp-binary",
+                            str(cpp_binary),
+                            "--mcp-binary",
+                            str(mcp_binary),
+                            "--build-dir",
+                            str(root / "build"),
+                            "--platform",
+                            "linux-x64",
+                            "--out",
+                            str(out),
+                        ]
+                    ):
+                        rc = pc.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(fix_rpath.call_count, 3)
+            self.assertEqual(
+                [call.args[0].name for call in fix_rpath.call_args_list],
+                ["pulp", "pulp-cpp", "pulp-mcp"],
+            )
+            with tarfile.open(out, "r:gz") as tar:
+                self.assertEqual(
+                    sorted(tar.getnames()),
+                    ["libwgpu_native.so", "pulp", "pulp-cpp", "pulp-mcp"],
+                )
+
     def test_main_packages_macos_tarball_and_rewrites_rpath(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
