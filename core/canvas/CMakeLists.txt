@@ -114,6 +114,28 @@ if(PULP_HAS_SKIA)
             pkg_check_modules(FONTCONFIG IMPORTED_TARGET fontconfig)
             if(FONTCONFIG_FOUND)
                 target_link_libraries(pulp-canvas PUBLIC PkgConfig::FONTCONFIG)
+                # Force `-lfontconfig` to appear at the END of every
+                # downstream binary's link line, regardless of where
+                # CMake places the transitive PkgConfig::FONTCONFIG dep.
+                # GNU ld processes static archives left-to-right and
+                # won't re-scan to resolve `libskia.a(SkFontMgr_fontconfig.o)`'s
+                # `Fc*` references once it moves past them. The PUBLIC
+                # link above gives consumers fontconfig in the right
+                # position when only pulp::canvas is linked directly,
+                # but breaks down for transitive consumers (e.g. an
+                # executable linking only pulp::view → pulp::canvas) —
+                # those see libskia.a get pulled in before -lfontconfig
+                # appears on the line. Re-mentioning fontconfig as an
+                # INTERFACE_LINK_OPTIONS entry guarantees it tails every
+                # consumer's link, fixing the entire class of:
+                #
+                #   undefined reference to `FcGetVersion`, `FcPatternGetMatrix`,
+                #   `FcConfigSubstitute`, `FcCharSetHasChar`, etc.
+                #
+                # This obsoletes the per-target `pulp_link_fontconfig_after_skia`
+                # calls in pulp-cli / pulp-import-design / _pulp_add_standalone
+                # for new code; existing calls remain harmless redundancy.
+                target_link_options(pulp-canvas INTERFACE "-lfontconfig")
             endif()
         endif()
     # Android: Skia bundles FreeType + HarfBuzz, no system fontconfig needed
