@@ -104,12 +104,25 @@ class ExpectedLibraryPath(unittest.TestCase):
 
 
 class UnknownMatrixPlatform(unittest.TestCase):
+    def test_missing_platform_argument_returns_usage_error(self):
+        with _in_tempdir():
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = fetch_skia.main(["fetch_skia_for_release.py"])
+
+        self.assertEqual(rc, 2)
+        self.assertIn("usage:", err.getvalue())
+
     def test_returns_zero_with_warning(self):
         with _in_tempdir():
-            rc = fetch_skia.main(
-                ["fetch_skia_for_release.py", "amiga-68k"]
-            )
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "amiga-68k"]
+                )
+
         self.assertEqual(rc, 0)
+        self.assertIn("unknown matrix platform", err.getvalue())
 
 
 class ManifestValidation(unittest.TestCase):
@@ -258,6 +271,56 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             )
             self.assertTrue(expected.is_file())
             self.assertEqual(expected.read_bytes(), b"linux-skia")
+
+    def test_windows_x64_arch_subdir(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-win.zip"
+            payload = {
+                "build/win-gpu/lib/Release/x64/skia.lib": b"windows-skia",
+                "build/win-gpu/lib/Release/x64/skparagraph.lib": b"windows-para",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "win-x64"
+            )
+
+            rc = fetch_skia.main(["fetch_skia_for_release.py", "windows-x64"])
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/win-gpu/lib/Release"
+            )
+            self.assertEqual((release_dir / "skia.lib").read_bytes(), b"windows-skia")
+            self.assertEqual(
+                (release_dir / "skparagraph.lib").read_bytes(), b"windows-para"
+            )
+
+    def test_arch_subdir_does_not_clobber_existing_flat_file(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/arm64/libskia.a": b"arch-copy",
+                "build/mac-gpu/lib/Release/libdawn_combined.a": b"already-flat",
+                "build/mac-gpu/lib/Release/arm64/libdawn_combined.a": b"dawn",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/mac-gpu/lib/Release"
+            )
+            self.assertEqual((release_dir / "libskia.a").read_bytes(), b"arch-copy")
+            self.assertEqual(
+                (release_dir / "libdawn_combined.a").read_bytes(), b"already-flat"
+            )
+            self.assertTrue((release_dir / "arm64" / "libdawn_combined.a").is_file())
 
 
 class MissingLibFails(unittest.TestCase):
