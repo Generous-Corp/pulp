@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-14 23:42 PDT
+Last updated: 2026-05-15 00:16 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -162,6 +162,25 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | local format validation extra | `96b9dfd8` | `92e83b37` | superseded by #2016 | no standalone CI action |
 | local package freshness extra | `55bee1c5` | `92e83b37` | superseded by #2016 | no standalone CI action |
 | #646 SDL3 surface fallback | `d81b03cc` | `92e83b37` | superseded by #2016 | no standalone CI action |
+| #2017 view/widget wave | `8f9effa7` | `7a532c59` | open PR on `feature/phase3-view-widget-batch-493`; broad test-only GitHub-hosted wave superseding 18 local #493 view/widget tranches; local macOS target build, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
+| local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local code editor document MRU | `fef0ef6c` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local graph editor paint | `8ed9f335` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local GUI components edges | `a37626d7` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local image cache trim | `165c2357` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local input events edges | `e87e6b10` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local modal overlay edges | `67fe482e` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local param attachment edges | `4e7ab1ad` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local new widgets input | `ba19ff03` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local phase9 widget edges | `b23e4d25` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local tree view edges | `ca5267a7` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local UI components edges | `4bc91d9e` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local visualization bridge edges | `a30900b8` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local waveform editor edges | `1ea97d99` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local widgets render paths | `15ca568b` | `92e83b37` | superseded by #2017 | no standalone CI action |
+| local window manager edges | `f7da4e54` | `92e83b37` | superseded by #2017 | no standalone CI action |
 
 2026-05-14 22:58 PDT: created the larger #645 signal DSP batch
 `feature/phase3-signal-dsp-batch-645` at `3bb753ac`, PR #2014,
@@ -250,6 +269,32 @@ could not fetch the pinned Highway tree; GitHub Actions remains the
 authoritative CI gate for this PR. Resume action: monitor #2016 required
 GitHub-hosted checks and merge directly when green; do not use Namespace
 or SSH targets.
+
+2026-05-15 00:16 PDT: created the #493 view/widget coverage wave
+`feature/phase3-view-widget-batch-493` at `8f9effa7`, PR #2017, based on
+current `origin/main` `7a532c59`. The branch batches 18 local test-only
+tranches into one 17-file diff touching only test sources:
+AppearanceTracker, AudioBridge, AutoUi, CodeEditor document/MRU paths,
+GraphEditorView paint/drag paths, GUI components, ImageCache trim,
+InputEvents, ModalOverlay, ParamAttachment, Phase9 widgets, TreeView,
+UI components, VisualizationBridge, WaveformEditor, generic widgets, and
+WindowManager. Excluded source-fix, version-bump, docs/skill, and CMake
+target-creation tranches from this wave.
+
+Local macOS validation passed for #2017: configure with GPU/examples off
+and the shared MbedTLS cache, build `pulp-test-appearance`,
+`pulp-test-audio-bridge`, `pulp-test-auto-ui`, `pulp-test-code-editor`,
+`pulp-test-graph-editor-view`, `pulp-test-gui-components`,
+`pulp-test-image-cache`, `pulp-test-input-events`, `pulp-test-modal`,
+`pulp-test-param-attachment`, `pulp-test-phase9-widgets`,
+`pulp-test-tree-view`, `pulp-test-ui-components`,
+`pulp-test-visualization`, `pulp-test-waveform-editor`,
+`pulp-test-widgets`, and `pulp-test-window-manager`, then run all 17
+touched binaries fully with `-r compact`. `git diff --check`,
+skill-sync, version-bump, docs-sync, and compat-sync reports passed.
+Branch push pre-push gates passed without demotion. Resume action:
+monitor #2017 required GitHub-hosted checks and merge directly when
+green; do not use Namespace or SSH targets.
 
 ## Snapshot Summary
 
