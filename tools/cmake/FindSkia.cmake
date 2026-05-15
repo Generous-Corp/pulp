@@ -137,6 +137,22 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
     set(SKIA_LIBRARIES ${_skia_all_libs})
 
+    # Skia chrome/m144 split SkUnicode into libskunicode_core.a (definitions)
+    # and libskunicode_icu.a (uses core symbols). file(GLOB) returns
+    # alphabetical order, so core comes first. With GNU ld's single-pass
+    # static-archive resolution, the back-references from icu → core go
+    # unresolved and the link fails with hundreds of
+    #   undefined reference to `SkUnicode::convertUtf8ToUtf16(...)`
+    # entries. Apple's ld handles back-references natively and MSVC's link
+    # treats all libraries as one group, so this only bites Linux + Android.
+    # Wrap the archive list in --start-group/--end-group on those platforms
+    # to force the linker to keep re-scanning until all symbols are
+    # resolved.
+    if(SKIA_LIBRARIES AND (UNIX AND NOT APPLE))
+        set(SKIA_LIBRARIES
+            "-Wl,--start-group" ${SKIA_LIBRARIES} "-Wl,--end-group")
+    endif()
+
     # Create imported interface target that links everything
     if(NOT TARGET skia::skia)
         add_library(skia::skia INTERFACE IMPORTED)
