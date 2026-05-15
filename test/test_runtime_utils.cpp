@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/runtime/memory_mapped_file.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
@@ -46,6 +47,47 @@ TEST_CASE("TemporaryFile move semantics", "[runtime][temp_file]") {
     REQUIRE(std::filesystem::exists(path));
 }
 
+TEST_CASE("TemporaryFile normalizes extensions without leading dots",
+          "[runtime][temp_file][issue-641]") {
+    TemporaryFile tmp("raw");
+    REQUIRE(tmp.path().extension() == ".raw");
+    REQUIRE(std::filesystem::exists(tmp.path()));
+}
+
+TEST_CASE("TemporaryFile move assignment removes the previous active file",
+          "[runtime][temp_file][issue-641]") {
+    std::filesystem::path old_path;
+    std::filesystem::path new_path;
+    {
+        TemporaryFile old_file(".old");
+        TemporaryFile new_file(".new");
+        old_path = old_file.path();
+        new_path = new_file.path();
+
+        old_file = std::move(new_file);
+        REQUIRE(old_file.path() == new_path);
+        REQUIRE_FALSE(std::filesystem::exists(old_path));
+        REQUIRE(std::filesystem::exists(new_path));
+    }
+
+    REQUIRE_FALSE(std::filesystem::exists(new_path));
+}
+
+TEST_CASE("TemporaryFile self move assignment preserves ownership",
+          "[runtime][temp_file][issue-641]") {
+    std::filesystem::path path;
+    {
+        TemporaryFile tmp(".self");
+        path = tmp.path();
+        auto& ref = tmp;
+        tmp = std::move(ref);
+        REQUIRE(tmp.path() == path);
+        REQUIRE(std::filesystem::exists(path));
+    }
+
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 // ── MemoryMappedFile ────────────────────────────────────────────────────
 
 TEST_CASE("MemoryMappedFile maps a file", "[runtime][mmap]") {
@@ -85,6 +127,28 @@ TEST_CASE("MemoryMappedFile move semantics", "[runtime][mmap]") {
     MemoryMappedFile b = std::move(a);
     REQUIRE(b.is_open());
     REQUIRE_FALSE(a.is_open());
+}
+
+TEST_CASE("MemoryMappedFile reopen closes the previous mapping",
+          "[runtime][mmap][issue-641]") {
+    TemporaryFile first(".bin");
+    TemporaryFile second(".bin");
+    {
+        std::ofstream f(first.path(), std::ios::binary);
+        f << "first";
+    }
+    {
+        std::ofstream f(second.path(), std::ios::binary);
+        f << "second-file";
+    }
+
+    MemoryMappedFile mmap;
+    REQUIRE(mmap.open(first.path_string()));
+    REQUIRE(mmap.size() == 5);
+    REQUIRE(mmap.open(second.path_string()));
+    REQUIRE(mmap.is_open());
+    REQUIRE(mmap.size() == 11);
+    REQUIRE(std::string(reinterpret_cast<const char*>(mmap.data()), mmap.size()) == "second-file");
 }
 
 // ── DynamicLibrary ──────────────────────────────────────────────────────
@@ -361,6 +425,13 @@ TEST_CASE("Range constrain", "[runtime][range]") {
     REQUIRE(r.constrain(200) == 99);
 }
 
+TEST_CASE("Range constrain handles empty and reversed integer ranges",
+          "[runtime][range][coverage][issue-641]") {
+    REQUIRE(IntRange(5, 5).constrain(100) == 5);
+    REQUIRE(IntRange(10, 5).constrain(-100) == 10);
+    REQUIRE(IntRange(-3, -1).constrain(9) == -2);
+}
+
 TEST_CASE("Range from_start_length", "[runtime][range]") {
     auto r = IntRange::from_start_length(5, 10);
     REQUIRE(r.start == 5);
@@ -401,4 +472,18 @@ TEST_CASE("FloatRange", "[runtime][range]") {
     FloatRange r(0.0f, 1.0f);
     REQUIRE(r.contains(0.5f));
     REQUIRE_FALSE(r.contains(1.0f));
+}
+
+TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
+          "[runtime][range][coverage][issue-641]") {
+    DoubleRange a(0.25, 2.75);
+    DoubleRange b(1.5, 4.0);
+
+    auto intersection = a.intersection(b);
+    REQUIRE_THAT(intersection.start, Catch::Matchers::WithinAbs(1.5, 1e-12));
+    REQUIRE_THAT(intersection.end, Catch::Matchers::WithinAbs(2.75, 1e-12));
+
+    auto combined = a.enclosing_union(b);
+    REQUIRE_THAT(combined.start, Catch::Matchers::WithinAbs(0.25, 1e-12));
+    REQUIRE_THAT(combined.end, Catch::Matchers::WithinAbs(4.0, 1e-12));
 }
