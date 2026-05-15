@@ -11,6 +11,15 @@ push when useful and Linux/Windows left to hosted Actions. The old
 Namespace-specific notes below are retained as history for older PRs and
 should not be read as current dispatch guidance.
 
+Batch size guidance after reopening GitHub-hosted CI: prefer larger
+coherent test-only batches over one-tranche PRs. A good batch is one
+related code area, one or a small number of test binaries, and enough
+coverage work to justify a full hosted CI cycle. Do not depend on merge
+queues; each batch PR should stand alone, run the normal required
+pull-request checks, and merge directly once green. Keep source behavior
+fixes, version-bump changes, and platform-only branches separate unless
+the shared validation target makes the combined risk clearly lower.
+
 ## Queue Policy
 
 - Reopen Codecov validation in small batches; do not dump the full paused queue back into Namespace at once.
