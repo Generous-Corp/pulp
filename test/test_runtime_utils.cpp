@@ -165,6 +165,41 @@ TEST_CASE("MemoryMappedFile move semantics", "[runtime][mmap]") {
     REQUIRE_FALSE(a.is_open());
 }
 
+TEST_CASE("MemoryMappedFile read-write mapping and move assignment",
+          "[runtime][mmap][coverage][phase3]") {
+    TemporaryFile old_tmp(".bin");
+    TemporaryFile new_tmp(".bin");
+    {
+        std::ofstream f(old_tmp.path(), std::ios::binary);
+        f << "old";
+    }
+    {
+        std::ofstream f(new_tmp.path(), std::ios::binary);
+        f << "new";
+    }
+
+    MemoryMappedFile old_map;
+    REQUIRE(old_map.open(old_tmp.path_string()));
+    REQUIRE(old_map.is_open());
+
+    MemoryMappedFile new_map;
+    REQUIRE(new_map.open(new_tmp.path_string(), MapMode::ReadWrite));
+    REQUIRE(new_map.is_open());
+    REQUIRE(new_map.size() == 3);
+    new_map.mutable_data()[0] = 'N';
+
+    old_map = std::move(new_map);
+    REQUIRE(old_map.is_open());
+    REQUIRE_FALSE(new_map.is_open());
+    REQUIRE(std::string(reinterpret_cast<const char*>(old_map.data()), old_map.size()) == "New");
+
+    old_map.close();
+    std::ifstream f(new_tmp.path(), std::ios::binary);
+    std::string persisted;
+    f >> persisted;
+    REQUIRE(persisted == "New");
+}
+
 // ── DynamicLibrary ──────────────────────────────────────────────────────
 
 TEST_CASE("DynamicLibrary loads system library", "[runtime][dynlib]") {
