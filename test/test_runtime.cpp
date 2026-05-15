@@ -283,3 +283,29 @@ TEST_CASE("DynamicLibrary move keeps failed handles closed", "[runtime][dynamic_
     REQUIRE_FALSE(second.is_open());
     REQUIRE_FALSE(second.error().empty());
 }
+
+TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library][coverage][phase3]") {
+    DynamicLibrary original;
+#ifdef __APPLE__
+    REQUIRE(original.open("/usr/lib/libSystem.B.dylib"));
+    const char* symbol = "malloc";
+#elif defined(__linux__)
+    REQUIRE(original.open("libc.so.6"));
+    const char* symbol = "malloc";
+#else
+    const char* symbol = nullptr;
+    SUCCEED("No stable system library fixture on this platform.");
+    return;
+#endif
+
+    DynamicLibrary moved(std::move(original));
+    REQUIRE_FALSE(original.is_open());
+    REQUIRE(moved.is_open());
+    REQUIRE(moved.find_symbol(symbol) != nullptr);
+
+    DynamicLibrary assigned;
+    assigned = std::move(moved);
+    REQUIRE_FALSE(moved.is_open());
+    REQUIRE(assigned.is_open());
+    REQUIRE(assigned.find_symbol(symbol) != nullptr);
+}
