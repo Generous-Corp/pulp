@@ -11,8 +11,17 @@ TEST_CASE("i18n add and translate", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("greeting", "Hello");
     REQUIRE(strings.translate("greeting") == "Hello");
+    REQUIRE(strings.t("greeting") == "Hello");
     REQUIRE(strings.has("greeting"));
     REQUIRE(strings.count() == 1);
+}
+
+TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n][coverage][issue-656]") {
+    LocalisedStrings strings;
+    strings.add("mode", "old");
+    strings.add("mode", "new");
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("mode") == "new");
 }
 
 TEST_CASE("i18n translate missing key returns key", "[runtime][i18n]") {
@@ -94,6 +103,22 @@ TEST_CASE("i18n .strings parser ignores malformed lines", "[runtime][i18n]") {
     REQUIRE(strings.count() == 1);
     REQUIRE(strings.translate("valid") == "kept");
     REQUIRE_FALSE(strings.has("missing_value"));
+}
+
+TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
+          "[runtime][i18n][coverage][issue-656]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"label\" = \"First\";\n";
+        f << "\"label\" = \"Second\";\n";
+        f << "\"other\" = \"Value\";\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("label") == "Second");
 }
 
 // ── .po file format ─────────────────────────────────────────────────────
@@ -184,6 +209,24 @@ TEST_CASE("i18n JSON parser handles escapes and keyless entries", "[runtime][i18
     REQUIRE(strings.translate("slash") == "path\\file");
 }
 
+TEST_CASE("i18n JSON parser accepts commas and duplicate keys", "[runtime][i18n][coverage][issue-656]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  \"mode\": \"old\",\n";
+        f << "  \"mode\": \"new\",\n";
+        f << "  \"tail\": \"kept\",\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("mode") == "new");
+    REQUIRE(strings.translate("tail") == "kept");
+}
+
 TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
     TemporaryFile tmp(".json");
 
@@ -220,6 +263,8 @@ TEST_CASE("i18n global instance", "[runtime][i18n]") {
     auto& inst = LocalisedStrings::instance();
     inst.add("test_global", "works");
     REQUIRE(tr("test_global") == "works");
+    inst.add("test_global_args", "{0} works");
+    REQUIRE(tr("test_global_args", {"also"}) == "also works");
     inst.clear();
 }
 

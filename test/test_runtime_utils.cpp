@@ -87,6 +87,55 @@ TEST_CASE("MemoryMappedFile move semantics", "[runtime][mmap]") {
     REQUIRE_FALSE(a.is_open());
 }
 
+TEST_CASE("MemoryMappedFile read-write maps persist and move assignment closes old map",
+          "[runtime][mmap][coverage][issue-656]") {
+    TemporaryFile first(".bin");
+    TemporaryFile second(".bin");
+    {
+        std::ofstream f(first.path(), std::ios::binary);
+        f << "abcd";
+    }
+    {
+        std::ofstream f(second.path(), std::ios::binary);
+        f << "wxyz";
+    }
+
+    MemoryMappedFile old_map;
+    REQUIRE(old_map.open(first.path_string(), MapMode::ReadOnly));
+    REQUIRE(old_map.is_open());
+
+    MemoryMappedFile writable;
+    REQUIRE(writable.open(second.path_string(), MapMode::ReadWrite));
+    REQUIRE(writable.is_open());
+    REQUIRE(writable.size() == 4);
+    writable.mutable_data()[1] = static_cast<uint8_t>('!');
+
+    old_map = std::move(writable);
+    REQUIRE(old_map.is_open());
+    REQUIRE_FALSE(writable.is_open());
+    REQUIRE(old_map.size() == 4);
+    REQUIRE(std::string(reinterpret_cast<const char*>(old_map.data()), old_map.size()) == "w!yz");
+
+    old_map.close();
+    std::ifstream f(second.path(), std::ios::binary);
+    std::string saved((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    REQUIRE(saved == "w!yz");
+}
+
+TEST_CASE("MemoryMappedFile rejects empty files and close is idempotent",
+          "[runtime][mmap][coverage][issue-656]") {
+    TemporaryFile tmp(".bin");
+
+    MemoryMappedFile mmap;
+    REQUIRE_FALSE(mmap.open(tmp.path_string()));
+    REQUIRE_FALSE(mmap.is_open());
+    REQUIRE(mmap.size() == 0);
+    REQUIRE(mmap.data() == nullptr);
+    mmap.close();
+    mmap.close();
+    REQUIRE_FALSE(mmap.is_open());
+}
+
 // ── DynamicLibrary ──────────────────────────────────────────────────────
 
 TEST_CASE("DynamicLibrary loads system library", "[runtime][dynlib]") {
@@ -267,6 +316,26 @@ TEST_CASE("HTTP helpers reject invalid numeric URL ports",
     const auto too_large_port = http_post("http://example.com:65536/path", "body", "text/plain", 1);
     REQUIRE(too_large_port.status_code == 0);
     REQUIRE(too_large_port.error == "Invalid URL");
+}
+
+TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url][coverage][issue-656]") {
+    HttpResponse response;
+    response.status_code = 199;
+    REQUIRE_FALSE(response.ok());
+    response.status_code = 200;
+    REQUIRE(response.ok());
+    response.status_code = 299;
+    REQUIRE(response.ok());
+    response.status_code = 300;
+    REQUIRE_FALSE(response.ok());
+}
+
+TEST_CASE("HTTP helpers reject malformed URL hosts and schemes",
+          "[runtime][http][url][coverage][issue-656]") {
+    REQUIRE(http_get("https://:443/path", 1).error == "Invalid URL");
+    REQUIRE(http_get("http://example.com:not-a-port/path", 1).error == "Invalid URL");
+    REQUIRE(http_post("file://example.com/path", "body", "text/plain", 1).error == "Invalid URL");
+    REQUIRE_FALSE(http_download("http://", "/tmp/pulp-url-invalid-download-656", 1));
 }
 
 // ── Text Diff ────────────────────────────────────────────────────────────

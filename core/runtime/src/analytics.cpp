@@ -4,6 +4,26 @@
 
 namespace pulp::runtime {
 
+namespace {
+
+std::string json_escape(std::string_view value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char c : value) {
+        switch (c) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
+}  // namespace
+
 // ── FileAnalyticsDestination ────────────────────────────────────────────
 
 FileAnalyticsDestination::FileAnalyticsDestination(std::string_view path)
@@ -28,13 +48,13 @@ void FileAnalyticsDestination::flush() {
     if (!file) return;
 
     for (auto& event : buffer_) {
-        file << "{\"event\":\"" << event.name << "\",\"time\":" << event.timestamp;
+        file << "{\"event\":\"" << json_escape(event.name) << "\",\"time\":" << event.timestamp;
         if (!event.properties.empty()) {
             file << ",\"props\":{";
             bool first = true;
             for (auto& [k, v] : event.properties) {
                 if (!first) file << ",";
-                file << "\"" << k << "\":\"" << v << "\"";
+                file << "\"" << json_escape(k) << "\":\"" << json_escape(v) << "\"";
                 first = false;
             }
             file << "}";

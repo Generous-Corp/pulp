@@ -67,6 +67,12 @@ TEST_CASE("Uuid string round-trip", "[runtime][identity]") {
         REQUIRE(parsed == original);
     }
 
+    SECTION("from_string accepts uppercase hex") {
+        auto parsed = Uuid::from_string("00112233-4455-6677-8899-AABBCCDDEEFF");
+        REQUIRE_FALSE(parsed.is_nil());
+        REQUIRE(parsed.to_string() == "00112233-4455-6677-8899-aabbccddeeff");
+    }
+
     SECTION("Nil UUID") {
         Uuid nil;
         REQUIRE(nil.is_nil());
@@ -77,6 +83,26 @@ TEST_CASE("Uuid string round-trip", "[runtime][identity]") {
         auto parsed = Uuid::from_string("not-a-uuid");
         REQUIRE(parsed.is_nil());
     }
+
+    SECTION("Invalid hex digits and misplaced dashes return nil") {
+        REQUIRE(Uuid::from_string("00112233-4455-6677-8899-aabbccddeefg").is_nil());
+        REQUIRE(Uuid::from_string("001122334455-6677-8899-aabbccddeeff").is_nil());
+        REQUIRE(Uuid::from_string("00112233445566778899aabbccddeeff00").is_nil());
+    }
+}
+
+TEST_CASE("Uuid ordering and hashing cover deterministic values", "[runtime][identity][coverage][issue-656]") {
+    auto low = Uuid::from_string("00000000-0000-0000-0000-000000000001");
+    auto high = Uuid::from_string("00000000-0000-0000-0000-000000000002");
+
+    REQUIRE(low < high);
+    REQUIRE_FALSE(high < low);
+
+    std::unordered_set<Uuid> ids;
+    ids.insert(low);
+    ids.insert(high);
+    ids.insert(Uuid::from_string(low.to_hex()));
+    REQUIRE(ids.size() == 2);
 }
 
 TEST_CASE("Typed identity wrappers", "[runtime][identity]") {

@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <charconv>
+#include <cctype>
 
 namespace pulp::runtime {
 
@@ -40,12 +41,21 @@ Uuid Uuid::from_string(std::string_view str) {
     // Parse "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (36 chars)
     // or compact "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" (32 chars)
     Uuid id;
+    if (str.size() != 32 && str.size() != 36) return id;
+    if (str.size() == 36 &&
+        (str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-')) {
+        return id;
+    }
+
     std::string hex;
     hex.reserve(32);
     for (char c : str) {
         if (c != '-') hex += c;
     }
     if (hex.size() != 32) return id; // nil on parse failure
+    for (char c : hex) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return id;
+    }
 
     for (int i = 0; i < 8; ++i) {
         id.hi = (id.hi << 8) | (hex_digit(hex[i * 2]) << 4 | hex_digit(hex[i * 2 + 1]));
