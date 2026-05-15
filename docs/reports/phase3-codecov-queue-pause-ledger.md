@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-15 01:04 PDT
+Last updated: 2026-05-15 01:14 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -168,6 +168,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | #2024 tools Python control-plane batch | `50acc069` | `a29cb7dc` | open PR on `feature/phase3-tools-python-batch-643`; test-only GitHub-hosted batch covering host-pump linting, release Skia fetcher extra paths, and macOS reroute watcher control-plane behavior; local unittest, direct script, py_compile, diff, skill/version/docs guards passed; local Python coverage runner was unavailable because the installed coverage.py is below the repo's required 7.10 floor; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2025 runtime/state utility batch | `dda4d1e` | `a29cb7dc` | open PR on `feature/phase3-runtime-state-batch-641`; test-only GitHub-hosted batch covering PropertiesFile JSON/save/no-op edges, StateTree typed getter/listener/child/JSON/deep-copy edges, StateTreeSynchroniser reattach/truncated-batch edges, TemporaryFile move/extension behavior, MemoryMappedFile reopen, and Range boundaries; local macOS target build, focused tag runs, full touched binaries, exact CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2026 events/runtime IPC batch | `bad6149` | `a29cb7dc` | open PR on `feature/phase3-events-runtime-batch-642`; test-only GitHub-hosted batch covering IPC endpoint malformed-port paths, endpoint disconnect reset, NetworkServiceDiscovery backend/cache lifecycle edges, callback-less discovery storage, ActionBroadcaster no-listener sends, MultiTimer restart behavior, and LockingAsyncUpdater synchronous trigger-and-wait behavior; local macOS target build, focused tag runs, full touched binaries, exact CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
+| #2028 canvas/OSC/render helper batch | `9570cdb` | `a29cb7dc` | open PR on `feature/phase3-canvas-osc-render-batch-644`; test-only GitHub-hosted batch covering OSC typed-default/codec/sender edges, OSC bundle timetag/default-element/pattern edges, AttributedString/TextLayout empty/reuse/wrap behavior, and DirtyTracker full-repaint/threshold/invalid-viewport edges; local macOS target build, focused tag runs, full touched binaries, CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
@@ -3592,3 +3593,35 @@ skill-sync report, version-bump report, and docs-sync report. Branch
 pushed with GitHub-hosted PR workflow only; no Namespace dispatch and no
 SSH targets. Resume action: monitor #2026 required checks and merge
 directly when green.
+
+2026-05-15 01:14 PDT: created the #644 canvas/OSC/render helper batch
+`feature/phase3-canvas-osc-render-batch-644` at `9570cdb`, PR #2028,
+from current `origin/main` `a29cb7dc`. It adds test-only coverage in
+`test/test_osc.cpp`, `test/test_osc_bundle.cpp`,
+`test/test_attributed_string.cpp`, and `test/test_dirty_tracker.cpp` for
+OSC typed defaults, empty/padded/truncated string decode, trailing
+padding, unconnected raw sends, bundle fractional timetags, default
+bundle elements, address-pattern separator/alternative/negated-class
+edges, AttributedString empty setter no-ops and clear/reuse, TextLayout
+wrap delimiter behavior, and DirtyTracker full-repaint bounds,
+threshold-equality, and invalid-viewport promotion behavior. Local macOS
+validation passed: configure with
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=/Users/danielraffel/Library/Caches/Pulp/fetchcontent-src/mbedtls-v3.6.2-tar`,
+build `cmake --build build --target pulp-test-osc pulp-test-osc-bundle
+pulp-test-attributed-string pulp-test-dirty-tracker -j$(sysctl -n
+hw.ncpu)`, focused `./build/test/pulp-test-osc "[issue-644]" -r
+compact` passing 19 assertions in 5 cases, focused
+`./build/test/pulp-test-osc-bundle "[issue-644]" -r compact` passing 14
+assertions in 5 cases, focused `./build/test/pulp-test-attributed-string
+"[issue-644]" -r compact` passing 15 assertions in 3 cases, focused
+`./build/test/pulp-test-dirty-tracker "[issue-644]" -r compact` passing
+14 assertions in 3 cases, full `pulp-test-osc` passing 116 assertions in
+32 cases, full `pulp-test-osc-bundle` passing 93 assertions in 36 cases,
+full `pulp-test-attributed-string` passing 112 assertions in 25 cases,
+full `pulp-test-dirty-tracker` passing 66 assertions in 21 cases, `ctest
+--test-dir build -R "OSC|AttributedString|TextLayout|DirtyTracker"
+--output-on-failure` passing 87/87, `git diff --check`, skill-sync
+report, version-bump report, and docs-sync report. Branch pushed with
+GitHub-hosted PR workflow only; no Namespace dispatch and no SSH targets.
+Resume action: monitor #2028 required checks and merge directly when
+green.
