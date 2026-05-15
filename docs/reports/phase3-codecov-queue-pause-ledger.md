@@ -150,7 +150,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | local chorus/reverb edges | `e6b5c6bc` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local oscillator edges | `5e3a1db3` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
 | local signal helper edges | `431a3c5d` | `4bebc7bf` | superseded by #2014 batch | no standalone CI action |
-| local platform/runtime batch | `b77c6979` | `c98896db` | locally validated on `feature/phase3-platform-runtime-batch-640`; test-only batch superseding Environment dispatch and ChildProcess output; held to avoid deepening hosted CI queue while #2012/#2014 are active | push/open PR when active hosted batch pressure drops |
+| local platform/runtime batch | `b77c6979` | `c98896db` | locally validated and pushed on `feature/phase3-platform-runtime-batch-640`; test-only batch superseding Environment dispatch and ChildProcess output; PR intentionally not opened yet to avoid deepening hosted CI queue while #2012/#2014 are active | push/open PR when active hosted batch pressure drops |
 | local Environment dispatch | `33565a65` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
 | local ChildProcess output | `4c474115` | `92e83b37` | superseded by local platform/runtime batch | no standalone CI action |
 
@@ -200,8 +200,7 @@ passing 65 assertions in 21 test cases, exact `ctest --test-dir build
 -R "Environment: token self move|Environment: listener removed before|Environment: reset during dispatch|read_available_output drains stdout" --output-on-failure`
 passing 4/4, `git diff --check`, `git diff --cached --check`,
 skill-sync report, version-bump report, docs-sync report, and
-compat-sync report. This batch is intentionally committed locally but
-not pushed yet while #2012 and #2014 are still consuming hosted CI.
+compat-sync report. This batch is committed and pushed as `feature/phase3-platform-runtime-batch-640`, but no PR is open yet while #2012 and #2014 are still consuming hosted CI.
 Resume action: push/open as one GitHub-hosted PR when active hosted
 batch pressure drops; do not run Namespace or SSH targets.
 
