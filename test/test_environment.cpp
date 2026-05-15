@@ -166,6 +166,46 @@ TEST_CASE("Environment: token move transfers ownership", "[environment]") {
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("Environment: publish without listeners still updates snapshot",
+          "[environment][coverage][issue-649]") {
+    Environment::reset_for_test();
+
+    auto state = make_state(ColorScheme::light, 1.25f, 48.0f);
+    state.safe_area.bottom = 12.0f;
+    state.memory_pressure = MemoryPressure::moderate;
+    Environment::instance().publish(state);
+
+    auto got = Environment::instance().snapshot();
+    REQUIRE(got.color_scheme == ColorScheme::light);
+    REQUIRE(got.display.scale == 1.25f);
+    REQUIRE(got.keyboard.bottom == 48.0f);
+    REQUIRE(got.safe_area.bottom == 12.0f);
+    REQUIRE(got.memory_pressure == MemoryPressure::moderate);
+}
+
+TEST_CASE("Environment: token reset and self-move assignment are idempotent",
+          "[environment][coverage][issue-649]") {
+    Environment::reset_for_test();
+    int calls = 0;
+
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++calls; });
+    REQUIRE(token.valid());
+
+    auto* same_token = &token;
+    token = std::move(*same_token);
+    REQUIRE(token.valid());
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(calls == 1);
+
+    token.reset();
+    REQUIRE_FALSE(token.valid());
+    token.reset();
+    REQUIRE_FALSE(token.valid());
+    Environment::inject_for_test(make_state(ColorScheme::light));
+    REQUIRE(calls == 1);
+}
+
 TEST_CASE("Environment: token move assignment replaces prior subscription",
           "[environment][issue-640]") {
     Environment::reset_for_test();

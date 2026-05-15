@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/platform.hpp>
 #include <pulp/platform/popup_menu.hpp>
+#include <pulp/platform/progress_parser.hpp>
 #include <pulp/platform/win/registry.hpp>
+
+#include <vector>
 
 using namespace pulp::platform;
 
@@ -71,6 +74,46 @@ TEST_CASE("PopupMenu records items and separators",
     REQUIRE_FALSE(items[2].enabled);
     REQUIRE(items[2].checked);
     REQUIRE_FALSE(items[2].is_separator);
+}
+
+TEST_CASE("ProgressParser accepts payloads, empty payloads, and type-only lines",
+          "[platform][progress][coverage][issue-649]") {
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) {
+        events.push_back(e);
+    });
+
+    parser.feed_line("PROGRESS:DOWNLOAD_START:https://example.test/file.zip");
+    parser.feed_line("PROGRESS:OVERALL:42");
+    parser.feed_line("PROGRESS:EMPTY:");
+    parser.feed_line("PROGRESS:TYPE_ONLY");
+
+    REQUIRE(events.size() == 4);
+    REQUIRE(events[0].type == "DOWNLOAD_START");
+    REQUIRE(events[0].payload == "https://example.test/file.zip");
+    REQUIRE(events[1].type == "OVERALL");
+    REQUIRE(events[1].payload == "42");
+    REQUIRE(events[2].type == "EMPTY");
+    REQUIRE(events[2].payload.empty());
+    REQUIRE(events[3].type == "TYPE_ONLY");
+    REQUIRE(events[3].payload.empty());
+}
+
+TEST_CASE("ProgressParser ignores non-progress lines and tolerates empty callbacks",
+          "[platform][progress][coverage][issue-649]") {
+    int calls = 0;
+    ProgressParser parser([&](const ProgressEvent&) { ++calls; });
+
+    parser.feed_line("");
+    parser.feed_line("progress:LOWERCASE:ignored");
+    parser.feed_line("INFO:PROGRESS:OVERALL:1");
+    parser.feed_line("PROGRESSISH:OVERALL:1");
+    REQUIRE(calls == 0);
+
+    ProgressParser empty_callback({});
+    empty_callback.feed_line("PROGRESS:OVERALL:100");
+    empty_callback.feed_line("PROGRESS:TYPE_ONLY");
+    SUCCEED("empty callbacks are inert");
 }
 
 #if !defined(__APPLE__)
