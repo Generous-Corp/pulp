@@ -406,6 +406,13 @@ set(PULP_HAS_YOGA TRUE)
 message(STATUS "Pulp: Yoga layout engine enabled")
 
 # Google Highway (Apache 2.0) — portable SIMD abstraction (SSE/NEON/AVX)
+# Pinned to the exact SHA of the 1.2.0 release (verified via
+# `git ls-remote https://github.com/google/highway.git refs/tags/1.2.0`).
+# Pinning the SHA instead of the tag avoids intermittent
+# `fatal: invalid reference: 1.2.0` failures when GIT_SHALLOW combines
+# with tag-name resolution under load (Pulp #1930). SHA pins are also
+# more cache-friendly: FetchContent's UPDATE_DISCONNECTED check sees a
+# stable ref and skips the re-fetch on every reconfigure.
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -415,8 +422,8 @@ pulp_register_fetchcontent_source(highway REF 1.2.0)
 FetchContent_Declare(
     highway
     GIT_REPOSITORY https://github.com/google/highway.git
-    GIT_TAG 1.2.0
-    GIT_SHALLOW TRUE
+    # 1.2.0 release commit
+    GIT_TAG 457c891775a7397bdb0376bb1031e6e027af1c48
 )
 FetchContent_MakeAvailable(highway)
 set(PULP_HAS_HIGHWAY TRUE)

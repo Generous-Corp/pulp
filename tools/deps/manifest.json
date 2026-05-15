@@ -152,6 +152,7 @@
       "upstream": { "kind": "git-tag", "ref": "1.2.0" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
+      "notes": "CMake pins the exact 1.2.0 release SHA (457c891775a7397bdb0376bb1031e6e027af1c48) instead of the tag name to avoid intermittent `fatal: invalid reference: 1.2.0` shallow-clone failures hit by tools/scripts/local_diff_cover.sh (Pulp #1930). Upstream drift is still tracked against the 1.2.0 tag.",
       "source_files": [
         "CMakeLists.txt",
         "core/runtime/CMakeLists.txt",
