@@ -3816,3 +3816,37 @@ unknown|DescriptorValidation: MIDI capability warnings)"
 GitHub-hosted PR workflow only; no Namespace dispatch and no SSH targets.
 Resume action: monitor #2035 required checks and merge directly when
 green.
+
+2026-05-15 02:15 PDT: created the #647 format state-IO batch
+`feature/phase3-format-state-io-batch-647` at `5e83df7`, PR #2037, from
+current `origin/main` `a29cb7dc`. It adds test-only coverage in
+`test/test_headless.cpp`, `test/test_plugin_state_io.cpp`, and
+`test/test_preset_manager.cpp` for HeadlessHost prepare/release context
+forwarding, default process context filling, explicit MIDI buffer
+forwarding, null-processor no-op processing, plugin_state_io envelopes
+with empty plugin payloads, empty inner StateStore payload rejection,
+envelope CRC mismatch rejection before plugin callbacks, PresetManager
+out-of-range load clamping, user preset scan filtering and nested folder
+metadata, missing preset delete no-op behavior, and empty preset-list
+navigation. Local macOS validation passed: configure `cmake -S . -B build
+-DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF
+-DPULP_BUILD_EXAMPLES=OFF`, build `cmake --build build --target
+pulp-test-headless pulp-test-plugin-state-io pulp-test-preset-manager
+-j$(sysctl -n hw.ncpu)`, focused `./build/test/pulp-test-headless
+"[coverage][issue-647]" -r compact` passing 17 assertions in 4 cases,
+focused `./build/test/pulp-test-plugin-state-io "[coverage][issue-647]"
+-r compact` passing 9 assertions in 2 cases, focused
+`./build/test/pulp-test-preset-manager "[coverage][issue-647]" -r
+compact` passing 19 assertions in 4 cases, full `pulp-test-headless`
+passing 38 assertions in 11 cases, full `pulp-test-plugin-state-io`
+passing 71 assertions in 9 cases, full `pulp-test-preset-manager`
+passing 101 assertions in 18 cases, exact `ctest --test-dir build -R
+"(plugin_state_io rejects malformed blobs|HeadlessHost forwards|HeadlessHost
+fills|HeadlessHost null|plugin_state_io envelope with empty|plugin_state_io
+rejects envelope CRC|PresetManager load clamps|PresetManager user preset
+scan|PresetManager delete missing|PresetManager navigation on empty)"
+--output-on-failure` passing 11/11, `git diff --check`, and
+`./tools/check-docs.sh` passed with existing warnings. Branch pushed with
+GitHub-hosted PR workflow only; no Namespace dispatch and no SSH targets.
+Resume action: monitor #2037 required checks and merge directly when
+green.
