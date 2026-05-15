@@ -124,8 +124,19 @@ jobs:
           python3 tools/import-validation/check-source-contracts.py --strict
           python3 tools/import-validation/test_source_contracts.py
 
+      - name: CLI ↔ MCP parity check (issue #1997)
+        # Authoritative gate for the parity invariant: every top-level CLI
+        # command added to tools/cli/pulp_cli.cpp must have either a matching
+        # pulp_<command> tool in tools/mcp/pulp_mcp.cpp OR an entry in
+        # tools/scripts/cli_mcp_parity_baseline.json with a one-line reason.
+        # Whole-tree check — no diff base needed. Same exit-1-on-new-gap
+        # semantics as the skill-sync, docs-sync, and compat-sync gates.
+        run: |
+          python3 tools/scripts/check_cli_mcp_parity.py --mode=report --no-color
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
           python3 tools/scripts/test_docs_sync_check.py
           python3 tools/scripts/test_compat_sync_check.py
+          python3 tools/scripts/test_check_cli_mcp_parity.py

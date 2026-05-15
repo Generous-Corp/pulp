@@ -93,6 +93,9 @@
         "tools/mcp/pulp_mcp.cpp",
         "docs/status/cli-commands.yaml",
         "tools/scripts/cli_sync_check.py",
+        "tools/scripts/check_cli_mcp_parity.py",
+        "tools/scripts/test_check_cli_mcp_parity.py",
+        "tools/scripts/cli_mcp_parity_baseline.json",
         ".claude/commands/**"
       ]
     },
