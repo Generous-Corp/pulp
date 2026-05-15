@@ -116,12 +116,9 @@ TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
     TemporaryFile tmp(".strings");
     {
         std::ofstream f(tmp.path());
-        f << ""label" = "First";
-";
-        f << ""label" = "Second";
-";
-        f << ""other" = "Value";
-";
+        f << "\"label\" = \"First\";\n";
+        f << "\"label\" = \"Second\";\n";
+        f << "\"other\" = \"Value\";\n";
     }
 
     LocalisedStrings strings;
