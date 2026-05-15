@@ -128,6 +128,29 @@ TEST_CASE("MouseEvent is_cancelled flag", "[view][input][pointer]") {
     REQUIRE(e.is_cancelled);
 }
 
+TEST_CASE("MouseEvent wheel and meta helper edge paths",
+          "[view][input][issue-493]") {
+    MouseEvent e;
+    REQUIRE(e.button == MouseButton::left);
+    REQUIRE_FALSE(e.isWheel());
+    REQUIRE_FALSE(e.isMetaDown());
+
+    e.button = MouseButton::none;
+    e.modifiers = kModMeta | kModCtrl;
+    e.is_wheel = true;
+    e.scroll_delta_x = -3.0f;
+    e.scroll_delta_y = 7.0f;
+    e.pointer_id = 2;
+
+    REQUIRE(e.button == MouseButton::none);
+    REQUIRE(e.isWheel());
+    REQUIRE(e.isMetaDown());
+    REQUIRE(e.isCtrlDown());
+    REQUIRE_FALSE(e.isPrimary());
+    REQUIRE(e.scroll_delta_x == -3.0f);
+    REQUIRE(e.scroll_delta_y == 7.0f);
+}
+
 // ── Gesture event tests (P4) ───────────────────────────────────────────
 
 TEST_CASE("GestureEvent defaults", "[view][input][gesture]") {
@@ -147,6 +170,53 @@ TEST_CASE("GestureEvent pinch", "[view][input][gesture]") {
 
     REQUIRE(ge.scale == 1.5f);
     REQUIRE(ge.position.x == 100.0f);
+}
+
+TEST_CASE("GestureEvent ended and cancelled phases carry deltas",
+          "[view][input][gesture][issue-493]") {
+    GestureEvent ended;
+    ended.phase = GesturePhase::ended;
+    ended.rotation = 0.75f;
+    ended.delta_rotation = 0.25f;
+    ended.position = {12, 34};
+
+    REQUIRE(ended.phase == GesturePhase::ended);
+    REQUIRE(ended.rotation == 0.75f);
+    REQUIRE(ended.delta_rotation == 0.25f);
+    REQUIRE(ended.position.y == 34.0f);
+
+    GestureEvent cancelled;
+    cancelled.phase = GesturePhase::cancelled;
+    cancelled.scale = 0.8f;
+    cancelled.delta_scale = -0.2f;
+
+    REQUIRE(cancelled.phase == GesturePhase::cancelled);
+    REQUIRE(cancelled.scale == 0.8f);
+    REQUIRE(cancelled.delta_scale == -0.2f);
+}
+
+TEST_CASE("KeyEvent main modifier release and repeat edge paths",
+          "[view][input][issue-493]") {
+    KeyEvent e;
+    e.key = KeyCode::enter;
+    e.is_down = false;
+    e.is_repeat = true;
+    REQUIRE(e.key == KeyCode::enter);
+    REQUIRE_FALSE(e.is_down);
+    REQUIRE(e.is_repeat);
+    REQUIRE_FALSE(e.isCtrlDown());
+    REQUIRE_FALSE(e.isCmdDown());
+    REQUIRE_FALSE(e.isMainModifier());
+
+#ifdef __APPLE__
+    e.modifiers = kModCmd;
+    REQUIRE(e.isCmdDown());
+    REQUIRE(e.isMainModifier());
+#else
+    e.modifiers = kModCtrl;
+    REQUIRE(e.isCtrlDown());
+    REQUIRE(e.isMainModifier());
+#endif
 }
 
 // ── Pointer capture tests (P2b) ────────────────────────────────────────
@@ -174,4 +244,20 @@ TEST_CASE("View pointer capture duplicate is no-op", "[view][input][capture]") {
     REQUIRE(v.has_pointer_capture(0));
     v.release_pointer_capture(0);
     REQUIRE_FALSE(v.has_pointer_capture(0)); // single release clears it
+}
+
+TEST_CASE("View pointer capture ignores missing release ids",
+          "[view][input][capture][issue-493]") {
+    View v;
+    v.set_pointer_capture(1);
+    v.set_pointer_capture(2);
+
+    v.release_pointer_capture(99);
+    REQUIRE(v.has_pointer_capture(1));
+    REQUIRE(v.has_pointer_capture(2));
+
+    v.release_pointer_capture(1);
+    v.release_pointer_capture(1);
+    REQUIRE_FALSE(v.has_pointer_capture(1));
+    REQUIRE(v.has_pointer_capture(2));
 }

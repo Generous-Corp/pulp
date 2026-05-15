@@ -22,6 +22,14 @@ KeyEvent key_down(KeyCode key) {
     return e;
 }
 
+bool has_fill_text(const RecordingCanvas& canvas, const std::string& text) {
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::fill_text && command.text == text)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("TreeNode add children", "[view][tree]") {
@@ -113,6 +121,14 @@ TEST_CASE("TreeView triangle click toggles without selecting", "[view][tree]") {
     REQUIRE(toggled_state);
     REQUIRE(select_count == 0);
     REQUIRE(tree.selected_node() == nullptr);
+
+    tree.on_mouse_event(mouse_down(4, 5));
+
+    REQUIRE_FALSE(synths.expanded);
+    REQUIRE(toggled_label == "Synths");
+    REQUIRE_FALSE(toggled_state);
+    REQUIRE(select_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
 }
 
 TEST_CASE("TreeView double click activates without selecting", "[view][tree]") {
@@ -165,6 +181,21 @@ TEST_CASE("TreeView key left collapses expanded selection", "[view][tree]") {
     REQUIRE(collapsed);
 }
 
+TEST_CASE("TreeView key left consumes collapsed selected nodes without toggling",
+          "[view][tree]") {
+    TreeView tree;
+    auto& synths = tree.root().add_child("Synths");
+    synths.add_child("Bass");
+    tree.set_selected_node(&synths);
+
+    int toggle_count = 0;
+    tree.on_toggle = [&](TreeNode&, bool) { ++toggle_count; };
+
+    REQUIRE(tree.on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(synths.expanded);
+    REQUIRE(toggle_count == 0);
+}
+
 TEST_CASE("TreeView ignores unhandled key edges", "[view][tree]") {
     TreeView tree;
     auto& leaf = tree.root().add_child("Leaf");
@@ -195,6 +226,29 @@ TEST_CASE("TreeView user data lookup finds nested nodes only for non-null data",
     REQUIRE(tree.find_node_by_user_data(&nested_payload) == &nested);
     REQUIRE(tree.find_node_by_user_data(nullptr) == nullptr);
     REQUIRE(tree.find_node_by_user_data(&root_payload) == &tree.root());
+}
+
+TEST_CASE("TreeView paint covers selection highlight and disclosure states",
+          "[view][tree]") {
+    TreeView tree;
+    auto& group = tree.root().add_child("Group");
+    group.add_child("Nested");
+    tree.set_selected_node(&group);
+    tree.set_bounds({0, 0, 200, 100});
+
+    RecordingCanvas collapsed;
+    tree.paint(collapsed);
+    REQUIRE(collapsed.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(has_fill_text(collapsed, "\xe2\x96\xb6"));
+    REQUIRE(has_fill_text(collapsed, "Group"));
+    REQUIRE_FALSE(has_fill_text(collapsed, "Nested"));
+
+    group.expanded = true;
+    RecordingCanvas expanded;
+    tree.paint(expanded);
+    REQUIRE(expanded.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(has_fill_text(expanded, "\xe2\x96\xbc"));
+    REQUIRE(has_fill_text(expanded, "Nested"));
 }
 
 TEST_CASE("TreeView paint produces draw commands", "[view][tree]") {

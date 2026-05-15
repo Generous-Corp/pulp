@@ -5,6 +5,8 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/widgets/graph_editor_view.hpp>
 
+#include <algorithm>
+
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;
 using pulp::host::SignalGraph;
@@ -30,6 +32,34 @@ MouseEvent modifier_event(uint16_t modifiers) {
     MouseEvent event;
     event.modifiers = modifiers;
     return event;
+}
+
+bool has_fill_rect(const RecordingCanvas& canvas, float x, float y, float w, float h) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& cmd) {
+                           return cmd.type == DrawCommand::Type::fill_rect &&
+                                  cmd.f[0] == x && cmd.f[1] == y &&
+                                  cmd.f[2] == w && cmd.f[3] == h;
+                       });
+}
+
+bool has_text(const RecordingCanvas& canvas, const std::string& text) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& cmd) {
+                           return cmd.type == DrawCommand::Type::fill_text &&
+                                  cmd.text == text;
+                       });
+}
+
+bool has_stroke_color(const RecordingCanvas& canvas, pulp::canvas::Color color) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& cmd) {
+                           return cmd.type == DrawCommand::Type::set_stroke_color &&
+                                  cmd.color == color;
+                       });
 }
 
 } // namespace
@@ -58,6 +88,58 @@ TEST_CASE("GraphEditorView paints graph nodes connections and drag ghost",
     RecordingCanvas drag_canvas;
     editor.paint(drag_canvas);
     REQUIRE(drag_canvas.count(DrawCommand::Type::cubic_to) == 2);
+}
+
+TEST_CASE("GraphEditorView auto layout preserves positions and paints unnamed ports",
+          "[view][graph_editor][issue-493]") {
+    SignalGraph graph;
+    const auto unnamed_input = graph.add_input_node(2, "");
+    graph.add_output_node(2, "Output");
+
+    GraphEditorView editor(graph);
+    editor.set_node_position(unnamed_input, 100.0f, 20.0f);
+    graph.add_gain_node("Gain");
+    editor.auto_layout();
+
+    RecordingCanvas canvas;
+    editor.paint(canvas);
+
+    REQUIRE(has_fill_rect(canvas, 100.0f, 20.0f, 160.0f, 80.0f));
+    REQUIRE(has_fill_rect(canvas, 260.0f, 40.0f, 160.0f, 80.0f));
+    REQUIRE(has_fill_rect(canvas, 480.0f, 40.0f, 160.0f, 80.0f));
+    REQUIRE(has_text(canvas, "(unnamed)"));
+    REQUIRE(has_text(canvas, "Output"));
+    REQUIRE(has_text(canvas, "Gain"));
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 8);
+}
+
+TEST_CASE("GraphEditorView paints feedback and midi edge colors",
+          "[view][graph_editor][issue-493]") {
+    SignalGraph feedback_graph;
+    const auto feedback_input = feedback_graph.add_input_node(1, "Input");
+    const auto feedback_output = feedback_graph.add_output_node(1, "Output");
+    REQUIRE(feedback_graph.connect_feedback(feedback_input, 0, feedback_output, 0));
+
+    GraphEditorView feedback(feedback_graph);
+    feedback.set_node_position(feedback_input, 10.0f, 10.0f);
+    feedback.set_node_position(feedback_output, 240.0f, 10.0f);
+
+    RecordingCanvas feedback_canvas;
+    feedback.paint(feedback_canvas);
+    REQUIRE(has_stroke_color(feedback_canvas, {0.95f, 0.40f, 0.40f, 1.0f}));
+
+    SignalGraph midi_graph;
+    const auto midi_in = midi_graph.add_midi_input_node("Keys");
+    const auto midi_out = midi_graph.add_midi_output_node("Sink");
+    REQUIRE(midi_graph.connect_midi(midi_in, midi_out));
+
+    GraphEditorView midi(midi_graph);
+    midi.set_node_position(midi_in, 10.0f, 10.0f);
+    midi.set_node_position(midi_out, 240.0f, 10.0f);
+
+    RecordingCanvas midi_canvas;
+    midi.paint(midi_canvas);
+    REQUIRE(has_stroke_color(midi_canvas, {0.30f, 0.85f, 0.45f, 1.0f}));
 }
 
 TEST_CASE("GraphEditorView drag connects output to input and reverse",

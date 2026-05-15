@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -133,6 +134,39 @@ TEST_CASE("zero budget disables trimming", "[view][image-cache]") {
     for (int i = 0; i < 100; ++i) c.get("u" + std::to_string(i));
     REQUIRE(c.stats().entry_count == 100);
     REQUIRE(c.stats().evictions == 0);
+}
+
+TEST_CASE("lowering byte budget trims least recently used entries",
+          "[view][image-cache][coverage][issue-493]") {
+    ImageCache c;
+    std::atomic<int> calls{0};
+    std::vector<void*> released;
+    c.set_decoder(make_fake_decoder(calls));
+    c.set_releaser([&](DecodedImage& img) { released.push_back(img.native_handle); });
+
+    const auto* a = c.get("a");
+    const auto* b = c.get("bb");
+    const auto* ccc = c.get("ccc");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(ccc != nullptr);
+    auto* b_handle = b->native_handle;
+    REQUIRE(c.stats().entry_count == 3);
+
+    REQUIRE(c.get("a") == a);
+    c.set_byte_budget(64 * 2);
+
+    auto s = c.stats();
+    REQUIRE(s.entry_count == 2);
+    REQUIRE(s.total_bytes == 64 * 2);
+    REQUIRE(s.evictions == 1);
+    REQUIRE(released.size() == 1);
+    REQUIRE(released[0] == b_handle);
+
+    calls = 0;
+    REQUIRE(c.get("a") != nullptr);
+    REQUIRE(c.get("ccc") != nullptr);
+    REQUIRE(calls.load() == 0);
 }
 
 TEST_CASE("stats track hits/misses/evictions",

@@ -200,6 +200,36 @@ TEST_CASE("FileBasedDocument handles save and load edge paths",
     REQUIRE_FALSE(last_dirty);
 }
 
+TEST_CASE("FileBasedDocument handles successful load and save_as paths",
+          "[gui][code-editor][coverage]") {
+    TestDoc doc;
+    int dirty_callback_count = 0;
+    bool last_dirty = true;
+    doc.on_dirty_changed = [&](bool dirty) {
+        ++dirty_callback_count;
+        last_dirty = dirty;
+    };
+
+    doc.set_dirty(true);
+    REQUIRE(doc.load("/tmp/session.pulp"));
+    REQUIRE(doc.load_calls == 1);
+    REQUIRE(doc.loaded_path == "/tmp/session.pulp");
+    REQUIRE(doc.file_path() == "/tmp/session.pulp");
+    REQUIRE(doc.title() == "session");
+    REQUIRE_FALSE(doc.is_dirty());
+    REQUIRE(dirty_callback_count == 0);
+
+    doc.set_dirty(true);
+    REQUIRE(doc.save_as("/tmp/renamed.project"));
+    REQUIRE(doc.save_calls == 1);
+    REQUIRE(doc.saved_path == "/tmp/renamed.project");
+    REQUIRE(doc.file_path() == "/tmp/renamed.project");
+    REQUIRE(doc.title() == "renamed");
+    REQUIRE_FALSE(doc.is_dirty());
+    REQUIRE(dirty_callback_count == 1);
+    REQUIRE_FALSE(last_dirty);
+}
+
 TEST_CASE("RecentlyOpenedFilesList MRU behavior", "[gui][code-editor]") {
     RecentlyOpenedFilesList mru;
     mru.add("/path/a.txt");
@@ -217,6 +247,28 @@ TEST_CASE("RecentlyOpenedFilesList MRU behavior", "[gui][code-editor]") {
     // Max entries
     mru.set_max_entries(2);
     REQUIRE(mru.files().size() == 2);
+}
+
+TEST_CASE("RecentlyOpenedFilesList removes entries and ignores missing paths",
+          "[gui][code-editor][coverage]") {
+    RecentlyOpenedFilesList mru;
+    mru.add("/path/a.txt");
+    mru.add("/path/b.txt");
+    mru.add("/path/c.txt");
+
+    mru.remove("/path/b.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/path/c.txt");
+    REQUIRE(mru.files()[1] == "/path/a.txt");
+
+    mru.remove("/path/missing.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/path/c.txt");
+    REQUIRE(mru.files()[1] == "/path/a.txt");
+
+    mru.remove("/path/c.txt");
+    mru.remove("/path/a.txt");
+    REQUIRE(mru.files().empty());
 }
 
 TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",

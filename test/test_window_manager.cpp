@@ -53,6 +53,26 @@ TEST_CASE("WindowManager unregister", "[view][multiwindow]") {
     REQUIRE(mgr.window(id) == nullptr);
 }
 
+TEST_CASE("WindowManager unregister invokes close callback and ignores missing ids",
+          "[view][multiwindow]") {
+    WindowManager mgr;
+    View root;
+    StubWindowHost host;
+    auto id = mgr.register_window(&host, &root, WindowType::main);
+
+    std::vector<WindowId> closed;
+    mgr.set_on_window_closed([&](WindowId closed_id) {
+        closed.push_back(closed_id);
+    });
+
+    mgr.unregister_window(id);
+    mgr.unregister_window(id);
+    mgr.unregister_window(999);
+
+    REQUIRE(closed == std::vector<WindowId>{id});
+    REQUIRE(mgr.window_count() == 0);
+}
+
 TEST_CASE("WindowManager unique IDs", "[view][multiwindow]") {
     WindowManager mgr;
     View r1, r2, r3;
@@ -154,6 +174,29 @@ TEST_CASE("WindowManager close leaf only", "[view][multiwindow]") {
     REQUIRE(mgr.window(main_id) != nullptr);
     REQUIRE(h2.close_requested_);
     REQUIRE_FALSE(h1.close_requested_);
+}
+
+TEST_CASE("WindowManager closes windows without host or root view",
+          "[view][multiwindow]") {
+    WindowManager mgr;
+    mgr.set_shared_theme(Theme::dark());
+
+    auto id = mgr.register_window(nullptr, nullptr, WindowType::popup);
+    auto* rec = mgr.window(id);
+    REQUIRE(rec != nullptr);
+    REQUIRE(rec->host == nullptr);
+    REQUIRE(rec->root_view == nullptr);
+
+    std::vector<WindowId> closed;
+    mgr.set_on_window_closed([&](WindowId closed_id) {
+        closed.push_back(closed_id);
+    });
+
+    mgr.close_window(id);
+
+    REQUIRE(closed == std::vector<WindowId>{id});
+    REQUIRE(mgr.window_count() == 0);
+    REQUIRE(mgr.window(id) == nullptr);
 }
 
 // ── Theme propagation ───────────────────────────────────────────────────────
@@ -268,6 +311,30 @@ TEST_CASE("WindowManager message handler removed on unregister", "[view][multiwi
     msg.type = "test";
     mgr.send_message(id, msg);
     REQUIRE_FALSE(called);
+}
+
+TEST_CASE("WindowManager send and broadcast skip missing handlers",
+          "[view][multiwindow]") {
+    WindowManager mgr;
+    View r1, r2;
+    StubWindowHost h1, h2;
+
+    auto id1 = mgr.register_window(&h1, &r1, WindowType::main);
+    auto id2 = mgr.register_window(&h2, &r2, WindowType::palette);
+
+    int count = 0;
+    mgr.set_message_handler(id1, [&](const WindowMessage& msg) {
+        REQUIRE(msg.type == "ping");
+        ++count;
+    });
+
+    WindowMessage msg;
+    msg.type = "ping";
+    mgr.send_message(id2, msg);
+    REQUIRE(count == 0);
+
+    mgr.broadcast_message(msg);
+    REQUIRE(count == 1);
 }
 
 // ── Window state save / restore ─────────────────────────────────────────────

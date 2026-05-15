@@ -206,6 +206,40 @@ TEST_CASE("ComboBox global click closes only outside active popup",
     REQUIRE(ComboBox::active_popup_ == nullptr);
 }
 
+TEST_CASE("ComboBox opening another popup closes the previous one",
+          "[view][combo][issue-493]") {
+    ComboBox::close_active_popup();
+
+    ComboBox first;
+    first.set_items({"One", "Two"});
+    ComboBox second;
+    second.set_items({"Alpha", "Beta"});
+
+    KeyEvent space;
+    space.key = KeyCode::space;
+    space.is_down = true;
+
+    REQUIRE(first.on_key_event(space));
+    REQUIRE(first.is_open());
+    REQUIRE(ComboBox::active_popup_ == &first);
+
+    REQUIRE(second.on_key_event(space));
+    REQUIRE_FALSE(first.is_open());
+    REQUIRE(second.is_open());
+    REQUIRE(ComboBox::active_popup_ == &second);
+
+    int changes = 0;
+    second.on_change = [&](int) { ++changes; };
+    TextInputEvent no_match;
+    no_match.text = "z";
+    second.on_text_input(no_match);
+    REQUIRE(second.selected() == 0);
+    REQUIRE(changes == 0);
+    REQUIRE(second.is_open());
+
+    ComboBox::close_active_popup();
+}
+
 // ── Tooltip ──────────────────────────────────────────────────────────────
 
 TEST_CASE("Tooltip show and hide", "[view][tooltip]") {
@@ -556,6 +590,57 @@ TEST_CASE("ScrollView vertical wheel leave and horizontal track click edges",
     REQUIRE(horizontal_track.scroll_x() > 0.0f);
 }
 
+TEST_CASE("ScrollView hit testing honors pointer modes with scrolled children",
+          "[view][scroll][issue-493]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 100, 100});
+    sv.set_content_size({100, 300});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 150, 20, 20});
+    auto* child_ptr = child.get();
+    sv.add_child(std::move(child));
+    sv.set_scroll(0, 100);
+
+    REQUIRE(sv.hit_test({20, 60}) == child_ptr);
+
+    sv.set_pointer_events(View::PointerEvents::box_only);
+    REQUIRE(sv.hit_test({20, 60}) == &sv);
+
+    sv.set_pointer_events(View::PointerEvents::box_none);
+    REQUIRE(sv.hit_test({20, 60}) == child_ptr);
+    REQUIRE(sv.hit_test({2, 2}) == nullptr);
+
+    sv.set_pointer_events(View::PointerEvents::none);
+    REQUIRE(sv.hit_test({20, 60}) == nullptr);
+}
+
+TEST_CASE("ScrollView paint_all clips translated content and skips invisible views",
+          "[view][scroll][issue-493]") {
+    ScrollView hidden;
+    hidden.set_visible(false);
+    RecordingCanvas hidden_canvas;
+    hidden.paint_all(hidden_canvas);
+    REQUIRE(hidden_canvas.command_count() == 0);
+
+    ScrollView sv;
+    sv.set_direction(ScrollView::Direction::both);
+    sv.set_bounds({5, 7, 100, 50});
+    sv.set_content_size({200, 150});
+    sv.set_scroll(10, 20);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 20, 20});
+    sv.add_child(std::move(child));
+
+    RecordingCanvas canvas;
+    sv.paint_all(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::save) >= 2);
+    REQUIRE(canvas.count(DrawCommand::Type::clip_rect) >= 2);
+    REQUIRE(canvas.count(DrawCommand::Type::translate) >= 2);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) >= 2);
+}
+
 // ── ListBox ──────────────────────────────────────────────────────────────
 
 TEST_CASE("ListBox set items and select", "[view][listbox]") {
@@ -658,4 +743,38 @@ TEST_CASE("ListBox wheel scrolling double-click and enter activation",
     RecordingCanvas canvas;
     list.paint(canvas);
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+}
+
+TEST_CASE("ListBox ignores boundary keys and out-of-range mouse presses",
+          "[view][listbox][issue-493]") {
+    ListBox list;
+    list.set_bounds({0, 0, 120, 48});
+    list.set_items({"Alpha", "Beta"});
+    list.set_selected(1);
+
+    int selects = 0;
+    list.on_select = [&](int) { ++selects; };
+
+    KeyEvent down;
+    down.key = KeyCode::down;
+    down.is_down = true;
+    REQUIRE_FALSE(list.on_key_event(down));
+    REQUIRE(list.selected() == 1);
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+    REQUIRE_FALSE(list.on_key_event(enter));
+
+    KeyEvent up_released;
+    up_released.key = KeyCode::up;
+    up_released.is_down = false;
+    REQUIRE_FALSE(list.on_key_event(up_released));
+
+    MouseEvent far_click;
+    far_click.position = {10.0f, 500.0f};
+    far_click.is_down = true;
+    list.on_mouse_event(far_click);
+    REQUIRE(list.selected() == 1);
+    REQUIRE(selects == 0);
 }

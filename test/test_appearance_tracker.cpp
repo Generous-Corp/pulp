@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/appearance_tracker.hpp>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -38,6 +39,31 @@ TEST_CASE("AppearanceTracker callback fires on lock", "[view][appearance]") {
     tracker.lock(Appearance::light);
 
     REQUIRE(received == Appearance::light);
+}
+
+TEST_CASE("AppearanceTracker callbacks follow repeated locks and locked poll no-op",
+          "[view][appearance][coverage][issue-493]") {
+    AppearanceTracker tracker;
+    std::vector<Appearance> received;
+
+    tracker.on_appearance_changed([&](Appearance a) { received.push_back(a); });
+    tracker.lock(Appearance::light);
+    tracker.lock(Appearance::dark);
+
+    REQUIRE(tracker.is_locked());
+    REQUIRE(tracker.locked_appearance() == Appearance::dark);
+    REQUIRE(tracker.current_appearance() == Appearance::dark);
+    REQUIRE_FALSE(tracker.poll());
+    REQUIRE(received == std::vector<Appearance>{Appearance::light, Appearance::dark});
+
+    const auto count_before_unlock = received.size();
+    tracker.unlock();
+    REQUIRE_FALSE(tracker.is_locked());
+    REQUIRE((tracker.current_appearance() == Appearance::light ||
+             tracker.current_appearance() == Appearance::dark));
+
+    if (received.size() > count_before_unlock)
+        REQUIRE(received.back() == tracker.current_appearance());
 }
 
 // ── ThemeManager ────────────────────────────────────────────────────────────
@@ -85,4 +111,43 @@ TEST_CASE("ThemeManager callback fires on theme change", "[view][appearance]") {
     mgr.lock_appearance(Appearance::light);
 
     REQUIRE(called);
+}
+
+TEST_CASE("ThemeManager callbacks cover locked theme poll and unlock",
+          "[view][appearance][coverage][issue-493]") {
+    ThemeManager mgr;
+
+    Theme light;
+    light.colors["bg.primary"] = color_from_hex(0x110000);
+    Theme dark;
+    dark.colors["bg.primary"] = color_from_hex(0x220000);
+    Theme locked;
+    locked.colors["bg.primary"] = color_from_hex(0x330000);
+    mgr.set_theme_pair(light, dark);
+
+    std::vector<uint8_t> callback_red;
+    mgr.on_theme_changed([&](const Theme& theme) {
+        callback_red.push_back(theme.color("bg.primary")->r8());
+    });
+
+    mgr.lock_theme(locked);
+    REQUIRE(mgr.is_locked());
+    REQUIRE(mgr.active_theme().color("bg.primary")->r8() == 0x33);
+    REQUIRE(callback_red == std::vector<uint8_t>{0x33});
+    REQUIRE_FALSE(mgr.poll());
+    REQUIRE(callback_red == std::vector<uint8_t>{0x33});
+
+    mgr.lock_appearance(Appearance::light);
+    REQUIRE(mgr.is_locked());
+    REQUIRE(mgr.active_theme().color("bg.primary")->r8() == 0x11);
+
+    mgr.lock_appearance(Appearance::dark);
+    REQUIRE(mgr.active_theme().color("bg.primary")->r8() == 0x22);
+
+    mgr.unlock();
+    REQUIRE_FALSE(mgr.is_locked());
+    REQUIRE(callback_red.size() == 4);
+    REQUIRE(callback_red[0] == 0x33);
+    REQUIRE(callback_red[1] == 0x11);
+    REQUIRE(callback_red[2] == 0x22);
 }

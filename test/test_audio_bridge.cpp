@@ -47,6 +47,15 @@ TEST_CASE("AudioBridge pop_latest drains queue", "[view][bridge]") {
     REQUIRE_THAT(out.peak[0], WithinAbs(0.3, 0.001));
 }
 
+TEST_CASE("AudioBridge pop_latest reports empty before first meter",
+          "[view][bridge][issue-493]") {
+    AudioBridge bridge;
+
+    MeterData out;
+    REQUIRE_FALSE(bridge.pop_latest_meter(out));
+    REQUIRE(out.num_channels == 0);
+}
+
 TEST_CASE("AudioBridge analyze_and_push", "[view][bridge]") {
     AudioBridge bridge;
 
@@ -79,6 +88,43 @@ TEST_CASE("AudioBridge analyze_and_push", "[view][bridge]") {
     // ch1 should be silent
     REQUIRE_THAT(out.peak[1], WithinAbs(0.0, 0.001));
     REQUIRE_THAT(out.rms[1], WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("AudioBridge analyze clamps channels and handles zero sample blocks",
+          "[view][bridge][issue-493]") {
+    AudioBridge bridge;
+
+    std::vector<std::vector<float>> samples(10, std::vector<float>(4));
+    std::vector<const float*> channels(samples.size());
+    for (std::size_t ch = 0; ch < samples.size(); ++ch) {
+        float base = 0.05f * static_cast<float>(ch + 1);
+        samples[ch] = {base, -2.0f * base, 0.5f * base, 0.0f};
+        channels[ch] = samples[ch].data();
+    }
+
+    bridge.analyze_and_push(channels.data(), static_cast<int>(channels.size()), 4);
+
+    MeterData out;
+    REQUIRE(bridge.pop_latest_meter(out));
+    REQUIRE(out.num_channels == MeterData::max_channels);
+    for (int ch = 0; ch < out.num_channels; ++ch) {
+        float base = 0.05f * static_cast<float>(ch + 1);
+        REQUIRE_THAT(out.peak[ch], WithinAbs(2.0f * base, 0.0001));
+        REQUIRE_THAT(out.rms[ch],
+                     WithinAbs(std::sqrt((base * base +
+                                          4.0f * base * base +
+                                          0.25f * base * base) /
+                                         4.0f),
+                               0.0001));
+    }
+
+    bridge.analyze_and_push(channels.data(), static_cast<int>(channels.size()), 0);
+    REQUIRE(bridge.pop_latest_meter(out));
+    REQUIRE(out.num_channels == MeterData::max_channels);
+    for (int ch = 0; ch < out.num_channels; ++ch) {
+        REQUIRE_THAT(out.peak[ch], WithinAbs(0.0, 0.0001));
+        REQUIRE_THAT(out.rms[ch], WithinAbs(0.0, 0.0001));
+    }
 }
 
 TEST_CASE("MeterBallistics smooth response", "[view][bridge]") {
@@ -118,4 +164,16 @@ TEST_CASE("MeterBallistics peak hold", "[view][bridge]") {
         ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
     }
     REQUIRE(ballistics.held_peak < 0.9f); // Should have decayed
+}
+
+TEST_CASE("MeterBallistics releases tiny values to exact zero",
+          "[view][bridge][issue-493]") {
+    MeterBallistics ballistics;
+
+    ballistics.display_peak = 5e-7f;
+    ballistics.display_rms = 4e-7f;
+    ballistics.update(0.0f, 0.0f, 1.0f / 60.0f);
+
+    REQUIRE(ballistics.display_peak == 0.0f);
+    REQUIRE(ballistics.display_rms == 0.0f);
 }

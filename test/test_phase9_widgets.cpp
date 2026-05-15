@@ -9,8 +9,35 @@
 #include <pulp/view/property_list.hpp>
 #include <pulp/view/breadcrumb.hpp>
 
+#include <algorithm>
+#include <string_view>
+
 using namespace pulp::view;
+using pulp::canvas::DrawCommand;
+using pulp::canvas::RecordingCanvas;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+bool has_text(const RecordingCanvas& canvas, std::string_view text) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& command) {
+                           return command.type == DrawCommand::Type::fill_text &&
+                                  command.text == text;
+                       });
+}
+
+bool has_fill_color(const RecordingCanvas& canvas, Color color) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& command) {
+                           return command.type == DrawCommand::Type::set_fill_color &&
+                                  command.color == color;
+                       });
+}
+
+} // namespace
 
 // ── EqCurveView ─────────────────────────────────────────────────────────────
 
@@ -195,6 +222,61 @@ TEST_CASE("MidiKeyboard interaction callback", "[view][midi_keyboard]") {
     REQUIRE(last_vel > 0);
 }
 
+TEST_CASE("MidiKeyboard vertical drag releases previous notes and misses",
+          "[view][midi_keyboard][issue-493]") {
+    MidiKeyboard kb;
+    kb.set_range(60, 64);
+    kb.set_orientation(MidiKeyboard::Orientation::vertical);
+    kb.set_bounds({0, 0, 80, 300});
+
+    std::vector<int> note_ons;
+    std::vector<int> note_offs;
+    kb.on_note_on = [&](int note, float velocity) {
+        REQUIRE_THAT(velocity, WithinAbs(0.8, 0.001));
+        note_ons.push_back(note);
+    };
+    kb.on_note_off = [&](int note) { note_offs.push_back(note); };
+
+    kb.on_mouse_down({10, 20});
+    REQUIRE(note_ons.size() == 1);
+    REQUIRE(note_ons[0] == 60);
+    REQUIRE(kb.is_note_on(60));
+
+    kb.on_mouse_drag({10, 110});
+    REQUIRE(note_offs.size() == 1);
+    REQUIRE(note_offs[0] == 60);
+    REQUIRE(note_ons.size() == 2);
+    REQUIRE(note_ons[1] == 61);
+    REQUIRE_FALSE(kb.is_note_on(60));
+    REQUIRE(kb.is_note_on(61));
+
+    kb.on_mouse_drag({90, 310});
+    REQUIRE(note_offs.size() == 2);
+    REQUIRE(note_offs[1] == 61);
+    REQUIRE_FALSE(kb.is_note_on(61));
+
+    kb.on_mouse_up({90, 310});
+    REQUIRE(note_offs.size() == 2);
+}
+
+TEST_CASE("MidiKeyboard paint emits note names and active highlight color",
+          "[view][midi_keyboard][issue-493]") {
+    MidiKeyboard kb;
+    kb.set_range(60, 64);
+    kb.set_bounds({0, 0, 300, 80});
+    kb.set_show_note_names(true);
+    kb.set_highlight_color(Color::rgba8(255, 0, 0));
+    kb.note_on(60);
+
+    RecordingCanvas canvas;
+    kb.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 5);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 3);
+    REQUIRE(has_text(canvas, "C4"));
+    REQUIRE(has_fill_color(canvas, Color::rgba8(255, 0, 0)));
+}
+
 // ── ColorPicker ─────────────────────────────────────────────────────────────
 
 TEST_CASE("ColorPicker set/get color", "[view][color_picker]") {
@@ -365,6 +447,52 @@ TEST_CASE("FileDropZone empty extensions accepts all", "[view][file_drop]") {
     REQUIRE(zone.is_drag_valid());
 }
 
+TEST_CASE("FileDropZone rejected drop resets state without callback",
+          "[view][file_drop][issue-493]") {
+    FileDropZone zone;
+    zone.set_accepted_extensions({".wav"});
+
+    int drops = 0;
+    zone.on_drop = [&](const std::vector<std::string>&) { ++drops; };
+
+    zone.drag_enter({"notes.txt"});
+    REQUIRE(zone.is_drag_over());
+    REQUIRE_FALSE(zone.is_drag_valid());
+
+    zone.drop({"notes.txt"});
+    REQUIRE(drops == 0);
+    REQUIRE_FALSE(zone.is_drag_over());
+    REQUIRE_FALSE(zone.is_drag_valid());
+}
+
+TEST_CASE("FileDropZone paint covers idle valid invalid and no-icon states",
+          "[view][file_drop][issue-493]") {
+    FileDropZone zone;
+    zone.set_bounds({0, 0, 200, 120});
+    zone.set_label("Drop audio");
+    zone.set_hover_label("Release audio");
+    zone.set_accepted_extensions({".wav"});
+
+    zone.set_icon_style(FileDropZone::IconStyle::none);
+    RecordingCanvas idle;
+    zone.paint(idle);
+    REQUIRE(has_text(idle, "Drop audio"));
+    REQUIRE(idle.count(DrawCommand::Type::stroke_line) == 0);
+
+    zone.set_icon_style(FileDropZone::IconStyle::upload);
+    zone.drag_enter({"sound.wav"});
+    RecordingCanvas valid;
+    zone.paint(valid);
+    REQUIRE(has_text(valid, "Release audio"));
+    REQUIRE(valid.count(DrawCommand::Type::stroke_line) == 3);
+
+    zone.drag_enter({"sound.txt"});
+    RecordingCanvas invalid;
+    zone.paint(invalid);
+    REQUIRE(has_text(invalid, "Drop audio"));
+    REQUIRE(invalid.count(DrawCommand::Type::stroke_line) == 3);
+}
+
 // ── SplitView ───────────────────────────────────────────────────────────────
 
 TEST_CASE("SplitView basic setup", "[view][split_view]") {
@@ -404,6 +532,73 @@ TEST_CASE("SplitView orientation", "[view][split_view]") {
     REQUIRE(split.orientation() == SplitView::Orientation::vertical);
 }
 
+TEST_CASE("SplitView drag handling clamps to pane minimums and ignores misses",
+          "[view][split_view][issue-493]") {
+    SplitView split;
+    split.set_bounds({0, 0, 400, 200});
+    split.set_first(std::make_unique<View>());
+    split.set_second(std::make_unique<View>());
+    split.set_min_first_size(80.0f);
+    split.set_min_second_size(80.0f);
+    split.set_split_fraction(0.5f);
+    split.layout_children();
+
+    int changes = 0;
+    float last_fraction = 0.0f;
+    split.on_split_changed = [&](float fraction) {
+        ++changes;
+        last_fraction = fraction;
+    };
+
+    split.on_mouse_drag({10, 100});
+    REQUIRE(changes == 0);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.5, 0.001));
+
+    split.on_mouse_down({20, 20});
+    split.on_mouse_drag({300, 100});
+    REQUIRE(changes == 0);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.5, 0.001));
+
+    split.on_mouse_down({200, 100});
+    split.on_mouse_drag({10, 100});
+    REQUIRE(changes == 1);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.2, 0.001));
+    REQUIRE_THAT(last_fraction, WithinAbs(0.2, 0.001));
+
+    split.on_mouse_drag({390, 100});
+    REQUIRE(changes == 2);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.8, 0.001));
+    split.on_mouse_up({390, 100});
+
+    split.on_mouse_drag({100, 100});
+    REQUIRE(changes == 2);
+
+    split.set_orientation(SplitView::Orientation::vertical);
+    split.set_split_fraction(0.5f);
+    split.layout_children();
+    split.on_mouse_down({200, 100});
+    split.on_mouse_drag({200, 190});
+    REQUIRE(changes == 3);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.6, 0.001));
+}
+
+TEST_CASE("SplitView paint emits horizontal and vertical divider grips",
+          "[view][split_view][issue-493]") {
+    SplitView split;
+    split.set_bounds({0, 0, 300, 180});
+
+    pulp::canvas::RecordingCanvas canvas;
+    split.paint(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_circle) == 3);
+
+    canvas.clear();
+    split.set_orientation(SplitView::Orientation::vertical);
+    split.paint(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_circle) == 3);
+}
+
 // ── PropertyList ────────────────────────────────────────────────────────────
 
 TEST_CASE("PropertyList basic operations", "[view][property_list]") {
@@ -441,6 +636,94 @@ TEST_CASE("PropertyList intrinsic height", "[view][property_list]") {
         {"b", "B", std::string("y"), false, ""},
     });
     REQUIRE(list.intrinsic_height() > 0);
+}
+
+TEST_CASE("PropertyList mouse editing toggles writable booleans only",
+          "[view][property_list][issue-493]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 240, 160});
+    list.set_properties({
+        {"enabled", "Enabled", false, false, "General"},
+        {"locked", "Locked", true, true, "General"},
+        {"name", "Name", std::string("Osc"), false, "Info"},
+    });
+
+    int changes = 0;
+    std::string changed_key;
+    bool changed_bool = false;
+    list.on_change = [&](const std::string& key, PropertyList::PropertyValue value) {
+        ++changes;
+        changed_key = key;
+        if (std::holds_alternative<bool>(value))
+            changed_bool = std::get<bool>(value);
+    };
+
+    list.on_mouse_down({12, 30});
+    auto* enabled = list.find_property("enabled");
+    REQUIRE(enabled != nullptr);
+    REQUIRE(std::get<bool>(enabled->value));
+    REQUIRE(changes == 1);
+    REQUIRE(changed_key == "enabled");
+    REQUIRE(changed_bool);
+
+    list.on_mouse_down({12, 60});
+    auto* locked = list.find_property("locked");
+    REQUIRE(locked != nullptr);
+    REQUIRE(std::get<bool>(locked->value));
+    REQUIRE(changes == 1);
+
+    list.on_mouse_down({12, 110});
+    REQUIRE(changes == 1);
+
+    list.on_mouse_down({12, 500});
+    REQUIRE(changes == 1);
+}
+
+TEST_CASE("PropertyList paints categories and scalar value variants",
+          "[view][property_list][issue-493]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 260, 180});
+    list.set_row_height(20.0f);
+    list.set_label_width_fraction(0.5f);
+    list.set_properties({
+        {"name", "", std::string("Osc"), false, "General"},
+        {"gain", "Gain", 0.5f, false, "General"},
+        {"voices", "Voices", 8, false, "Synth"},
+        {"enabled", "Enabled", true, false, "Synth"},
+    });
+
+    const auto with_categories = list.intrinsic_height();
+    list.set_show_categories(false);
+    REQUIRE_THAT(list.intrinsic_height(), WithinAbs(80.0, 0.001));
+    REQUIRE(with_categories > list.intrinsic_height());
+
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 4);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 8);
+
+    bool saw_key_label = false;
+    bool saw_float_value = false;
+    bool saw_int_value = false;
+    bool saw_bool_value = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::fill_text)
+            continue;
+        saw_key_label = saw_key_label || command.text == "name";
+        saw_float_value = saw_float_value || command.text == "0.50";
+        saw_int_value = saw_int_value || command.text == "8";
+        saw_bool_value = saw_bool_value || command.text == "true";
+    }
+    REQUIRE(saw_key_label);
+    REQUIRE(saw_float_value);
+    REQUIRE(saw_int_value);
+    REQUIRE(saw_bool_value);
+
+    canvas.clear();
+    list.set_show_categories(true);
+    list.paint(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 10);
 }
 
 // ── Breadcrumb ──────────────────────────────────────────────────────────────
