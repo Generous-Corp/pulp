@@ -836,11 +836,20 @@ section for the v0.56.2+ toolkit (`shipyard rescue` / `runner watch
 shipyard pr
 
 # Useful options (v0.20.0):
-shipyard pr --base origin/main
+shipyard pr --base main                         # base ref must NOT include `origin/` — Shipyard prepends it internally (Shipyard #301)
 shipyard pr --no-apply-bumps                    # hard-fail on missing version bumps
 shipyard pr --skip-bump plugin --bump-reason="test-only change"
 shipyard pr --skip-skill-update ci --skill-reason="docs-only"
 shipyard pr --skip-target ubuntu                # deliberate lane skip
+
+# Docs-only PR (no source under core/**, examples/**, ship/**, tools/cli/**, no
+# CMakeLists.txt change). Skip both SSH targets and the pre-push diff-cover
+# gate — both trigger a full CMake configure + build that fails in fresh
+# worktrees lacking Skia and FetchContent dependencies. Upstream fixes are
+# tracked at pulp #2021 (auto-detect docs-only and skip diff-cover) and
+# Shipyard #301 (--base double-prefix + auto-skip unreachable SSH targets).
+PULP_SKIP_DIFF_COVER=1 shipyard pr --base main \
+  --skip-target ubuntu --skip-target windows
 
 # `pulp pr` is a Pulp-side wrapper; it defaults to shipyard pr and reports
 # opt-out workflows via `pulp status`. Agents should prefer `shipyard pr`.
