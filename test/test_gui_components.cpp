@@ -283,6 +283,9 @@ TEST_CASE("Toolbar enable/disable", "[gui][toolbar]") {
 
     toolbar.set_enabled("save", false);
     // Disabled items shouldn't trigger (tested via on_mouse_down in real usage)
+    toolbar.set_enabled("missing", false);
+    toolbar.on_mouse_down({10, 10});
+    REQUIRE_FALSE(clicked);
 }
 
 TEST_CASE("Toolbar remove item", "[gui][toolbar]") {
@@ -291,8 +294,34 @@ TEST_CASE("Toolbar remove item", "[gui][toolbar]") {
     toolbar.add_button("b", "B", []() {});
     REQUIRE(toolbar.item_count() == 2);
 
+    toolbar.remove_item("missing");
+    REQUIRE(toolbar.item_count() == 2);
+
     toolbar.remove_item("a");
     REQUIRE(toolbar.item_count() == 1);
+}
+
+TEST_CASE("Toolbar missing ids and sizing fallbacks are stable",
+          "[gui][toolbar][coverage][issue-653]") {
+    Toolbar toolbar;
+    toolbar.add_toggle("solo", "Solo", [](bool) {});
+
+    toolbar.set_toggled("missing", true);
+    toolbar.set_enabled("missing", false);
+    REQUIRE_FALSE(toolbar.is_toggled("missing"));
+    REQUIRE_FALSE(toolbar.is_toggled("solo"));
+
+    toolbar.set_item_size(18.0f);
+    toolbar.set_spacing(2.0f);
+    REQUIRE(toolbar.intrinsic_height() == 26.0f);
+
+    toolbar.set_orientation(Toolbar::Orientation::vertical);
+    REQUIRE(toolbar.intrinsic_height() == 0.0f);
+
+    int clicks = 0;
+    toolbar.add_button("go", "Go", [&] { ++clicks; });
+    toolbar.on_mouse_down({40, 40});
+    REQUIRE(clicks == 0);
 }
 
 TEST_CASE("Toolbar mouse interaction skips separators and disabled items",
