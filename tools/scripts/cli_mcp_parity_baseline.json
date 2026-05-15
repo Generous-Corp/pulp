@@ -41,6 +41,7 @@
     "pulp_audio_model_list": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_model_status": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
     "pulp_audio_read_bundle": "Sub-tool of `pulp audio` — audio service surface, no top-level CLI peer",
+    "pulp_compat": "Introspection tool — reports pulp-mcp / MCP protocol / project SDK versions + per-tool min_sdk floors so clients can pre-filter (#2070). No CLI peer because `pulp doctor --versions` already covers the human surface.",
     "pulp_docs_check": "Sub-tool of `pulp docs` — wraps tools/check-docs.sh",
     "pulp_docs_search": "Sub-tool of `pulp docs` — wraps `pulp docs search`",
     "pulp_get_view_tree": "Headless screenshot harness; wraps pulp-screenshot binary",

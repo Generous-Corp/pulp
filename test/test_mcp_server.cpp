@@ -150,6 +150,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_audio_model_status",
         "pulp_audio_read_bundle",
         "pulp_build",
+        "pulp_compat",
         "pulp_create",
         "pulp_docs_check",
         "pulp_docs_search",
@@ -315,4 +316,127 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
         REQUIRE(src.find(tool) != std::string::npos);
         REQUIRE(src.find(method) != std::string::npos);
     }
+}
+
+// ── pulp #2070: per-tool feature detection (min_sdk_version) ────────────────
+//
+// pulp-mcp ships independently of any given Pulp project, so a user may
+// have a newer pulp-mcp on PATH while editing a project pinned to an
+// older SDK. compare_semver() / min_sdk_for_tool() / handle_compat() are
+// the three pieces that make tools/call return a clean upgrade nudge
+// instead of running the newer behavior the project author didn't pin.
+
+TEST_CASE("compare_semver orders pulp version triples", "[mcp][compat][issue-2070]") {
+    REQUIRE(compare_semver("0.99.0", "0.100.0") < 0);   // 99 < 100 by numeric, not lex
+    REQUIRE(compare_semver("0.100.0", "0.99.0") > 0);
+    REQUIRE(compare_semver("1.0.0", "1.0.0") == 0);
+    REQUIRE(compare_semver("1.0.0", "0.999.999") > 0);
+    REQUIRE(compare_semver("0.0.0", "0.0.0") == 0);
+    // Unparseable inputs fail open (treated as equal) so a malformed
+    // pulp.toml or CMakeLists.txt can't strand a user out of every tool.
+    REQUIRE(compare_semver("garbage", "0.99.0") == 0);
+    REQUIRE(compare_semver("0.99.0", "not-a-version") == 0);
+}
+
+TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
+          "[mcp][compat][issue-2070]") {
+    // Default for any tool not in TOOL_MIN_SDK_TABLE: no floor. This
+    // preserves pre-#2070 behavior — only tools that explicitly opt in
+    // get gated.
+    REQUIRE(min_sdk_for_tool("pulp_build") == "0.0.0");
+    REQUIRE(min_sdk_for_tool("pulp_audio_excerpt_find") == "0.0.0");
+    REQUIRE(min_sdk_for_tool("a_tool_that_does_not_exist") == "0.0.0");
+}
+
+TEST_CASE("pulp_compat reports versions and tool min_sdk map",
+          "[mcp][compat][issue-2070]") {
+    // Run from a project root so resolve_project_sdk_version() finds
+    // the in-tree CMakeLists.txt VERSION (the source-tree fallback).
+    ScopedCurrentPath cwd(repo_root());
+
+    auto response = handle_request(tool_call("70", "pulp_compat"));
+    require_contains(response, R"JSON("id":70)JSON");
+    // Build version comes from PULP_MCP_SERVER_VERSION (generated header).
+    require_contains(response,
+                     std::string(R"JSON("pulp_mcp_version":")JSON")
+                     + PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
+    // MCP wire protocol — independent of build version, tracks upstream spec.
+    require_contains(response, R"JSON("mcp_protocol_version":"2024-11-05")JSON");
+    // Should not be null when invoked from a Pulp project root.
+    require_contains(response, R"JSON("project_sdk":")JSON");
+    // The tool_min_sdk map MUST be present (even if empty) — clients
+    // depend on the field existing so they can iterate it without a
+    // null check.
+    require_contains(response, R"JSON("tool_min_sdk":)JSON");
+}
+
+TEST_CASE("pulp_compat handles missing project root by emitting null",
+          "[mcp][compat][issue-2070]") {
+    // Outside any Pulp project — emulate a user running pulp-mcp from a
+    // scratch directory (or via the Claude plugin's launcher before
+    // it's been pointed at a project).
+    TempDir temp;
+    ScopedCurrentPath cwd(temp.path);
+    auto response = handle_request(tool_call("71", "pulp_compat"));
+    // Build + protocol versions still resolve.
+    require_contains(response,
+                     std::string(R"JSON("pulp_mcp_version":")JSON")
+                     + PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
+    require_contains(response, R"JSON("mcp_protocol_version":"2024-11-05")JSON");
+    // project_sdk explicitly null so clients can tell "no project"
+    // apart from "project pinned to 0.0.0".
+    require_contains(response, R"JSON("project_sdk":null)JSON");
+}
+
+TEST_CASE("compat_error_payload renders an isError result with actionable text",
+          "[mcp][compat][issue-2070]") {
+    auto body = compat_error_payload("pulp_future_tool", "0.110.0", "0.99.0");
+    // isError must be exactly the JSON literal true so MCP clients can
+    // branch on it without parsing the content text.
+    require_contains(body, R"JSON("isError":true)JSON");
+    // structuredContent carries machine-readable fields.
+    require_contains(body, R"JSON("error":"sdk_too_old")JSON");
+    require_contains(body, R"JSON("tool":"pulp_future_tool")JSON");
+    require_contains(body, R"JSON("required_sdk":"0.110.0")JSON");
+    require_contains(body, R"JSON("project_sdk":"0.99.0")JSON");
+    // Human-readable text mentions both versions and the upgrade path.
+    require_contains(body, "0.110.0");
+    require_contains(body, "0.99.0");
+    require_contains(body, "pulp project bump");
+}
+
+TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
+          "[mcp][compat][issue-2070]") {
+    // Read the active repo's CMakeLists.txt and verify the parser hits
+    // a sane semver triple. This is the path resolve_project_sdk_version
+    // uses in source-tree mode.
+    auto cmake_path = std::filesystem::path(__FILE__).parent_path().parent_path()
+                      / "CMakeLists.txt";
+    REQUIRE(std::filesystem::exists(cmake_path));
+    std::ifstream in(cmake_path);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const auto version = parse_cmake_project_version(buf.str());
+    // Must look like x.y.z.
+    int dots = 0;
+    for (char c : version) if (c == '.') ++dots;
+    INFO("parsed CMakeLists.txt version='" << version << "'");
+    REQUIRE(dots == 2);
+    REQUIRE_FALSE(version.empty());
+}
+
+TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
+          "[mcp][compat][issue-2070]") {
+    // Hand-rolled scanner — confirm the obvious cases and the trap
+    // case where another key contains 'sdk_version' as a substring
+    // (e.g., min_sdk_version) doesn't poison the result.
+    REQUIRE(parse_pulp_toml_sdk_version("sdk_version = \"0.99.0\"\n") == "0.99.0");
+    REQUIRE(parse_pulp_toml_sdk_version("  sdk_version=\"1.2.3\"\n") == "1.2.3");
+    REQUIRE(parse_pulp_toml_sdk_version("# sdk_version commented out\n").empty());
+    // The substring trap: min_sdk_version must NOT be returned as the
+    // top-level sdk_version.
+    REQUIRE(parse_pulp_toml_sdk_version("min_sdk_version = \"0.50.0\"\n").empty());
+    // When both are present, the top-level wins.
+    REQUIRE(parse_pulp_toml_sdk_version(
+        "min_sdk_version = \"0.50.0\"\nsdk_version = \"0.99.0\"\n") == "0.99.0");
 }

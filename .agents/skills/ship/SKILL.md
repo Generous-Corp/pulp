@@ -265,6 +265,20 @@ backwards compat is the MCP server's responsibility (per-tool feature
 detection), not the launcher's. `pulp doctor` surfaces drift advisory-
 only.
 
+**Per-tool `min_sdk_version` floors live in
+`tools/mcp/pulp_mcp.cpp::TOOL_MIN_SDK_TABLE`.** When adding a new MCP
+tool that depends on a specific SDK API, add a row to that table with
+the SDK version that API landed in. The tools/call dispatcher reads the
+active project's pinned SDK (from `pulp.toml` `sdk_version` first, then
+`CMakeLists.txt` `project(... VERSION ...)`) on every call and returns
+an `isError:true` content payload with actionable upgrade guidance when
+the project SDK is too old. The `pulp_compat` introspection tool
+exposes the full matrix (`pulp_mcp_version`, `mcp_protocol_version`,
+`project_sdk`, `tool_min_sdk`) so plugin authors can pre-filter their
+visible tool list at startup. Leaving a tool out of the table = no
+floor = runs on any project (matches pre-feature-detection behavior).
+Never replace this with a launcher-side hard gate.
+
 ### Released SDK is missing WebView symbols
 
 Symptom: a consumer links against a downloaded `pulp-sdk-<platform>`
