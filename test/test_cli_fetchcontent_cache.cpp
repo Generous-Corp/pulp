@@ -88,6 +88,14 @@ std::string json_field_fragment(const std::string& key,
 
 }  // namespace
 
+TEST_CASE("status and fix labels fall back to unknown",
+          "[fetchcontent_cache][issue-643]") {
+    CHECK(std::string(fcc::status_label(fcc::CacheStatus::Healthy)) == "healthy");
+    CHECK(std::string(fcc::fix_outcome_label(fcc::FixOutcome::Removed)) == "removed");
+    CHECK(std::string(fcc::status_label(static_cast<fcc::CacheStatus>(99))) == "unknown");
+    CHECK(std::string(fcc::fix_outcome_label(static_cast<fcc::FixOutcome>(99))) == "unknown");
+}
+
 // ── Acceptance scenario 1: healthy ──────────────────────────────────────────
 
 TEST_CASE("discover: healthy entries report Healthy and exit 0",
@@ -268,6 +276,75 @@ TEST_CASE("discover: missing cache root returns empty and renders OK",
     CHECK(out.str().find("no entries") != std::string::npos);
 }
 
+TEST_CASE("discover: undeclared entries use fallback splitting and stable order",
+          "[fetchcontent_cache][issue-643]") {
+    fs::path root = "/fake/cache";
+    fs::path plain = root / "zlib";
+    fs::path split = root / "foo-bar-baz";
+    fs::path alpha = root / "alpha-v1";
+    MockState state;
+    state.children = {plain, split, alpha};
+
+    fcc::StatInfo info;
+    info.exists = true;
+    info.is_symlink = false;
+    info.is_directory = true;
+    info.is_user_writable = true;
+    state.lstat_results[plain] = info;
+    state.lstat_results[split] = info;
+    state.lstat_results[alpha] = info;
+
+    auto env = make_mock_env(root, {}, state);
+    auto entries = fcc::discover_fetchcontent_cache(env);
+
+    REQUIRE(entries.size() == 3);
+    CHECK(entries[0].name == "alpha-v1");
+    CHECK(entries[0].dep_name == "alpha");
+    CHECK(entries[0].cached_ref == "v1");
+    CHECK(entries[1].name == "foo-bar-baz");
+    CHECK(entries[1].dep_name == "foo-bar");
+    CHECK(entries[1].cached_ref == "baz");
+    CHECK(entries[2].name == "zlib");
+    CHECK(entries[2].dep_name == "zlib");
+    CHECK(entries[2].cached_ref.empty());
+    for (const auto& entry : entries) {
+        CHECK(entry.status == fcc::CacheStatus::Healthy);
+    }
+}
+
+TEST_CASE("discover: live symlink follows target and stays healthy",
+          "[fetchcontent_cache][issue-643]") {
+    fs::path root = "/fake/cache";
+    fs::path entry = root / "threejs-077dd13c0e869d9f3dbe55875686f920367de457";
+    MockState state;
+    state.children = {entry};
+
+    fcc::StatInfo link_info;
+    link_info.exists = true;
+    link_info.is_symlink = true;
+    link_info.symlink_target = "/Users/me/Code/three.js";
+    link_info.is_user_writable = true;
+    state.lstat_results[entry] = link_info;
+
+    fcc::StatInfo target_info;
+    target_info.exists = true;
+    target_info.is_directory = true;
+    target_info.is_user_writable = true;
+    state.stat_follow_results[entry] = target_info;
+
+    fcc::DeclaredRefs refs{
+        {"threejs", "077dd13c0e869d9f3dbe55875686f920367de457"}};
+    auto env = make_mock_env(root, refs, state);
+
+    auto entries = fcc::discover_fetchcontent_cache(env);
+    REQUIRE(entries.size() == 1);
+    CHECK(entries[0].status == fcc::CacheStatus::Healthy);
+    CHECK(entries[0].is_symlink);
+    CHECK(entries[0].resolved_target == fs::path("/Users/me/Code/three.js"));
+    CHECK_FALSE(fcc::any_unhealthy(entries));
+    CHECK_FALSE(fcc::blocks_preflight(entries));
+}
+
 TEST_CASE("discover: lstat miss reports Unknown and blocks preflight",
           "[fetchcontent_cache][issue-643]") {
     fs::path root = "/fake/cache";
@@ -348,6 +425,39 @@ TEST_CASE("apply_fixes: removes a real fixable entry from a tempdir",
     fs::remove_all(tmp, ec);
 }
 
+TEST_CASE("apply_fixes: removes symlinks without deleting their targets",
+          "[fetchcontent_cache][issue-643]") {
+#ifdef _WIN32
+    SKIP("symlink creation requires privileges on Windows");
+#else
+    auto tmp = fs::temp_directory_path() / "pulp-fcc-symlink-test-643";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp / "target");
+    auto link = tmp / "stale-link";
+    fs::create_directory_symlink(tmp / "target", link, ec);
+    if (ec) {
+        fs::remove_all(tmp, ec);
+        SKIP("symlink creation unavailable in this filesystem");
+    }
+    REQUIRE(fs::is_symlink(fs::symlink_status(link)));
+    REQUIRE(fs::exists(tmp / "target"));
+
+    fcc::CacheEntry e;
+    e.name = "stale-link";
+    e.path = link;
+    e.status = fcc::CacheStatus::Dangling;
+    e.fixable = true;
+
+    auto results = fcc::apply_fixes({e}, /*dry_run=*/false);
+    REQUIRE(results.size() == 1);
+    CHECK(results[0].outcome == fcc::FixOutcome::Removed);
+    CHECK_FALSE(fs::exists(fs::symlink_status(link)));
+    CHECK(fs::exists(tmp / "target"));
+    fs::remove_all(tmp, ec);
+#endif
+}
+
 // ── parse_declared_refs_from_text: handles the real CMakeLists shape ───────
 
 TEST_CASE("parse_declared_refs_from_text: extracts name → REF map",
@@ -371,6 +481,27 @@ TEST_CASE("parse_declared_refs_from_text: extracts name → REF map",
     // is what protects stale-commit detection from false positives on
     // example/documentation snippets in CMakeLists.
     CHECK(refs.count("commented") == 0);
+}
+
+TEST_CASE("parse_declared_refs_from_file reads files and ignores missing paths",
+          "[fetchcontent_cache][issue-643]") {
+    auto tmp = fs::temp_directory_path() / "pulp-fcc-parse-file-643";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp);
+    auto cmake = tmp / "CMakeLists.txt";
+    {
+        std::ofstream out(cmake);
+        out << "pulp_register_fetchcontent_source(Yoga REF release/3.2.12)\n";
+        out << "pulp_register_fetchcontent_source(no_ref URL https://example.invalid)\n";
+    }
+
+    auto refs = fcc::parse_declared_refs_from_file(cmake);
+    REQUIRE(refs.size() == 1);
+    CHECK(refs.at("yoga") == "release/3.2.12");
+    CHECK(refs.count("no_ref") == 0);
+    CHECK(fcc::parse_declared_refs_from_file(tmp / "missing.txt").empty());
+    fs::remove_all(tmp, ec);
 }
 
 // ── Multi-hyphen dep names split correctly ─────────────────────────────────
