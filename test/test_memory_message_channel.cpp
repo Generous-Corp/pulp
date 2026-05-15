@@ -68,6 +68,64 @@ TEST_CASE("MemoryMessageChannel send succeeds without peer callback",
     REQUIRE(left->send_text("nobody-listens"));
 }
 
+TEST_CASE("MemoryMessageChannel delivers zero-length binary and text payloads",
+          "[runtime][message_channel][coverage][issue-641]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<Message> received;
+    right->on_message([&](const Message& message) {
+        received.push_back(message);
+    });
+
+    std::uint8_t empty = 0;
+    REQUIRE(left->send(&empty, 0));
+    REQUIRE(left->send_text(""));
+
+    REQUIRE(received.size() == 2);
+    REQUIRE(received[0].kind == MessageKind::Binary);
+    REQUIRE(received[0].payload.empty());
+    REQUIRE(received[1].kind == MessageKind::Text);
+    REQUIRE(received[1].payload.empty());
+    REQUIRE(received[1].as_text().empty());
+}
+
+TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
+          "[runtime][message_channel][coverage][issue-641]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    int calls = 0;
+    right->on_message([&](const Message&) { ++calls; });
+    REQUIRE(left->send_text("before-clear"));
+    REQUIRE(calls == 1);
+
+    right->on_message({});
+    REQUIRE(left->send_text("after-clear"));
+    REQUIRE(calls == 1);
+    REQUIRE(left->is_open());
+    REQUIRE(right->is_open());
+}
+
+TEST_CASE("MemoryMessageChannel text views preserve embedded NUL bytes",
+          "[runtime][message_channel][coverage][issue-641]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::string text = "prefix";
+    text.push_back('\0');
+    text += "suffix";
+
+    std::string_view view;
+    Message received;
+    right->on_message([&](const Message& message) {
+        received = message;
+        view = received.as_text();
+    });
+
+    REQUIRE(left->send_text(text));
+    REQUIRE(received.kind == MessageKind::Text);
+    REQUIRE(view.size() == text.size());
+    REQUIRE(std::string(view) == text);
+}
+
 TEST_CASE("MemoryMessageChannel close is peer-wide and idempotent",
           "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
