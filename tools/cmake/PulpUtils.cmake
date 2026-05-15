@@ -34,10 +34,34 @@ if(NOT _PULP_FORMAT_TARGET)
         "Use add_subdirectory(Pulp) or find_package(Pulp) before including it.")
 endif()
 
+# Resolve PulpUtils.cmake's sibling helper dirs without reaching into
+# CMAKE_SOURCE_DIR (which is the *consumer's* source tree when this
+# file is loaded via find_package, not Pulp's). Pulp #2087 piggyback —
+# CMAKE_CURRENT_LIST_DIR at top level is this file's own dir, so we
+# probe both possible layouts (in-tree source build + installed SDK)
+# before falling back. The fallback path is kept as a last-resort
+# escape hatch for stale checkouts that haven't run `cmake --install`.
+#
+#   In-tree:    tools/cmake/PulpUtils.cmake
+#               -> ../../core/format/src    (Pulp source tree)
+#               -> ../../tools/templates/auv3
+#               -> ../../templates/ios-auv3
+#   Installed:  <prefix>/lib/cmake/Pulp/PulpUtils.cmake
+#               -> ../../../src/pulp/format (matches root install(FILES) DESTINATION src/pulp/format)
+#               -> ../../../templates/auv3
+#               -> ../../../templates/ios-auv3
 if(DEFINED PULP_FORMAT_SOURCE_DIR AND EXISTS "${PULP_FORMAT_SOURCE_DIR}")
     set(_PULP_FORMAT_SOURCE_DIR "${PULP_FORMAT_SOURCE_DIR}")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../core/format/src")
+    set(_PULP_FORMAT_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../core/format/src")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/format")
+    set(_PULP_FORMAT_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../src/pulp/format")
 else()
-    set(_PULP_FORMAT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/core/format/src")
+    # Last resort: leave unset so plugin targets fail with a clear "missing
+    # source" error at link-time rather than silently picking up the
+    # consumer's source tree. Override with -DPULP_FORMAT_SOURCE_DIR=... if
+    # the SDK install is incomplete.
+    set(_PULP_FORMAT_SOURCE_DIR "")
 endif()
 
 if(DEFINED PULP_VST3_INCLUDE_DIR AND EXISTS "${PULP_VST3_INCLUDE_DIR}")
@@ -50,14 +74,22 @@ endif()
 
 if(DEFINED PULP_AUV3_TEMPLATE_DIR AND EXISTS "${PULP_AUV3_TEMPLATE_DIR}")
     set(_PULP_AUV3_TEMPLATE_DIR "${PULP_AUV3_TEMPLATE_DIR}")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../tools/templates/auv3")
+    set(_PULP_AUV3_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../tools/templates/auv3")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../templates/auv3")
+    set(_PULP_AUV3_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../templates/auv3")
 else()
-    set(_PULP_AUV3_TEMPLATE_DIR "${CMAKE_SOURCE_DIR}/tools/templates/auv3")
+    set(_PULP_AUV3_TEMPLATE_DIR "")
 endif()
 
 if(DEFINED PULP_IOS_AUV3_TEMPLATE_DIR AND EXISTS "${PULP_IOS_AUV3_TEMPLATE_DIR}")
     set(_PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_IOS_AUV3_TEMPLATE_DIR}")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../templates/ios-auv3")
+    set(_PULP_IOS_AUV3_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../templates/ios-auv3")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../templates/ios-auv3")
+    set(_PULP_IOS_AUV3_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../templates/ios-auv3")
 else()
-    set(_PULP_IOS_AUV3_TEMPLATE_DIR "${CMAKE_SOURCE_DIR}/templates/ios-auv3")
+    set(_PULP_IOS_AUV3_TEMPLATE_DIR "")
 endif()
 
 function(_pulp_normalize_ui_script_path out_var source_dir ui_script)
@@ -994,7 +1026,19 @@ function(_pulp_add_standalone target name bundle_id version)
     # transitively pulls in pulp::view → pulp::canvas → libskia.a, which
     # references Fc* symbols. Re-mention fontconfig AFTER the archive so
     # the linker resolves them. No-op on macOS/Windows/Android.
-    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
+    #
+    # CMAKE_CURRENT_FUNCTION_LIST_DIR (NOT CMAKE_CURRENT_LIST_DIR or
+    # CMAKE_SOURCE_DIR) — CMake's CMAKE_CURRENT_LIST_DIR inside a function
+    # body resolves to the *caller's* dir, not where the function was
+    # defined. CMAKE_CURRENT_FUNCTION_LIST_DIR (CMake 3.17+; Pulp pins
+    # 3.24) is the one that consistently resolves to PulpUtils.cmake's
+    # own dir — i.e., the in-tree tools/cmake/ during a source build,
+    # and ~/.pulp/sdk/<ver>/lib/cmake/Pulp/ after install. The sibling
+    # PulpLinkFontconfig.cmake ships alongside via root CMakeLists.txt's
+    # install(FILES) block. Pulp #2087 piggyback — pre-fix this broke
+    # every Linux/Android consumer since CMAKE_SOURCE_DIR resolved to
+    # the consumer's source tree.
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpLinkFontconfig.cmake")
     pulp_link_fontconfig_after_skia(${target}_Standalone)
 endfunction()
 

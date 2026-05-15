@@ -1,0 +1,151 @@
+name: Install consumer smoke
+
+# Pulp #2087 piggyback. Catches the class of bug where in-tree builds
+# work but installed-SDK consumers break — the original symptom: an
+# `include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)`
+# inside PulpUtils.cmake resolved to the *consumer's* source tree
+# during `find_package(Pulp)`, blocking every downstream Linux/Android
+# rebuild against v0.101.5+ SDK (Spectr was the visible victim).
+#
+# Strategy: install Pulp to a temp prefix on Linux + macOS, then
+# configure a minimal external project that calls into
+# `find_package(Pulp)` + `pulp_add_plugin(...)`. CMake configure-time
+# failures (missing helpers, bad paths) surface here BEFORE downstream
+# users feel them.
+
+on:
+  pull_request:
+    paths:
+      - 'core/**'
+      - 'tools/cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/install-consumer-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'tools/cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/install-consumer-smoke.yml'
+
+concurrency:
+  group: install-consumer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
+            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure + build
+        # Tests and examples off — they don't participate in install
+        # rules and would just slow the smoke. But every install(TARGETS)
+        # target must be built or `cmake --install` aborts mid-pass
+        # before reaching the install(FILES) block that ships the
+        # CMake config files. That's why we build the full default
+        # target set rather than just pulp-view.
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF
+          cmake --build build --config Release
+        shell: bash
+
+      - name: Install Pulp to a temp prefix
+        run: |
+          PREFIX="${RUNNER_TEMP}/pulp-install"
+          cmake --install build --prefix "$PREFIX" --config Release
+          ls -la "$PREFIX"/lib/cmake/Pulp/
+          # The piggyback fix: PulpLinkFontconfig.cmake MUST ship alongside
+          # PulpUtils.cmake. Pre-fix this file was missing and consumers
+          # blew up at configure-time with a CMAKE_SOURCE_DIR path that
+          # resolved to their own source tree.
+          test -f "$PREFIX/lib/cmake/Pulp/PulpLinkFontconfig.cmake"
+          test -f "$PREFIX/lib/cmake/Pulp/PulpUtils.cmake"
+        shell: bash
+
+      - name: Configure a downstream consumer against the installed SDK
+        run: |
+          PREFIX="${RUNNER_TEMP}/pulp-install"
+          CONSUMER="${RUNNER_TEMP}/pulp-consumer"
+          rm -rf "$CONSUMER"
+          mkdir -p "$CONSUMER/src"
+          # Minimal consumer: find_package(Pulp), declare a tiny plugin
+          # via pulp_add_plugin so PulpUtils.cmake's downstream-facing
+          # functions get exercised. The Linux+GNU-ld include of
+          # PulpLinkFontconfig.cmake fires inside _pulp_add_standalone
+          # on Linux — that's the exact line the piggyback fix repaired.
+          cat > "$CONSUMER/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.24)
+          project(PulpConsumerSmoke VERSION 0.1.0 LANGUAGES CXX)
+          find_package(Pulp REQUIRED)
+          # Headers-only assertion — this proves find_package wired up.
+          # Target namespace is Pulp:: (capital P) per PulpTargets.cmake's
+          # add_library(Pulp::* STATIC IMPORTED).
+          if(NOT TARGET Pulp::view)
+              message(FATAL_ERROR "find_package(Pulp) did not expose Pulp::view")
+          endif()
+          message(STATUS "Consumer smoke: Pulp::view target resolved.")
+          EOF
+          cmake -S "$CONSUMER" -B "$CONSUMER/build" \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DPulp_DIR="$PREFIX/lib/cmake/Pulp" \
+            -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+
+      - name: Verify CMake config files don't reach into Pulp's source tree
+        # Defense in depth: grep the installed CMake config files for
+        # any ${CMAKE_SOURCE_DIR}/tools/cmake/... or similar
+        # Pulp-internal path. That pattern was the #2087 piggyback bug —
+        # the include resolved to the *consumer's* source tree, not
+        # Pulp's, at consume-time.
+        #
+        # Intentional ${CMAKE_SOURCE_DIR} uses (the consumer's own
+        # android/, external/skia-build/ etc. — i.e., paths the consumer
+        # IS expected to have under their own project root) are
+        # NOT flagged here. Only Pulp-internal helper references that
+        # would dangle in the install tree.
+        run: |
+          PREFIX="${RUNNER_TEMP}/pulp-install"
+          # Patterns that indicate a Pulp-internal path that no consumer
+          # has any reason to own. If a future commit adds one of these,
+          # the same class of bug as #2087 has reappeared.
+          set +e
+          bad=$(grep -nE '\$\{CMAKE_SOURCE_DIR\}/tools/(cmake|scripts)/|\$\{CMAKE_SOURCE_DIR\}/core/' \
+                  "$PREFIX"/lib/cmake/Pulp/*.cmake 2>/dev/null)
+          set -e
+          if [ -n "$bad" ]; then
+            echo "::error::Installed CMake config files reach into Pulp's source tree via CMAKE_SOURCE_DIR — will resolve to consumer's source tree, not Pulp's. Class of bug as #2087 piggyback."
+            echo "$bad"
+            echo
+            echo "Fix: inside a function body, use CMAKE_CURRENT_FUNCTION_LIST_DIR. At top level of a config file, use CMAKE_CURRENT_LIST_DIR. See tools/cmake/PulpUtils.cmake's _pulp_add_standalone for the pattern."
+            exit 1
+          fi
+          echo "OK: no Pulp-internal CMAKE_SOURCE_DIR references in installed CMake config."
+        shell: bash

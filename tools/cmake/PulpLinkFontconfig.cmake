@@ -22,9 +22,14 @@
 # drift. Pulp #1986 follow-up — also needed for v0.100.0 release-cli
 # linux-x64 build of pulp-import-design.
 #
-# Usage:
-#     include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
+# Usage (in-tree Pulp build):
+#     include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake")
 #     pulp_link_fontconfig_after_skia(my-target)
+#
+# Usage (consumed from installed SDK via find_package(Pulp) — pulp #2087):
+#     This file ships alongside PulpUtils.cmake at lib/cmake/Pulp/; the
+#     helper functions in PulpUtils.cmake include it via CMAKE_CURRENT_LIST_DIR
+#     so downstream consumers don't need to reference it directly.
 #
 # No-op on non-Linux platforms (macOS uses CoreText, Windows uses
 # DirectWrite, Android bundles its own font manager).
