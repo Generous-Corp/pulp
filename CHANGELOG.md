@@ -9,11 +9,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v01018"></a>
+## [0.38.0]
+
 ## [0.101.8] - 2026-05-15
 
 - feat(view,cli,import): bundle 4 first-user friction fixes + tests for resize fix ([#1984](https://github.com/danielraffel/pulp/pull/1984))
 
 <a id="v01017"></a>
+## [0.102.0]
+
 ## [0.101.7] - 2026-05-15
 
 - fix(view/host/mac): host-level ESC closes ComboBox even with stolen focus (#68) ([#2010](https://github.com/danielraffel/pulp/pull/2010))
