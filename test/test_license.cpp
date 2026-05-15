@@ -119,6 +119,25 @@ TEST_CASE("LicenseValidator validate_and_parse extracts info", "[crypto][license
     REQUIRE(info->edition == "pro");
 }
 
+TEST_CASE("LicenseValidator validate_and_parse extracts optional machine and expiry",
+          "[crypto][license][issue-641]") {
+    LicenseValidator validator;
+
+    std::string payload =
+        "{\"product_id\":\"PulpSynth\",\"email\":\"user@example.com\","
+        "\"machine_id\":\"machine-1\",\"edition\":\"studio\","
+        "\"issued\":1700000000,\"expiry\":1800000000}";
+    auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
+
+    REQUIRE(info.has_value());
+    REQUIRE(info->product_id == "PulpSynth");
+    REQUIRE(info->user_email == "user@example.com");
+    REQUIRE(info->machine_id == "machine-1");
+    REQUIRE(info->edition == "studio");
+    REQUIRE(info->issued_timestamp == 1700000000);
+    REQUIRE(info->expiry_timestamp == 1800000000);
+}
+
 TEST_CASE("LicenseValidator validate_and_parse rejects malformed payloads", "[crypto][license]") {
     LicenseValidator validator;
 
@@ -166,6 +185,28 @@ TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license
 
     LicenseValidator validator;
     REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator validate_file accepts file without trailing newline",
+          "[crypto][license][issue-641]") {
+    TemporaryFile tmp(".license");
+    std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
+    std::string key = base64_encode(payload) + "." + base64_encode("signature");
+
+    {
+        std::ofstream out(tmp.path());
+        REQUIRE(out.good());
+        out << key;
+    }
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator validate rejects empty payload section",
+          "[crypto][license][issue-641]") {
+    LicenseValidator validator;
+    REQUIRE(validator.validate(".sig") == LicenseStatus::InvalidSignature);
 }
 
 TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]") {

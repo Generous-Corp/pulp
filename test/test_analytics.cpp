@@ -2,6 +2,7 @@
 #include <pulp/runtime/analytics.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <fstream>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -73,6 +74,21 @@ TEST_CASE("Analytics forwards event details and flushes destinations", "[runtime
 
     a.flush();
     REQUIRE(*flushes == 1);
+}
+
+TEST_CASE("Analytics flush reaches destinations even when disabled", "[runtime][analytics][issue-641]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    a.set_enabled(false);
+    a.flush();
+    REQUIRE(*flushes == 1);
+    REQUIRE(events->empty());
+
+    a.set_enabled(true);
 }
 
 TEST_CASE("Analytics disabled skips destinations", "[runtime][analytics]") {
@@ -148,6 +164,33 @@ TEST_CASE("FileAnalyticsDestination appends multiple flushes", "[runtime][analyt
     REQUIRE(content.find("\"event\":\"second\"") != std::string::npos);
 }
 
+TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][issue-641]") {
+    TemporaryFile tmp(".jsonl");
+    auto path = tmp.path();
+    std::filesystem::remove(path);
+
+    FileAnalyticsDestination dest(tmp.path_string());
+    dest.flush();
+
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
+TEST_CASE("FileAnalyticsDestination writes property map in key order", "[runtime][analytics][issue-641]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    AnalyticsEvent event;
+    event.name = "ordered";
+    event.properties = {{"z", "last"}, {"a", "first"}};
+    dest.log_event(event);
+    dest.flush();
+
+    std::ifstream f(tmp.path());
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"a\":\"first\"") < line.find("\"z\":\"last\""));
+}
+
 TEST_CASE("WidgetTracker logs events", "[runtime][analytics]") {
     auto& a = Analytics::instance();
     a.set_enabled(true);
@@ -158,4 +201,27 @@ TEST_CASE("WidgetTracker logs events", "[runtime][analytics]") {
     WidgetTracker::track_preset_select("Default");
 
     REQUIRE(a.event_count() == before + 3);
+}
+
+TEST_CASE("WidgetTracker forwards expected event names and properties",
+          "[runtime][analytics][issue-641]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.set_enabled(true);
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    WidgetTracker::track_click("bypass");
+    WidgetTracker::track_value_change("gain", "-6");
+    WidgetTracker::track_preset_select("Init");
+
+    REQUIRE(events->size() == 3);
+    REQUIRE((*events)[0].name == "widget_click");
+    REQUIRE((*events)[0].properties.at("widget") == "bypass");
+    REQUIRE((*events)[1].name == "value_change");
+    REQUIRE((*events)[1].properties.at("widget") == "gain");
+    REQUIRE((*events)[1].properties.at("value") == "-6");
+    REQUIRE((*events)[2].name == "preset_select");
+    REQUIRE((*events)[2].properties.at("preset") == "Init");
 }

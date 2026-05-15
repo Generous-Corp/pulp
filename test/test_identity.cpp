@@ -79,6 +79,27 @@ TEST_CASE("Uuid string round-trip", "[runtime][identity]") {
     }
 }
 
+TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
+          "[runtime][identity][issue-641]") {
+    Uuid id;
+    id.hi = 0x0123456789abcdefULL;
+    id.lo = 0xfedcba9876543210ULL;
+
+    REQUIRE(Uuid::from_string("01234567-89AB-CDEF-FEDC-BA9876543210") == id);
+    REQUIRE(Uuid::from_string("0123456789ABCDEFFEDCBA9876543210") == id);
+}
+
+TEST_CASE("Uuid ordering sorts by high word before low word",
+          "[runtime][identity][issue-641]") {
+    Uuid low{1, 999};
+    Uuid middle{2, 1};
+    Uuid high{2, 2};
+
+    REQUIRE(low < middle);
+    REQUIRE(middle < high);
+    REQUIRE_FALSE(high < middle);
+}
+
 TEST_CASE("Typed identity wrappers", "[runtime][identity]") {
     SECTION("SessionId") {
         auto sid = SessionId::generate();
@@ -121,6 +142,19 @@ TEST_CASE("Typed identity wrappers", "[runtime][identity]") {
         REQUIRE(sessions.size() == 1);
         REQUIRE(objects.size() == 1);
     }
+}
+
+TEST_CASE("Typed identity nil and hashing are stable", "[runtime][identity][issue-641]") {
+    REQUIRE(SessionId::nil() == SessionId::nil());
+    REQUIRE(RunId::nil() == RunId::nil());
+    REQUIRE(ObjectId::nil() == ObjectId::from_string("00000000000000000000000000000000"));
+    REQUIRE(CorrelationId::nil() == CorrelationId::nil());
+
+    auto object = ObjectId::generate();
+    std::unordered_set<ObjectId> objects;
+    objects.insert(object);
+    objects.insert(object);
+    REQUIRE(objects.size() == 1);
 }
 
 TEST_CASE("EventEnvelope", "[runtime][identity]") {
