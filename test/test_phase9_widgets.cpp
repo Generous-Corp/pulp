@@ -8,6 +8,7 @@
 #include <pulp/view/split_view.hpp>
 #include <pulp/view/property_list.hpp>
 #include <pulp/view/breadcrumb.hpp>
+#include <pulp/view/theme_editor.hpp>
 
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
@@ -143,6 +144,22 @@ TEST_CASE("EqCurveView empty hit does not start a drag", "[view][eq_curve][issue
     REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("EqCurveView paint covers disabled grid and disabled band handles",
+          "[view][eq_curve][coverage][issue-652]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 240, 120});
+    eq.set_show_grid(false);
+    eq.add_band({500.0f, 12.0f, 1.0f, EqCurveView::FilterType::peak, false});
+
+    pulp::canvas::RecordingCanvas canvas;
+    eq.paint(canvas);
+
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_circle) == 0);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_circle) == 0);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) > 0);
+}
+
 // ── MidiKeyboard ────────────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboard note state", "[view][midi_keyboard]") {
@@ -193,6 +210,40 @@ TEST_CASE("MidiKeyboard interaction callback", "[view][midi_keyboard]") {
     kb.on_mouse_down({5, 40});
     REQUIRE(last_note >= 60);
     REQUIRE(last_vel > 0);
+}
+
+TEST_CASE("MidiKeyboard drag releases old notes and supports vertical range",
+          "[view][midi_keyboard][coverage][issue-652]") {
+    MidiKeyboard kb;
+    kb.set_range(80, 60);
+    REQUIRE(kb.first_note() == 80);
+    REQUIRE(kb.last_note() == 80);
+
+    kb.set_range(60, 72);
+    kb.set_orientation(MidiKeyboard::Orientation::vertical);
+    kb.set_bounds({0, 0, 100, 130});
+
+    std::vector<int> note_ons;
+    std::vector<int> note_offs;
+    kb.on_note_on = [&](int note, float velocity) {
+        note_ons.push_back(note);
+        REQUIRE_THAT(velocity, WithinAbs(0.8f, 0.001f));
+    };
+    kb.on_note_off = [&](int note) { note_offs.push_back(note); };
+
+    kb.on_mouse_down({10, 12});
+    REQUIRE(note_ons == std::vector<int>{61});
+    REQUIRE(kb.is_note_on(61));
+
+    kb.on_mouse_drag({10, 120});
+    REQUIRE(note_offs == std::vector<int>{61});
+    REQUIRE_FALSE(kb.is_note_on(61));
+    REQUIRE_FALSE(note_ons.empty());
+    REQUIRE(kb.is_note_on(note_ons.back()));
+
+    kb.on_mouse_up({10, 120});
+    REQUIRE_FALSE(kb.is_note_on(note_ons.back()));
+    REQUIRE(note_offs.back() == note_ons.back());
 }
 
 // ── ColorPicker ─────────────────────────────────────────────────────────────
@@ -315,6 +366,26 @@ TEST_CASE("ColorPicker paint positions alpha cursor from normalized alpha",
     REQUIRE(found_alpha_cursor);
 }
 
+TEST_CASE("ColorPicker mode and outside mouse input are stable",
+          "[view][color_picker][coverage][issue-652]") {
+    ColorPicker picker;
+    picker.set_bounds({0, 0, 200, 260});
+    picker.set_mode(ColorPicker::Mode::hex_only);
+    REQUIRE(picker.mode() == ColorPicker::Mode::hex_only);
+
+    picker.set_color(Color::rgba8(10, 20, 30));
+    auto before = picker.hex();
+    int changes = 0;
+    picker.on_change = [&](Color) { ++changes; };
+
+    picker.on_mouse_down({300, 300});
+    picker.on_mouse_drag({4, 4});
+    picker.on_mouse_up({4, 4});
+
+    REQUIRE(changes == 0);
+    REQUIRE(picker.hex() == before);
+}
+
 // ── FileDropZone ────────────────────────────────────────────────────────────
 
 TEST_CASE("FileDropZone extension filtering", "[view][file_drop]") {
@@ -363,6 +434,62 @@ TEST_CASE("FileDropZone empty extensions accepts all", "[view][file_drop]") {
     FileDropZone zone;
     zone.drag_enter({"anything.xyz"});
     REQUIRE(zone.is_drag_valid());
+}
+
+TEST_CASE("FileDropZone paint reflects idle valid and invalid drag states",
+          "[view][file_drop][coverage][issue-652]") {
+    FileDropZone zone;
+    zone.set_bounds({0, 0, 180, 120});
+    zone.set_label("Idle");
+    zone.set_hover_label("Ready");
+    zone.set_accepted_extensions({".wav"});
+    auto fill_text_count = [](const pulp::canvas::RecordingCanvas& canvas,
+                              const std::string& text) {
+        int count = 0;
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_text &&
+                command.text == text) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    pulp::canvas::RecordingCanvas idle;
+    zone.paint(idle);
+    REQUIRE(idle.count(pulp::canvas::DrawCommand::Type::fill_text) == 1);
+    REQUIRE(fill_text_count(idle, "Idle") == 1);
+    REQUIRE(idle.count(pulp::canvas::DrawCommand::Type::stroke_line) == 3);
+
+    zone.drag_enter({"take.wav"});
+    pulp::canvas::RecordingCanvas valid;
+    zone.paint(valid);
+    REQUIRE(fill_text_count(valid, "Ready") == 1);
+
+    zone.drag_enter({"take.txt"});
+    pulp::canvas::RecordingCanvas invalid;
+    zone.paint(invalid);
+    REQUIRE(fill_text_count(invalid, "Idle") == 1);
+
+    zone.set_icon_style(FileDropZone::IconStyle::none);
+    pulp::canvas::RecordingCanvas no_icon;
+    zone.paint(no_icon);
+    REQUIRE(no_icon.count(pulp::canvas::DrawCommand::Type::stroke_line) == 0);
+}
+
+TEST_CASE("FileDropZone invalid or empty drops do not call callback",
+          "[view][file_drop][coverage][issue-652]") {
+    FileDropZone zone;
+    zone.set_accepted_extensions({".wav"});
+
+    int drops = 0;
+    zone.on_drop = [&](const std::vector<std::string>&) { ++drops; };
+
+    zone.drop({"notes.txt"});
+    zone.drop({});
+    REQUIRE(drops == 0);
+    REQUIRE_FALSE(zone.is_drag_over());
+    REQUIRE_FALSE(zone.is_drag_valid());
 }
 
 // ── SplitView ───────────────────────────────────────────────────────────────
@@ -566,4 +693,34 @@ TEST_CASE("Breadcrumb paint emits background, items, and separators",
 
     REQUIRE(home_text == 1);
     REQUIRE(separator_text == 2);
+}
+
+// ── ThemeEditor ────────────────────────────────────────────────────────────
+
+TEST_CASE("ThemeEditor covers missing selection empty theme and selected paint",
+          "[view][theme-editor][coverage][issue-652]") {
+    ThemeEditor editor;
+    editor.set_bounds({0, 0, 360, 120});
+
+    editor.select_token("missing");
+    REQUIRE(editor.selected_token() == "missing");
+    REQUIRE(editor.token_names().empty());
+
+    pulp::canvas::RecordingCanvas empty;
+    editor.paint_all(empty);
+    REQUIRE(empty.count(pulp::canvas::DrawCommand::Type::fill_text) == 1);
+
+    Theme theme;
+    theme.colors["accent.primary"] = Color::rgba8(1, 2, 3);
+    theme.colors["bg.primary"] = Color::rgba8(4, 5, 6);
+    editor.set_theme(theme);
+    editor.select_token("accent.primary");
+
+    pulp::canvas::RecordingCanvas selected;
+    editor.paint_all(selected);
+
+    REQUIRE(selected.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 2);
+    REQUIRE(selected.count(pulp::canvas::DrawCommand::Type::stroke_rounded_rect) == 1);
+    REQUIRE(selected.count(pulp::canvas::DrawCommand::Type::fill_text) == 3);
+    REQUIRE(editor.export_json().find("accent.primary") != std::string::npos);
 }
