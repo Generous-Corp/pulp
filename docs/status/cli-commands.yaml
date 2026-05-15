@@ -4,7 +4,7 @@
 commands:
   - name: build
     status: usable
-    summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1` (#744).
+    summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects. When configure is needed, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`.
     args:
       - name: --js-engine
         kind: option
@@ -19,7 +19,7 @@ commands:
 
   - name: test
     status: usable
-    summary: Run the test suite via CTest. Builds first if needed. When a cold-start build is triggered, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1` (#744). Works with repo and standalone projects.
+    summary: Run the test suite via CTest. Builds first if needed. When a cold-start build is triggered, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`. Works with repo and standalone projects.
     args:
       - name: extra_args
         kind: passthrough
@@ -167,7 +167,7 @@ commands:
 
   - name: projects
     status: usable
-    summary: Manage the ~/.pulp/projects.json registry. Populated automatically by `pulp create`; use these commands to add existing projects or prune stale entries. `pulp doctor --versions` reads this registry for per-project skew reporting. (#552)
+    summary: Manage the ~/.pulp/projects.json registry. Populated automatically by `pulp create`; use these commands to add existing projects or prune stale entries. `pulp doctor --versions` reads this registry for per-project skew reporting.
     subcommands:
       - name: list
         summary: Show registered projects (and flag any whose path no longer exists)
@@ -189,7 +189,7 @@ commands:
 
   - name: project
     status: usable
-    summary: Per-project SDK pin management — bump standalone `pulp.toml` sdk_version + find_package(Pulp ...) pins, or legacy CMake pins, and undo the last batch. (#564/#244)
+    summary: Per-project SDK pin management — bump standalone `pulp.toml` sdk_version + find_package(Pulp ...) pins, or legacy CMake pins, and undo the last batch.
     subcommands:
       - name: bump
         summary: Bump the pinned Pulp SDK version (CWD by default; `--all` iterates the registry)
@@ -307,7 +307,7 @@ commands:
 
   - name: run
     status: usable
-    summary: Launch a standalone Pulp application from the build directory. Supports headless / screenshot / frames / watch modes for CI auto-validation (#914).
+    summary: Launch a standalone Pulp application from the build directory. Supports headless / screenshot / frames / watch modes for CI auto-validation.
     args:
       - name: target
         kind: positional
@@ -315,16 +315,16 @@ commands:
         description: "Target name (default: first standalone binary found)"
       - name: --headless
         kind: flag
-        description: Run without a window; render offscreen. Forwarded as --headless and PULP_HEADLESS=1 env var (#914).
+        description: Run without a window; render offscreen. Forwarded as --headless and PULP_HEADLESS=1 env var.
       - name: --screenshot
         kind: option
-        description: Save a PNG screenshot to <file>; implies --headless. Forwarded as --screenshot <file> and PULP_SCREENSHOT=<file> env var (#914).
+        description: Save a PNG screenshot to <file>; implies --headless. Forwarded as --screenshot <file> and PULP_SCREENSHOT=<file> env var.
       - name: --frames
         kind: option
-        description: Number of frames to render before screenshot. Default 1. Forwarded as --frames <n> and PULP_FRAMES=<n> env var (#914).
+        description: Number of frames to render before screenshot. Default 1. Forwarded as --frames <n> and PULP_FRAMES=<n> env var.
       - name: --watch
         kind: flag
-        description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot (#914).
+        description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot.
     docs: reference/cli.md#run
 
   - name: upgrade
@@ -337,13 +337,13 @@ commands:
         description: "Version to install (default: latest)"
       - name: --check-only
         kind: flag
-        description: Report cached latest release and exit; no download (#547 Slice 2).
+        description: Report cached latest release and exit; no download.
       - name: --notes
         kind: flag
-        description: Print embedded migration notes for the upgrade hop; no binary swap (#548 Slice 3).
+        description: Print embedded migration notes for the upgrade hop; no binary swap.
       - name: --json
         kind: flag
-        description: With `--notes`, emit stable-shape JSON for agent consumers (#548 Slice 3 → Slice 4).
+        description: With `--notes`, emit stable-shape JSON for agent consumers.
       - name: --from
         kind: option
         description: Override the `from` version for `--notes` (default is the installed CLI).
@@ -376,7 +376,7 @@ commands:
 
   - name: doctor
     status: usable
-    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints (#8 / #355). `--versions` surfaces CLI/SDK/Plugin version skew (#499). `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage (#743). `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs (#744); `--caches --fix` auto-heals user-owned drift without sudo.
+    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints. `--versions` surfaces CLI/SDK/Plugin version skew. `--validators` surfaces plugin-format validator install + signature integrity, with `--fix` healing user-owned breakage. `--caches` audits the FetchContent shared-source cache for dangling symlinks, stale-commit entries, and root-owned dirs; `--caches --fix` auto-heals user-owned drift without sudo.
     args:
       - name: target
         kind: positional
@@ -395,13 +395,13 @@ commands:
         description: Print CLI/SDK/Plugin version diagnostics and advisory skew warnings (always exits 0)
       - name: --validators
         kind: flag
-        description: Discover auval / pluginval / clap-validator across well-known paths, verify each candidate's code signature is intact (catches the "ripped out of .app bundle" signature drift that causes amfid to SIGKILL pluginval mid-run), and report ✓/✗/⚠. Exit 0 only when every validator is Healthy. (#743)
+        description: Discover auval / pluginval / clap-validator across well-known paths, verify each candidate's code signature is intact (catches the "ripped out of .app bundle" signature drift that causes amfid to SIGKILL pluginval mid-run), and report ✓/✗/⚠. Exit 0 only when every validator is Healthy.
       - name: --scan-parents
         kind: flag
         description: With --versions, also walk the CWD's ancestor directories for CMakeLists.txt files invoking pulp_add_* macros and surface them inline (never auto-registered; opt-in escape hatch for projects created outside `pulp create`)
       - name: --caches
         kind: flag
-        description: Audit the Pulp FetchContent shared-source cache (~/Library/Caches/Pulp/fetchcontent-src on macOS, equivalent paths elsewhere). Exits 1 on any dangling-symlink, stale-commit, or root-owned entry. Same discovery code runs as a preflight inside `pulp build` and `pulp test`; bypass via PULP_SKIP_CACHE_PREFLIGHT=1 (#744).
+        description: Audit the Pulp FetchContent shared-source cache (~/Library/Caches/Pulp/fetchcontent-src on macOS, equivalent paths elsewhere). Exits 1 on any dangling-symlink, stale-commit, or root-owned entry. Same discovery code runs as a preflight inside `pulp build` and `pulp test`; bypass via PULP_SKIP_CACHE_PREFLIGHT=1.
       - name: --json
         kind: flag
         description: With --versions or --caches, emit the diagnostic as a single JSON object (stable schema — see reference/cli.md#doctor)
@@ -567,7 +567,7 @@ commands:
     summary: >
       Import designs from Figma, Stitch, v0, Pencil, Claude Design, or Google
       DESIGN.md into Pulp web-compat JS. The designmd source is tokens-only
-      in Phase 1 (no ui.js); other sources emit a full ui.js + tokens.json.
+      as tokens-only (no ui.js); other sources emit a full ui.js + tokens.json.
     args:
       - name: --from
         kind: option
@@ -623,7 +623,7 @@ commands:
         description: Output JSON report with metrics
       - name: --detect-only
         kind: flag
-        description: "Detect (source, format-version, parser-version) for --file or --directory <path> against compat.json without parsing (pulp #1031)"
+        description: "Detect (source, format-version, parser-version) for --file or --directory <path> against compat.json without parsing"
       - name: --directory
         kind: option
         description: Path to a directory export (alternative to --file)
@@ -934,7 +934,7 @@ commands:
 
   - name: loop
     status: experimental
-    summary: Leveraged-prototype focus mode (#940) — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    summary: Leveraged-prototype focus mode — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
       - name: --platform
         kind: option
@@ -950,10 +950,10 @@ commands:
         description: Persist focus state and exit without entering the watch loop (CI/test friendly)
       - name: --watch-issues
         kind: option
-        description: "(Slice 3, deferred — issue #947) Poll `gh pr list` for state flips on PRs referencing the named issues. Today prints a deferred hint."
+        description: "Deferred: poll `gh pr list` for state flips on PRs referencing the named issues. Today prints a deferred hint."
       - name: --ar-swap-from
         kind: option
-        description: "(Slice 2, deferred — issue #946) Validate header/library ABI and swap built `.o` files from another worktree into the pinned SDK's static archive. Today prints a deferred hint."
+        description: "Deferred: validate header/library ABI and swap built `.o` files from another worktree into the pinned SDK's static archive. Today prints a deferred hint."
       - name: --test
         kind: flag
         description: Run tests after each successful build

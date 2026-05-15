@@ -79,12 +79,12 @@ format_limitations:
   vst3:
     - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
   au_v2:
-    - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host (#626)."
+    - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host."
   clap:
     - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
     - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
   lv2:
-    - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring is tracked under issue #239 (workstream 01)."
+    - "Atom sysex is ignored — the run() loop only promotes 1–3-byte short MIDI messages out of the input atom sequence; sysex sidecar wiring remains part of format-adapter production-readiness work."
   aax:
     - "Custom editor surface not wired — Pro Tools shows the auto-generated parameter strip rather than a Pulp ViewBridge editor (followups plan, row 7)."
     - "AudioSuite role is declared but not exercised end-to-end (followups plan, row 13)."
@@ -129,20 +129,20 @@ audio_io:
     notes: >-
       AVAudioSession category / interruption / route-change / media-services-reset
       all observed in Swift and forwarded to native listeners via
-      pulp_ios_audio_session_emit (#329 / PR #374). Runtime validation
-      still waits on iOS on-device smoke (#249).
+      pulp_ios_audio_session_emit. Runtime validation still waits on
+      iOS on-device smoke coverage.
   wasapi:
     status: experimental
     platform: windows
     notes: >-
-      Shared-mode playback with IMMNotificationClient hotplug (landed
-      PR #281). Input capture + exclusive-mode paths tracked in #243.
+      Shared-mode playback with IMMNotificationClient hotplug. Input
+      capture + exclusive-mode paths remain pending.
   alsa:
     status: experimental
     platform: linux
     notes: >-
       Output path works. Input capture and real device-metadata
-      enumeration tracked under #215 child issue.
+      enumeration remain pending.
   jack:
     status: planned
     platform: linux
@@ -528,9 +528,9 @@ platform_maturity:
     notes: >-
       macOS native (NSOpenPanel/NSSavePanel) — `usable`. Non-Apple
       platforms route through a host-registered backend with honest
-      has_backend() — PRs #312/#316. No native provider ships yet
-      for Windows/Linux/Android; callers register their own backend
-      or receive explicit no-selection. #338/#339.
+      has_backend(). No native provider ships yet for
+      Windows/Linux/Android; callers register their own backend or
+      receive explicit no-selection.
 
 input:
   pointer_events:
@@ -585,10 +585,10 @@ runtime_apis:
     notes: >-
       navigator.clipboard.readText/writeText via platform::Clipboard C++ API.
       macOS/iOS/Windows use native pasteboard APIs. Linux uses
-      xclip/wl-copy (#309 / PR #320) — set_text returns false honestly
-      when neither is on PATH. Android routes through a host-registered
-      bridge (Clipboard::set_android_bridge / clear_android_bridge);
-      generated app wiring tracked in #345.
+      xclip/wl-copy — set_text returns false honestly when neither is
+      on PATH. Android routes through a host-registered bridge
+      (Clipboard::set_android_bridge / clear_android_bridge); generated
+      app wiring remains pending.
   local_storage:
     status: usable
     notes: localStorage.getItem/setItem/removeItem — file-backed in temp directory.
@@ -712,14 +712,14 @@ design_import:
     parser-version: "0.1"
     format-version: alpha
     notes: >
-      Google DESIGN.md (Apache-2.0). Phase 1 emits tokens.json only — no
+      Google DESIGN.md (Apache-2.0). Emits tokens.json only — no
       ui.js, because DESIGN.md describes a system, not a screen. Strict
       detection (filename + frontmatter fence + name: + at least one of
       colors/typography/rounded/spacing/components; all-of with 95% min
       confidence). yaml-cpp (MIT) is vendored via CMake FetchContent for
-      the frontmatter parse. Phase 2 adds pulp design lint / diff +
-      Tailwind v3+v4 export; Phase 3 adds round-trip and component
-      scaffolding. See reference/imports/designmd.md.
+      the frontmatter parse. Design lint / diff, Tailwind export,
+      round-trip, and component scaffolding remain staged follow-ups. See
+      reference/imports/designmd.md.
   code_generator:
     status: usable
     notes: >
@@ -767,7 +767,7 @@ subsystems:
   view: usable
   osc: experimental
 
-# ── Known limitations (workstream 08 slice 8.5) ───────────────────────────────
+# ── Known limitations ────────────────────────────────────────────────────────
 #
 # Each entry keys a capability path already declared above and carries a list
 # of known limitations that should be visible to plugin authors. Every
@@ -775,8 +775,7 @@ subsystems:
 # a GitHub issue — so readers can follow the work.
 #
 # tools/list_limitations.py renders this block as a markdown table for
-# injection into docs/reference/capabilities.md (manual for v1; auto-inject
-# follows in slice 8.3).
+# injection into docs/reference/capabilities.md.
 #
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
@@ -813,9 +812,8 @@ limitations:
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
     - text: "Input capture not wired — input_view is always empty."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
-    # Hotplug: IMMNotificationClient device-change callbacks landed in
-    # PR #281; stale stub entry removed on 2026-04-18 during parity-audit
-    # docs refresh (#348).
+    # Hotplug: IMMNotificationClient device-change callbacks are wired;
+    # no stale stub limitation remains.
   audio_io.alsa:
     - text: "No input capture path."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
@@ -834,19 +832,18 @@ limitations:
     - text: "Running status not handled; timestamps always 0; no hotplug. SysEx input accumulator landed."
       tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.5"
   platform_maturity.accessibility.windows:
-    # UIA bootstrap landed in PR #283 (UIAutomationCore linked, session
-    # init wired). Remaining: IRawElementProviderSimple provider tree +
-    # WM_GETOBJECT integration + value/focus/selection event emission
-    # — tracked in #247.
-    - text: "UIA provider tree and event emission pending (bootstrap in place via #283)."
+    # UIA bootstrap is in place (UIAutomationCore linked, session init
+    # wired). Remaining: IRawElementProviderSimple provider tree +
+    # WM_GETOBJECT integration + value/focus/selection event emission.
+    - text: "UIA provider tree and event emission pending (UIAutomationCore linked, session init wired)."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.1"
   platform_maturity.accessibility.linux:
-    # AT-SPI D-Bus bridge bootstrap landed in PR #280. Remaining:
-    # per-view AtkObject model + value/text/focus event emission.
-    - text: "AT-SPI per-view accessible objects and events pending (bridge bootstrap in place via #280)."
+    # AT-SPI D-Bus bridge bootstrap is in place. Remaining: per-view
+    # AtkObject model + value/text/focus event emission.
+    - text: "AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place)."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
 
-# ── Schema-v2 additions (workstream 08 slice 8.1) ─────────────────────────────
+# ── Schema-v2 additions ──────────────────────────────────────────────────────
 #
 # Widgets: inventory every widget in core/view/include/pulp/view/ so the
 # consistency checker can cross-reference capabilities.md and catch stale
@@ -861,7 +858,7 @@ widgets:
   toggle_button:    { status: usable, header: widgets.hpp }
   icon:             { status: usable, header: widgets.hpp }
   image_view:       { status: partial, header: widgets.hpp,
-                      notes: "Placeholder rendering; Skia decode lands in workstream 07 slice 7.4." }
+                      notes: "Placeholder rendering; Skia decode planned." }
   meter:            { status: usable, header: widgets.hpp }
   multi_meter:      { status: usable, header: widgets.hpp }
   correlation_meter: { status: usable, header: widgets.hpp }
@@ -894,10 +891,10 @@ widgets:
                        notes: "Canvas-based node editor driving SignalGraph." }
   canvas_widget:    { status: usable, header: canvas_widget.hpp }
   table:            { status: partial, header: table.hpp,
-                      notes: "Basic rows; sortable columns + virtualization land in workstream 07 slice 7.3." }
-  modulation_matrix:   { status: planned, notes: "Workstream 07 slice 7.1." }
-  ab_compare:          { status: planned, notes: "Workstream 07 slice 7.2." }
-  resizable_shell:     { status: planned, notes: "Workstream 07 slice 7.5 (documented pattern)." }
+                      notes: "Basic rows; sortable columns + virtualization planned." }
+  modulation_matrix:   { status: planned, notes: "Planned modulation-matrix widget." }
+  ab_compare:          { status: planned, notes: "Planned A/B comparison widget." }
+  resizable_shell:     { status: planned, notes: "Planned documented resizable-shell pattern." }
 
 # Plugin formats beyond audio host integration.
 ara:
@@ -922,13 +919,13 @@ accessibility_features:
     notes: on_accessibility_adjust(float) routed through VoiceOver/TalkBack increment/decrement actions.
   actions:
     status: planned
-    notes: Per-widget std::vector<Action> exposure lands in workstream 04 slice 4.3.
+    notes: Per-widget std::vector<Action> exposure planned.
   live_region_announce:
     status: planned
-    notes: announce(text, politeness) cross-platform API lands in workstream 04 slice 4.3.
+    notes: announce(text, politeness) cross-platform API planned.
   tree_invalidation_events:
     status: planned
-    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) land in workstream 04 slice 4.3.
+    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) planned.
   a11y_test_harness:
     status: planned
-    notes: Headless AX introspection tests per platform land in workstream 04 slice 4.4.
+    notes: Headless AX introspection tests per platform planned.

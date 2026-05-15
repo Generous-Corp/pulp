@@ -98,7 +98,7 @@ The `--watch` flag enters a file-watching loop after the initial build. It polls
 For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 Before configure/build, `pulp build` also compares the active project's pinned `sdk_version` / `cli_min_version` against the running CLI. If the project is ahead, it fails fast and points at `pulp upgrade`; use `--allow-unsupported-sdk` only as an explicit unsupported escape hatch.
 
-When `pulp build` decides a CMake reconfigure is required, it also runs the FetchContent cache preflight from `pulp doctor --caches` first. If the shared cache (`~/Library/Caches/Pulp/fetchcontent-src/` on macOS, `$XDG_CACHE_HOME/pulp/fetchcontent-src/` on Linux, `%LOCALAPPDATA%/Pulp/fetchcontent-src/` on Windows) contains a dangling symlink or stale-commit entry, `pulp build` aborts with a one-screen remediation message instead of letting `cmake` blow up 200 lines into the configure log. Run `pulp doctor --caches --fix` to heal user-owned drift, or set `PULP_SKIP_CACHE_PREFLIGHT=1` to bypass the gate (#744).
+When `pulp build` decides a CMake reconfigure is required, it also runs the FetchContent cache preflight from `pulp doctor --caches` first. If the shared cache (`~/Library/Caches/Pulp/fetchcontent-src/` on macOS, `$XDG_CACHE_HOME/pulp/fetchcontent-src/` on Linux, `%LOCALAPPDATA%/Pulp/fetchcontent-src/` on Windows) contains a dangling symlink or stale-commit entry, `pulp build` aborts with a one-screen remediation message instead of letting `cmake` blow up 200 lines into the configure log. Run `pulp doctor --caches --fix` to heal user-owned drift, or set `PULP_SKIP_CACHE_PREFLIGHT=1` to bypass the gate.
 
 On Windows, `pulp build` also selects a Visual Studio generator automatically when no active MSVC shell is detected on `PATH`.
 
@@ -115,7 +115,7 @@ pulp test -R Gain             # Run tests matching "Gain"
 
 Extra arguments are passed through to `ctest`.
 
-When `pulp test` triggers a cold-start build (no `build/CMakeCache.txt`), the FetchContent cache preflight from `pulp doctor --caches` runs first and aborts with a clear remediation message on any unhealthy entry — same gate `pulp build` applies, same `PULP_SKIP_CACHE_PREFLIGHT=1` bypass (#744).
+When `pulp test` triggers a cold-start build (no `build/CMakeCache.txt`), the FetchContent cache preflight from `pulp doctor --caches` runs first and aborts with a clear remediation message on any unhealthy entry — same gate `pulp build` applies, same `PULP_SKIP_CACHE_PREFLIGHT=1` bypass.
 
 ### status
 
@@ -150,7 +150,7 @@ pulp validate --report out.json  # Write JSON report to file
 pulp validate --strict     # CI gate: skipped-because-missing-tool ⇒ exit 1
 ```
 
-**Validator-discovery preflight (#743).** Before launching any validator,
+**Validator-discovery preflight.** Before launching any validator,
 `pulp validate` runs the same discovery that powers `pulp doctor --validators`.
 If any validator on disk has a broken code signature (the classic case:
 a copy of `pluginval` ripped out of its `.app` bundle, where amfid will
@@ -206,7 +206,7 @@ Searches the active project's build output:
 - standalone projects: `build/bin/`
 - in-repo examples: `build/examples/`
 
-#### Headless / screenshot flags (#914)
+#### Headless / screenshot flags
 
 - `--headless` — run without a window. The CLI forwards `--headless`
   to the launched binary and also sets `PULP_HEADLESS=1`, so binaries
@@ -261,13 +261,13 @@ pulp doctor                          # show all checks
 pulp doctor --fix                    # auto-fix issues where possible
 pulp doctor --ci                     # non-interactive, exit codes only
 pulp doctor --dry-run                # show what --fix would do
-pulp doctor --versions               # CLI/SDK/Plugin version diagnostics (#499 Slice 1)
-pulp doctor --versions --scan-parents # ALSO walk CWD ancestors for pulp_add_* projects (#552)
-pulp doctor --versions --json        # emit the diagnostic as stable JSON (#552)
-pulp doctor --validators             # discover auval / pluginval / clap-validator + verify signatures (#743)
+pulp doctor --versions               # CLI/SDK/Plugin version diagnostics
+pulp doctor --versions --scan-parents # ALSO walk CWD ancestors for pulp_add_* projects
+pulp doctor --versions --json        # emit the diagnostic as stable JSON
+pulp doctor --validators             # discover auval / pluginval / clap-validator + verify signatures
 pulp doctor --validators --fix       # ALSO remove user-owned broken copies; root-owned breakage prints sudo one-liner
 pulp doctor --validators --dry-run   # preview what --fix would do
-pulp doctor --caches                 # FetchContent shared-source cache health (#744)
+pulp doctor --caches                 # FetchContent shared-source cache health
 pulp doctor --caches --fix           # heal user-owned dangling/stale-commit entries
 pulp doctor --caches --fix --dry-run # preview heal without removing anything
 pulp doctor --caches --json          # emit the cache report as stable JSON
@@ -314,7 +314,7 @@ Untagged CLI builds (anything not matching `M.N.P` exactly) are
 skipped silently, matching the design's forward-compatible
 convention.
 
-**Multi-project skew (#552 Slice 1b).** When `~/.pulp/projects.json`
+**Multi-project skew.** When `~/.pulp/projects.json`
 contains registered projects, `pulp doctor --versions` lists each
 project with its own SDK / `cli_min_version` pair and surfaces any
 skew inline. Entries whose `path` no longer exists are shown with a
@@ -343,10 +343,10 @@ stable shape — `{"cli": {...}, "plugin": {...}, "plugin_min_cli":
 user-visible warnings; per-field semver fields carry
 `comparable: true` only when they parse as pure `M.N.P`.
 `plugin_min_cli` is populated from the plugin's `plugin.json`
-`min_cli_version` field (release-discovery Slice 6, #551); absent in
+`min_cli_version` field; absent in
 older plugin builds.
 
-#### `--validators` (#743)
+#### `--validators`
 
 `pulp doctor --validators` is a dedicated diagnostic that discovers the
 three plugin-format validators `pulp validate` shells out to —
@@ -387,7 +387,7 @@ any validator. If any validator is in the Broken state, `pulp validate`
 aborts with the exact remediation instead of letting amfid SIGKILL the
 run mid-validation.
 
-**FetchContent cache health (#744).** `pulp doctor --caches` audits
+**FetchContent cache health.** `pulp doctor --caches` audits
 the shared-source FetchContent cache that Pulp uses to avoid
 re-cloning external SDKs across builds. The cache root is the same
 path `pulp_register_fetchcontent_source` populates:
@@ -438,7 +438,7 @@ produce per-project skew reports.
 
 ```bash
 pulp projects list                       # show registered projects
-pulp projects list --json                # machine-parseable JSON output (Phase 8 parity, #244)
+pulp projects list --json                # machine-parseable JSON output
 pulp projects add                        # register the current directory
 pulp projects add ~/code/my-plugin       # register a specific directory
 pulp projects remove ~/code/old-plugin   # forget a project by path
@@ -490,7 +490,7 @@ pulp project undo                     # revert the newest batch
 pulp project undo <timestamp>         # revert a specific batch
 ```
 
-**Cross-binary parity (Phase 8):** `pulp project bump` and `pulp project undo` round-trip byte-exactly between the C++ and Rust CLI implementations. A bump written by one binary's `bump` is correctly understood by the other binary's `undo`, including the optional `notes:[...]` field the Rust port emits. The C++ undo-batch parser silently skips unknown ARRAY / OBJECT fields it doesn't recognize so future schema additions don't desync the parser.
+**Cross-binary parity:** `pulp project bump` and `pulp project undo` round-trip byte-exactly between the C++ and Rust CLI implementations. A bump written by one binary's `bump` is correctly understood by the other binary's `undo`, including the optional `notes:[...]` field the Rust port emits. The C++ undo-batch parser silently skips unknown ARRAY / OBJECT fields it doesn't recognize so future schema additions don't desync the parser.
 
 **Safety rails:** branch pins (`GIT_TAG main`) and SHA pins are
 skipped with a diagnostic; dirty pin-bearing files are gated behind
@@ -503,8 +503,8 @@ doesn't abort the rest. Running inside the Pulp source checkout is
 refused because that is a framework release/version operation, not a
 consumer project SDK bump.
 
-**Migration notes** from Slice 3 (`#548`) print after a successful
-bump so users see any API changes the hop introduced.
+**Migration notes** print after a successful bump so users see any API
+changes the hop introduced.
 
 **When to use `pulp upgrade` vs `pulp project bump`:** use
 `pulp upgrade` to replace the installed Pulp CLI/SDK toolchain. Use
@@ -520,7 +520,7 @@ a `pulp project bump --all` hint after a successful CLI upgrade.
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
 
-> **Note:** For most CI workflows, use `shipyard run` for validation and `shipyard pr` for PR creation/shipping/tracking instead of `pulp ci-local`. Shipyard is Pulp's primary CI tool and provides the same target matrix with evidence-gated merges. `pulp ci-local` remains available as an advanced fallback — see issue #120 for removal timeline.
+> **Note:** For most CI workflows, use `shipyard run` for validation and `shipyard pr` for PR creation/shipping/tracking instead of `pulp ci-local`. Shipyard is Pulp's primary CI tool and provides the same target matrix with evidence-gated merges. `pulp ci-local` remains available as an advanced fallback while legacy workflows are still supported.
 
 Local-first CI control plane for Pulp. This is the shared operator surface for:
 
@@ -918,13 +918,13 @@ Accepted `--from` values: `figma`, `stitch`, `v0`, `pencil`, `claude`, `designmd
 
 Supports `--url` (fetches via curl), `--frame` (Figma frame selection), and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
 
-For `--from claude`, the CLI emits a `classnames.json` artifact alongside the generated JS view and `tokens.json`. The artifact maps `classname → { cssProp(camelCase): cssValue, ... }` for every `<style>` rule with a plain classname selector — `@pulp/css-adapt` (and downstream) consumes it to merge class-based styles into inline before forwarding to bridge calls. Mirrors the output of Spectr's `tools/extract-html-bundle/extract.mjs` (pulp #1035).
+For `--from claude`, the CLI emits a `classnames.json` artifact alongside the generated JS view and `tokens.json`. The artifact maps `classname → { cssProp(camelCase): cssValue, ... }` for every `<style>` rule with a plain classname selector — `@pulp/css-adapt` (and downstream) consumes it to merge class-based styles into inline before forwarding to bridge calls. Mirrors the output shape of Spectr's `tools/extract-html-bundle/extract.mjs`.
 
 For `--from designmd`, the CLI emits **only** a `tokens.json` (W3C
 DTCG) — no `ui.js`, because DESIGN.md describes a design system, not
 a screen. See [Import: DESIGN.md](imports/designmd.md) for the full
 contract (supported subset, reference resolution, detection rules,
-exit codes, diagnostics, and the Phase 1/2/3 split).
+exit codes, diagnostics, and the staged rollout split).
 
 | Flag | Description |
 |------|-------------|
@@ -1024,7 +1024,7 @@ Flags:
 
 **Status**: experimental
 
-Leveraged-prototype focus mode (issue [#940](https://github.com/danielraffel/pulp/issues/940)). `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, and drives the same watch + rebuild + screencap loop as `pulp dev` — but pinned to one platform's toolchain so the slow cross-platform configure paths (Skia/Dawn/threejs FetchContent) can be skipped when other platforms add unrelated cost.
+Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, and drives the same watch + rebuild + screencap loop as `pulp dev` — but pinned to one platform's toolchain so the slow cross-platform configure paths (Skia/Dawn/threejs FetchContent) can be skipped when other platforms add unrelated cost.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host
@@ -1032,8 +1032,8 @@ pulp loop --platform=macos          # Pin to macOS explicitly
 pulp loop --platform=linux --test   # Pin + run tests on every save
 pulp loop --status                  # Print the current focus state
 pulp loop --off                     # Restore cross-platform mode
-pulp loop --watch-issues 924,927    # (Slice 3, deferred — issue #947)
-pulp loop --ar-swap-from feat/x     # (Slice 2, deferred — issue #946)
+pulp loop --watch-issues 924,927    # Poll PR state for named issues (deferred)
+pulp loop --ar-swap-from feat/x     # ABI-checked .o swap (deferred)
 ```
 
 Flags:
@@ -1044,8 +1044,8 @@ Flags:
 | `--off` | Restore cross-platform mode by clearing the focus marker |
 | `--status` | Print the current focus state and exit |
 | `--no-watch` | Persist focus state and exit without entering the watch loop |
-| `--watch-issues N1,N2,...` | (Slice 3, deferred — [#947](https://github.com/danielraffel/pulp/issues/947)) Poll `gh pr list` for state flips |
-| `--ar-swap-from <ref>` | (Slice 2, deferred — [#946](https://github.com/danielraffel/pulp/issues/946)) ABI-checked `.o` swap |
+| `--watch-issues N1,N2,...` | Deferred: poll `gh pr list` for state flips on PRs referencing the named issues |
+| `--ar-swap-from <ref>` | Deferred: ABI-checked `.o` swap from another worktree |
 | `--test`, `-t` | Run tests after each successful build |
 | `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
 | `--validate` | Run quick plugin dlopen validation after build |
@@ -1072,13 +1072,13 @@ pulp scan --format au               # Only AU v2
 pulp scan --format auv3             # Only AUv3
 pulp scan --format lv2              # Only LV2
 pulp scan -f clap                   # Short alias for --format
-pulp scan --no-load                 # Filesystem-only walk (#812 escape hatch)
+pulp scan --no-load                 # Filesystem-only walk escape hatch
 pulp scan --help                    # Print usage; never opens any plug-in
 ```
 
 Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary (#812). Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
+`--no-load` skips the dlopen step entirely. Names are filename-derived; vendor / version / unique-id metadata is not surfaced. The trade-off: `--no-load` cannot crash on a malformed plug-in whose static-init code throws across the dlopen boundary. Use it when the rich path errors out with `libc++abi: terminating` or when you want a quick path-only listing.
 
 `pulp scan --help` is short-circuited — it does NOT dlopen any plug-in, so it remains safe even when one of the installed plug-ins would crash the rich path.
 
@@ -1141,17 +1141,17 @@ pulp upgrade --notes --json                       # same, stable-shape JSON (age
 pulp upgrade --notes --from 0.25.0 --to 0.29.0    # explicit hop override
 ```
 
-Downloads the release from GitHub, installs the archive's top-level companion payloads next to the current binary, replaces the current binary, and verifies. Phase 8+ archives install Rust `pulp` plus the `pulp-cpp` fallthrough delegate together. Requires `curl`.
+Downloads the release from GitHub, installs the archive's top-level companion payloads next to the current binary, replaces the current binary, and verifies. Current archives install Rust `pulp` plus the `pulp-cpp` fallthrough delegate together. Requires `curl`.
 
-`--check-only` reads the on-disk cache written by the on-every-invocation background refresh (release-discovery #547 Slice 2) and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
+`--check-only` reads the on-disk cache written by the on-every-invocation background refresh and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
 
-`--notes` is the Slice 3 (#548) surface: it filters the embedded migration index (built from `docs/migrations/*.md` at compile time) through each entry's `applies_if` expression and prints only the notes relevant to the upgrade hop. No network, no binary swap. The JSON variant emits a stable-shape document (`from`, `to`, `entries[].{version, breaking, summary, applies_if, body}`) that Slice 4's `/upgrade` Claude Code skill consumes.
+`--notes` filters the embedded migration index (built from `docs/migrations/*.md` at compile time) through each entry's `applies_if` expression and prints only the notes relevant to the upgrade hop. No network, no binary swap. The JSON variant emits a stable-shape document (`from`, `to`, `entries[].{version, breaking, summary, applies_if, body}`) for the `/upgrade` Claude Code skill.
 
 ### config
 
 **Status**: usable
 
-Read or write `~/.pulp/config.toml` settings. Release-discovery Slice 2 (#547) + Slice 5 (#550).
+Read or write `~/.pulp/config.toml` settings.
 
 ```bash
 pulp config get pr.workflow
@@ -1171,7 +1171,7 @@ Supported PR workflow key:
 
 Supported update keys:
 
-- `update.mode` — one of `auto | prompt | manual | off` (default `prompt`). Slice 5 (#550) wires all four modes into the invocation path:
+- `update.mode` — one of `auto | prompt | manual | off` (default `prompt`). All four modes are wired into the invocation path:
     - `auto` — silently stages the new release via `~/.pulp/pending-upgrade`; the swap completes on the next invocation.
     - `prompt` — prints a one-line banner per new version; 24h snooze via `~/.pulp/update-snooze` respected if present.
     - `manual` — prints a one-line "Run `pulp upgrade` when you're ready" notice per new version; never prompts.
@@ -1179,7 +1179,7 @@ Supported update keys:
 
   Changing `update.mode` clears `~/.pulp/update-snooze` so the new mode takes effect on the next invocation.
 - `update.check_interval_hours` — integer hours between background checks (default `24`). The 24h default stays under the 60/hour anonymous GitHub API rate limit by a wide margin.
-- `update.channel` — `stable | beta` (default `stable`). Reserved for a future slice; ignored today.
+- `update.channel` — `stable | beta` (default `stable`). Reserved for future release-channel support; ignored today.
 - `update.bump_projects` — `prompt | auto | off` (default `prompt`). Controls whether a successful `pulp upgrade` nudges the user toward `pulp project bump --all`.
 
 ### clean

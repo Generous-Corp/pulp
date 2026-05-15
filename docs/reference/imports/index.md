@@ -3,7 +3,7 @@
 `pulp import-design` ships a three-layer version model so the CLI surface
 stays stable as external tools evolve their export formats. The model is
 declared in [`compat.json`](../../../compat.json) and consumed by the
-detector behind `pulp import-design --detect-only` (pulp #1031).
+detector behind `pulp import-design --detect-only`.
 
 ## The three layers
 
@@ -35,8 +35,8 @@ asserts the row in `pulp-test-cli-import-detect`.
 
 The empty `detected-formats: []` arrays for figma / pencil / v0 reserve
 the source-level `parser-version` slot — the per-source parsers exist
-already but their format-versioning lands incrementally as #995 ships
-the buildable-React-project pipeline.
+already; their format-versioning lands incrementally as the
+buildable-React-project pipeline matures.
 
 ## Fingerprint vocabulary
 
@@ -130,18 +130,14 @@ warning: confidence below 80% — this export may be a newer
 
 - [`compat.json`](../../../compat.json) — the source of truth.
 - [Style props reference](../style-props.md) — RN-style style vocab
-  consumed downstream by the per-source parsers (#1026).
+  consumed downstream by the per-source parsers.
 - [Design Import API reference](../design-import.md) — the parser
   output shape and CLI flag list.
-- pulp #995 — buildable React project end-state. The
+- Buildable React project support — the
   `parser-version`-vs-`format-version` matrix exercises end-to-end
-  once #995 lands its parser; until then the schema + detect-only
-  surface ship in isolation.
-- pulp #1027 — `compat.json` parent issue. The stub at the repo root
-  is owned by #1031 (imports section) until #1027 merges its broader
-  surface (CLI, plugin formats, …) — entries are alphabetically
-  sorted to make the merge mechanical.
-- pulp #1029 — `compat-sync` hook. When that lands,
-  `tools/scripts/compat_path_map.json` will route edits to per-source
-  parsers into a `parser-version` bump check; until then the gate is
-  manual.
+  once the parser path is available; until then the schema +
+  detect-only surface ship in isolation.
+- `compat.json` ownership — import entries are alphabetically sorted
+  so broader compat-surface merges stay mechanical.
+- `compat-sync` hook — `tools/scripts/compat_path_map.json` routes
+  edits to per-source parsers into a `parser-version` bump check.

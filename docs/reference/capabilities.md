@@ -36,8 +36,8 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `midi_io.coremidi` | UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler. | [link](planning/production-readiness/02-audio-midi-io.md#2.6) |
 | `midi_io.win32_midi` | Legacy mmeapi; no windows.devices.midi2, no hotplug. SysEx input routed via MIM_LONGDATA; WinRT MIDI runtime still pending. | [link](planning/production-readiness/02-audio-midi-io.md#2.4) |
 | `midi_io.alsa_midi` | Running status not handled; timestamps always 0; no hotplug. SysEx input accumulator landed. | [link](planning/production-readiness/02-audio-midi-io.md#2.5) |
-| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (bootstrap in place via #283). | [link](planning/production-readiness/04-accessibility.md#4.1) |
-| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (bridge bootstrap in place via #280). | [link](planning/production-readiness/04-accessibility.md#4.2) |
+| `platform_maturity.accessibility.windows` | UIA provider tree and event emission pending (UIAutomationCore linked, session init wired). | [link](planning/production-readiness/04-accessibility.md#4.1) |
+| `platform_maturity.accessibility.linux` | AT-SPI per-view accessible objects and events pending (D-Bus bridge bootstrap in place). | [link](planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
 
 ---

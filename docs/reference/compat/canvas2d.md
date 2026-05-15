@@ -22,7 +22,7 @@ This section was previously a stub. The 2026-05-04 pass walked the
 `canvas*` register_function entries in widget_bridge.cpp, with extra
 notes per backend where Skia and CG diverge.
 
-## Counts (2026-05-07 — Wave 4 cleanup)
+## Counts
 
 Harness verdict (per `tools/harness/verifier`):
 
@@ -42,26 +42,25 @@ Catalog status counts (informational):
 | partial | ~9 |
 | missing | 0 |
 
-`fillText` and `strokeText` flipped `partial → supported` in pulp #1525
-once `maxWidth` was plumbed end-to-end and `strokeText` got its own
-dedicated bridge command (true outlined-glyph rendering, not the
-pre-#1525 fillText-with-stroke-color approximation).
+`fillText` and `strokeText` are now `supported` because `maxWidth` is
+plumbed end-to-end and `strokeText` has its own dedicated bridge
+command for true outlined-glyph rendering instead of the former
+fillText-with-stroke-color approximation.
 
-## Wave 1 paperwork (2026-05-07)
+## Catalog/oracle reconciliation
 
 Catalog/oracle gotcha hygiene only; no JS or C++ source change. Drift
 count dropped from 1 → 0 on the canvas2d surface.
 
-- **`canvas2d/arc`** — flipped `partial` → `supported` (PR #1348 wired
-  path-mode arc as cubic-bezier segments via `canvasPathArc`; the
-  per-quadrant bezier approximation is visually exact for fill / stroke /
-  clip use cases — the harness already verified PASS against the oracle).
+- **`canvas2d/arc`** — flipped `partial` → `supported`: path-mode arc
+  records cubic-bezier segments via `canvasPathArc`; the per-quadrant
+  bezier approximation is visually exact for fill / stroke / clip use
+  cases, and the harness verifies PASS against the oracle.
 - **Tracked-deferred gotcha annotations (5 entries — stay DIVERGE
   per oracle expectedStatus, but read as tracked rather than drift):**
-  - `isPointInPath`, `isPointInStroke` — bridge-thin gap-fill (pulp
-    #1527); synchronous JS-side ray-cast / closest-point on the path
-    mirror.
-  - `transform` — strict concat semantics deferred (PR #1348);
+  - `isPointInPath`, `isPointInStroke` — synchronous JS-side
+    ray-cast / closest-point checks on the path mirror.
+  - `transform` — strict concat semantics remain deferred; the
     pure-translation fast path covers the common case.
   - `lineDashOffset` — minor edge case; file follow-up if observable.
   - `setLineDash` — HTML5-spec odd-length doubling done internally
@@ -71,16 +70,16 @@ count dropped from 1 → 0 on the canvas2d surface.
     has no variant field; Skia/CG fonts in the canvas pipeline don't
     expose OpenType features at this layer).
   - `fillStyle` CanvasPattern — wiring confirmed via createPattern +
-    `_applyFillStyle` / `canvasSetFillPattern` (#1625 finding).
-  - `drawImage` sprite-sheet 9-arg form — issue-916 deferred.
-  - `getImageData` / `putImageData` — issue-916 (base64 round-trip
-    avoids typed-array bridge cost; sub-rect form deferred).
+    `_applyFillStyle` / `canvasSetFillPattern`.
+  - `drawImage` sprite-sheet 9-arg form — deferred.
+  - `getImageData` / `putImageData` — base64 round-trip avoids
+    typed-array bridge cost; sub-rect form remains deferred.
 
-## DIVERGE→PASS sweep (2026-05-07)
+## DIVERGE→PASS sweep
 
 The 21 → 18 flip closed 3 entries plus a wiring fix for a previously
-failing `[issue-1522]` regression. Remaining 18 are genuine paint-side
-or oracle-pin gaps.
+failing fill-rule regression. Remaining 18 are genuine paint-side or
+oracle-pin gaps.
 
 Closed in this sweep:
 
@@ -98,9 +97,8 @@ Closed in this sweep:
 Ancillary fix (closes pre-existing test failure):
 
 - **`canvasFillPath` / `canvasClip` fillRule arg** — the bridge fns
-  weren't reading `args.get<double>(1)` even though `[issue-1522]`
-  exercised that plumbing. Now both read the optional fillRule int
-  (0 = nonzero, 1 = evenodd) and store it on the recorded command;
+  now read the optional `args.get<double>(1)` fillRule int (0 =
+  nonzero, 1 = evenodd) and store it on the recorded command;
   the JS shim for `ctx.fill('evenodd')` and `ctx.clip('evenodd')`
   threads the keyword through. End-to-end rendering still uses
   non-zero on the Skia/CG paint side (see remaining DIVERGE list);
@@ -132,30 +130,30 @@ Remaining DIVERGE (18) — implementation / oracle gaps:
 | `canvas2d/strokeStyle` | Gradient on stroke (no `canvasSetStrokeLinearGradient` bridge fn). |
 | `canvas2d/transform` | `transform()` concat only routes pure-translation. |
 
-## Wave 4 cleanup (2026-05-07)
+## Catalog reconciliation
 
-Catalog reconciliation against Wave 1 / 2 / 3 wiring + one small JS
-shim fix. Net: **53 PASS / 13 DIVERGE → 57 PASS / 9 DIVERGE (80.3% →
+Catalog reconciliation against shipped wiring plus one small JS shim
+fix. Net: **53 PASS / 13 DIVERGE → 57 PASS / 9 DIVERGE (80.3% →
 86.4%)** on the canvas2d surface.
 
 Flipped `partial → supported`:
 
-- **`canvas2d/arcTo`** — pulp #1521 wired native `SkPath::arcTo(p1, p2, r)`
-  (Skia) and `CGPathAddArcToPoint` (CG); the catalog's "lineTo
-  fallback / radius ignored" claim was stale from the pre-#1521 era.
-- **`canvas2d/fillText`** — pulp #1525 plumbed `maxWidth` end-to-end
-  (Skia: `SkMatrix::Scale` around the origin; CG: `CGContextScaleCTM`)
-  AND Wave 3 c2d.6 routed gradient/pattern `fillStyle` through
-  `current_fill_paint()` so glyphs honour `gradient_shader_`. Both
-  catalog "unsupported values" entries were stale.
-- **`canvas2d/strokeStyle`** — Wave 3 c2d.7 wired
-  `canvasSetStrokeLinearGradient` / `canvasSetStrokeRadialGradient` /
+- **`canvas2d/arcTo`** — native `SkPath::arcTo(p1, p2, r)` (Skia)
+  and `CGPathAddArcToPoint` (CG) are wired; the catalog's previous
+  "lineTo fallback / radius ignored" claim is stale.
+- **`canvas2d/fillText`** — `maxWidth` is plumbed end-to-end (Skia:
+  `SkMatrix::Scale` around the origin; CG: `CGContextScaleCTM`) and
+  gradient/pattern `fillStyle` routes through `current_fill_paint()`
+  so glyphs honour `gradient_shader_`. Both catalog "unsupported
+  values" entries are stale.
+- **`canvas2d/strokeStyle`** — `canvasSetStrokeLinearGradient` /
+  `canvasSetStrokeRadialGradient` /
   `canvasSetStrokeRadialGradientTwoCircles` /
-  `canvasSetStrokeConicGradient` / `canvasSetStrokePattern` plus the
-  `_applyStrokeStyle` per-kind dispatcher. Catalog "no
-  stroke-gradient setter" claim was stale.
-- **`canvas2d/lineDashOffset`** — Wave 4 micro-fix in
-  `web-compat-canvas.js`: the field is now an `Object.defineProperty`
+  `canvasSetStrokeConicGradient` / `canvasSetStrokePattern` are wired
+  along with the `_applyStrokeStyle` per-kind dispatcher. The catalog
+  "no stroke-gradient setter" claim is stale.
+- **`canvas2d/lineDashOffset`** — `web-compat-canvas.js` now defines
+  the field as an `Object.defineProperty`
   getter/setter pair that re-pushes the active dash pattern via
   `canvasSetLineDash` on every assignment. Mutating between draws now
   shifts the stroke phase without requiring a redundant
@@ -168,21 +166,20 @@ Remaining 9 DIVERGE are all genuine tracked-deferred or architectural:
 
 | Entry | Reason |
 |---|---|
-| `canvas2d/transform` | Strict concat semantics (PR #1348). |
-| `canvas2d/isPointInPath` | Path2D-object arg + fillRule self-intersect (#1527). |
-| `canvas2d/isPointInStroke` | Square caps / miter spike approximations (#1527). |
-| `canvas2d/drawImage` | Sprite-sheet 9-arg slicing (issue-916). |
-| `canvas2d/getImageData` | RecordingCanvas returns zero-filled (issue-916). |
-| `canvas2d/putImageData` | Sub-rect form treated as no-rect (issue-916). |
+| `canvas2d/transform` | Strict concat semantics. |
+| `canvas2d/isPointInPath` | Path2D-object arg + fillRule self-intersect. |
+| `canvas2d/isPointInStroke` | Square caps / miter spike approximations. |
+| `canvas2d/drawImage` | Sprite-sheet 9-arg slicing. |
+| `canvas2d/getImageData` | RecordingCanvas returns zero-filled. |
+| `canvas2d/putImageData` | Sub-rect form treated as no-rect. |
 | `canvas2d/font` | `small-caps` (architectural — Canvas::set_font_full has no variant field). |
-| `canvas2d/direction` | Mixed-script bidi (#1506 SkParagraph plumbing). |
+| `canvas2d/direction` | Mixed-script bidi requires SkParagraph plumbing. |
 | `canvas2d/filter` | drop-shadow / url() / CG backend unfiltered. |
 
-## Recently expanded (#1348)
+## Recently expanded — state stack, transforms, paths, and gradients
 
-PR #1348 (pulp #1346, augments #1322) wired up the bulk of the
-Canvas2D state-stack and transform surface that FilterBank's
-visualizer needs:
+The bridge now covers the bulk of the Canvas2D state-stack and
+transform surface that FilterBank's visualizer needs:
 
 - State stack: `save`, `restore`
 - Transform: `translate`, `scale`, `rotate`, `setTransform`,
@@ -195,13 +192,13 @@ visualizer needs:
 - Compositing: `globalAlpha`, `globalCompositeOperation`
 - Line state: `lineCap`, `lineJoin`, `setLineDash` / `getLineDash`
 
-Skia gradient-shape fills (fillRect / fillCircle /
-fillRoundedRect honoring an active linear or radial gradient) landed
-in #1353. CG counterpart in #1359 / PR #1360 (merged 2026-05-03).
+Skia and CG gradient-shape fills (`fillRect` / `fillCircle` /
+`fillRoundedRect` honoring an active linear or radial gradient) are
+wired on both backends.
 
 ## Pre-existing surface
 
-These were wired before #1348 and remain stable:
+These were wired before the state-stack expansion and remain stable:
 `fillRect`, `strokeRect`, `clearRect`, `beginPath`, `closePath`,
 `moveTo`, `lineTo`, `fill`, `stroke`, `lineWidth`, `textAlign`,
 `textBaseline`, `fillStyle`, `strokeStyle`, `measureText`,
@@ -211,16 +208,16 @@ conveniences: `canvasFillCircle`, `canvasFillRoundedRect`,
 
 ## Notable gaps
 
-The two former NOT-IMPL entries (`filter`, `direction`) flipped to
-`partial` in pulp #1520 — see "Recently wired" below for scope.
+The two former NOT-IMPL entries (`filter`, `direction`) are now
+`partial` — see "Recently wired" below for scope.
 
-## Recently expanded — full CSS `font` shorthand (pulp #1434)
+## Recently expanded — full CSS `font` shorthand
 
 The Canvas2D `ctx.font` setter previously only parsed the legacy
 `'<size>px <family>'` form, so every Figma copy-CSS value of the shape
 `'italic small-caps bold 14px/1.4 "Inter", sans-serif'` collapsed to
-`14px sans-serif` (size + first family token only). The 2026-05-05
-shim parser now walks the full CSS Fonts Module Level 4 grammar:
+`14px sans-serif` (size + first family token only). The shim parser now
+walks the full CSS Fonts Module Level 4 grammar:
 
 ```
 font: [<font-style>] [<font-variant>] [<font-weight>] [<font-stretch>]
@@ -235,7 +232,7 @@ Plumbing:
   `SkFontStyle(weight, kNormal_Width, italic_or_upright)`. CG falls
   through to family + size (the base default).
 - `canvasSetFont(id, family, size)` — kept as the legacy fallback for
-  hosts that pre-date this PR.
+  hosts that do not expose `canvasSetFontFull`.
 
 Supported tokens:
 
@@ -257,16 +254,16 @@ The `font` getter still returns the originally-assigned string verbatim,
 so the spec round-trip (`ctx.font = 'italic 14px Inter'; ctx.font`)
 returns the same string.
 
-## Recently wired (pulp #1434 bridge-thin gap-fill)
+## Recently wired — bridge-thin gap fill
 
-The 2026-05-05 bridge-thin gap-fill PR closed four NOT-IMPL entries
-that were blocked only on a missing bridge fn — Skia and CG already
-exposed the underlying capability:
+The bridge-thin gap fill closed four NOT-IMPL entries that were
+blocked only on a missing bridge fn — Skia and CG already exposed the
+underlying capability:
 
 - **`createConicGradient(startAngle, x, y)`** — Skia routes through
   `SkGradientShader::MakeSweep` (real conic sweep). CG previously
-  degraded to the first-stop colour; **pulp #1524** software-rasterises
-  a `CGImage` of the active clip's bounding box (per-pixel `atan2`
+  degraded to the first-stop colour; it now software-rasterises a
+  `CGImage` of the active clip's bounding box (per-pixel `atan2`
   sweep + colour-stop interpolation) and paints it via
   `CGContextDrawImage`, so both backends now render real multi-stop
   sweeps.
@@ -278,22 +275,21 @@ exposed the underlying capability:
   CG: `CGContextSetInterpolationQuality` (`Low` / `Medium` / `High`).
   `enabled = false` collapses to nearest-neighbour for pixel-art.
 
-### Follow-up: `createPattern` (sub-agent #24)
+### `createPattern` image-resource handling
 
-The follow-up bridge-thin slice wired `createPattern` — deferred from
-the original #1480 PR because pattern handling needs an image-resource
-identifier shape, not just a bridge fn:
+`createPattern` required an image-resource identifier shape, not just
+a bridge fn:
 
 - **`createPattern(image, repetition)`** — Skia routes through
   `SkShader::MakeImage` with `SkTileMode::kRepeat` / `SkTileMode::kDecal`
   per axis. All four spec repetition values are supported:
-  `"repeat"`, `"repeat-x"`, `"repeat-y"`, `"no-repeat"`. **pulp #1524**
-  promoted the CG path from solid-fill fallback to a real
+  `"repeat"`, `"repeat-x"`, `"repeat-y"`, `"no-repeat"`. The CG
+  path now uses a real
   `CGPatternCreate` + `CGPatternCallbacks` (image-tile draw callback)
   + `CGContextSetFillPattern` flow; `no_repeat` axes blow up the tile
   step beyond the clip bounding box so only the seed tile lands.
 
-### Promotion: pulp #1524 — CG-degraded gradient/pattern cluster
+### CG gradient/pattern promotion
 
 3 entries previously DIVERGE on the CG backend now PASS on both Skia
 and CG:
@@ -315,17 +311,17 @@ Skia canvas but never applied to the actual paint. `lineCap` and
 `lineJoin` are now visually faithful on the GPU path.
 
 The Canvas2D `shadowColor` / `shadowBlur` / `shadowOffsetX` /
-`shadowOffsetY` quartet landed in pulp #1434 batch 7 (separate slice).
+`shadowOffsetY` quartet is also wired.
 
-## Recently changed — `fillText` / `strokeText` maxWidth + true stroked glyphs (pulp #1525)
+## Recently changed — `fillText` / `strokeText` maxWidth + true stroked glyphs
 
 The Canvas2D `ctx.fillText(text, x, y, maxWidth)` and
 `ctx.strokeText(text, x, y, maxWidth)` calls previously discarded
-`maxWidth` (the JS shim's `void maxWidth;` pre-#1525) and
-`strokeText` re-routed through `fillText` with the strokeStyle as the
+`maxWidth` and `strokeText` re-routed through `fillText` with the
+strokeStyle as the
 fill colour — visually approximate but spec-incompatible.
 
-The 2026-05-06 PR plumbs both calls end-to-end:
+Both calls are now plumbed end-to-end:
 
 - **`fillText`** — `maxWidth` threads through to the bridge as the 7th
   arg (`<= 0` / NaN / Infinity / null collapse to the no-constraint
@@ -343,14 +339,14 @@ The 2026-05-06 PR plumbs both calls end-to-end:
     `strokeStyle`.
   - CG: `CGContextSetTextDrawingMode(kCGTextStroke)` + active
     `CGContextSetRGBStrokeColor`.
-  - The shim falls back to the pre-#1525 fillText-with-strokeStyle
-    approximation on legacy hosts (no `canvasStrokeText` registered),
+  - The shim falls back to the legacy fillText-with-strokeStyle
+    approximation on hosts without `canvasStrokeText` registered,
     so a v0.78 plugin still renders visible text on a v0.77 host.
 - **`measureText`** — unchanged. Reports the natural advance regardless
   of any subsequent `fillText` `maxWidth` squeeze.
-## Recently promoted (pulp #1521 — arc-as-path cluster)
+## Recently promoted — arc-as-path cluster
 
-The 2026-05-06 cluster lifted four arc-related entries out of the
+The arc-as-path cluster lifted four arc-related entries out of the
 "partial" bucket. The legacy JS shim approximated each via cubic-bezier
 or polyline segments — closed-form-correct geometry was always
 available behind `SkPath::arcTo` / `SkRRect` (Skia) and `CGPathAddArc`
@@ -362,13 +358,13 @@ arc parameters through directly:
 - **`arcTo(x1, y1, x2, y2, radius)`** — Skia: `SkPath::arcTo(p1, p2, radius)` (the 5-arg overload). CG: `CGPathAddArcToPoint`. Radius is honoured. Degenerate (collinear / zero-radius) cases collapse to `lineTo` per spec.
 - **`ellipse(cx, cy, rx, ry, rotation, start, end, anticlockwise)`** — Skia: arc on an axis-aligned oval, transformed through `SkMatrix::RotateRad`. CG: `CGPathAddArc` through a `CGAffineTransform` carrying translate + rotate + non-uniform scale. Rotation is honoured.
 - **`roundRect(x, y, w, h, radii)`** — Skia: `SkRRect::MakeRectRadii` (4-corner). CG: 8-segment per-corner layout with adjacent-corner clamping. Supports the full CSS spec radii forms (number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], `{x, y}` elliptical corner).
-### Catalog hygiene: 10-entry `tests` round-trip (pulp #1526)
+### Catalog hygiene: 10-entry `tests` round-trip
 
-The 10 canvas2d entries below were cataloged in #1366 and wired across
-#1348 / #1480, but their `compat.json` `tests` field was empty — there
-was no single test pinning the round-trip "JS shim → bridge → CanvasWidget
-command stream" for the set. Two new Catch2 cases under `[issue-1526]`
-cover the round-trip (recorded `set_global_alpha` / `set_blend_mode` /
+The 10 canvas2d entries below were already cataloged and wired, but
+their `compat.json` `tests` field was empty — there was no single test
+pinning the round-trip "JS shim → bridge → CanvasWidget command stream"
+for the set. Dedicated Catch2 cases now cover the round-trip (recorded
+`set_global_alpha` / `set_blend_mode` /
 `set_line_cap` / `set_line_join` / `set_text_align` / `set_text_baseline`
 / `set_line_dash` / `quad_to` / `cubic_to` / `move_to` cmds) and the
 spec-default + assignment getter round-trip. Each catalog entry now
@@ -379,10 +375,9 @@ references the new test:
 - `textAlign`, `textBaseline`
 - `quadraticCurveTo`, `bezierCurveTo`, `arc`
 
-No behaviour change — this slice closes the catalog `tests`-field gap
-the entries inherited from PR #1366.
+No behaviour change — this closes the catalog `tests`-field gap.
 
-### Follow-up: `direction` + `filter` (pulp #1520)
+### `direction` + `filter`
 
 The two final NOT-IMPL entries in the canvas2d catalog flipped to
 `partial`:
@@ -391,8 +386,8 @@ The two final NOT-IMPL entries in the canvas2d catalog flipped to
   flushes via `canvasSetDirection`. Skia wires the enum through to the
   `SkShaper` `leftToRight` flag so HarfBuzz emits glyphs in visual order
   for right-to-left scripts. `inherit` maps to `ltr` until per-View
-  writing-direction lookup lands (#1506); full Unicode bidi for
-  mixed-script paragraphs requires SkParagraph plumbing tracked there.
+  writing-direction lookup lands; full Unicode bidi for mixed-script
+  paragraphs requires SkParagraph plumbing.
 - **`filter`** — JS shim tracks the raw CSS `<filter-function-list>`
   string and flushes via `canvasSetFilter`. Skia parses the string into
   an `SkImageFilter` chain and applies via `SkPaint::setImageFilter` on
@@ -407,7 +402,7 @@ backend stores the values but renders unfiltered today (Skia-only
 filter chain); a CG follow-up can route through `CGContextSetShadow`
 + `CGImage`-backed colour-matrix passes when needed.
 
-### Recently changed (pulp #1527)
+### Recently changed — synchronous path queries
 
 The bridge-thin gap-fill PR closed the three remaining
 synchronous-return Canvas2D entries — the underlying Skia/CG paths

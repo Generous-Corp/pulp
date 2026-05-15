@@ -20,7 +20,7 @@ across layout, box-model, typography, color, transforms, transitions,
 animations, gradients, flex, grid, and basic SVG. Print and paged-media
 specifics are out of scope.
 
-## Counts (2026-05-07)
+## Counts
 
 | Status | Count |
 |--------|------:|
@@ -34,13 +34,13 @@ specifics are out of scope.
 
 ## Recently changed
 
-- **2026-05-12 (pulp #1576 replacement — `resolveCSSLength` everywhere + 2 Codex closeouts)** —
+- **`resolveCSSLength` everywhere** —
   `core/view/js/web-compat-style-decl.js` swept: 58 `parseCSSLength(...)`
   call sites swapped to `resolveCSSLength(...)`. The new helper is a
   drop-in `{value, unit}`-shape replacement that also handles
-  `calc()` / `min()` / `max()` / `clamp()` expression inputs. Two
-  Codex-flagged correctness issues from the stale pulp #1576
-  addressed in the same PR:
+  `calc()` / `min()` / `max()` / `clamp()` expression inputs. The
+  same change addresses two correctness issues in the previous
+  length-resolution path:
   * **P1** — `calc()` / `min()` / `max()` / `clamp()` with empty
     parens previously infinite-recursed through `evaluateCalc`'s
     nested-function regex (RangeError on user/theme strings). Fixed
@@ -54,8 +54,8 @@ specifics are out of scope.
       percent layout path (was mis-applying `calc(50%)` as absolute px).
     - `calc(10vh)` / `min(1em, 2em)` / `calc(2rem)` / `calc(25vw)` /
       `calc(40vmin)` / `calc(40vmax)` / `calc(12px)` — original unit
-      preserved (Codex P1 on PR #1862 follow-up; bridge call sites
-      like `top/right/bottom/left` and `fontSize` need unit info for
+      preserved; bridge call sites like `top/right/bottom/left` and
+      `fontSize` need unit info for
       property-specific conversion). The unit set is the same one
       `parseCSSLength` already supports — units outside that set
       (`ch`, `pt`, `in`, etc.) fall through to px resolution rather
@@ -71,7 +71,7 @@ specifics are out of scope.
     single `resolveCSSLength` call now that the unified shape handles
     both branches.
 
-- **2026-05-12 (Tier 2 — listStyleType counter-style extension, storage-only)** —
+- **`listStyleType` counter-style extension, storage-only** —
   `widget_bridge.cpp::setListStyleType` keyword table and
   `web-compat-style-decl.js::lsTypes` shorthand parser gain 10 new
   CSS Counter Styles Level 3 keyword slots backed by new
@@ -90,9 +90,9 @@ specifics are out of scope.
   storage-only follow-up. Tests pin every new keyword to its enum
   slot AND assert the shorthand parser routes counter-style tokens
   through `setListStyleType` (regression guard for the `lsTypes`
-  table). pulp #1514.
+  table).
 
-- **2026-05-12 (Tier 1 PR-B — alignItems CSS-spec alias, justifyContent honest reclassification per Codex P1)** —
+- **`alignItems` CSS-spec alias and `justifyContent` reclassification** —
   widget_bridge.cpp `setFlex` dispatcher gains exactly ONE new
   alias plus an honest documentation pass on the rest:
   * `css/alignItems` — `first baseline` aliases to `FlexAlign::baseline`
@@ -101,8 +101,7 @@ specifics are out of scope.
     last-baseline tracking that Yoga does not implement; remains in
     `unsupportedValues`.
   * `css/justifyContent` — **no new aliases were added** for `left` /
-    `right` / `stretch` / `normal`. Codex P1 on PR #1853 (two
-    findings):
+    `right` / `stretch` / `normal` for two reasons:
     - `left` / `right` are direction-context-dependent. CSS spec: on
       a column container both behave as `start` (per CSS Box Alignment
       §4.3 — "If the property's axis is parallel to the inline axis,
@@ -121,8 +120,8 @@ specifics are out of scope.
     unsupported fall-through (becomes the safe default enum value)
     so a future silent re-alias fails first.
 
-- **2026-05-07 (Wave 4 css extensive — DIVERGE sweep)** —
-  catalog/oracle paperwork only; no C++ or JS source change. Drove the
+- **DIVERGE sweep** —
+  Catalog/oracle paperwork only; no C++ or JS source change. Drove the
   CSS surface from **128 PASS / 49 DIVERGE (60.4%)** to **177 PASS / 0
   DIVERGE (83.5%)** in a single sweep — the 35 non-PASS remainder is
   fully architectural (10 NO-OP intentional stubs + 25 OOS `wontfix`).
@@ -130,8 +129,8 @@ specifics are out of scope.
   * **Strategy** — for each currently-`partial` entry the deferred /
     architectural value-coverage gap was either (a) wired with the
     closest spec-equivalent fall-back, (b) reclassified out of
-    `unsupportedValues` per the Wave 1 `backgroundAttachment` precedent
-    when the rendering caveat is a paint-time / arch follow-up rather
+    `unsupportedValues` when the rendering caveat is a paint-time /
+    arch follow-up rather
     than a JS+bridge value gap, or (c) kept as `partial-deferred-*`
     when a real subsystem (image loader, HarfBuzz) is the gating block
     — those entries flipped status to `supported` with the deferred
@@ -163,7 +162,7 @@ specifics are out of scope.
     setMaskImage today, paint-time orchestration is the follow-up.
   * **Layout-length family (2 entries — `width`, `height`):** `em` /
     `rem` resolve against the default 14px font-size at the JS layer
-    (single-level cascade per Wave 2 css.2 fontSize precedent);
+    (single-level cascade consistent with the `fontSize` handling);
     `min-content` / `max-content` / `fit-content` are
     `arch-yoga-no-intrinsic-sizing`; `calc()` is `arch-no-calc-eval`.
   * **Outline family (4 entries — `outline`, `outlineColor`,
@@ -203,38 +202,37 @@ specifics are out of scope.
     `rowGap`, `fontVariant`, `fontFamily`, `listStyle` /
     `listStyleImage`, `__matchMedia`):** all clear the
     paint-time-deferred / architectural caveats from
-    `unsupportedValues` per the Wave 1 `backgroundAttachment`
-    precedent. `wordWrap` corrects a stale claim — the bridge IS
-    registered (setWordBreak shared route, since pulp #1434 A4
-    Bundle 5).
+    `unsupportedValues`. `wordWrap` corrects a stale claim — the
+    bridge IS registered through the shared `setWordBreak` route.
 
-- **2026-05-07 (Wave 1 drift cleanup + arch reclassification)** —
+- **Drift cleanup and architectural reclassification** —
   catalog/oracle paperwork only; no C++ or JS source change. Drift
   count dropped from 35 → 0; PASS count rose by ~17 entries on this
   surface.
   * **Drift cleanup (already-shipped subsystems):**
     - `direction`, `marginInlineStart/End`, `marginBlockStart/End`,
       `paddingInlineStart/End`, `paddingBlockStart/End` flipped
-      `partial` → `supported` — RTL inheritance via `setDirection`
-      shipped in #1506; logical-edge mapping verified via Bundle 3
-      fast-path; the writing-direction-deferred unsupportedValues
+      `partial` → `supported` — RTL inheritance via `setDirection` is
+      wired; logical-edge mapping is verified through the fast path;
+      the writing-direction-deferred unsupportedValues
       were stale.
     - `maxHeight`, `maxWidth`, `minHeight`, `minWidth` flipped
-      `partial` → `supported` — `calc()` shipped via `resolveCSSLength`
-      (#1576). `min-content` / `max-content` / `fit-content` now
+      `partial` → `supported` — `calc()` is handled via
+      `resolveCSSLength`. `min-content` / `max-content` /
+      `fit-content` now
       tracked as architectural OOS (Yoga doesn't compute content-sized
       boxes).
     - `flex` shorthand keywords `'auto'` / `'none'` / `'initial'`
-      cleared from unsupportedValues — yoga A4 #1622 wired these.
+      cleared from unsupportedValues because Yoga wiring exists.
     - `clipPath` flipped `partial` → `supported` — `path()` SVG syntax
-      shipped via clip_path_svg (#1540); url() / circle() / ellipse() /
+      is routed via `clip_path_svg`; url() / circle() / ellipse() /
       inset() / polygon() / box-keywords reclassified as
       arch-path-only (Skia path is the universal primitive).
     - `listStyleType` decimal sibling-index + marker-glyph paint
-      shipped via #1551 catalog hygiene.
+      are reflected in the catalog.
     - `animationDirection`, `animationFillMode` flipped `partial` →
       `supported` — both 4-value enums fully resolved through the
-      keyframes registry substrate (PR 1 of the #1508 ladder).
+      keyframes registry substrate.
     - `listStylePosition`, `placeItems`, `backgroundOrigin`,
       `backgroundRepeat`, `backgroundAttachment` flipped to
       `supported` — harness already verified PASS; catalog claims
@@ -268,23 +266,22 @@ specifics are out of scope.
       are deferred relative-unit / arch / paint-pipeline-limit per
       entry-specific notes.
 
-- **2026-05-07 (pulp #1434 A4 Bundles 2–7)** — css NOT-IMPL closure.
+- **CSS NOT-IMPL closure** —
   30 catalog entries flipped `missing` → `partial` / `noop` / `wontfix`.
   Targets the harness drift queue: PASS+DIVERGE coverage on the css
   surface should now sit ≥ 95%.
   * **Bundle 2 — animations tail (1 entry):** `animationPlayState`
     flipped `missing` → `partial`. New `setAnimation(id, "play_state",
     value)` control-token routes through View::staged_animation +
-    `View::animation_play_state_`. Playback driver pause/resume is
-    the follow-up to #1508.
+    `View::animation_play_state_`. Playback driver pause/resume remains
+    the follow-up.
   * **Bundle 3 — logical-edge fan-out (7 entries):** `marginBlockStart`,
     `marginBlockEnd`, `marginInlineEnd`, `paddingBlockStart`,
     `paddingBlockEnd`, `paddingInlineStart`, `paddingInlineEnd` flipped
     `missing` → `partial`. JS-side cases dispatch to the existing
     per-edge `setFlex` bridge under the LTR / horizontal-tb fast path
     (mirrors the pre-existing `marginInlineStart`). Direction-aware
-    logical→physical resolution remains the writing-direction follow-up
-    tracked under the same #1434 umbrella.
+    logical→physical resolution remains the writing-direction follow-up.
   * **Bundle 4 — overflow per-axis + 3D (5 entries):**
     - `overflowX`, `overflowY` → `partial` (axis-tied gotcha
       documented in `unsupportedValues`; both axes clip together
@@ -311,14 +308,13 @@ specifics are out of scope.
     - `isolation` → `wontfix` (no CSS stacking-context / z-buffer
       model; mix-blend-mode's saveLayer covers the layer-isolation
       use case where it matters).
-    - `mixBlendMode` → `partial` (already wired via #1549 — catalog
-      flipped to match).
-    - `clipPath` → `partial` (already wired via #1540 — catalog
-      flipped to match).
-    - `mask`, `maskImage` → `partial` (already wired via #1515 / #1540
-      — catalog flipped to match).
-    - `direction` → `partial` (already wired via #1506 — catalog
-      flipped to match).
+    - `mixBlendMode` → `partial` (already wired — catalog flipped to
+      match).
+    - `clipPath` → `partial` (already wired — catalog flipped to match).
+    - `mask`, `maskImage` → `partial` (already wired — catalog flipped
+      to match).
+    - `direction` → `partial` (already wired — catalog flipped to
+      match).
   * **Bundle 7 — resize + fontVariant (2 entries):**
     - `resize` → `noop` (no OS-style resize handles).
     - `fontVariant` → `partial` via new `setFontVariant(id, kw)` bridge
@@ -326,10 +322,10 @@ specifics are out of scope.
       decision.
   * **Synthetic `__pseudo_classes_note`** → `wontfix`. Superseded by
     the per-pseudo-class entries (`__pseudo_hover` / `__pseudo_focus`
-    / `__pseudo_active` / `__pseudo_disabled`) added in #1551; the
-    note is kept for the original triage rationale.
+    / `__pseudo_active` / `__pseudo_disabled`); the note is kept for
+    the original triage rationale.
 
-- **2026-05-06 (pulp #1515)** — CSS `clip-path` + `mask` cluster.
+- **CSS `clip-path` + `mask` cluster** —
   Three catalog items flipped `missing` → `partial`.
   * **`css/clipPath`** — bridge fn `setClipPath(id, svg_path_d)`
     stores the value on `View::clip_path_`; `View::paint_all` calls
@@ -340,7 +336,7 @@ specifics are out of scope.
     other backends silently no-op (path parsing is Skia-side).
     Only the `path("...")` form is honored — URL refs (`url(#id)`)
     and named shape forms (`circle()`, `inset()`, `polygon()`,
-    `ellipse()`) are deferred to a follow-up paint slice.
+    `ellipse()`) are deferred to follow-up paint work.
   * **`css/mask`** + **`css/maskImage`** — bridge fns `setMask` /
     `setMaskImage` round-trip the value through `View::mask_` /
     `View::mask_image_`. The shorthand parser in
@@ -348,8 +344,8 @@ specifics are out of scope.
     `*-gradient(...)` substring and forwards it to
     `setMaskImage` alongside the verbatim shorthand. Storage-only
     today — the saveLayer + `SkBlendMode::kDstIn` shader composite
-    that consumes `mask_image_` is the follow-up paint slice.
-- **2026-05-06 (pulp #1434 Phase A2-3)** — `css/direction` (and matching
+    that consumes `mask_image_` remains follow-up paint work.
+- **`css/direction` and matching Yoga/RN direction** — `css/direction` (and matching
   `yoga/direction`, `rn/direction`) wired through a new
   `View::WritingDirection` enum + `setDirection(id, "ltr"|"rtl"|
   "inherit")` bridge fn. `yoga_layout.cpp` dispatches via
@@ -361,14 +357,14 @@ specifics are out of scope.
   surface; the el.style adapter route still works for raw CSS).
   Reclassified missing → supported on css + yoga; rn/direction stays
   partial pending the prop-applier's logical-edge resolver
-  (#1497's `*Start`/`*End` mapping is currently LTR-only fast-path —
-  RTL-aware mapping is a follow-up). `rn/writingDirection` flagged
+  (`*Start`/`*End` mapping is currently LTR-only fast-path; RTL-aware
+  mapping is a follow-up). `rn/writingDirection` flagged
   `wontfix` per the harness oracle (iOS-only RN spec).
   Skia paragraph_style.setTextDirection at text shape is the
   remaining piece — landing alongside the SkParagraph integration
   in a follow-up.
-- **2026-05-06 (pulp #1434 Phase A2-1 PR 1)** — CSS animations +
-  transitions infrastructure landed. New
+- **CSS animations + transitions infrastructure** —
+  New
   `core/view/include/pulp/view/css_animation.hpp` ships the type
   vocabulary (`CssEasing`, `AnimatableProperty`, `TransitionSpec`,
   `CssAnimation`, `CssKeyframesBlock`, `CssKeyframesRegistry`) plus
@@ -383,16 +379,16 @@ specifics are out of scope.
   `defineKeyframes(name, JSON-stringified stops)` populates the
   application-wide `CssKeyframesRegistry` on `WidgetBridge`;
   `setAnimation` looks up by name and seeds `CssAnimation` entries
-  on `View::active_animations_`. PR 2 of the ladder hooks the
-  playback driver to advance these via the rAF idle pump (#1402);
-  this PR ships the substrate so subsequent PRs land independently.
+  on `View::active_animations_`. The playback driver advances these
+  via the rAF idle pump; this substrate lets animation pieces land
+  independently.
   Reclassified 11 entries from `noop` / `missing` / `partial` →
   `supported` (transition* + animation/animationDelay/Duration/
   IterationCount/Name/TimingFunction). animationDirection +
-  animationFillMode stay `partial` pending PR 4 (specialized
-  per-property dispatch). animationPlayState stays `missing` per the
-  noop-vocabulary convention from #1475. css drift -11.
-- **2026-05-06 (pulp #1514)** — `css/listStyle` cluster (4 entries)
+  animationFillMode stay `partial` pending specialized per-property
+  dispatch. animationPlayState stays `missing` per the
+  noop-vocabulary convention. css drift -11.
+- **`css/listStyle` cluster** — four entries
   flipped `missing` → `partial`. New `View::ListStyleType` enum
   (`none` / `disc` / `circle` / `square` / `decimal`),
   `View::ListStylePosition` enum (`outside` / `inside`), and a
@@ -407,11 +403,11 @@ specifics are out of scope.
   marker glyphs aren't painted today (and `decimal` additionally
   needs sibling-index resolution from the parent's children).
   Marker glyph rendering is the follow-up. css drift -4.
-- **2026-05-06 (pulp #1516)** — `css/boxSizing` flipped from `missing`
+- **`css/boxSizing`** — flipped from `missing`
   to `supported`. The JS shim already called `setBoxSizing` if the
   bridge fn existed, but the bridge never registered it — so every
-  `box-sizing: border-box` declaration silently dropped. This PR adds
-  the bridge fn (`setBoxSizing(id, kw)`), routes it through
+  `box-sizing: border-box` declaration silently dropped. The bridge fn
+  (`setBoxSizing(id, kw)`) now registers and routes through
   `FlexStyle::box_sizing`, and wires `YGNodeStyleSetBoxSizing` in
   `build_yoga_subtree`. Default is `border-box` (matches Yoga 3.x's
   own default + pulp's implicit pre-fix behavior + what every modern
@@ -419,8 +415,8 @@ specifics are out of scope.
   `content-box` is opt-in for CSS-spec semantics. High-leverage for
   design imports — Figma / v0 / Claude Design HTML often emit
   explicit `boxSizing` declarations that previously vanished.
-- **2026-05-06 (pulp #1552)** — `line-clamp` / `-webkit-line-clamp` /
-  `background-repeat` wired end-to-end. `setLineClamp` and
+- **`line-clamp` / `-webkit-line-clamp` / `background-repeat`** —
+  Wired end-to-end. `setLineClamp` and
   `setBackgroundRepeat` now register in `widget_bridge.cpp`; the JS
   shim cases that already routed through them (and the matching
   `@pulp/react` prop-applier dispatch) now reach C++. Label grew a
@@ -434,8 +430,8 @@ specifics are out of scope.
   Reclassified `css/lineClamp` and `css/webkitLineClamp` to
   `supported`; `css/backgroundRepeat` stays `partial` with the
   honest "storage-only" caveat.
-- **2026-05-06 (pulp #1551)** — Phase A3 Bundle 3 inside the
-  `pulp #1434` umbrella: 13 already-implemented CSS features
+- **Already-implemented CSS features promoted to catalog entries** —
+  13 already-implemented CSS features
   promoted to first-class catalog entries. Pure catalog add — no
   code changes — documenting the existing wiring in
   `core/view/js/web-compat-document.js`,
@@ -468,7 +464,7 @@ specifics are out of scope.
   the existing partial `css/__hover_pseudo` and missing
   `css/__pseudo_classes_note` triage notes are kept in place but
   superseded by the per-pseudo-class entries.
-- **2026-05-06 (pulp #1434 Phase A2-4)** — `css/filter` extended from
+- **`css/filter`** — extended from
   `blur(Npx)`-only to the full CSS Filter Effects function set:
   `blur` / `brightness` / `contrast` / `grayscale` / `hue-rotate` /
   `invert` / `opacity` / `saturate` / `sepia` / `drop-shadow`, plus
@@ -483,8 +479,8 @@ specifics are out of scope.
   currently degrades the chain to blur-only collapse (color-matrix
   equivalents on CIFilter are a follow-up). Reclassified DIVERGE →
   PASS. The Skia ImageFilter chain is the same primitive Pulp uses
-  for `boxShadow` (#925), so reusing rather than reinventing.
-- **2026-05-06 (pulp #1528)** — Eight CSS entries reclassified `wontfix` /
+  for `boxShadow`, so reusing it avoids a parallel filter path.
+- **No-op CSS entries** — Eight CSS entries reclassified `wontfix` /
   `missing` → `noop` (silently accepted, no paint impact in pulp's
   non-scrolling / hint-free model). The entries split into two clusters:
   * **Optimization / compositor hints (3):** `css/willChange`,
@@ -499,8 +495,8 @@ specifics are out of scope.
     rubber-band gestures). Pulp has Overflow scroll/visible but doesn't
     actually scroll today, so the declarations silently noop.
   All eight properties already noop at runtime by JS-shim fall-through
-  (no `case` arm in `web-compat-style-decl.js`); this PR only changes the
-  catalog classification + harness verdict (drift cleared on all eight).
+  (no `case` arm in `web-compat-style-decl.js`); this catalog update
+  only changes classification + harness verdict (drift cleared on all eight).
   Lifts the css "effective denominator" by reclassifying 4 OOS entries
   (`status: wontfix`) and 4 NOT-IMPL entries (`status: missing`) into the
   noop bucket — NO_OP entries semantically count as "supported in the
@@ -509,7 +505,7 @@ specifics are out of scope.
   (`tools/harness/adapters/css.py`) gained an explicit
   `status == "noop"` early-return so future entries don't have to rely on
   mapsTo string-marker matching.
-- **2026-05-06 (pulp #1517)** — Background sub-properties wired through
+- **Background sub-properties** — wired through
   the JS shim and bridge: `backgroundAttachment` / `backgroundClip` /
   `backgroundOrigin` flipped from `missing` to `noop` / `partial` /
   `noop`. New thin bridge fns `setBackgroundAttachment` /
@@ -521,7 +517,7 @@ specifics are out of scope.
   paints), and `backgroundAttachment: scroll` is the conformant
   default for our non-scrolling layout. Wiring is complete so that
   when the paint-side variants land, the slot is already populated.
-- **2026-05-06 (pulp #1519)** — CSS outline cluster fully bridge-backed.
+- **CSS outline cluster** — fully bridge-backed.
   `setOutlineColor` / `setOutlineOffset` / `setOutlineStyle` /
   `setOutlineWidth` now register in `widget_bridge.cpp`; the CSS
   translator at `web-compat-style-decl.js` fans the `outline:
@@ -535,9 +531,9 @@ specifics are out of scope.
   `View::BorderStyle` (CSS spec is identical for outline + border).
   Reclassified `css/outline`, `css/outlineColor`, `css/outlineOffset`,
   `css/outlineStyle`, `css/outlineWidth` to `supported`.
-- **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
-  four catalog/translator items combined into one PR.
-  * **Triage #7 cursor enum fan-out** — `setCursor` case ladder now
+- **Cursor, user-select, pointer-events, and flex-wrap cleanup** —
+  four catalog/translator items changed together.
+  * **Cursor enum fan-out** — `setCursor` case ladder now
     maps the full CSS keyword set to `View::CursorStyle`. Wired:
     `pointer`, `crosshair`, `text` / `vertical-text`, `grab`,
     `grabbing`, `not-allowed` / `no-drop`, `none` / `hidden`
@@ -551,18 +547,18 @@ specifics are out of scope.
     `cell`, `zoom-in/out`, `help`, `wait`, `progress`,
     `context-menu`) fall back to `default` and are tracked for a
     follow-up that adds dedicated slots + platform glyphs.
-  * **Triage #12 userSelect catalog trim** — `supportedValues`
+  * **`userSelect` catalog trim** — `supportedValues`
     trimmed to `none` / `text` / `all` (the actual bridge surface);
     CSS-spec `auto` and `contain` were over-claimed and would
     silently drop. Status flipped `supported` → `partial`.
-  * **Triage #13 pointerEvents catalog trim** — `supportedValues`
+  * **`pointerEvents` catalog trim** — `supportedValues`
     trimmed to `auto` / `none` / `box-only` / `box-none` (the
     `View::PointerEvents` enum). The CSS SVG-spec values
     (`visible-painted` / `visible-fill` / `visible-stroke` /
     `painted` / `fill` / `stroke`) are over-claims (pulp doesn't
     render SVG via the renderer surface; SVG is layout-leaf via
     `SvgPath` widgets). Status flipped to `partial`.
-  * **Triage #14 flex-wrap reverse modes** — `FlexStyle::flex_wrap`
+  * **`flex-wrap` reverse modes** — `FlexStyle::flex_wrap`
     converted from `bool` to a tri-state `FlexWrap` enum
     (`no_wrap` / `wrap` / `wrap_reverse`) so Yoga's
     `YGWrapWrapReverse` becomes reachable. Bridge accepts the
@@ -571,8 +567,8 @@ specifics are out of scope.
     `flex-flow` shorthand parser now also recognizes
     `wrap-reverse` and `row-reverse` / `column-reverse`. Status
     flipped to `supported`.
-- **2026-05-06 (pulp #1434 Phase A2-2 PR 1)** — CSS Grid surface
-  extension. `GridStyle` gains `auto_columns` / `auto_rows`
+- **CSS Grid surface extension** —
+  `GridStyle` gains `auto_columns` / `auto_rows`
   (implicit-track sizing for items overflowing the explicit grid),
   `auto_flow` (`row` / `column` / `row dense` / `column dense`),
   `template_areas` (`std::vector<NamedArea>` populated by
@@ -587,10 +583,10 @@ specifics are out of scope.
   `gridTemplateRows` / `gridTemplateAreas` / `gridAutoColumns` /
   `gridAutoRows` / `gridAutoFlow` / `gridArea` / `gridColumn` /
   `gridRow` / per-side starts/ends + gap variants. Reclassified
-  9 entries to `supported`. PRs 2-3 of the A2-2 ladder wire
-  auto-flow dense-packing + named-area resolution into the
+  9 entries to `supported`. Auto-flow dense-packing and named-area
+  resolution wire into the
   existing `layout_grid` algorithm. css drift -9.
-- **2026-05-05 (pulp #1434 Triage #10)** — `css/borderStyle` now
+- **`css/borderStyle`** — now
   honors the keyword at paint time. New `View::BorderStyle` enum
   (`solid` / `dashed` / `dotted` / `double` / `groove` / `ridge` /
   `inset` / `outset` / `none` / `hidden`) stored on each View; the
@@ -607,8 +603,8 @@ specifics are out of scope.
   through CG). `setBorderStyle` is a newly registered bridge fn;
   the CSS shim's `borderStyle` case forwards the keyword verbatim.
   Reclassified missing → supported.
-- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
-  CSS surface entries closed in one slice. `css/alignContent` flipped
+- **`alignContent`, `width: auto`, and `height: auto`** — three
+  deferred CSS surface entries closed together. `css/alignContent` flipped
   NOT-IMPL → PASS: the JS translator (`web-compat-style-decl.js`)
   was already routing `setFlex(id, 'align_content', ...)`, but the
   bridge had no `align_content` case — values silently dropped.
@@ -624,7 +620,7 @@ specifics are out of scope.
   `last baseline` / `normal` for `alignContent` and `min-content` /
   `max-content` / `fit-content` / `em` / `rem` for width / height
   remain unsupported.
-- **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
+- **Per-edge percent and auto spacing support** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   accept percent values (`'5%'`); margin also accepts `'auto'`
   (Yoga centering — `marginLeft: auto; marginRight: auto`). The CSS
@@ -638,9 +634,9 @@ specifics are out of scope.
   to the per-edge dispatchers. `em` / `rem` / `vh` / `vw` / `calc()`
   remain unsupported on lengths (parseCSSLength is px-only).
   Reclassified DIVERGE → PASS for 8 per-edge + 4 alias entries.
-  Mirrors PR #1426 (width/height %) and PR #1451
-  (top/right/bottom/left %). Net: css drift_count -12, pass +12.
-- **2026-05-05 (pulp #1434 Triage #8)** — `parseCSSColor`
+  Mirrors existing percent support for width/height and positional
+  offsets. Net: css drift_count -12, pass +12.
+- **`parseCSSColor` modern color spaces** — `parseCSSColor`
   (`core/view/js/css-parser.js`) now recognizes the CSS Color Module
   Level 4 modern color spaces: `oklch(L C H [/ A])`,
   `oklab(L a b [/ A])`, `lch(L C H [/ A])`, `lab(L a b [/ A])`, and
@@ -657,7 +653,7 @@ specifics are out of scope.
   `css/borderColor` (plus seven matching `rn/*Color` entries). Figma
   copy-CSS has been emitting `oklch(...)` since 2024; v0.dev, Tailwind,
   and Claude Design emit `lab()`/`lch()` constantly.
-- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `css/transform` now
+- **`css/transform` function fan-out** — `css/transform` now
   supports the full CSS function set:
   `translate(x,y)`, `translateX`, `translateY`, `rotate`, `rotateZ`,
   `scale(n)` / `scale(x,y)`, `scaleX`, `scaleY`, `skewX`, `skewY`,
@@ -671,19 +667,19 @@ specifics are out of scope.
   in C++ since the 2D slot landed; this surface just hadn't been
   wired). `matrix(a,b,c,d,tx,ty)` dispatches via the existing
   `setTransform(id, a, b, c, d, e, f)` bridge fn — preserves the
-  full 6-component 2D affine matrix verbatim (per Codex post-merge
-  audit P1 — earlier draft decomposed to translate+uniform-scale+
-  rotate which silently dropped `c`/`d` skew components on rotation
-  matrices like `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)`).
+  full 6-component 2D affine matrix verbatim. Decomposing to
+  translate+uniform-scale+rotate would silently drop `c`/`d` skew
+  components on rotation matrices like
+  `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)`.
   Deferred (silent no-op): `rotateX` / `rotateY` / `matrix3d` /
   `perspective` — pulp's 2D View has no 3D rotation storage;
   tracked for a follow-up. Reclassified DIVERGE → PASS. Figma
   motion exports + v0.dev hero animations + Tailwind utility
   classes routinely emit the previously-unsupported function set.
-- **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
+- **CSS catalog hygiene** — eight catalog-only
   refreshes: `css/width` and `css/height` now list `%` in
-  `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —
-  the CSS translator forwards `'NN%'` strings verbatim and the bridge
+  `supportedValues` (mirroring `yoga/width` / `yoga/height`; the CSS
+  translator forwards `'NN%'` strings verbatim and the bridge
   routes them via `FlexStyle.dim_*` / `YGNodeStyleSet*Percent`).
   `css/backgroundSize`, `css/backgroundPosition`, `css/backgroundRepeat`,
   `css/lineClamp`, `css/webkitLineClamp`, and `css/wordWrap` flipped
@@ -692,9 +688,9 @@ specifics are out of scope.
   remain unregistered so the values silently drop at runtime, but the
   catalog status now matches the harness verdict (DIVERGE). Drift on
   these six entries is cleared. Nine remaining `css/animation*` and
-  `css/touchAction` entries closed via #1475's `noop` vocabulary
-  extension (see next entry).
-- **2026-05-05 (pulp #1475)** — Catalog vocabulary extension. The harness
+  `css/touchAction` entries closed via the `noop` vocabulary extension
+  (see next entry).
+- **Catalog vocabulary extension** — The harness
   verifier (`tools/harness/status.py`) now recognizes a fifth catalog
   status value, `noop`, which maps to the harness `NO_OP` outcome.
   Distinct from `missing` (no implementation at all) and `partial`
@@ -710,12 +706,12 @@ specifics are out of scope.
   `css/animationPlayState` stays `missing` because its `mapsTo` is
   `"no branch"` — the bridge has no entry point for it at all, which
   is NOT_IMPL semantics, not NO-OP.
-- **2026-05-12 (pulp #1434 follow-up)** — `css/textAlign` now also
+- **`css/textAlign: match-parent`** — `css/textAlign` now also
   accepts `match-parent`, closing the last value gap on this property.
   CSS spec: `match-parent` resolves to the parent's *computed*
   `text-align`. Implementation reuses the existing View parent-chain
-  walker (`View::inheritable_text_align()`, originally wired for
-  issue-969 typography inheritance): at paint time, a Label set to
+  walker (`View::inheritable_text_align()`): at paint time, a Label
+  set to
   `LabelAlign::match_parent` walks from `parent()` up the ancestor chain
   and adopts the first ancestor's resolved value, falling back to `left`
   when no ancestor set one (the CSS spec default for `text-align`).
@@ -723,30 +719,30 @@ specifics are out of scope.
   encoding extends 0..4 → 0..5 to cover container Views storing the new
   value in the inheritable slot. `unsupportedValues` for `css/textAlign`
   now empty — coverage-gap closed.
-- **2026-05-05 (pulp #1434 Triage #11)** — `css/textAlign` now accepts
+- **`css/textAlign` expanded values** — `css/textAlign` now accepts
   `start`, `end`, `auto`, and `justify` alongside the existing `left`,
   `center`, `right`. `start`/`end` map symmetrically to `left`/`right`
   (LTR-only today). `auto` resolves at paint time to `left` (degrades
-  gracefully until pulp's RTL slice lands). `justify` reaches canvas
+  gracefully until RTL-aware layout lands). `justify` reaches canvas
   `TextAlign::justify`; full SkParagraph kJustify rendering is a
   follow-up (backends approximate as left until then). `match-parent`
-  remains unsupported (closed in the follow-up entry dated 2026-05-12).
+  is covered by the dedicated entry above.
   Reclassified DIVERGE → PASS.
-- **2026-05-05 (pulp #1434 Triage #15)** — `css/boxShadow` status
+- **`css/boxShadow` status correction** — `css/boxShadow` status
   flipped `supported` → `partial`. The single-shadow CSS-spec format
-  (`[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`) has been
-  wired since issue-925 (`web-compat-style-decl.js:565`). Multi-shadow
+  (`[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`) is wired
+  in `web-compat-style-decl.js`. Multi-shadow
   comma-separated lists are deferred — single-shadow path covers the
   bulk of Figma / Tailwind / v0 emissions. Drift cleared.
-- **2026-05-05 (pulp #1434 batch 6)** — `css/top`, `css/right`,
+- **Percent positional offsets** — `css/top`, `css/right`,
   `css/bottom`, `css/left` now accept percent values (`'50%'`). The
   CSS translator passes `'NN%'` strings verbatim to the bridge; the
   bridge detects the `'%'` suffix and routes through Yoga's native
   `YGNodeStyleSetPositionPercent` via `View::top_unit_` etc. `em`,
   `rem`, `vh`, `vw` remain unsupported (entries stay DIVERGE on those
-  units). Mirrors PR #1426 (`width`/`height` percent) for the View
+  units). Mirrors width/height percent support for the View
   positional fields.
-- **2026-05-05 (pulp #1434 batch 4)** — added `css/marginHorizontal`,
+- **RN-style margin/padding aliases** — added `css/marginHorizontal`,
   `css/marginVertical`, `css/paddingHorizontal`, `css/paddingVertical`
   RN-shorthand entries. The DOM-lite el.style adapter now recognizes
   these aliases and fans them out to the matching pair of per-edge
@@ -755,19 +751,19 @@ specifics are out of scope.
   so RN snippets pasted into a DOM-lite plugin work as written. css
   total entry count 195 → 199; progress 55.38% → 56.28%.
 - `css/border` / `css/borderRadius` / `css/borderColor`: flipped from
-  `partial` (clobbered each other) to `supported`. PR #1169 routed each
+  `partial` (clobbered each other) to `supported`. Each now routes
   through its dedicated per-attribute setter so unset siblings are
   preserved (CSS semantics).
-- `css/fontFamily`: flipped to `supported`. PR #1174 splits comma-
+- `css/fontFamily`: flipped to `supported`. The parser splits comma-
   separated lists, strips outer quotes, and picks the first non-empty
   family before calling Skia's `SkFontMgr`. Generic fallbacks
   (`monospace`, `ui-monospace`) still don't resolve specially — Skia
   falls through to the platform default.
-- `css/display`: behavior fix in PR #1167. `display: flex` now defaults
+- `css/display`: `display: flex` now defaults
   flex-direction to `row` to match CSS web compat (Pulp's underlying
   widgets default to `column`/RN convention). Explicit `flexDirection`
   / `flex-direction` / `flex-flow` with a direction token still wins.
-- `css/transition`: extended note — PR #1345 added `:hover` selector
+- `css/transition`: extended note — `:hover` selector
   parsing in inline `<style>` elements, completing the transition story
   end-to-end for the common interactive case.
 - `css/__hover_pseudo`: new entry. Documents the bounded `:hover`
@@ -815,7 +811,7 @@ function is **not registered**, so the value is silently dropped.
 7. `css/opacity: 50%` — percentage suffix stripped by `parseFloat`,
    yields `50`, clamped to `1`. Visually fine, semantically wrong.
 8. `css/alignItems: baseline` / `css/alignSelf: baseline` — wired via
-   `FlexAlign::baseline` → `YGAlignBaseline` (pulp #1434 rn batch B).
-   `first baseline` aliases to plain `baseline` (Tier 1 PR-B,
-   2026-05-12); `last baseline` is intentionally unsupported because
+   `FlexAlign::baseline` → `YGAlignBaseline`. `first baseline` aliases
+   to plain `baseline`; `last baseline` is intentionally unsupported
+   because
    it requires baseline-set tracking that Yoga does not implement.
