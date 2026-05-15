@@ -4862,3 +4862,24 @@ local-only so it can keep accumulating into one larger GitHub-hosted CI
 batch. REST queue sweep after validation showed #2048, #2049, #2050,
 #2051, and #2097 still with no failing check-runs; #2048/#2051 each had
 one fewer pending check than the prior sweep.
+
+2026-05-15 16:24 PDT: extended the held runtime/audio batch to six commits
+ahead of `origin/main`, current head `de855b2fd` (`test(runtime): cover
+default http stream state`). Additional local-only commits are
+`2ba25e795` (`test(runtime): cover file stream position edges`),
+`8b8325cbe` (`test(runtime): cover http response status helper`), and
+`de855b2fd`. These add coverage for `StreamResult` helper predicates,
+`FileStream` read/write-mode position, zero-byte I/O, closed flush/position
+edges, `HttpResponse::ok()` boundary statuses, and default `HttpStream`
+eof/zero-read/close behavior.
+
+Validation for the accumulated branch passed locally:
+`cmake --build build --target pulp-test-runtime-utils pulp-test-json-rpc
+pulp-test-memory-message-channel pulp-test-stream pulp-test-network-stream
+-j$(sysctl -n hw.ncpu)`;
+`ctest --test-dir build --output-on-failure -R
+"PULP_ON_SCOPE_EXIT|TemporaryFile|ScopeGuard|HttpResponse|HTTP helpers|JsonRpcPeer|MemoryMessageChannel|StreamResult|FileStream|MemoryStream|Stream polymorphic|HttpStream"`
+with 44/44 tests passing; and `git diff --check`. The branch remains
+local-only while it grows toward the larger PR batch size. REST queue sweep
+showed no failing check-runs on #2048, #2049, #2050, #2051, or #2097; #2050
+also dropped one pending check since the prior sweep.
