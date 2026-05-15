@@ -4883,3 +4883,20 @@ with 44/44 tests passing; and `git diff --check`. The branch remains
 local-only while it grows toward the larger PR batch size. REST queue sweep
 showed no failing check-runs on #2048, #2049, #2050, #2051, or #2097; #2050
 also dropped one pending check since the prior sweep.
+
+2026-05-15 16:27 PDT: extended the held runtime/audio batch to eight commits
+ahead of `origin/main`, current head `27c1d1fd` (`test(runtime): cover
+bigint assignment edges`). Additional commits after the six-commit mark are
+`d823f799f` (`test(runtime): cover spsc queue capacity helper`) and
+`27c1d1fd`. These cover `SpscQueue::capacity()`, rvalue queue pushes, and
+`BigInteger` copy/move assignment behavior without changing runtime code.
+
+Validation for the accumulated branch passed locally:
+`cmake --build build --target pulp-test-runtime-utils pulp-test-json-rpc
+pulp-test-memory-message-channel pulp-test-stream pulp-test-network-stream
+pulp-test-runtime pulp-test-license -j$(sysctl -n hw.ncpu)`;
+`ctest --test-dir build --output-on-failure -R
+"PULP_ON_SCOPE_EXIT|TemporaryFile|ScopeGuard|HttpResponse|HTTP helpers|JsonRpcPeer|MemoryMessageChannel|StreamResult|FileStream|MemoryStream|Stream polymorphic|HttpStream|SpscQueue|BigInteger"`
+with 64/64 tests passing; and `git diff --check`. The branch remains
+local-only; target size is still a larger GitHub-hosted batch rather than a
+small PR.
