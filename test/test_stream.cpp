@@ -120,6 +120,23 @@ TEST_CASE("MemoryStream zero-size, rewind, and clear edge paths", "[stream]") {
     REQUIRE(eof.closed());
 }
 
+TEST_CASE("StreamResult helpers classify non-ok states", "[stream][coverage][issue-656]") {
+    auto ok = StreamResult::make(3);
+    REQUIRE(ok.ok());
+    REQUIRE(ok.bytes == 3);
+    REQUIRE_FALSE(ok.closed());
+    REQUIRE_FALSE(ok.would_block());
+
+    auto blocked = StreamResult::fail(StreamError::WouldBlock);
+    REQUIRE_FALSE(blocked.ok());
+    REQUIRE(blocked.would_block());
+    REQUIRE_FALSE(blocked.closed());
+
+    auto invalid = StreamResult::fail(StreamError::Invalid);
+    REQUIRE_FALSE(invalid.ok());
+    REQUIRE_FALSE(invalid.closed());
+}
+
 TEST_CASE("FileStream round-trip via filesystem", "[stream]") {
     auto path = make_temp_path("pulp_stream");
     const std::uint8_t payload[] = {'p', 'u', 'l', 'p', 0, 1, 2, 3};
@@ -196,6 +213,45 @@ TEST_CASE("FileStream open failure leaves stream closed", "[stream]") {
     auto r = s.read(buf, sizeof(buf));
     REQUIRE_FALSE(r.ok());
     REQUIRE(r.closed());
+}
+
+TEST_CASE("FileStream zero-size operations and positions are stable", "[stream][coverage][issue-656]") {
+    auto path = make_temp_path("pulp_stream_position");
+    const std::uint8_t payload[] = {'x', 'y', 'z'};
+
+    {
+        FileStream stream(path.string(), FileStream::Mode::ReadWrite);
+        REQUIRE(stream.is_open());
+        REQUIRE(stream.position() == 0);
+
+        auto zero_write = stream.write(payload, 0);
+        REQUIRE(zero_write.ok());
+        REQUIRE(zero_write.bytes == 0);
+        REQUIRE(stream.position() == 0);
+
+        auto wrote = stream.write(payload, sizeof(payload));
+        REQUIRE(wrote.ok());
+        REQUIRE(wrote.bytes == sizeof(payload));
+        REQUIRE(stream.position() == sizeof(payload));
+        REQUIRE(stream.flush());
+    }
+
+    {
+        FileStream stream(path.string(), FileStream::Mode::Read);
+        std::uint8_t out[3]{};
+        auto zero_read = stream.read(out, 0);
+        REQUIRE(zero_read.ok());
+        REQUIRE(zero_read.bytes == 0);
+        REQUIRE(stream.position() == 0);
+    }
+
+    FileStream closed;
+    REQUIRE(closed.position() == static_cast<std::size_t>(-1));
+    REQUIRE_FALSE(closed.flush());
+    closed.close();
+    REQUIRE_FALSE(closed.is_open());
+
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("Stream polymorphic usage", "[stream]") {

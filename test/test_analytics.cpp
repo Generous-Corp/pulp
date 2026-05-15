@@ -125,6 +125,35 @@ TEST_CASE("FileAnalyticsDestination writes JSON", "[runtime][analytics]") {
     REQUIRE(line.find("\"key\":\"value\"") != std::string::npos);
 }
 
+TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics][coverage][issue-656]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    AnalyticsEvent event;
+    event.name = "quote\"and\nline";
+    event.timestamp = 1.0;
+    event.properties = {{"key\"name", "value\\path\tend"}};
+    dest.log_event(event);
+    dest.flush();
+
+    std::ifstream f(tmp.path());
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"quote\\\"and\\nline\"") != std::string::npos);
+    REQUIRE(line.find("\"key\\\"name\":\"value\\\\path\\tend\"") != std::string::npos);
+}
+
+TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][coverage][issue-656]") {
+    TemporaryFile tmp(".jsonl");
+    auto path = tmp.path();
+    tmp.release();
+    std::filesystem::remove(path);
+
+    FileAnalyticsDestination dest(path.string());
+    dest.flush();
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("FileAnalyticsDestination auto flushes at batch threshold", "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
