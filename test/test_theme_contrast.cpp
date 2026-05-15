@@ -61,6 +61,16 @@ TEST_CASE("Min contrast thresholds are correct", "[view][contrast]") {
     REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aaa_large), WithinAbs(4.5, 0.01));
 }
 
+TEST_CASE("Contrast helpers clamp channel inputs",
+          "[view][contrast][coverage][issue-651]") {
+    auto below_black = Color::rgba(-1.0f, -0.5f, -0.25f);
+    auto above_white = Color::rgba(2.0f, 1.5f, 1.25f);
+
+    REQUIRE_THAT(relative_luminance(below_black), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(relative_luminance(above_white), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(contrast_ratio(below_black, above_white), WithinAbs(21.0, 0.1));
+}
+
 // ── Auto Contrast ───────────────────────────────────────────────────────────
 
 TEST_CASE("Auto contrast picks white on dark background", "[view][contrast]") {
@@ -114,6 +124,16 @@ TEST_CASE("Shift hue wraps around", "[view][contrast][hsl]") {
     auto shifted = shift_hue(red, 120.0f); // Should be green-ish
     auto hsl = rgb_to_hsl(shifted);
     REQUIRE_THAT(hsl.h, WithinAbs(120.0, 2.0));
+}
+
+TEST_CASE("Shift hue wraps negative and alpha is preserved",
+          "[view][contrast][hsl][coverage][issue-651]") {
+    auto color = Color::rgba8(0, 255, 0, 96);
+    auto shifted = shift_hue(color, -240.0f);
+    auto hsl = rgb_to_hsl(shifted);
+
+    REQUIRE_THAT(hsl.h, WithinAbs(240.0, 2.0));
+    REQUIRE_THAT(shifted.a, WithinAbs(color.a, 0.001));
 }
 
 TEST_CASE("Adjust lightness clamps at range bounds", "[view][contrast][hsl]") {
@@ -202,4 +222,23 @@ TEST_CASE("Auto-fix contrast produces valid theme", "[view][contrast][theme]") {
     if (tp && bp) {
         REQUIRE(contrast_ratio(*tp, *bp) >= 4.5f);
     }
+}
+
+TEST_CASE("Theme contrast validation skips missing pairs and reports failures",
+          "[view][contrast][theme][coverage][issue-651]") {
+    Theme partial;
+    partial.colors["bg.primary"] = Color::rgba8(255, 255, 255);
+    partial.colors["text.primary"] = Color::rgba8(200, 200, 200);
+
+    auto issues = validate_theme_contrast(partial, ContrastLevel::aa_normal);
+    REQUIRE(issues.size() == 1);
+    REQUIRE(issues.front().foreground_token == "text.primary");
+    REQUIRE(issues.front().background_token == "bg.primary");
+    REQUIRE(issues.front().ratio < min_contrast_for_level(ContrastLevel::aa_normal));
+    REQUIRE(issues.front().required_level == ContrastLevel::aa_normal);
+
+    auto fixed = auto_fix_contrast(partial, ContrastLevel::aa_normal);
+    REQUIRE(meets_contrast(*fixed.color("text.primary"),
+                           *fixed.color("bg.primary"),
+                           ContrastLevel::aa_normal));
 }

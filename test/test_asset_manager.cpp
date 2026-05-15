@@ -69,6 +69,31 @@ TEST_CASE("AssetManager cache clear", "[view][assets]") {
     REQUIRE(mgr.cache_count() == 0);
 }
 
+TEST_CASE("Asset data wrappers report validity and byte size",
+          "[view][assets][coverage][issue-651]") {
+    ImageData image;
+    image.pixels = {1, 2, 3, 4};
+    image.width = 1;
+    image.height = 1;
+    REQUIRE(image.valid());
+    REQUIRE(image.byte_size() == 4);
+
+    FontData font;
+    font.data = {0, 1};
+    REQUIRE(font.valid());
+    REQUIRE(font.byte_size() == 2);
+
+    ShaderData shader{"void main() {}", ""};
+    REQUIRE(shader.valid());
+    REQUIRE(shader.byte_size() == shader.source.size());
+    shader.error = "compile failed";
+    REQUIRE_FALSE(shader.valid());
+
+    BlobData blob{{5, 6, 7}};
+    REQUIRE(blob.valid());
+    REQUIRE(blob.byte_size() == 3);
+}
+
 TEST_CASE("AssetManager max cache size", "[view][assets]") {
     auto& mgr = AssetManager::instance();
     size_t old_max = mgr.max_cache_size();
@@ -246,6 +271,24 @@ TEST_CASE("AssetManager load image from memory with PNG header", "[view][assets]
     REQUIRE(img.height == 8);
 }
 
+TEST_CASE("AssetManager image memory loading handles invalid and short buffers",
+          "[view][assets][coverage][issue-651]") {
+    auto& mgr = AssetManager::instance();
+
+    static const uint8_t short_png[] = {0x89, 0x50, 0x4E};
+    auto too_short = mgr.load_image_from_memory(short_png, sizeof(short_png));
+    REQUIRE_FALSE(too_short.valid());
+    REQUIRE(too_short.byte_size() == 0);
+
+    static const uint8_t not_png[] = {
+        'n', 'o', 't', 'p', 'n', 'g', '!', '!',
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+    };
+    auto decoded = mgr.load_image_from_memory(not_png, sizeof(not_png));
+    REQUIRE_FALSE(decoded.valid());
+    REQUIRE(decoded.byte_size() == sizeof(not_png));
+}
+
 TEST_CASE("AssetManager load image from embedded", "[view][assets]") {
     auto& mgr = AssetManager::instance();
 
@@ -335,6 +378,18 @@ TEST_CASE("AssetManager data URI base64 decode", "[view][assets]") {
     // Should decode the base64 and attempt PNG parse
     // Won't be a valid image but should not crash
     // The decoded bytes would be the PNG signature (8 bytes)
+}
+
+TEST_CASE("AssetManager data URI decodes PNG dimensions with ignored characters",
+          "[view][assets][coverage][issue-651]") {
+    auto& mgr = AssetManager::instance();
+
+    auto img = mgr.load_image_from_data_uri(
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAAFCAYAAAA=\n!?");
+
+    REQUIRE(img.valid());
+    REQUIRE(img.width == 3);
+    REQUIRE(img.height == 5);
 }
 
 TEST_CASE("AssetManager rejects malformed data URIs", "[view][assets]") {
@@ -433,6 +488,38 @@ TEST_CASE("AssetManager blob file cache and misses", "[view][assets]") {
     REQUIRE_FALSE(missing_embedded.valid());
 
     mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
+}
+
+TEST_CASE("AssetManager font file loading derives family names and uses cache",
+          "[view][assets][coverage][issue-651]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    auto path = make_temp_asset_path("Pulp Test Font", ".ttf");
+    const std::vector<uint8_t> bytes = {0x00, 0x01, 0x00, 0x00, 0x66};
+    write_bytes(path, bytes);
+
+    auto font = mgr.load_font(path.string());
+    REQUIRE(font.valid());
+    REQUIRE(font.data == bytes);
+    REQUIRE(font.family_name == path.stem().string());
+    REQUIRE(mgr.cache_count() == 1);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    auto cached = mgr.load_font(path.string());
+    REQUIRE(cached.valid());
+    REQUIRE(cached.data == bytes);
+    REQUIRE(cached.family_name == font.family_name);
+
+    mgr.clear_cache();
+    auto missing = mgr.load_font(path.string());
+    REQUIRE_FALSE(missing.valid());
+
     mgr.set_max_cache_size(old_max);
 }
 

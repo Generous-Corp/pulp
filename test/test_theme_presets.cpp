@@ -37,6 +37,17 @@ TEST_CASE("find_preset returns nullptr for unknown", "[view][presets]") {
     REQUIRE(find_preset("nonexistent") == nullptr);
 }
 
+TEST_CASE("preset_ids preserves library order and exact size",
+          "[view][presets][coverage][issue-651]") {
+    const auto& presets = all_presets();
+    auto ids = preset_ids();
+
+    REQUIRE(ids.size() == presets.size());
+    REQUIRE_FALSE(ids.empty());
+    REQUIRE(ids.front() == presets.front().id);
+    REQUIRE(ids.back() == presets.back().id);
+}
+
 // ── Derivation Layer ────────────────────────────────────────────────────────
 
 TEST_CASE("Derived theme has all required tokens", "[view][presets][derive]") {
@@ -106,6 +117,36 @@ TEST_CASE("Derived theme JSON round-trip", "[view][presets][derive]") {
     auto orig_knob = original.color("knob.arc").value();
     auto rest_knob = restored.color("knob.arc").value();
     REQUIRE(orig_knob == rest_knob);
+}
+
+TEST_CASE("theme_from_preset applies variant-specific overrides",
+          "[view][presets][derive][coverage][issue-651]") {
+    ThemePreset preset;
+    preset.id = "custom";
+    preset.name = "Custom";
+    preset.light = all_presets().front().light;
+    preset.dark = all_presets().front().dark;
+    preset.light_overrides.colors["accent.primary"] = color_from_hex(0x010203);
+    preset.light_overrides.dimensions["spacing.md"] = 11.0f;
+    preset.light_overrides.strings["font.family"] = "LightFace";
+    preset.dark_overrides.colors["accent.primary"] = color_from_hex(0xA0B0C0);
+    preset.dark_overrides.dimensions["spacing.md"] = 7.0f;
+    preset.dark_overrides.strings["font.family"] = "DarkFace";
+
+    auto light = theme_from_preset(preset, false);
+    auto dark = theme_from_preset(preset, true);
+
+    REQUIRE(light.color("accent.primary")->r8() == 0x01);
+    REQUIRE(light.color("accent.primary")->g8() == 0x02);
+    REQUIRE(light.color("accent.primary")->b8() == 0x03);
+    REQUIRE_THAT(light.dimension("spacing.md").value(), Catch::Matchers::WithinAbs(11.0, 0.001));
+    REQUIRE(light.string_token("font.family").value() == "LightFace");
+
+    REQUIRE(dark.color("accent.primary")->r8() == 0xA0);
+    REQUIRE(dark.color("accent.primary")->g8() == 0xB0);
+    REQUIRE(dark.color("accent.primary")->b8() == 0xC0);
+    REQUIRE_THAT(dark.dimension("spacing.md").value(), Catch::Matchers::WithinAbs(7.0, 0.001));
+    REQUIRE(dark.string_token("font.family").value() == "DarkFace");
 }
 
 // ── Specific Presets ────────────────────────────────────────────────────────

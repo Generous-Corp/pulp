@@ -232,6 +232,32 @@ TEST_CASE("Theme from_json maps malformed color strings to default color",
     REQUIRE(theme.color("bad.short").value() == Color{});
 }
 
+TEST_CASE("Theme JSON parser covers optional sections and alpha colors",
+          "[view][theme][coverage][issue-651]") {
+    auto theme = Theme::from_json(R"({
+        "colors": {
+            "overlay.tint": "#10203040",
+            "missing.hash": "102030"
+        },
+        "strings": {
+            "font.family": "Mono"
+        }
+    })");
+
+    auto tint = theme.color("overlay.tint").value();
+    REQUIRE(tint.r8() == 0x10);
+    REQUIRE(tint.g8() == 0x20);
+    REQUIRE(tint.b8() == 0x30);
+    REQUIRE(tint.a8() == 0x40);
+
+    REQUIRE(theme.color("missing.hash").value() == Color{});
+    REQUIRE_FALSE(theme.dimension("spacing.md").has_value());
+    REQUIRE(theme.string_token("font.family").value() == "Mono");
+
+    auto json = theme.to_json();
+    REQUIRE(json.find("#10203040") != std::string::npos);
+}
+
 TEST_CASE("Theme load and save handle file edge cases",
           "[view][theme][issue-493]") {
     const auto path = std::filesystem::temp_directory_path() /
@@ -261,6 +287,26 @@ TEST_CASE("Theme load and save handle file edge cases",
         loaded.dimension("spacing.md").value(),
         WithinAbs(theme.dimension("spacing.md").value(), 0.001));
     REQUIRE(loaded.string_token("font.family") == theme.string_token("font.family"));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Theme file IO rejects invalid JSON and unwritable targets",
+          "[view][theme][coverage][issue-651]") {
+    const auto path = std::filesystem::temp_directory_path() /
+        "pulp-theme-invalid-json-test.json";
+
+    {
+        std::ofstream invalid(path);
+        invalid << "{ invalid json";
+    }
+
+    auto invalid = Theme::load_from_file(path.string());
+    REQUIRE(invalid.colors.empty());
+    REQUIRE(invalid.dimensions.empty());
+    REQUIRE(invalid.strings.empty());
+
+    REQUIRE_FALSE(Theme::dark().save_to_file(std::filesystem::temp_directory_path().string()));
 
     std::filesystem::remove(path);
 }
