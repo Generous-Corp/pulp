@@ -36,6 +36,17 @@ spec.loader.exec_module(ard)
 
 
 class SemverCmpTests(unittest.TestCase):
+    def test_parse_version_accepts_numeric_triplets(self):
+        self.assertEqual(ard.parse_version("1.2.3"), (1, 2, 3))
+        self.assertEqual(ard.parse_version("01.002.0003"), (1, 2, 3))
+
+    def test_parse_version_rejects_missing_or_malformed_values(self):
+        self.assertIsNone(ard.parse_version(""))
+        self.assertIsNone(ard.parse_version(None))
+        self.assertIsNone(ard.parse_version("1.2"))
+        self.assertIsNone(ard.parse_version("1.2.3.4"))
+        self.assertIsNone(ard.parse_version("1.two.3"))
+
     def test_strict_greater(self):
         self.assertEqual(ard.semver_cmp("0.23.1", "0.23.0"), "gt")
         self.assertEqual(ard.semver_cmp("1.0.0", "0.99.99"), "gt")
@@ -58,6 +69,8 @@ class SemverCmpTests(unittest.TestCase):
         # Not strictly required, but document behavior
         self.assertEqual(ard.semver_cmp("not.a.version", "0.1.0"), "lt")
         self.assertEqual(ard.semver_cmp("0.1", "0.1.0"), "lt")
+        self.assertEqual(ard.semver_cmp("1.0.0", "latest"), "gt")
+        self.assertEqual(ard.semver_cmp("broken", "also-broken"), "eq")
 
 
 class DecideTests(unittest.TestCase):
@@ -282,6 +295,16 @@ class CliContractTests(unittest.TestCase):
 
         self.assertEqual(cm.exception.code, 2)
         self.assertIn("invalid choice", stderr.getvalue())
+
+    def test_cli_help_exits_zero(self):
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["auto_release_decision.py", "--help"]), \
+             contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as cm:
+                ard.main()
+
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Decide whether auto-release.yml", stdout.getvalue())
 
     def test_script_entrypoint_prints_json_and_exits_zero(self):
         stdout = io.StringIO()
