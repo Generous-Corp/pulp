@@ -45,17 +45,23 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     bool check_only = false;
     bool notes_only = false;
     bool notes_json = false;
+    // Pulp #2087: `pulp upgrade` updates BOTH CLI and SDK by default.
+    // `--cli-only` keeps the pre-#2087 behavior for the rare case
+    // where a user wants a newer CLI paired with their current SDK
+    // (e.g., they want a CLI bug fix without touching project pins).
+    bool cli_only = false;
     std::string from_override;
     std::string to_override;
     std::string target_version;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp upgrade — update the Pulp CLI to the latest version\n\n";
-            std::cout << "Usage: pulp upgrade [--check-only] [--notes [--json]] [--from X --to Y] [version]\n\n";
+            std::cout << "pulp upgrade — update the Pulp CLI + SDK to the latest version\n\n";
+            std::cout << "Usage: pulp upgrade [--check-only] [--cli-only] [--notes [--json]] [--from X --to Y] [version]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --check-only   Report the latest available version and exit.\n";
             std::cout << "                 Reads the update cache; does not download.\n";
-            std::cout << "                 (Full enforcement lands in #499 Slice 5.)\n";
+            std::cout << "  --cli-only     Update CLI only; skip SDK install. Pre-#2087 behavior.\n";
+            std::cout << "                 Default since #2087: also fetch the matching SDK.\n";
             std::cout << "  --notes        Print migration notes for the upgrade hop and exit.\n";
             std::cout << "                 No binary swap. Reads the embedded migration index.\n";
             std::cout << "  --notes --json Same, but emit a stable-shape JSON document instead\n";
@@ -65,9 +71,15 @@ int cmd_upgrade(const std::vector<std::string>& args) {
             std::cout << "\n";
             std::cout << "If no version is specified, upgrades to the latest release.\n";
             std::cout << "Requires curl (macOS/Linux) or Invoke-WebRequest (Windows).\n";
+            std::cout << "\n";
+            std::cout << "Project pinning (#2087): if pulp upgrade is run from inside a project\n";
+            std::cout << "whose pulp.toml pins an explicit SDK version, the SDK swap leaves that\n";
+            std::cout << "pin alone — pinning is sacred. Run `pulp project unpin` first to track\n";
+            std::cout << "latest, or `pulp project pin <new>` to migrate the pin.\n";
             return 0;
         }
         if (args[i] == "--check-only") { check_only = true; continue; }
+        if (args[i] == "--cli-only")   { cli_only = true; continue; }
         if (args[i] == "--notes")      { notes_only = true; continue; }
         if (args[i] == "--json")       { notes_json = true; continue; }
         if (args[i] == "--from" && i + 1 < args.size()) { from_override = args[++i]; continue; }
@@ -289,6 +301,54 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         std::cout << "    Run `pulp upgrade --notes --from " << installed
                   << " --to " << version
                   << "` to see what changed.\n";
+    }
+
+    // Pulp #2087: by default, also install the matching SDK so the
+    // CLI and SDK stay coherent. The CLI's own `sdk install` flow
+    // handles caching, idempotence, and the GitHub-releases fetch.
+    //
+    // We spawn the NEWLY-installed CLI (not this process's binary, in
+    // case the executable's been replaced) so the SDK install uses
+    // the new version's release-asset URL conventions if those changed.
+    //
+    // If running inside a project that pins an explicit SDK in pulp.toml,
+    // we install the latest SDK side-by-side but leave the project's
+    // pin alone — pinning is sacred. The user is told how to opt out
+    // of pinning if they want to track latest.
+    if (!cli_only) {
+        std::cout << "\n  Installing matching SDK v" << version << "...\n";
+        // Use shell quoting because self_path might contain spaces.
+        int sdk_rc = run(shell_quote(self_path) + " sdk install --version "
+                         + version);
+        if (sdk_rc == 0) {
+            std::cout << "    \xe2\x9c\x93 SDK v" << version << " installed.\n";
+            if (installed != version) {
+                std::cout << "    Versions: CLI " << installed << " -> "
+                          << version << "; SDK " << installed << " -> "
+                          << version << "\n";
+            }
+        } else {
+            std::cout << "    (warning) SDK install failed; CLI was updated.\n";
+            std::cout << "    Retry with: pulp sdk install --version "
+                      << version << "\n";
+        }
+
+        // Detect a pinned project in cwd and surface a clear non-action
+        // notice so the user knows the pin wasn't touched. This is the
+        // user-facing payload of "pinning is sacred" — without the
+        // notice, users who type `pulp upgrade` from inside a pinned
+        // project wonder why their build still uses the old SDK.
+        auto cwd = fs::current_path();
+        if (fs::exists(cwd / "pulp.toml") && !is_floating_sdk(cwd)) {
+            auto pinned = read_raw_sdk_version(cwd);
+            auto project_name = cwd.filename().string();
+            std::cout << "\n  \xe2\x84\xb9 Project " << project_name
+                      << " stays on pinned SDK " << pinned
+                      << "; latest available is " << version << ".\n"
+                      << "    Run `pulp project unpin` to start tracking latest,\n"
+                      << "    or `pulp project pin " << version
+                      << "` to migrate the pin.\n";
+        }
     }
 
     // Slice 7 (#564) wiring: honor update.bump_projects after a

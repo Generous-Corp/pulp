@@ -112,6 +112,36 @@ if [ -x "${INSTALL_DIR}/pulp-mcp" ]; then
     info "Installed: pulp-mcp (Claude Code plugin MCP server)"
 fi
 
+# #2087: Pulp users running `curl install.sh | sh` historically ended
+# up with a fresh CLI but no SDK. Any project then built against
+# whatever stale ~/.pulp/sdk/<old>/ they had — sometimes months behind
+# — silently missing every framework fix in between (Spectr was the
+# visible victim). Auto-install the latest SDK matching the CLI's own
+# version so install.sh leaves the user with a coherent CLI+SDK pair.
+#
+# Failure mode: SDK install can fail on a transient network error.
+# Don't fail the whole install — the CLI is still usable; the user can
+# retry with `pulp sdk install` later. Print a clear nudge.
+SDK_VERSION_FROM_CLI=$("${INSTALL_DIR}/pulp" version 2>/dev/null \
+    | awk '/Pulp SDK version:/ {print $4}' \
+    | head -n 1)
+if [ -z "$SDK_VERSION_FROM_CLI" ]; then
+    SDK_VERSION_FROM_CLI=$(echo "$INSTALLED_VERSION" | awk '{print $NF}' \
+        | sed -E 's/^v//')
+fi
+
+echo ""
+info "Installing matching SDK v${SDK_VERSION_FROM_CLI}..."
+if PATH="${INSTALL_DIR}:$PATH" "${INSTALL_DIR}/pulp" sdk install 2>&1 \
+       | sed 's/^/  /'; then
+    info "Installed SDK at ~/.pulp/sdk/${SDK_VERSION_FROM_CLI}/"
+else
+    echo ""
+    echo "  (warning) SDK install failed — the CLI is still usable, but"
+    echo "  building a project will need the SDK. Retry with:"
+    echo "    pulp sdk install"
+fi
+
 # ── Add to PATH ─────────────────────────────────────────────────────────────
 
 add_to_path() {
@@ -162,7 +192,17 @@ fi
 # ── Done ────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "  Done! Run \`pulp create my-plugin\` to create your first plugin."
+echo "  Done! Installed pulp ${INSTALLED_VERSION} CLI + SDK v${SDK_VERSION_FROM_CLI}"
+echo "  at ${INSTALL_DIR}/ and ~/.pulp/sdk/${SDK_VERSION_FROM_CLI}/."
+echo ""
+echo "  Next: run \`pulp create my-plugin\` to scaffold your first plugin."
+echo ""
+echo "  Tip: new projects default to floating-SDK mode (track latest) so"
+echo "       you automatically pick up framework fixes on every rebuild."
+echo "       Pin a specific SDK version for a project with:"
+echo "         cd my-plugin && pulp project pin <version>"
+echo "       Pinned projects don't auto-update. Run \`pulp project unpin\`"
+echo "       to switch back to floating mode."
 echo ""
 echo "  If 'pulp' is not found, restart your shell or run:"
 echo "    export PATH=\"${INSTALL_DIR}:\$PATH\""

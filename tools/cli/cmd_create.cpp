@@ -116,6 +116,10 @@ int cmd_create(const std::vector<std::string>& args) {
     bool ci_mode = false;
     bool in_tree_mode = false;
     bool mpe_mode = false;
+    // Pulp #2087: default new projects to floating-SDK mode (track latest)
+    // instead of exact-pin. `--pin` opts into exact-version pinning at
+    // create-time for users who want reproducibility from day one.
+    bool pin_at_create = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
         if (args[i] == "--mpe") { mpe_mode = true; continue; }
@@ -128,6 +132,7 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--in-tree" || args[i] == "--example") { in_tree_mode = true; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
         if (args[i] == "--no-interactive" || args[i] == "--ci") { ci_mode = true; continue; }
+        if (args[i] == "--pin") { pin_at_create = true; continue; }
         if (args[i] == "--help" || args[i] == "-h") {
             std::cout << "pulp create — create a new plugin project\n\n";
             std::cout << "Usage: pulp create <name> [options]\n\n";
@@ -141,9 +146,15 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  --in-tree, --example                 Add the project to examples/ using the local Pulp checkout\n";
             std::cout << "  --no-build                           Skip build after scaffolding\n";
             std::cout << "  --no-interactive, --ci               Non-interactive mode (use defaults)\n";
+            std::cout << "  --pin                                Write the current SDK version into pulp.toml (default: floating, tracks latest)\n";
             std::cout << "\nDefault behavior: create a standalone product project, even inside the Pulp repo.\n";
             std::cout << "Inside the repo, the default location is next to the repo root unless\n";
             std::cout << "PULP_PROJECTS_DIR or ~/.pulp/config.toml overrides it.\n";
+            std::cout << "\nSDK pinning: new projects default to floating mode (sdk_version = \"latest\")\n";
+            std::cout << "  so they track the latest installed SDK and pick up framework fixes\n";
+            std::cout << "  on every rebuild. Pass --pin to write the exact current SDK version\n";
+            std::cout << "  instead, or run `pulp project pin <version>` from inside the project\n";
+            std::cout << "  at any time.\n";
             return 0;
         }
         if (name.empty() && !args[i].empty() && args[i][0] != '-') { name = args[i]; continue; }
@@ -469,13 +480,31 @@ int cmd_create(const std::vector<std::string>& args) {
     if (standalone_mode) {
         std::ofstream f(out_dir / "pulp.toml");
         f << "[pulp]\n";
-        f << "sdk_version = \"" << sdk_version << "\"\n";
+        // Pulp #2087: floating-SDK default. Unpinned projects track the
+        // latest installed SDK on every rebuild, so users automatically
+        // pick up framework fixes without remembering to run an
+        // explicit upgrade. `--pin` writes the exact resolved version
+        // for users who want reproducibility from day one.
+        //
+        // The `"latest"` marker is interpreted by version_diag.cpp and
+        // the SDK-resolution path in cmd_build / cmd_run / ... — it
+        // resolves to the newest sibling under ~/.pulp/sdk/<ver>/ at
+        // command time, falling back to the CLI's own SDK_VERSION if
+        // no installed SDK exists.
+        if (pin_at_create) {
+            f << "sdk_version = \"" << sdk_version << "\"\n";
+        } else {
+            f << "sdk_version = \"latest\"\n";
+        }
         if (!root.empty()) {
             auto local_sdk_dir = local_sdk_cache_path(sdk_version);
             f << "sdk_path = \"" << local_sdk_dir.generic_string() << "\"\n";
             f << "sdk_checkout = \"" << root.generic_string() << "\"\n";
         }
         log("  Created pulp.toml\n");
+        if (!pin_at_create) {
+            log("  SDK mode: floating (tracks latest installed) — pin with `pulp project pin <version>`\n");
+        }
     }
 
     // Android target scaffold (experimental — see issue #83)

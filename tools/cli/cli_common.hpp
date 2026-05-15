@@ -118,7 +118,23 @@ fs::path ensure_sdk(const std::string& version);
 fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& version);
 int ensure_checkout_dependencies(const fs::path& repo_root);
 std::string read_pulp_toml_value(const fs::path& project_root, const std::string& key);
+// `read_sdk_version` returns the EFFECTIVE SDK version a build should use.
+// If pulp.toml pins an explicit version, that wins. If pulp.toml writes
+// `sdk_version = "latest"` (pulp #2087 floating mode — the new default
+// for `pulp create`), this returns the newest installed SDK under
+// ~/.pulp/sdk/<x.y.z>/, falling back to PULP_SDK_VERSION when none
+// are installed. Use `read_raw_sdk_version` for the unresolved value.
 std::string read_sdk_version(const fs::path& project_root);
+std::string read_raw_sdk_version(const fs::path& project_root);
+// True when pulp.toml's sdk_version field is the floating marker
+// "latest" (pulp #2087), or absent entirely. Pinned projects (an
+// explicit x.y.z) return false. Used by `pulp upgrade` to skip
+// pinned-project SDK auto-update and by `pulp doctor --versions`
+// to render the pin status.
+bool is_floating_sdk(const fs::path& project_root);
+// Return the newest installed SDK version under ~/.pulp/sdk/ — i.e.
+// the version `"latest"` resolves to. Empty if no SDKs are installed.
+std::string newest_installed_sdk();
 fs::path read_sdk_path_hint(const fs::path& project_root);
 fs::path read_sdk_checkout_hint(const fs::path& project_root);
 struct StandaloneSdkResolution {

@@ -134,40 +134,51 @@ void print_project_help() {
     std::cout <<
         "pulp project — manage a Pulp project's pinned SDK version\n\n"
         "Usage:\n"
-        "  pulp project bump [<version>] [--to=X] [--all] [--dry-run]\n"
-        "                    [--force-dirty] [--allow-downgrade]\n"
-        "                    [--allow-cli-skew] [--allow-redundant]\n"
-        "                    [--verify-builds]\n"
+        "  pulp project pin [<version>] [--to=X] [--all] [--dry-run]\n"
+        "                   [--force-dirty] [--allow-downgrade]\n"
+        "                   [--allow-cli-skew] [--allow-redundant]\n"
+        "                   [--verify-builds]\n"
+        "  pulp project unpin [--dry-run]\n"
         "  pulp project undo [<timestamp>]\n"
         "\n"
-        "Run `pulp project bump --help` or `pulp project undo --help`\n"
-        "for command-specific details.\n";
+        "Pulp #2087: `pin` is the primary command. `bump` remains as a\n"
+        "deprecated alias for one minor release. `unpin` switches the\n"
+        "project to floating mode (tracks latest installed SDK).\n"
+        "\n"
+        "Run `pulp project pin --help`, `pulp project unpin --help`, or\n"
+        "`pulp project undo --help` for command-specific details.\n";
 }
 
 void print_bump_help() {
     std::cout <<
-        "pulp project bump — update the pinned Pulp SDK version\n\n"
+        "pulp project pin — pin the project's Pulp SDK to a specific version\n"
+        "                  (alias: `pulp project bump`)\n\n"
         "Usage:\n"
-        "  pulp project bump                     Bump CWD to the CLI's own version\n"
-        "  pulp project bump <version>           Bump CWD to <version> (positional)\n"
-        "  pulp project bump --to=<version>      Bump CWD to <version> (named)\n"
-        "  pulp project bump --all               Iterate ~/.pulp/projects.json\n"
-        "  pulp project bump --all --to=<version>\n"
+        "  pulp project pin                      Pin CWD to the CLI's own version\n"
+        "  pulp project pin <version>            Pin CWD to <version> (positional)\n"
+        "  pulp project pin --to=<version>       Pin CWD to <version> (named)\n"
+        "  pulp project pin --all                Iterate ~/.pulp/projects.json\n"
+        "  pulp project pin --all --to=<version>\n"
         "\n"
         "Flags:\n"
         "  --dry-run            Show the plan without rewriting anything\n"
         "  --force-dirty        Skip the git-clean gate (risky — changes mingle)\n"
         "  --allow-downgrade    Permit target older than current pin\n"
         "  --allow-cli-skew     Permit target newer than this pulp CLI\n"
-        "  --allow-redundant    Permit bump already present on origin/main\n"
-        "  --verify-builds      Build each project post-bump; roll back on failure\n"
+        "  --allow-redundant    Permit pin already present on origin/main\n"
+        "  --verify-builds      Build each project post-pin; roll back on failure\n"
         "\n"
         "Standalone SDK-mode projects update pulp.toml sdk_version plus a\n"
         "versioned find_package(Pulp ...) line. `project(... VERSION ...)`\n"
         "remains the plugin/app version and is not treated as the SDK pin.\n\n"
-        "Every successful bump writes ~/.pulp/bump-undo-<timestamp>.json so\n"
+        "Every successful pin writes ~/.pulp/bump-undo-<timestamp>.json so\n"
         "`pulp project undo` can revert. Migration notes from Slice 3 (#548)\n"
-        "print after the report.\n";
+        "print after the report.\n"
+        "\n"
+        "To go BACK to floating-SDK mode (track latest installed), run\n"
+        "`pulp project unpin`. New projects created via `pulp create`\n"
+        "default to floating mode (pulp #2087); pass `pulp create --pin`\n"
+        "to pin at create-time instead.\n";
 }
 
 void print_undo_help() {
@@ -1029,6 +1040,106 @@ int do_undo(const std::vector<std::string>& args) {
 
 }  // namespace
 
+// Pulp #2087: `pulp project unpin` removes the SDK pin from pulp.toml
+// so the project goes back to floating mode and tracks the latest
+// installed SDK on every rebuild. Sibling of `pin` (= `bump`).
+//
+// Implementation: rewrite the project's pulp.toml so its sdk_version
+// becomes the floating marker `"latest"`. We DON'T delete the field
+// entirely because (a) downstream tooling that greps for it loses a
+// clear signal, and (b) keeping the line preserves user comments and
+// surrounding TOML structure intact.
+static int do_unpin(const std::vector<std::string>& args) {
+    bool dry_run = false;
+    for (const auto& a : args) {
+        if (a == "--help" || a == "-h" || a == "help") {
+            std::cout <<
+                "pulp project unpin — remove the SDK pin so the project tracks latest\n\n"
+                "Usage:\n"
+                "  pulp project unpin             Switch CWD project to floating SDK mode\n"
+                "  pulp project unpin --dry-run   Show plan without rewriting\n"
+                "\n"
+                "After unpin, the project's resolved SDK is the newest installed\n"
+                "version under ~/.pulp/sdk/<x.y.z>/, picked up on every rebuild.\n"
+                "Re-pin with `pulp project pin <version>` (or `pulp project bump`).\n";
+            return 0;
+        }
+        if (a == "--dry-run") { dry_run = true; continue; }
+        std::cerr << "pulp project unpin: ignoring unknown argument '" << a << "'\n";
+    }
+
+    bool found_pulp_source = false;
+    auto target = find_bumpable_project_root_from(fs::current_path(), &found_pulp_source);
+    if (found_pulp_source) {
+        std::cerr << "pulp project unpin: refusing to run inside the Pulp source checkout.\n";
+        return 1;
+    }
+    if (target.empty()) {
+        std::cerr << "pulp project unpin: not inside a Pulp project (expected pulp.toml)\n";
+        return 1;
+    }
+
+    auto toml = target / "pulp.toml";
+    if (!fs::exists(toml)) {
+        std::cerr << "pulp project unpin: no pulp.toml at " << toml.string() << "\n";
+        return 1;
+    }
+
+    auto body = read_text(toml);
+    if (body.empty()) {
+        std::cerr << "pulp project unpin: could not read " << toml.string() << "\n";
+        return 1;
+    }
+
+    // Find the sdk_version line and capture the current value (so we
+    // can print "was X.Y.Z, now floating"). Keep it lightweight — same
+    // single-line semantics read_pulp_toml_value uses.
+    std::string current;
+    {
+        auto pos = body.find("sdk_version");
+        if (pos != std::string::npos) {
+            auto q1 = body.find('"', pos);
+            auto q2 = (q1 == std::string::npos) ? std::string::npos
+                                                : body.find('"', q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos) {
+                current = body.substr(q1 + 1, q2 - q1 - 1);
+            }
+        }
+    }
+
+    if (current.empty() || current == "latest") {
+        std::cout << "pulp project unpin: " << target.filename().string()
+                  << " is already floating (sdk_version = \"latest\").\n";
+        return 0;
+    }
+
+    if (dry_run) {
+        std::cout << "[dry-run] would set sdk_version = \"latest\" in "
+                  << toml.string() << " (was \"" << current << "\")\n";
+        return 0;
+    }
+
+    // Replace "<old>" with "latest" on the sdk_version line.
+    auto pos = body.find("sdk_version");
+    auto q1 = body.find('"', pos);
+    auto q2 = body.find('"', q1 + 1);
+    std::string rewritten = body.substr(0, q1 + 1) + "latest"
+                          + body.substr(q2);
+
+    if (!write_text_atomic(toml, rewritten)) {
+        std::cerr << "pulp project unpin: write failed at " << toml.string() << "\n";
+        return 1;
+    }
+
+    std::cout << color::green() << "unpinned" << color::reset()
+              << " " << target.filename().string()
+              << "  was " << current << " -> now floating (tracks latest)\n";
+    std::cout << "\nThe project will resolve its SDK at command time to the newest\n"
+                 "installed version under ~/.pulp/sdk/. Re-pin any time with\n"
+                 "`pulp project pin <version>`.\n";
+    return 0;
+}
+
 int cmd_project(const std::vector<std::string>& args) {
     if (args.empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
         print_project_help();
@@ -1038,7 +1149,13 @@ int cmd_project(const std::vector<std::string>& args) {
     const auto& sub = args[0];
     std::vector<std::string> rest(args.begin() + 1, args.end());
 
-    if (sub == "bump") return do_bump(rest);
+    // Pulp #2087: `pin` is the primary, intuitive name for what this
+    // command does. `bump` predates the rename and stays as a
+    // deprecated alias so existing scripts and skill docs keep working
+    // through one minor release. New docs and skill examples should
+    // use `pin`.
+    if (sub == "pin" || sub == "bump") return do_bump(rest);
+    if (sub == "unpin") return do_unpin(rest);
     if (sub == "undo") return do_undo(rest);
 
     std::cerr << "pulp project: unknown subcommand '" << sub << "'\n";

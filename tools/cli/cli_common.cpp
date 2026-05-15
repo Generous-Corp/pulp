@@ -808,10 +808,86 @@ std::string read_pulp_toml_value(const fs::path& project_root, const std::string
     return {};
 }
 
+// Return the newest semver triple under ~/.pulp/sdk/<x.y.z>/. Skips
+// directories whose name doesn't parse as semver, and skips entries
+// without a version.txt (those are interrupted installs). Used by
+// the "latest" floating-SDK resolution in read_sdk_version.
+std::string newest_installed_sdk() {
+    auto home = pulp_home();
+    if (home.empty()) return {};
+    auto sdk_base = home / "sdk";
+    if (!fs::exists(sdk_base)) return {};
+
+    auto parse_triple = [](const std::string& s, int& maj, int& min, int& patch) -> bool {
+        maj = min = patch = -1;
+        std::size_t i = 0;
+        auto eat = [&](int& out) {
+            if (i >= s.size() || s[i] < '0' || s[i] > '9') return false;
+            int v = 0;
+            while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+                v = v * 10 + (s[i] - '0'); ++i;
+            }
+            out = v; return true;
+        };
+        if (!eat(maj)) return false;
+        if (i >= s.size() || s[i] != '.') return false; ++i;
+        if (!eat(min)) return false;
+        if (i >= s.size() || s[i] != '.') return false; ++i;
+        if (!eat(patch)) return false;
+        return true;
+    };
+
+    std::string best;
+    int bM = -1, bm = -1, bp = -1;
+    for (auto& entry : fs::directory_iterator(sdk_base)) {
+        if (!entry.is_directory()) continue;
+        auto ver = entry.path().filename().string();
+        int M, m, p;
+        if (!parse_triple(ver, M, m, p)) continue;
+        if (!fs::exists(entry.path() / "version.txt")) continue;
+        bool newer = best.empty() || M > bM ||
+                     (M == bM && m > bm) ||
+                     (M == bM && m == bm && p > bp);
+        if (newer) { best = ver; bM = M; bm = m; bp = p; }
+    }
+    return best;
+}
+
+std::string read_raw_sdk_version(const fs::path& project_root) {
+    return read_pulp_toml_value(project_root, "sdk_version");
+}
+
+bool is_floating_sdk(const fs::path& project_root) {
+    auto raw = read_raw_sdk_version(project_root);
+    if (raw.empty()) return true;
+    // Case-insensitive compare against "latest"
+    std::string lower;
+    lower.reserve(raw.size());
+    for (char c : raw) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return lower == "latest";
+}
+
 std::string read_sdk_version(const fs::path& project_root) {
-    auto version = read_pulp_toml_value(project_root, "sdk_version");
-    if (!version.empty()) return version;
-    return PULP_SDK_VERSION;
+    auto version = read_raw_sdk_version(project_root);
+    // Pulp #2087 floating mode: `sdk_version = "latest"` (or absence
+    // of the field) means "resolve to the newest installed SDK at
+    // command time" rather than pinning to one. The CLI's own SDK
+    // version is the final fallback when no SDKs are installed under
+    // ~/.pulp/sdk/ yet — common on a fresh `curl install.sh` machine
+    // before the user has run `pulp sdk install`.
+    auto is_latest = [&]() {
+        if (version.empty()) return true;
+        std::string lower;
+        lower.reserve(version.size());
+        for (char c : version) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return lower == "latest";
+    };
+    if (is_latest()) {
+        auto resolved = newest_installed_sdk();
+        if (!resolved.empty()) return resolved;
+        return PULP_SDK_VERSION;
+    }
+    return version;
 }
 
 fs::path read_sdk_path_hint(const fs::path& project_root) {

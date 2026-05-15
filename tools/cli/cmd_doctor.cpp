@@ -3,11 +3,18 @@
 #include "cli_common.hpp"
 #include "fetchcontent_cache.hpp"
 #include "projects_registry.hpp"
+#include "update_check.hpp"
 #include "validator_discovery.hpp"
 #include "version_diag.hpp"
 
 #include <algorithm>
 #include <iostream>
+
+// Defined in cmd_upgrade.cpp. Forward-declared here rather than added
+// to cli_common.hpp because it's a single-callsite cross-TU helper and
+// piping it through the shared header would force a rebuild of every
+// command on every change.
+fs::path update_cache_path();
 
 namespace {
 
@@ -296,6 +303,55 @@ int cmd_doctor(const std::vector<std::string>& args) {
             (void)pulp::cli::version_diag::render_report_json(report);
         } else {
             (void)pulp::cli::version_diag::render_report(report);
+        }
+
+        // Pulp #2087: append local + remote SDK availability so users
+        // see at-a-glance whether they're behind. JSON consumers get
+        // the same data via a stable trailing object, separate from
+        // the existing report shape so older tooling that parses the
+        // first JSON doc keeps working.
+        if (!json_mode) {
+            auto newest_local = newest_installed_sdk();
+            std::cout << "\n  Local SDKs (~/.pulp/sdk/):\n";
+            if (newest_local.empty()) {
+                std::cout << "    (none installed — run `pulp sdk install`)\n";
+            } else {
+                std::cout << "    Newest installed: v" << newest_local << "\n";
+            }
+
+            // Project pin status — floating ("latest") vs pinned (exact).
+            if (standalone_mode && !active_root.empty()) {
+                if (is_floating_sdk(active_root)) {
+                    std::cout << "    Project SDK pin: floating — tracks latest installed\n";
+                } else {
+                    auto pinned = read_raw_sdk_version(active_root);
+                    std::cout << "    Project SDK pin: " << pinned
+                              << " (pinned). Run `pulp project unpin` to track latest.\n";
+                }
+            }
+
+            // Best-effort cached "latest remote" reading. We DELIBERATELY
+            // do not make a network call here — `pulp doctor` must be
+            // offline-safe. The update-cache is populated by `pulp
+            // upgrade --check-only` and the background check on every
+            // invocation, so it's almost always fresh.
+            auto cache_path = update_cache_path();
+            if (!cache_path.empty()) {
+                if (auto cache = pulp::cli::update_check::read_cache_file(cache_path);
+                    cache && !cache->latest_version.empty()) {
+                    std::cout << "    Latest remote: v" << cache->latest_version
+                              << " (cached). Run `pulp upgrade --check-only` to refresh.\n";
+                    // Behind-the-times hint when local newest < latest remote
+                    if (!newest_local.empty() &&
+                        pulp::cli::update_check::is_newer(
+                            newest_local, cache->latest_version)) {
+                        std::cout << "\n  \xe2\x84\xb9 A newer SDK (v"
+                                  << cache->latest_version
+                                  << ") is available — run `pulp upgrade`\n"
+                                  << "    to fetch the matching CLI + SDK pair.\n";
+                    }
+                }
+            }
         }
         return 0;
     }
