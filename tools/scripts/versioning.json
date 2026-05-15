@@ -42,7 +42,8 @@
       "label": "Claude Code plugin",
       "version_files": [
         { "path": ".claude-plugin/plugin.json", "kind": "json_field", "field": "version" },
-        { "path": ".claude-plugin/marketplace.json", "kind": "json_field", "field": "version" }
+        { "path": ".claude-plugin/marketplace.json", "kind": "json_field", "field": "version" },
+        { "path": ".claude-plugin/marketplace.json", "kind": "json_path",  "field": "plugins.0.version" }
       ],
       "trigger_paths": [
         ".claude-plugin/**",

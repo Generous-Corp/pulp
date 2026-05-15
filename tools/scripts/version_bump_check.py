@@ -284,6 +284,12 @@ def read_version(repo: Path, vf: VersionFile) -> str | None:
         except json.JSONDecodeError:
             return None
         return data.get(vf.field)
+    if vf.kind == "json_path":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        return _json_walk_get(data, vf.field or "")
     if vf.kind == "pyproject_version":
         m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
         return m.group(1) if m else None
@@ -294,6 +300,65 @@ def read_version(repo: Path, vf: VersionFile) -> str | None:
         m = re.search(vf.pattern, text)
         return m.group(1) if m else None
     return None
+
+
+def _json_walk_get(data, dotted_path: str):
+    # Walk `plugins.0.version`-style paths. Numeric segments index into
+    # arrays; string segments index into objects. Returns None on any
+    # miss rather than raising, so the gate stays advisory-style on
+    # shape drift.
+    if not dotted_path:
+        return None
+    cur = data
+    for seg in dotted_path.split("."):
+        if seg == "":
+            return None
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(seg)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(cur, dict):
+            if seg not in cur:
+                return None
+            cur = cur[seg]
+        else:
+            return None
+    return cur
+
+
+def _json_walk_set(data, dotted_path: str, value) -> bool:
+    # Mirror of _json_walk_get for write_version. Returns True iff the
+    # walk reached a settable leaf.
+    if not dotted_path:
+        return False
+    parts = dotted_path.split(".")
+    if any(p == "" for p in parts):
+        return False
+    cur = data
+    for seg in parts[:-1]:
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(seg)]
+            except (ValueError, IndexError):
+                return False
+        elif isinstance(cur, dict):
+            if seg not in cur:
+                return False
+            cur = cur[seg]
+        else:
+            return False
+    last = parts[-1]
+    if isinstance(cur, list):
+        try:
+            cur[int(last)] = value
+        except (ValueError, IndexError):
+            return False
+        return True
+    if isinstance(cur, dict):
+        cur[last] = value
+        return True
+    return False
 
 
 def write_version(repo: Path, vf: VersionFile, new: str) -> bool:
@@ -313,6 +378,15 @@ def write_version(repo: Path, vf: VersionFile, new: str) -> bool:
             return False
         data[vf.field] = new
         # Preserve trailing newline if original had one.
+        end = "\n" if text.endswith("\n") else ""
+        new_text = json.dumps(data, indent=2) + end
+    elif vf.kind == "json_path":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if not _json_walk_set(data, vf.field or "", new):
+            return False
         end = "\n" if text.endswith("\n") else ""
         new_text = json.dumps(data, indent=2) + end
     elif vf.kind == "pyproject_version":
@@ -579,6 +653,11 @@ def _extract_version_from_text(text: str, vf: VersionFile) -> str | None:
     if vf.kind == "json_field":
         try:
             return json.loads(text).get(vf.field)
+        except json.JSONDecodeError:
+            return None
+    if vf.kind == "json_path":
+        try:
+            return _json_walk_get(json.loads(text), vf.field or "")
         except json.JSONDecodeError:
             return None
     if vf.kind == "pyproject_version":
