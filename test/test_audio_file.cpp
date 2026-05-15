@@ -425,6 +425,30 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     REQUIRE_FALSE(info.has_value());
 }
 
+TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empties",
+          "[audio][file][issue-640]") {
+    AudioFileData data;
+    REQUIRE(data.num_channels() == 0);
+    REQUIRE(data.num_frames() == 0);
+    REQUIRE(data.empty());
+
+    data.sample_rate = 44100;
+    data.channels = {{}, {0.25f, 0.5f}};
+    REQUIRE(data.num_channels() == 2);
+    REQUIRE(data.num_frames() == 0);
+    REQUIRE(data.empty());
+
+    auto path = unique_temp_audio_path("_empty_first_channel.wav");
+    std::filesystem::remove(path);
+    REQUIRE_FALSE(write_wav_file(path.string(), data));
+    REQUIRE_FALSE(std::filesystem::exists(path));
+
+    data.channels = {{0.0f, 0.5f, 1.0f}, {-0.5f}};
+    REQUIRE(data.num_channels() == 2);
+    REQUIRE(data.num_frames() == 3);
+    REQUIRE_FALSE(data.empty());
+}
+
 TEST_CASE("WAV helpers write deinterleaved channel data and reject malformed input",
           "[audio][file][issue-640]") {
     auto path = unique_temp_audio_path("_helper_edges.wav");
@@ -719,6 +743,31 @@ TEST_CASE("StreamingWriter rejects invalid opens and closed writes",
     REQUIRE(writer.frames_written() == 0);
 
     writer.close();
+    writer.close();
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("StreamingWriter finalizes the active file before a failed reopen",
+          "[audio][file][streaming][issue-640]") {
+    auto path = unique_temp_audio_path("_stream_reopen_fail.wav");
+    std::filesystem::remove(path);
+
+    StreamingWriter writer;
+    REQUIRE(writer.open(path.string(), 44100, 1, 16));
+
+    const float frames[] = {-0.25f, 0.25f};
+    REQUIRE(writer.write_frames(frames, 2) == 2);
+    REQUIRE(writer.frames_written() == 2);
+
+    REQUIRE_FALSE(writer.open(std::filesystem::temp_directory_path().string(), 44100, 1, 16));
+    REQUIRE_FALSE(writer.is_open());
+    REQUIRE(writer.frames_written() == 0);
+
+    auto bytes = read_binary_file(path);
+    require_wav_header(bytes, 1, 44100, 16, 4);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 44)) == -8191);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 46)) == 8191);
+
     writer.close();
     std::filesystem::remove(path);
 }
@@ -1147,4 +1196,58 @@ TEST_CASE("AIFF reader rejects truncated PCM payloads", "[audio][file][registry]
     REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
 
     std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader rejects invalid COMM metadata and unsupported PCM depths",
+          "[audio][file][registry][aiff][issue-640]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("zero sample rate") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_rate.aiff");
+        auto comm = make_comm_chunk(1, 1, 16);
+        std::fill(comm.begin() + 8, comm.begin() + 18, 0);
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", comm},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("zero channels") {
+        auto tmp_path = unique_temp_audio_path("_aiff_zero_channels.aiff");
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(0, 1, 16)},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("unsupported PCM bit depth") {
+        auto tmp_path = unique_temp_audio_path("_aiff_20bit.aiff");
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 1, 20)},
+                               {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                           });
+
+        auto info = registry.read_info(tmp_path.string());
+        REQUIRE(info.has_value());
+        REQUIRE(info->bits_per_sample == 20);
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
 }
