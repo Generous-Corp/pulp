@@ -52,6 +52,71 @@ class VersionFileIoTests(unittest.TestCase):
             self.assertFalse(vbc.write_version(repo, vbc.VersionFile("missing", "json_field", "version"), "1.0.0"))
             self.assertIsNone(vbc.read_version(repo, vbc.VersionFile("missing", "json_field", "version")))
 
+    def test_json_path_kind_walks_nested_arrays_and_objects(self) -> None:
+        # pulp #1962-followup — marketplace.json has both a top-level
+        # `.version` and a nested `.plugins[0].version`. The Claude Code
+        # marketplace reads the nested one, so plugin bumps must update
+        # both. Cover read + write + the missing-segment fallthrough that
+        # keeps the gate advisory rather than crashing on shape drift.
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / "marketplace.json").write_text(
+                '{"version": "1.2.3", "plugins": [{"version": "0.1.0"}]}\n',
+                encoding="utf-8")
+
+            top = vbc.VersionFile("marketplace.json", "json_field", "version")
+            nested = vbc.VersionFile("marketplace.json", "json_path", "plugins.0.version")
+
+            self.assertEqual(vbc.read_version(repo, top), "1.2.3")
+            self.assertEqual(vbc.read_version(repo, nested), "0.1.0")
+
+            # Bump both; nested write should not clobber sibling fields.
+            self.assertTrue(vbc.write_version(repo, top, "2.0.0"))
+            self.assertTrue(vbc.write_version(repo, nested, "2.0.0"))
+            self.assertEqual(vbc.read_version(repo, top), "2.0.0")
+            self.assertEqual(vbc.read_version(repo, nested), "2.0.0")
+
+            # Missing nested segment returns None and write returns False —
+            # neither crashes the gate. Models the case where someone
+            # restructures marketplace.json.
+            missing = vbc.VersionFile("marketplace.json", "json_path", "plugins.99.version")
+            self.assertIsNone(vbc.read_version(repo, missing))
+            self.assertFalse(vbc.write_version(repo, missing, "9.9.9"))
+
+            empty = vbc.VersionFile("marketplace.json", "json_path", "")
+            self.assertIsNone(vbc.read_version(repo, empty))
+            self.assertFalse(vbc.write_version(repo, empty, "9.9.9"))
+
+    def test_marketplace_plugins_version_stays_in_sync_with_top_level(self) -> None:
+        # pulp #1962-followup — assert versioning.json registers BOTH the
+        # top-level marketplace.json `.version` AND the nested
+        # `.plugins[0].version` for the plugin surface. If a future
+        # refactor drops the nested entry, Claude Code's marketplace
+        # silently ships a stale plugin version and we never notice.
+        repo = pathlib.Path(vbc.__file__).resolve().parents[2]
+        cfg_path = repo / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+        plugin = cfg["surfaces"]["plugin"]
+        marketplace_entries = [vf for vf in plugin["version_files"]
+                               if vf["path"] == ".claude-plugin/marketplace.json"]
+        kinds = sorted({vf["kind"] for vf in marketplace_entries})
+        self.assertIn("json_field", kinds,
+                      "top-level .version on marketplace.json must be bumped")
+        self.assertIn("json_path", kinds,
+                      "plugins[0].version on marketplace.json must be bumped — "
+                      "it's what Claude Code marketplace reads")
+        nested = [vf for vf in marketplace_entries if vf["kind"] == "json_path"]
+        self.assertEqual(nested[0]["field"], "plugins.0.version")
+
+        # And the on-disk values had better match — or the marketplace
+        # is shipping the wrong version right now.
+        market = json.loads((repo / ".claude-plugin/marketplace.json").read_text())
+        self.assertEqual(
+            market["version"],
+            market["plugins"][0]["version"],
+            "marketplace.json top-level version and plugins[0].version drifted; "
+            "Claude Code installs from plugins[0].version.")
+
     def test_json_decode_and_unknown_version_kinds_are_tolerated(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = pathlib.Path(td)

@@ -83,6 +83,57 @@ The plugin includes two hooks that run automatically:
 - **docs-reminder** — When you modify files in `core/`, `examples/`, or `tools/cli/`, reminds you to update documentation manifests
 - **cli-plugin-sync** — When you modify the CLI or MCP server, reminds you to check if the plugin commands and skills need matching updates
 
+### MCP server
+
+The plugin ships an MCP (Model Context Protocol) server — `pulp-mcp` — that
+exposes 18 Pulp operations as callable tools, so Claude Code (and other MCP
+clients) can drive them in one turn instead of multiple shell calls.
+
+| Category | Tools |
+|---|---|
+| Build / test / status | `pulp_build`, `pulp_test`, `pulp_status`, `pulp_validate`, `pulp_create`, `pulp_docs_check`, `pulp_docs_search` |
+| UI rendering + interaction | `pulp_screenshot` (render JS UI to PNG), `pulp_simulate_click`, `pulp_get_view_tree` |
+| Live plugin inspection (inspector protocol) | `pulp_inspect_dom`, `pulp_inspect_params`, `pulp_inspect_screenshot`, `pulp_inspect_evaluate` (JS expr), `pulp_inspect_performance`, `pulp_inspect_audio` |
+| Audio model / WAV-first excerpt-find | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle` |
+
+#### Setup
+
+`tools/mcp/pulp-mcp-launcher` is a thin shell shim. It looks for the binary
+in this order:
+
+1. `<repo>/build/tools/mcp/pulp-mcp` (source-tree build) — typical Pulp
+   contributor workflow.
+2. `pulp-mcp` on `$PATH` (installed binary).
+
+If neither exists, the launcher prints a readable diagnostic on stderr and
+exits 127 so Claude Code surfaces the failure rather than silently no-oping
+(`pulp #1821`).
+
+To wire it up from a Pulp checkout:
+
+```bash
+cmake --build build --target pulp-mcp
+# Then in Claude Code: "Reconnect" the pulp MCP server.
+```
+
+#### `.mcp.json` and `${CLAUDE_PLUGIN_ROOT}` (gotcha)
+
+The Pulp repo's project-local `.mcp.json` uses a path **relative to the
+project root** — `./tools/mcp/pulp-mcp-launcher` — not
+`${CLAUDE_PLUGIN_ROOT}/...`. Reason: `${CLAUDE_PLUGIN_ROOT}` is set by
+Claude Code only when launching a marketplace-installed plugin's MCP
+server. Project-local `.mcp.json` files (loaded by Claude Code from
+the working-directory project, not from a plugin install) get an empty
+`${CLAUDE_PLUGIN_ROOT}`, which makes the command resolve to the literal
+`/tools/mcp/pulp-mcp-launcher` — fails with `No such file or directory`,
+exit 127, and Claude Code shows the server as `✘ failed`.
+
+Until the Pulp plugin ships a separate marketplace-bundled `.mcp.json`
+under `.claude-plugin/`, only project-local source-tree usage is
+supported. That's intentional — `pulp-mcp` requires the binary to be
+built (or installed on `$PATH`) regardless of how it's wired in, so
+non-checkout users don't gain anything from the marketplace path.
+
 ## Plugin Structure
 
 ```

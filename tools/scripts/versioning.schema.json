@@ -31,7 +31,7 @@
                 "path": { "type": "string" },
                 "kind": {
                   "type": "string",
-                  "enum": ["cmake_project_version", "json_field", "python_dunder_version", "pyproject_version", "regex"]
+                  "enum": ["cmake_project_version", "json_field", "json_path", "python_dunder_version", "pyproject_version", "regex"]
                 },
                 "field": { "type": "string" },
                 "pattern": { "type": "string" }
@@ -39,6 +39,10 @@
               "allOf": [
                 {
                   "if": { "properties": { "kind": { "const": "json_field" } } },
+                  "then": { "required": ["field"] }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "json_path" } } },
                   "then": { "required": ["field"] }
                 },
                 {

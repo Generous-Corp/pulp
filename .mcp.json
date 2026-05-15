@@ -1,7 +1,8 @@
 {
+  "_comment": "Project-local MCP server for Pulp source-tree work. Path is RELATIVE because Claude Code launches MCP servers from the project root for project-local .mcp.json — ${CLAUDE_PLUGIN_ROOT} is only set for marketplace-installed plugins, not for project-local configs. The pulp-mcp-launcher itself locates the binary via $BASH_SOURCE so this still works regardless of cwd if Claude Code follows the MCP spec.",
   "mcpServers": {
     "pulp": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/tools/mcp/pulp-mcp-launcher",
+      "command": "./tools/mcp/pulp-mcp-launcher",
       "env": {}
     }
   }
