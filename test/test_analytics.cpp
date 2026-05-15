@@ -132,7 +132,10 @@ TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics]
     AnalyticsEvent event;
     event.name = "quote\"and\nline";
     event.timestamp = 1.0;
-    event.properties = {{"key\"name", "value\\path\tend"}};
+    event.properties = {
+        {"key\"name", "value\\path\tend"},
+        {"return", "line\rend"},
+    };
     dest.log_event(event);
     dest.flush();
 
@@ -141,6 +144,8 @@ TEST_CASE("FileAnalyticsDestination escapes JSON strings", "[runtime][analytics]
     REQUIRE(std::getline(f, line));
     REQUIRE(line.find("\"event\":\"quote\\\"and\\nline\"") != std::string::npos);
     REQUIRE(line.find("\"key\\\"name\":\"value\\\\path\\tend\"") != std::string::npos);
+    REQUIRE(line.find("\"return\":\"line\\rend\"") != std::string::npos);
+    REQUIRE(line.find("\",\"return\"") != std::string::npos);
 }
 
 TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][coverage][issue-656]") {
