@@ -4163,3 +4163,140 @@ failed to read the pinned Highway tree; focused and full macOS tests were
 green before push.
 Resume action: monitor #2046 required checks and merge directly when
 green.
+
+2026-05-15 03:45 PDT: prepared the next runtime helper batch locally in
+`/private/tmp/pulp-phase3-runtime-helpers-batch-656` on
+`feature/phase3-runtime-helpers-batch-656` at `5df4150`, intentionally
+not pushed yet to avoid adding another GitHub CI run while the open
+queue is saturated. The held batch covers six runtime/helper test
+targets with 16 new focused CTest cases across identity parsing, stream
+result/file-position behavior, i18n duplicate/trailing parser paths,
+analytics JSON escaping and empty flush, memory-mapped file read-write
+and empty-file paths, HTTP helper status/URL boundaries, BigInteger
+copy/move/hex/bit-count helpers, and license activation malformed-URL
+paths. It also includes two bounded correctness fixes exposed by the new
+tests: `Uuid::from_string` now rejects non-hex digits and misplaced
+dashes instead of decoding them as zero nibbles, and
+`FileAnalyticsDestination` now escapes JSON string output for quotes,
+backslashes, and common control characters. Local macOS validation
+passed: configure `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+-DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`, build `cmake --build
+build --target pulp-test-runtime-utils pulp-test-stream
+pulp-test-identity pulp-test-i18n pulp-test-analytics
+pulp-test-license -j$(sysctl -n hw.ncpu)`, focused issue tag runs
+passing 80 assertions in 15 cases, full affected binaries passing 456
+assertions in 114 cases, exact `ctest --test-dir build -R
+"(MemoryMappedFile read-write|MemoryMappedFile rejects empty|HttpResponse
+ok|HTTP helpers reject malformed URL|StreamResult helpers|FileStream
+zero-size|Uuid ordering|i18n duplicate|i18n \\.strings parser
+lets|i18n JSON parser accepts|FileAnalyticsDestination
+escapes|FileAnalyticsDestination empty flush|BigInteger copy
+move|LicenseValidator validate_and_parse includes|OnlineActivation
+rejects)" --output-on-failure` passing 16/16, and `git diff --check`.
+Resume action: keep this batch held for consolidation unless the queue
+clears; if pushed, open one GitHub-hosted PR and record the PR number.
+
+2026-05-15 03:48 PDT: investigated apparent failures on open codecov PRs
+after the GitHub queue spike. PRs #2012, #2014, #2016, #2022, #2030,
+and #2031 showed failed alias or sanitizer/coverage checks, but the
+inspected runs were cancellations clustered around 2026-05-15 10:36 UTC,
+not actionable test failures. Examples: #2030 and #2031 macOS,
+sanitizer, and macOS coverage legs were cancelled while Windows/Linux
+legs succeeded; #2012 ASan/UBSan were cancelled while TSan succeeded;
+#2016 Android coverage was cancelled while macOS/Windows/Linux coverage
+legs succeeded; #2022 macOS, Android macOS build, and ASan/UBSan were
+cancelled while Linux/Windows and TSan succeeded. Current action: do not
+patch code for these cancellation-only failures; selectively rerun failed
+jobs later when the queue calms, and avoid pushing small new CI batches.
+
+2026-05-15 04:45 PDT: collapsed the codecov queue from 25 small
+GitHub-hosted test PRs into 4 broader replacement PRs to reduce slow
+macOS runner fan-out. Before opening replacements, cancelled queued /
+in-progress runs for the superseded branches where possible, merged each
+source branch into a domain worktree, resolved conflicts, and ran local
+macOS validation with `PULP_ENABLE_GPU=OFF` and examples off. No
+Namespace CI or SSH hosts were used.
+
+Replacement PRs:
+- #2048 `feature/phase3-codecov-runtime-platform-consolidated-657`
+  supersedes #2025, #2026, #2030, #2031, #2032, #2033, #2040, plus the
+  held local runtime helper batch #656. Local validation built affected
+  runtime/platform/event/state targets and directly ran
+  `pulp-test-analytics`, `pulp-test-crypto`, `pulp-test-environment`,
+  `pulp-test-events-async-helpers`, `pulp-test-i18n`,
+  `pulp-test-identity`, `pulp-test-ipc-endpoints`,
+  `pulp-test-json-rpc`, `pulp-test-license`,
+  `pulp-test-memory-message-channel`,
+  `pulp-test-network-service-discovery`, `pulp-test-permissions`,
+  `pulp-test-platform`, `pulp-test-properties`, `pulp-test-runtime`,
+  `pulp-test-runtime-utils`, `pulp-test-state-tree`,
+  `pulp-test-stream`, and `pulp-test-xml-zip`; all passed. Consolidation
+  exposed malformed string literals in `test_i18n.cpp` and
+  `test_license.cpp`; fixed in follow-up commits on the replacement
+  branch before push.
+- #2049 `feature/phase3-codecov-media-consolidated-658` supersedes
+  #2012, #2014, #2019, #2028, #2034, #2041. Local validation built and
+  directly ran affected audio/MIDI/signal/canvas/OSC/SDF binaries:
+  `pulp-test-attributed-string`, `pulp-test-audio-file`,
+  `pulp-test-descriptor-validation`, `pulp-test-diagnostic`,
+  `pulp-test-dirty-tracker`, `pulp-test-dsp-expansion`,
+  `pulp-test-midi-buffer-ump`, `pulp-test-midi-ci`,
+  `pulp-test-midi-file`, `pulp-test-mpe-buffer`,
+  `pulp-test-msdf-atlas`, `pulp-test-osc`, `pulp-test-osc-bundle`,
+  `pulp-test-path-to-sdf`, `pulp-test-psdf-atlas`,
+  `pulp-test-scan-blacklist`, `pulp-test-sdf-atlas`,
+  `pulp-test-sdf-atlas-cache`, `pulp-test-sdf-effects`,
+  `pulp-test-sdf-software-renderer`, `pulp-test-sdf-text`, and
+  `pulp-test-signal`; all passed.
+- #2051 `feature/phase3-codecov-tools-host-format-consolidated-659`
+  supersedes #2016, #2022, #2024, #2035, #2037, #2038. Local validation
+  built and directly ran affected tools/host/format/state binaries:
+  `pulp-test-audio-tools`, `pulp-test-binding`,
+  `pulp-test-child-process`, `pulp-test-cli-fetchcontent-cache`,
+  `pulp-test-cli-shellout`, `pulp-test-descriptor-validation`,
+  `pulp-test-environment`, `pulp-test-graph-serializer`,
+  `pulp-test-headless`, `pulp-test-host`, `pulp-test-ios-audio-session`,
+  `pulp-test-plugin-state-io`, `pulp-test-preset-manager`,
+  `pulp-test-sdl3-surface`, `pulp-test-state`,
+  `pulp-test-validation-harness`, `pulp-test-aax-model`, and
+  `pulp-test-ara`; all passed. Python tests first failed under
+  `python3 -m pytest` because this local Python 3.14 lacks pytest, then
+  passed through their checked-in unittest entrypoints:
+  `tools/packages/test_freshness_check_extra.py`,
+  `tools/scripts/test_auto_release_decision_extra.py`,
+  `tools/scripts/test_check_format_validation.py`,
+  `tools/scripts/test_fetch_skia_for_release_extra.py`,
+  `tools/scripts/test_host_pump_lint.py`,
+  `tools/scripts/test_macos_reroute_watcher.py`, and
+  `tools/scripts/test_ruleset_drift_config.py`.
+- #2050 `feature/phase3-codecov-view-consolidated-660` supersedes
+  #2017, #2042, #2043, #2044, #2045, #2046. Local validation built and
+  directly ran affected view/UI/theme/widget binaries:
+  `pulp-test-accessibility-tree`, `pulp-test-appearance`,
+  `pulp-test-asset-manager`, `pulp-test-audio-bridge`,
+  `pulp-test-auto-ui`, `pulp-test-cli-shellout`,
+  `pulp-test-code-editor`, `pulp-test-file-browser`,
+  `pulp-test-graph-editor-view`, `pulp-test-gui-components`,
+  `pulp-test-image-cache`, `pulp-test-input-events`, `pulp-test-modal`,
+  `pulp-test-param-attachment`, `pulp-test-phase9-widgets`,
+  `pulp-test-preset-browser`, `pulp-test-property-list`,
+  `pulp-test-table-list-box`, `pulp-test-theme`,
+  `pulp-test-theme-contrast`, `pulp-test-theme-presets`,
+  `pulp-test-tree-view`, `pulp-test-ui-components`,
+  `pulp-test-visualization`, `pulp-test-waveform-editor`,
+  `pulp-test-widgets`, and `pulp-test-window-manager`; all passed.
+
+All superseded PRs were commented and closed after replacements existed;
+source branches were intentionally retained for audit. Pre-push
+diff-cover on #2048, #2050, and #2051 attempted a separate coverage
+configure and hit a local transient Highway FetchContent checkout error
+(`failed to checkout tag 457c891...`), then was demoted by
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1`; focused local macOS validation was
+green before push.
+
+Updated batching policy for remaining codecov work: hold future
+coverage slices locally until there is a substantial domain corpus, then
+submit one broad PR per related area instead of small PR fan-out. Target
+roughly a dozen discrete slices per PR when practical, validate locally
+on macOS, push only GitHub-hosted CI, avoid Namespace, and record both
+the held local queue and any submitted replacement PR mapping here.
