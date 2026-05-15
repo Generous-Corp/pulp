@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -90,6 +91,51 @@ TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-9
     large.set_font_size(36.0f);
 
     REQUIRE(large.intrinsic_width() > small.intrinsic_width());
+}
+
+TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (#76)",
+          "[view][widget][issue-pulp-internal-76]") {
+    // pulp-internal #76 — Spectr's `<span fontSize=10>SNAPSHOT</span>` in
+    // the bottom toolbar was vertically clipped because Yoga reserved
+    // 10 * 1.4 = 14px for the Label, but Inter's typographic ascent +
+    // descent at 10pt is ~13px and the GPU clip-rect on the View bounds
+    // shaved descender slack off in practice. intrinsic_height now uses
+    // a 1.6 multiplier for small font sizes (< 12pt) to ensure the full
+    // glyph extent fits inside the reserved box.
+    //
+    // Larger sizes keep the historical 1.4 multiplier — they have plenty
+    // of absolute slack and downstream visual tests / golden-files
+    // depend on the exact numbers.
+
+    // Below the threshold — bumped multiplier.
+    Label tiny("snapshot");
+    tiny.set_font_size(10.0f);
+    REQUIRE(tiny.intrinsic_height() == Catch::Approx(10.0f * 1.6f));
+
+    Label small("ok");
+    small.set_font_size(11.5f);
+    REQUIRE(small.intrinsic_height() == Catch::Approx(11.5f * 1.6f));
+
+    // At/above the threshold — original multiplier.
+    Label normal("hello");
+    normal.set_font_size(12.0f);
+    REQUIRE(normal.intrinsic_height() == Catch::Approx(12.0f * 1.4f));
+
+    Label big("HEADING");
+    big.set_font_size(24.0f);
+    REQUIRE(big.intrinsic_height() == Catch::Approx(24.0f * 1.4f));
+
+    // Explicit line_height ALWAYS wins (multiplier ignored on either side
+    // of the threshold) — preserves the existing escape hatch.
+    Label explicit_tiny("snapshot");
+    explicit_tiny.set_font_size(10.0f);
+    explicit_tiny.set_line_height(20.0f);
+    REQUIRE(explicit_tiny.intrinsic_height() == Catch::Approx(20.0f));
+
+    Label explicit_big("HEADING");
+    explicit_big.set_font_size(24.0f);
+    explicit_big.set_line_height(20.0f);
+    REQUIRE(explicit_big.intrinsic_height() == Catch::Approx(20.0f));
 }
 
 TEST_CASE("Label intrinsic_width respects text-transform", "[view][widget][issue-928]") {
