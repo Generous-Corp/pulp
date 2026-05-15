@@ -2,10 +2,12 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -1822,4 +1824,130 @@ TEST_CASE("Label soft-wrap: bounds().width == 0 falls through to legacy path (no
     auto text_cmds = commands_of(canvas, DrawCommand::Type::fill_text);
     REQUIRE(text_cmds.size() == 1);
     REQUIRE(text_cmds[0].text == "hello world how are you");
+}
+
+namespace {
+
+// pulp #73 — minimal WindowHost that counts repaint() calls. Mirrors
+// the DummyWindowHost in test_view.cpp; duplicated here so the widget
+// suite stays self-contained.
+class CountingHost final : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return false; }
+    void repaint() override { ++repaint_count; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+
+    int repaint_count = 0;
+};
+
+} // namespace
+
+// pulp #73 — programmatic value mutation MUST schedule a repaint.
+// User-input mutation (mouse drag) piggybacks on the host's per-event
+// setNeedsDisplay path; preset application / JS bridge setValue go
+// through THIS code path and would otherwise leave the painted state
+// stale until the next user input. The "preset-applied band-shape
+// outline missing (only renders during manual draw)" symptom in
+// Spectr was exactly this gap. These regression tests fence each
+// programmatic setter so a refactor that drops the request_repaint()
+// call surfaces in CI before the user sees a silent paint.
+TEST_CASE("Widget set_value programmatic mutation requests repaint [issue-73]",
+          "[view][widget][issue-73]") {
+    SECTION("Knob::set_value") {
+        Knob knob;
+        CountingHost host;
+        knob.set_window_host(&host);
+        REQUIRE(host.repaint_count == 0);
+
+        knob.set_value(0.7f);
+        REQUIRE(host.repaint_count >= 1);
+    }
+
+    SECTION("Fader::set_value") {
+        Fader fader;
+        CountingHost host;
+        fader.set_window_host(&host);
+        REQUIRE(host.repaint_count == 0);
+
+        fader.set_value(0.4f);
+        REQUIRE(host.repaint_count >= 1);
+    }
+
+    SECTION("RangeSlider::set_value") {
+        RangeSlider slider;
+        slider.set_min(0);
+        slider.set_max(100);
+        CountingHost host;
+        slider.set_window_host(&host);
+        int before = host.repaint_count;
+
+        slider.set_value(50);
+        REQUIRE(host.repaint_count > before);
+    }
+
+    SECTION("Toggle::set_on") {
+        Toggle toggle;
+        CountingHost host;
+        toggle.set_window_host(&host);
+        REQUIRE(host.repaint_count == 0);
+
+        toggle.set_on(true);
+        REQUIRE(host.repaint_count >= 1);
+    }
+
+    SECTION("Checkbox::set_checked") {
+        Checkbox cb;
+        CountingHost host;
+        cb.set_window_host(&host);
+        REQUIRE(host.repaint_count == 0);
+
+        cb.set_checked(true);
+        REQUIRE(host.repaint_count >= 1);
+    }
+
+    SECTION("ToggleButton::set_on") {
+        ToggleButton tb;
+        CountingHost host;
+        tb.set_window_host(&host);
+        REQUIRE(host.repaint_count == 0);
+
+        tb.set_on(true);
+        REQUIRE(host.repaint_count >= 1);
+    }
+}
+
+TEST_CASE("Widget set_label programmatic mutation requests repaint [issue-73]",
+          "[view][widget][issue-73]") {
+    SECTION("Knob::set_label") {
+        Knob knob;
+        CountingHost host;
+        knob.set_window_host(&host);
+        int before = host.repaint_count;
+
+        knob.set_label("Cutoff");
+        REQUIRE(host.repaint_count > before);
+    }
+
+    SECTION("Fader::set_label") {
+        Fader fader;
+        CountingHost host;
+        fader.set_window_host(&host);
+        int before = host.repaint_count;
+
+        fader.set_label("Volume");
+        REQUIRE(host.repaint_count > before);
+    }
+
+    SECTION("ToggleButton::set_label") {
+        ToggleButton tb;
+        CountingHost host;
+        tb.set_window_host(&host);
+        int before = host.repaint_count;
+
+        tb.set_label("Mute");
+        REQUIRE(host.repaint_count > before);
+    }
 }
