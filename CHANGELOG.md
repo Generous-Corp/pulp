@@ -11,6 +11,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v0990"></a>
 ## [0.99.0] - 2026-05-14
 
+- fix(plugin): bump marketplace plugins[0].version + relative .mcp.json path ([#1996](https://github.com/danielraffel/pulp/pull/1996))
 - fix(view): reserve Yoga height for multi-line Labels (pulp-internal #74) ([#1969](https://github.com/danielraffel/pulp/pull/1969))
 - fix(codecov): align bot ignore list with Pulp diff-cover gate exclusions ([#1988](https://github.com/danielraffel/pulp/pull/1988))
 - fix(view): bump line-height multiplier to 1.6 for small font Labels (#76) ([#1990](https://github.com/danielraffel/pulp/pull/1990))
@@ -24,15 +25,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(import-validation): fall back to public roundtrip fixtures ([#1976](https://github.com/danielraffel/pulp/pull/1976))
 - fix(view+design-tool): import-design escapes JS-string user text (#81); design-tool window title derives from --script (#61) ([#1966](https://github.com/danielraffel/pulp/pull/1966))
 - fix(release): unblock SDK pipeline — flatten Skia arch subdir + safe backfill ([#1965](https://github.com/danielraffel/pulp/pull/1965))
-
-<a id="v0980"></a>
-## [0.98.0] - 2026-05-14
-
 - feat(import): add Pencil React export parser (Phase 6.6.6) ([#1964](https://github.com/danielraffel/pulp/pull/1964))
-
-<a id="v0970"></a>
-## [0.97.0] - 2026-05-13
-
 - feat(view+pulp-react+tools): live-host parity hardening — drive setInterval, recursive asText, lint+smoke, hidden-window flag ([#1960](https://github.com/danielraffel/pulp/pull/1960))
 - feat(import,design): DESIGN.md adoption — Phase 1 + 2 + Phase 3 scaffold ([#1934](https://github.com/danielraffel/pulp/pull/1934))
 - fix(view+cmake): port viewport_reconcile to core/view; LOUD perf-regression guard when Skia not linked (#1957) ([#1959](https://github.com/danielraffel/pulp/pull/1959))
@@ -76,18 +69,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - feat(ci): pulp overflow CLI for macOS-runner overflow routing ([#1942](https://github.com/danielraffel/pulp/pull/1942))
 - feat(ci): opportunistic macOS-overflow reroute watcher ([#1944](https://github.com/danielraffel/pulp/pull/1944))
 - fix(ci): macOS overflow probe counts queued-to-local only ([#1943](https://github.com/danielraffel/pulp/pull/1943))
-
-<a id="v0960"></a>
-## [0.96.0] - 2026-05-13
-
 - feat(ci): pulp macos retarget — per-PR macOS-runner override without full rerun ([#1941](https://github.com/danielraffel/pulp/pull/1941))
 - feat(import): Figma Make React export parser (Phase 6.6.3) ([#1910](https://github.com/danielraffel/pulp/pull/1910))
 - fix(ci): macOS overflow probe — use in_progress runs proxy (no admin scope) ([#1936](https://github.com/danielraffel/pulp/pull/1936))
 - ci(build): macOS overflow routing to Namespace when local Mac is busy ([#1935](https://github.com/danielraffel/pulp/pull/1935))
-
-<a id="v0951"></a>
-## [0.95.1] - 2026-05-13
-
 - fix(view): Label wraps with CSS default white-space:normal (closes #1924) ([#1933](https://github.com/danielraffel/pulp/pull/1933))
 - ci: add path-scoped parser validation profile (closes #1916) ([#1920](https://github.com/danielraffel/pulp/pull/1920))
 - fix(widget_bridge): pump message loop after JS event dispatch so drag-state commits before next event (closes #1923) ([#1929](https://github.com/danielraffel/pulp/pull/1929))
@@ -99,10 +84,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(host): cache dlerror() before std::format call in CLAP scanner (ASan SEGV) ([#1873](https://github.com/danielraffel/pulp/pull/1873))
 - test(view/css): pin Tier-1 supported core + reclassify 5 rows (closes 5 coverage-gaps) ([#1857](https://github.com/danielraffel/pulp/pull/1857))
 - fix(css): nested var() fallback + var-in-calc resolution via balanced-paren walker (closes coverage-gap css/__var) ([#1855](https://github.com/danielraffel/pulp/pull/1855))
-
-<a id="v0950"></a>
-## [0.95.0] - 2026-05-12
-
 - feat(view): SDK C++ runtime-import API — install_runtime_import_handlers ([#1856](https://github.com/danielraffel/pulp/pull/1856))
 - test(view/css): pin display:contents arch-deferred no-op (closes coverage-gap rn/display + yoga/display) ([#1852](https://github.com/danielraffel/pulp/pull/1852))
 - feat(css): alignItems / justifyContent CSS-spec value aliases (Tier 1 #1434) ([#1853](https://github.com/danielraffel/pulp/pull/1853))
@@ -1775,11 +1756,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
 [0.99.0]: https://github.com/danielraffel/pulp/releases/tag/v0.99.0
-[0.98.0]: https://github.com/danielraffel/pulp/releases/tag/v0.98.0
-[0.97.0]: https://github.com/danielraffel/pulp/releases/tag/v0.97.0
-[0.96.0]: https://github.com/danielraffel/pulp/releases/tag/v0.96.0
-[0.95.1]: https://github.com/danielraffel/pulp/releases/tag/v0.95.1
-[0.95.0]: https://github.com/danielraffel/pulp/releases/tag/v0.95.0
 [0.94.0]: https://github.com/danielraffel/pulp/releases/tag/v0.94.0
 [0.93.0]: https://github.com/danielraffel/pulp/releases/tag/v0.93.0
 [0.92.0]: https://github.com/danielraffel/pulp/releases/tag/v0.92.0
