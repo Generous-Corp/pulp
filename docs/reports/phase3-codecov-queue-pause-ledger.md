@@ -4478,7 +4478,7 @@ root cause if confirmed, then continue monitoring #2048/#2049/#2050/#2051.
 After those are stable, continue adding to the held ship/package batch and
 future large domain batches before opening new GitHub-hosted PRs.
 
-2026-05-15 12:45 PDT: #2050 local focused coverage reproduction completed
+2026-05-15 12:30 PDT: #2050 local focused coverage reproduction completed
 in `/private/tmp/pulp-phase3-codecov-view-consolidated-660`. The focused
 CTest run passed both
 `PresetBrowser ignores filtered clicks before the list starts` and
@@ -4493,7 +4493,7 @@ rerun, `Diff coverage required` was no longer listed as failing, with the
 Coverage rerun still pending and `codecov/patch` still red until Codecov
 recomputes.
 
-2026-05-15 12:50 PDT: investigated #2049's isolated `codecov/patch`
+2026-05-15 12:33 PDT: investigated #2049's isolated `codecov/patch`
 failure. GitHub's required diff gate and all build/coverage/sanitizer jobs
 were green, but Codecov reported patch coverage below the 75% target even
 though the visible diff against current `origin/main` was test-only. The
@@ -4507,3 +4507,16 @@ comparison. Flattened the current visible test-only diff onto current
 with no mapped skill-sync/compat-sync paths touched plus its 20-test
 check. No Namespace or SSH validation was used. Fresh GitHub-hosted checks
 are now pending on #2049 with no failures at the time of this entry.
+
+2026-05-15 12:34 PDT: continued the held local ship/package batch after
+rebasing `feature/phase3-codecov-ship-package-batch-661` onto current
+`origin/main` `664c2c52f`. Added commit `7eee37120`
+(`test(release): cover skia fetch archive edges`) extending
+`tools/scripts/test_fetch_skia_for_release.py` with coverage for missing
+CLI arguments, unknown-platform warning output, Windows archive flattening,
+and the no-clobber branch when an arch subdirectory contains a duplicate
+library name. Local validation passed
+`python3 tools/scripts/test_fetch_skia_for_release.py` (17 tests) and
+`git diff --check`. The batch is now five commits ahead of current
+`origin/main` and remains local-only/unpushed while the active GitHub PR
+queue drains.
