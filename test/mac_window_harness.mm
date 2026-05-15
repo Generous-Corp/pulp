@@ -17,6 +17,7 @@
 #import "mac_window_harness.hpp"
 
 #import <AppKit/AppKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #import <pulp/view/view.hpp>
 #import <pulp/view/window_host.hpp>
@@ -68,17 +69,25 @@ NSEvent* build_event(NSWindow* window,
     }
 
     if (type == NSEventTypeScrollWheel) {
-        // ScrollWheel events use a different constructor.
-        return [NSEvent
-            mouseEventWithType:type
-                      location:location
-                 modifierFlags:0
-                     timestamp:[[NSProcessInfo processInfo] systemUptime]
-                  windowNumber:[window windowNumber]
-                       context:nil
-                   eventNumber:0
-                    clickCount:0
-                      pressure:0.0f];
+        // Codex review (PR #2009): `+[NSEvent mouseEventWithType:]` does
+        // NOT carry scrolling deltas — the produced event reports
+        // `scrollingDeltaX/Y == 0`, so the synthetic scroll falls
+        // through `PulpView::scrollWheel:` as a no-op and tests pass
+        // while exercising nothing. Build the event via a CGEvent
+        // source so `event.scrollingDeltaX/Y` reflect the requested
+        // deltas. Axis order: CGEventCreateScrollWheelEvent2's
+        // variadic wheel args are (wheel1, wheel2) ≡ (Y, X).
+        CGEventRef cge = CGEventCreateScrollWheelEvent2(
+            /* source */ NULL,
+            kCGScrollEventUnitPixel,
+            /* wheelCount */ 2,
+            static_cast<int32_t>(ev.scroll_delta_y),
+            static_cast<int32_t>(ev.scroll_delta_x),
+            0);
+        if (!cge) return nil;
+        NSEvent* event = [NSEvent eventWithCGEvent:cge];
+        CFRelease(cge);
+        return event;
     }
 
     return [NSEvent
@@ -142,13 +151,47 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
         NSEvent* nsevent = build_event(window, content, event);
         if (!nsevent) return false;
 
+        // Codex review (PR #2009): `build_event` correctly stamped
+        // NSEventType{Right,Other}Mouse* based on `event.button`, but the
+        // dispatch below previously routed every phase through
+        // `mouseDown:`/`mouseUp:`/`mouseDragged:`. That meant a right-
+        // click test exercised `mouseDown:` (single-click path) instead
+        // of `rightMouseDown:` (context-menu path), and middle-clicks
+        // never reached `otherMouseDown:`. Route by button so synthetic
+        // right/middle clicks hit the matching selectors on PulpView.
         switch (event.phase) {
-            case SimulatedMouse::Phase::down:   [view mouseDown:nsevent];    break;
-            case SimulatedMouse::Phase::up:     [view mouseUp:nsevent];      break;
-            case SimulatedMouse::Phase::move:   [view mouseMoved:nsevent];   break;
-            case SimulatedMouse::Phase::drag:   [view mouseDragged:nsevent]; break;
-            case SimulatedMouse::Phase::scroll: [view scrollWheel:nsevent];  break;
-            default: return false;
+            case SimulatedMouse::Phase::down:
+                if (event.button == pulp::view::MouseButton::right)
+                    [view rightMouseDown:nsevent];
+                else if (event.button == pulp::view::MouseButton::middle)
+                    [view otherMouseDown:nsevent];
+                else
+                    [view mouseDown:nsevent];
+                break;
+            case SimulatedMouse::Phase::up:
+                if (event.button == pulp::view::MouseButton::right)
+                    [view rightMouseUp:nsevent];
+                else if (event.button == pulp::view::MouseButton::middle)
+                    [view otherMouseUp:nsevent];
+                else
+                    [view mouseUp:nsevent];
+                break;
+            case SimulatedMouse::Phase::move:
+                [view mouseMoved:nsevent];
+                break;
+            case SimulatedMouse::Phase::drag:
+                if (event.button == pulp::view::MouseButton::right)
+                    [view rightMouseDragged:nsevent];
+                else if (event.button == pulp::view::MouseButton::middle)
+                    [view otherMouseDragged:nsevent];
+                else
+                    [view mouseDragged:nsevent];
+                break;
+            case SimulatedMouse::Phase::scroll:
+                [view scrollWheel:nsevent];
+                break;
+            default:
+                return false;
         }
 
         // Settle the deferred click handler from PulpView::mouseUp:.

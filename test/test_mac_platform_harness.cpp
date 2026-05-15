@@ -17,11 +17,15 @@
 #include "mac_window_harness.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <vector>
 
+using pulp::view::MouseButton;
+using pulp::view::MouseEvent;
+using pulp::view::Rect;
 using pulp::view::View;
 using pulp::view::WindowHost;
 using pulp::view::WindowOptions;
@@ -80,4 +84,104 @@ TEST_CASE("mac harness honors caller-provided window options size",
     // assert the host rounded the request up to something plausible.
     REQUIRE(content.width  >= 600);
     REQUIRE(content.height >= 400);
+}
+
+// ── Codex review P2 fixes (PR #2009) ────────────────────────────────────
+//
+// Before these fixes:
+//   1. `build_event` constructed scroll wheel events via
+//      `+[NSEvent mouseEventWithType:]`, which does not carry
+//      `scrollingDeltaX/Y`. `PulpView::scrollWheel:` reads those, so the
+//      synthetic event delivered a zero-delta wheel — scroll tests
+//      passed without ever exercising real scroll math.
+//   2. `simulate_mouse` routed every phase through `mouseDown:` /
+//      `mouseUp:` / `mouseDragged:` regardless of `event.button`, so a
+//      right-click in a test reached the left-click selector instead of
+//      `rightMouseDown:` (which is what triggers the context-menu path).
+//
+// These two tests pin both behaviors. They build a hidden GPU window,
+// install a child view with a known hit-test rect, and assert the
+// production selectors actually fired.
+
+TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
+          "[mac][platform-harness][issue-2001]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    // Child fills the window. on_pointer_event is the callback
+    // `PulpView::scrollWheel:` invokes once it has walked ancestors to
+    // dispatch a wheel-flagged MouseEvent.
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 320, 240});
+
+    int wheel_calls = 0;
+    float captured_dx = 0.0f;
+    float captured_dy = 0.0f;
+    child->on_pointer_event = [&](const MouseEvent& me) {
+        if (!me.is_wheel) return;
+        ++wheel_calls;
+        captured_dx = me.scroll_delta_x;
+        captured_dy = me.scroll_delta_y;
+    };
+    root.add_child(std::move(child));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    pt::SimulatedMouse ev;
+    ev.phase = pt::SimulatedMouse::Phase::scroll;
+    ev.x = 100.0f;
+    ev.y = 100.0f;
+    ev.scroll_delta_y = 10.0f;
+    ev.scroll_delta_x = 0.0f;
+    REQUIRE(pt::simulate_mouse(*host, ev));
+
+    REQUIRE(wheel_calls == 1);
+    // PulpView::scrollWheel: negates the Y axis (Cocoa wheel deltas are
+    // bottom-up; the View MouseEvent is top-down). The harness already
+    // hands the CGEvent the caller's raw scroll_delta_y, so the View
+    // callback observes |delta| > 0 with the production sign.
+    REQUIRE(captured_dy != 0.0f);
+    REQUIRE(captured_dx == 0.0f);
+}
+
+TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDown:",
+          "[mac][platform-harness][issue-2001]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 320, 240});
+
+    // `on_click` is the left-click signal: PulpView::mouseUp: posts it
+    // via dispatch_async. `on_context_menu` is the right-click signal:
+    // PulpView::rightMouseDown: invokes it synchronously. Wiring both
+    // here lets us prove the synthetic right-click did NOT fall into
+    // the left-click path.
+    int left_clicks = 0;
+    int context_menus = 0;
+    child->on_click = [&] { ++left_clicks; };
+    child->on_context_menu = [&](pulp::view::Point) { ++context_menus; };
+    root.add_child(std::move(child));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    pt::SimulatedMouse down;
+    down.phase = pt::SimulatedMouse::Phase::down;
+    down.button = MouseButton::right;
+    down.x = 50.0f;
+    down.y = 50.0f;
+    REQUIRE(pt::simulate_mouse(*host, down));
+
+    // Right-click only fires on rightMouseDown:; the matching up event
+    // is exercised here mainly to keep the gesture symmetrical and to
+    // confirm `simulate_mouse` does not crash when routing to
+    // `rightMouseUp:` (which PulpView does not override).
+    pt::SimulatedMouse up = down;
+    up.phase = pt::SimulatedMouse::Phase::up;
+    REQUIRE(pt::simulate_mouse(*host, up));
+
+    REQUIRE(context_menus == 1);
+    REQUIRE(left_clicks == 0);
 }
