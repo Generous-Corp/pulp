@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-15 00:20 PDT
+Last updated: 2026-05-15 00:45 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -165,6 +165,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | #2017 view/widget wave | `8f9effa7` | `7a532c59` | open PR on `feature/phase3-view-widget-batch-493`; broad test-only GitHub-hosted wave superseding 18 local #493 view/widget tranches; local macOS target build, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2019 MIDI/host format batch | `62a17f78` | `b70bd42a` | open PR on `feature/phase3-midi-host-batch-645`; test-only GitHub-hosted batch covering MPE buffer/tracker edges, diagnostic reporter/default JSON, host-type feature heuristics, descriptor validation warning/error combinations, and scan blacklist parser edges; local macOS target build, focused tag runs, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2022 host graph/serializer batch | `276f7f7f` | `a29cb7dc` | open PR on `feature/phase3-host-graph-batch-493`; GitHub-hosted batch covering SignalGraph invalid/duplicate edge variants, live gain updates, release/clear helper behavior, GraphSerializer unresolved-plugin identity reserialization, and plugin-field error cleanup; includes a narrow source fix preserving placeholder plugin identity by using the existing `add_plugin_node(info)` path; local macOS target build, focused tag runs, full touched binaries, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
+| #2024 tools Python control-plane batch | `50acc069` | `a29cb7dc` | open PR on `feature/phase3-tools-python-batch-643`; test-only GitHub-hosted batch covering host-pump linting, release Skia fetcher extra paths, and macOS reroute watcher control-plane behavior; local unittest, direct script, py_compile, diff, skill/version/docs guards passed; local Python coverage runner was unavailable because the installed coverage.py is below the repo's required 7.10 floor; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
@@ -377,6 +378,48 @@ fetching Highway commit `457c891775a7397bdb0376bb1031e6e027af1c48`
 before test execution. Branch pushed and PR opened with GitHub-hosted CI
 only; no Namespace or SSH dispatch. Resume action: monitor #2022
 required checks and merge directly when green.
+
+2026-05-15 00:45 PDT: created the #643 tools Python control-plane batch
+`feature/phase3-tools-python-batch-643` at `50acc069`, PR #2024, from
+current `origin/main` `a29cb7dc`. The diff is test-only and adds
+`tools/scripts/test_host_pump_lint.py`,
+`tools/scripts/test_fetch_skia_for_release_extra.py`, and
+`tools/scripts/test_macos_reroute_watcher.py`. Coverage areas include
+host-pump lint pairing, window, skip-marker, and main-result paths;
+release Skia fetcher usage, platform, manifest, checksum, unpack, and
+layout-drift paths; and macOS reroute watcher subprocess wrapping, local
+busy checks, cloud lane labeling, BAT queue parsing, reroute
+success/failure/timeout, flap-guard trimming, and `tick()` busy,
+candidate, and flap behavior.
+
+Local macOS validation passed for #2024: `python3 -m unittest
+tools.scripts.test_host_pump_lint
+tools.scripts.test_fetch_skia_for_release_extra
+tools.scripts.test_macos_reroute_watcher` passed 17 tests; combined
+`python3 -m unittest tools.scripts.test_fetch_skia_for_release
+tools.scripts.test_fetch_skia_for_release_extra
+tools.scripts.test_host_pump_lint
+tools.scripts.test_macos_reroute_watcher` passed 27 tests; direct script
+runs for the three new tests passed; `python3 -m py_compile
+tools/scripts/host_pump_lint.py tools/scripts/fetch_skia_for_release.py
+tools/scripts/macos_reroute_watcher.py
+tools/scripts/test_host_pump_lint.py
+tools/scripts/test_fetch_skia_for_release_extra.py
+tools/scripts/test_macos_reroute_watcher.py` passed; `git diff --check
+origin/main...HEAD`, `git diff --check`, `git diff --cached --check`,
+`python3 tools/scripts/skill_sync_check.py`,
+`tools/scripts/cli_version_check.sh`, and `./tools/check-docs.sh`
+passed. Local `tools/scripts/run_python_coverage.py` could not run
+because the installed coverage.py is below the required `>=7.10` floor.
+The broader `python3 -m unittest discover -s tools/scripts -p
+'test_*lint.py'` sweep hit the existing unrelated
+`tools/scripts/test_workflow_lint.py` workflow-step expectation for
+`Release-pipeline regression tests (#720)`. Local pre-push diff-cover
+was demoted because its coverage configure path failed fetching Highway
+commit `457c891775a7397bdb1031e6e027af1c48` before tests. Branch pushed
+and PR opened with GitHub-hosted CI only; no Namespace or SSH dispatch.
+Resume action: monitor #2024 required checks and merge directly when
+green.
 
 ## Snapshot Summary
 
