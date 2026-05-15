@@ -173,3 +173,51 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
     REQUIRE(model.cell_text(0, 1).empty());
     REQUIRE(model.cell_text(1, 1) == "two");
 }
+
+TEST_CASE("TableListBox clear columns and model-less clicks are stable",
+          "[gui][table][coverage][issue-653]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 160, 80});
+    table.set_header_height(20.0f);
+    table.add_column({"Name", 80.0f});
+    table.add_column({"Value", 80.0f});
+    REQUIRE(table.column_count() == 2);
+
+    table.on_mouse_down({10.0f, 5.0f});
+    table.on_mouse_down({10.0f, 35.0f});
+    REQUIRE(table.selected_row() == -1);
+
+    table.clear_columns();
+    REQUIRE(table.column_count() == 0);
+
+    RecordingCanvas canvas;
+    table.paint(canvas);
+    REQUIRE(canvas.command_count() == 0);
+}
+
+TEST_CASE("TableListBox paints selected row and ignores negative body clicks",
+          "[gui][table][coverage][issue-653]") {
+    RecordingTableModel model({
+        {"First", "A"},
+        {"Second", "B"},
+    });
+
+    TableListBox table;
+    table.set_bounds({0, 0, 180, 80});
+    table.set_header_height(20.0f);
+    table.set_row_height(20.0f);
+    table.set_model(&model);
+    table.add_column({"Name", 90.0f});
+    table.add_column({"Value", 90.0f});
+    table.set_selected_row(1);
+
+    table.on_mouse_down({10.0f, -5.0f});
+    REQUIRE(model.sort_calls.empty());
+    REQUIRE(table.selected_row() == 1);
+
+    RecordingCanvas canvas;
+    table.paint(canvas);
+    REQUIRE(has_text(canvas, "First"));
+    REQUIRE(has_text(canvas, "Second"));
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 3);
+}
