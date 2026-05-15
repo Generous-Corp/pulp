@@ -4567,3 +4567,19 @@ target-log preparation. Local validation passed
 helper coverage. It remains local-only and intentionally unpushed until it
 is large enough to justify one GitHub-hosted PR or the current PR queue
 clears.
+
+2026-05-15 15:04 PDT: added release-discovery coverage slice
+`159cbce81` (`test(release): cover migration index codegen edges`) to the
+held ship/package/local-CI batch. It extends
+`tools/scripts/test_build_migration_index_extra.py` for non-empty C++
+codegen source comments, default non-breaking entries, table-size wiring,
+and empty-docs CLI output. Local validation passed
+`python3 tools/scripts/test_build_migration_index_extra.py` (12 tests),
+`python3 tools/scripts/test_build_migration_index.py` (7 tests),
+`python3 tools/local-ci/test_local_ci_extra.py` (19 tests),
+`python3 tools/scripts/test_android_target.py` (18 tests),
+`python3 tools/scripts/test_validate_hosts.py` (11 tests), and
+`git diff --check`. The held batch is now ten commits ahead of current
+`origin/main`, touches 13 files, and adds 1076 lines of focused
+ship/package/release/local-CI coverage. It remains unpushed until the
+current GitHub PR queue is ready for one substantial batched PR.
