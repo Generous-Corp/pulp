@@ -252,7 +252,17 @@ float Label::intrinsic_height() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-    return line_height_ > 0 ? line_height_ : effective_font_size * 1.4f;
+    // pulp-internal #76 — small font sizes need a larger line-height
+    // multiplier than the standard 1.4. At fs=10 (Spectr's
+    // `<span fontSize=10>SNAPSHOT</span>` in the bottom toolbar), Inter's
+    // typographic ascent + descent is ~13px, leaving only ~1px of slack
+    // in a 14px box (10 * 1.4); the GPU clip-rect on the View bounds
+    // then shaved the descender-side slack off in practice and the label
+    // visibly clipped from the bottom. Bumping to 1.6 for sizes below
+    // ~12pt buys 16px of box room for fs=10, fully containing the glyph
+    // extent. Larger sizes keep 1.4 — they have plenty of absolute slack.
+    const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
+    return line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
 }
 
 float Label::intrinsic_width() const {
@@ -287,7 +297,9 @@ float Label::intrinsic_width() const {
     bool vertical = (text_direction_ == canvas::TextDirection::top_to_bottom ||
                      text_direction_ == canvas::TextDirection::bottom_to_top);
     if (vertical) {
-        return std::ceil(line_height_ > 0 ? line_height_ : effective_font_size * 1.4f);
+        // pulp-internal #76 — same small-font-size bump as intrinsic_height.
+        const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
+        return std::ceil(line_height_ > 0 ? line_height_ : effective_font_size * lh_mult);
     }
 
     // Mirror paint()'s text-transform — measurement must match what's
@@ -447,7 +459,13 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     // Vertical alignment
-    float lh = line_height_ > 0 ? line_height_ : effective_font_size * 1.4f;
+    // pulp-internal #76 — match intrinsic_height's small-font-size bump so
+    // multi-line / shaper-wrapped layout uses the same line-box height
+    // that Yoga reserved. Without matching here, an fs=10 multi-line
+    // label would size to 16px boxes but paint at 14px line height and
+    // siblings would not align.
+    const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
+    float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
 
     // pulp #1737 PR-2 / #1924 — CSS `white-space` / `overflow-wrap` /
     // `word-break` soft-wrap path. Route any multi-line, bounded-width
