@@ -27,6 +27,25 @@ std::filesystem::path make_temp_path(const char* stem) {
 
 }  // namespace
 
+TEST_CASE("StreamResult helper predicates classify errors",
+          "[stream][coverage][phase3]") {
+    auto ok = StreamResult::make(3);
+    REQUIRE(ok.ok());
+    REQUIRE_FALSE(ok.would_block());
+    REQUIRE_FALSE(ok.closed());
+    REQUIRE(ok.bytes == 3);
+
+    auto would_block = StreamResult::fail(StreamError::WouldBlock);
+    REQUIRE_FALSE(would_block.ok());
+    REQUIRE(would_block.would_block());
+    REQUIRE_FALSE(would_block.closed());
+
+    auto invalid = StreamResult::fail(StreamError::Invalid);
+    REQUIRE_FALSE(invalid.ok());
+    REQUIRE_FALSE(invalid.would_block());
+    REQUIRE_FALSE(invalid.closed());
+}
+
 TEST_CASE("MemoryStream round-trip", "[stream]") {
     MemoryStream s;
     const std::uint8_t msg[] = {1, 2, 3, 4, 5};
@@ -181,6 +200,44 @@ TEST_CASE("FileStream append and move keep handle ownership correct", "[stream]"
         REQUIRE(std::memcmp(out, "abcde", sizeof(out)) == 0);
     }
 
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("FileStream read-write mode tracks position and zero-byte I/O",
+          "[stream][coverage][phase3]") {
+    auto path = make_temp_path("pulp_stream_readwrite");
+    const std::uint8_t payload[] = {'r', 'w', '0'};
+
+    FileStream stream(path.string(), FileStream::Mode::ReadWrite);
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.position() == 0);
+
+    REQUIRE(stream.write(payload, 0).ok());
+    REQUIRE(stream.position() == 0);
+
+    auto wrote = stream.write(payload, sizeof(payload));
+    REQUIRE(wrote.ok());
+    REQUIRE(wrote.bytes == sizeof(payload));
+    REQUIRE(stream.position() == sizeof(payload));
+    REQUIRE(stream.flush());
+
+    stream.close();
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE_FALSE(stream.flush());
+    REQUIRE(stream.position() == static_cast<std::size_t>(-1));
+
+    FileStream reader(path.string(), FileStream::Mode::Read);
+    REQUIRE(reader.is_open());
+    std::uint8_t out[sizeof(payload)]{};
+    REQUIRE(reader.read(out, 0).ok());
+    REQUIRE(reader.position() == 0);
+
+    auto got = reader.read(out, sizeof(out));
+    REQUIRE(got.ok());
+    REQUIRE(got.bytes == sizeof(out));
+    REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+
+    reader.close();
     std::filesystem::remove(path);
 }
 
