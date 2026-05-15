@@ -164,6 +164,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | #646 SDL3 surface fallback | `d81b03cc` | `92e83b37` | superseded by #2016 | no standalone CI action |
 | #2017 view/widget wave | `8f9effa7` | `7a532c59` | open PR on `feature/phase3-view-widget-batch-493`; broad test-only GitHub-hosted wave superseding 18 local #493 view/widget tranches; local macOS target build, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2019 MIDI/host format batch | `62a17f78` | `b70bd42a` | open PR on `feature/phase3-midi-host-batch-645`; test-only GitHub-hosted batch covering MPE buffer/tracker edges, diagnostic reporter/default JSON, host-type feature heuristics, descriptor validation warning/error combinations, and scan blacklist parser edges; local macOS target build, focused tag runs, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
+| #2022 host graph/serializer batch | `276f7f7f` | `a29cb7dc` | open PR on `feature/phase3-host-graph-batch-493`; GitHub-hosted batch covering SignalGraph invalid/duplicate edge variants, live gain updates, release/clear helper behavior, GraphSerializer unresolved-plugin identity reserialization, and plugin-field error cleanup; includes a narrow source fix preserving placeholder plugin identity by using the existing `add_plugin_node(info)` path; local macOS target build, focused tag runs, full touched binaries, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
@@ -342,6 +343,40 @@ skill-sync, version-bump, docs-sync, and compat-sync reports passed.
 Branch pushed and PR opened with GitHub-hosted CI only; no Namespace or
 SSH dispatch. Resume action: monitor #2019 required checks and merge
 directly when green.
+
+2026-05-15 00:32 PDT: created the #493 host graph/serializer batch
+`feature/phase3-host-graph-batch-493` at `276f7f7`, PR #2022, based on
+current `origin/main` `a29cb7dc`. The branch touches
+`core/host/src/graph_serializer.cpp`, `test/test_host.cpp`, and
+`test/test_graph_serializer.cpp`. It adds SignalGraph coverage for
+missing-node and duplicate edge variants across audio/feedback/MIDI,
+live gain updates without re-prepare, release silence behavior,
+non-plugin parameter helper returns, prepare guard returns, and clear
+state reset. It adds GraphSerializer coverage for unresolved-plugin
+identity reserialization without state blobs and for field-error cleanup
+after a partially loaded graph. The one-line source fix routes missing
+plugin placeholders through the existing `add_plugin_node(info)` path so
+GraphNode preserves the serialized PluginInfo identity when a saved
+plugin cannot be resolved.
+
+Local macOS validation passed for #2022: configured Debug with GPU and
+examples off, built `pulp-test-host` and `pulp-test-graph-serializer`,
+focused `./build/test/pulp-test-host "[host][graph][issue-493]" -r
+compact` passed 88 assertions in 3 test cases, focused
+`./build/test/pulp-test-graph-serializer
+"[host][serializer][issue-493]" -r compact` passed 33 assertions in 5
+test cases, full `pulp-test-host -r compact` passed 1126 assertions in
+31 test cases, and full `pulp-test-graph-serializer -r compact` passed
+382 assertions in 16 test cases. `git diff --check origin/main...HEAD`,
+`git diff --check`, `git diff --cached --check`,
+`python3 tools/scripts/skill_sync_check.py`,
+`tools/scripts/cli_version_check.sh`, and `./tools/check-docs.sh`
+passed; docs check reported only existing warnings. Local pre-push
+diff-cover was demoted because its coverage configure path failed while
+fetching Highway commit `457c891775a7397bdb0376bb1031e6e027af1c48`
+before test execution. Branch pushed and PR opened with GitHub-hosted CI
+only; no Namespace or SSH dispatch. Resume action: monitor #2022
+required checks and merge directly when green.
 
 ## Snapshot Summary
 
