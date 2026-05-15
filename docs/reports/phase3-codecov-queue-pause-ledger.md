@@ -4392,3 +4392,32 @@ built `pulp-test-graph-serializer`, ran focused unresolved-plugin display
 name and identity tests, then ran the full graph serializer binary (394
 assertions / 17 cases). Pushed the branch and commented on #2051 with the
 validation summary. Fresh GitHub-hosted CI is running for the updated head.
+
+2026-05-15 11:38 PDT: #2048's fresh required diff-coverage job completed
+red at 72% with concrete misses in `core/runtime/src/analytics.cpp` lines
+14-18 and `core/runtime/src/identity.cpp` lines 47-48. Root cause on the
+identity side was a test-input bug: the prior misplaced-dash examples were
+not exactly 36 characters, so they exercised the length guard rather than
+the dashed-format guard. Added commit `8ec1b311f`
+(`test(runtime): cover remaining coverage gate branches`) with an exact
+36-character malformed dashed UUID and additional per-character analytics
+JSON escape cases for backslash, quote, newline, carriage return, and tab
+in event names plus property keys/values. Local validation passed:
+`cmake --build build --target pulp-test-analytics pulp-test-identity`,
+focused analytics escape tests (19 assertions / 3 cases), focused UUID
+round-trip test (19 assertions / 1 case), full `pulp-test-analytics` (49
+assertions / 17 cases), full `pulp-test-identity` (51 assertions / 8
+cases), and `git diff --check`. Pushed #2048; fresh GitHub-hosted checks
+are running.
+
+2026-05-15 11:40 PDT: continued the held local release/package batch
+`feature/phase3-codecov-ship-package-batch-661` after rebasing onto current
+`origin/main`. Added commit `cf4001cea`
+(`test(release): guard dual cli packaging workflow`) to extend
+`tools/scripts/test_release_workflow_test_step.py` with static regression
+coverage for the release CLI workflow's dual-binary contract: Unix and
+Windows package steps must pass `--cpp-binary`, and Unix/Windows smoke
+steps must exercise both `pulp` and `pulp-cpp` while checking loader/DLL
+failure text. Local validation passed
+`python3 tools/scripts/test_release_workflow_test_step.py` (9 tests) and
+`git diff --check`. This batch remains local-only; no PR/CI dispatch yet.
