@@ -334,6 +334,25 @@ class RenderExtraTests(unittest.TestCase):
 
         self.assertEqual(result.percent, 100.0)
 
+    def test_render_failure_lists_only_failed_tiers(self) -> None:
+        body = ctc.render(
+            [
+                ctc.TierResult(
+                    tier=ctc.Tier("audio-critical", 80, ("core/audio/**",)),
+                    touched_lines=4,
+                    covered_lines=4,
+                ),
+                ctc.TierResult(
+                    tier=ctc.Tier("user-facing", 70, ("core/view/**",)),
+                    touched_lines=4,
+                    covered_lines=2,
+                ),
+            ]
+        )
+
+        self.assertIn("**Per-tier gate failed:** user-facing", body)
+        self.assertNotIn("audio-critical below", body)
+
 
 class AggregateExtraTests(unittest.TestCase):
 
@@ -356,11 +375,65 @@ class AggregateExtraTests(unittest.TestCase):
         self.assertEqual(results[0].touched_lines, 0)
         self.assertEqual(results[0].files, [])
 
+    def test_missing_instrumented_file_records_uncovered_diff_lines(self) -> None:
+        tier = ctc.Tier("audio-critical", 80, ("core/audio/**",))
+
+        results = ctc.aggregate(
+            [tier],
+            ["core/audio/src/new_voice.cpp"],
+            {},
+            lines_getter=lambda _p: {3, 4, 5},
+        )
+
+        self.assertEqual(results[0].touched_lines, 3)
+        self.assertEqual(results[0].covered_lines, 0)
+        self.assertEqual(results[0].files, ["core/audio/src/new_voice.cpp"])
+        self.assertFalse(results[0].passed)
+
+    def test_unclassified_instrumented_file_is_ignored_by_per_tier_gate(self) -> None:
+        tier = ctc.Tier("audio-critical", 80, ("core/audio/**",))
+        getter = mock.Mock(return_value={1, 2, 3})
+
+        results = ctc.aggregate(
+            [tier],
+            ["third_party/lib.cpp"],
+            {},
+            lines_getter=getter,
+        )
+
+        self.assertEqual(results[0].touched_lines, 0)
+        getter.assert_not_called()
+
+    def test_non_instrumented_tier_file_does_not_query_diff_lines(self) -> None:
+        tier = ctc.Tier("infra", 50, ("tools/**",))
+        getter = mock.Mock(return_value={1, 2, 3})
+
+        results = ctc.aggregate(
+            [tier],
+            ["tools/scripts/release_notes.py"],
+            {},
+            lines_getter=getter,
+        )
+
+        self.assertEqual(results[0].touched_lines, 0)
+        getter.assert_not_called()
+
 
 class InstrumentedSourceExtraTests(unittest.TestCase):
 
     def test_extensionless_path_is_not_instrumented(self) -> None:
         self.assertFalse(ctc.is_instrumented_source("tools/scripts/pulp-helper"))
+
+    def test_extension_match_is_case_insensitive(self) -> None:
+        self.assertTrue(ctc.is_instrumented_source("core/audio/src/Plugin.CPP"))
+
+    def test_react_surface_matches_only_exact_prefix(self) -> None:
+        self.assertTrue(
+            ctc.is_instrumented_source("packages/pulp-react/src/widget.tsx")
+        )
+        self.assertFalse(
+            ctc.is_instrumented_source("packages/pulp-reactive/src/widget.tsx")
+        )
 
 
 if __name__ == "__main__":
