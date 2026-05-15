@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0990"></a>
+## [0.100.0]
+
 ## [0.99.0] - 2026-05-14
 
 - fix(plugin): bump marketplace plugins[0].version + relative .mcp.json path ([#1996](https://github.com/danielraffel/pulp/pull/1996))
