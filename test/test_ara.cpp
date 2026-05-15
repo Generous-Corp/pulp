@@ -38,6 +38,29 @@ TEST_CASE("AraDocumentController subclass overrides work", "[ara]") {
     REQUIRE((c.supported_roles() & static_cast<int>(AraRole::EditorView)) != 0);
 }
 
+TEST_CASE("AraDocumentController defaults are inert and non-ARA", "[ara][coverage][issue-648]") {
+    AraDocumentController controller;
+    controller.begin_editing();
+    controller.notify_audio_source_content_changed(123);
+    controller.end_editing();
+    REQUIRE(controller.supported_roles() == static_cast<int>(AraRole::None));
+    REQUIRE(controller.is_ara_supported() == false);
+    REQUIRE(controller.ara_factory_name().empty());
+}
+
+TEST_CASE("AraRole bit values remain stable for adapter metadata", "[ara][coverage][issue-648]") {
+    REQUIRE(static_cast<int>(AraRole::None) == 0);
+    REQUIRE(static_cast<int>(AraRole::PlaybackRenderer) == 1);
+    REQUIRE(static_cast<int>(AraRole::EditorRenderer) == 2);
+    REQUIRE(static_cast<int>(AraRole::EditorView) == 4);
+
+    const auto render_and_view =
+        static_cast<int>(AraRole::PlaybackRenderer)
+        | static_cast<int>(AraRole::EditorRenderer)
+        | static_cast<int>(AraRole::EditorView);
+    REQUIRE(render_and_view == 7);
+}
+
 TEST_CASE("ara_sdk_generation reflects SDK headers", "[ara]") {
 #ifdef PULP_HAS_ARA
     // Compiled with the Celemony SDK — generation constant is at least
