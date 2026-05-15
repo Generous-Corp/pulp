@@ -238,12 +238,22 @@ int cmd_create(const std::vector<std::string>& args) {
     auto checks = run_doctor_checks(standalone_mode ? fs::path{} : root, standalone_mode);
     bool env_ok = true;
     for (auto& c : checks) {
-        if (!c.passed) {
-            std::cout << "  \xe2\x9c\x97 " << c.name;
-            if (!c.fix.empty()) std::cout << " — fix: " << c.fix;
-            std::cout << "\n";
-            env_ok = false;
+        if (c.passed) continue;
+        // Optional checks are advisory — they surface fix advice but
+        // must not gate `pulp create`. The pulp-mcp row (#2067) is
+        // optional because the binary is only needed for the Claude
+        // Code plugin's MCP server, not for creating a Pulp project.
+        if (c.optional) {
+            log("  \xe2\x9a\xa0 " + c.name
+                + (c.detail.empty() ? std::string{}
+                                    : (" — " + c.detail))
+                + "\n");
+            continue;
         }
+        std::cout << "  \xe2\x9c\x97 " << c.name;
+        if (!c.fix.empty()) std::cout << " — fix: " << c.fix;
+        std::cout << "\n";
+        env_ok = false;
     }
     if (!env_ok) {
         std::cerr << "\nEnvironment issues found. Run `pulp doctor --fix` first.\n";
