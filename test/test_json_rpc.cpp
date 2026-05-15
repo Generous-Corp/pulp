@@ -291,3 +291,81 @@ TEST_CASE("JsonRpcPeer reports closed and failed sends", "[json_rpc]") {
     channel.deliver_text(R"json({"jsonrpc":"2.0","id":1,"result":true})json");
     REQUIRE_FALSE(callback_called);
 }
+
+TEST_CASE("JsonRpcPeer omits params for empty request payloads",
+          "[json_rpc][coverage][issue-641]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string outbound_request;
+    pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer client(*pair.first);
+    std::atomic<int> callbacks{0};
+    std::string result;
+    REQUIRE(client.send_request("noParams", "", [&](const JsonRpcResult& response) {
+        result = response.result_json;
+        callbacks.fetch_add(1);
+    }));
+
+    REQUIRE(outbound_request.find(R"("method":"noParams")") != std::string::npos);
+    REQUIRE(outbound_request.find(R"("params")") == std::string::npos);
+
+    pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"result":{"ok":true}})json");
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(result.find(R"("ok")") != std::string::npos);
+    REQUIRE(result.find("true") != std::string::npos);
+}
+
+TEST_CASE("JsonRpcPeer preserves string request ids in responses",
+          "[json_rpc][coverage][issue-641]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string reply;
+    pair.first->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    server.register_method("echo", [](std::string_view params) {
+        return JsonRpcResult::ok(std::string(params));
+    });
+
+    pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":"abc-123","method":"echo","params":{"value":7}})json");
+
+    REQUIRE(reply.find(R"("id":"abc-123")") != std::string::npos);
+    REQUIRE(reply.find(R"("value")") != std::string::npos);
+    REQUIRE(reply.find("7") != std::string::npos);
+}
+
+TEST_CASE("JsonRpcPeer dispatches incoming error responses with data",
+          "[json_rpc][coverage][issue-641]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string outbound_request;
+    pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer client(*pair.first);
+    std::atomic<bool> done{false};
+    std::optional<JsonRpcError> error;
+
+    REQUIRE(client.send_request("willFail", "[]", [&](const JsonRpcResult& response) {
+        error = response.error;
+        done.store(true);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    pair.second->send_text(
+        R"json({"jsonrpc":"2.0","id":1,"error":{"code":-32099,"message":"custom","data":{"retry":false}}})json");
+
+    REQUIRE(wait_until([&] { return done.load(); }));
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == -32099);
+    REQUIRE(error->message == "custom");
+    REQUIRE(error->data_json.find(R"("retry")") != std::string::npos);
+    REQUIRE(error->data_json.find("false") != std::string::npos);
+}
