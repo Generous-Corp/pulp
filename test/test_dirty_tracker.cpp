@@ -70,6 +70,24 @@ TEST_CASE("DirtyTracker invalidate_all forces full repaint", "[render][dirty]") 
     REQUIRE(dt.dirty_rects().empty());
 }
 
+TEST_CASE("DirtyTracker full repaint keeps empty partial bounds",
+          "[render][dirty][issue-644]") {
+    DirtyTracker dt;
+    dt.clear();
+    dt.invalidate(1, 2, 3, 4);
+    REQUIRE_FALSE(dt.dirty_rects().empty());
+
+    dt.invalidate_all();
+    REQUIRE(dt.is_dirty());
+    REQUIRE(dt.needs_full_repaint());
+    REQUIRE(dt.dirty_rects().empty());
+    auto b = dt.bounds();
+    REQUIRE(b.x == Catch::Approx(0.0f));
+    REQUIRE(b.y == Catch::Approx(0.0f));
+    REQUIRE(b.w == Catch::Approx(0.0f));
+    REQUIRE(b.h == Catch::Approx(0.0f));
+}
+
 TEST_CASE("DirtyTracker frame counter increments", "[render][dirty]") {
     DirtyTracker dt;
     REQUIRE(dt.frame_count() == 0);
@@ -129,6 +147,30 @@ TEST_CASE("DirtyTracker threshold sums partial dirty regions", "[render][dirty][
     dt.invalidate(50, 50, 30, 30);
     REQUIRE(dt.needs_full_repaint());
     REQUIRE(dt.dirty_rects().empty());
+}
+
+TEST_CASE("DirtyTracker threshold equality remains partial repaint",
+          "[render][dirty][issue-644]") {
+    DirtyTracker dt;
+    dt.set_viewport(100, 100, 0.25f);
+    dt.clear();
+
+    dt.invalidate(0, 0, 50, 50);
+    REQUIRE(dt.is_dirty());
+    REQUIRE_FALSE(dt.needs_full_repaint());
+    REQUIRE(dt.dirty_rects().size() == 1);
+}
+
+TEST_CASE("DirtyTracker ignores invalid viewport dimensions for promotion",
+          "[render][dirty][issue-644]") {
+    DirtyTracker dt;
+    dt.set_viewport(-100, 100, 0.01f);
+    dt.clear();
+    dt.invalidate(0, 0, 1000, 1000);
+
+    REQUIRE(dt.is_dirty());
+    REQUIRE_FALSE(dt.needs_full_repaint());
+    REQUIRE(dt.dirty_rects().size() == 1);
 }
 
 TEST_CASE("DirtyTracker does not promote to full repaint without viewport", "[render][dirty][issue-646]") {
