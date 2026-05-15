@@ -189,6 +189,10 @@ For the user-facing version of this rationale, see `docs/reference/layout-model.
 
 This repo will be open-sourced. Every commit, every file, every directory name should reflect that. No throwaway code on main. No "WIP" commits. No embarrassing history.
 
+`tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
+Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
+Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
+
 ### Verify Against Code, Not Planning Docs
 
 When assessing what features exist or what claims are accurate, **always check the actual code on the current branch** — never trust planning documents, phase trackers, or status files as the source of truth. Planning docs describe intent; the code describes reality. If there is a conflict, the code wins. This applies to:
