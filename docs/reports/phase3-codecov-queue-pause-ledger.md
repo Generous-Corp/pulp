@@ -4702,3 +4702,31 @@ Validation for this held slice passed locally:
 `git diff --check`. The batch is now 13 commits ahead of `origin/main`
 and is still intentionally held local-only rather than pushed as another
 small CI run.
+
+2026-05-15 15:58 PDT: pushed a targeted #2051 repair on
+`feature/phase3-codecov-tools-host-format-consolidated-659` at
+`f446d2033` (`test(view): cover widget repaint and host capture edges`).
+The stale/failing Codecov patch report for #2051 was concentrated in
+`core/view/include/pulp/view/widgets.hpp` and
+`core/view/include/pulp/view/window_host.hpp`, so this adds direct tests
+for the cheap uncovered branches rather than suppressing the check:
+`WindowHost` back-buffer capture delegation, idempotent `Fader` and
+`ToggleButton` label setters, and `Knob::set_format` repaint behavior
+without changing the current value.
+
+Validation before push passed locally:
+`cmake --build build --target pulp-test-widgets
+pulp-test-standalone-editor-chrome -j$(sysctl -n hw.ncpu)`;
+`ctest --test-dir build --output-on-failure -R
+"Widget setters skip repaint|Widget set_label|Knob format setter|WindowHost
+default content-size"` passed 4 tests; `git diff --check` passed; and a
+focused `scripts/run_coverage.sh --tests
+"Widget setters skip repaint|Widget set_label|Knob format setter|WindowHost
+default content-size"` completed with those same 4 tests passing under
+coverage. The generated whole-tree coverage percentage is intentionally
+not meaningful for this targeted run because only four tests were
+selected against the full instrumented object set. Push completed, but
+the pre-push advisory diff-cover path again hit the unrelated local
+FetchContent `mbedtls` `v3.6.2` checkout failure in a fresh `build-cov`;
+do not treat that advisory run as validation. REST check-rollup after
+push showed #2051 pending with no failing check-runs.
