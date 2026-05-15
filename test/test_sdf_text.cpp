@@ -41,6 +41,16 @@ struct FakeAtlas {
 };
 }  // namespace
 
+TEST_CASE("SdfTextOptions default to shader contract values",
+          "[canvas][sdf][layout][coverage][issue-650]") {
+    SdfTextOptions opts;
+    REQUIRE(opts.edge == Catch::Approx(0.5f));
+    REQUIRE(opts.softness == 0.0f);
+    REQUIRE(opts.mip_bias == 0.0f);
+    REQUIRE(opts.gamma == Catch::Approx(2.2f));
+    REQUIRE(opts.snap == SdfPenSnap::Free);
+}
+
 TEST_CASE("snap_pen_x honours the pen-snap policy", "[canvas][sdf][snap]") {
     REQUIRE(snap_pen_x(3.7f, SdfPenSnap::Free)    == 3.7f);
     REQUIRE(snap_pen_x(3.7f, SdfPenSnap::Nearest) == 4.0f);
@@ -96,6 +106,20 @@ TEST_CASE("build_text_quads skips missing glyphs", "[canvas][sdf][layout]") {
     REQUIRE(quads.size() == 2);  // X is skipped.
 }
 
+TEST_CASE("build_text_quads handles empty text and zero render size",
+          "[canvas][sdf][layout][coverage][issue-650]") {
+    FakeAtlas atlas;
+    REQUIRE(build_text_quads(atlas, std::u32string(), 10.0f, 20.0f, 12.0f).empty());
+
+    auto zero = build_text_quads(atlas, std::u32string(U"A"),
+                                 10.0f, 20.0f, 0.0f);
+    REQUIRE(zero.size() == 1);
+    REQUIRE(zero[0].dst_x == 10.0f);
+    REQUIRE(zero[0].dst_y == 20.0f);
+    REQUIRE(zero[0].dst_w == 0.0f);
+    REQUIRE(zero[0].dst_h == 0.0f);
+}
+
 TEST_CASE("build_text_quads returns empty when atlas base size is invalid",
           "[canvas][sdf][layout][issue-641]") {
     FakeAtlas atlas;
@@ -139,6 +163,27 @@ TEST_CASE("named SDF text wrappers forward to shared quad builder",
     REQUIRE(sdf[0].codepoint == U'A');
     REQUIRE(msdf[0].codepoint == U'A');
     REQUIRE(psdf[0].codepoint == U'A');
+}
+
+TEST_CASE("named SDF text wrappers forward options consistently",
+          "[canvas][sdf][layout][coverage][issue-650]") {
+    FakeAtlas atlas;
+    SdfTextOptions opts;
+    opts.snap = SdfPenSnap::Nearest;
+
+    const auto sdf = fill_text_sdf(atlas, std::u32string(U"A"),
+                                   1.6f, 2.4f, 10.0f, opts);
+    const auto msdf = fill_text_msdf(atlas, std::u32string(U"A"),
+                                     1.6f, 2.4f, 10.0f, opts);
+    const auto psdf = fill_text_psdf(atlas, std::u32string(U"A"),
+                                     1.6f, 2.4f, 10.0f, opts);
+
+    REQUIRE(sdf.size() == 1);
+    REQUIRE(msdf.size() == 1);
+    REQUIRE(psdf.size() == 1);
+    REQUIRE(sdf[0].dst_x == msdf[0].dst_x);
+    REQUIRE(msdf[0].dst_x == psdf[0].dst_x);
+    REQUIRE(sdf[0].dst_y == psdf[0].dst_y);
 }
 
 TEST_CASE("build_text_quads works against MsdfAtlas (shared surface)",

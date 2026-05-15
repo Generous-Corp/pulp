@@ -68,6 +68,22 @@ TEST_CASE("software SDF render handles empty quad list",
     for (auto v : out) REQUIRE(v == 0);
 }
 
+TEST_CASE("software SDF render leaves output untouched for invalid output bounds",
+          "[canvas][sdf][render][coverage][issue-650]") {
+    TinyAtlas atlas{1, 1, {255}};
+    SdfTextQuad q;
+    q.dst_w = 1.0f;
+    q.dst_h = 1.0f;
+    q.src_w = 1.0f;
+    q.src_h = 1.0f;
+
+    std::uint8_t out[1] = {11};
+    render_sdf_text_software(atlas, {q}, out, 0, 1);
+    REQUIRE(out[0] == 11);
+    render_sdf_text_software(atlas, {q}, out, 1, 0);
+    REQUIRE(out[0] == 11);
+}
+
 TEST_CASE("software SDF render leaves output untouched for empty atlas",
           "[canvas][sdf][render][issue-641]") {
     TinyAtlas atlas;
@@ -160,4 +176,23 @@ TEST_CASE("software SDF render keeps maximum alpha for overlapping quads",
     std::uint8_t out[1] = {0};
     render_sdf_text_software(atlas, {low, high}, out, 1, 1);
     REQUIRE(out[0] == 255);
+}
+
+TEST_CASE("software SDF render honors custom edge thresholds",
+          "[canvas][sdf][render][coverage][issue-650]") {
+    TinyAtlas atlas{2, 1, {64, 255}};
+    SdfTextQuad q;
+    q.dst_w = 2.0f;
+    q.dst_h = 1.0f;
+    q.src_w = 2.0f;
+    q.src_h = 1.0f;
+
+    std::uint8_t out[2] = {0, 0};
+    SdfTextOptions opts;
+    opts.edge = 1.0f;
+    render_sdf_text_software(atlas, {q}, out, 2, 1, opts);
+
+    REQUIRE(out[0] == 0);
+    REQUIRE(out[1] > 0);
+    REQUIRE(out[1] < 255);
 }
