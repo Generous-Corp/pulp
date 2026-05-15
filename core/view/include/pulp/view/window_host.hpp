@@ -127,7 +127,28 @@ public:
     virtual void detach_native_child_view(void* child_view) { (void) child_view; }
 
     // Capture the current visible content as a PNG image.
+    //
+    // Semantics: "whatever the compositor sees" — on macOS this prefers
+    // `screencapture` and the content-view cache before falling back to a
+    // direct GPU-backbuffer readback. Suitable for live screenshots of a
+    // visible window.
     virtual std::vector<uint8_t> capture_png() { return {}; }
+
+    // Capture the host's own back-buffer as a PNG image (issue #2001).
+    //
+    // Semantics: "host-managed pixels, deterministically." Implementations
+    // MUST NOT call show()/makeKeyAndOrderFront/etc., and MUST bypass any
+    // compositor-side capture path (`screencapture`, content-view caching).
+    // For GPU-backed hosts, this reads the actual rendered back-buffer; for
+    // non-GPU hosts, it can fall back to the rasterized content view.
+    //
+    // Default delegates to capture_png() so non-overriding hosts keep their
+    // current behavior. Test harnesses (`test/mac_window_harness.{hpp,mm}`)
+    // depend on the override existing on macOS GPU hosts so hidden-window
+    // tests get reproducible bytes.
+    virtual std::vector<uint8_t> capture_back_buffer_png() {
+        return capture_png();
+    }
 
     // Clear any cached host-side input targets before the view tree is rebuilt.
     virtual void invalidate_input_state() {}

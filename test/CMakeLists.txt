@@ -2295,3 +2295,32 @@ if(PULP_BENCHMARK AND TARGET pulp-render)
         catch_discover_tests(pulp-test-bench-integration)
     endif()
 endif()
+
+# ── Mac platform-test harness (issue #2001) ────────────────────────────────
+#
+# Catch2 fixture that brings up a hidden NSWindow + CAMetalLayer host
+# WITHOUT calling makeKeyAndOrderFront / activateIgnoringOtherApps, so
+# tests can exercise window_host_mac.mm code paths (set_design_viewport,
+# paint_scene, mouse-coordinate inverse mapping, resize → contentsScale)
+# that today are structurally untestable from plain Catch2.
+#
+# Phase B-1 (this PR): ships the harness scaffold + a smoke test proving
+#   the hidden window / capture_back_buffer_png contract.
+# Phase B-2 (next PR): migrates one PR-#1984 invariant as the first real
+#   consumer, and adds simulate_mouse exercise.
+#
+# Plan: planning/2026-05-14-mac-platform-test-harness.md (planning sub).
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
+    add_executable(pulp-test-mac-platform-harness
+        test_mac_platform_harness.cpp
+        mac_window_harness.mm
+    )
+    target_link_libraries(pulp-test-mac-platform-harness PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+        "-framework Metal"
+        "-framework QuartzCore"
+    )
+    catch_discover_tests(pulp-test-mac-platform-harness)
+endif()

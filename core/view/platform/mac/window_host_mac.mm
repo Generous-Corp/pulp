@@ -1625,6 +1625,14 @@ public:
         auto live = capture_window_screencapture_png(window_);
         return !live.empty() ? live : capture_window_content_png(window_, view_);
     }
+
+    // issue #2001 — host-managed pixels only. CG-backed host has no GPU
+    // back-buffer, so the deterministic surface is the rasterized content
+    // view. Skips screencapture so hidden windows still produce bytes.
+    std::vector<uint8_t> capture_back_buffer_png() override {
+        return capture_window_content_png(window_, view_);
+    }
+
     void invalidate_input_state() override { [view_ clearInteractionState]; }
     void request_close() override { request_app_close(window_); }
 
@@ -1832,6 +1840,27 @@ public:
         if (!live.empty()) return live;
 
         return capture_window_content_png(window_, metal_view_);
+    }
+
+    // issue #2001 — deterministic GPU back-buffer readback for hidden /
+    // headless test windows. Bypasses screencapture (which fails on hidden
+    // windows) and the content-view cache, going straight through the
+    // existing render_frame(...) path that already powers the
+    // capture_png() fallback. Returns {} on failure (no exceptions).
+    std::vector<uint8_t> capture_back_buffer_png() override {
+        if (!gpu_surface_ || !skia_surface_) return {};
+
+        needs_repaint_.store(true, std::memory_order_relaxed);
+
+        std::vector<uint8_t> pixels;
+        uint32_t pixel_w = 0;
+        uint32_t pixel_h = 0;
+        if (!render_frame(&pixels, &pixel_w, &pixel_h)) return {};
+
+        return encode_rgba_to_png(pixels.data(),
+                                  pixel_w,
+                                  pixel_h,
+                                  static_cast<size_t>(pixel_w) * 4u);
     }
 
     void invalidate_input_state() override {
