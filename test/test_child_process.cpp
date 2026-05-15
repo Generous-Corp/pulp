@@ -161,6 +161,35 @@ TEST_CASE("wait and read before start return default results",
     REQUIRE_FALSE(r.was_cancelled);
 }
 
+TEST_CASE("read_available_output drains stdout while process is running",
+          "[child_process][edge][issue-640]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd",
+                     {"/c", "<nul set /p dummy=available& ping -n 3 127.0.0.1 >nul"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf available; sleep 1"}));
+#endif
+
+    std::string observed;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (observed.find("available") == std::string::npos
+           && std::chrono::steady_clock::now() < deadline) {
+        observed += cp.read_available_output();
+        if (observed.find("available") == std::string::npos) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    REQUIRE(observed.find("available") != std::string::npos);
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+}
+
 TEST_CASE("run honors working directory",
           "[child_process][edge][issue-640]") {
     auto dir = std::filesystem::temp_directory_path()
