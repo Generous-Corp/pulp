@@ -4477,3 +4477,33 @@ Resume action: finish the local #2050 coverage reproduction, patch the
 root cause if confirmed, then continue monitoring #2048/#2049/#2050/#2051.
 After those are stable, continue adding to the held ship/package batch and
 future large domain batches before opening new GitHub-hosted PRs.
+
+2026-05-15 12:45 PDT: #2050 local focused coverage reproduction completed
+in `/private/tmp/pulp-phase3-codecov-view-consolidated-660`. The focused
+CTest run passed both
+`PresetBrowser ignores filtered clicks before the list starts` and
+`AssetManager font file loading derives family names and uses cache`.
+The generated Cobertura report showed the exact diff-gate lines hit
+locally: `preset_browser.hpp` lines 215-217 hit once and
+`asset_manager.cpp` lines 206, 207, 210, and 212 hit once. This confirms
+the current test paths cover the reported diff lines on macOS and that the
+previous GitHub diff-gate failure was not a missing test assertion. Reran
+the GitHub-hosted Coverage workflow for #2050 (`25932577890`); after the
+rerun, `Diff coverage required` was no longer listed as failing, with the
+Coverage rerun still pending and `codecov/patch` still red until Codecov
+recomputes.
+
+2026-05-15 12:50 PDT: investigated #2049's isolated `codecov/patch`
+failure. GitHub's required diff gate and all build/coverage/sanitizer jobs
+were green, but Codecov reported patch coverage below the 75% target even
+though the visible diff against current `origin/main` was test-only. The
+branch merge-base was stale (`a65d223427868efd056f281890ce97d8120c1397`),
+so the consolidated merge history was likely confusing Codecov's patch
+comparison. Flattened the current visible test-only diff onto current
+`origin/main` and force-with-lease updated the existing PR branch to
+`fbc9f1c22b9fb64bc4ecec34f581ae663e661778`
+(`test: consolidate media codecov queue`). Local validation before push:
+`git diff --check origin/main...HEAD` passed, and the pre-push hook passed
+with no mapped skill-sync/compat-sync paths touched plus its 20-test
+check. No Namespace or SSH validation was used. Fresh GitHub-hosted checks
+are now pending on #2049 with no failures at the time of this entry.
