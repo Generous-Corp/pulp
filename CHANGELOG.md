@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01010"></a>
+## [0.101.0] - 2026-05-15
+
+- fix(view/widgets): programmatic set_value/set_on/set_label requests repaint (#73) ([#2013](https://github.com/danielraffel/pulp/pull/2013))
+
 <a id="v01000"></a>
 ## [0.100.0] - 2026-05-15
 
@@ -20,10 +25,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - ci(release): add release-path PR gate + draft-stuck watchdog (#1962 prevention) ([#1994](https://github.com/danielraffel/pulp/pull/1994))
 
 <a id="v0990"></a>
-## [0.101.0]
-
-## [0.100.0]
-
 ## [0.99.0] - 2026-05-14
 
 - fix(plugin): bump marketplace plugins[0].version + relative .mcp.json path ([#1996](https://github.com/danielraffel/pulp/pull/1996))
@@ -1770,6 +1771,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.101.0]: https://github.com/danielraffel/pulp/releases/tag/v0.101.0
 [0.100.0]: https://github.com/danielraffel/pulp/releases/tag/v0.100.0
 [0.99.0]: https://github.com/danielraffel/pulp/releases/tag/v0.99.0
 [0.94.0]: https://github.com/danielraffel/pulp/releases/tag/v0.94.0
