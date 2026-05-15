@@ -64,17 +64,19 @@ in `tools/shipyard.toml`). It:
 5. Pushes the branch, creates the PR, and records Shipyard tracking state.
 6. Runs cross-platform validate + merge on green.
 7. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
-   publishes binaries on merge. **Auto-supersede behavior**: when a
-   new SDK tag is created, the workflow cancels any in-flight
-   `release-cli.yml` / `sign-and-release.yml` runs for strictly-older
-   SemVer tags and deletes their draft releases. This prevents the
-   2026-05-15 v0.101.x saga from recurring (5 bumps each queueing a
-   full macos-15 darwin-arm64 build, latest waiting hours behind
-   already-obsolete builds). Opt out via `vars.PULP_RELEASE_MODE=land-all`
-   (repo-wide) or `Release-Supersede: skip reason="..."` trailer on
-   the merging commit (per-release). See #2076 + the
-   `release-draft-stuck-check.yml` newest-SemVer skip for the watchdog
-   side of the cleanup.
+   publishes binaries on merge. The full pipeline (tag → 5-platform build
+   → sign + notarize → 11-asset publish) is documented end-to-end in
+   [docs/guides/release-pipeline.md](../../../docs/guides/release-pipeline.md).
+   **Keep that doc in sync when you touch any release workflow.**
+   **Auto-supersede behavior**: when a new SDK tag is created, the workflow
+   cancels any in-flight `release-cli.yml` / `sign-and-release.yml` runs for
+   strictly-older SemVer tags and deletes their draft releases. This prevents
+   the 2026-05-15 v0.101.x saga from recurring (5 bumps each queueing a full
+   macos-15 darwin-arm64 build, latest waiting hours behind already-obsolete
+   builds). Opt out via `vars.PULP_RELEASE_MODE=land-all` (repo-wide) or
+   `Release-Supersede: skip reason="..."` trailer on the merging commit
+   (per-release). See #2076 + the `release-draft-stuck-check.yml` newest-SemVer
+   skip for the watchdog side of the cleanup.
 
 Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
