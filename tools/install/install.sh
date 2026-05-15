@@ -125,6 +125,27 @@ chmod +x "$INSTALL_DIR/pulp"
 INSTALLED_VERSION=$("$INSTALL_DIR/pulp" --version 2>/dev/null || echo "unknown")
 echo "Installed: pulp $INSTALLED_VERSION"
 
+# ── SDK ──────────────────────────────────────────────────────────────────────
+#
+# pulp #2087 — install.sh used to install only the CLI. Users would then
+# `pulp build` against a non-existent (or ancient) SDK, get cryptic errors,
+# and never realize the CLI/SDK distinction. Install the matching SDK now
+# so the next `pulp build` Just Works.
+#
+# Skippable for power users who want to manage SDKs manually
+# (PULP_SKIP_SDK_INSTALL=1).
+if [ "${PULP_SKIP_SDK_INSTALL:-0}" != "1" ]; then
+    echo ""
+    echo "Installing matching SDK..."
+    if "$INSTALL_DIR/pulp" sdk install >/tmp/pulp-install-sdk.log 2>&1; then
+        SDK_INSTALLED=$("$INSTALL_DIR/pulp" sdk status 2>/dev/null | grep -E '\(downloaded\)' | head -1 | awk '{print $1}')
+        echo "  ✓ SDK ${SDK_INSTALLED:-installed} alongside CLI"
+    else
+        echo "  ⚠ SDK install failed (CLI is fine; run \`pulp sdk install\` manually)"
+        tail -5 /tmp/pulp-install-sdk.log 2>&1 | sed 's/^/    /'
+    fi
+fi
+
 # ── PATH ─────────────────────────────────────────────────────────────────────
 
 if [ "$NO_MODIFY_PATH" = "1" ]; then
@@ -168,12 +189,19 @@ fi
 # ── Done ─────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "Pulp CLI installed successfully!"
-echo "This installed Pulp only; it did not install Shipyard or GitHub CLI (gh)."
+echo "Pulp installed successfully!"
+echo "This installed the Pulp CLI + matching SDK."
+echo "(Shipyard and GitHub CLI are NOT installed by this script.)"
 echo ""
 echo "Get started:"
 echo "  pulp create MyPlugin     # create your first plugin"
 echo "  pulp doctor              # check your environment"
+echo "  pulp sdk status          # see installed SDK versions"
+echo ""
+echo "Stay current (or pin a project):"
+echo "  pulp upgrade             # refresh CLI to the latest release"
+echo "  pulp sdk install         # add the latest SDK (if newer than installed)"
+echo "  pulp project bump <ver>  # pin THIS project to a specific SDK"
 echo ""
 echo "Or clone the framework:"
 echo "  git clone https://github.com/$REPO.git"

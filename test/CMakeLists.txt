@@ -108,6 +108,18 @@ if(UNIX)
     set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
 endif()
 
+# pulp #2087 (slice 1) — install.sh must install CLI + matching SDK in one
+# shot, and the closing message must document upgrade/pinning. Without
+# this, fresh-install users silently end up with a current CLI on top of
+# whatever ancient SDK was previously cached at ~/.pulp/sdk/.
+if(UNIX)
+    add_test(NAME install-sh-runs-sdk-install
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_sh_runs_sdk_install.sh)
+    set_tests_properties(install-sh-runs-sdk-install
+        PROPERTIES TIMEOUT 10
+        LABELS "tooling")
+endif()
+
 # Window-only capture invariants (pulp-internal task #81) —
 # spectr-roundtrip.sh must not silently fall back to full-screen
 # screencapture, because terminal / desktop background then poisons
