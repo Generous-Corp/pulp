@@ -134,6 +134,11 @@ class DocsNoiseLintTests(unittest.TestCase):
         result = self._run("--mode=report", "docs/reports/noisy.md")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_reviews_directory_is_allowlisted(self) -> None:
+        self._write("docs/reviews/plan.md", "See #123 and Wave 4 inventory.\n")
+        result = self._run("--mode=report", "docs/reviews/plan.md")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_hint_mode_reports_but_exits_zero(self) -> None:
         self._write("docs/reference/noisy.md", "See #123.\n")
         result = self._run("--mode=hint")

@@ -46,6 +46,7 @@ FILE_ALLOWLIST = (
     ".agents/skills/ci/SKILL.md",
     "docs/migrations/**",
     "docs/reports/**",
+    "docs/reviews/**",
     "docs/policies/**",
     "docs/contracts/**",
     "CHANGELOG*",
