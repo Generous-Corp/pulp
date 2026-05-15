@@ -213,6 +213,8 @@ public:
 
         // Click in list area
         float list_y = header_h + (filter_text_.empty() ? 4.0f : 22.0f);
+        if (event.position.y < list_y)
+            return;
         float click_y = event.position.y - list_y + scroll_offset_;
         int index = static_cast<int>(click_y / row_height_);
 

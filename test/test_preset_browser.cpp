@@ -327,6 +327,29 @@ TEST_CASE("PresetBrowser mouse list selects and double-click activates", "[view]
     REQUIRE(browser.selected_index() == 2);
 }
 
+TEST_CASE("PresetBrowser filtered list click uses filter offset and row height",
+          "[view][preset_browser][coverage][issue-655]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 180, 180});
+    browser.set_row_height(30.0f);
+    browser.set_filter("clean");
+
+    std::string selected_name;
+    browser.on_preset_selected = [&](const PresetInfo& p) {
+        selected_name = p.name;
+    };
+
+    browser.on_mouse_event(mouse_down(40.0f, 40.0f));
+    REQUIRE(browser.selected_index() == -1);
+    REQUIRE(selected_name.empty());
+
+    browser.on_mouse_event(mouse_down(40.0f, 58.0f));
+    REQUIRE(browser.selected_index() == 0);
+    REQUIRE(selected_name == "Clean");
+    REQUIRE(browser.row_height() == 30.0f);
+}
+
 TEST_CASE("PresetBrowser paint produces draw commands", "[view][preset_browser]") {
     TestPresetFixture f;
     PresetBrowser browser(*f.pm);

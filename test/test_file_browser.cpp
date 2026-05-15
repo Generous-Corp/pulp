@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/file_browser.hpp>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -56,6 +57,10 @@ int index_containing(const std::vector<std::string>& texts, const std::string& n
 
 bool contains_text(const std::vector<std::string>& texts, const std::string& needle) {
     return index_containing(texts, needle) >= 0;
+}
+
+int exact_text_count(const std::vector<std::string>& texts, const std::string& text) {
+    return static_cast<int>(std::count(texts.begin(), texts.end(), text));
 }
 
 float x_for_exact_text(const RecordingCanvas& canvas, const std::string& text) {
@@ -120,6 +125,29 @@ TEST_CASE("FileBrowser filters hidden files and sorts directories before files",
     browser.paint(canvas);
     texts = fill_texts(canvas);
     REQUIRE(contains_text(texts, ".hidden.wav"));
+}
+
+TEST_CASE("FileBrowser paint clips rows and keeps directories through filters",
+          "[view][file-browser][coverage][issue-655]") {
+    TempDir tmp("filter-clip");
+    std::filesystem::create_directory(tmp.path / "Samples");
+    write_file(tmp.path / "alpha.wav");
+    write_file(tmp.path / "beta.txt");
+    write_file(tmp.path / "gamma.wav");
+
+    FileBrowser browser;
+    browser.set_bounds({0, 0, 320, 40});
+    browser.set_filters({"*.wav"});
+    browser.set_root(tmp.path);
+
+    RecordingCanvas clipped;
+    browser.paint(clipped);
+    auto texts = fill_texts(clipped);
+
+    REQUIRE(contains_text(texts, "Samples"));
+    REQUIRE(contains_text(texts, "alpha.wav"));
+    REQUIRE_FALSE(contains_text(texts, "beta.txt"));
+    REQUIRE_FALSE(contains_text(texts, "gamma.wav"));
 }
 
 TEST_CASE("FileTree skips hidden nodes and paints one expanded directory level",
@@ -221,4 +249,29 @@ TEST_CASE("MultiDocumentPanel remove_document preserves active document callback
         REQUIRE(closed == std::vector<int>({0, 1, 0}));
         REQUIRE(active_changes == std::vector<int>({0, 2, 1, 0, -1}));
     }
+}
+
+TEST_CASE("MultiDocumentPanel paint reflects active tab and empty state",
+          "[view][multi-document][coverage][issue-655]") {
+    MultiDocumentPanel empty;
+    empty.set_bounds({0, 0, 200, 80});
+    RecordingCanvas empty_canvas;
+    empty.paint(empty_canvas);
+    REQUIRE(empty_canvas.count(DrawCommand::Type::fill_text) == 0);
+    REQUIRE(empty_canvas.count(DrawCommand::Type::fill_rect) == 0);
+
+    MultiDocumentPanel panel;
+    panel.set_bounds({0, 0, 260, 100});
+    panel.add_document("Main", std::make_unique<View>());
+    panel.add_document("Aux", std::make_unique<View>());
+    panel.set_active(1);
+
+    RecordingCanvas canvas;
+    panel.paint(canvas);
+    auto texts = fill_texts(canvas);
+
+    REQUIRE(panel.active_index() == 1);
+    REQUIRE(exact_text_count(texts, "Main") == 1);
+    REQUIRE(exact_text_count(texts, "Aux") == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 2);
 }
