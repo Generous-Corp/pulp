@@ -989,6 +989,13 @@ function(_pulp_add_standalone target name bundle_id version)
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_Standalone)
     endif()
+    # Linux+GNU-ld link-order fix: libskia.a → fontconfig. Same helper
+    # used for pulp-cli (#1986) and pulp-import-design (#2018). Standalone
+    # transitively pulls in pulp::view → pulp::canvas → libskia.a, which
+    # references Fc* symbols. Re-mention fontconfig AFTER the archive so
+    # the linker resolves them. No-op on macOS/Windows/Android.
+    include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
+    pulp_link_fontconfig_after_skia(${target}_Standalone)
 endfunction()
 
 # ── pulp_add_app ────────────────────────────────────────────────────────
