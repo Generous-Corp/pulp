@@ -4685,3 +4685,20 @@ and `git diff --check`. The ship/package/release/local-CI batch is now
 12 commits ahead of `origin/main` and remains intentionally local-only
 until it is large enough, or the active GitHub-hosted CI queue clears
 enough, to justify one substantial PR instead of smaller CI runs.
+
+2026-05-15 15:48 PDT: added a GitHub runner resolver script slice to the
+held local batch `feature/phase3-codecov-ship-package-batch-661`. Commit
+`277befe94` (`test(ci): cover runner resolver selector edges`) extends
+`tools/scripts/test_resolve_runs_on_extra.py` with direct selector JSON
+acceptance/rejection coverage, empty/missing/whitespace env normalization,
+custom requested-provider env handling for local runners, and
+optional-namespace main output when GitHub-hosted is requested. This is
+aligned with the current CI policy for the codecov queue: avoid Namespace,
+prefer GitHub-hosted, and keep resolver behavior explicit.
+
+Validation for this held slice passed locally:
+`python3 tools/scripts/test_resolve_runs_on_extra.py` (8 tests),
+`python3 tools/scripts/test_resolve_runs_on.py` (19 tests), and
+`git diff --check`. The batch is now 13 commits ahead of `origin/main`
+and is still intentionally held local-only rather than pushed as another
+small CI run.
