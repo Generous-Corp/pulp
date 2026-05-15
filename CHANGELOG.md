@@ -8,9 +8,24 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0980"></a>
-## [0.99.0]
+<a id="v0990"></a>
+## [0.99.0] - 2026-05-14
 
+- fix(view): reserve Yoga height for multi-line Labels (pulp-internal #74) ([#1969](https://github.com/danielraffel/pulp/pull/1969))
+- fix(codecov): align bot ignore list with Pulp diff-cover gate exclusions ([#1988](https://github.com/danielraffel/pulp/pull/1988))
+- fix(view): bump line-height multiplier to 1.6 for small font Labels (#76) ([#1990](https://github.com/danielraffel/pulp/pull/1990))
+- fix(cli): explicitly link fontconfig after libskia.a in pulp-cli ([#1986](https://github.com/danielraffel/pulp/pull/1986))
+- ci(import-validation): gate source-contract registry ([#1983](https://github.com/danielraffel/pulp/pull/1983))
+- fix(canvas): use pkg-config IMPORTED_TARGET for fontconfig ([#1982](https://github.com/danielraffel/pulp/pull/1982))
+- test(import-validation): backfill source-contract verification ([#1980](https://github.com/danielraffel/pulp/pull/1980))
+- fix(canvas,ci): propagate fontconfig PUBLIC + extend backfill overlay ([#1979](https://github.com/danielraffel/pulp/pull/1979))
+- feat(import-validation): add source-contract registry linter ([#1977](https://github.com/danielraffel/pulp/pull/1977))
+- fix(ci): install libfontconfig1-dev on Linux for chrome/m144 Skia ([#1974](https://github.com/danielraffel/pulp/pull/1974))
+- fix(import-validation): fall back to public roundtrip fixtures ([#1976](https://github.com/danielraffel/pulp/pull/1976))
+- fix(view+design-tool): import-design escapes JS-string user text (#81); design-tool window title derives from --script (#61) ([#1966](https://github.com/danielraffel/pulp/pull/1966))
+- fix(release): unblock SDK pipeline — flatten Skia arch subdir + safe backfill ([#1965](https://github.com/danielraffel/pulp/pull/1965))
+
+<a id="v0980"></a>
 ## [0.98.0] - 2026-05-14
 
 - feat(import): add Pencil React export parser (Phase 6.6.6) ([#1964](https://github.com/danielraffel/pulp/pull/1964))
@@ -1759,6 +1774,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.99.0]: https://github.com/danielraffel/pulp/releases/tag/v0.99.0
 [0.98.0]: https://github.com/danielraffel/pulp/releases/tag/v0.98.0
 [0.97.0]: https://github.com/danielraffel/pulp/releases/tag/v0.97.0
 [0.96.0]: https://github.com/danielraffel/pulp/releases/tag/v0.96.0
