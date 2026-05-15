@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-15 00:45 PDT
+Last updated: 2026-05-15 00:56 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -166,6 +166,7 @@ Initial no-CI readiness sweep, refreshed through 2026-05-14 22:35 PDT:
 | #2019 MIDI/host format batch | `62a17f78` | `b70bd42a` | open PR on `feature/phase3-midi-host-batch-645`; test-only GitHub-hosted batch covering MPE buffer/tracker edges, diagnostic reporter/default JSON, host-type feature heuristics, descriptor validation warning/error combinations, and scan blacklist parser edges; local macOS target build, focused tag runs, full touched binaries, and sync/version/docs/compat guards passed | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2022 host graph/serializer batch | `276f7f7f` | `a29cb7dc` | open PR on `feature/phase3-host-graph-batch-493`; GitHub-hosted batch covering SignalGraph invalid/duplicate edge variants, live gain updates, release/clear helper behavior, GraphSerializer unresolved-plugin identity reserialization, and plugin-field error cleanup; includes a narrow source fix preserving placeholder plugin identity by using the existing `add_plugin_node(info)` path; local macOS target build, focused tag runs, full touched binaries, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
 | #2024 tools Python control-plane batch | `50acc069` | `a29cb7dc` | open PR on `feature/phase3-tools-python-batch-643`; test-only GitHub-hosted batch covering host-pump linting, release Skia fetcher extra paths, and macOS reroute watcher control-plane behavior; local unittest, direct script, py_compile, diff, skill/version/docs guards passed; local Python coverage runner was unavailable because the installed coverage.py is below the repo's required 7.10 floor; local pre-push diff-cover was demoted because its coverage configure path failed fetching Highway before tests | monitor GitHub Actions hosted checks, merge when required checks are green |
+| #2025 runtime/state utility batch | `dda4d1e` | `a29cb7dc` | open PR on `feature/phase3-runtime-state-batch-641`; test-only GitHub-hosted batch covering PropertiesFile JSON/save/no-op edges, StateTree typed getter/listener/child/JSON/deep-copy edges, StateTreeSynchroniser reattach/truncated-batch edges, TemporaryFile move/extension behavior, MemoryMappedFile reopen, and Range boundaries; local macOS target build, focused tag runs, full touched binaries, exact CTest selector, skill/version/docs guards, and diff checks passed; local pre-push diff-cover was intentionally disabled after focused/full validation | monitor GitHub Actions hosted checks, merge when required checks are green |
 | local appearance manager | `0bbaaa9a` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local audio bridge edges | `2d00e9ac` | `92e83b37` | superseded by #2017 | no standalone CI action |
 | local AutoUi edges | `832c0781` | `92e83b37` | superseded by #2017 | no standalone CI action |
@@ -420,6 +421,47 @@ commit `457c891775a7397bdb1031e6e027af1c48` before tests. Branch pushed
 and PR opened with GitHub-hosted CI only; no Namespace or SSH dispatch.
 Resume action: monitor #2024 required checks and merge directly when
 green.
+
+2026-05-15 00:56 PDT: created the #641 runtime/state utility batch
+`feature/phase3-runtime-state-batch-641` at `dda4d1e`, PR #2025, from
+current `origin/main` `a29cb7dc`. The diff is test-only and touches
+`test/test_properties_file.cpp`, `test/test_state_tree.cpp`, and
+`test/test_runtime_utils.cpp`. Coverage areas include PropertiesFile
+bool-string interpretation, non-object JSON failure state, unsupported
+JSON member filtering, directory save failure, and missing-key/empty
+clear no-ops; StateTree typed getter fallback, invalid child indexes,
+insert-at-end and missing-pointer removal, property listener old/new
+values, remove-without-callback behavior, JSON filtering and default
+node type, deep-copy child parent rewiring, ObservableValue assignment,
+CachedProperty mismatched external updates, StateTreeSynchroniser
+reattach, empty batches, and truncated-batch prefix preservation; and
+runtime utility coverage for TemporaryFile extension normalization,
+move-assignment cleanup, self-move ownership, MemoryMappedFile reopen,
+and Range integer/double boundary behavior.
+
+Local macOS validation passed for #2025: configured Debug with GPU and
+examples off, built `pulp-test-properties`, `pulp-test-state-tree`, and
+`pulp-test-runtime-utils`, focused
+`./build/test/pulp-test-properties "[issue-641]" -r compact` passed 24
+assertions in 5 test cases, focused
+`./build/test/pulp-test-state-tree "[issue-641]" -r compact` passed 55
+assertions in 12 test cases, focused
+`./build/test/pulp-test-runtime-utils "[issue-641]" -r compact` passed
+88 assertions in 18 test cases, full `pulp-test-properties -r compact`
+passed 75 assertions in 22 test cases, full `pulp-test-state-tree -r
+compact` passed 171 assertions in 43 test cases, full
+`pulp-test-runtime-utils -r compact` passed 150 assertions in 43 test
+cases, and exact `ctest --test-dir build -R
+"PropertiesFile|StateTree|TemporaryFile|MemoryMappedFile|Range"
+--output-on-failure` passed 76/76 tests. `git diff --check
+origin/main...HEAD`, `git diff --check`, `git diff --cached --check`,
+`python3 tools/scripts/skill_sync_check.py`,
+`tools/scripts/cli_version_check.sh`, and `./tools/check-docs.sh`
+passed; docs check reported existing warnings. Local pre-push diff-cover
+was intentionally disabled after the focused/full local validation
+because this is a test-only batch. Branch pushed and PR opened with
+GitHub-hosted CI only; no Namespace or SSH dispatch. Resume action:
+monitor #2025 required checks and merge directly when green.
 
 ## Snapshot Summary
 
