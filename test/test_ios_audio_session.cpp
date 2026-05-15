@@ -88,6 +88,54 @@ TEST_CASE("C ABI entry routes to the C++ listener",
     pulp_ios_audio_session_set_callback(nullptr, nullptr);
 }
 
+TEST_CASE("C ABI ignores null events and prefers C++ listeners over raw callbacks",
+          "[ios][audio-session][c-abi][coverage][issue-648]") {
+    int c_calls = 0;
+    pulp_ios_audio_session_set_callback(
+        [](const PulpIosAudioSessionEvent*, void* ud) {
+            ++(*static_cast<int*>(ud));
+        },
+        &c_calls);
+    pulp_ios_audio_session_emit(nullptr);
+    REQUIRE(c_calls == 0);
+
+    int cpp_calls = 0;
+    set_ios_audio_session_listener(
+        [&](const PulpIosAudioSessionEvent&) { ++cpp_calls; });
+
+    PulpIosAudioSessionEvent e{};
+    e.event = PULP_IOS_AUDIO_EVENT_ROUTE_CHANGED;
+    e.reason = PULP_IOS_ROUTE_CHANGE_CATEGORY_CHANGE;
+    pulp_ios_audio_session_emit(&e);
+    REQUIRE(cpp_calls == 1);
+    REQUIRE(c_calls == 0);
+
+    set_ios_audio_session_listener({});
+    pulp_ios_audio_session_emit(&e);
+    REQUIRE(c_calls == 1);
+
+    pulp_ios_audio_session_set_callback(nullptr, nullptr);
+}
+
+TEST_CASE("audio session listener replacement detaches the previous sink",
+          "[ios][audio-session][coverage][issue-648]") {
+    int first_calls = 0;
+    int second_calls = 0;
+    set_ios_audio_session_listener(
+        [&](const PulpIosAudioSessionEvent&) { ++first_calls; });
+    set_ios_audio_session_listener(
+        [&](const PulpIosAudioSessionEvent&) { ++second_calls; });
+
+    PulpIosAudioSessionEvent e{};
+    e.event = PULP_IOS_AUDIO_EVENT_INTERRUPTION_ENDED;
+    REQUIRE(emit_ios_audio_session_event(e));
+    REQUIRE(first_calls == 0);
+    REQUIRE(second_calls == 1);
+
+    set_ios_audio_session_listener({});
+    REQUIRE_FALSE(emit_ios_audio_session_event(e));
+}
+
 TEST_CASE("to_string covers every event code",
           "[ios][audio-session]") {
     REQUIRE(to_string(PULP_IOS_AUDIO_EVENT_NONE) == "none");
