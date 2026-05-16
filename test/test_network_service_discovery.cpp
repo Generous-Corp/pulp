@@ -102,6 +102,37 @@ TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
     REQUIRE(log->stopped == 1);
 }
 
+TEST_CASE("NSD can browse again after stop",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    nsd.browse("_pulp._tcp");
+    nsd.stop();
+    nsd.browse("_http._tcp");
+    nsd.stop();
+
+    REQUIRE(log->browse_types == std::vector<std::string>{"_pulp._tcp", "_http._tcp"});
+    REQUIRE(log->stopped == 2);
+}
+
+TEST_CASE("NSD unregister after backend removal is a no-op",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    nsd.unregister_service();
+    REQUIRE(log->unregistered == 1);
+
+    nsd.install_backend(nullptr);
+    nsd.unregister_service();
+    REQUIRE(log->unregistered == 1);
+}
+
 TEST_CASE("NSD browse backend can publish through the dispatcher",
           "[events][service-discovery][issue-642]") {
     NetworkServiceDiscovery nsd;
