@@ -86,7 +86,7 @@ void EventLoop::run() {
 
         // Execute outside the lock
         for (auto& task : tasks) {
-            task();
+            if (task) task();
         }
     }
 }

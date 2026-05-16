@@ -154,6 +154,28 @@ TEST_CASE("EventLoop dispatch_after handles multiple ready tasks",
     REQUIRE(wait_until([&] { return calls.load() == 3; }, 2000ms));
 }
 
+TEST_CASE("EventLoop skips empty dispatched tasks",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch({});
+    loop.dispatch([&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 2000ms));
+}
+
+TEST_CASE("EventLoop skips empty delayed tasks",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch_after(1ms, {});
+    loop.dispatch_after(2ms, [&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 2000ms));
+}
+
 TEST_CASE("Timer basic operation", "[events][timer]") {
     EventLoop loop;
 
