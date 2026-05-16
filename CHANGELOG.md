@@ -8,17 +8,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01030"></a>
-## [0.104.0]
+<a id="v01040"></a>
+## [0.104.0] - 2026-05-16
 
+- feat(design-import): extract keyboard shortcuts from React source (V1) ([#2116](https://github.com/danielraffel/pulp/pull/2116))
+- test(runtime): batch crypto and osc coverage edges ([#2109](https://github.com/danielraffel/pulp/pull/2109))
+- test(audio): batch tools coverage edges ([#2111](https://github.com/danielraffel/pulp/pull/2111))
+- feat(pulp-react): auto-claim overlay for ARIA modal/popup roles ([#2115](https://github.com/danielraffel/pulp/pull/2115))
+- fix(view): restore native Dawn GPU bridge in JS preludes (cube renders again) ([#2101](https://github.com/danielraffel/pulp/pull/2101))
+- test(runtime): cover memory message channel edges ([#2107](https://github.com/danielraffel/pulp/pull/2107))
+- test(signal): batch DSP coverage edges ([#2106](https://github.com/danielraffel/pulp/pull/2106))
+- fix(view): SvgPathWidget exposes viewBox as intrinsic size (#72) ([#2105](https://github.com/danielraffel/pulp/pull/2105))
+
+<a id="v01030"></a>
 ## [0.103.0] - 2026-05-16
 
 - feat(cli): SDK-update UX — auto-update default, easy pin opt-out (#2087) ([#2091](https://github.com/danielraffel/pulp/pull/2091))
 - test: consolidate phase 3 codecov coverage queue ([#2102](https://github.com/danielraffel/pulp/pull/2102))
 
 <a id="v01021"></a>
-## [0.103.0]
-
 ## [0.102.1] - 2026-05-15
 
 - fix(view/mac): re-sync _focusedView at every deref site (closes #2088) ([#2093](https://github.com/danielraffel/pulp/pull/2093))
@@ -1833,6 +1841,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.104.0]: https://github.com/danielraffel/pulp/releases/tag/v0.104.0
 [0.103.0]: https://github.com/danielraffel/pulp/releases/tag/v0.103.0
 [0.102.1]: https://github.com/danielraffel/pulp/releases/tag/v0.102.1
 [0.102.0]: https://github.com/danielraffel/pulp/releases/tag/v0.102.0
