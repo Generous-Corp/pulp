@@ -5733,3 +5733,29 @@ The current local held batch remains
 `/private/tmp/pulp-phase3-codecov-combined-677` with five validated local
 coverage commits and should be submitted as one larger PR only after the open
 queue drains enough to avoid wasting macOS CI capacity.
+
+2026-05-16 15:02 PDT: #2108's rerun still failed Codecov for the same
+`core/runtime/src/expression.cpp` lines even though the focused CI test passed.
+Downloaded and inspected the GitHub coverage artifacts: the Linux artifact
+retained nearby expression hits from `pulp-test-runtime-utils` but did not
+retain the malformed-exponent hits from `pulp-test-v3-gaps`; the macOS artifact
+had no hits for those lines. Root fix: added the same malformed exponent
+assertions to the existing runtime-utils malformed-input test, so the guard is
+covered by the test binary that CI already retains in the coverage artifact.
+Local validation passed:
+`cmake --build build --target pulp-test-runtime-utils pulp-test-v3-gaps
+-j$(sysctl -n hw.ncpu)`;
+`./build/test/pulp-test-runtime-utils "Expression evaluator resolves variables and rejects malformed inputs"`
+with 9 assertions;
+`./build/test/pulp-test-v3-gaps "Expression rejects malformed numeric and grouping syntax"`
+with 8 assertions; and targeted local diff coverage with
+`PULP_DIFF_COVER_CTEST_REGEX='Expression evaluator resolves variables and rejects malformed inputs|Expression rejects malformed numeric and grouping syntax' tools/scripts/local_diff_cover.sh`
+reported `core/runtime/src/expression.cpp (100%)`, 2 touched lines, 0 missing,
+100% coverage.
+
+Corrected push note for #2108: an interrupted full pre-push run briefly staged
+generated local build-test damage (`CMakeLists.txt`/`pulp.toml`) into an amend.
+That bad tip was immediately removed with `--force-with-lease`; the corrected
+head is `a95b3228e`, contains only `test/test_runtime_utils.cpp` (+3
+assertions), and has fresh GitHub-hosted CI queued. No Namespace/SSH validation
+was dispatched.
