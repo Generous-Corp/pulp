@@ -57,18 +57,21 @@ std::vector<std::string> StateTree::property_names() const {
 }
 
 void StateTree::add_child(Ptr child) {
+    if (!child) return;
     child->parent_ = this;
     children_.push_back(child);
     int idx = static_cast<int>(children_.size()) - 1;
     for (auto& [id, fn] : child_added_listeners_)
-        fn(*this, *child, idx);
+        if (fn) fn(*this, *child, idx);
 }
 
 void StateTree::insert_child(int index, Ptr child) {
+    if (!child) return;
+    index = std::clamp(index, 0, child_count());
     child->parent_ = this;
     children_.insert(children_.begin() + index, child);
     for (auto& [id, fn] : child_added_listeners_)
-        fn(*this, *child, index);
+        if (fn) fn(*this, *child, index);
 }
 
 void StateTree::remove_child(int index) {
@@ -76,7 +79,7 @@ void StateTree::remove_child(int index) {
     auto child = children_[index];
     child->parent_ = nullptr;
     for (auto& [id, fn] : child_removed_listeners_)
-        fn(*this, *child, index);
+        if (fn) fn(*this, *child, index);
     children_.erase(children_.begin() + index);
 }
 
@@ -150,7 +153,7 @@ void StateTree::notify_property_changed(std::string_view name,
                                         const PropertyValue& old_val,
                                         const PropertyValue& new_val) {
     for (auto& [id, fn] : listeners_)
-        fn(*this, name, old_val, new_val);
+        if (fn) fn(*this, name, old_val, new_val);
 }
 
 static choc::value::Value tree_to_choc(const StateTree& node) {

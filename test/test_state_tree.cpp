@@ -163,6 +163,21 @@ TEST_CASE("StateTree insert at end and missing child pointer removal are stable"
     REQUIRE(missing->parent() == nullptr);
 }
 
+TEST_CASE("StateTree child insertion clamps invalid indexes and skips null children",
+          "[state][tree][codecov]") {
+    auto root = StateTree::create("root");
+    root->add_child(nullptr);
+    root->insert_child(10, nullptr);
+    REQUIRE(root->child_count() == 0);
+
+    root->insert_child(-10, StateTree::create("first"));
+    root->insert_child(99, StateTree::create("last"));
+
+    REQUIRE(root->child_count() == 2);
+    REQUIRE(root->child(0)->type_name() == "first");
+    REQUIRE(root->child(1)->type_name() == "last");
+}
+
 // ── Listeners ───────────────────────────────────────────────────────────
 
 TEST_CASE("StateTree property change listener", "[state][tree]") {
@@ -268,6 +283,45 @@ TEST_CASE("StateTree remove listener", "[state][tree]") {
     tree->remove_listener(id);
     tree->set("b", int64_t(2));
     REQUIRE(count == 1);  // Listener removed, count unchanged
+}
+
+TEST_CASE("StateTree skips empty listeners",
+          "[state][tree][codecov]") {
+    auto root = StateTree::create("root");
+    int property_count = 0;
+    int added_count = 0;
+    int removed_count = 0;
+
+    root->add_listener({});
+    root->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        REQUIRE(prop == "gain");
+        ++property_count;
+    });
+
+    root->add_child_added_listener({});
+    root->add_child_added_listener(
+        [&](StateTree&, StateTree& child, int index) {
+            REQUIRE(child.type_name() == "child");
+            REQUIRE(index == 0);
+            ++added_count;
+        });
+
+    root->add_child_removed_listener({});
+    root->add_child_removed_listener(
+        [&](StateTree&, StateTree& child, int index) {
+            REQUIRE(child.type_name() == "child");
+            REQUIRE(index == 0);
+            ++removed_count;
+        });
+
+    root->set("gain", 0.5);
+    root->add_child(StateTree::create("child"));
+    root->remove_child(0);
+
+    REQUIRE(property_count == 1);
+    REQUIRE(added_count == 1);
+    REQUIRE(removed_count == 1);
 }
 
 // ── JSON serialization ──────────────────────────────────────────────────
