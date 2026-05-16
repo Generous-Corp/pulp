@@ -70,6 +70,23 @@ pulp::audio::AudioFileData make_audio(uint32_t sample_rate, uint64_t frame_count
     return data;
 }
 
+fs::path install_active_clap_model(const TempDir& temp) {
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "clap",
+  "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    write_text(temp.path / "audio" / "model-state.json", R"JSON({
+  "active_model_id": "clap_music_audioset_v1"
+}
+)JSON");
+    return checkpoint;
+}
+
 uint64_t stable_hash64(std::string_view text) {
     constexpr uint64_t offset_basis = 14695981039346656037ull;
     constexpr uint64_t prime = 1099511628211ull;
@@ -217,6 +234,30 @@ TEST_CASE("audio model list reports registry and install state", "[audio][tools]
     REQUIRE(result.models[0].active);
 }
 
+TEST_CASE("audio model registry resolves checkpoint URLs and lookup misses",
+          "[audio][tools][codecov]") {
+    const auto& models = registered_models();
+    REQUIRE_FALSE(models.empty());
+    REQUIRE(models[0].model_id == "clap_music_audioset_v1");
+    REQUIRE(models[0].auto_downloadable);
+    REQUIRE(models[0].download_url.find("https://huggingface.co/")
+            == 0);
+
+    auto* model = find_registered_model("clap_music_audioset_v1");
+    REQUIRE(model != nullptr);
+    REQUIRE(model->backend == "clap");
+    REQUIRE(find_registered_model("missing_model") == nullptr);
+
+    REQUIRE(resolve_checkpoint_url("hf://user/repo/path/to/file.pt")
+            == "https://huggingface.co/user/repo/resolve/main/path/to/file.pt");
+    REQUIRE(resolve_checkpoint_url("https://example.com/model.pt")
+            == "https://example.com/model.pt");
+    REQUIRE(resolve_checkpoint_url("http://example.com/model.pt")
+            == "http://example.com/model.pt");
+    REQUIRE(resolve_checkpoint_url("hf://user-only").empty());
+    REQUIRE(resolve_checkpoint_url("manual://model.pt").empty());
+}
+
 TEST_CASE("audio model status reports missing config cleanly", "[audio][tools]") {
     TempDir temp;
 
@@ -250,6 +291,47 @@ TEST_CASE("audio model status reports configured checkpoint loadability", "[audi
     REQUIRE(status.message == "configured model is loadable");
 }
 
+TEST_CASE("audio model status reports malformed state files",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    write_text(temp.path / "audio" / "model-state.json", "{ not-json");
+
+    auto status = query_model_status(temp.path);
+
+    REQUIRE(status.state_file_found);
+    REQUIRE(status.state_path == temp.path / "audio" / "model-state.json");
+    REQUIRE_FALSE(status.loadable());
+    REQUIRE(status.message.find("failed to parse") != std::string::npos);
+}
+
+TEST_CASE("audio model status reads legacy model.json and installed metadata fallbacks",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "clap",
+  "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    write_text(temp.path / "audio" / "model.json", R"JSON({
+  "model_id": "clap_music_audioset_v1"
+}
+)JSON");
+
+    auto status = query_model_status(temp.path);
+
+    REQUIRE(status.state_file_found);
+    REQUIRE(status.state_path == temp.path / "audio" / "model.json");
+    REQUIRE(status.configured_model_id == "clap_music_audioset_v1");
+    REQUIRE(status.backend == "clap");
+    REQUIRE(status.checkpoint_ref == "hf://lukewys/laion_clap/music.pt");
+    REQUIRE(status.resolved_checkpoint_path == checkpoint);
+    REQUIRE(status.loadable());
+}
+
 TEST_CASE("audio model activate writes state from installed metadata", "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
@@ -272,6 +354,30 @@ TEST_CASE("audio model activate writes state from installed metadata", "[audio][
     REQUIRE(status.loadable());
     REQUIRE(status.configured_model_id == "clap_music_audioset_v1");
     REQUIRE(status.checkpoint_exists);
+}
+
+TEST_CASE("audio model activate falls back to registered metadata",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+
+    auto activation = activate_model("clap_music_audioset_v1", temp.path);
+
+    REQUIRE(activation.ok);
+    REQUIRE(activation.backend == "clap");
+    REQUIRE(activation.checkpoint_ref == "hf://lukewys/laion_clap/music.pt");
+    REQUIRE(activation.resolved_checkpoint_path == checkpoint);
+
+    auto status = query_model_status(temp.path);
+    REQUIRE(status.loadable());
+    REQUIRE(status.backend == "clap");
+    REQUIRE(status.checkpoint_ref == "hf://lukewys/laion_clap/music.pt");
 }
 
 TEST_CASE("audio model activate rejects unknown or uninstalled models", "[audio][tools]") {
@@ -306,6 +412,117 @@ TEST_CASE("audio model activate rejects installed metadata with missing checkpoi
     auto activation = activate_model("clap_music_audioset_v1", temp.path);
     REQUIRE_FALSE(activation.ok);
     REQUIRE(activation.error.find("checkpoint does not exist") != std::string::npos);
+}
+
+TEST_CASE("audio model store accepts overrides and legacy checkpoint metadata",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "legacy-clap.pt";
+    write_text(checkpoint, "stub");
+
+    REQUIRE(resolve_pulp_home(temp.path) == temp.path);
+    REQUIRE(audio_model_state_path(temp.path)
+            == temp.path / "audio" / "model-state.json");
+    REQUIRE(audio_model_install_path("clap_music_audioset_v1", temp.path)
+            == temp.path / "audio" / "models" / "clap_music_audioset_v1.json");
+
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "legacy-clap",
+  "checkpoint_ref": "manual://legacy",
+  "checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    auto installed = read_installed_model("clap_music_audioset_v1", temp.path);
+    REQUIRE(installed.metadata_found);
+    REQUIRE(installed.loadable());
+    REQUIRE(installed.backend == "legacy-clap");
+    REQUIRE(installed.checkpoint_ref == "manual://legacy");
+    REQUIRE(installed.resolved_checkpoint_path == checkpoint);
+
+    write_text(temp.path / "audio" / "model-state.json", R"JSON({
+  "requested_model_id": "clap_music_audioset_v1"
+}
+)JSON");
+    REQUIRE(read_active_model_id(temp.path) == "clap_music_audioset_v1");
+}
+
+TEST_CASE("audio model store treats malformed install metadata as unloadable",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json",
+               "{ not-json");
+
+    auto installed = read_installed_model("clap_music_audioset_v1", temp.path);
+
+    REQUIRE(installed.metadata_found);
+    REQUIRE(installed.model_id == "clap_music_audioset_v1");
+    REQUIRE(installed.backend.empty());
+    REQUIRE_FALSE(installed.checkpoint_exists);
+    REQUIRE_FALSE(installed.loadable());
+}
+
+TEST_CASE("audio model and bundle JSON serializers include stable fields",
+          "[audio][tools][codecov]") {
+    ModelListResult list;
+    list.pulp_home = "/tmp/pulp-home";
+    list.active_model_id = "clap_music_audioset_v1";
+    list.error = "sample error";
+    ListedModel listed;
+    listed.model.model_id = "clap_music_audioset_v1";
+    listed.model.display_name = "CLAP Music";
+    listed.model.backend = "clap";
+    listed.model.checkpoint_ref = "hf://example/model.pt";
+    listed.model.task_tags = {"music", "embedding"};
+    listed.model.size_bytes = 1234;
+    listed.status = "installed";
+    listed.active = true;
+    listed.resolved_checkpoint_path = "/tmp/model.pt";
+    list.models.push_back(listed);
+
+    auto list_json = to_json(list);
+    REQUIRE(list_json.find("\"active_model_id\": \"clap_music_audioset_v1\"")
+            != std::string::npos);
+    REQUIRE(list_json.find("\"status\": \"installed\"") != std::string::npos);
+    REQUIRE(list_json.find("\"active\": true") != std::string::npos);
+    REQUIRE(list_json.find("\"error\": \"sample error\"") != std::string::npos);
+
+    ActivateModelResult activation;
+    activation.ok = true;
+    activation.state_path = "/tmp/state.json";
+    activation.active_model_id = "clap_music_audioset_v1";
+    activation.backend = "clap";
+    activation.checkpoint_ref = "hf://example/model.pt";
+    activation.resolved_checkpoint_path = "/tmp/model.pt";
+    auto activation_json = to_json(activation);
+    REQUIRE(activation_json.find("\"ok\": true") != std::string::npos);
+    REQUIRE(activation_json.find("\"state_path\": \"/tmp/state.json\"")
+            != std::string::npos);
+
+    ModelStatus status;
+    status.state_path = "/tmp/state.json";
+    status.state_file_found = true;
+    status.configured_model_id = "clap_music_audioset_v1";
+    status.resolved_checkpoint_path = "/tmp/model.pt";
+    status.checkpoint_exists = true;
+    status.message = "configured model is loadable";
+    auto status_json = to_json(status);
+    REQUIRE(status_json.find("\"loadable\": true") != std::string::npos);
+    REQUIRE(status_json.find("\"message\": \"configured model is loadable\"")
+            != std::string::npos);
+
+    BundleReadResult bundle;
+    bundle.ok = true;
+    bundle.bundle_path = "/tmp/bundle";
+    bundle.bundle_version = 1;
+    bundle.tool = "pulp audio excerpt-find";
+    bundle.result_count = 1;
+    bundle.results.push_back({1, 0.5, "input.wav", 1000.0, 100.0, 200.0,
+                              "excerpts/rank-01.wav"});
+    auto bundle_json = to_json(bundle);
+    REQUIRE(bundle_json.find("\"result_count\": 1") != std::string::npos);
+    REQUIRE(bundle_json.find("\"excerpt_file\": \"excerpts/rank-01.wav\"")
+            != std::string::npos);
 }
 
 TEST_CASE("excerpt bundle reader summarizes manifest and ranked results", "[audio][tools]") {
@@ -417,6 +634,8 @@ TEST_CASE("excerpt bundle reader fills defaults from model and ranked result fil
     auto result = read_excerpt_bundle(bundle);
 
     REQUIRE(result.ok);
+    REQUIRE(result.model_path == bundle / "model.json");
+    REQUIRE(result.ranked_results_path == bundle / "ranked_results.json");
     REQUIRE(result.requested_model_id == "clap_music_audioset_v1");
     REQUIRE(result.loaded_model_id == "clap_music_audioset_v1");
     REQUIRE(result.backend == "clap");
@@ -432,22 +651,24 @@ TEST_CASE("excerpt bundle reader fills defaults from model and ranked result fil
     REQUIRE(json.find("\"source_file\": \"/tmp/source.wav\"") != std::string::npos);
 }
 
-TEST_CASE("excerpt bundle reader rejects missing ranked result file",
-          "[audio][tools][issue-643]") {
+TEST_CASE("excerpt bundle reader reports empty and missing ranked inputs",
+          "[audio][tools][codecov]") {
+    auto empty = read_excerpt_bundle({});
+    REQUIRE_FALSE(empty.ok);
+    REQUIRE(empty.error == "bundle path is required");
+
     TempDir temp;
     auto bundle = temp.path / "bundle";
     fs::create_directories(bundle);
-
     write_text(bundle / "manifest.json", R"JSON({
-  "tool": "pulp audio excerpt-find",
-  "bundle_version": 1
+  "ranked_results_file": "missing.json"
 }
 )JSON");
 
-    auto result = read_excerpt_bundle(bundle);
-
-    REQUIRE_FALSE(result.ok);
-    REQUIRE(result.error.find("missing ranked results file") != std::string::npos);
+    auto missing_ranked = read_excerpt_bundle(bundle);
+    REQUIRE_FALSE(missing_ranked.ok);
+    REQUIRE(missing_ranked.error.find("missing ranked results file")
+            != std::string::npos);
 }
 
 TEST_CASE("excerpt find writes a deterministic WAV-first bundle", "[audio][tools]") {
@@ -499,6 +720,179 @@ TEST_CASE("excerpt find writes a deterministic WAV-first bundle", "[audio][tools
     REQUIRE(bundle.ok);
     REQUIRE(bundle.backend == "null");
     REQUIRE(bundle.results.size() == result.results.size());
+}
+
+TEST_CASE("excerpt find validates required request fields before model loading",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto input = temp.path / "input.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.input_path = input;
+
+    auto missing_text = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(missing_text.ok);
+    REQUIRE(missing_text.error == "text query is required");
+
+    request.text = "kick";
+    request.input_path.clear();
+    auto missing_input = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(missing_input.ok);
+    REQUIRE(missing_input.error == "input path is required");
+
+    request.input_path = input;
+    request.top_k = 0;
+    auto bad_top = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_top.ok);
+    REQUIRE(bad_top.error == "top and max_candidates_per_file must be >= 1");
+
+    request.top_k = 1;
+    request.max_candidates_per_file = 0;
+    auto bad_max = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_max.ok);
+    REQUIRE(bad_max.error == "top and max_candidates_per_file must be >= 1");
+
+    request.max_candidates_per_file = 1;
+    request.window_ms = 0;
+    auto bad_window = run_excerpt_find(request, temp.path);
+    REQUIRE_FALSE(bad_window.ok);
+    REQUIRE(bad_window.error == "window_ms and hop_ms must be >= 1");
+}
+
+TEST_CASE("excerpt find reports unsupported inputs after resolving a model",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "clap",
+  "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    write_text(temp.path / "audio" / "model-state.json", R"JSON({
+  "active_model_id": "clap_music_audioset_v1"
+}
+)JSON");
+
+    auto text_file = temp.path / "notes.txt";
+    write_text(text_file, "not audio");
+
+    ExcerptFindRequest request;
+    request.text = "texture";
+    request.input_path = text_file;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "no supported WAV inputs found");
+    REQUIRE(result.scanned_file_count == 0);
+    REQUIRE(result.skipped_files.size() == 1);
+    REQUIRE(result.skipped_files[0].find("unsupported; WAV only") != std::string::npos);
+}
+
+TEST_CASE("excerpt find JSON serializer includes results and skipped files",
+          "[audio][tools][codecov]") {
+    ExcerptFindResult result;
+    result.ok = true;
+    result.bundle_path = "/tmp/bundle";
+    result.query = "kick";
+    result.requested_model_id = "clap_music_audioset_v1";
+    result.loaded_model_id = "clap_music_audioset_v1";
+    result.backend = "null";
+    result.resolved_checkpoint_path = "/tmp/model.pt";
+    result.scanned_file_count = 2;
+    result.results.push_back({1, 0.75, "input.wav", 1000.0, 0.0, 500.0,
+                              "excerpts/rank-01.wav"});
+    result.skipped_files.push_back("notes.txt (unsupported; WAV only)");
+
+    auto json = to_json(result);
+
+    REQUIRE(json.find("\"ok\": true") != std::string::npos);
+    REQUIRE(json.find("\"query\": \"kick\"") != std::string::npos);
+    REQUIRE(json.find("\"scanned_file_count\": 2") != std::string::npos);
+    REQUIRE(json.find("\"excerpt_file\": \"excerpts/rank-01.wav\"")
+            != std::string::npos);
+    REQUIRE(json.find("notes.txt (unsupported; WAV only)") != std::string::npos);
+}
+
+TEST_CASE("excerpt find reports explicit unknown models",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto input = temp.path / "input.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "texture";
+    request.input_path = input;
+    request.model_id = "not_a_model";
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "unknown model_id: not_a_model");
+}
+
+TEST_CASE("excerpt find collects uppercase WAV files and records unsupported siblings",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+
+    auto wav = temp.path / "Upper.WAV";
+    REQUIRE(pulp::audio::write_wav_file(wav.string(), make_audio(48000, 48000)));
+    write_text(temp.path / "notes.mp3", "not really mp3");
+    fs::create_directories(temp.path / "nested");
+    REQUIRE(pulp::audio::write_wav_file(
+        (temp.path / "nested" / "ignored.wav").string(),
+        make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "texture";
+    request.input_path = temp.path;
+    request.recursive = false;
+    request.top_k = 1;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 1;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.scanned_file_count == 1);
+    REQUIRE(result.results.size() == 1);
+    REQUIRE(result.results[0].source_file == wav.string());
+    REQUIRE(result.skipped_files.size() == 1);
+    REQUIRE(result.skipped_files[0].find("notes.mp3") != std::string::npos);
+    REQUIRE(result.skipped_files[0].find("unsupported; WAV only") != std::string::npos);
+}
+
+TEST_CASE("excerpt find can dry-run with all candidates below min score",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    install_active_clap_model(temp);
+    auto input = temp.path / "input.wav";
+    REQUIRE(pulp::audio::write_wav_file(input.string(), make_audio(48000, 48000)));
+
+    ExcerptFindRequest request;
+    request.text = "texture";
+    request.input_path = input;
+    request.top_k = 3;
+    request.window_ms = 1000;
+    request.hop_ms = 1000;
+    request.max_candidates_per_file = 2;
+    request.min_score = 2.0;
+    request.dry_run = true;
+
+    auto result = run_excerpt_find(request, temp.path);
+
+    REQUIRE(result.ok);
+    REQUIRE(result.bundle_path.empty());
+    REQUIRE(result.scanned_file_count == 1);
+    REQUIRE(result.results.empty());
+    REQUIRE(result.skipped_files.empty());
 }
 
 TEST_CASE("excerpt find deterministic scores use a stable hash", "[audio][tools]") {

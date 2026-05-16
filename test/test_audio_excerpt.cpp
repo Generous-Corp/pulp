@@ -262,3 +262,18 @@ TEST_CASE("AudioSubsectionReader handles empty and past-end ranges",
     REQUIRE(dest[0] == 7.0f);
     REQUIRE(dest[1] == 8.0f);
 }
+
+TEST_CASE("AudioSubsectionReader ignores invalid read destinations",
+          "[audio][subsection][codecov]") {
+    AudioFileData audio;
+    audio.sample_rate = 48000;
+    audio.channels = {{0.0f, 0.5f}, {1.0f, 1.5f}};
+
+    AudioSubsectionReader reader(audio, 0, 2);
+    reader.read_frames(nullptr, 0, 0, 2);
+
+    float dest[] = {-1.0f, -2.0f};
+    reader.read_frames(dest, 2, 0, 2);
+    REQUIRE(dest[0] == -1.0f);
+    REQUIRE(dest[1] == -2.0f);
+}

@@ -38,6 +38,7 @@ public:
 
     /// Copy frames from this subsection into a destination buffer
     void read_frames(float* dest, uint32_t channel, uint64_t start, uint64_t count) const {
+        if (dest == nullptr) return;
         if (!source_ || channel >= num_channels()) return;
         uint64_t actual_start = start_ + std::min(start, length_);
         uint64_t actual_count = std::min(count, length_ - std::min(start, length_));

@@ -82,6 +82,7 @@ public:
     /// @param num_channels Number of channels (must match start()).
     /// @return Number of frames actually copied (may be less if buffer underrun).
     int read(float* dest, int num_frames, int num_channels) {
+        if (dest == nullptr || num_frames <= 0) return 0;
         if (num_channels != num_channels_ || buffer_.empty()) return 0;
 
         int samples_requested = num_frames * num_channels;

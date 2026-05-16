@@ -363,3 +363,23 @@ TEST_CASE("BufferingReader channel mismatch returns 0", "[audio][buffering]") {
 
     reader.stop();
 }
+
+TEST_CASE("BufferingReader invalid read destinations are no-ops",
+          "[audio][buffering][codecov]") {
+    BufferingReader reader;
+
+    REQUIRE(reader.read(nullptr, 16, 1) == 0);
+
+    float buf[4] = {-1.0f, -2.0f, -3.0f, -4.0f};
+    REQUIRE(reader.read(buf, 0, 1) == 0);
+    REQUIRE(reader.read(buf, -1, 1) == 0);
+    REQUIRE(buf[0] == -1.0f);
+    REQUIRE(buf[1] == -2.0f);
+
+    reader.set_read_callback([](float*, int, int) {
+        return 0;
+    });
+    reader.start(1, 1024);
+    REQUIRE(reader.read(nullptr, 16, 1) == 0);
+    reader.stop();
+}
