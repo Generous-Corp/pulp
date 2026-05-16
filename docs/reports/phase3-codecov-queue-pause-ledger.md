@@ -5770,3 +5770,14 @@ cross-platform-safe environment restoration. Local validation passed:
 `./build/test/pulp-test-i18n "i18n system_locale*"` (3 assertions / 3 cases),
 and full `./build/test/pulp-test-i18n` (73 assertions / 26 cases). This batch
 remains local-only to avoid opening another small GitHub-hosted CI run.
+
+2026-05-16 15:32 PDT: added a seventh local commit to the held combined
+coverage batch, `2fe145fe7` (`test(runtime): cover high resolution timer
+lifecycle`). The tests cover `HighResolutionTimer` start/stop state, callback
+execution, idempotent stop, restart replacing the previous callback, and a null
+callback path. Local validation passed: `cmake --build build --target
+pulp-test-runtime -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-runtime
+"HighResolutionTimer*"` (10 assertions / 2 cases); and full
+`./build/test/pulp-test-runtime` (198 assertions / 28 cases). The combined
+batch remains local-only while the open GitHub-hosted PR queue waits on macOS
+and sanitizer capacity.
