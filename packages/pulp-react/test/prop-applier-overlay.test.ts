@@ -108,4 +108,69 @@ describe('@pulp/react prop-applier — overlay routing (pulp #1148)', () => {
         expect(bridge.calls.some((c) => c.fn === 'claimOverlay')).toBe(false);
         expect(bridge.calls.some((c) => c.fn === 'releaseOverlay')).toBe(false);
     });
+
+    // ────────────────────────────────────────────────────────────────────
+    // UX best-practice default: ARIA modal/popup roles auto-claim overlay
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // role="dialog"|"alertdialog"|"menu"|"listbox" and aria-modal="true"
+    // semantically describe dismissable overlays. Auto-claim so Esc-
+    // dismiss + outside-click routing fire without consumers needing to
+    // mirror a position-based heuristic in their own dom-adapter.
+
+    function withProps(id: string, props: Record<string, unknown>): PulpInstance {
+        const inst = makeInstance(id);
+        inst.props = props;
+        return inst;
+    }
+
+    it('role="dialog" auto-claims overlay', () => {
+        applyAllProps(withProps('m1', { role: 'dialog' }));
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        expect(claims.length).toBe(1);
+        expect(claims[0].args).toEqual(['m1']);
+    });
+
+    it('role="alertdialog" auto-claims overlay', () => {
+        applyAllProps(withProps('m2', { role: 'alertdialog' }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+    });
+
+    it('role="menu" auto-claims overlay (dropdown menu pattern)', () => {
+        applyAllProps(withProps('m3', { role: 'menu' }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+    });
+
+    it('role="listbox" auto-claims overlay (combobox/picker pattern)', () => {
+        applyAllProps(withProps('m4', { role: 'listbox' }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+    });
+
+    it('role="button" does NOT auto-claim overlay (not a popup role)', () => {
+        applyAllProps(withProps('m5', { role: 'button' }));
+        expect(bridge.calls.some((c) => c.fn === 'claimOverlay')).toBe(false);
+    });
+
+    it('aria-modal="true" auto-claims overlay', () => {
+        applyAllProps(withProps('m6', { 'aria-modal': 'true' }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+    });
+
+    it('aria-modal={true} (boolean) auto-claims overlay', () => {
+        applyAllProps(withProps('m7', { 'aria-modal': true }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+    });
+
+    it('aria-modal="false" does NOT auto-claim', () => {
+        applyAllProps(withProps('m8', { 'aria-modal': 'false' }));
+        expect(bridge.calls.some((c) => c.fn === 'claimOverlay')).toBe(false);
+    });
+
+    it('explicit overlay={false} alongside role still releases (override wins)', () => {
+        // role auto-claims, explicit overlay={false} releases.
+        // Net: one claim + one release.
+        applyAllProps(withProps('m9', { role: 'dialog', overlay: false }));
+        expect(bridge.calls.filter((c) => c.fn === 'claimOverlay').length).toBe(1);
+        expect(bridge.calls.filter((c) => c.fn === 'releaseOverlay').length).toBe(1);
+    });
 });

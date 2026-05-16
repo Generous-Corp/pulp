@@ -1688,6 +1688,35 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (value) return call('claimOverlay', id);
             return call('releaseOverlay', id);
 
+        // pulp ARIA modal/popup auto-overlay — UX best-practice default.
+        // When the JSX declares an ARIA role that semantically IS a
+        // dismissable overlay (`role="dialog" | "alertdialog" | "menu" |
+        // "listbox"`) or sets `aria-modal="true"`, claim the overlay so
+        // Esc-dismiss + outside-click routing fire automatically. Pre-fix,
+        // every consumer (Spectr's dom-adapter, etc.) had to opt in by
+        // mirroring a position:absolute heuristic, which missed inset:0
+        // full-screen modal backdrops (the most common modal pattern) and
+        // every dropdown/menu authored without explicit positioning.
+        //
+        // Override semantics: an explicit `overlay={false}` still wins
+        // because applyChangedProps emits that case AFTER the role case
+        // (object iteration order is insertion order, and JSX collects
+        // props left-to-right; `overlay` typically appears after `role`).
+        // For defensive parity, an explicit overlay={true} is a no-op on
+        // top of the auto-claim (idempotent on the bridge side).
+        case 'role': {
+            const r = typeof value === 'string' ? value.toLowerCase() : '';
+            if (r === 'dialog' || r === 'alertdialog' || r === 'menu' || r === 'listbox') {
+                return call('claimOverlay', id);
+            }
+            return;
+        }
+        case 'aria-modal': {
+            const truthy = value === true || value === 'true' || value === '';
+            if (truthy) return call('claimOverlay', id);
+            return;
+        }
+
         // SvgPath (pulp #994) — wires the SvgPathWidget bridge surface
         // (createSvgPath / setSvgPath / setSvgViewBox / setSvgFill /
         // setSvgStroke / setSvgStrokeWidth) through a typed JSX intrinsic.
