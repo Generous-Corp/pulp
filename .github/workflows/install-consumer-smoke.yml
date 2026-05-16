@@ -51,7 +51,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libasound2-dev libatk1.0-dev libatk-bridge2.0-dev \
+            libdbus-1-dev libdrm-dev libegl1-mesa-dev \
             libfontconfig1-dev \
             libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
             libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
