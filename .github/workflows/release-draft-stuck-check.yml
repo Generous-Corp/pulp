@@ -101,18 +101,43 @@ jobs:
           # Process each release. We care about those whose tag exists
           # in git AND draft == true AND age > grace AND landed inside
           # the lookback window.
+          # Compute the highest SemVer tag in the releases set (across
+          # both draft and published). Anything strictly older than this
+          # is "superseded" — auto-release.yml's supersede step is
+          # supposed to delete those drafts immediately, but the
+          # PULP_RELEASE_MODE=land-all override OR a slow-running cleanup
+          # can leave stragglers. Don't alarm on them.
+          # See #2075 + the 2026-05-15 v0.101.x saga.
           mapfile -t release_lines < <(
               python3 - <<'PY'
-          import json, sys
+          import json, re, sys
+          SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-.+)?$")
           rels = json.load(open('releases.json'))
+
+          def parse(tag):
+              m = SEMVER.match(tag or "")
+              if not m:
+                  return None
+              return tuple(int(g) for g in m.groups())
+
+          # Find the newest semver tag we know about (any draft state).
+          newest = None
+          for r in rels:
+              v = parse(r.get('tag_name', ''))
+              if v and (newest is None or v > newest):
+                  newest = v
+
           for r in rels:
               tag = r.get('tag_name') or ''
               draft = bool(r.get('draft'))
               created = r.get('created_at') or ''
               if not tag:
                   continue
-              # Emit one TSV row per release for downstream awk.
-              print('\t'.join([tag, str(draft).lower(), created]))
+              # Mark as superseded if a strictly-newer semver tag exists
+              # in the releases set. Downstream awk reads the fourth col.
+              v = parse(tag)
+              superseded = (v is not None and newest is not None and v < newest)
+              print('\t'.join([tag, str(draft).lower(), created, str(superseded).lower()]))
           PY
           )
 
@@ -120,8 +145,14 @@ jobs:
               tag=$(echo "$line" | cut -f1)
               draft=$(echo "$line" | cut -f2)
               created=$(echo "$line" | cut -f3)
+              superseded=$(echo "$line" | cut -f4)
 
               if [ "$draft" != "true" ]; then continue; fi
+
+              if [ "$superseded" = "true" ]; then
+                  echo "  skip ${tag} — superseded by a newer SemVer tag (see #2075)"
+                  continue
+              fi
 
               # Tag must exist in git — drafts on deleted tags are
               # someone-else's-problem (likely a deletion in flight).

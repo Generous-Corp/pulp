@@ -31,6 +31,8 @@ concurrency:
 permissions:
   contents: write   # tag push
   issues: write     # open the "stranded fix/feat" tracker (issue #1009)
+  actions: write    # cancel superseded release-cli / sign-and-release runs
+                    # (see "Supersede older in-flight builds" step below)
 
 jobs:
   tag:
@@ -346,6 +348,141 @@ jobs:
           if [ "$PLUGIN_SHOULD_TAG" = "1" ] && [ -n "$PLUGIN_AFTER" ]; then
               create_tag "plugin-v${PLUGIN_AFTER}"
           fi
+
+          # Expose the SDK tag we just created so downstream steps can
+          # supersede older in-flight builds. (Plugin tags don't go
+          # through release-cli, so they don't need supersede.)
+          if [ "$SDK_SHOULD_TAG" = "1" ] && [ -n "$SDK_AFTER" ]; then
+              echo "sdk_tag=v${SDK_AFTER}" >> "$GITHUB_OUTPUT"
+          fi
+        id: tag
+
+      # ── Supersede older in-flight release-cli + sign-and-release runs ─
+      #
+      # Cancels release-cli.yml and sign-and-release.yml runs for any
+      # strictly-older SDK tag, then deletes the corresponding draft
+      # release. The intent: if v0.101.7 is mid-build and we just tagged
+      # v0.102.0, v0.101.7's artifacts are obsolete — users will only
+      # ever install v0.102.0. Saves github-hosted macos-15 minutes and
+      # gets the latest release to users faster (see #2075 + the 2026-05-15
+      # v0.101.x saga that motivated this step).
+      #
+      # Two opt-outs:
+      #   1. vars.PULP_RELEASE_MODE=land-all — repo-wide disable
+      #   2. `Release-Supersede: skip reason="..."` trailer on the tip
+      #      commit — per-release disable
+      #
+      # Cancelling sign-and-release.yml is important: it runs on the same
+      # tag push and can resurrect a draft release after release-cli is
+      # cancelled (codex flagged this footgun in #2075).
+      #
+      # Semver via stdlib regex, not packaging.version (PEP 440 ≠ SemVer)
+      # and not `sort -V` (Pulp pre-release suffixes would be a future
+      # extension, but `sort -V` mis-orders them today).
+      - name: Supersede older in-flight release builds
+        if: steps.tag.outputs.sdk_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ steps.tag.outputs.sdk_tag }}
+          RELEASE_MODE: ${{ vars.PULP_RELEASE_MODE || 'supersede-older' }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [ "$RELEASE_MODE" = "land-all" ]; then
+            echo "RELEASE_MODE=land-all → skipping supersede"
+            exit 0
+          fi
+
+          # Per-release opt-out via commit trailer.
+          if git log -1 --format=%B HEAD | \
+               git interpret-trailers --parse | \
+               grep -qE '^Release-Supersede:\s*skip\b'; then
+            echo "Release-Supersede: skip trailer found → skipping supersede"
+            exit 0
+          fi
+
+          echo "Supersede check: new tag = $NEW_TAG"
+
+          python3 <<'PYEOF'
+          import json, os, re, subprocess, sys
+
+          NEW_TAG = os.environ["NEW_TAG"]
+          REPO = os.environ["REPO"]
+          SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-.+)?$")
+
+          def parse(tag):
+              m = SEMVER.match(tag)
+              if not m:
+                  return None
+              return tuple(int(g) for g in m.groups())
+
+          new_ver = parse(NEW_TAG)
+          if not new_ver:
+              print(f"NEW_TAG={NEW_TAG} is not a SemVer tag; skipping supersede")
+              sys.exit(0)
+
+          def gh(args, check=True):
+              r = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+              if check and r.returncode != 0:
+                  print(f"gh api failed: {r.stderr}", file=sys.stderr)
+                  return None
+              return r.stdout
+
+          # Workflow IDs to scan. release-cli.yml + sign-and-release.yml.
+          workflows = [
+              ("release-cli.yml", "release-cli"),
+              ("sign-and-release.yml", "sign-and-release"),
+          ]
+
+          # Sweep ALL non-completed run states (codex P2 on #2076): the
+          # ?status= filter splits queued / in_progress / requested /
+          # waiting / pending into separate buckets, and a run may sit
+          # in any of them at the moment we read. Listing the full
+          # workflow runs page and filtering client-side by status is
+          # more robust than querying each named status separately.
+          NON_COMPLETED = {
+              "queued", "in_progress", "requested", "waiting", "pending",
+          }
+          for wf_file, wf_label in workflows:
+              raw = gh([
+                  f"/repos/{REPO}/actions/workflows/{wf_file}/runs?per_page=100",
+                  "--jq", ".workflow_runs[] | {id, head_branch, status}",
+              ])
+              if not raw:
+                  continue
+              for line in raw.strip().splitlines():
+                  run = json.loads(line)
+                  if run.get("status") not in NON_COMPLETED:
+                      continue
+                  tag = run["head_branch"]
+                  old_ver = parse(tag)
+                  if not old_ver:
+                      continue
+                  if old_ver >= new_ver:
+                      continue
+                  print(f"  superseding {wf_label} run {run['id']} (tag {tag} < {NEW_TAG}, status={run.get('status')})")
+                  subprocess.run([
+                      "gh", "api", "-X", "POST",
+                      f"/repos/{REPO}/actions/runs/{run['id']}/cancel",
+                  ], capture_output=True)
+
+          # Delete strictly-older draft releases. Never touch published.
+          raw = gh([
+              f"/repos/{REPO}/releases?per_page=50",
+              "--jq", ".[] | select(.draft) | {id, tag: .tag_name}",
+          ])
+          if raw:
+              for line in raw.strip().splitlines():
+                  rel = json.loads(line)
+                  old_ver = parse(rel["tag"])
+                  if not old_ver or old_ver >= new_ver:
+                      continue
+                  print(f"  deleting draft release {rel['tag']} (id {rel['id']})")
+                  subprocess.run([
+                      "gh", "api", "-X", "DELETE",
+                      f"/repos/{REPO}/releases/{rel['id']}",
+                  ], capture_output=True)
+          PYEOF
 
       # CHANGELOG regeneration moved to .github/workflows/post-tag-sync.yml
       # (installed by `shipyard release-bot hook install`). Firing on the
