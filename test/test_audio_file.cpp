@@ -608,6 +608,33 @@ TEST_CASE("MemoryMappedAudioReader leaves destinations untouched past EOF",
     std::filesystem::remove(path);
 }
 
+TEST_CASE("MemoryMappedAudioReader rejects invalid destination buffers",
+          "[audio][file][mmap][codecov]") {
+    auto path = unique_temp_audio_path("_mmap_invalid_dest.wav");
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {
+        {0.0f, 0.25f},
+        {0.5f, 0.75f},
+    };
+    REQUIRE(write_wav_file(path.string(), data));
+
+    MemoryMappedAudioReader reader;
+    REQUIRE(reader.open(path.string()));
+
+    REQUIRE_FALSE(reader.read_frames(nullptr, 2, 0, 1));
+
+    float left[1] = {-1.0f};
+    float* missing_right[] = {left, nullptr};
+    REQUIRE_FALSE(reader.read_frames(missing_right, 2, 0, 1));
+    REQUIRE(left[0] == -1.0f);
+
+    reader.close();
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("offline processing handles guards, block tails, and file dispatch",
           "[audio][file][offline][issue-640]") {
     AudioFileData input;
