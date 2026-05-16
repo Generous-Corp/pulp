@@ -141,7 +141,7 @@ public:
 
     /// Reset the parameter to its default value and fire change callbacks.
     void reset() {
-        if (store_) {
+        if (store_ && info()) {
             store_->reset_to_default(param_id_);
             notify(store_->get_value(param_id_));
         }
@@ -153,7 +153,7 @@ public:
 private:
     void notify(float value) {
         for (auto& cb : callbacks_) {
-            cb(value);
+            if (cb) cb(value);
         }
     }
 
