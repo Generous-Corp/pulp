@@ -117,6 +117,28 @@ TEST_CASE("DryWetMixer latency delays dry path and reset clears history", "[dsp]
     REQUIRE_THAT(wet_after_reset[1], WithinAbs(0.0f, 1e-6f));
 }
 
+TEST_CASE("DryWetMixer can enable latency after prepare and leaves unmatched wet channels",
+          "[dsp][dry_wet][codecov]") {
+    DryWetMixer mixer;
+    mixer.prepare(2, 4);
+    mixer.set_wet_latency(1);
+    mixer.set_mix(0.0f);
+
+    float dry_l[] = {3.0f, 4.0f};
+    float wet_l[] = {10.0f, 10.0f};
+    float wet_r[] = {20.0f, 20.0f};
+    const float* dry_ptrs[] = {dry_l};
+    float* wet_ptrs[] = {wet_l, wet_r};
+
+    mixer.push_dry(dry_ptrs, 1, 2);
+    mixer.mix_wet(wet_ptrs, 2, 2);
+
+    REQUIRE_THAT(wet_l[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_l[1], WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[0], WithinAbs(20.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[1], WithinAbs(20.0f, 1e-6f));
+}
+
 // ── ProcessorDuplicator ─────────────────────────────────────────────────
 
 // Simple gain processor for testing

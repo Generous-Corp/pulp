@@ -7,8 +7,13 @@
 #include <pulp/signal/lookup_table.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/gain.hpp>
+#include <pulp/signal/interpolator.hpp>
+#include <pulp/signal/simd_buffer.hpp>
+#include <pulp/signal/spectrogram.hpp>
+#include <pulp/signal/stft.hpp>
 #include <pulp/signal/waveshaper.hpp>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 using namespace pulp::signal;
@@ -480,4 +485,179 @@ TEST_CASE("TptFilter cutoff clamping", "[signal][tpt]") {
     REQUIRE(f.cutoff() >= 1.0f);
     f.set_cutoff(100000.0f); // should clamp to near Nyquist
     REQUIRE(f.cutoff() < 44100.0f * 0.5f);
+}
+
+// ── Visualization helpers ───────────────────────────────────────────────
+
+TEST_CASE("ColorMapper clamps values and switches color ramps",
+          "[signal][spectrogram][codecov]") {
+    ColorMapper mapper(ColorRamp::grayscale);
+
+    auto black = mapper.map(-1.0f);
+    REQUIRE(black.r == 0);
+    REQUIRE(black.g == 0);
+    REQUIRE(black.b == 0);
+    REQUIRE(black.a == 255);
+
+    auto white = mapper.map(2.0f);
+    REQUIRE(white.r == 255);
+    REQUIRE(white.g == 255);
+    REQUIRE(white.b == 255);
+
+    mapper.set_ramp(ColorRamp::heat);
+    REQUIRE(mapper.ramp() == ColorRamp::heat);
+    auto heat_mid = mapper.map(0.5f);
+    REQUIRE(heat_mid.r >= heat_mid.g);
+    REQUIRE(heat_mid.a == 255);
+
+    mapper.set_ramp(ColorRamp::viridis);
+    auto viridis_mid = mapper.map(0.5f);
+    REQUIRE(viridis_mid.g > viridis_mid.r);
+
+    mapper.set_ramp(ColorRamp::inferno);
+    auto inferno_low = mapper.map(0.0f);
+    REQUIRE(inferno_low.b > inferno_low.r);
+}
+
+TEST_CASE("FrequencyAxis maps linear logarithmic and mel scales",
+          "[signal][spectrogram][codecov]") {
+    FrequencyAxis axis;
+    axis.configure(1024, 48000.0f, FrequencyScale::linear);
+    REQUIRE(axis.num_bins() == 513);
+    REQUIRE_THAT(axis.nyquist(), WithinAbs(24000.0f, 1e-5f));
+    REQUIRE(axis.scale() == FrequencyScale::linear);
+    REQUIRE_THAT(axis.bin_to_hz(256), WithinAbs(12000.0f, 1e-5f));
+    REQUIRE(axis.hz_to_bin(-100.0f) == 0);
+    REQUIRE(axis.hz_to_bin(999999.0f) == 512);
+    REQUIRE_THAT(axis.hz_to_display(12000.0f), WithinAbs(0.5f, 1e-5f));
+    REQUIRE_THAT(axis.display_to_hz(0.5f), WithinAbs(12000.0f, 1e-5f));
+
+    axis.configure(1024, 48000.0f, FrequencyScale::logarithmic);
+    REQUIRE(axis.display_to_bin(axis.bin_to_display(64)) == 64);
+    REQUIRE(axis.display_to_hz(-1.0f) >= 1.0f);
+    REQUIRE_THAT(axis.display_to_hz(2.0f), WithinAbs(axis.nyquist(), 1e-2f));
+
+    axis.configure(1024, 48000.0f, FrequencyScale::mel);
+    const float mel_pos = axis.hz_to_display(1000.0f);
+    REQUIRE(mel_pos > 0.0f);
+    REQUIRE(mel_pos < 1.0f);
+    REQUIRE(axis.display_to_bin(mel_pos) == axis.hz_to_bin(1000.0f));
+}
+
+TEST_CASE("SpectrogramBuffer scrolls columns and maps dB ranges",
+          "[signal][spectrogram][codecov]") {
+    SpectrogramBuffer buffer;
+    ColorMapper mapper(ColorRamp::grayscale);
+    buffer.configure(3, 2);
+
+    const float first[] = {-80.0f, -40.0f, 0.0f, -20.0f};
+    buffer.push_column(first, 4, mapper, -80.0f, 0.0f);
+    REQUIRE(buffer.width() == 3);
+    REQUIRE(buffer.height() == 2);
+    REQUIRE(buffer.frames_written() == 1);
+    REQUIRE(buffer.write_column() == 1);
+    REQUIRE(buffer.pixels()[0].r == 0);
+    REQUIRE(buffer.pixels()[3].r == 255);
+
+    const float second[] = {-20.0f, -20.0f};
+    const float third[] = {-10.0f, -10.0f};
+    const float fourth[] = {-5.0f, -5.0f};
+    buffer.push_column(second, 2, mapper, 0.0f, 0.0f);
+    buffer.push_column(third, 2, mapper);
+    buffer.push_column(fourth, 2, mapper);
+
+    REQUIRE(buffer.frames_written() == 4);
+    REQUIRE(buffer.write_column() == 1);
+    REQUIRE(buffer.pixels()[0].r > 200);
+}
+
+TEST_CASE("STFT emits frames converts dB and resets state",
+          "[signal][stft][codecov]") {
+    StftConfig config;
+    config.fft_size = 256;
+    config.hop_size = 64;
+    config.window = WindowFunction::Type::hann;
+
+    Stft stft(config);
+    REQUIRE(stft.fft_size() == 256);
+    REQUIRE(stft.hop_size() == 64);
+    REQUIRE(stft.num_bins() == 129);
+    REQUIRE_FALSE(stft.frame_ready());
+
+    std::vector<float> samples(255, 0.0f);
+    REQUIRE_FALSE(stft.push_samples(samples.data(), static_cast<int>(samples.size())));
+    samples.assign(1, 1.0f);
+    REQUIRE(stft.push_samples(samples.data(), 1));
+    REQUIRE(stft.frame_ready());
+    REQUIRE(stft.latest_frame().num_bins == 129);
+
+    auto db = stft.latest_magnitude_db(-90.0f);
+    REQUIRE(db.size() == 129);
+    for (float value : db)
+        REQUIRE(value >= -90.0f);
+
+    float magnitudes[] = {0.0f, 1.0f};
+    Stft::to_db(magnitudes, 2, -60.0f);
+    REQUIRE_THAT(magnitudes[0], WithinAbs(-60.0f, 1e-5f));
+    REQUIRE_THAT(magnitudes[1], WithinAbs(0.0f, 1e-5f));
+
+    stft.reset();
+    REQUIRE_FALSE(stft.frame_ready());
+    for (float mag : stft.latest_frame().magnitude)
+        REQUIRE_THAT(mag, WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("AlignedBuffer resizes moves clears and copies bounded input",
+          "[signal][simd][codecov]") {
+    AlignedBuffer empty;
+    REQUIRE(empty.empty());
+    REQUIRE(empty.data() == nullptr);
+
+    AlignedBuffer buffer(3);
+    REQUIRE(buffer.size() == 3);
+    REQUIRE_FALSE(buffer.empty());
+    REQUIRE(reinterpret_cast<std::uintptr_t>(buffer.data()) % kSimdAlignment == 0);
+    REQUIRE_THAT(buffer[0], WithinAbs(0.0f, 1e-6f));
+
+    const float source[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    buffer.copy_from(source, 4);
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(3.0f, 1e-6f));
+
+    buffer.clear();
+    REQUIRE_THAT(buffer[1], WithinAbs(0.0f, 1e-6f));
+
+    buffer.resize(5);
+    REQUIRE(buffer.size() == 5);
+    REQUIRE_THAT(buffer[4], WithinAbs(0.0f, 1e-6f));
+
+    AlignedBuffer moved(std::move(buffer));
+    REQUIRE(moved.size() == 5);
+    REQUIRE(buffer.empty());
+
+    AlignedBuffer assigned;
+    assigned = std::move(moved);
+    REQUIRE(assigned.size() == 5);
+    REQUIRE(moved.empty());
+    assigned.resize(0);
+    REQUIRE(assigned.empty());
+}
+
+TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::linear(0.0f, 2.0f, 6.0f), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(Interpolator::linear(1.0f, 2.0f, 6.0f), WithinAbs(6.0f, 1e-6f));
+    REQUIRE_THAT(Interpolator::linear(0.25f, 2.0f, 6.0f), WithinAbs(3.0f, 1e-6f));
+
+    REQUIRE_THAT(Interpolator::hermite(0.0f, -1.0f, 0.0f, 1.0f, 2.0f),
+                 WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(Interpolator::hermite(1.0f, -1.0f, 0.0f, 1.0f, 2.0f),
+                 WithinAbs(1.0f, 1e-6f));
+
+    REQUIRE_THAT(Interpolator::lagrange(0.5f, 0.0f, 1.0f, 4.0f, 9.0f),
+                 WithinAbs(2.25f, 1e-6f));
+
+    const float sinc_mid = Interpolator::sinc6(0.5f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f);
+    REQUIRE(sinc_mid > 0.75f);
+    REQUIRE(sinc_mid < 1.25f);
 }
