@@ -186,6 +186,7 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # External SDK archives (libausdk.a, libvst3-sdk.a) are excluded because
 # they're built from third-party sources not instrumented by our flags.
 BINARIES=()
+TEST_BINARIES=()
 
 # First-party static libraries — expose every instrumented TU regardless
 # of whether a test links it. Pattern is `libpulp-*.a` on macOS/Linux
@@ -213,7 +214,10 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 # CTest can run `.exe` files whose Unix executable bit is not visible to
 # `find -perm -u+x`; include `.exe` explicitly so their coverage maps reach
 # llvm-cov.
-while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+while IFS= read -r f; do
+    TEST_BINARIES+=("$f")
+    BINARIES+=("-object" "$f")
+done < <(
     find "${BUILD_DIR}/test" -maxdepth 2 -type f \
          \( -perm -u+x -o -name '*.exe' \) \
          ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
@@ -223,7 +227,10 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 # binaries in the llvm-cov object set. The embedded Python bindings
 # smoke target is built under bindings/python/, not build/test/, so
 # without this pass its profile data never contributes to report/show.
-while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+while IFS= read -r f; do
+    TEST_BINARIES+=("$f")
+    BINARIES+=("-object" "$f")
+done < <(
     find "${BUILD_DIR}" -type f \
          \( -perm -u+x -o -name '*.exe' \) \
          -name 'pulp-test-*' \
@@ -234,7 +241,7 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
          2>/dev/null || true
 )
 
-if [[ ${#BINARIES[@]} -eq 0 ]]; then
+if [[ ${#TEST_BINARIES[@]} -eq 0 ]]; then
     echo "run_coverage.sh: no test binaries found under ${BUILD_DIR}/test" >&2
     exit 1
 fi
