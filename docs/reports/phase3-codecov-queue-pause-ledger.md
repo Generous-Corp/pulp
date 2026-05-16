@@ -4972,3 +4972,30 @@ with 2/2 tests passing; `ctest --test-dir build --output-on-failure -R
 find JSON serializer"` with 3/3 tests passing; and `git diff --check`. This
 branch remains intentionally local-only while it grows toward the larger
 GitHub-hosted batch size.
+
+2026-05-15 18:19 PDT: grew and published the held audio/tools batch as
+#2099, `test: batch audio tooling coverage`, on
+`feature/phase3-codecov-audio-runtime-batch-663` at `121c5c46a`. The final
+batch contains 12 focused commits and is labeled `codecov`.
+
+Additional commits after the four-commit checkpoint are `7b449939c`
+(`test(audio): cover excerpt find collection edges`), `208229b4f`
+(`test(audio): cover excerpt bundle fallbacks`), `0d4814144`
+(`test(audio): cover model registry helpers`), `5434e12f5` (`test(audio):
+guard subsection read destinations`), `e3934c76e` (`test(audio): guard
+buffering reader reads`), `3144441ad` (`test(audio): cover model status
+fallbacks`), `905645cf1` (`test(audio): cover model activation fallbacks`),
+and `121c5c46a` (`test(audio): cover malformed model metadata`).
+
+Final local validation before publishing passed:
+`cmake --build build --target pulp-test-audio pulp-test-audio-file
+pulp-test-audio-excerpt pulp-test-buffering-reader pulp-test-audio-tools
+-j$(sysctl -n hw.ncpu)`;
+`ctest --test-dir build --output-on-failure -R
+"Buffer|AudioFileData|Device metadata|ChannelSet|MemoryMappedAudioReader|AudioSubsectionReader|BufferingReader|audio model|excerpt bundle|excerpt find"`
+with 59/59 tests passing; and `git diff --check`. The first push was blocked
+by the local version-bump gate, so the tip commit was amended with
+`Version-Bump: sdk=skip reason="test-only coverage batch; no SDK or CLI
+surface change"`. The second push passed local pre-push gates with
+`PULP_VIA_SHIPYARD=1 PULP_DISABLE_PREPUSH_DIFF_COVER=1 PULP_SKIP_DIFF_COVER=1`.
+No Namespace/SSH validation was dispatched.
