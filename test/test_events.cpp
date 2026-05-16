@@ -283,6 +283,39 @@ TEST_CASE("Timer tolerates empty callbacks",
     REQUIRE_FALSE(repeating.is_active());
 }
 
+TEST_CASE("Timer one-shot can be restarted after firing",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 1ms, [&] { count.fetch_add(1); }, false);
+
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 1; }, kTimerAsyncBudget));
+    REQUIRE_FALSE(timer.is_active());
+
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 2; }, kTimerAsyncBudget));
+    REQUIRE_FALSE(timer.is_active());
+}
+
+TEST_CASE("Timer stop before first fire permits a later restart",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 50ms, [&] { count.fetch_add(1); }, false);
+
+    timer.start();
+    timer.stop();
+    std::this_thread::sleep_for(80ms);
+    REQUIRE(count.load() == 0);
+    REQUIRE_FALSE(timer.is_active());
+
+    timer.set_interval(1ms);
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 1; }, kTimerAsyncBudget));
+    REQUIRE_FALSE(timer.is_active());
+}
+
 // #687 — stop()/start() pairs repeatedly on the owner thread while the
 // event-loop thread is running timer dispatches. Pre-fix, start()'s
 // `alive_ = make_shared<>(...)` raced with schedule_next()'s
