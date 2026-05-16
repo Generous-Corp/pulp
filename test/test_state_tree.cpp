@@ -251,18 +251,30 @@ TEST_CASE("StateTree property listener receives old and new values",
     REQUIRE_THAT(std::get<double>(new_values[1]), WithinAbs(0.5, 1e-9));
 }
 
-TEST_CASE("StateTree remove does not emit property callbacks",
+TEST_CASE("StateTree remove emits property callbacks with a cleared value",
           "[state][tree][issue-641]") {
     auto tree = StateTree::create("test");
     tree->set("name", std::string("before"));
 
+    std::string changed_prop;
+    PropertyValue old_value;
+    PropertyValue new_value;
     int count = 0;
-    tree->add_listener([&](StateTree&, std::string_view, const PropertyValue&,
-                           const PropertyValue&) { count++; });
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue& old_val,
+                           const PropertyValue& next_val) {
+        changed_prop = std::string(prop);
+        old_value = old_val;
+        new_value = next_val;
+        count++;
+    });
 
     tree->remove("name");
     tree->remove("missing");
-    REQUIRE(count == 0);
+    REQUIRE(count == 1);
+    REQUIRE(changed_prop == "name");
+    REQUIRE(std::get<std::string>(old_value) == "before");
+    REQUIRE(std::holds_alternative<std::monostate>(new_value));
     REQUIRE_FALSE(tree->has("name"));
 }
 
