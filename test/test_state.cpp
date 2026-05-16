@@ -255,6 +255,20 @@ TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0, 0.001));
 }
 
+TEST_CASE("StateStore deserialize clamps values to current ranges",
+          "[state][serialize][codecov]") {
+    StateStore source;
+    source.add_parameter(make_param_info(1, "Wide", "", {0.0f, 100.0f, 50.0f}));
+    source.set_value(1, 80.0f);
+    auto data = source.serialize();
+
+    StateStore target;
+    target.add_parameter(make_param_info(1, "Narrow", "", {0.0f, 1.0f, 0.5f}));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(1), WithinAbs(1.0, 0.001));
+}
+
 TEST_CASE("StateStore change listener", "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));

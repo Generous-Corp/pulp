@@ -191,7 +191,9 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
         // Only set if we know this parameter (forward compatibility)
         auto it = id_to_index_.find(id);
         if (it != id_to_index_.end()) {
-            values_[it->second].set(value);
+            const auto index = it->second;
+            const auto& range = params_[index].range;
+            values_[index].set(std::clamp(value, range.min, range.max));
         }
     }
 
