@@ -494,6 +494,9 @@ TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs"
 
     REQUIRE_FALSE(evaluate("missing + 1").has_value());
     REQUIRE_FALSE(evaluate("min(1)").has_value());
+    REQUIRE_FALSE(evaluate("1e").has_value());
+    REQUIRE_FALSE(evaluate("1e+").has_value());
+    REQUIRE_FALSE(evaluate("1e-").has_value());
     REQUIRE_FALSE(evaluate("(1 + 2").has_value());
     REQUIRE_FALSE(evaluate("").has_value());
 }
