@@ -5148,3 +5148,50 @@ changed; the tip commit was amended with
 `Version-Bump: sdk=skip reason="state robustness and coverage batch; no SDK
 or CLI API surface change"`, then pre-push gates passed. No Namespace/SSH
 validation was dispatched.
+
+2026-05-15 21:34 PDT: addressed Codex P2 review comments on #2102 and
+#2103, then published the next held MIDI coverage batch as #2104.
+
+#2102 follow-up: commit `71b82e141` (`fix(coverage): require test binaries
+before upload`) fixes the coverage helper guard so archive discovery cannot
+make the "no test binaries found" check ineffective. `scripts/run_coverage.sh`
+now tracks discovered test executables separately in `TEST_BINARIES` and
+requires that list to be non-empty before upload proceeds. Local validation:
+`bash -n scripts/run_coverage.sh` and `git diff --check`. The local diff-cover
+pre-push lane attempted a fresh coverage configure but hit the known
+FetchContent checkout failure for `mbedtls` tag `v3.6.2`, then was demoted
+with `PULP_DISABLE_PREPUSH_DIFF_COVER=1`. No Namespace/SSH validation was
+dispatched.
+
+#2103 follow-up: commit `e1fc40380` (`fix(state): preserve explicit null sync
+values`) fixes the state-tree synchronizer so only an actual absent property
+is classified as `PropertyRemove`; explicit `set(key, PropertyValue{})`
+remains a `PropertySet`. Added a regression proving `apply()` preserves
+`has("nullable")` for explicit null values. Focused local validation passed:
+`cmake --build build --target pulp-test-state-tree -j8`; `ctest --test-dir
+build --output-on-failure -R "StateTree"` with 33/33 tests passing; and
+`git diff --check`. The local diff-cover pre-push lane hit the same
+`mbedtls v3.6.2` checkout failure and was demoted with
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1`. No Namespace/SSH validation was
+dispatched.
+
+#2104: opened `test(midi): batch coverage edges` on
+`feature/phase3-codecov-midi-batch-667` at `831bb88c8`, labeled `codecov`
+and `tests`. This is a single MIDI-focused GitHub-hosted CI batch containing
+four local tranches instead of separate small PRs:
+
+- `test(midi): cover keyboard rpn and sequence edges`
+- `test(midi): cover ump and mpe buffer edges`
+- `test(midi): cover capability inquiry edges`
+- `test(midi): cover sysex sidecar edges`
+
+The batch covers `MidiKeyboardState`, `RpnParser`, `MidiMessageSequence`,
+`MidiBuffer` SysEx sidecars, UMP packet factories, MIDI 1.0/2.0 conversion,
+`UmpBuffer`, `MpeBuffer` tracker binding, and MIDI-CI discovery/profile/
+property edge cases. Local validation before publishing passed:
+`cmake --build build --target pulp-test-midi pulp-test-midi-ci -j8`;
+`./build/test/pulp-test-midi` with 19 test cases / 276 assertions passing;
+`./build/test/pulp-test-midi-ci` with 18 test cases / 89 assertions passing;
+and `git diff --check`. Branch pre-push gates were clean. `gh pr create`
+hit the GitHub GraphQL rate limit, so #2104 was opened via the GitHub REST
+API. No Namespace/SSH validation was dispatched.
