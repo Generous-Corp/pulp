@@ -91,7 +91,9 @@ private:
             if (pos_ < input_.size() && (input_[pos_] == 'e' || input_[pos_] == 'E')) {
                 pos_++;
                 if (pos_ < input_.size() && (input_[pos_] == '+' || input_[pos_] == '-')) pos_++;
+                size_t exponent_start = pos_;
                 while (pos_ < input_.size() && std::isdigit(input_[pos_])) pos_++;
+                if (pos_ == exponent_start) throw std::runtime_error("Malformed exponent");
             }
             return std::stod(std::string(input_.substr(start, pos_ - start)));
         }

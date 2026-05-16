@@ -63,6 +63,39 @@ TEST_CASE("BackgroundScanner: completes a quick scan", "[host][bg-scan]") {
     REQUIRE(final_results[0].name == "A");
 }
 
+TEST_CASE("BackgroundScanner: empty worker still completes",
+          "[host][bg-scan][coverage]") {
+    BackgroundScanner bs;
+    bool completion_called = false;
+    bool final_cancelled = true;
+    std::vector<PluginInfo> final_results{fake_info("stale", PluginFormat::VST3)};
+
+    REQUIRE(bs.start(
+        nullptr,
+        [](const std::string&, int, int) {
+            FAIL("progress should not fire without a worker");
+        },
+        [&](std::vector<PluginInfo> results, bool cancelled) {
+            final_results = std::move(results);
+            final_cancelled = cancelled;
+            completion_called = true;
+        }));
+
+    bs.join();
+    REQUIRE(completion_called);
+    REQUIRE_FALSE(final_cancelled);
+    REQUIRE(final_results.empty());
+}
+
+TEST_CASE("BackgroundScanner: idle cancel and join are no-ops",
+          "[host][bg-scan][coverage]") {
+    BackgroundScanner bs;
+    REQUIRE_FALSE(bs.is_running());
+    bs.cancel();
+    bs.join();
+    REQUIRE_FALSE(bs.is_running());
+}
+
 TEST_CASE("BackgroundScanner: second start while running returns false",
           "[host][bg-scan]") {
     BackgroundScanner bs;
@@ -224,6 +257,16 @@ TEST_CASE("BackgroundScanner: progress callback fires from worker thread",
     bs.join();
     REQUIRE(done.load());
     REQUIRE(progress_calls.load() == 2);
+}
+
+TEST_CASE("CancelToken reset clears a prior cancellation request",
+          "[host][bg-scan][coverage]") {
+    CancelToken token;
+    REQUIRE_FALSE(token.requested());
+    token.request();
+    REQUIRE(token.requested());
+    token.reset();
+    REQUIRE_FALSE(token.requested());
 }
 
 TEST_CASE("BackgroundScanner: destructor cancels + joins any running worker",

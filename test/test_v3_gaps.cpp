@@ -412,6 +412,24 @@ TEST_CASE("Expression rejects malformed calls and trailing tokens", "[runtime][e
     REQUIRE_FALSE(pulp::runtime::evaluate("1 2").has_value());
 }
 
+TEST_CASE("Expression rejects malformed numeric and grouping syntax",
+          "[runtime][expression][coverage]") {
+    REQUIRE_FALSE(pulp::runtime::evaluate("").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate(".").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1e").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("(1 + 2").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1 + )").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("pow(2, 3").has_value());
+}
+
+TEST_CASE("Expression covers unary and nested function combinations",
+          "[runtime][expression][coverage]") {
+    REQUIRE_THAT(*pulp::runtime::evaluate("-(-4)"), WithinAbs(4.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("max(min(9, 4), abs(-3))"),
+                 WithinAbs(4.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("2 ^ -2"), WithinAbs(0.25, 1e-10));
+}
+
 TEST_CASE("ExpressionEvaluator custom functions and clearing", "[runtime][expression][issue-641]") {
     pulp::runtime::ExpressionEvaluator eval;
     eval.set("x", 4.0);
