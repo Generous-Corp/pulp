@@ -511,6 +511,26 @@ mouse / pointer / wheel on macOS. Every dispatcher MUST:
 - Leave `on_mouse_down` / `on_mouse_drag` / `on_mouse_up` deepest-wins
   (those are the JUCE-style click channel, not the W3C bubbling channel).
 
+### registerShortcut focus-guard
+
+`WidgetBridge::forward_key_event` checks `registerShortcut` entries
+before falling through to the W3C `__global__` keydown dispatch. To
+prevent global bare-key shortcuts (`?` for cheatsheet, etc.) from
+firing while the user types into a text input, the loop reads
+`View::focused_input_` and suppresses any registered shortcut whose
+modifier mask has no `kModCtrl|kModAlt|kModMeta|kModCmd` bit set.
+Shift alone counts as bare (Shift only picks the upper-case glyph).
+Modifier chords (`Cmd+S`, `Cmd+,`) always fire — they are always-global
+by design and must work even when an editor has focus.
+
+The focused-input slot is the same one used by the macOS PulpView for
+text-input dispatch (#1708); TextEditor-like widgets claim it via
+`View::claim_input_focus()` and release on focus-out / destruction.
+
+Prereq for the default-shortcuts pass (`planning/2026-05-16-default-
+keyboard-shortcuts.md`), which adds a bare-`?` cheatsheet binding to
+imported designs.
+
 ### Tests that pin the contract
 
 `test/test_widget_bridge.cpp` — `[contract]` tag:
@@ -518,6 +538,7 @@ mouse / pointer / wheel on macOS. Every dispatcher MUST:
 - "Event contract: W3C MouseEvent.button maps left=0, middle=1, right=2"
 - "Event contract: forward_key_event emits W3C UIEvent.key strings + modifier booleans"
 - "Event contract: window.addEventListener('keydown', fn) receives __global__ keydown"
+- "WidgetBridge focus-guard: bare-key shortcuts suppressed while text input focused"
 - "Event contract: __dispatch__ try/catch keeps listeners alive after a handler throws"
 - "Event contract: wheel dispatch is an object {deltaX,deltaY,clientX,clientY}"
 - "Event contract: registerPointer/registerWheel are idempotent (no lambda-stack growth)"

@@ -13957,3 +13957,84 @@ TEST_CASE("minWidth / minHeight / maxWidth / maxHeight route % and calc-family t
     REQUIRE(xh_calc_px->flex().dim_max_height.unit == DimensionUnit::px);
     REQUIRE_THAT(xh_calc_px->flex().dim_max_height.value, WithinAbs(150.0f, 0.001f));
 }
+
+// Focus-guard for global key shortcuts. Bare-key shortcuts (no Ctrl/Alt/
+// Meta/Cmd; Shift alone counts as bare since it just picks the upper-case
+// glyph) must NOT fire while a text input has focus — otherwise typing a
+// `?` into a search box would open the global cheatsheet. Modifier chords
+// (Cmd+S, Cmd+,) are always-global by design and must still fire when an
+// input is focused.
+//
+// Prereq for the default-shortcuts pass (planning/2026-05-16-default-
+// keyboard-shortcuts.md), which adds a bare-`?` cheatsheet binding.
+TEST_CASE("WidgetBridge focus-guard: bare-key shortcuts suppressed while text input focused",
+          "[view][bridge][shortcuts][focus-guard]") {
+    using namespace pulp::view;
+
+    // Always start the test with a clean focus slot so prior cases don't
+    // bleed in (the slot is a static and tests share the same process).
+    View::focused_input_ = nullptr;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var bare_count = 0;
+        var shift_count = 0;
+        var cmd_count = 0;
+        function bareHit()  { bare_count++; }
+        function shiftHit() { shift_count++; }
+        function cmdHit()   { cmd_count++; }
+
+        // Bare-`?` (no modifiers): cheatsheet pattern.
+        registerShortcut(63, 0, 'bareHit');
+        // Shift+`?` (kModShift = 1): also bare for guard purposes — Shift
+        // alone is just the glyph selector when typing.
+        registerShortcut(63, 1, 'shiftHit');
+        // Cmd+`,` (kModCmd = 16): always-global modifier chord.
+        registerShortcut(44, 16, 'cmdHit');
+    )");
+
+    SECTION("no input focused: bare-key fires") {
+        REQUIRE(View::focused_input_ == nullptr);
+        bridge.forward_key_event(63, 0, true);
+        REQUIRE(engine.evaluate("bare_count").getWithDefault<int>(0) == 1);
+    }
+
+    SECTION("input focused: bare-key suppressed") {
+        View input;
+        input.set_focusable(true);
+        input.claim_input_focus();
+        REQUIRE(View::focused_input_ == &input);
+
+        bridge.forward_key_event(63, 0, true);
+        REQUIRE(engine.evaluate("bare_count").getWithDefault<int>(0) == 0);
+
+        // Shift alone is also guarded.
+        bridge.forward_key_event(63, 1, true);
+        REQUIRE(engine.evaluate("shift_count").getWithDefault<int>(0) == 0);
+
+        // Modifier chord still fires — Cmd+, opens Settings even from an
+        // input.
+        bridge.forward_key_event(44, 16, true);
+        REQUIRE(engine.evaluate("cmd_count").getWithDefault<int>(0) == 1);
+
+        input.release_input_focus();
+        REQUIRE(View::focused_input_ == nullptr);
+    }
+
+    SECTION("focus released: bare-key fires again") {
+        View input;
+        input.set_focusable(true);
+        input.claim_input_focus();
+        bridge.forward_key_event(63, 0, true);
+        REQUIRE(engine.evaluate("bare_count").getWithDefault<int>(0) == 0);
+
+        input.release_input_focus();
+        bridge.forward_key_event(63, 0, true);
+        REQUIRE(engine.evaluate("bare_count").getWithDefault<int>(0) == 1);
+    }
+}
