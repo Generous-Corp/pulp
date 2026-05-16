@@ -5069,3 +5069,14 @@ with 29/29 tests passing; and `git diff --check`. Push used
 `PULP_VIA_SHIPYARD=1 PULP_DISABLE_PREPUSH_DIFF_COVER=1`; the same local
 `mbedtls v3.6.2` FetchContent checkout failure was demoted. GitHub-hosted
 CI restarted on both new heads.
+
+2026-05-15 20:50 PDT: queue policy update. Going forward, do not publish
+small Codecov/test PRs from this lane. Build coverage work locally in held
+batch worktrees and only open a GitHub PR when the batch is large enough to
+justify a full GitHub-hosted CI cycle: target roughly 12+ coherent commits
+or an equivalently broad related subsystem cluster. Prefer one substantial
+PR per area over multiple narrow PRs. Keep the ledger updated with local
+validation and batch contents while held. Existing open PRs should be
+monitored, fixed, merged on green, or folded only when doing so reduces
+queue pressure without losing review/CI signal. No Namespace/SSH validation;
+use GitHub-hosted CI and macOS local focused validation.
