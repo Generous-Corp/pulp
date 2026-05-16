@@ -133,7 +133,6 @@ std::optional<std::vector<uint8_t>> aes_decrypt(
     // Remove PKCS7 padding
     uint8_t pad_val = result.back();
     if (pad_val == 0 || pad_val > 16) return std::nullopt;
-    if (pad_val > result.size()) return std::nullopt;
     for (size_t i = 0; i < pad_val; ++i) {
         if (result[result.size() - 1 - i] != pad_val)
             return std::nullopt;
