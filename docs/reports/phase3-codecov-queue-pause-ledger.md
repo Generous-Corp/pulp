@@ -5195,3 +5195,42 @@ property edge cases. Local validation before publishing passed:
 and `git diff --check`. Branch pre-push gates were clean. `gh pr create`
 hit the GitHub GraphQL rate limit, so #2104 was opened via the GitHub REST
 API. No Namespace/SSH validation was dispatched.
+
+2026-05-15 23:41 PDT: resumed after context compaction, recreated missing
+state/MIDI worktrees, and continued GitHub-hosted monitoring only.
+
+#2103 follow-up: GitHub macOS failed in the unrelated
+`HotReloader detects file changes` test. Root cause was a real watcher race:
+macOS can emit a modified event for a JS file that already existed before
+`HotReloader` construction, so the first `poll_reload()` could see a stale
+pending reload. Commit `38186634d` (`fix(view): ignore stale hot reload
+watcher events`) seeds observed JS write times before starting the watcher
+and ignores non-advancing modified events. Focused local validation passed:
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`;
+`cmake --build build --target pulp-test-hot-reload -j8`; and
+`./build/test/pulp-test-hot-reload` with 5 test cases / 16 assertions
+passing. Push used `PULP_DISABLE_PREPUSH_DIFF_COVER=1`; the local diff-cover
+pre-push lane hit the known `mbedtls v3.6.2` FetchContent checkout failure
+and was demoted. No Namespace/SSH validation was dispatched.
+
+#2104 monitoring: Windows failed with GitHub's hosted-runner communication
+loss annotation, not a test assertion. The failed job cannot be rerun while
+the workflow run is still in progress; rerun the failed job/run once the
+remaining macOS jobs finish. No code patch is indicated from the current
+annotations.
+
+Held local batch: `feature/phase3-codecov-signal-batch-668` is rebased on
+current `origin/main` and intentionally not opened yet so it can remain a
+larger signal/DSP coverage PR. Current tip is `c924468a4` with four commits:
+`test(signal): cover visualization helper edges`,
+`test(signal): cover effect reset edges`,
+`test(signal): cover envelope ramp edges`, and
+`test(signal): cover gate and bias edges`. Current diff adds 413 test lines
+across `test/test_dsp_expansion.cpp` and `test/test_signal.cpp`. Local
+validation passed after rebase:
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF`;
+`cmake --build build --target pulp-test-signal pulp-test-dsp-expansion -j8`;
+`./build/test/pulp-test-signal` with 88 test cases / 1064 assertions passing;
+`./build/test/pulp-test-dsp-expansion` with 41 test cases / 408 assertions
+passing; and `git diff --check`. Continue adding related signal/DSP coverage
+locally before submitting the next single batched PR.
