@@ -30,7 +30,6 @@ void MemoryMappedAudioReader::close() {
 bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_channels,
                                            uint64_t start_frame, uint64_t num_frames) {
     if (!is_open()) return false;
-    if (dest_channels == nullptr) return false;
 
     // For now, read the full file and extract the range
     // A more optimized version would decode only the requested range
@@ -41,10 +40,6 @@ bool MemoryMappedAudioReader::read_frames(float** dest_channels, uint32_t num_ch
     uint64_t avail = data->num_frames();
     uint64_t start = std::min(start_frame, avail);
     uint64_t count = std::min(num_frames, avail - start);
-
-    for (uint32_t c = 0; c < ch_count; ++c) {
-        if (dest_channels[c] == nullptr) return false;
-    }
 
     for (uint32_t c = 0; c < ch_count; ++c)
         for (uint64_t f = 0; f < count; ++f)
