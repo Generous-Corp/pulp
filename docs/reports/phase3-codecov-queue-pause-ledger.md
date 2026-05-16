@@ -4937,3 +4937,38 @@ hw.ncpu)`, `ctest --test-dir build --output-on-failure -R
 passing, and `git diff --check`. Push pre-push gates were clean with
 `PULP_VIA_SHIPYARD=1 PULP_DISABLE_PREPUSH_DIFF_COVER=1`. #2098 is now at
 `796c62cc0`; GitHub-hosted checks restarted on the new head.
+
+2026-05-15 18:10 PDT: started the next held local audio/tools coverage
+batch in `/private/tmp/pulp-phase3-codecov-audio-runtime-batch-663` on
+`feature/phase3-codecov-audio-runtime-batch-663`, based on `origin/main`
+`85bd37efa`. Current head is `d53bcb072` (`test(audio): cover excerpt find
+validation paths`), four commits ahead of `origin/main`: `394a3e1c0`
+(`test(audio): cover primitive shape defaults`), `641f581d2` (`test(audio):
+guard mapped reader destinations`), `d728bab05` (`test(audio): cover model
+store JSON helpers`), and `d53bcb072`.
+
+Coverage added so far:
+- `test/test_audio.cpp`: zero-channel/zero-sample buffer states,
+  `AudioFileData` shape helpers, and `DeviceInfo`/`DeviceConfig` defaults.
+- `core/audio/src/mmap_reader.cpp` + `test/test_audio_file.cpp`: reject null
+  destination channel buffers in `MemoryMappedAudioReader::read_frames()`
+  instead of dereferencing them.
+- `test/test_audio_tools.cpp`: model-store override paths, legacy
+  `checkpoint_path` metadata, active-model fallback keys, model/bundle JSON
+  serializer fields, excerpt-find request validation, unsupported-input
+  reporting, and `ExcerptFindResult` JSON fields.
+
+Validation passed locally on macOS:
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`;
+`cmake --build build --target pulp-test-audio pulp-test-audio-file
+pulp-test-audio-tools -j$(sysctl -n hw.ncpu)` via focused target builds;
+`ctest --test-dir build --output-on-failure -R
+"Buffer|AudioFileData|Device metadata|ChannelSet"` with 12/12 tests passing;
+`ctest --test-dir build --output-on-failure -R "MemoryMappedAudioReader"`
+with 4/4 tests passing; `ctest --test-dir build --output-on-failure -R
+"audio model store accepts overrides|audio model and bundle JSON serializers"`
+with 2/2 tests passing; `ctest --test-dir build --output-on-failure -R
+"excerpt find validates|required request|excerpt find reports unsupported|excerpt
+find JSON serializer"` with 3/3 tests passing; and `git diff --check`. This
+branch remains intentionally local-only while it grows toward the larger
+GitHub-hosted batch size.
