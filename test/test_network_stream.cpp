@@ -270,3 +270,29 @@ TEST_CASE("HttpStream status_code is 0 before fetch",
     HttpStream stream;
     REQUIRE(stream.status_code() == 0);
 }
+
+TEST_CASE("HttpStream default state supports zero reads and idempotent close",
+          "[network_stream][http][coverage][phase3]") {
+    HttpStream stream;
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.eof());
+    REQUIRE(stream.transport_error().empty());
+    REQUIRE(stream.headers().empty());
+
+    std::uint8_t byte = 0x7f;
+    auto zero_read = stream.read(&byte, 0);
+    REQUIRE(zero_read.ok());
+    REQUIRE(zero_read.bytes == 0);
+    REQUIRE(byte == 0x7f);
+
+    auto eof_read = stream.read(&byte, 1);
+    REQUIRE_FALSE(eof_read.ok());
+    REQUIRE(eof_read.closed());
+
+    stream.close();
+    stream.close();
+    REQUIRE_FALSE(stream.is_open());
+    auto closed_read = stream.read(&byte, 1);
+    REQUIRE_FALSE(closed_read.ok());
+    REQUIRE(closed_read.closed());
+}

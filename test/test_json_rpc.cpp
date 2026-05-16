@@ -198,6 +198,30 @@ TEST_CASE("JsonRpcPeer unregisters methods and notifications", "[json_rpc]") {
     REQUIRE(notifications.load() == 1);
 }
 
+TEST_CASE("JsonRpcPeer preserves string request ids and omits missing params",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string reply;
+    pair.first->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    std::string captured_params = "unset";
+    server.register_method("no_params", [&](std::string_view params) {
+        captured_params = std::string(params);
+        return JsonRpcResult::ok(R"({"accepted":true})");
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":"abc-123","method":"no_params"})json"));
+
+    REQUIRE(reply.find(R"("id":"abc-123")") != std::string::npos);
+    REQUIRE(reply.find(R"("accepted":true)") != std::string::npos);
+    REQUIRE(captured_params.empty());
+}
+
 TEST_CASE("JsonRpcPeer serializes handler errors and exceptions", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
@@ -288,6 +312,7 @@ TEST_CASE("JsonRpcPeer reports closed and failed sends", "[json_rpc]") {
     REQUIRE_FALSE(failing_peer.send_request("failed", "[]", [&](const JsonRpcResult&) {
         callback_called = true;
     }));
+    REQUIRE_FALSE(failing_peer.notify("failed_notify", "[]"));
     channel.deliver_text(R"json({"jsonrpc":"2.0","id":1,"result":true})json");
     REQUIRE_FALSE(callback_called);
 }

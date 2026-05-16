@@ -9,6 +9,7 @@
 #include <pulp/runtime/expression.hpp>
 #include <pulp/runtime/http.hpp>
 #include <pulp/runtime/range.hpp>
+#include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/text_diff.hpp>
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
@@ -56,6 +57,7 @@ TEST_CASE("TemporaryFile normalizes extensions without leading dots",
           "[runtime][temp_file][issue-641]") {
     TemporaryFile tmp("raw");
     REQUIRE(tmp.path().extension() == ".raw");
+    REQUIRE(tmp.path_string() == tmp.path().string());
     REQUIRE(std::filesystem::exists(tmp.path()));
 }
 
@@ -338,6 +340,18 @@ TEST_CASE("run_process captures exit code", "[runtime][child_process]") {
     REQUIRE(result->exit_code == 42);
 }
 
+TEST_CASE("run_process captures stderr separately",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    auto result = run_process("powershell", {"-NoProfile", "-Command", "[Console]::Error.WriteLine('bad-news'); exit 7"});
+#else
+    auto result = run_process("/bin/sh", {"-c", "echo bad-news >&2; exit 7"});
+#endif
+    REQUIRE(result.has_value());
+    REQUIRE(result->exit_code == 7);
+    REQUIRE(result->stderr_output.find("bad-news") != std::string::npos);
+}
+
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
 #ifdef _WIN32
     auto result = run_process("C:\\nonexistent_binary_12345.exe");
@@ -552,6 +566,8 @@ TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url]
     REQUIRE_FALSE(response.ok());
     response.status_code = 200;
     REQUIRE(response.ok());
+    response.status_code = 204;
+    REQUIRE(response.ok());
     response.status_code = 299;
     REQUIRE(response.ok());
     response.status_code = 300;
@@ -752,4 +768,3 @@ TEST_CASE("Range boundary touch points remain non-intersections",
     REQUIRE(IntRange(5, 4).empty());
     REQUIRE(IntRange(5, 5).constrain(100) == 5);
 }
-

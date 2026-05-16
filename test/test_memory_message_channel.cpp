@@ -59,6 +59,20 @@ TEST_CASE("MemoryMessageChannel replaces message callbacks",
     REQUIRE(second_count == 1);
 }
 
+TEST_CASE("MemoryMessageChannel clears message callbacks",
+          "[runtime][message_channel][coverage][phase3]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    int deliveries = 0;
+    right->on_message([&](const Message&) { ++deliveries; });
+    REQUIRE(left->send_text("delivered"));
+    REQUIRE(deliveries == 1);
+
+    right->on_message({});
+    REQUIRE(left->send_text("ignored"));
+    REQUIRE(deliveries == 1);
+}
+
 TEST_CASE("MemoryMessageChannel send succeeds without peer callback",
           "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();

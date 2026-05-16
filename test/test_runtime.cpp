@@ -14,6 +14,7 @@ using namespace pulp::runtime;
 
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     SpscQueue<int, 16> q;
+    REQUIRE(SpscQueue<int, 16>::capacity() == 16);
 
     SECTION("Empty queue") {
         REQUIRE(q.empty());
@@ -105,6 +106,18 @@ TEST_CASE("SpscQueue cross-thread", "[runtime][spsc]") {
     REQUIRE(sum.load() == expected);
 }
 
+TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage][phase3]") {
+    SpscQueue<std::string, 2> q;
+
+    REQUIRE(q.try_push(std::string("alpha")));
+    REQUIRE(q.size_approx() == 1);
+
+    auto value = q.try_pop();
+    REQUIRE(value.has_value());
+    REQUIRE(*value == "alpha");
+    REQUIRE(q.empty());
+}
+
 TEST_CASE("ScopeGuard executes on exit", "[runtime][scope_guard]") {
     int x = 0;
     {
@@ -172,6 +185,20 @@ TEST_CASE("Runtime GMT helper returns UTC tm", "[runtime][system]") {
     REQUIRE(tm.tm_sec == 0);
 }
 
+TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system][coverage][phase3]") {
+    auto tm = localtime_local(static_cast<std::time_t>(0));
+    REQUIRE(tm.tm_mon >= 0);
+    REQUIRE(tm.tm_mon <= 11);
+    REQUIRE(tm.tm_mday >= 1);
+    REQUIRE(tm.tm_mday <= 31);
+    REQUIRE(tm.tm_hour >= 0);
+    REQUIRE(tm.tm_hour <= 23);
+    REQUIRE(tm.tm_min >= 0);
+    REQUIRE(tm.tm_min <= 59);
+    REQUIRE(tm.tm_sec >= 0);
+    REQUIRE(tm.tm_sec <= 60);
+}
+
 TEST_CASE("Runtime C string copy truncates safely", "[runtime][system]") {
     char buffer[5]{};
     copy_c_string(buffer, "abcdef");
@@ -188,6 +215,16 @@ TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]
     REQUIRE(untouched == 'x');
 
     REQUIRE_NOTHROW(copy_c_string(nullptr, 4, "abc"));
+}
+
+TEST_CASE("Runtime system info convenience helpers mirror cached info",
+          "[runtime][system][coverage][phase3]") {
+    const auto& info = get_system_info();
+    REQUIRE_FALSE(info.os_name.empty());
+    REQUIRE_FALSE(info.arch.empty());
+    REQUIRE(info.cpu_threads >= 0);
+    REQUIRE(cpu_thread_count() == info.cpu_threads);
+    REQUIRE(total_memory_mb() == info.total_memory_mb);
 }
 
 TEST_CASE("TemporaryFile creates extensions and release preserves path", "[runtime][temporary_file]") {
@@ -278,4 +315,30 @@ TEST_CASE("DynamicLibrary move keeps failed handles closed", "[runtime][dynamic_
     REQUIRE_FALSE(first.is_open());
     REQUIRE_FALSE(second.is_open());
     REQUIRE_FALSE(second.error().empty());
+}
+
+TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_library][coverage][phase3]") {
+    DynamicLibrary original;
+#ifdef __APPLE__
+    REQUIRE(original.open("/usr/lib/libSystem.B.dylib"));
+    const char* symbol = "malloc";
+#elif defined(__linux__)
+    REQUIRE(original.open("libc.so.6"));
+    const char* symbol = "malloc";
+#else
+    const char* symbol = nullptr;
+    SUCCEED("No stable system library fixture on this platform.");
+    return;
+#endif
+
+    DynamicLibrary moved(std::move(original));
+    REQUIRE_FALSE(original.is_open());
+    REQUIRE(moved.is_open());
+    REQUIRE(moved.find_symbol(symbol) != nullptr);
+
+    DynamicLibrary assigned;
+    assigned = std::move(moved);
+    REQUIRE_FALSE(moved.is_open());
+    REQUIRE(assigned.is_open());
+    REQUIRE(assigned.find_symbol(symbol) != nullptr);
 }
