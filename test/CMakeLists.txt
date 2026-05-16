@@ -2373,4 +2373,16 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         "-framework QuartzCore"
     )
     catch_discover_tests(pulp-test-mac-platform-harness)
+
+    # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
+    # ~View() must auto-clear focused_input_ (#1708 contract) so the
+    # accessor can safely re-sync the ivar to nullptr before any deref.
+    add_executable(pulp-test-mac-mousedown-stale-focus
+        test_mac_mousedown_stale_focus.mm
+    )
+    target_link_libraries(pulp-test-mac-mousedown-stale-focus PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+    )
+    catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
 endif()

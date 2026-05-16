@@ -237,9 +237,25 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e { (void)e; return YES; }
 
+// pulp #2088 — the Obj-C `_focusedView` ivar is a parallel pointer to
+// `pulp::view::View::focused_input_`. The static is auto-cleared by ~View()
+// (pulp #1708) when the focused widget is destroyed (e.g. React unmount
+// of a clicked widget); the ivar is not. The #1818 fix re-syncs at the
+// TOP of mouseDown — but mouseDown's own work (overlay dispatch, ComboBox
+// routing, on_mouse_event → React unmount) can destroy the focused view
+// MID-FUNCTION, after which subsequent _focusedView derefs PAC-fault on
+// the vtable load. Read the live pointer through this accessor everywhere
+// _focusedView could be reached after a callback that might destroy a view.
+- (pulp::view::View*)liveFocusedView {
+    if (_focusedView != pulp::view::View::focused_input_) {
+        _focusedView = pulp::view::View::focused_input_;
+    }
+    return _focusedView;
+}
+
 - (void)clearInteractionState {
     _dragTarget = nullptr;
-    if (_focusedView) _focusedView->release_input_focus();
+    if (auto* fv = [self liveFocusedView]) fv->release_input_focus();
     _focusedView = nullptr;
 }
 
@@ -401,17 +417,19 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             }
             auto pt = [self localPoint:event];
 
-            // pulp #1818 — the Obj-C `_focusedView` ivar is a parallel
+            // pulp #1818 / #2088 — the Obj-C `_focusedView` ivar is a parallel
             // pointer to `pulp::view::View::focused_input_`. The static is
             // auto-cleared by ~View() (pulp #1708) when the focused widget
-            // is destroyed (e.g., a React unmount of a clicked widget),
-            // but nothing clears the ivar. The next mouseDown then
-            // dereferences `_focusedView->on_focus_changed(false)` on
-            // freed memory and PAC-faults on the vtable load — this is
-            // the exact crash in pulp #1818 ("-[PulpView mouseDown:] + 664",
-            // KERN_INVALID_ADDRESS, x9 = corrupt high bits). Re-sync from
-            // the auto-clearing static at the top of every mouseDown so
-            // the ivar can never be dangling for any deref below.
+            // is destroyed (e.g., a React unmount of a clicked widget); the
+            // ivar is not. The original #1818 fix re-synced ONLY at this top
+            // of mouseDown — but mouseDown's own work (overlay dispatch, ComboBox
+            // routing, on_mouse_event → React unmount) can destroy the focused
+            // view MID-FUNCTION, so subsequent _focusedView derefs PAC-faulted
+            // (#2088: "-[PulpView mouseDown:] + 1172"). The complete fix routes
+            // every deref below through -[liveFocusedView], which performs the
+            // re-sync at each access site. This top-level re-sync is now
+            // redundant with the per-call accessor, but kept as defense-in-depth
+            // for any future deref that forgets to use the accessor.
             if (_focusedView && _focusedView != pulp::view::View::focused_input_) {
                 _focusedView = pulp::view::View::focused_input_;
             }
@@ -495,14 +513,14 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                     auto local = toLocal(pt, _dragTarget, self.rootView);
 
                     if (_dragTarget->focusable()) {
-                        if (_focusedView && _focusedView != _dragTarget)
-                            _focusedView->on_focus_changed(false);
+                        if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
+                            fv->on_focus_changed(false);
                         _focusedView = _dragTarget;
                         _focusedView->on_focus_changed(true);
                         _focusedView->claim_input_focus();
-                    } else if (_focusedView) {
-                        _focusedView->on_focus_changed(false);
-                        _focusedView->release_input_focus();
+                    } else if (auto* fv = [self liveFocusedView]) {
+                        fv->on_focus_changed(false);
+                        fv->release_input_focus();
                         _focusedView = nullptr;
                     }
 
@@ -546,14 +564,14 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             auto local = toLocal(pt, _dragTarget, self.rootView);
 
             if (_dragTarget->focusable()) {
-                if (_focusedView && _focusedView != _dragTarget)
-                    _focusedView->on_focus_changed(false);
+                if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
+                    fv->on_focus_changed(false);
                 _focusedView = _dragTarget;
                 _focusedView->on_focus_changed(true);
                 _focusedView->claim_input_focus();
-            } else if (_focusedView) {
-                _focusedView->on_focus_changed(false);
-                _focusedView->release_input_focus();
+            } else if (auto* fv = [self liveFocusedView]) {
+                fv->on_focus_changed(false);
+                fv->release_input_focus();
                 _focusedView = nullptr;
             }
 
@@ -781,12 +799,15 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
         }
 
         if (key == pulp::view::KeyCode::tab && self.rootView) {
-            auto* old = _focusedView;
+            // pulp #2088 — re-sync via liveFocusedView so a destroyed prior
+            // focused view doesn't leak a dangling ivar into focus_next/prev
+            // and the on_focus_changed/release_input_focus calls below.
+            auto* old = [self liveFocusedView];
             pulp::view::View* next = nullptr;
             if (mods & pulp::view::kModShift)
-                next = pulp::view::View::focus_prev(*self.rootView, _focusedView);
+                next = pulp::view::View::focus_prev(*self.rootView, old);
             else
-                next = pulp::view::View::focus_next(*self.rootView, _focusedView);
+                next = pulp::view::View::focus_next(*self.rootView, old);
             if (next && next != old) {
                 if (old) {
                     old->on_focus_changed(false);
@@ -858,13 +879,17 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
         [self interpretKeyEvents:@[event]];
 
-            if (_focusedView) {
+            // pulp #2088 — interpretKeyEvents above can dispatch IME / app
+            // commands that ultimately destroy the focused widget (e.g.,
+            // a JS key handler triggers a React unmount). Re-sync via
+            // liveFocusedView so we don't deref a freed view here.
+            if (auto* fv = [self liveFocusedView]) {
                 pulp::view::KeyEvent ke;
                 ke.key = key;
                 ke.modifiers = mods;
                 ke.is_down = true;
                 ke.is_repeat = event.isARepeat;
-                _focusedView->on_key_event(ke);
+                fv->on_key_event(ke);
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
             }
