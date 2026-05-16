@@ -5080,3 +5080,43 @@ validation and batch contents while held. Existing open PRs should be
 monitored, fixed, merged on green, or folded only when doing so reduces
 queue pressure without losing review/CI signal. No Namespace/SSH validation;
 use GitHub-hosted CI and macOS local focused validation.
+
+2026-05-15 20:56 PDT: collapsed the still-open Codecov/test PR queue into
+one replacement GitHub-hosted CI run. Created
+`feature/phase3-codecov-megabatch-666` in
+`/private/tmp/pulp-phase3-codecov-megabatch-666` from `origin/main`
+`85bd37efa`, then merged the current heads of:
+
+- #2048 `feature/phase3-codecov-runtime-platform-consolidated-657`
+- #2049 `feature/phase3-codecov-media-consolidated-658`
+- #2050 `feature/phase3-codecov-view-consolidated-660`
+- #2051 `feature/phase3-codecov-tools-host-format-consolidated-659`
+- #2097 `feature/phase3-codecov-ship-package-batch-661`
+- #2098 `feature/phase3-codecov-runtime-audio-batch-662`
+- #2099 `feature/phase3-codecov-audio-runtime-batch-663`
+- #2100 `feature/phase3-codecov-events-batch-664`
+
+Resolved merge conflicts in `test/test_license.cpp`,
+`test/test_runtime_utils.cpp`, and `test/test_audio_tools.cpp` by preserving
+the broader existing assertions and adding the unique assertions from the
+incoming branches. Local validation passed: `cmake -S . -B build
+-DCMAKE_BUILD_TYPE=Debug`; full `cmake --build build -j8`; and focused
+`ctest --test-dir build --output-on-failure -R
+"BigInteger copy move|TemporaryFile normalizes|TemporaryFile move
+assignment|TemporaryFile self move|MemoryMappedFile|HttpResponse ok|HTTP
+helpers reject malformed|excerpt bundle reader fills defaults|excerpt
+bundle reader reports empty|EventLoop|Timer|ActionBroadcaster|MountedVolumeListChangeDetector|IPC|NetworkServiceDiscovery|GraphSerializer|StateTree remove
+notifies|StateTreeSynchroniser records property removals|StateTreeSynchroniser
+apply"` with 90/90 tests passing. Push used
+`PULP_VIA_SHIPYARD=1 PULP_DISABLE_PREPUSH_DIFF_COVER=1`; the local
+diff-cover pre-push lane attempted a coverage configure and hit the known
+FetchContent checkout failure for `mbedtls` tag `v3.6.2`, then demoted as
+advisory. No Namespace/SSH validation was dispatched.
+
+Opened #2102, `test: consolidate phase 3 codecov coverage queue`, on
+`feature/phase3-codecov-megabatch-666`, labeled `codecov` and `tests`.
+Immediately commented and closed the superseded open PRs #2048, #2049,
+#2050, #2051, #2097, #2098, #2099, and #2100 so those smaller branches stop
+consuming separate GitHub/macOS CI runs. Monitor #2102 only for this combined
+queue. Future Codecov work should continue as held local batches until the
+batch is large enough to justify one GitHub-hosted CI run.
