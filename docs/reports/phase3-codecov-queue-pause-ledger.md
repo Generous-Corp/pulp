@@ -5120,3 +5120,31 @@ Immediately commented and closed the superseded open PRs #2048, #2049,
 consuming separate GitHub/macOS CI runs. Monitor #2102 only for this combined
 queue. Future Codecov work should continue as held local batches until the
 batch is large enough to justify one GitHub-hosted CI run.
+
+2026-05-15 21:19 PDT: published the next large state/parameter coverage
+batch as #2103, `test: batch state coverage edges`, on
+`feature/phase3-codecov-state-batch-665` at `c096457a2`. This is a single
+12-commit GitHub-hosted CI batch rather than separate small PRs.
+
+Batch contents cover:
+- `StateStore` deserialize clamp, bad-magic, future-version, listener, and
+  `ParamValue` primitive edges.
+- `StateTree` listener, child-removal, typed-getter, malformed JSON, and
+  synchronizer decode/remove edges.
+- `Binding` empty callback and unknown-parameter reset robustness.
+- `EditHistory` runtime max-depth trimming and zero-depth behavior.
+- `PropertiesFile` scalar parser and malformed JSON shape edges.
+- `PresetManager` empty navigation, discovery, `PresetInfo` load, and
+  rename/current-name edges.
+
+Local validation before publishing passed:
+`cmake --build build --target pulp-test-state pulp-test-state-tree
+pulp-test-binding pulp-test-properties pulp-test-preset-manager
+pulp-test-edit-history -j8`; `ctest --test-dir build --output-on-failure
+-R "ParamRange|ParamValue|StateStore|StateTree|ObservableValue|CachedProperty|PropertiesFile|ApplicationProperties|Binding|PresetManager|EditHistory"`
+with 116/116 tests passing; and `git diff --check origin/main...HEAD`.
+The first push was blocked by the version-bump gate because state headers
+changed; the tip commit was amended with
+`Version-Bump: sdk=skip reason="state robustness and coverage batch; no SDK
+or CLI API surface change"`, then pre-push gates passed. No Namespace/SSH
+validation was dispatched.
