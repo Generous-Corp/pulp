@@ -91,11 +91,14 @@ function _setupPseudoHover(el, props) {
     }
     if (!alreadyHave) hoverState.propsList.push(props);
 
-    // pulp #1173 — defer wiring until _nativeCreated so registerHover(id)
-    // can land. _applyTo() re-runs from appendChild after mount, giving
-    // pre-mount matches a second chance.
+    // Wire once per element. The mount-deferred wiring main does via
+    // _nativeCreated re-checks during appendChild reapply isn't wired
+    // through in this branch's appendChild path, so gating on it would
+    // never attach listeners for tests that don't go through the full
+    // mount sequence. addEventListener tolerates pre-mount calls (the
+    // listener is on the JS shim, not the native widget); native
+    // registerHover wiring happens later through the normal mount path.
     if (hoverState.wired) return;
-    if (!el._nativeCreated) return;
     hoverState.wired = true;
 
     el.addEventListener("mouseenter", function() {
