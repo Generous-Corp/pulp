@@ -33,6 +33,27 @@ TEST_CASE("SvgPathWidget defaults match HTML <path> semantics", "[svg_path][issu
     REQUIRE(w.segments().empty());
 }
 
+TEST_CASE("SvgPathWidget intrinsic size reflects viewBox", "[svg_path][issue-72]") {
+    // Spectr preset-manager thumbnails mount <svg viewBox="0 0 W H"><path/></svg>
+    // into a flex container without explicit width/height. Pre-fix, Yoga had
+    // nothing to size the widget with (intrinsic_*() returned 0 from the base),
+    // so paint() saw a 0x0 local_bounds and early-exited. Exposing the
+    // viewBox as the intrinsic size lets Yoga pick it up as flex-basis.
+    SvgPathWidget w;
+    REQUIRE(w.intrinsic_width() == 0.0f);   // no viewBox set
+    REQUIRE(w.intrinsic_height() == 0.0f);
+
+    w.set_viewbox(24.0f, 16.0f);
+    REQUIRE(w.intrinsic_width() == 24.0f);
+    REQUIRE(w.intrinsic_height() == 16.0f);
+
+    // Zero / negative viewBox stays at 0 (caller must provide explicit size,
+    // matching pre-fix behavior for the no-viewBox case).
+    w.set_viewbox(0.0f, 0.0f);
+    REQUIRE(w.intrinsic_width() == 0.0f);
+    REQUIRE(w.intrinsic_height() == 0.0f);
+}
+
 TEST_CASE("SvgPathWidget parses absolute M/L/Z", "[svg_path][issue-965]") {
     SvgPathWidget w;
     w.set_path("M 1 2 L 3 4 Z");

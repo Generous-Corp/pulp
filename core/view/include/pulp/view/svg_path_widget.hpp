@@ -97,6 +97,17 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    /// pulp #72 — expose the viewBox as the natural / intrinsic size so
+    /// Yoga can use it as flex-basis when the host doesn't set explicit
+    /// dimensions. Without these, an `<svg viewBox="0 0 24 24"><path/></svg>`
+    /// dropped into a flex container collapses to 0×0 and `paint()` early-
+    /// exits at the `local_bounds().width <= 0` guard — the symptom that
+    /// blanked Spectr's preset-manager band-shape thumbnails. Returns 0
+    /// when no viewBox is set (caller must provide explicit size, same
+    /// pre-fix behavior).
+    float intrinsic_width() const override  { return viewbox_w_ > 0 ? viewbox_w_ : 0; }
+    float intrinsic_height() const override { return viewbox_h_ > 0 ? viewbox_h_ : 0; }
+
 private:
     void reparse();
 
