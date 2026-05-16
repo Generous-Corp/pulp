@@ -281,6 +281,23 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
 
 5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>85%)
 
+### Keyboard shortcut extraction (UX best-practice default)
+
+The library function `extract_keyboard_shortcuts(source, filename)` scans
+imported React source for inline `onKeyDown={e => ...}`,
+`window.addEventListener('keydown', ...)`, and `if (e.key === 'X')` patterns,
+returning a `std::vector<DetectedShortcut>` for the design-import emitter
+to register via Pulp's runtime `registerShortcut(key, modifiers, callback)`
+surface. Modifier idioms (`metaKey || ctrlKey`) collapse to a single `meta`
+entry per the cross-platform shortcut convention. Use
+`serialize_detected_shortcuts()` to emit the stable JSON manifest.
+
+The matcher is **lexical only** — handler bodies that reference React state
+(e.g. `setActiveTab(2)`) can't be auto-wired yet; the manifest surfaces them
+for human triage via a `handler_excerpt` field. V1 (this slice) only emits
+the manifest; follow-up slices wire the CLI flag and emit `registerShortcut(...)`
+into the generated JS. Default-on with a planned `--no-import-shortcuts` opt-out.
+
 ### Yoga Layout Rules (MUST follow)
 - Every container needs explicit `height`, `min_height`, or `flex_grow`
 - Labels need `min_height` (14px for normal text, 12px for small)
