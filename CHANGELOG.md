@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v01040"></a>
+## [0.40.0]
+
+## [0.105.0]
+
 ## [0.104.0] - 2026-05-16
 
 - feat(design-import): extract keyboard shortcuts from React source (V1) ([#2116](https://github.com/danielraffel/pulp/pull/2116))
