@@ -1123,29 +1123,24 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
 
     const auto bin = fs::absolute(pulp_binary());
 
-    // Doctor walks xcode-select / xcrun / simctl on macOS and the Android
-    // SDK probe on non-macOS; under CI load (github-hosted ARM64 runners
-    // especially) these can stretch well past a minute. This test only
-    // validates subcommand recognition, so allow extra headroom and let
-    // exit-code assertions catch real parser regressions.
-    constexpr int doctor_timeout_ms = 180000;
-    auto android = exec(bin.string(), {"doctor", "android"}, doctor_timeout_ms);
-    auto ios     = exec(bin.string(), {"doctor", "ios"},     doctor_timeout_ms);
-    auto bogus   = exec(bin.string(), {"doctor", "potato"},  10000);
+    // Use --versions so the parser still has to accept the mobile
+    // subcommand before the diagnostic short-circuit, without running the
+    // slow host SDK probes that can hang on saturated CI runners.
+    auto android = exec(bin.string(), {"doctor", "android", "--versions"}, 10000);
+    auto ios     = exec(bin.string(), {"doctor", "ios", "--versions"},     10000);
+    auto bogus   = exec(bin.string(), {"doctor", "potato", "--versions"},  10000);
 
     REQUIRE_FALSE(android.timed_out);
     REQUIRE_FALSE(ios.timed_out);
     REQUIRE_FALSE(bogus.timed_out);
 
-    // android + ios run the new check sets — exit 0 when the host
-    // has the tooling, exit 1 when something's missing. Either is
-    // fine here; we're verifying the SUBCOMMAND is recognized, not
-    // that the dev host is fully provisioned. exit 2 is the
-    // "unknown subcommand" failure path we're guarding against.
-    REQUIRE(android.exit_code != 2);
-    REQUIRE(ios.exit_code != 2);
-    REQUIRE(android.stdout_output.find("Pulp Doctor") != std::string::npos);
-    REQUIRE(ios.stdout_output.find("Pulp Doctor") != std::string::npos);
+    // android + ios are recognized before --versions short-circuits the
+    // doctor pipeline. exit 2 is the "unknown subcommand" failure path
+    // we're guarding against.
+    REQUIRE(android.exit_code == 0);
+    REQUIRE(ios.exit_code == 0);
+    REQUIRE(android.stdout_output.find("Pulp Version Diagnostics") != std::string::npos);
+    REQUIRE(ios.stdout_output.find("Pulp Version Diagnostics") != std::string::npos);
 
     // bogus subcommand: rejected at the parser with a helpful Usage line.
     REQUIRE(bogus.exit_code == 2);

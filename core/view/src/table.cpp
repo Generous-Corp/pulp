@@ -104,6 +104,11 @@ void TableListBox::paint(canvas::Canvas& canvas) {
 void TableListBox::on_mouse_down(Point pos) {
     float header_h = header_height_;
 
+    if (pos.x < 0.0f || pos.y < 0.0f || pos.x >= bounds().width ||
+        pos.y >= bounds().height) {
+        return;
+    }
+
     if (pos.y < header_h) {
         // Click on header — sort by column
         float col_x = 0;

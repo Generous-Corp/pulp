@@ -1,16 +1,58 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/auto_ui.hpp>
+#include <pulp/canvas/canvas.hpp>
+
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 
 using namespace pulp::view;
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
 
+namespace {
+
+ParamInfo make_param(ParamID id, std::string name, std::string unit, ParamRange range) {
+    ParamInfo info;
+    info.id = id;
+    info.name = std::move(name);
+    info.unit = std::move(unit);
+    info.range = range;
+    return info;
+}
+
+template <typename Widget>
+Widget* find_widget(View& view, std::string_view id) {
+    if (view.id() == id) {
+        if (auto* widget = dynamic_cast<Widget*>(&view)) return widget;
+    }
+    for (size_t i = 0; i < view.child_count(); ++i) {
+        if (auto* widget = find_widget<Widget>(*view.child_at(i), id)) return widget;
+    }
+    return nullptr;
+}
+
+bool paints_text(View& view, std::string_view text) {
+    pulp::canvas::RecordingCanvas canvas;
+    view.paint(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text &&
+            cmd.text == text) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
     StateStore store;
-    store.add_parameter({1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}});
-    store.add_parameter({2, "Mix", "%", {0.0f, 100.0f, 100.0f}});
-    store.add_parameter({3, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}}); // step=1 → toggle
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param(2, "Mix", "%", {0.0f, 100.0f, 100.0f}));
+    store.add_parameter(make_param(3, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
 
     auto root = AutoUi::build(store);
     REQUIRE(root != nullptr);
@@ -132,7 +174,7 @@ TEST_CASE("AutoUi scales from 1 param up to 16 without losing structure",
 
 TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     StateStore store;
-    store.add_parameter({1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}});
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
 
     auto root = AutoUi::build(store);
     REQUIRE(root != nullptr);
@@ -155,4 +197,66 @@ TEST_CASE("AutoUi sync updates widgets", "[view][auto_ui]") {
     auto* knob = find_knob(*root);
     REQUIRE(knob != nullptr);
     REQUIRE_THAT(knob->value(), WithinAbs(0.8, 0.01));
+}
+
+TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
+          "[view][auto_ui][coverage][issue-493]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Frequency", "Hz", {0.0f, 1000.0f, 500.0f}));
+    store.add_parameter(make_param(2, "Drive", "dB", {0.0f, 80.0f, 50.0f}));
+    store.add_parameter(make_param(3, "Fine", "", {0.0f, 8.0f, 5.0f}));
+    store.add_parameter(make_param(4, "Bypass", "", {0.0f, 1.0f, 1.0f, 1.0f}));
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+
+    auto* frequency = find_widget<Knob>(*root, "Frequency");
+    auto* drive = find_widget<Knob>(*root, "Drive");
+    auto* fine = find_widget<Knob>(*root, "Fine");
+    auto* bypass = find_widget<Toggle>(*root, "Bypass");
+
+    REQUIRE(frequency != nullptr);
+    REQUIRE(drive != nullptr);
+    REQUIRE(fine != nullptr);
+    REQUIRE(bypass != nullptr);
+    REQUIRE(bypass->is_on());
+    REQUIRE(bypass->label() == "Bypass");
+
+    frequency->set_bounds({0, 0, 80, 80});
+    drive->set_bounds({0, 0, 80, 80});
+    fine->set_bounds({0, 0, 80, 80});
+
+    REQUIRE(paints_text(*frequency, "500 Hz"));
+    REQUIRE(paints_text(*drive, "50.0 dB"));
+    REQUIRE(paints_text(*fine, "5.00"));
+}
+
+TEST_CASE("AutoUi sync updates generated toggles and existing faders",
+          "[view][auto_ui][coverage][issue-493]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+    store.add_parameter(make_param(2, "Level", "", {0.0f, 1.0f, 0.0f}));
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+
+    auto* bypass = find_widget<Toggle>(*root, "Bypass");
+    REQUIRE(bypass != nullptr);
+    REQUIRE_FALSE(bypass->is_on());
+
+    auto fader = std::make_unique<Fader>();
+    auto* fader_ptr = fader.get();
+    fader->set_id("Level");
+    root->add_child(std::move(fader));
+
+    store.set_normalized(1, 1.0f);
+    store.set_normalized(2, 0.35f);
+    AutoUi::sync(*root, store);
+
+    REQUIRE(bypass->is_on());
+    REQUIRE_THAT(fader_ptr->value(), WithinAbs(0.35f, 0.001f));
+
+    store.set_normalized(1, 0.0f);
+    AutoUi::sync(*root, store);
+    REQUIRE_FALSE(bypass->is_on());
 }

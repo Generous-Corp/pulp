@@ -63,6 +63,22 @@ TEST_CASE("WaveformEditor selection callback", "[view][waveform_editor]") {
     REQUIRE(cb_end == 1500);
 }
 
+TEST_CASE("WaveformEditor clamps selection bounds and reversed ranges", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+
+    editor.set_selection(-100, 1200);
+    REQUIRE(editor.selection_start() == 0);
+    REQUIRE(editor.selection_end() == 1000);
+    REQUIRE(editor.selection_length() == 1000);
+
+    editor.set_selection(900, 100);
+    REQUIRE(editor.selection_start() == 100);
+    REQUIRE(editor.selection_end() == 900);
+    REQUIRE(editor.selection_length() == 800);
+}
+
 TEST_CASE("WaveformEditor zoom in/out", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(44100);
@@ -103,6 +119,18 @@ TEST_CASE("WaveformEditor zoom to selection", "[view][waveform_editor]") {
     REQUIRE(editor.visible_length() == 10000);
 }
 
+TEST_CASE("WaveformEditor zoom to selection is a no-op without selection", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+    editor.set_visible_range(200, 250);
+
+    editor.zoom_to_selection();
+
+    REQUIRE(editor.visible_start() == 200);
+    REQUIRE(editor.visible_length() == 250);
+}
+
 TEST_CASE("WaveformEditor scroll", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(44100);
@@ -127,6 +155,20 @@ TEST_CASE("WaveformEditor scroll clamped at boundaries", "[view][waveform_editor
     REQUIRE(editor.visible_start() + editor.visible_length() <= 44100);
 }
 
+TEST_CASE("WaveformEditor visible range clamps minimum length near end", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+
+    editor.set_visible_range(995, 1);
+    REQUIRE(editor.visible_length() == 16);
+    REQUIRE(editor.visible_start() == 984);
+
+    editor.set_visible_range(-50, 100);
+    REQUIRE(editor.visible_start() == 0);
+    REQUIRE(editor.visible_length() == 100);
+}
+
 TEST_CASE("WaveformEditor playhead", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(44100);
@@ -134,6 +176,18 @@ TEST_CASE("WaveformEditor playhead", "[view][waveform_editor]") {
 
     editor.set_playhead(22050);
     REQUIRE(editor.playhead() == 22050);
+}
+
+TEST_CASE("WaveformEditor playhead clamps to audio bounds", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+
+    editor.set_playhead(-50);
+    REQUIRE(editor.playhead() == 0);
+
+    editor.set_playhead(5000);
+    REQUIRE(editor.playhead() == 1000);
 }
 
 TEST_CASE("WaveformEditor regions", "[view][waveform_editor]") {
@@ -164,6 +218,22 @@ TEST_CASE("WaveformEditor paint produces draw commands", "[view][waveform_editor
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) > 0);
 }
 
+TEST_CASE("WaveformEditor paint records regions selection and playhead", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(400);
+    editor.set_audio_data(data.data(), 400, 44100.0f);
+    editor.set_bounds({0, 0, 80, 40});
+    editor.set_selection(40, 120);
+    editor.add_region({160, 240, "Loop"});
+    editor.set_playhead(200);
+
+    RecordingCanvas canvas;
+    editor.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 3);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) >= 82);
+}
+
 TEST_CASE("WaveformEditor key Cmd+A selects all", "[view][waveform_editor]") {
     WaveformEditor editor;
     auto data = make_sine(44100);
@@ -180,4 +250,61 @@ TEST_CASE("WaveformEditor key Cmd+A selects all", "[view][waveform_editor]") {
     REQUIRE(editor.on_key_event(e));
     REQUIRE(editor.selection_start() == 0);
     REQUIRE(editor.selection_end() == 44100);
+}
+
+TEST_CASE("WaveformEditor key scrolls and release events are ignored", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+    editor.set_visible_range(200, 200);
+
+    KeyEvent release;
+    release.key = KeyCode::right;
+    release.is_down = false;
+    REQUIRE_FALSE(editor.on_key_event(release));
+    REQUIRE(editor.visible_start() == 200);
+
+    KeyEvent right;
+    right.key = KeyCode::right;
+    REQUIRE(editor.on_key_event(right));
+    REQUIRE(editor.visible_start() == 220);
+
+    KeyEvent left;
+    left.key = KeyCode::left;
+    REQUIRE(editor.on_key_event(left));
+    REQUIRE(editor.visible_start() == 200);
+}
+
+TEST_CASE("WaveformEditor mouse click and shift extend selection", "[view][waveform_editor]") {
+    WaveformEditor editor;
+    auto data = make_sine(1000);
+    editor.set_audio_data(data.data(), 1000, 44100.0f);
+    editor.set_bounds({0, 0, 100, 40});
+
+    MouseEvent down;
+    down.is_down = true;
+    down.position = {25, 10};
+    editor.on_mouse_event(down);
+    REQUIRE(editor.selection_start() == 250);
+    REQUIRE(editor.selection_end() == 250);
+    REQUIRE_FALSE(editor.has_selection());
+
+    editor.set_selection(100, 200);
+    int cb_start = -1;
+    int cb_end = -1;
+    editor.on_selection_changed = [&](int start, int end) {
+        cb_start = start;
+        cb_end = end;
+    };
+
+    MouseEvent shift_down;
+    shift_down.is_down = true;
+    shift_down.modifiers = kModShift;
+    shift_down.position = {50, 10};
+    editor.on_mouse_event(shift_down);
+
+    REQUIRE(editor.selection_start() == 100);
+    REQUIRE(editor.selection_end() == 500);
+    REQUIRE(cb_start == 100);
+    REQUIRE(cb_end == 500);
 }

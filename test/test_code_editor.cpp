@@ -94,6 +94,20 @@ TEST_CASE("CodeEditor insert text", "[gui][code-editor]") {
     REQUIRE(editor.text() == "hello world");
 }
 
+TEST_CASE("CodeEditor insert appends in read-only fallback mode",
+          "[gui][code-editor][coverage][issue-655]") {
+    CodeEditor editor;
+    editor.set_read_only(true);
+    editor.set_text("alpha");
+    editor.insert_text("\nbeta");
+    editor.go_to_line(99);
+
+    REQUIRE(editor.text() == "alpha\nbeta");
+    REQUIRE(editor.cursor_line() == 99);
+    REQUIRE(editor.cursor_column() == 1);
+    REQUIRE(editor.selected_text().empty());
+}
+
 TEST_CASE("CodeEditor go to line", "[gui][code-editor]") {
     CodeEditor editor;
     editor.set_text("line1\nline2\nline3");
@@ -200,6 +214,36 @@ TEST_CASE("FileBasedDocument handles save and load edge paths",
     REQUIRE_FALSE(last_dirty);
 }
 
+TEST_CASE("FileBasedDocument handles successful load and save_as paths",
+          "[gui][code-editor][coverage]") {
+    TestDoc doc;
+    int dirty_callback_count = 0;
+    bool last_dirty = true;
+    doc.on_dirty_changed = [&](bool dirty) {
+        ++dirty_callback_count;
+        last_dirty = dirty;
+    };
+
+    doc.set_dirty(true);
+    REQUIRE(doc.load("/tmp/session.pulp"));
+    REQUIRE(doc.load_calls == 1);
+    REQUIRE(doc.loaded_path == "/tmp/session.pulp");
+    REQUIRE(doc.file_path() == "/tmp/session.pulp");
+    REQUIRE(doc.title() == "session");
+    REQUIRE_FALSE(doc.is_dirty());
+    REQUIRE(dirty_callback_count == 0);
+
+    doc.set_dirty(true);
+    REQUIRE(doc.save_as("/tmp/renamed.project"));
+    REQUIRE(doc.save_calls == 1);
+    REQUIRE(doc.saved_path == "/tmp/renamed.project");
+    REQUIRE(doc.file_path() == "/tmp/renamed.project");
+    REQUIRE(doc.title() == "renamed");
+    REQUIRE_FALSE(doc.is_dirty());
+    REQUIRE(dirty_callback_count == 1);
+    REQUIRE_FALSE(last_dirty);
+}
+
 TEST_CASE("RecentlyOpenedFilesList MRU behavior", "[gui][code-editor]") {
     RecentlyOpenedFilesList mru;
     mru.add("/path/a.txt");
@@ -217,6 +261,28 @@ TEST_CASE("RecentlyOpenedFilesList MRU behavior", "[gui][code-editor]") {
     // Max entries
     mru.set_max_entries(2);
     REQUIRE(mru.files().size() == 2);
+}
+
+TEST_CASE("RecentlyOpenedFilesList removes entries and ignores missing paths",
+          "[gui][code-editor][coverage]") {
+    RecentlyOpenedFilesList mru;
+    mru.add("/path/a.txt");
+    mru.add("/path/b.txt");
+    mru.add("/path/c.txt");
+
+    mru.remove("/path/b.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/path/c.txt");
+    REQUIRE(mru.files()[1] == "/path/a.txt");
+
+    mru.remove("/path/missing.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/path/c.txt");
+    REQUIRE(mru.files()[1] == "/path/a.txt");
+
+    mru.remove("/path/c.txt");
+    mru.remove("/path/a.txt");
+    REQUIRE(mru.files().empty());
 }
 
 TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",
@@ -258,4 +324,26 @@ TEST_CASE("RecentlyOpenedFilesList persists trims and handles I/O misses",
     REQUIRE(reloaded.files()[1] == "/saved/a.txt");
 
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("RecentlyOpenedFilesList remove and max-entry edge paths",
+          "[gui][code-editor][coverage][issue-655]") {
+    RecentlyOpenedFilesList mru;
+    mru.add("/a.txt");
+    mru.add("/b.txt");
+    mru.add("/c.txt");
+
+    mru.remove("/b.txt");
+    REQUIRE(mru.files().size() == 2);
+    REQUIRE(mru.files()[0] == "/c.txt");
+    REQUIRE(mru.files()[1] == "/a.txt");
+
+    mru.remove("/missing.txt");
+    REQUIRE(mru.files().size() == 2);
+
+    mru.set_max_entries(0);
+    REQUIRE(mru.files().empty());
+
+    mru.add("/d.txt");
+    REQUIRE(mru.files().empty());
 }

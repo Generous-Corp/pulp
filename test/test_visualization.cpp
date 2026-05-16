@@ -123,6 +123,79 @@ TEST_CASE("VisualizationBridge publishes waveform", "[view][vizbridge]") {
     REQUIRE(wf.samples[wf.num_samples - 1] > 0.9f);
 }
 
+TEST_CASE("VisualizationBridge skips waveform when capture is disabled", "[view][vizbridge]") {
+    VisualizationBridge bridge;
+
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 128;
+    cfg.num_channels = 1;
+    cfg.sample_rate = 44100.0f;
+    cfg.capture_waveform = false;
+    cfg.waveform_length = 64;
+
+    bridge.configure(cfg);
+
+    std::vector<float> buf(128, 0.25f);
+    const float* channels[] = {buf.data()};
+    bridge.process(channels, 1, 128);
+
+    const auto& wf = bridge.read_waveform();
+    REQUIRE(wf.num_samples == 0);
+    REQUIRE(wf.num_channels == 0);
+}
+
+TEST_CASE("VisualizationBridge zero-channel block only publishes empty meter", "[view][vizbridge]") {
+    VisualizationBridge bridge;
+
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 128;
+    cfg.num_channels = 2;
+    cfg.sample_rate = 1000.0f;
+    cfg.capture_waveform = true;
+    cfg.waveform_length = 32;
+
+    bridge.configure(cfg);
+
+    bridge.process(nullptr, 0, 16);
+
+    const auto& meter = bridge.read_meter();
+    const auto& spec = bridge.read_spectrum();
+    const auto& wf = bridge.read_waveform();
+
+    REQUIRE(meter.num_channels == 0);
+    REQUIRE(spec.num_bins == 0);
+    REQUIRE(wf.num_samples == 0);
+    REQUIRE(wf.num_channels == 0);
+}
+
+TEST_CASE("VisualizationBridge clamps waveform capture length to storage", "[view][vizbridge]") {
+    VisualizationBridge bridge;
+
+    VisualizationConfig cfg;
+    cfg.fft_size = 256;
+    cfg.hop_size = 128;
+    cfg.num_channels = 1;
+    cfg.sample_rate = 44100.0f;
+    cfg.capture_waveform = true;
+    cfg.waveform_length = WaveformData::kMaxSamples + 256;
+
+    bridge.configure(cfg);
+
+    std::vector<float> ramp(16);
+    for (int i = 0; i < static_cast<int>(ramp.size()); ++i)
+        ramp[i] = static_cast<float>(i) / static_cast<float>(ramp.size());
+
+    const float* channels[] = {ramp.data()};
+    bridge.process(channels, 1, static_cast<int>(ramp.size()));
+
+    const auto& wf = bridge.read_waveform();
+    REQUIRE(wf.num_samples == WaveformData::kMaxSamples);
+    REQUIRE(wf.num_channels == 1);
+    REQUIRE_THAT(wf.samples[wf.num_samples - 1], WithinAbs(15.0f / 16.0f, 1e-6f));
+}
+
 TEST_CASE("VisualizationBridge reset clears state", "[view][vizbridge]") {
     VisualizationBridge bridge;
 

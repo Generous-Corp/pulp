@@ -30,6 +30,68 @@ public:
     }
 };
 
+class PanelProbeView final : public View {
+public:
+    explicit PanelProbeView(float intrinsic_height) : intrinsic_height_(intrinsic_height) {}
+
+    int paint_count = 0;
+
+    float intrinsic_height() const override { return intrinsic_height_; }
+
+    void paint(pulp::canvas::Canvas& canvas) override {
+        ++paint_count;
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(4, 5, 6));
+        canvas.fill_rect(0, 0, bounds().width, bounds().height);
+    }
+
+private:
+    float intrinsic_height_ = 0.0f;
+};
+
+class TrackingTableModel final : public TableModel {
+public:
+    explicit TrackingTableModel(std::vector<std::vector<std::string>> rows)
+        : rows_(std::move(rows)) {}
+
+    int sort_calls = 0;
+    int selected_calls = 0;
+    int last_sort_column = -1;
+    int last_selected_row = -1;
+    bool last_sort_ascending = false;
+
+    int row_count() const override { return static_cast<int>(rows_.size()); }
+
+    std::string cell_text(int row, int column) const override {
+        if (row < 0 || row >= row_count())
+            return "";
+        const auto& row_values = rows_[static_cast<size_t>(row)];
+        if (column < 0 || column >= static_cast<int>(row_values.size()))
+            return "";
+        return row_values[static_cast<size_t>(column)];
+    }
+
+    bool sort(int column, bool ascending) override {
+        ++sort_calls;
+        last_sort_column = column;
+        last_sort_ascending = ascending;
+        const auto col = static_cast<size_t>(column);
+        std::sort(rows_.begin(), rows_.end(), [col, ascending](const auto& a, const auto& b) {
+            const std::string av = col < a.size() ? a[col] : "";
+            const std::string bv = col < b.size() ? b[col] : "";
+            return ascending ? av < bv : av > bv;
+        });
+        return true;
+    }
+
+    void row_selected(int row) override {
+        ++selected_calls;
+        last_selected_row = row;
+    }
+
+private:
+    std::vector<std::vector<std::string>> rows_;
+};
+
 }  // namespace
 
 // ── SimpleTableModel ────────────────────────────────────────────────────
@@ -96,6 +158,101 @@ TEST_CASE("TableListBox column management", "[gui][table]") {
     REQUIRE(table.column_count() == 0);
 }
 
+TEST_CASE("TableListBox header sorting and row selection edge paths",
+          "[gui][table][issue-493]") {
+    TrackingTableModel model({
+        {"Charlie", "Synth", "3"},
+        {"Alice", "Bass", "1"},
+        {"Bob", "Lead", "2"},
+    });
+
+    TableListBox table;
+    table.set_bounds({0, 0, 180, 120});
+    table.set_model(&model);
+    table.add_column({"Name", 120.0f, true});
+    table.add_column({"Type", 120.0f, false});
+    table.add_column({"Rank", 60.0f, true});
+
+    table.on_mouse_down({20, 8});
+    REQUIRE(model.sort_calls == 1);
+    REQUIRE(model.last_sort_column == 0);
+    REQUIRE(model.last_sort_ascending);
+    REQUIRE(model.cell_text(0, 0) == "Alice");
+
+    table.on_mouse_down({20, 8});
+    REQUIRE(model.sort_calls == 2);
+    REQUIRE(model.last_sort_column == 0);
+    REQUIRE_FALSE(model.last_sort_ascending);
+    REQUIRE(model.cell_text(0, 0) == "Charlie");
+
+    table.on_mouse_down({90, 8});
+    REQUIRE(model.sort_calls == 2);
+
+    table.on_mouse_down({160, 8});
+    REQUIRE(model.sort_calls == 3);
+    REQUIRE(model.last_sort_column == 2);
+    REQUIRE(model.last_sort_ascending);
+
+    int selected = -1;
+    table.on_selection_changed = [&](int row) { selected = row; };
+    table.on_mouse_down({15, 58});
+    REQUIRE(table.selected_row() == 1);
+    REQUIRE(selected == 1);
+    REQUIRE(model.selected_calls == 1);
+    REQUIRE(model.last_selected_row == 1);
+
+    table.on_mouse_down({15, 400});
+    REQUIRE(table.selected_row() == 1);
+    REQUIRE(model.selected_calls == 1);
+}
+
+TEST_CASE("TableListBox paint covers empty guards scaled columns and alignment",
+          "[gui][table][issue-493]") {
+    TableListBox empty;
+    empty.set_bounds({0, 0, 120, 80});
+    RecordingCanvas canvas;
+    empty.paint(canvas);
+    REQUIRE(canvas.command_count() == 0);
+
+    TrackingTableModel model({
+        {"Alice", "Bass", "10"},
+        {"Bob", "Lead", "2"},
+        {"Charlie", "Pad", "30"},
+    });
+
+    TableListBox table;
+    table.set_bounds({0, 0, 160, 86});
+    table.set_model(&model);
+    table.add_column({"Name", 120.0f, true, true, TableColumn::Align::left});
+    table.add_column({"Type", 100.0f, true, true, TableColumn::Align::center});
+    table.add_column({"Rank", 100.0f, true, true, TableColumn::Align::right});
+    table.set_selected_row(1);
+    table.on_mouse_down({12, 8});
+
+    table.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 4);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) >= 4);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 13);
+
+    bool saw_name_header = false;
+    bool saw_rank_header = false;
+    bool saw_selected_cell = false;
+    bool saw_sort_indicator = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != DrawCommand::Type::fill_text)
+            continue;
+        saw_name_header = saw_name_header || command.text == "Name";
+        saw_rank_header = saw_rank_header || command.text == "Rank";
+        saw_selected_cell = saw_selected_cell || command.text == "Bob";
+        saw_sort_indicator = saw_sort_indicator || command.text == "\xe2\x96\xb2";
+    }
+
+    REQUIRE(saw_name_header);
+    REQUIRE(saw_rank_header);
+    REQUIRE(saw_selected_cell);
+    REQUIRE(saw_sort_indicator);
+}
+
 // ── Toolbar ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Toolbar add items", "[gui][toolbar]") {
@@ -126,6 +283,9 @@ TEST_CASE("Toolbar enable/disable", "[gui][toolbar]") {
 
     toolbar.set_enabled("save", false);
     // Disabled items shouldn't trigger (tested via on_mouse_down in real usage)
+    toolbar.set_enabled("missing", false);
+    toolbar.on_mouse_down({10, 10});
+    REQUIRE_FALSE(clicked);
 }
 
 TEST_CASE("Toolbar remove item", "[gui][toolbar]") {
@@ -134,8 +294,34 @@ TEST_CASE("Toolbar remove item", "[gui][toolbar]") {
     toolbar.add_button("b", "B", []() {});
     REQUIRE(toolbar.item_count() == 2);
 
+    toolbar.remove_item("missing");
+    REQUIRE(toolbar.item_count() == 2);
+
     toolbar.remove_item("a");
     REQUIRE(toolbar.item_count() == 1);
+}
+
+TEST_CASE("Toolbar missing ids and sizing fallbacks are stable",
+          "[gui][toolbar][coverage][issue-653]") {
+    Toolbar toolbar;
+    toolbar.add_toggle("solo", "Solo", [](bool) {});
+
+    toolbar.set_toggled("missing", true);
+    toolbar.set_enabled("missing", false);
+    REQUIRE_FALSE(toolbar.is_toggled("missing"));
+    REQUIRE_FALSE(toolbar.is_toggled("solo"));
+
+    toolbar.set_item_size(18.0f);
+    toolbar.set_spacing(2.0f);
+    REQUIRE(toolbar.intrinsic_height() == 26.0f);
+
+    toolbar.set_orientation(Toolbar::Orientation::vertical);
+    REQUIRE(toolbar.intrinsic_height() == 0.0f);
+
+    int clicks = 0;
+    toolbar.add_button("go", "Go", [&] { ++clicks; });
+    toolbar.on_mouse_down({40, 40});
+    REQUIRE(clicks == 0);
 }
 
 TEST_CASE("Toolbar mouse interaction skips separators and disabled items",
@@ -283,6 +469,74 @@ TEST_CASE("ConcertinaPanel exclusive mode", "[gui][concertina]") {
     panel.expand(1);
     REQUIRE_FALSE(panel.is_expanded(0));  // Auto-collapsed
     REQUIRE(panel.is_expanded(1));
+}
+
+TEST_CASE("ConcertinaPanel guards indices and syncs content visibility",
+          "[gui][concertina][issue-493]") {
+    ConcertinaPanel panel;
+    auto first = std::make_unique<PanelProbeView>(24.0f);
+    auto* first_ptr = first.get();
+    auto second = std::make_unique<PanelProbeView>(0.0f);
+    auto* second_ptr = second.get();
+
+    panel.add_section("First", std::move(first), true);
+    panel.add_section("Second", std::move(second), false);
+
+    REQUIRE(first_ptr->visible());
+    REQUIRE_FALSE(second_ptr->visible());
+    REQUIRE_FALSE(panel.is_expanded(-1));
+    REQUIRE_FALSE(panel.is_expanded(99));
+
+    panel.expand(-1);
+    panel.collapse(99);
+    panel.toggle(99);
+    REQUIRE(panel.is_expanded(0));
+    REQUIRE_FALSE(panel.is_expanded(1));
+
+    panel.expand(1);
+    REQUIRE(second_ptr->visible());
+    panel.collapse(0);
+    REQUIRE_FALSE(first_ptr->visible());
+
+    panel.layout_sections();
+    REQUIRE(second_ptr->bounds().height == 100.0f);
+}
+
+TEST_CASE("ConcertinaPanel paint and mouse hit testing cover content offsets",
+          "[gui][concertina][issue-493]") {
+    ConcertinaPanel panel;
+    panel.set_bounds({0, 0, 180, 160});
+    panel.set_header_height(20.0f);
+
+    auto first = std::make_unique<PanelProbeView>(40.0f);
+    auto* first_ptr = first.get();
+    auto second = std::make_unique<PanelProbeView>(30.0f);
+    auto* second_ptr = second.get();
+
+    panel.add_section("First", std::move(first), true);
+    panel.add_section("Second", std::move(second), false);
+
+    RecordingCanvas canvas;
+    panel.paint(canvas);
+    REQUIRE(first_ptr->paint_count == 1);
+    REQUIRE(second_ptr->paint_count == 0);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 4);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
+
+    panel.on_mouse_down({10, 35});
+    REQUIRE(panel.is_expanded(0));
+    REQUIRE_FALSE(panel.is_expanded(1));
+
+    panel.on_mouse_down({10, 65});
+    REQUIRE(panel.is_expanded(1));
+
+    canvas.clear();
+    panel.paint(canvas);
+    REQUIRE(second_ptr->paint_count == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 2);
 }
 
 // ── TextButton ──────────────────────────────────────────────────────────

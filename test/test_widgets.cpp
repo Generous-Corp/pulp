@@ -1027,6 +1027,158 @@ TEST_CASE("Audio widgets render declarative schemas and invalid schema fallback"
     REQUIRE(invalid_canvas.count(DrawCommand::Type::fill_rect) == 1);
 }
 
+TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
+          "[view][widget][shader][issue-493]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 80, 80});
+    knob.set_value(0.5f);
+    knob.set_label("Drive");
+    knob.set_format([](float) { return "50%"; });
+    knob.set_custom_shader("uniform float time; half4 main(float2 p) { return half4(time); }");
+    REQUIRE(knob.has_custom_shader());
+    REQUIRE(knob.shader_uses_time());
+
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_text) >= 2);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 24, 120});
+    fader.set_label("Level");
+    fader.set_custom_shader("half4 main(float2 p) { return half4(1); }");
+    REQUIRE(fader.has_custom_shader());
+    REQUIRE_FALSE(fader.shader_uses_time());
+
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_text) == 1);
+
+    Toggle toggle;
+    toggle.set_bounds({0, 0, 64, 32});
+    toggle.set_on(true);
+    toggle.set_label("On");
+    toggle.set_custom_shader("uniform float time; half4 main(float2 p) { return half4(time); }");
+    REQUIRE(toggle.has_custom_shader());
+    REQUIRE(toggle.shader_uses_time());
+
+    RecordingCanvas toggle_canvas;
+    toggle.paint(toggle_canvas);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_text) == 1);
+}
+
+TEST_CASE("Audio widgets minimal render style paints simplified branches",
+          "[view][widget][style][issue-493]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 64, 64});
+    knob.set_render_style(WidgetRenderStyle::minimal);
+
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_circle) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_arc) == 0);
+
+    Fader fader;
+    fader.set_bounds({0, 0, 28, 120});
+    fader.set_render_style(WidgetRenderStyle::minimal);
+
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_circle) == 0);
+
+    Meter meter;
+    meter.set_bounds({0, 0, 8, 6});
+    meter.set_render_style(WidgetRenderStyle::minimal);
+
+    RecordingCanvas meter_canvas;
+    meter.paint(meter_canvas);
+    REQUIRE(meter_canvas.count(DrawCommand::Type::fill_rect) == 6);
+    REQUIRE(meter_canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
+}
+
+TEST_CASE("Knob mouse paths update value, hover animation, and default reset",
+          "[view][widget][interaction][issue-493]") {
+    Knob knob;
+    knob.set_value(0.25f);
+    knob.set_default_value(0.75f);
+
+    std::vector<float> changes;
+    knob.on_change = [&](float v) { changes.push_back(v); };
+
+    knob.on_mouse_enter();
+    knob.advance_animations(1.0f);
+    REQUIRE(knob.hover_glow() > 0.9f);
+
+    knob.on_mouse_leave();
+    knob.advance_animations(1.0f);
+    REQUIRE(knob.hover_glow() < 0.1f);
+
+    knob.on_mouse_down({0, 100});
+    knob.on_mouse_drag({0, 55});
+    REQUIRE(knob.value() > 0.25f);
+    REQUIRE_FALSE(changes.empty());
+
+    MouseEvent reset;
+    reset.is_down = true;
+    reset.click_count = 2;
+    knob.on_mouse_event(reset);
+    REQUIRE_THAT(knob.value(), WithinAbs(0.75, 0.001));
+    REQUIRE_THAT(changes.back(), WithinAbs(0.75, 0.001));
+}
+
+TEST_CASE("Fader and toggle mouse paths dispatch clamped interactive values",
+          "[view][widget][interaction][issue-493]") {
+    Fader vertical;
+    vertical.set_bounds({0, 0, 24, 100});
+    std::vector<float> fader_changes;
+    vertical.on_change = [&](float v) { fader_changes.push_back(v); };
+
+    MouseEvent down;
+    down.is_down = true;
+    down.position = {12, 75};
+    vertical.on_mouse_event(down);
+    REQUIRE_THAT(vertical.value(), WithinAbs(0.25, 0.001));
+
+    vertical.on_mouse_drag({12, 20});
+    REQUIRE_THAT(vertical.value(), WithinAbs(0.80, 0.001));
+
+    MouseEvent up = down;
+    up.is_down = false;
+    vertical.on_mouse_event(up);
+    vertical.on_mouse_drag({12, 100});
+    REQUIRE_THAT(vertical.value(), WithinAbs(0.80, 0.001));
+    REQUIRE(fader_changes.size() >= 2);
+
+    Fader horizontal;
+    horizontal.set_bounds({0, 0, 200, 24});
+    horizontal.set_orientation(Fader::Orientation::horizontal);
+    MouseEvent horizontal_down;
+    horizontal_down.is_down = true;
+    horizontal_down.position = {50, 12};
+    horizontal.on_mouse_event(horizontal_down);
+    REQUIRE_THAT(horizontal.value(), WithinAbs(0.25, 0.001));
+
+    Toggle toggle;
+    std::vector<bool> toggle_changes;
+    toggle.on_toggle = [&](bool v) { toggle_changes.push_back(v); };
+
+    toggle.on_mouse_enter();
+    toggle.advance_animations(1.0f);
+    REQUIRE(toggle.hover_opacity() > 0.9f);
+
+    toggle.on_mouse_down({4, 4});
+    REQUIRE(toggle.is_on());
+    REQUIRE(toggle_changes == std::vector<bool>{true});
+
+    toggle.on_mouse_leave();
+    toggle.advance_animations(1.0f);
+    REQUIRE(toggle.hover_opacity() < 0.1f);
+}
+
 TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget paint edges",
           "[view][widget][controls]") {
     Checkbox checkbox;

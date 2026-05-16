@@ -110,3 +110,88 @@ TEST_CASE("attach_knob on_change writes to store", "[view][attachment]") {
     if (knob->on_change) knob->on_change(0.5f);
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.5, 0.01));
 }
+
+TEST_CASE("param attachments forward fader toggle and combo edits",
+          "[view][attachment][issue-493]") {
+    StateStore store;
+    setup_store(store);
+
+    auto [fader, fader_binding] = attach_fader(store, 2);
+    REQUIRE(fader->on_change);
+    fader->on_change(0.25f);
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.25, 0.001));
+
+    auto [toggle, toggle_binding] = attach_toggle(store, 4);
+    REQUIRE(toggle->on_toggle);
+    toggle->on_toggle(true);
+    REQUIRE_THAT(store.get_value(4), WithinAbs(1.0, 0.001));
+    toggle->on_toggle(false);
+    REQUIRE_THAT(store.get_value(4), WithinAbs(0.0, 0.001));
+
+    auto [combo, combo_binding] = attach_combo(store, 3, {"LP", "HP", "BP", "Notch"});
+    combo->set_selected(3);
+    REQUIRE(combo->selected() == 3);
+    REQUIRE(combo->selected_text() == "Notch");
+    REQUIRE_THAT(store.get_value(3), WithinAbs(3.0, 0.001));
+}
+
+TEST_CASE("param attachments tolerate missing parameter ids",
+          "[view][attachment][issue-493]") {
+    StateStore store;
+    setup_store(store);
+
+    auto [knob, knob_binding] = attach_knob(store, 999, 72.0f);
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->id().empty());
+    REQUIRE_THAT(knob->value(), WithinAbs(0.0, 0.001));
+    REQUIRE(knob->on_change);
+    knob->on_change(1.0f);
+    REQUIRE_THAT(knob_binding.get(), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(knob->flex().preferred_width, WithinAbs(72.0, 0.001));
+
+    auto [fader, fader_binding] = attach_fader(store, 999);
+    REQUIRE(fader != nullptr);
+    REQUIRE(fader->id().empty());
+    REQUIRE(fader->on_change);
+    fader->on_change(0.5f);
+    REQUIRE_THAT(fader_binding.get(), WithinAbs(0.0, 0.001));
+
+    auto [toggle, toggle_binding] = attach_toggle(store, 999);
+    REQUIRE(toggle != nullptr);
+    REQUIRE_FALSE(toggle->is_on());
+    REQUIRE(toggle->on_toggle);
+    toggle->on_toggle(true);
+    REQUIRE_THAT(toggle_binding.get(), WithinAbs(0.0, 0.001));
+
+    auto [combo, combo_binding] = attach_combo(store, 999, {"A", "B"});
+    REQUIRE(combo != nullptr);
+    combo->set_selected(1);
+    REQUIRE(combo->selected() == 1);
+    REQUIRE_THAT(combo_binding.get(), WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("poll_bindings forwards external parameter changes",
+          "[view][attachment][issue-493]") {
+    StateStore store;
+    setup_store(store);
+    auto [knob, binding] = attach_knob(store, 1);
+
+    int callback_count = 0;
+    float last_value = 0.0f;
+    binding.on_change([&](float value) {
+        ++callback_count;
+        last_value = value;
+    });
+
+    std::vector<Binding> bindings;
+    bindings.push_back(std::move(binding));
+
+    poll_bindings(bindings);
+    callback_count = 0;
+
+    store.set_value(1, 5000.0f);
+    poll_bindings(bindings);
+
+    REQUIRE(callback_count == 1);
+    REQUIRE_THAT(last_value, WithinAbs(5000.0, 0.001));
+}

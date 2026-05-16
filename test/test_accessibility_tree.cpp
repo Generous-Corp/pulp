@@ -7,6 +7,9 @@
 #include <pulp/view/accessibility_tree.hpp>
 #include <pulp/view/view.hpp>
 
+#include <string>
+#include <utility>
+
 using namespace pulp::view;
 
 namespace {
@@ -24,6 +27,46 @@ public:
 
 private:
     double current_ = 0.0;
+};
+
+class DegenerateRangeProbe : public View, public AccessibilityValueInterface {
+public:
+    explicit DegenerateRangeProbe(double current) : current_(current) {}
+
+    double get_current_value() const override { return current_; }
+    void set_current_value(double value) override { current_ = value; }
+    double get_minimum_value() const override { return 5.0; }
+    double get_maximum_value() const override { return 5.0; }
+
+private:
+    double current_ = 0.0;
+};
+
+class TextProbe : public AccessibilityTextInterface {
+public:
+    explicit TextProbe(std::string text) : text_(std::move(text)) {}
+
+    std::string get_text() const override { return text_; }
+    void set_text(std::string_view text) override { text_ = std::string(text); }
+
+private:
+    std::string text_;
+};
+
+class TableProbe : public AccessibilityTableInterface {
+public:
+    int get_row_count() const override { return 3; }
+    int get_column_count() const override { return 2; }
+    std::string get_column_header(int column) const override {
+        return column == 0 ? "Name" : "Value";
+    }
+};
+
+class CellProbe : public AccessibilityCellInterface {
+public:
+    std::string get_cell_text(int row, int column) const override {
+        return std::to_string(row) + ":" + std::to_string(column);
+    }
 };
 
 } // namespace
@@ -205,4 +248,58 @@ TEST_CASE("Accessibility snapshot surfaces ARIA state attributes",
 
     REQUIRE(nodes[2].label == "Decorative icon");
     REQUIRE(nodes[2].hidden == "true");
+}
+
+TEST_CASE("Accessibility value interface default strings clamp and fall back",
+          "[a11y][coverage][issue-654]") {
+    Probe root;
+
+    auto high = std::make_unique<RangeProbe>(30.0);
+    high->set_access_role(View::AccessRole::slider);
+    high->set_access_label("High");
+    root.add_child(std::move(high));
+
+    auto low = std::make_unique<RangeProbe>(-30.0);
+    low->set_access_role(View::AccessRole::slider);
+    low->set_access_label("Low");
+    root.add_child(std::move(low));
+
+    auto flat = std::make_unique<DegenerateRangeProbe>(7.25);
+    flat->set_access_role(View::AccessRole::meter);
+    flat->set_access_label("Flat");
+    root.add_child(std::move(flat));
+
+    auto nodes = snapshot_accessibility_tree(root);
+    REQUIRE(nodes.size() == 3);
+    REQUIRE(nodes[0].has_value);
+    REQUIRE(nodes[0].value_string == "100%");
+    REQUIRE(nodes[1].value_string == "0%");
+    REQUIRE(nodes[2].value_string == "7.25");
+}
+
+TEST_CASE("Accessibility helper interfaces expose default selection behavior",
+          "[a11y][coverage][issue-654]") {
+    TextProbe text("abcdef");
+    REQUIRE(text.get_character_count() == 6);
+    REQUIRE(text.get_selection() == std::pair<int, int>{0, 0});
+    REQUIRE_FALSE(text.is_editable());
+    REQUIRE(text.get_text_range(-5, 3) == "abc");
+    REQUIRE(text.get_text_range(2, 99) == "cdef");
+    REQUIRE(text.get_text_range(4, 2).empty());
+    text.set_selection(1, 4);
+    REQUIRE(text.get_selection() == std::pair<int, int>{0, 0});
+    text.set_text("xy");
+    REQUIRE(text.get_character_count() == 2);
+
+    TableProbe table;
+    REQUIRE(table.get_selected_row() == -1);
+    REQUIRE(table.get_selected_rows().empty());
+    REQUIRE_FALSE(table.supports_multi_selection());
+    table.select_row(1);
+    REQUIRE(table.get_selected_row() == -1);
+
+    CellProbe cell;
+    REQUIRE(cell.get_cell_text(2, 1) == "2:1");
+    REQUIRE_FALSE(cell.is_cell_editable(0, 0));
+    REQUIRE(cell.get_cell_span(0, 0) == std::pair<int, int>{1, 1});
 }

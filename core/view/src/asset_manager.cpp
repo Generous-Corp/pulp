@@ -206,15 +206,8 @@ FontData AssetManager::load_font(const std::string& path) {
     FontData font;
     font.data = std::move(blob.data);
 
-    // Extract family name from path
-    auto slash = path.rfind('/');
-    auto dot = path.rfind('.');
-    if (slash != std::string::npos && dot != std::string::npos && dot > slash)
-        font.family_name = path.substr(slash + 1, dot - slash - 1);
-    else if (dot != std::string::npos)
-        font.family_name = path.substr(0, dot);
-    else
-        font.family_name = path;
+    // Extract family name from path using platform separators.
+    font.family_name = std::filesystem::path(path).stem().string();
 
     CacheEntry entry;
     entry.type = CacheEntry::Type::font;

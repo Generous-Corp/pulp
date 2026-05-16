@@ -2,6 +2,9 @@
 #include <pulp/view/tree_view.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <algorithm>
+#include <string>
+
 using namespace pulp::view;
 using namespace pulp::canvas;
 
@@ -20,6 +23,29 @@ KeyEvent key_down(KeyCode key) {
     e.key = key;
     e.is_down = true;
     return e;
+}
+
+bool has_text(const RecordingCanvas& canvas, const std::string& text) {
+    return std::any_of(canvas.commands().begin(),
+                       canvas.commands().end(),
+                       [&](const DrawCommand& cmd) {
+                           return cmd.type == DrawCommand::Type::fill_text &&
+                                  cmd.text == text;
+                       });
+}
+
+bool has_fill_text(const RecordingCanvas& canvas, const std::string& text) {
+    return has_text(canvas, text);
+}
+
+int text_count(const RecordingCanvas& canvas, const std::string& text) {
+    return static_cast<int>(std::count_if(
+        canvas.commands().begin(),
+        canvas.commands().end(),
+        [&](const DrawCommand& cmd) {
+            return cmd.type == DrawCommand::Type::fill_text &&
+                   cmd.text == text;
+        }));
 }
 
 } // namespace
@@ -113,6 +139,14 @@ TEST_CASE("TreeView triangle click toggles without selecting", "[view][tree]") {
     REQUIRE(toggled_state);
     REQUIRE(select_count == 0);
     REQUIRE(tree.selected_node() == nullptr);
+
+    tree.on_mouse_event(mouse_down(4, 5));
+
+    REQUIRE_FALSE(synths.expanded);
+    REQUIRE(toggled_label == "Synths");
+    REQUIRE_FALSE(toggled_state);
+    REQUIRE(select_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
 }
 
 TEST_CASE("TreeView double click activates without selecting", "[view][tree]") {
@@ -165,6 +199,21 @@ TEST_CASE("TreeView key left collapses expanded selection", "[view][tree]") {
     REQUIRE(collapsed);
 }
 
+TEST_CASE("TreeView key left consumes collapsed selected nodes without toggling",
+          "[view][tree]") {
+    TreeView tree;
+    auto& synths = tree.root().add_child("Synths");
+    synths.add_child("Bass");
+    tree.set_selected_node(&synths);
+
+    int toggle_count = 0;
+    tree.on_toggle = [&](TreeNode&, bool) { ++toggle_count; };
+
+    REQUIRE(tree.on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(synths.expanded);
+    REQUIRE(toggle_count == 0);
+}
+
 TEST_CASE("TreeView ignores unhandled key edges", "[view][tree]") {
     TreeView tree;
     auto& leaf = tree.root().add_child("Leaf");
@@ -197,6 +246,29 @@ TEST_CASE("TreeView user data lookup finds nested nodes only for non-null data",
     REQUIRE(tree.find_node_by_user_data(&root_payload) == &tree.root());
 }
 
+TEST_CASE("TreeView paint covers selection highlight and disclosure states",
+          "[view][tree]") {
+    TreeView tree;
+    auto& group = tree.root().add_child("Group");
+    group.add_child("Nested");
+    tree.set_selected_node(&group);
+    tree.set_bounds({0, 0, 200, 100});
+
+    RecordingCanvas collapsed;
+    tree.paint(collapsed);
+    REQUIRE(collapsed.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(has_fill_text(collapsed, "\xe2\x96\xb6"));
+    REQUIRE(has_fill_text(collapsed, "Group"));
+    REQUIRE_FALSE(has_fill_text(collapsed, "Nested"));
+
+    group.expanded = true;
+    RecordingCanvas expanded;
+    tree.paint(expanded);
+    REQUIRE(expanded.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(has_fill_text(expanded, "\xe2\x96\xbc"));
+    REQUIRE(has_fill_text(expanded, "Nested"));
+}
+
 TEST_CASE("TreeView paint produces draw commands", "[view][tree]") {
     TreeView tree;
     tree.root().add_child("Item 1");
@@ -215,4 +287,65 @@ TEST_CASE("TreeView row_height and indent configurable", "[view][tree]") {
 
     REQUIRE(tree.row_height() == 30.0f);
     REQUIRE(tree.indent() == 24.0f);
+}
+
+TEST_CASE("TreeView collapsed children are hidden from paint and hit testing",
+          "[view][tree][coverage][issue-654]") {
+    TreeView tree;
+    auto& group = tree.root().add_child("Group");
+    group.add_child("Hidden child");
+    auto& visible = tree.root().add_child("Visible");
+    tree.set_bounds({0, 0, 240, 120});
+
+    std::string selected;
+    tree.on_select = [&](TreeNode& node) { selected = node.label; };
+
+    RecordingCanvas collapsed;
+    tree.paint(collapsed);
+    REQUIRE(has_text(collapsed, "Group"));
+    REQUIRE_FALSE(has_text(collapsed, "Hidden child"));
+    REQUIRE(has_text(collapsed, "Visible"));
+
+    tree.on_mouse_event(mouse_down(40, 28));
+    REQUIRE(selected == "Visible");
+    REQUIRE(tree.selected_node() == &visible);
+}
+
+TEST_CASE("TreeView expanded child activation and selected paint paths",
+          "[view][tree][coverage][issue-654]") {
+    TreeView tree;
+    tree.set_bounds({0, 0, 240, 160});
+    tree.set_row_height(20.0f);
+    tree.set_indent(24.0f);
+    auto& group = tree.root().add_child("Group");
+    auto& child = group.add_child("Child");
+    group.expanded = true;
+
+    std::string activated;
+    tree.on_activate = [&](TreeNode& node) { activated = node.label; };
+
+    tree.on_mouse_event(mouse_down(54, 25, 2));
+    REQUIRE(activated == "Child");
+
+    tree.set_selected_node(&child);
+    RecordingCanvas selected;
+    tree.paint(selected);
+    REQUIRE(selected.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(text_count(selected, "\xe2\x96\xbc") == 1);
+    REQUIRE(has_text(selected, "Child"));
+}
+
+TEST_CASE("TreeView left key on collapsed parent is handled without toggling",
+          "[view][tree][coverage][issue-654]") {
+    TreeView tree;
+    auto& group = tree.root().add_child("Group");
+    group.add_child("Child");
+    tree.set_selected_node(&group);
+
+    int toggles = 0;
+    tree.on_toggle = [&](TreeNode&, bool) { ++toggles; };
+
+    REQUIRE(tree.on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(group.expanded);
+    REQUIRE(toggles == 0);
 }

@@ -124,3 +124,60 @@ TEST_CASE("PropertyList set_value only mutates existing keys", "[view][property_
     REQUIRE(gain != nullptr);
     REQUIRE(std::get<float>(gain->value) == 0.75f);
 }
+
+TEST_CASE("PropertyList category visibility and label fallback paint paths",
+          "[view][property_list][coverage][issue-653]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 220, 100});
+    list.set_row_height(20.0f);
+    list.set_label_width_fraction(0.25f);
+    list.set_show_categories(false);
+    list.set_properties({
+        {"key_only", "", std::string("value"), false, "Hidden"},
+        {"readonly", "Read Only", true, true, "Hidden"},
+    });
+
+    RecordingCanvas canvas;
+    list.paint(canvas);
+
+    REQUIRE_FALSE(has_text(canvas, "Hidden"));
+    REQUIRE(has_text(canvas, "key_only"));
+    REQUIRE(has_text(canvas, "value"));
+    REQUIRE(has_text(canvas, "Read Only"));
+    REQUIRE(has_text(canvas, "true"));
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 2);
+    REQUIRE(list.intrinsic_height() == 40.0f);
+}
+
+TEST_CASE("PropertyList selection highlight covers non-bool rows and misses",
+          "[view][property_list][coverage][issue-653]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 180, 100});
+    list.set_row_height(20.0f);
+    list.set_properties({
+        {"name", "Name", std::string("Main"), false, ""},
+        {"bypass", "Bypass", false, false, ""},
+    });
+
+    int changes = 0;
+    list.on_change = [&](const std::string&, PropertyList::PropertyValue) {
+        ++changes;
+    };
+
+    list.on_mouse_down({5.0f, 5.0f});
+    RecordingCanvas selected_text;
+    list.paint(selected_text);
+    REQUIRE(selected_text.count(DrawCommand::Type::fill_rect) == 2);
+    REQUIRE(changes == 0);
+
+    list.on_mouse_down({5.0f, 200.0f});
+    RecordingCanvas after_miss;
+    list.paint(after_miss);
+    REQUIRE(after_miss.count(DrawCommand::Type::fill_rect) == 1);
+
+    list.on_mouse_down({5.0f, 25.0f});
+    REQUIRE(changes == 1);
+    auto* bypass = list.find_property("bypass");
+    REQUIRE(bypass != nullptr);
+    REQUIRE(std::get<bool>(bypass->value));
+}
