@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/audio.hpp>
+#include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/channel_set.hpp>
 #include <cmath>
 #include <numbers>
@@ -142,6 +143,84 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
 
     buf.resize(2, 0);
     REQUIRE(buf.view().empty());
+}
+
+TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
+          "[audio][buffer][codecov]") {
+    Buffer<float> zero_channels(0, 8);
+    REQUIRE(zero_channels.num_channels() == 0);
+    REQUIRE(zero_channels.num_samples() == 8);
+    REQUIRE(zero_channels.view().empty());
+    zero_channels.clear();
+
+    Buffer<float> zero_samples(2, 0);
+    REQUIRE(zero_samples.num_channels() == 2);
+    REQUIRE(zero_samples.num_samples() == 0);
+    auto empty_view = zero_samples.view();
+    REQUIRE(empty_view.empty());
+    REQUIRE(empty_view.num_channels() == 2);
+    REQUIRE(empty_view.num_samples() == 0);
+    zero_samples.clear();
+
+    BufferView<float> default_view;
+    REQUIRE(default_view.empty());
+    REQUIRE(default_view.num_channels() == 0);
+    REQUIRE(default_view.num_samples() == 0);
+    default_view.clear();
+}
+
+TEST_CASE("AudioFileData reports shape from first channel",
+          "[audio][file][codecov]") {
+    AudioFileData empty;
+    REQUIRE(empty.sample_rate == 0);
+    REQUIRE(empty.num_channels() == 0);
+    REQUIRE(empty.num_frames() == 0);
+    REQUIRE(empty.empty());
+
+    AudioFileData first_channel_empty;
+    first_channel_empty.sample_rate = 44100;
+    first_channel_empty.channels = {{}, {1.0f, 2.0f}};
+    REQUIRE(first_channel_empty.num_channels() == 2);
+    REQUIRE(first_channel_empty.num_frames() == 0);
+    REQUIRE(first_channel_empty.empty());
+
+    AudioFileData stereo;
+    stereo.sample_rate = 48000;
+    stereo.channels = {{0.0f, 0.25f, -0.25f}, {1.0f}};
+    REQUIRE(stereo.num_channels() == 2);
+    REQUIRE(stereo.num_frames() == 3);
+    REQUIRE_FALSE(stereo.empty());
+}
+
+TEST_CASE("Device metadata defaults and custom configs are stable",
+          "[audio][device][codecov]") {
+    DeviceInfo info;
+    REQUIRE(info.id.empty());
+    REQUIRE(info.name.empty());
+    REQUIRE(info.max_input_channels == 0);
+    REQUIRE(info.max_output_channels == 0);
+    REQUIRE(info.sample_rates.empty());
+    REQUIRE(info.buffer_sizes.empty());
+    REQUIRE_FALSE(info.is_default_input);
+    REQUIRE_FALSE(info.is_default_output);
+
+    DeviceConfig config;
+    REQUIRE(config.device_id.empty());
+    REQUIRE(config.sample_rate == 48000.0);
+    REQUIRE(config.buffer_size == 256);
+    REQUIRE(config.input_channels == 0);
+    REQUIRE(config.output_channels == 2);
+
+    config.device_id = "external-device";
+    config.sample_rate = 96000.0;
+    config.buffer_size = 128;
+    config.input_channels = 2;
+    config.output_channels = 6;
+    REQUIRE(config.device_id == "external-device");
+    REQUIRE(config.sample_rate == 96000.0);
+    REQUIRE(config.buffer_size == 128);
+    REQUIRE(config.input_channels == 2);
+    REQUIRE(config.output_channels == 6);
 }
 
 TEST_CASE("ChannelSet maps standard layouts by count and name",
