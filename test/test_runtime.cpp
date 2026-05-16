@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
+#include <pulp/runtime/high_resolution_timer.hpp>
 #include <pulp/runtime/runtime.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -14,6 +17,7 @@
 #include <utility>
 
 using namespace pulp::runtime;
+using namespace std::chrono_literals;
 
 namespace {
 
@@ -460,4 +464,58 @@ TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_lib
     REQUIRE_FALSE(moved.is_open());
     REQUIRE(assigned.is_open());
     REQUIRE(assigned.find_symbol(symbol) != nullptr);
+}
+
+TEST_CASE("HighResolutionTimer starts stops and reports running state",
+          "[runtime][timer][coverage][phase3]") {
+    HighResolutionTimer timer;
+    std::atomic<int> calls{0};
+
+    REQUIRE_FALSE(timer.is_running());
+    timer.start(5ms, [&] { calls.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(timer.is_running());
+
+    const auto deadline = std::chrono::steady_clock::now() + 250ms;
+    while (calls.load(std::memory_order_relaxed) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(2ms);
+    }
+
+    REQUIRE(calls.load(std::memory_order_relaxed) >= 2);
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
+
+    const auto stopped_count = calls.load(std::memory_order_relaxed);
+    std::this_thread::sleep_for(20ms);
+    REQUIRE(calls.load(std::memory_order_relaxed) == stopped_count);
+
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
+}
+
+TEST_CASE("HighResolutionTimer restart replaces callback",
+          "[runtime][timer][coverage][phase3]") {
+    HighResolutionTimer timer;
+    std::atomic<int> first{0};
+    std::atomic<int> second{0};
+
+    timer.start(20ms, [&] { first.fetch_add(1, std::memory_order_relaxed); });
+    std::this_thread::sleep_for(30ms);
+    timer.start(5ms, [&] { second.fetch_add(1, std::memory_order_relaxed); });
+
+    const auto first_after_restart = first.load(std::memory_order_relaxed);
+    const auto deadline = std::chrono::steady_clock::now() + 250ms;
+    while (second.load(std::memory_order_relaxed) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(2ms);
+    }
+
+    timer.stop();
+    REQUIRE(second.load(std::memory_order_relaxed) >= 2);
+    REQUIRE(first.load(std::memory_order_relaxed) == first_after_restart);
+
+    timer.start(5ms, {});
+    REQUIRE(timer.is_running());
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
 }
