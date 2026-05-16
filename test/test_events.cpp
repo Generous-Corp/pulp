@@ -200,6 +200,19 @@ TEST_CASE("EventLoop ignores new dispatches after stop",
     REQUIRE(calls.load() == 0);
 }
 
+TEST_CASE("EventLoop runs tasks dispatched from the loop thread",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch([&] {
+        calls.fetch_add(1);
+        loop.dispatch([&] { calls.fetch_add(1); });
+    });
+
+    REQUIRE(wait_until([&] { return calls.load() == 2; }, 2000ms));
+}
+
 TEST_CASE("Timer basic operation", "[events][timer]") {
     EventLoop loop;
 
