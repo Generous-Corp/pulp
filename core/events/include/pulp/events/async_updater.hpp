@@ -106,8 +106,13 @@ public:
 
     /// Send an action to all listeners
     void send_action(std::string_view action) {
-        for (auto& [id, fn] : listeners_) {
+        std::vector<ActionCallback> callbacks;
+        callbacks.reserve(listeners_.size());
+        for (const auto& [id, fn] : listeners_) {
             (void)id;
+            callbacks.push_back(fn);
+        }
+        for (auto& fn : callbacks) {
             if (fn) fn(action);
         }
     }

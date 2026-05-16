@@ -528,6 +528,37 @@ TEST_CASE("ActionBroadcaster skips empty callbacks",
     REQUIRE(seen.size() == 1);
 }
 
+TEST_CASE("ActionBroadcaster snapshots callbacks during dispatch",
+          "[events][async_updater][action_broadcaster][codecov]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+    int first_id = -1;
+    int second_id = -1;
+    int added_id = -1;
+
+    first_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("first:" + std::string(action));
+        broadcaster.remove_listener(first_id);
+        broadcaster.remove_listener(second_id);
+        added_id = broadcaster.add_listener([&](std::string_view later) {
+            seen.emplace_back("added:" + std::string(later));
+        });
+    });
+
+    second_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("second:" + std::string(action));
+    });
+
+    broadcaster.send_action("refresh");
+    REQUIRE(seen == std::vector<std::string>{"first:refresh", "second:refresh"});
+
+    broadcaster.send_action("again");
+    REQUIRE(seen == std::vector<std::string>{
+        "first:refresh", "second:refresh", "added:again"});
+
+    broadcaster.remove_listener(added_id);
+}
+
 TEST_CASE("ScopedLowPowerModeDisabler is constructible as an RAII guard",
           "[events][async_updater][power]") {
     {
