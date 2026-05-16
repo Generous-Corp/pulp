@@ -794,6 +794,25 @@ TEST_CASE("StateTreeSynchroniser decode keeps complete prefix on truncated batch
     REQUIRE(std::get<std::string>(decoded[0].value) == "Lead");
 }
 
+TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
+          "[state][sync][codecov]") {
+    const std::vector<SyncDelta> cases = {
+        {SyncDeltaType::PropertySet, "root", "name", std::string("Lead"), -1},
+        {SyncDeltaType::PropertySet, "root", "count", int64_t(42), -1},
+        {SyncDeltaType::PropertySet, "root", "mix", 0.25, -1},
+        {SyncDeltaType::PropertySet, "root", "enabled", true, -1},
+    };
+
+    for (const auto& delta : cases) {
+        auto encoded = StateTreeSynchroniser::encode({delta});
+        REQUIRE_FALSE(encoded.empty());
+        encoded.pop_back();
+
+        auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
+        REQUIRE(decoded.empty());
+    }
+}
+
 TEST_CASE("StateTreeSynchroniser apply mutates properties and children", "[state][sync]") {
     auto tree = StateTree::create("root");
     tree->set("remove_me", std::string("bye"));
