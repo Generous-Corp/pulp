@@ -45,6 +45,28 @@ TEST_CASE("MemoryMessageChannel delivers text payloads and as_text views",
     REQUIRE(text == "hello");
 }
 
+TEST_CASE("MemoryMessageChannel delivers empty text and binary messages",
+          "[runtime][message_channel][codecov]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<Message> received;
+    right->on_message([&](const Message& message) {
+        received.push_back(message);
+    });
+
+    std::uint8_t empty_payload = 0;
+    REQUIRE(left->send_text(""));
+    REQUIRE(left->send(&empty_payload, 0));
+
+    REQUIRE(received.size() == 2);
+    REQUIRE(received[0].kind == MessageKind::Text);
+    REQUIRE(received[0].payload.empty());
+    REQUIRE(received[0].as_text().empty());
+    REQUIRE(received[1].kind == MessageKind::Binary);
+    REQUIRE(received[1].payload.empty());
+    REQUIRE(received[1].as_text().empty());
+}
+
 TEST_CASE("MemoryMessageChannel replaces message callbacks",
           "[runtime][message_channel]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
@@ -161,6 +183,26 @@ TEST_CASE("MemoryMessageChannel close is peer-wide and idempotent",
 
     std::uint8_t byte = 0;
     REQUIRE_FALSE(right->send(&byte, 1));
+}
+
+TEST_CASE("MemoryMessageChannel replaces close callbacks and leaves error inert",
+          "[runtime][message_channel][codecov]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    int first_left_closed = 0;
+    int second_left_closed = 0;
+    int right_errors = 0;
+    left->on_closed([&] { ++first_left_closed; });
+    left->on_closed([&] { ++second_left_closed; });
+    right->on_error([&](std::string_view) { ++right_errors; });
+
+    right->close();
+
+    REQUIRE(first_left_closed == 0);
+    REQUIRE(second_left_closed == 1);
+    REQUIRE(right_errors == 0);
+    REQUIRE_FALSE(left->is_open());
+    REQUIRE_FALSE(right->is_open());
 }
 
 TEST_CASE("MemoryMessageChannel peer destruction closes the survivor",
