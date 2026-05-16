@@ -190,7 +190,7 @@ function __installNativeGpuBufferedDrawAugmentation() {
         return serializedBindGroups.length > 0 ? serializedBindGroups : null;
     }
 
-    function createBufferedDrawPayload(attachment, attachmentView, currentPipeline, currentBindGroups, currentVertexBuffers, currentIndexBuffer, drawDescriptor) {
+    function createBufferedDrawPayload(attachment, attachmentView, currentPipeline, currentBindGroups, currentVertexBuffers, currentIndexBuffer, drawDescriptor, depthStencil) {
         if (!attachmentView || !attachmentView._nativeBridge ||
             !currentPipeline || !currentPipeline._nativeBridge || !drawDescriptor) {
             noteBufferedSkip("missing-native-bridge", {
@@ -264,26 +264,6 @@ function __installNativeGpuBufferedDrawAugmentation() {
                 };
             }
         }
-        // Serialize depth/stencil attachment if present
-        if (depthStencil) {
-            payload.depthStencil = {
-                depthLoadOp: depthStencil.depthLoadOp || "clear",
-                depthStoreOp: depthStencil.depthStoreOp || "store",
-                depthClearValue: depthStencil.depthClearValue == null ? 1.0 : depthStencil.depthClearValue,
-                format: depthStencil.view && depthStencil.view.texture
-                    ? depthStencil.view.texture.format || "depth24plus"
-                    : "depth24plus"
-            };
-        }
-        // Serialize depth/stencil state from pipeline
-        if (currentPipeline && currentPipeline.depthStencil) {
-            payload.pipelineDepthStencil = {
-                format: currentPipeline.depthStencil.format || "depth24plus",
-                depthWriteEnabled: currentPipeline.depthStencil.depthWriteEnabled !== false,
-                depthCompare: currentPipeline.depthStencil.depthCompare || "less"
-            };
-        }
-
         if (attachmentView._nativeCanvasId) {
             payload.canvasId = attachmentView._nativeCanvasId;
         } else if (attachmentView._nativeTextureId) {
@@ -366,6 +346,11 @@ function __installNativeGpuBufferedDrawAugmentation() {
         var attachments = descriptor.colorAttachments || [];
         var attachment = attachments.length > 0 ? attachments[0] : null;
         var attachmentView = attachment && attachment.view ? attachment.view : null;
+        // depthStencil is referenced by encoder.draw / encoder.drawIndexed
+        // when forwarding to createBufferedDrawPayload — declare it here so
+        // those references resolve through closure (was a latent bug —
+        // encoder.draw passed `depthStencil` without it being defined,
+        // throwing ReferenceError once attachmentView._nativeBridge is true).
         var depthStencil = descriptor.depthStencilAttachment || null;
         var originalSetPipeline = encoder.setPipeline;
         var originalSetBindGroup = encoder.setBindGroup;
@@ -423,7 +408,7 @@ function __installNativeGpuBufferedDrawAugmentation() {
                 instanceCount: instanceCount,
                 firstVertex: firstVertex,
                 firstInstance: firstInstance
-            });
+            }, depthStencil);
             if (bufferedPayload && typeof init.onEnd === "function") {
                 emittedBufferedDraw = true;
                 init.onEnd({
@@ -446,7 +431,7 @@ function __installNativeGpuBufferedDrawAugmentation() {
                 firstIndex: firstIndex,
                 baseVertex: baseVertex,
                 firstInstance: firstInstance
-            });
+            }, depthStencil);
             if (bufferedPayload && typeof init.onEnd === "function") {
                 emittedBufferedDraw = true;
                 init.onEnd({
@@ -536,53 +521,6 @@ function __installNativeGpuBufferedDrawAugmentation() {
                     if (command.type === "native-present-texture-buffered" &&
                         typeof __gpuQueuePresentTextureImpl === "function") {
                         __gpuQueuePresentTextureImpl(command.payload);
-                    }
-                }
-
-                // Dispatch compute passes if present
-                var computePasses = commandBuffer._computePasses || [];
-                for (var cp = 0; cp < computePasses.length; ++cp) {
-                    var pass = computePasses[cp];
-                    var cmds = pass._commands || [];
-                    for (var ck = 0; ck < cmds.length; ++ck) {
-                        var cmd = cmds[ck];
-                        if (cmd.type === "dispatch" && typeof __gpuComputeDispatchImpl === "function") {
-                            // Serialize bind group entries with buffer data
-                            var bindGroupData = {};
-                            for (var bgIdx in cmd.bindGroups) {
-                                var bg = cmd.bindGroups[bgIdx];
-                                if (!bg || !bg.entries) continue;
-                                var entries = [];
-                                for (var e = 0; e < bg.entries.length; ++e) {
-                                    var entry = bg.entries[e];
-                                    var resource = entry.resource || {};
-                                    var entryData = { binding: entry.binding };
-                                    if (resource.buffer && resource.buffer._bytes) {
-                                        // Storage/uniform buffer — serialize data as base64
-                                        var bytes = resource.buffer._bytes;
-                                        var b64 = "";
-                                        for (var bi = 0; bi < bytes.length; ++bi)
-                                            b64 += String.fromCharCode(bytes[bi]);
-                                        entryData.bufferSize = resource.buffer.size;
-                                        entryData.bufferUsage = resource.buffer.usage;
-                                        entryData.bufferOffset = resource.offset || 0;
-                                        entryData.bufferDataBase64 = typeof btoa === "function" ? btoa(b64) : b64;
-                                    }
-                                    entries.push(entryData);
-                                }
-                                bindGroupData[bgIdx] = entries;
-                            }
-                            __gpuComputeDispatchImpl(JSON.stringify({
-                                shaderCode: cmd.pipeline && cmd.pipeline._compute && cmd.pipeline._compute.module
-                                    ? cmd.pipeline._compute.module.code : "",
-                                entryPoint: cmd.pipeline && cmd.pipeline._compute
-                                    ? (cmd.pipeline._compute.entryPoint || "main") : "main",
-                                workgroupCountX: cmd.workgroupCountX,
-                                workgroupCountY: cmd.workgroupCountY,
-                                workgroupCountZ: cmd.workgroupCountZ,
-                                bindGroups: bindGroupData
-                            }));
-                        }
                     }
                 }
             }

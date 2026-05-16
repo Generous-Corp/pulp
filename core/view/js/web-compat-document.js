@@ -40,41 +40,21 @@ StyleSheet.prototype._applyTo = function(el) {
         var rule = this._parsedRules[i];
         var parsed = rule.parsed;
 
-        // Handle pseudo-classes separately. We pass `parsedNoPseudo`
-        // (the parsed selector with pseudo stripped) to `_matchesSelector`
-        // because the stylesheet wire-up path matches "would this
-        // selector apply if state X were true?" — that's the structural
-        // match, not the live state. The live state check is then either
-        // (a) deferred to the event-handler wiring (`:hover` / `:focus` /
-        // `:active`), or (b) done explicitly here (`:disabled` reads
-        // `el._disabled` after the structural match). The new
-        // querySelector-side _matchesSelector pseudo evaluator (pulp
-        // #1737) honours pseudo when present, but is bypassed here so
-        // the wire-up still sees structural matches before the user has
-        // moused over anything.
-        var parsedNoPseudo = parsed;
-        if (parsed.pseudo) {
-            parsedNoPseudo = {
-                tag: parsed.tag, id: parsed.id, classes: parsed.classes,
-                attrs: parsed.attrs, pseudo: null,
-                parent: parsed.parent, direct: parsed.direct,
-            };
-        }
-
+        // Handle pseudo-classes separately
         if (parsed.pseudo === "hover") {
-            if (_matchesSelector(el, parsedNoPseudo)) {
+            if (_matchesSelector(el, parsed)) {
                 _setupPseudoHover(el, rule.properties);
             }
         } else if (parsed.pseudo === "focus") {
-            if (_matchesSelector(el, parsedNoPseudo)) {
+            if (_matchesSelector(el, parsed)) {
                 _setupPseudoFocus(el, rule.properties);
             }
         } else if (parsed.pseudo === "active") {
-            if (_matchesSelector(el, parsedNoPseudo)) {
+            if (_matchesSelector(el, parsed)) {
                 _setupPseudoActive(el, rule.properties);
             }
         } else if (parsed.pseudo === "disabled") {
-            if (_matchesSelector(el, parsedNoPseudo) && el._disabled) {
+            if (_matchesSelector(el, parsed) && el._disabled) {
                 _applyStyles(el, rule.properties);
             }
         } else {
@@ -92,191 +72,20 @@ function _applyStyles(el, props) {
 }
 
 function _setupPseudoHover(el, props) {
-    // pulp #1323 — multiple `:hover` rules on the same element layer
-    // their property maps. We keep a per-element list so `mouseleave`
-    // restores the union of all hover-touched properties to their
-    // pre-hover values, even when a later rule introduced a new key.
-    // The list is keyed on the props *object identity* so repeated
-    // _applyTo() runs (e.g. from className mutation) don't grow the
-    // list — each rule object goes in exactly once per element.
-    var hoverState = el._hoverState;
-    if (!hoverState) {
-        hoverState = el._hoverState = {
-            propsList: [],
-            savedProps: {},
-            wired: false
-        };
-    }
+    if (el._hoverSetup) return;
+    el._hoverSetup = true;
+    var savedProps = {};
 
-    // Append unique rules; idempotent across repeated _applyTo() runs.
-    var alreadyHave = false;
-    for (var pi = 0; pi < hoverState.propsList.length; pi++) {
-        if (hoverState.propsList[pi] === props) { alreadyHave = true; break; }
-    }
-    if (!alreadyHave) hoverState.propsList.push(props);
-
-    // pulp #1173 — registerHover(id) arms the native dispatcher. The C++
-    // side requires the widget to exist before the call lands, so we
-    // defer wiring until _nativeCreated. _applyTo() runs again from
-    // appendChild's _reapplyStylesheets() after _nativeCreated flips,
-    // giving us a second chance to wire even for elements that matched
-    // the rule pre-mount.
-    if (hoverState.wired) return;
-    if (!el._nativeCreated) return;
-    hoverState.wired = true;
-
-    // Use addEventListener (multi-callback __eventListeners__ map) so we
-    // coexist with JSX onMouseEnter / addEventListener('mouseenter')
-    // handlers the user may register independently. The lower-level
-    // `on()` channel is single-callback per (id, event) — using it here
-    // would clobber, or be clobbered by, any other mouseenter listener.
-    // addEventListener also routes through _registerNativeEvent which
-    // calls registerHover(id) for us — but only if _nativeCreated is
-    // already true on this code path, which we just asserted above.
     el.addEventListener("mouseenter", function() {
-        var list = hoverState.propsList;
-        // Snapshot the BEFORE state for every property any rule touches.
-        // Refreshed on every enter so a hover-after-className-change
-        // (or a JS-driven style mutation between hovers) still reverts
-        // to the pre-hover value rather than to a stale snapshot.
-        for (var i = 0; i < list.length; i++) {
-            var p = list[i];
-            for (var k in p) {
-                if (!Object.prototype.hasOwnProperty.call(hoverState.savedProps, k)) {
-                    hoverState.savedProps[k] = el.style[k];
-                }
-            }
-        }
-        // Layer rules in registration order — last write wins per
-        // property, which matches CSS specificity for equally-specific
-        // selectors (later rules in source order win).
-        for (var j = 0; j < list.length; j++) {
-            _applyStyles(el, list[j]);
-        }
+        // Save current values
+        for (var k in props) savedProps[k] = el.style[k];
+        _applyStyles(el, props);
     });
+
     el.addEventListener("mouseleave", function() {
-        for (var k in hoverState.savedProps) {
-            el.style[k] = hoverState.savedProps[k];
-        }
-        // Drop the snapshot so the next enter re-captures the current
-        // style (which may have been mutated by JS in between).
-        hoverState.savedProps = {};
+        // Restore
+        for (var k in savedProps) el.style[k] = savedProps[k];
     });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CSS text → StyleSheet translator (pulp #1323)
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// Converts the contents of a `<style>` element into a StyleSheet so the
-// existing rule-application path picks it up. We deliberately keep the
-// parser conservative: simple selectors (tag, .class, #id) optionally
-// suffixed with a single `:hover` / `:focus` / `:active` pseudo-class,
-// comma-separated selector lists, and `prop: value;` declarations.
-//
-// Out of scope for this slice (deferred follow-ups):
-//   - Descendant / child / sibling combinators in the CSS-text input
-//     (the underlying matcher supports them via `_parseSelector` but
-//     bringing them through the text parser opens a larger correctness
-//     surface — Spectr's editor.js sticks to flat selectors).
-//   - At-rules (@media, @keyframes, @supports, @import).
-//   - CSS variable resolution at parse time (handled by the existing
-//     style-decl path on apply).
-//   - `:active` pseudo-class wiring (#1149 part b explicit non-goal).
-
-function _stripCssComments(text) {
-    return text.replace(/\/\*[\s\S]*?\*\//g, "");
-}
-
-function _parseCssDeclarations(body) {
-    var props = {};
-    var decls = body.split(";");
-    for (var i = 0; i < decls.length; i++) {
-        var d = decls[i].trim();
-        if (!d) continue;
-        var colon = d.indexOf(":");
-        if (colon <= 0) continue;
-        var name = d.slice(0, colon).trim();
-        var value = d.slice(colon + 1).trim();
-        if (!name || !value) continue;
-        // CSS uses kebab-case; CSSStyleDeclaration._props expects camelCase.
-        // The setter side handles both, but normalize here so layered
-        // overrides on the same logical property collapse correctly.
-        var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
-        props[camel] = value;
-    }
-    return props;
-}
-
-function _parseCssText(text) {
-    // Returns an array of { selector, properties } records — array (not
-    // object) so duplicate selectors layer in source order.
-    var rules = [];
-    var src = _stripCssComments(text || "");
-    var i = 0;
-    while (i < src.length) {
-        // Skip whitespace and at-rule blocks (we don't support them; just
-        // jump over the matching brace pair so a stray @media doesn't
-        // poison the rest of the sheet).
-        var ch = src.charAt(i);
-        if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") { i++; continue; }
-        if (ch === "@") {
-            var depth = 0, found = false;
-            while (i < src.length) {
-                var c2 = src.charAt(i++);
-                if (c2 === "{") { depth++; found = true; }
-                else if (c2 === "}") { depth--; if (depth === 0 && found) break; }
-                else if (c2 === ";" && !found) { break; } // at-rule with no block
-            }
-            continue;
-        }
-        // Read selector list up to '{'
-        var brace = src.indexOf("{", i);
-        if (brace < 0) break;
-        var selectorList = src.slice(i, brace).trim();
-        var endBrace = src.indexOf("}", brace + 1);
-        if (endBrace < 0) break;
-        var body = src.slice(brace + 1, endBrace);
-        var props = _parseCssDeclarations(body);
-        // Split selector list on commas (top-level only; we don't support
-        // selectors with parenthesized commas in this slice).
-        var selectors = selectorList.split(",");
-        for (var s = 0; s < selectors.length; s++) {
-            var sel = selectors[s].trim();
-            if (!sel) continue;
-            rules.push({ selector: sel, properties: props });
-        }
-        i = endBrace + 1;
-    }
-    return rules;
-}
-
-function _processStyleElement(el) {
-    // Detach any previously-applied sheet so re-setting textContent
-    // (React commits, hot-reload) replaces rather than stacks.
-    if (el._appliedSheet && typeof el._appliedSheet.detach === "function") {
-        el._appliedSheet.detach();
-        el._appliedSheet = null;
-    }
-    var rules = _parseCssText(el._textContent || "");
-    if (rules.length === 0) return;
-    // StyleSheet's constructor takes { selector: properties }; we feed it
-    // a raw _parsedRules list to preserve duplicate selectors and
-    // source-order layering for `:hover` rules.
-    var sheet = Object.create(StyleSheet.prototype);
-    sheet._rules = {};
-    sheet._attached = false;
-    sheet._parsedRules = [];
-    for (var i = 0; i < rules.length; i++) {
-        var r = rules[i];
-        sheet._parsedRules.push({
-            selector: r.selector,
-            properties: r.properties,
-            parsed: _parseSelector(r.selector)
-        });
-    }
-    sheet.attach();
-    el._appliedSheet = sheet;
 }
 
 function _setupPseudoFocus(el, props) {
@@ -313,138 +122,41 @@ function _setupPseudoActive(el, props) {
 // Selector parsing and matching
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// pulp Wave 3 html.3 — minimal CSS selector parser.
-//
-// Supports the subset that React / Three.js helper code actually uses
-// in practice:
-//   tag           — element.tagName.toLowerCase() === tag
-//   #id           — element.id === id
-//   .class        — element.classList.contains(class)
-//   [attr]        — element.hasAttribute(attr)
-//   [attr=value]  — element.getAttribute(attr) === value
-//   [attr^=v]     — startsWith
-//   [attr$=v]     — endsWith
-//   [attr*=v]     — contains
-//   [attr|=v]     — value or value-prefixed-by-hyphen
-//   [attr~=v]     — token-match in whitespace-separated list
-//   compound      — tag.class, tag#id, tag[attr], #id.class.class[attr]
-//   descendant    — `a b`     (ancestor anywhere in the chain)
-//   child         — `a > b`   (immediate parent only)
-//
-// Pseudo-classes (`:hover`, `:nth-child`, etc.) are recognised by the
-// tokenizer for forward-compat (so they don't blow up the parser) but
-// are stored unmatched — the gotcha string in compat.json keeps them
-// listed as unsupported.  Sibling combinators (`+`, `~`) are not
-// implemented; selectors that include them silently fall through to
-// no-match (legacy behaviour).
 function _parseSelector(str) {
-    var result = { tag: null, id: null, classes: [], attrs: [], pseudo: null,
-                   parent: null, direct: false };
+    var result = { tag: null, id: null, classes: [], pseudo: null, parent: null, direct: false };
 
-    if (!str) return result;
-    str = String(str);
-
-    // Strip trailing pseudo-class (`:hover`, `:nth-child(2n)`, …) — pulp
-    // doesn't implement them, but we tolerate them at the tokenizer
-    // level so a real-world selector like `div.foo:hover` still
-    // matches `div.foo` instead of refusing to parse.
-    //
-    // pulp #1641 followup: scan for `:` at bracket depth 0 only, so
-    // colons inside attribute selectors like `[href="http://x"]` or
-    // `[data-time="12:30"]` aren't misinterpreted as pseudo-class
-    // boundaries (which would truncate the selector mid-bracket).
-    var pseudoIdx = -1;
-    var pdepth = 0;
-    for (var pi = 0; pi < str.length; pi++) {
-        var pc = str[pi];
-        if (pc === '[') pdepth++;
-        else if (pc === ']') pdepth--;
-        else if (pdepth === 0 && pc === ':' && (pi === 0 || str[pi - 1] !== '\\')) {
-            pseudoIdx = pi; break;
-        }
-    }
+    // Split pseudo-class
+    var pseudoIdx = str.indexOf(":");
     var mainPart = str;
     if (pseudoIdx >= 0) {
         result.pseudo = str.slice(pseudoIdx + 1);
         mainPart = str.slice(0, pseudoIdx);
     }
-    mainPart = mainPart.trim();
 
-    // Check for child / descendant combinators on the OUTERMOST level
-    // (combinators inside `[attr=" > "]` are protected by the bracket
-    // check below since we scan left-to-right respecting brackets).
-    var splitIdx = -1;
-    var splitDirect = false;
-    var depth = 0;
-    for (var ci = mainPart.length - 1; ci >= 0; ci--) {
-        var ch = mainPart[ci];
-        if (ch === "]") depth++;
-        else if (ch === "[") depth--;
-        else if (depth === 0 && ch === ">") { splitIdx = ci; splitDirect = true; break; }
-        else if (depth === 0 && ch === " " && ci < mainPart.length - 1 &&
-                 mainPart[ci + 1] !== ">" && (ci === 0 || mainPart[ci - 1] !== ">")) {
-            splitIdx = ci; splitDirect = false;
-            // Don't break — keep walking left to find the *rightmost*
-            // descendant boundary so the parent selector accumulates
-            // correctly for `a b c` -> parent=`a b`, child=`c`.
-            break;
-        }
+    // Check for descendant/child combinators
+    if (mainPart.indexOf(" > ") >= 0) {
+        var cp = mainPart.split(" > ");
+        result.parent = _parseSelector(cp.slice(0, -1).join(" > "));
+        result.direct = true;
+        mainPart = cp[cp.length - 1].trim();
+    } else if (mainPart.indexOf(" ") >= 0) {
+        var sp = mainPart.split(/\s+/);
+        result.parent = _parseSelector(sp.slice(0, -1).join(" "));
+        result.direct = false;
+        mainPart = sp[sp.length - 1].trim();
     }
 
-    if (splitIdx >= 0) {
-        var leftRaw = mainPart.slice(0, splitIdx).trim();
-        var rightRaw = mainPart.slice(splitIdx + 1).trim();
-        if (leftRaw.length && rightRaw.length) {
-            result.parent = _parseSelector(leftRaw);
-            result.direct = splitDirect;
-            mainPart = rightRaw;
-        }
-    }
-
-    // Tokenize `tag`, `#id`, `.class`, `[attr...]` from the rightmost
-    // simple selector.  Regex covers all four forms in one pass; brackets
-    // are matched non-greedily so two adjacent `[attr][attr2]` work.
-    var tokenRe = /\[[^\]]+\]|#[A-Za-z_][\w-]*|\.[A-Za-z_][\w-]*|[A-Za-z_][\w-]*/g;
-    var match;
-    while ((match = tokenRe.exec(mainPart)) !== null) {
-        var t = match[0];
-        if (!t) continue;
-        if (t[0] === "#") {
-            result.id = t.slice(1);
-        } else if (t[0] === ".") {
-            result.classes.push(t.slice(1));
-        } else if (t[0] === "[") {
-            // Strip `[` and `]`
-            var inner = t.slice(1, -1);
-            // Recognised operators (longest first so `^=` doesn't eat `=`):
-            var op = null;
-            var opIdx = -1;
-            var ops = ["^=", "$=", "*=", "|=", "~=", "="];
-            for (var oi = 0; oi < ops.length; oi++) {
-                var idx = inner.indexOf(ops[oi]);
-                if (idx >= 0 && (opIdx < 0 || idx < opIdx)) {
-                    op = ops[oi]; opIdx = idx;
-                }
+    // Parse tag, id, classes from main part
+    var parts = mainPart.match(/^([a-zA-Z][\w-]*)?([#.][^#.]+)*/);
+    if (parts && parts[0]) {
+        var tokens = mainPart.match(/([#.][a-zA-Z][\w-]*)|^([a-zA-Z][\w-]*)/g);
+        if (tokens) {
+            for (var i = 0; i < tokens.length; i++) {
+                var t = tokens[i];
+                if (t[0] === "#") result.id = t.slice(1);
+                else if (t[0] === ".") result.classes.push(t.slice(1));
+                else result.tag = t.toLowerCase();
             }
-            if (op === null) {
-                result.attrs.push({ name: inner.trim(), op: null, value: null });
-            } else {
-                var aname = inner.slice(0, opIdx).trim();
-                var aval = inner.slice(opIdx + op.length).trim();
-                // Strip optional surrounding quotes (single or double).
-                if (aval.length >= 2 &&
-                    ((aval[0] === '"' && aval[aval.length - 1] === '"') ||
-                     (aval[0] === "'" && aval[aval.length - 1] === "'"))) {
-                    aval = aval.slice(1, -1);
-                }
-                result.attrs.push({ name: aname, op: op, value: aval });
-            }
-        } else {
-            // Bare identifier — first one is the tag.  Multiple bare
-            // identifiers in a single compound selector are spec-invalid
-            // (`div span` is a descendant combinator, not compound) so
-            // any later bare token is ignored.
-            if (result.tag === null) result.tag = t.toLowerCase();
         }
     }
 
@@ -461,47 +173,6 @@ function _matchesSelector(el, parsed) {
     // Match classes
     for (var i = 0; i < parsed.classes.length; i++) {
         if (!el.classList.contains(parsed.classes[i])) return false;
-    }
-
-    // pulp Wave 3 html.3 — attribute selectors.
-    if (parsed.attrs && parsed.attrs.length) {
-        for (var ai = 0; ai < parsed.attrs.length; ai++) {
-            var a = parsed.attrs[ai];
-            if (a.op === null) {
-                if (!el.hasAttribute(a.name)) return false;
-                continue;
-            }
-            var av = el.getAttribute(a.name);
-            if (av === null || av === undefined) return false;
-            switch (a.op) {
-                case "=":  if (av !== a.value) return false; break;
-                case "^=": if (a.value === "" || String(av).indexOf(a.value) !== 0) return false; break;
-                case "$=": {
-                    if (a.value === "") return false;
-                    var s = String(av);
-                    if (s.length < a.value.length) return false;
-                    if (s.slice(s.length - a.value.length) !== a.value) return false;
-                    break;
-                }
-                case "*=": if (a.value === "" || String(av).indexOf(a.value) < 0) return false; break;
-                case "|=": {
-                    var s2 = String(av);
-                    if (s2 !== a.value && s2.indexOf(a.value + "-") !== 0) return false;
-                    break;
-                }
-                case "~=": {
-                    if (!a.value || /\s/.test(a.value)) return false;
-                    var tokens = String(av).split(/\s+/);
-                    var foundTok = false;
-                    for (var ti = 0; ti < tokens.length; ti++) {
-                        if (tokens[ti] === a.value) { foundTok = true; break; }
-                    }
-                    if (!foundTok) return false;
-                    break;
-                }
-                default: return false;
-            }
-        }
     }
 
     // Match parent constraint
@@ -521,142 +192,7 @@ function _matchesSelector(el, parsed) {
         }
     }
 
-    // pulp #1737 — pseudo-class state matching for querySelector. The
-    // parser stored parsed.pseudo (e.g. `disabled`, `checked`, `nth-child(2)`)
-    // but pre-fix _matchesSelector ignored it, so `div:disabled` matched
-    // every `div` (catalog DIVERGE on html/document_querySelector).
-    //
-    // Implemented here: state-on-element pseudo-classes (`:disabled`,
-    // `:checked`, `:enabled`, `:hover`, `:focus`) read directly from the
-    // matching el._* slot the bridge already maintains. DOM-position
-    // pseudo-classes (`:first-child`, `:last-child`, `:nth-child(N)`,
-    // `:nth-of-type(N)`) walk the parent's children. `:not(<simple>)`
-    // recursively dispatches to _matchesSelector with the negated selector.
-    //
-    // Pseudo-classes that require the full CSS Selectors Level 4 cascade
-    // engine (`:has()`, `:is()`, `:where()`, attribute-namespace forms)
-    // remain a no-match — the catalog flags those as architectural per
-    // CLAUDE.md (Pulp's selector engine is single-pass tag/.class/#id/
-    // [attr]/combinator).
-    if (parsed.pseudo) {
-        if (!_matchesPseudoClass(el, parsed.pseudo)) return false;
-    }
-
     return true;
-}
-
-// pulp #1737 — pseudo-class evaluator. Returns true if `el` matches the
-// pseudo-class string (e.g. `disabled`, `checked`, `nth-child(2n+1)`,
-// `not(.foo)`). Unknown / unimplemented forms return false (the broader
-// catalog claim is "no-match rather than throw" — same precedent as the
-// pre-#1737 parser-tolerates-but-matcher-ignores behaviour, except now
-// the matcher explicitly rejects so `div:nth-child(2)` no longer leaks
-// to all `div`).
-function _matchesPseudoClass(el, pseudo) {
-    if (!pseudo) return true;
-    var lower = pseudo.toLowerCase();
-
-    // State-on-element pseudo-classes — read the bridge-maintained slot.
-    if (lower === "disabled") return !!el._disabled;
-    if (lower === "enabled")  return !el._disabled;
-    if (lower === "checked")  return !!el._checked;
-    if (lower === "hover")    return !!el._isHovered;
-    if (lower === "focus")    return !!el._hasFocus;
-    if (lower === "active")   return !!el._isActive;
-
-    // DOM-position pseudo-classes. Need a parent to compute the index.
-    var parent = el._parentElement;
-    if (lower === "first-child") {
-        return !!parent && parent._children && parent._children[0] === el;
-    }
-    if (lower === "last-child") {
-        if (!parent || !parent._children) return false;
-        return parent._children[parent._children.length - 1] === el;
-    }
-    if (lower === "only-child") {
-        return !!parent && parent._children && parent._children.length === 1
-            && parent._children[0] === el;
-    }
-    // pulp #1737 (Codex P2 followup #3 on #1779): `:root` matches the
-    // document root element specifically (`__bodyElement__`), not any
-    // element with no parent. The previous `!el._parentElement` check
-    // also matched DETACHED elements (createElement before appendChild),
-    // which leaked `:root { ... }` theme/layout styles into normal
-    // nodes when they were later inserted. StyleSheet.attach() walks
-    // every entry in `__elements__` so the bug surfaced for any element
-    // created mid-stylesheet-life.
-    //
-    // Tied to the root via identity check — __bodyElement__ is the
-    // synthetic body element this shim creates at the top of
-    // web-compat-document.js. Detached elements still have a non-null
-    // _parentElement once mounted (and even pre-mount they're never
-    // === __bodyElement__), so this branch is safe.
-    //
-    // Catalog still doesn't claim :root for document.querySelector
-    // because _findMatch starts traversal from root._children — the
-    // root itself is never queued. So:
-    //   * stylesheet `:root { color: red }` → applies to body (this branch).
-    //   * document.querySelector(':root') → returns null (traversal
-    //     never sees the root). Catalog supportedValues notes the gap.
-    if (lower === "root") {
-        return el === __bodyElement__;
-    }
-    if (lower === "empty") {
-        return !el._children || el._children.length === 0;
-    }
-
-    // Functional pseudo-classes: `:not(<simple>)` and `:nth-child(N|2n|...)`.
-    // Use raw `pseudo` (not lowercased) so the inner selector retains case
-    // semantics for tag names + attribute values.
-    var notMatch = pseudo.match(/^not\((.+)\)$/i);
-    if (notMatch) {
-        var inner = _parseSelector(notMatch[1]);
-        return !_matchesSelector(el, inner);
-    }
-    var nthMatch = pseudo.match(/^nth-child\((.+)\)$/i);
-    if (nthMatch) {
-        if (!parent || !parent._children) return false;
-        var idx = parent._children.indexOf(el);
-        if (idx < 0) return false;
-        return _matchesNth(idx + 1, nthMatch[1].trim());
-    }
-    var nthLast = pseudo.match(/^nth-last-child\((.+)\)$/i);
-    if (nthLast) {
-        if (!parent || !parent._children) return false;
-        var lastIdx = parent._children.indexOf(el);
-        if (lastIdx < 0) return false;
-        return _matchesNth(parent._children.length - lastIdx, nthLast[1].trim());
-    }
-
-    // Unknown pseudo-class — explicit no-match (per CSS Selectors Level 4
-    // forward-compat: unknown pseudo-classes match nothing rather than
-    // refusing to parse).
-    return false;
-}
-
-// pulp #1737 — :nth-child(N) argument parser. Accepts:
-//   * `odd` / `even` (case-insensitive)
-//   * a positive integer literal (`2`, `5`)
-//   * `An+B` / `An-B` formula (e.g. `2n`, `2n+1`, `3n-1`, `-n+3`).
-// Returns true if `pos` (1-based child index) matches the formula.
-function _matchesNth(pos, arg) {
-    var lower = arg.toLowerCase().replace(/\s+/g, "");
-    if (lower === "odd")  return pos % 2 === 1;
-    if (lower === "even") return pos % 2 === 0;
-    // Plain integer.
-    if (/^-?\d+$/.test(lower)) return pos === parseInt(lower, 10);
-    // An+B form. Match `[A]n[+|-B]` where A and B are signed integers.
-    // Both are optional; n is required.
-    var m = lower.match(/^(-?\d*)n([+-]\d+)?$/);
-    if (!m) return false;
-    var aRaw = m[1];
-    var bRaw = m[2] || "0";
-    var a = aRaw === "" || aRaw === "+" ? 1 : (aRaw === "-" ? -1 : parseInt(aRaw, 10));
-    var b = parseInt(bRaw, 10);
-    if (a === 0) return pos === b;
-    var k = (pos - b) / a;
-    // Index must be a non-negative integer.
-    return k >= 0 && Math.floor(k) === k;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -730,6 +266,14 @@ __documentElement__._nativeCreated = true;
 var document = {
     body: __bodyElement__,
     documentElement: __documentElement__,
+    _listeners: {},
+
+    // Document-scope listeners are a no-op in headless capture; OrbitControls
+    // and similar controls call `domElement.ownerDocument.addEventListener`
+    // for window-level events (mouseup-outside-canvas etc.) we don't dispatch.
+    addEventListener: function() {},
+    removeEventListener: function() {},
+    dispatchEvent: function() { return true; },
 
     createElement: function(tag) {
         var el = new Element(tag);
@@ -750,72 +294,29 @@ var document = {
     },
 
     createTextNode: function(text) {
-        // Backed by an Element (`<span>`) so renderers handle text uniformly,
-        // but flagged as a DOM-spec text node so reconcilers (React 18, etc.)
-        // see `node.nodeType === 3` and `node.nodeName === "#text"`. Per
-        // pulp #468 — React's reconciler reads both on every node it walks.
         var el = new Element("span");
         el._textContent = text;
-        el._isTextNode = true;
-        Object.defineProperty(el, "nodeType", { value: 3, configurable: true });
-        Object.defineProperty(el, "nodeName", { value: "#text", configurable: true });
-        // Spec: a Text node's `data` and `nodeValue` mirror its content.
-        Object.defineProperty(el, "data", {
-            get: function() { return this._textContent; },
-            set: function(v) {
-                this._textContent = v == null ? "" : String(v);
-                if (this._nativeCreated) setText(this._id, this._textContent);
-            },
-            configurable: true
-        });
-        Object.defineProperty(el, "nodeValue", {
-            get: function() { return this._textContent; },
-            set: function(v) {
-                this._textContent = v == null ? "" : String(v);
-                if (this._nativeCreated) setText(this._id, this._textContent);
-            },
-            configurable: true
-        });
         __elements__[el._id] = el;
         return el;
     },
 
-    createComment: function(text) {
-        // Comment nodes are invisible scaffolding for renderers (e.g. React's
-        // hydration markers and ReactDOM's portal sentinels). Backed by a
-        // hidden Element so DOM tree ops still work.
-        var el = new Element("span");
-        el._textContent = "";
-        el._isCommentNode = true;
-        el._hidden = true;
-        Object.defineProperty(el, "nodeType", { value: 8, configurable: true });
-        Object.defineProperty(el, "nodeName", { value: "#comment", configurable: true });
-        Object.defineProperty(el, "data", {
-            get: function() { return this._commentText || ""; },
-            set: function(v) { this._commentText = v == null ? "" : String(v); },
-            configurable: true
-        });
-        Object.defineProperty(el, "nodeValue", {
-            get: function() { return this._commentText || ""; },
-            set: function(v) { this._commentText = v == null ? "" : String(v); },
-            configurable: true
-        });
-        if (text != null) el.data = text;
-        __elements__[el._id] = el;
-        return el;
+    addEventListener: function(type, fn) {
+        if (!this._listeners[type]) this._listeners[type] = [];
+        this._listeners[type].push(fn);
     },
 
-    createDocumentFragment: function() {
-        // A DocumentFragment is a lightweight container that vanishes when
-        // appended to a real parent (its children move, the fragment itself
-        // doesn't). For our needs (React batching commits) it's sufficient
-        // to model it as an Element that flattens on appendChild.
-        var el = new Element("div");
-        el._isDocumentFragment = true;
-        Object.defineProperty(el, "nodeType", { value: 11, configurable: true });
-        Object.defineProperty(el, "nodeName", { value: "#document-fragment", configurable: true });
-        __elements__[el._id] = el;
-        return el;
+    removeEventListener: function(type, fn) {
+        var list = this._listeners[type];
+        if (!list) return;
+        for (var i = list.length - 1; i >= 0; i--) {
+            if (list[i] === fn) list.splice(i, 1);
+        }
+    },
+
+    dispatchEvent: function(event) {
+        var list = this._listeners[event.type];
+        if (!list) return;
+        for (var i = 0; i < list.length; i++) list[i](event);
     }
 };
 
@@ -843,6 +344,34 @@ var window = {
         if (typeof __cancelFrame__ === "function") __cancelFrame__(id);
     }
 };
+
+if (typeof globalThis.window === "undefined") {
+    globalThis.window = window;
+}
+
+if (typeof globalThis.self === "undefined") {
+    globalThis.self = globalThis.window;
+}
+
+// Bind directly to the window-object's frame helpers — `var window = {…}`
+// at script-top becomes a property of globalThis in V8, so resolving
+// `globalThis.window.requestAnimationFrame` from a wrapper that itself lives
+// on globalThis would recurse infinitely (RangeError: Maximum call stack size
+// exceeded — silently swallowed by Three.js's `new Promise(async () => {…})`
+// async-executor inside renderer.init, leaving the init promise pending forever).
+var __pulpWindowRequestFrame__ = window.requestAnimationFrame;
+var __pulpWindowCancelFrame__ = window.cancelAnimationFrame;
+if (typeof globalThis.requestAnimationFrame === "undefined") {
+    globalThis.requestAnimationFrame = function(fn) {
+        return __pulpWindowRequestFrame__(fn);
+    };
+}
+
+if (typeof globalThis.cancelAnimationFrame === "undefined") {
+    globalThis.cancelAnimationFrame = function(id) {
+        return __pulpWindowCancelFrame__(id);
+    };
+}
 
 function __installGlobalIfMissing(name, value) {
     if (typeof globalThis[name] === "undefined") {
@@ -993,6 +522,26 @@ function __textureExtent(sizeLike) {
     };
 }
 
+function __mockTextureBytesPerPixel(format) {
+    switch (String(format || __mockPreferredCanvasFormat())) {
+        case "rgba8unorm":
+        case "bgra8unorm":
+        case "rgba8unorm-srgb":
+        case "bgra8unorm-srgb":
+            return 4;
+        default:
+            return 4;
+    }
+}
+
+function __allocateMockTextureBytes(texture) {
+    var bytesPerPixel = __mockTextureBytesPerPixel(texture && texture.format);
+    var width = texture && texture.width ? texture.width : 1;
+    var height = texture && texture.height ? texture.height : 1;
+    var depthOrArrayLayers = texture && texture.depthOrArrayLayers ? texture.depthOrArrayLayers : 1;
+    return new Uint8Array(width * height * depthOrArrayLayers * bytesPerPixel);
+}
+
 function __createMockGPUBuffer(init) {
     init = init || {};
     var buffer = {
@@ -1000,20 +549,35 @@ function __createMockGPUBuffer(init) {
         label: init.label || "",
         size: init.size || 0,
         usage: init.usage || 0,
-        mapState: "unmapped",
+        mapState: init.mappedAtCreation ? "mapped" : "unmapped",
         _destroyed: false,
-        _bytes: new Uint8Array(init.size || 0)
+        _bytes: new Uint8Array(init.size || 0),
+        _mappedRanges: []
     };
     buffer.mapAsync = function() {
         buffer.mapState = "mapped";
+        buffer._mappedRanges = [];
         return Promise.resolve(undefined);
     };
     buffer.getMappedRange = function(offset, size) {
         var begin = offset || 0;
         var end = size == null ? buffer.size : begin + size;
-        return buffer._bytes.buffer.slice(begin, end);
+        var mapped = buffer._bytes.slice(begin, end).buffer;
+        buffer._mappedRanges.push({
+            begin: begin,
+            end: end,
+            bytes: mapped
+        });
+        return mapped;
     };
-    buffer.unmap = function() { buffer.mapState = "unmapped"; };
+    buffer.unmap = function() {
+        for (var i = 0; i < buffer._mappedRanges.length; ++i) {
+            var range = buffer._mappedRanges[i];
+            buffer._bytes.set(new Uint8Array(range.bytes), range.begin);
+        }
+        buffer._mappedRanges = [];
+        buffer.mapState = "unmapped";
+    };
     buffer.destroy = function() { buffer._destroyed = true; };
     return buffer;
 }
@@ -1026,13 +590,22 @@ function __createMockGPUTextureView(init) {
         format: init.format || __mockPreferredCanvasFormat(),
         dimension: init.dimension || "2d",
         aspect: init.aspect || "all",
-        texture: init.texture || null
+        baseMipLevel: init.baseMipLevel == null ? 0 : init.baseMipLevel,
+        mipLevelCount: init.mipLevelCount == null ? 1 : init.mipLevelCount,
+        baseArrayLayer: init.baseArrayLayer == null ? 0 : init.baseArrayLayer,
+        arrayLayerCount: init.arrayLayerCount == null ? 1 : init.arrayLayerCount,
+        texture: init.texture || null,
+        _nativeBridge: !!init.nativeBridge,
+        _nativeCanvasId: init.nativeCanvasId || "",
+        _nativeTextureId: init.nativeTextureId || ""
     };
 }
 
 function __createMockGPUTexture(init) {
     init = init || {};
     var size = __textureExtent(init.size);
+    var format = init.format || __mockPreferredCanvasFormat();
+    var bytesPerPixel = __mockTextureBytesPerPixel(format);
     var texture = {
         _objectName: "GPUTexture",
         label: init.label || "",
@@ -1040,23 +613,45 @@ function __createMockGPUTexture(init) {
         height: size.height,
         depthOrArrayLayers: size.depthOrArrayLayers,
         dimension: init.dimension || "2d",
-        format: init.format || __mockPreferredCanvasFormat(),
+        format: format,
         usage: init.usage || GPUTextureUsage.RENDER_ATTACHMENT,
         mipLevelCount: init.mipLevelCount || 1,
         sampleCount: init.sampleCount || 1,
-        _destroyed: false
+        _destroyed: false,
+        _nativeBridge: !!init.nativeBridge,
+        _nativeCanvasId: init.nativeCanvasId || "",
+        _nativeTextureId: init.nativeTextureId || "",
+        _bytesPerRow: init.bytesPerRow || (size.width * bytesPerPixel),
+        _rowsPerImage: init.rowsPerImage || size.height,
+        _bytes: init.bytes ? __toUint8Array(init.bytes) : null
     };
-    texture.createView = function(descriptor) {
-        descriptor = descriptor || {};
-        return __createMockGPUTextureView({
-            label: descriptor.label || texture.label,
-            format: descriptor.format || texture.format,
-            dimension: descriptor.dimension || texture.dimension,
-            aspect: descriptor.aspect || "all",
-            texture: texture
-        });
+    if (!texture._bytes) {
+        texture._bytes = __allocateMockTextureBytes(texture);
+    }
+        texture.createView = function(descriptor) {
+            descriptor = descriptor || {};
+            return __createMockGPUTextureView({
+                label: descriptor.label || texture.label,
+                format: descriptor.format || texture.format,
+                dimension: descriptor.dimension || texture.dimension,
+                aspect: descriptor.aspect || "all",
+                baseMipLevel: descriptor.baseMipLevel == null ? 0 : descriptor.baseMipLevel,
+                mipLevelCount: descriptor.mipLevelCount == null ? 1 : descriptor.mipLevelCount,
+                baseArrayLayer: descriptor.baseArrayLayer == null ? 0 : descriptor.baseArrayLayer,
+                arrayLayerCount: descriptor.arrayLayerCount == null ? 1 : descriptor.arrayLayerCount,
+                texture: texture,
+                nativeBridge: texture._nativeBridge,
+                nativeCanvasId: texture._nativeCanvasId,
+                nativeTextureId: texture._nativeTextureId
+            });
+        };
+    texture.destroy = function() {
+        if (texture._nativeBridge && texture._nativeTextureId &&
+            typeof __gpuDestroyTextureImpl === "function") {
+            __gpuDestroyTextureImpl(texture._nativeTextureId);
+        }
+        texture._destroyed = true;
     };
-    texture.destroy = function() { texture._destroyed = true; };
     return texture;
 }
 
@@ -1082,79 +677,71 @@ function __createMockGPURenderPassEncoder(init) {
         setStencilReference: function() {},
         draw: function() {},
         drawIndexed: function() {},
-        end: function() {}
+        end: function() {
+            if (typeof init.onEnd !== "function") return;
+            var descriptor = init.descriptor || {};
+            var attachments = descriptor.colorAttachments || [];
+            var attachment = attachments.length > 0 ? attachments[0] : null;
+            var view = attachment && attachment.view ? attachment.view : null;
+            var clearValue = attachment && attachment.clearValue ? attachment.clearValue : null;
+            var loadOp = attachment && attachment.loadOp ? attachment.loadOp : "";
+            if (view && view._nativeBridge && view._nativeCanvasId && loadOp === "clear" && clearValue) {
+                init.onEnd({
+                    type: "native-clear-current-texture",
+                    canvasId: view._nativeCanvasId,
+                    r: Number(clearValue.r == null ? 0 : clearValue.r),
+                    g: Number(clearValue.g == null ? 0 : clearValue.g),
+                    b: Number(clearValue.b == null ? 0 : clearValue.b),
+                    a: Number(clearValue.a == null ? 1 : clearValue.a)
+                });
+                return;
+            }
+            init.onEnd(null);
+        }
     };
 }
 
 function __createMockGPUComputePassEncoder(init) {
     init = init || {};
-    var currentComputePipeline = null;
-    var computeBindGroups = {};
-    var computeCommands = [];
-
     return {
         _objectName: "GPUComputePassEncoder",
         label: init.label || "",
-        _commands: computeCommands,
-        setPipeline: function(pipeline) {
-            currentComputePipeline = pipeline;
-        },
-        setBindGroup: function(index, bindGroup) {
-            computeBindGroups[index == null ? 0 : index] = bindGroup || null;
-        },
-        dispatchWorkgroups: function(x, y, z) {
-            computeCommands.push({
-                type: "dispatch",
-                pipeline: currentComputePipeline,
-                bindGroups: Object.assign({}, computeBindGroups),
-                workgroupCountX: x || 1,
-                workgroupCountY: y || 1,
-                workgroupCountZ: z || 1
-            });
-        },
-        dispatchWorkgroupsIndirect: function(indirectBuffer, indirectOffset) {
-            computeCommands.push({
-                type: "dispatch-indirect",
-                pipeline: currentComputePipeline,
-                bindGroups: Object.assign({}, computeBindGroups),
-                indirectBuffer: indirectBuffer,
-                indirectOffset: indirectOffset || 0
-            });
-        },
-        end: function() {
-            // Commands are captured in _commands for native dispatch
-        }
+        setPipeline: function() {},
+        setBindGroup: function() {},
+        dispatchWorkgroups: function() {},
+        dispatchWorkgroupsIndirect: function() {},
+        end: function() {}
     };
 }
 
 function __createMockGPUCommandEncoder(init) {
     init = init || {};
-    var computePasses = [];
-    return {
+    var encoder = {
         _objectName: "GPUCommandEncoder",
         label: init.label || "",
-        _computePasses: computePasses,
+        _commands: [],
         beginRenderPass: function(descriptor) {
             return __createMockGPURenderPassEncoder({
                 label: descriptor && descriptor.label ? descriptor.label : "",
-                descriptor: descriptor || {}
+                descriptor: descriptor || {},
+                onEnd: function(command) {
+                    if (command) encoder._commands.push(command);
+                }
             });
         },
         beginComputePass: function(descriptor) {
-            var pass = __createMockGPUComputePassEncoder({ label: descriptor && descriptor.label ? descriptor.label : "" });
-            computePasses.push(pass);
-            return pass;
+            return __createMockGPUComputePassEncoder({ label: descriptor && descriptor.label ? descriptor.label : "" });
         },
         copyBufferToBuffer: function() {},
         copyTextureToBuffer: function() {},
         copyBufferToTexture: function() {},
         finish: function(descriptor) {
-            var cmdBuf = __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
-            // Attach compute pass commands to the command buffer for native dispatch
-            cmdBuf._computePasses = computePasses;
-            return cmdBuf;
+            var commandBuffer = __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
+            commandBuffer._commands = encoder._commands.slice();
+            return commandBuffer;
         }
     };
+    return encoder;
 }
 
 function __createMockGPUShaderModule(init) {
@@ -1202,7 +789,11 @@ function __createMockGPURenderPipeline(init) {
     var pipeline = {
         _objectName: "GPURenderPipeline",
         label: init.label || "",
-        _bindGroupLayouts: init.bindGroupLayouts || []
+        _bindGroupLayouts: init.bindGroupLayouts || [],
+        _nativeBridge: !!init.nativeBridge,
+        vertex: init.vertex || {},
+        fragment: init.fragment || {},
+        primitive: init.primitive || {}
     };
     pipeline.getBindGroupLayout = function(index) {
         return pipeline._bindGroupLayouts[index] || __createMockGPUBindGroupLayout({});
@@ -1217,8 +808,10 @@ function __createMockGPUSampler(init) {
         label: init.label || "",
         addressModeU: init.addressModeU || "clamp-to-edge",
         addressModeV: init.addressModeV || "clamp-to-edge",
+        addressModeW: init.addressModeW || "clamp-to-edge",
         magFilter: init.magFilter || "nearest",
-        minFilter: init.minFilter || "nearest"
+        minFilter: init.minFilter || "nearest",
+        mipmapFilter: init.mipmapFilter || "nearest"
     };
 }
 
@@ -1227,38 +820,73 @@ function __createMockGPUQueue(init) {
     var queue = {
         _objectName: "GPUQueue",
         label: init.label || "",
-        _submitCount: 0
+        _submitCount: 0,
+        _nativeBridge: !!init.nativeBridge
     };
     queue.submit = function(commandBuffers) {
         queue._submitCount += commandBuffers && typeof commandBuffers.length === "number" ? commandBuffers.length : 0;
+        if (!queue._nativeBridge || typeof __gpuQueueSubmitImpl !== "function" || !commandBuffers) return;
+        for (var i = 0; i < commandBuffers.length; ++i) {
+            var commandBuffer = commandBuffers[i];
+            var commands = commandBuffer && commandBuffer._commands ? commandBuffer._commands : [];
+            for (var j = 0; j < commands.length; ++j) {
+                var command = commands[j];
+                if (command && command.type === "native-clear-current-texture") {
+                    __gpuQueueSubmitImpl(command.canvasId, command.r, command.g, command.b, command.a);
+                }
+            }
+        }
     };
     queue.writeBuffer = function(buffer, bufferOffset, data, dataOffset, size) {
         if (!buffer || buffer._objectName !== "GPUBuffer") return;
         var source = __toUint8Array(data);
         var begin = bufferOffset || 0;
         var sliceOffset = dataOffset || 0;
-        var sliceSize = size == null ? source.length - sliceOffset : size;
-        buffer._bytes.set(source.slice(sliceOffset, sliceOffset + sliceSize), begin);
+        var isTypedArray = typeof ArrayBuffer !== "undefined" &&
+            typeof ArrayBuffer.isView === "function" &&
+            ArrayBuffer.isView(data) &&
+            !(typeof DataView !== "undefined" && data instanceof DataView) &&
+            data && typeof data.BYTES_PER_ELEMENT === "number";
+        var byteOffset = isTypedArray ? sliceOffset * data.BYTES_PER_ELEMENT : sliceOffset;
+        var byteSize = size == null
+            ? source.length - byteOffset
+            : (isTypedArray ? size * data.BYTES_PER_ELEMENT : size);
+        buffer._bytes.set(source.slice(byteOffset, byteOffset + byteSize), begin);
     };
     queue.writeTexture = function(destination, data, dataLayout, size) {
-        if (!destination || !destination.texture) return;
-        var texture = destination.texture;
+        destination = destination || {};
+        dataLayout = dataLayout || {};
+        var texture = destination.texture || null;
+        if (!texture || texture._objectName !== "GPUTexture") return;
+
         var source = __toUint8Array(data);
-        texture._bytes = source;
-        texture._bytesPerRow = dataLayout && dataLayout.bytesPerRow ? dataLayout.bytesPerRow : 0;
-        texture._rowsPerImage = dataLayout && dataLayout.rowsPerImage ? dataLayout.rowsPerImage : (size && size[1] ? size[1] : texture.height || 1);
+        var extent = __textureExtent(size || texture);
+        var bytesPerPixel = __mockTextureBytesPerPixel(texture.format);
+        var bytesPerRow = dataLayout.bytesPerRow || (extent.width * bytesPerPixel);
+        var rowsPerImage = dataLayout.rowsPerImage || extent.height;
+        var origin = destination.origin || {};
+        var originX = origin.x || 0;
+        var originY = origin.y || 0;
+        var originZ = origin.z || 0;
+
+        if (!texture._bytes || !(texture._bytes instanceof Uint8Array)) {
+            texture._bytes = __allocateMockTextureBytes(texture);
+        }
+        texture._bytesPerRow = texture.width * bytesPerPixel;
+        texture._rowsPerImage = texture.height;
+
+        var copyWidthBytes = extent.width * bytesPerPixel;
+        for (var z = 0; z < extent.depthOrArrayLayers; ++z) {
+            for (var y = 0; y < extent.height; ++y) {
+                var srcOffset = z * rowsPerImage * bytesPerRow + y * bytesPerRow;
+                var dstRow = (originZ + z) * texture._rowsPerImage + (originY + y);
+                var dstOffset = dstRow * texture._bytesPerRow + originX * bytesPerPixel;
+                var slice = source.slice(srcOffset, srcOffset + copyWidthBytes);
+                texture._bytes.set(slice, dstOffset);
+            }
+        }
     };
-    queue.copyExternalImageToTexture = function(source, destination, copySize) {
-        if (!source || !destination || !destination.texture) return;
-        var imageBitmap = source.source;
-        if (!imageBitmap || !imageBitmap._decodedPixels) return;
-        var texture = destination.texture;
-        texture._bytes = imageBitmap._decodedPixels;
-        texture._bytesPerRow = imageBitmap.width * 4;
-        texture._rowsPerImage = imageBitmap.height;
-        texture.width = imageBitmap.width;
-        texture.height = imageBitmap.height;
-    };
+    queue.copyExternalImageToTexture = function() {};
     queue.onSubmittedWorkDone = function() {
         return Promise.resolve(undefined);
     };
@@ -1282,20 +910,57 @@ function __pickDeviceFeatures(adapter, descriptor) {
     return picked;
 }
 
-function __createMockGPUDevice(adapter, descriptor) {
+function __createMockGPUDevice(adapter, descriptor, init) {
     descriptor = descriptor || {};
+    init = init || {};
     var device = {
         _objectName: "GPUDevice",
-        label: descriptor.label || "",
-        features: __createFeatureSet(__pickDeviceFeatures(adapter, descriptor)),
-        limits: __mergeMockGpuLimits(descriptor.requiredLimits),
-        queue: __createMockGPUQueue({}),
-        adapterInfo: adapter && adapter.info ? adapter.info : null,
+        label: descriptor.label || init.label || "",
+        _nativeBridge: !!init.nativeBridge,
+        features: __createFeatureSet(init.features || __pickDeviceFeatures(adapter, descriptor)),
+        limits: __mergeMockGpuLimits(init.limits || descriptor.requiredLimits),
+        queue: __createMockGPUQueue({ nativeBridge: !!init.nativeBridge }),
+        adapterInfo: init.adapterInfo || (adapter && adapter.info ? adapter.info : null),
         lost: new Promise(function() {}),
-        _destroyed: false
+        _destroyed: false,
+        _errorScopes: [],
+        _eventListeners: {}
     };
     device.createBuffer = function(bufferDescriptor) { return __createMockGPUBuffer(bufferDescriptor || {}); };
-    device.createTexture = function(textureDescriptor) { return __createMockGPUTexture(textureDescriptor || {}); };
+    device.createTexture = function(textureDescriptor) {
+        textureDescriptor = textureDescriptor || {};
+        var nativeTextureId = "";
+        if (device._nativeBridge && typeof __gpuCreateTextureImpl === "function") {
+            var size = __textureExtent(textureDescriptor.size);
+            nativeTextureId = String(__gpuCreateTextureImpl(JSON.stringify({
+                label: textureDescriptor.label || "",
+                size: {
+                    width: size.width,
+                    height: size.height,
+                    depthOrArrayLayers: size.depthOrArrayLayers
+                },
+                dimension: textureDescriptor.dimension || "2d",
+                format: textureDescriptor.format || __mockPreferredCanvasFormat(),
+                usage: textureDescriptor.usage || GPUTextureUsage.RENDER_ATTACHMENT,
+                mipLevelCount: textureDescriptor.mipLevelCount || 1,
+                sampleCount: textureDescriptor.sampleCount || 1
+            })) || "");
+        }
+        return __createMockGPUTexture({
+            label: textureDescriptor.label || "",
+            size: textureDescriptor.size,
+            dimension: textureDescriptor.dimension || "2d",
+            format: textureDescriptor.format || __mockPreferredCanvasFormat(),
+            usage: textureDescriptor.usage || GPUTextureUsage.RENDER_ATTACHMENT,
+            mipLevelCount: textureDescriptor.mipLevelCount || 1,
+            sampleCount: textureDescriptor.sampleCount || 1,
+            bytesPerRow: textureDescriptor.bytesPerRow,
+            rowsPerImage: textureDescriptor.rowsPerImage,
+            bytes: textureDescriptor.bytes,
+            nativeBridge: device._nativeBridge && !!nativeTextureId,
+            nativeTextureId: nativeTextureId
+        });
+    };
     device.createSampler = function(samplerDescriptor) { return __createMockGPUSampler(samplerDescriptor || {}); };
     device.createShaderModule = function(shaderDescriptor) { return __createMockGPUShaderModule(shaderDescriptor || {}); };
     device.createBindGroupLayout = function(layoutDescriptor) { return __createMockGPUBindGroupLayout(layoutDescriptor || {}); };
@@ -1305,91 +970,91 @@ function __createMockGPUDevice(adapter, descriptor) {
         pipelineDescriptor = pipelineDescriptor || {};
         return __createMockGPURenderPipeline({
             label: pipelineDescriptor.label || "",
+            nativeBridge: device._nativeBridge,
+            vertex: pipelineDescriptor.vertex || {},
+            fragment: pipelineDescriptor.fragment || {},
+            primitive: pipelineDescriptor.primitive || {},
             bindGroupLayouts: pipelineDescriptor.layout && pipelineDescriptor.layout.bindGroupLayouts
                 ? pipelineDescriptor.layout.bindGroupLayouts : []
         });
     };
-    device.createComputePipeline = function(descriptor) {
-        descriptor = descriptor || {};
-        var compute = descriptor.compute || {};
-        var pipeline = {
-            _objectName: "GPUComputePipeline",
-            label: descriptor.label || "",
-            _compute: compute,
-            _nativeBridge: device._nativeBridge || false,
-            _bindGroupLayouts: descriptor.layout && descriptor.layout.bindGroupLayouts
-                ? descriptor.layout.bindGroupLayouts : []
-        };
-        pipeline.getBindGroupLayout = function(index) {
-            return pipeline._bindGroupLayouts[index] || __createMockGPUBindGroupLayout({});
-        };
-        return pipeline;
+    device.createRenderPipelineAsync = function(pipelineDescriptor) {
+        return Promise.resolve(device.createRenderPipeline(pipelineDescriptor || {}));
     };
-    device.createComputePipelineAsync = function(descriptor) {
-        return Promise.resolve(device.createComputePipeline(descriptor));
+    device.pushErrorScope = function(filter) {
+        device._errorScopes.push(filter == null ? "validation" : String(filter));
     };
-    device.createRenderPipelineAsync = function(descriptor) {
-        return Promise.resolve(device.createRenderPipeline(descriptor));
+    device.popErrorScope = function() {
+        if (device._errorScopes.length > 0) {
+            device._errorScopes.pop();
+        }
+        return Promise.resolve(null);
+    };
+    device.addEventListener = function(type, callback) {
+        type = String(type || "");
+        if (!device._eventListeners[type]) device._eventListeners[type] = [];
+        if (typeof callback === "function") device._eventListeners[type].push(callback);
+    };
+    device.removeEventListener = function(type, callback) {
+        type = String(type || "");
+        var listeners = device._eventListeners[type];
+        if (!listeners || listeners.length === 0) return;
+        if (typeof callback !== "function") {
+            device._eventListeners[type] = [];
+            return;
+        }
+        var filtered = [];
+        for (var i = 0; i < listeners.length; ++i) {
+            if (listeners[i] !== callback) filtered.push(listeners[i]);
+        }
+        device._eventListeners[type] = filtered;
     };
     device.createCommandEncoder = function(commandDescriptor) { return __createMockGPUCommandEncoder(commandDescriptor || {}); };
+    // WebGPU error-scope API used by Three.js's WebGPUPipelineUtils — return null
+    // (no error) on pop. Matches spec shape; mock backend produces no GPU errors.
+    device.pushErrorScope = function() {};
+    device.popErrorScope = function() { return Promise.resolve(null); };
     device.destroy = function() { device._destroyed = true; };
     return device;
 }
 
-function __createMockGPUAdapter(init) {
+function __createGPUAdapter(init) {
     init = init || {};
     var adapter = {
         _objectName: "GPUAdapter",
         name: init.name || "Mock Dawn Adapter",
         backend: init.backend || __mockGpuInfo().backend,
         preferredCanvasFormat: init.preferredCanvasFormat || __mockPreferredCanvasFormat(),
+        _nativeBridge: !!init.nativeBridge,
         features: __createFeatureSet(init.features || [ "core-features-and-limits", "timestamp-query" ]),
         limits: __mergeMockGpuLimits(init.limits),
         info: init.info || { vendor: "Pulp", architecture: init.backend || __mockGpuInfo().backend, description: init.name || "Mock Dawn Adapter" }
     };
     adapter.requestDevice = function(descriptor) {
-        return Promise.resolve(__createMockGPUDevice(adapter, descriptor || {}));
+        var initDescriptor = {};
+        if (adapter._nativeBridge && typeof __describeNativeDeviceImpl === "function") {
+            initDescriptor = __describeNativeDeviceImpl(descriptor || {}) || {};
+        }
+        return Promise.resolve(__createMockGPUDevice(adapter, descriptor || {}, initDescriptor));
     };
     return adapter;
 }
 
-function __createMockGPUCanvasContext(canvasEl) {
-    var context = {
-        _objectName: "GPUCanvasContext",
-        canvas: canvasEl,
-        _configured: false,
-        device: null,
-        format: __mockPreferredCanvasFormat(),
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        alphaMode: "opaque"
-    };
-    context.configure = function(descriptor) {
-        descriptor = descriptor || {};
-        context._configured = true;
-        context.device = descriptor.device || null;
-        context.format = descriptor.format || __mockPreferredCanvasFormat();
-        context.usage = descriptor.usage || GPUTextureUsage.RENDER_ATTACHMENT;
-        context.alphaMode = descriptor.alphaMode || "opaque";
-    };
-    context.getCurrentTexture = function() {
-        return __createMockGPUTexture({
-            size: {
-                width: context.canvas && context.canvas.width ? context.canvas.width : 1,
-                height: context.canvas && context.canvas.height ? context.canvas.height : 1
-            },
-            format: context.format,
-            usage: context.usage,
-            label: (context.canvas && context.canvas.id ? context.canvas.id : "pulp-canvas") + "-current-texture"
-        });
-    };
-    context.present = function() {};
-    return context;
+function __createMockGPUAdapter(init) {
+    return __createGPUAdapter(init || {});
 }
 
 var navigator = globalThis.navigator || {};
 if (typeof navigatorGPU !== "undefined" && navigatorGPU) {
     navigator.gpu = navigatorGPU;
     navigator.gpu.requestAdapter = function() {
+        var descriptor = null;
+        if (typeof __describeNativeAdapterImpl === "function") {
+            descriptor = __describeNativeAdapterImpl();
+        }
+        if (descriptor && descriptor.nativeBridge) {
+            return Promise.resolve(__createGPUAdapter(descriptor));
+        }
         return Promise.resolve(window.pulp.gpu.createMockAdapter());
     };
 }
@@ -1682,39 +1347,6 @@ if (typeof globalThis.Response === "undefined") {
     globalThis.Response = __PulpResponse;
 }
 
-function createImageBitmap(source) {
-    var bytes;
-    if (source && source._bytes) {
-        bytes = source._bytes;
-    } else if (source instanceof ArrayBuffer) {
-        bytes = new Uint8Array(source);
-    } else if (source instanceof Uint8Array) {
-        bytes = source;
-    } else {
-        return Promise.reject(new Error("createImageBitmap: unsupported source type"));
-    }
-
-    if (typeof __decodeImageDataImpl === "function") {
-        var payload = JSON.stringify({ data: Array.from(bytes) });
-        var result = __decodeImageDataImpl(payload);
-        if (result && result.ok) {
-            var bitmap = {
-                width: result.width,
-                height: result.height,
-                _decodedPixels: new Uint8Array(result.pixels),
-                close: function() {}
-            };
-            return Promise.resolve(bitmap);
-        }
-        return Promise.reject(new Error("createImageBitmap: failed to decode image"));
-    }
-
-    return Promise.reject(new Error("createImageBitmap: no native decoder available"));
-}
-if (typeof globalThis.createImageBitmap === "undefined") {
-    globalThis.createImageBitmap = createImageBitmap;
-}
-
 function PulpURL(url) {
     this.href = String(url || "");
 }
@@ -1805,6 +1437,10 @@ window.pulp.gpu = {
         if (typeof getGPUInfo === "function") return getGPUInfo();
         return { available: false, backend: "unavailable" };
     },
+    describeNativeAdapter: function() {
+        if (typeof __describeNativeAdapterImpl === "function") return __describeNativeAdapterImpl();
+        return null;
+    },
     createMockAdapter: function() {
         var info = __mockGpuInfo();
         return __createMockGPUAdapter({
@@ -1812,9 +1448,276 @@ window.pulp.gpu = {
             preferredCanvasFormat: __mockPreferredCanvasFormat()
         });
     },
+    createNativeAdapter: function() {
+        var descriptor = window.pulp.gpu.describeNativeAdapter();
+        if (!descriptor || !descriptor.nativeBridge) return null;
+        return __createGPUAdapter(descriptor);
+    },
     createMockDevice: function(adapter, descriptor) {
         adapter = adapter && adapter._objectName === "GPUAdapter" ? adapter : window.pulp.gpu.createMockAdapter();
         descriptor = descriptor || {};
         return __createMockGPUDevice(adapter, descriptor);
     }
 };
+
+// Three.js's Animation does `this._context = typeof self !== 'undefined' ? self : null`
+// and then calls `this._context.requestAnimationFrame(...)`. Without `self`, it
+// silently nulls out and the renderer.init's async-executor swallows the throw.
+// Provide a minimal `self` shim with just rAF/cAF — assigning self=globalThis or
+// self=window causes CHOC's v8ToChoc to stack-overflow on the cycle (Tracktion/choc#105).
+if (typeof globalThis.self === "undefined") {
+    globalThis.self = {
+        requestAnimationFrame: window.requestAnimationFrame,
+        cancelAnimationFrame: window.cancelAnimationFrame
+    };
+}
+
+// OrbitControls (and other DOM-heavy libs) read `el.ownerDocument` to attach
+// document-scoped event listeners. Define as a non-enumerable getter so
+// CHOC's v8ToChoc property walker skips it (avoids the cycle bug, see #105).
+if (typeof Element !== "undefined" && Element.prototype && !Object.getOwnPropertyDescriptor(Element.prototype, "ownerDocument")) {
+    Object.defineProperty(Element.prototype, "ownerDocument", {
+        get: function() { return document; },
+        configurable: true,
+        enumerable: false
+    });
+}
+function _stripCssComments(text) {
+    return text.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function _parseCssDeclarations(body) {
+    var props = {};
+    var decls = body.split(";");
+    for (var i = 0; i < decls.length; i++) {
+        var d = decls[i].trim();
+        if (!d) continue;
+        var colon = d.indexOf(":");
+        if (colon <= 0) continue;
+        var name = d.slice(0, colon).trim();
+        var value = d.slice(colon + 1).trim();
+        if (!name || !value) continue;
+        // CSS uses kebab-case; CSSStyleDeclaration._props expects camelCase.
+        // The setter side handles both, but normalize here so layered
+        // overrides on the same logical property collapse correctly.
+        var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
+        props[camel] = value;
+    }
+    return props;
+}
+
+function _parseCssText(text) {
+    // Returns an array of { selector, properties } records — array (not
+    // object) so duplicate selectors layer in source order.
+    var rules = [];
+    var src = _stripCssComments(text || "");
+    var i = 0;
+    while (i < src.length) {
+        // Skip whitespace and at-rule blocks (we don't support them; just
+        // jump over the matching brace pair so a stray @media doesn't
+        // poison the rest of the sheet).
+        var ch = src.charAt(i);
+        if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") { i++; continue; }
+        if (ch === "@") {
+            var depth = 0, found = false;
+            while (i < src.length) {
+                var c2 = src.charAt(i++);
+                if (c2 === "{") { depth++; found = true; }
+                else if (c2 === "}") { depth--; if (depth === 0 && found) break; }
+                else if (c2 === ";" && !found) { break; } // at-rule with no block
+            }
+            continue;
+        }
+        // Read selector list up to '{'
+        var brace = src.indexOf("{", i);
+        if (brace < 0) break;
+        var selectorList = src.slice(i, brace).trim();
+        var endBrace = src.indexOf("}", brace + 1);
+        if (endBrace < 0) break;
+        var body = src.slice(brace + 1, endBrace);
+        var props = _parseCssDeclarations(body);
+        // Split selector list on commas (top-level only; we don't support
+        // selectors with parenthesized commas in this slice).
+        var selectors = selectorList.split(",");
+        for (var s = 0; s < selectors.length; s++) {
+            var sel = selectors[s].trim();
+            if (!sel) continue;
+            rules.push({ selector: sel, properties: props });
+        }
+        i = endBrace + 1;
+    }
+    return rules;
+}
+
+function _processStyleElement(el) {
+    // Detach any previously-applied sheet so re-setting textContent
+    // (React commits, hot-reload) replaces rather than stacks.
+    if (el._appliedSheet && typeof el._appliedSheet.detach === "function") {
+        el._appliedSheet.detach();
+        el._appliedSheet = null;
+    }
+    var rules = _parseCssText(el._textContent || "");
+    if (rules.length === 0) return;
+    // StyleSheet's constructor takes { selector: properties }; we feed it
+    // a raw _parsedRules list to preserve duplicate selectors and
+    // source-order layering for `:hover` rules.
+    var sheet = Object.create(StyleSheet.prototype);
+    sheet._rules = {};
+    sheet._attached = false;
+    sheet._parsedRules = [];
+    for (var i = 0; i < rules.length; i++) {
+        var r = rules[i];
+        sheet._parsedRules.push({
+            selector: r.selector,
+            properties: r.properties,
+            parsed: _parseSelector(r.selector)
+        });
+    }
+    sheet.attach();
+    el._appliedSheet = sheet;
+}
+
+function _matchesPseudoClass(el, pseudo) {
+    if (!pseudo) return true;
+    var lower = pseudo.toLowerCase();
+
+    // State-on-element pseudo-classes — read the bridge-maintained slot.
+    if (lower === "disabled") return !!el._disabled;
+    if (lower === "enabled")  return !el._disabled;
+    if (lower === "checked")  return !!el._checked;
+    if (lower === "hover")    return !!el._isHovered;
+    if (lower === "focus")    return !!el._hasFocus;
+    if (lower === "active")   return !!el._isActive;
+
+    // DOM-position pseudo-classes. Need a parent to compute the index.
+    var parent = el._parentElement;
+    if (lower === "first-child") {
+        return !!parent && parent._children && parent._children[0] === el;
+    }
+    if (lower === "last-child") {
+        if (!parent || !parent._children) return false;
+        return parent._children[parent._children.length - 1] === el;
+    }
+    if (lower === "only-child") {
+        return !!parent && parent._children && parent._children.length === 1
+            && parent._children[0] === el;
+    }
+    // pulp #1737 (Codex P2 followup #3 on #1779): `:root` matches the
+    // document root element specifically (`__bodyElement__`), not any
+    // element with no parent. The previous `!el._parentElement` check
+    // also matched DETACHED elements (createElement before appendChild),
+    // which leaked `:root { ... }` theme/layout styles into normal
+    // nodes when they were later inserted. StyleSheet.attach() walks
+    // every entry in `__elements__` so the bug surfaced for any element
+    // created mid-stylesheet-life.
+    //
+    // Tied to the root via identity check — __bodyElement__ is the
+    // synthetic body element this shim creates at the top of
+    // web-compat-document.js. Detached elements still have a non-null
+    // _parentElement once mounted (and even pre-mount they're never
+    // === __bodyElement__), so this branch is safe.
+    //
+    // Catalog still doesn't claim :root for document.querySelector
+    // because _findMatch starts traversal from root._children — the
+    // root itself is never queued. So:
+    //   * stylesheet `:root { color: red }` → applies to body (this branch).
+    //   * document.querySelector(':root') → returns null (traversal
+    //     never sees the root). Catalog supportedValues notes the gap.
+    if (lower === "root") {
+        return el === __bodyElement__;
+    }
+    if (lower === "empty") {
+        return !el._children || el._children.length === 0;
+    }
+
+    // Functional pseudo-classes: `:not(<simple>)` and `:nth-child(N|2n|...)`.
+    // Use raw `pseudo` (not lowercased) so the inner selector retains case
+    // semantics for tag names + attribute values.
+    var notMatch = pseudo.match(/^not\((.+)\)$/i);
+    if (notMatch) {
+        var inner = _parseSelector(notMatch[1]);
+        return !_matchesSelector(el, inner);
+    }
+    var nthMatch = pseudo.match(/^nth-child\((.+)\)$/i);
+    if (nthMatch) {
+        if (!parent || !parent._children) return false;
+        var idx = parent._children.indexOf(el);
+        if (idx < 0) return false;
+        return _matchesNth(idx + 1, nthMatch[1].trim());
+    }
+    var nthLast = pseudo.match(/^nth-last-child\((.+)\)$/i);
+    if (nthLast) {
+        if (!parent || !parent._children) return false;
+        var lastIdx = parent._children.indexOf(el);
+        if (lastIdx < 0) return false;
+        return _matchesNth(parent._children.length - lastIdx, nthLast[1].trim());
+    }
+
+    // Unknown pseudo-class — explicit no-match (per CSS Selectors Level 4
+    // forward-compat: unknown pseudo-classes match nothing rather than
+    // refusing to parse).
+    return false;
+}
+
+// pulp #1737 — :nth-child(N) argument parser. Accepts:
+//   * `odd` / `even` (case-insensitive)
+//   * a positive integer literal (`2`, `5`)
+//   * `An+B` / `An-B` formula (e.g. `2n`, `2n+1`, `3n-1`, `-n+3`).
+
+function _matchesNth(pos, arg) {
+    var lower = arg.toLowerCase().replace(/\s+/g, "");
+    if (lower === "odd")  return pos % 2 === 1;
+    if (lower === "even") return pos % 2 === 0;
+    // Plain integer.
+    if (/^-?\d+$/.test(lower)) return pos === parseInt(lower, 10);
+    // An+B form. Match `[A]n[+|-B]` where A and B are signed integers.
+    // Both are optional; n is required.
+    var m = lower.match(/^(-?\d*)n([+-]\d+)?$/);
+    if (!m) return false;
+    var aRaw = m[1];
+    var bRaw = m[2] || "0";
+    var a = aRaw === "" || aRaw === "+" ? 1 : (aRaw === "-" ? -1 : parseInt(aRaw, 10));
+    var b = parseInt(bRaw, 10);
+    if (a === 0) return pos === b;
+    var k = (pos - b) / a;
+    // Index must be a non-negative integer.
+    return k >= 0 && Math.floor(k) === k;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// querySelector / querySelectorAll
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function createImageBitmap(source) {
+    var bytes;
+    if (source && source._bytes) {
+        bytes = source._bytes;
+    } else if (source instanceof ArrayBuffer) {
+        bytes = new Uint8Array(source);
+    } else if (source instanceof Uint8Array) {
+        bytes = source;
+    } else {
+        return Promise.reject(new Error("createImageBitmap: unsupported source type"));
+    }
+
+    if (typeof __decodeImageDataImpl === "function") {
+        var payload = JSON.stringify({ data: Array.from(bytes) });
+        var result = __decodeImageDataImpl(payload);
+        if (result && result.ok) {
+            var bitmap = {
+                width: result.width,
+                height: result.height,
+                _decodedPixels: new Uint8Array(result.pixels),
+                close: function() {}
+            };
+            return Promise.resolve(bitmap);
+        }
+        return Promise.reject(new Error("createImageBitmap: failed to decode image"));
+    }
+
+    return Promise.reject(new Error("createImageBitmap: no native decoder available"));
+}
+if (typeof globalThis.createImageBitmap === "undefined") {
+    globalThis.createImageBitmap = createImageBitmap;
+}
+

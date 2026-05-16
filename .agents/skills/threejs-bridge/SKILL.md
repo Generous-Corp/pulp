@@ -53,6 +53,21 @@ Not supported by this skill:
 
 3. **Three.js fetched via FetchContent** — `PULP_HAS_THREEJS` is set automatically when GPU + tests are enabled.
 
+## Failure Modes To Recognize
+
+These three failures all present as "demo says `status: 'ready'` but the canvas is solid black/blank" — Three.js's `renderer.init()` uses `new Promise(async (resolve, reject) => {…})` which silently swallows any throw inside the executor, so errors do NOT propagate as rejections. Whenever you see a black canvas, suspect one of these:
+
+1. **`createNativeAdapter` / `describeNativeAdapter` missing from `window.pulp.gpu`** (regression introduced by ad7175be7 in April 2026). `web-compat-canvas.js`'s `__ensurePulpGpuHelpers` calls `window.pulp.gpu.createNativeAdapter()`; if undefined, the entire native bridge silently falls back to no-op mocks. Fix: keep the `describeNativeAdapter` / `createNativeAdapter` accessors in `web-compat-document.js` alongside the mock-adapter accessors, and keep the native-aware `navigator.gpu.requestAdapter` that prefers `__describeNativeAdapterImpl` over the mock.
+
+2. **`globalThis.requestAnimationFrame` recursing on `globalThis.window.requestAnimationFrame`** (RangeError: Maximum call stack size exceeded). In V8 the script-top `var window = {…}` becomes a property of globalThis, so a wrapper that lives on globalThis and calls `globalThis.window.X` resolves back to itself. Bind directly to the inner `__requestFrame__` helper (or capture `window.requestAnimationFrame` once at install time and call that local).
+
+3. **`var depthStencil` missing in the `__createMockGPURenderPassEncoder` closure** in `web-compat-gpu-buffered.js`. `encoder.draw` / `encoder.drawIndexed` reference `depthStencil` to forward to `createBufferedDrawPayload`; if undeclared in the closure, the reference resolves as a free variable and throws ReferenceError as soon as the bridge is engaged. Add `var depthStencil = descriptor.depthStencilAttachment || null;` next to the other closure vars.
+
+Diagnosing tools:
+- Wrap `renderer.init`'s async-executor body in your own try/catch + reject (in the cached `three.webgpu.js` from FetchContent) to surface the otherwise-silent throw.
+- Check `globalThis.__phase13BufferedSkips` after a render — empty array means draws are landing through the native bridge; non-empty means the buffered draw encoder gave up because `attachmentView._nativeBridge` was false.
+- Probe `context._nativeBridge`, `context._configured`, `device._nativeBridge`, and `context.getCurrentTexture().createView()._nativeBridge` to bisect which layer dropped the bridge metadata.
+
 ## Core Files
 
 Main workflow files:
