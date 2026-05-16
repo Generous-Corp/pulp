@@ -96,22 +96,53 @@ jobs:
           CONSUMER="${RUNNER_TEMP}/pulp-consumer"
           rm -rf "$CONSUMER"
           mkdir -p "$CONSUMER/src"
-          # Minimal consumer: find_package(Pulp), declare a tiny plugin
-          # via pulp_add_plugin so PulpUtils.cmake's downstream-facing
-          # functions get exercised. The Linux+GNU-ld include of
-          # PulpLinkFontconfig.cmake fires inside _pulp_add_standalone
-          # on Linux — that's the exact line the piggyback fix repaired.
+          # Minimal consumer: actually invoke `pulp_add_plugin(...)` so
+          # `_pulp_add_standalone` runs, which is the function body where
+          # the #2087 piggyback bug lived (an include of
+          # PulpLinkFontconfig.cmake via the wrong CMake path variable).
+          # A pure find_package + target-existence check leaves that path
+          # untested — and that's exactly the gap Codex P2 flagged on
+          # PR #2091 (consumer smoke would have passed on a broken SDK).
+          #
+          # The plugin source file is intentionally trivial: this is a
+          # configure-time smoke (not a build-time smoke), so we only
+          # need pulp_add_plugin to RUN to exercise _pulp_add_standalone.
+          # If the function-body include of PulpLinkFontconfig.cmake
+          # resolves to the consumer's source tree (the original bug),
+          # CMake aborts here with "include could not find requested
+          # file" and the workflow fails.
+          mkdir -p "$CONSUMER/src"
+          cat > "$CONSUMER/src/consumer_plugin.cpp" <<'EOF'
+          // Minimal stub plugin entry — see consumer_plugin.hpp for the
+          // actual Processor subclass declaration. pulp_add_plugin
+          // accepts SOURCES that compile against the SDK headers; the
+          // smoke verifies configure-time helper paths, not runtime
+          // plugin behavior.
+          EOF
           cat > "$CONSUMER/CMakeLists.txt" <<'EOF'
           cmake_minimum_required(VERSION 3.24)
           project(PulpConsumerSmoke VERSION 0.1.0 LANGUAGES CXX)
           find_package(Pulp REQUIRED)
-          # Headers-only assertion — this proves find_package wired up.
-          # Target namespace is Pulp:: (capital P) per PulpTargets.cmake's
-          # add_library(Pulp::* STATIC IMPORTED).
+          # find_package wired up — target namespace is Pulp:: (capital P)
+          # per PulpTargets.cmake's add_library(Pulp::* STATIC IMPORTED).
           if(NOT TARGET Pulp::view)
               message(FATAL_ERROR "find_package(Pulp) did not expose Pulp::view")
           endif()
-          message(STATUS "Consumer smoke: Pulp::view target resolved.")
+          # ACTUALLY invoke pulp_add_plugin so _pulp_add_standalone runs.
+          # This is the configure-time path where #2087 piggyback's
+          # PulpLinkFontconfig.cmake include lived; a pure target-check
+          # would silently miss the regression. CLAP-only formats keeps
+          # the workflow runner light and works on linux + macos without
+          # extra SDK dependencies.
+          pulp_add_plugin(PulpConsumerSmoke
+              PLUGIN_NAME "PulpConsumerSmoke"
+              MANUFACTURER "PulpSmoke"
+              BUNDLE_ID "audio.pulp.consumer.smoke"
+              VERSION "0.1.0"
+              FORMATS CLAP
+              SOURCES src/consumer_plugin.cpp
+          )
+          message(STATUS "Consumer smoke: pulp_add_plugin configure-time helpers OK.")
           EOF
           cmake -S "$CONSUMER" -B "$CONSUMER/build" \
             -DCMAKE_PREFIX_PATH="$PREFIX" \

@@ -3,12 +3,25 @@
 # pulp-mcp binary regardless of the cwd it spawns the MCP server with.
 #
 # Resolution order:
-#   1. ${CLAUDE_PLUGIN_ROOT-derived}/build/tools/mcp/pulp-mcp  (source-tree build)
-#   2. pulp-mcp on $PATH                                       (installed binary)
+#   1. <plugin-cwd>/build/tools/mcp/pulp-mcp  (source-tree dev build)
+#   2. ~/.pulp/bin/pulp-mcp                   (canonical install dest)
+#   3. pulp-mcp on $PATH                      (fallback for custom installs)
+#
+# Why probe ~/.pulp/bin BEFORE $PATH (pulp #2087 follow-up): Claude Code
+# spawns the MCP server with a sanitized environment — the user's
+# interactive-shell PATH (which includes ~/.pulp/bin via install.sh)
+# does NOT propagate, so `command -v pulp-mcp` returns empty even on
+# a healthy install. Without this probe, `/mcp` reports
+# "Failed to reconnect to pulp: ENOENT" (the launcher exits 127, and
+# Claude Code surfaces that as a missing-binary error) every time the
+# user restarts Claude Code on a fresh `curl install.sh | sh`. The
+# direct ~/.pulp/bin probe matches what install.sh + `pulp upgrade
+# --install` write to, so it's the authoritative location to check
+# regardless of PATH state.
 #
 # If neither is found, the launcher emits a readable diagnostic on stderr
 # and exits 127 so Claude Code surfaces the failure rather than treating
-# it as silent. See pulp #1821.
+# it as silent. See pulp #1821 and pulp #2087.
 
 set -e
 
@@ -20,6 +33,15 @@ if [ -x "$CANDIDATE_SOURCE_BUILD" ]; then
   exec "$CANDIDATE_SOURCE_BUILD" "$@"
 fi
 
+# install.sh + `pulp upgrade --install` write the binary to ~/.pulp/bin/
+# on every supported platform; this is the canonical location any healthy
+# `curl install.sh | sh` produces. Probing it directly is robust against
+# PATH not propagating into the MCP subprocess's env.
+CANDIDATE_INSTALLED="${HOME}/.pulp/bin/pulp-mcp"
+if [ -x "$CANDIDATE_INSTALLED" ]; then
+  exec "$CANDIDATE_INSTALLED" "$@"
+fi
+
 if command -v pulp-mcp >/dev/null 2>&1; then
   exec pulp-mcp "$@"
 fi
@@ -29,10 +51,13 @@ pulp-mcp-launcher: cannot locate pulp-mcp binary.
 
 Looked in:
   1. $CANDIDATE_SOURCE_BUILD  (source-tree build)
-  2. \$PATH (no executable named 'pulp-mcp' found)
+  2. $CANDIDATE_INSTALLED  (canonical install destination)
+  3. \$PATH (no executable named 'pulp-mcp' found)
 
 Fix one of:
-  - Build it: 'cmake --build build --target pulp-mcp' from $REPO_ROOT
+  - Install: 'curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh'
+    (drops pulp-mcp into ~/.pulp/bin/)
+  - Source build: 'cmake --build build --target pulp-mcp' from $REPO_ROOT
   - Install it on \$PATH so 'pulp-mcp' resolves globally
 
 See https://github.com/danielraffel/pulp/issues/1821 for context.

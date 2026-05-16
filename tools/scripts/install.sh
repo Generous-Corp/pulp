@@ -132,14 +132,24 @@ fi
 
 echo ""
 info "Installing matching SDK v${SDK_VERSION_FROM_CLI}..."
-if PATH="${INSTALL_DIR}:$PATH" "${INSTALL_DIR}/pulp" sdk install 2>&1 \
-       | sed 's/^/  /'; then
+# Capture pulp sdk install's exit code via PIPESTATUS, not the pipeline's
+# overall status. set -e doesn't help here: a successful `sed` would mask
+# a failed `pulp sdk install`, and we'd print "Installed SDK" even when no
+# SDK landed. Codex P2 review on PR #2091 caught this — pre-fix users
+# saw a confident success message while sitting on a broken CLI+SDK pair.
+PATH="${INSTALL_DIR}:$PATH" "${INSTALL_DIR}/pulp" sdk install 2>&1 \
+    | sed 's/^/  /'
+sdk_install_rc=${PIPESTATUS[0]}
+if [ "$sdk_install_rc" -eq 0 ]; then
     info "Installed SDK at ~/.pulp/sdk/${SDK_VERSION_FROM_CLI}/"
 else
     echo ""
-    echo "  (warning) SDK install failed — the CLI is still usable, but"
-    echo "  building a project will need the SDK. Retry with:"
+    echo "  (warning) SDK install failed (exit $sdk_install_rc) — the CLI is still usable,"
+    echo "  but building a project will need the SDK. Retry with:"
     echo "    pulp sdk install"
+    # Don't fail the whole install — the CLI itself landed cleanly above
+    # and the user has an actionable retry path. Just preserve the right
+    # signal for anyone scripting around the SDK availability.
 fi
 
 # ── Add to PATH ─────────────────────────────────────────────────────────────
