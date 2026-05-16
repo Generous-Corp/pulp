@@ -417,6 +417,8 @@ TEST_CASE("Expression rejects malformed numeric and grouping syntax",
     REQUIRE_FALSE(pulp::runtime::evaluate("").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate(".").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("1e").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1e+").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1e-").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("(1 + 2").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("1 + )").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("pow(2, 3").has_value());
