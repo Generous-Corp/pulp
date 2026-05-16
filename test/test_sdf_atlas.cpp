@@ -28,6 +28,28 @@ TEST_CASE("SdfAtlas default state is empty", "[canvas][sdf][issue-641]") {
     REQUIRE(atlas.glyph(U'A') == nullptr);
 }
 
+TEST_CASE("SdfAtlas move operations transfer atlas storage",
+          "[canvas][sdf][coverage][issue-650]") {
+    SdfAtlas original;
+    REQUIRE(original.build("stub", {U'A', U'B'}, 20, 2, 128));
+    const auto* before = original.glyph(U'B');
+    REQUIRE(before != nullptr);
+
+    SdfAtlas moved(std::move(original));
+    REQUIRE(moved.glyph_count() == 2);
+    REQUIRE(moved.base_size() == 20);
+    REQUIRE(moved.pixels() != nullptr);
+    REQUIRE(moved.glyph(U'B') != nullptr);
+    REQUIRE(moved.glyph(U'B')->atlas_x == before->atlas_x);
+
+    SdfAtlas assigned;
+    assigned = std::move(moved);
+    REQUIRE(assigned.glyph_count() == 2);
+    REQUIRE(assigned.pixels() != nullptr);
+    REQUIRE(assigned.glyph(U'A') != nullptr);
+    REQUIRE(assigned.glyph(U'Z') == nullptr);
+}
+
 TEST_CASE("SdfAtlas builds with the requested glyphs", "[canvas][sdf]") {
     SdfAtlas atlas;
     std::vector<char32_t> chars = {U'A', U'B', U'C', U'D'};
@@ -64,6 +86,24 @@ TEST_CASE("SdfAtlas rejects invalid build arguments without allocation",
     REQUIRE_FALSE(invalid_padding.build("stub", {U'A'}, 32, -1, 256));
     REQUIRE(invalid_padding.glyph_count() == 0);
     REQUIRE(invalid_padding.pixels() == nullptr);
+}
+
+TEST_CASE("SdfAtlas invalid rebuild preserves prior atlas but overflow clears it",
+          "[canvas][sdf][coverage][issue-650]") {
+    SdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A'}, 16, 2, 128));
+    REQUIRE(atlas.glyph_count() == 1);
+    REQUIRE(atlas.glyph(U'A') != nullptr);
+
+    REQUIRE_FALSE(atlas.build("stub", {}, 16, 2, 128));
+    REQUIRE(atlas.glyph_count() == 1);
+    REQUIRE(atlas.glyph(U'A') != nullptr);
+
+    std::vector<char32_t> many;
+    for (char32_t c = 0; c < 100; ++c) many.push_back(c);
+    REQUIRE_FALSE(atlas.build("stub", many, 128, 8, 256));
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.pixels() == nullptr);
 }
 
 TEST_CASE("SdfAtlas packs glyphs into deterministic tile coordinates",

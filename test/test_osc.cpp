@@ -43,6 +43,18 @@ TEST_CASE("OSC Message get with defaults", "[osc][message]") {
     REQUIRE(msg.get_string(0, "nope") == "nope");
 }
 
+TEST_CASE("OSC Message typed defaults cover every wrong-type accessor", "[osc][message][issue-644]") {
+    Message msg("/defaults");
+    msg.add(std::string("label"));
+    msg.add(std::vector<uint8_t>{0x01, 0x02});
+    msg.add(1.5f);
+
+    REQUIRE(msg.get_int(0, -10) == -10);
+    REQUIRE(msg.get_float(1, -2.0f) == -2.0f);
+    REQUIRE(msg.get_string(2, "fallback") == "fallback");
+    REQUIRE(msg.get_string(99, "missing") == "missing");
+}
+
 // ── Encoding/Decoding ────────────────────────────────────────────────────────
 
 TEST_CASE("OSC encode/decode round-trip int+float", "[osc][codec]") {
@@ -418,4 +430,57 @@ TEST_CASE("OSC Sender::send without connect is rejected", "[osc][udp][sender]") 
     Message msg("/x");
     msg.add(1);
     REQUIRE_FALSE(tx.send(msg));
+}
+
+TEST_CASE("OSC decode preserves empty strings and padded string arguments", "[osc][codec][issue-644]") {
+    Message msg("/strings");
+    msg.add(std::string{});
+    msg.add(std::string{"abc"});
+    msg.add(std::string{"abcd"});
+
+    auto data = encode(msg);
+    REQUIRE(data.size() % 4 == 0);
+
+    auto decoded = decode(data.data(), data.size());
+    REQUIRE(decoded.address == "/strings");
+    REQUIRE(decoded.args.size() == 3);
+    REQUIRE(decoded.get_string(0, "fallback").empty());
+    REQUIRE(decoded.get_string(1) == "abc");
+    REQUIRE(decoded.get_string(2) == "abcd");
+}
+
+TEST_CASE("OSC decode of truncated string argument returns empty string", "[osc][codec][issue-644]") {
+    std::vector<uint8_t> buf;
+    const char addr[] = "/truncated";
+    buf.insert(buf.end(), addr, addr + sizeof(addr));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+    const char tags[] = ",s";
+    buf.insert(buf.end(), tags, tags + sizeof(tags));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+
+    auto decoded = decode(buf.data(), buf.size());
+    REQUIRE(decoded.address == "/truncated");
+    REQUIRE(decoded.args.size() == 1);
+    REQUIRE(decoded.get_string(0, "fallback").empty());
+}
+
+TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][issue-644]") {
+    Message msg("/trail");
+    msg.add(123);
+    auto data = encode(msg);
+    data.insert(data.end(), {0, 0, 0, 0});
+
+    auto decoded = decode(data.data(), data.size());
+    REQUIRE(decoded.address == "/trail");
+    REQUIRE(decoded.args.size() == 1);
+    REQUIRE(decoded.get_int(0) == 123);
+}
+
+TEST_CASE("OSC Sender::send_raw without connect is rejected", "[osc][udp][sender][issue-644]") {
+    Sender tx;
+    uint8_t payload[] = {0, 1, 2, 3};
+    REQUIRE_FALSE(tx.is_connected());
+    REQUIRE_FALSE(tx.send_raw(payload, sizeof(payload)));
+    tx.disconnect();
+    REQUIRE_FALSE(tx.is_connected());
 }

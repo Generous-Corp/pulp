@@ -342,6 +342,39 @@ TEST_CASE("ADSR release to zero", "[signal][adsr]") {
     REQUIRE_THAT(env.next(), WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("ADSR handles immediate stages, idle note_off, and reset",
+          "[signal][adsr][issue-645]") {
+    Adsr env;
+    env.set_sample_rate(1000.0f);
+    env.set_params({0.0f, -0.01f, 0.25f, 0.0f});
+
+    env.note_off();
+    REQUIRE_FALSE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::idle);
+    REQUIRE_THAT(env.next(), WithinAbs(0.0f, 1e-6f));
+
+    env.note_on();
+    REQUIRE(env.stage() == Adsr::Stage::attack);
+    REQUIRE_THAT(env.next(), WithinAbs(1.0f, 1e-6f));
+    REQUIRE(env.stage() == Adsr::Stage::decay);
+    REQUIRE_THAT(env.next(), WithinAbs(0.25f, 1e-6f));
+    REQUIRE(env.stage() == Adsr::Stage::sustain);
+    REQUIRE_THAT(env.next(), WithinAbs(0.25f, 1e-6f));
+
+    env.note_off();
+    REQUIRE(env.stage() == Adsr::Stage::release);
+    REQUIRE_THAT(env.next(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::idle);
+
+    env.note_on();
+    REQUIRE_THAT(env.next(), WithinAbs(1.0f, 1e-6f));
+    env.reset();
+    REQUIRE_FALSE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::idle);
+    REQUIRE_THAT(env.next(), WithinAbs(0.0f, 1e-6f));
+}
+
 // ── Biquad ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Biquad lowpass attenuates high frequencies", "[signal][biquad]") {
@@ -558,6 +591,53 @@ TEST_CASE("Oscillator triangle output", "[signal][osc]") {
     REQUIRE(rms > 0.2f); // Triangle RMS ≈ 1/sqrt(3) ≈ 0.577
 }
 
+TEST_CASE("Oscillator reset, phase wrap, and PolyBLEP edges are deterministic",
+          "[signal][osc][issue-645]") {
+    Oscillator sine;
+    sine.set_sample_rate(8.0f);
+    sine.set_frequency(2.0f);
+    sine.set_waveform(Oscillator::Waveform::sine);
+
+    REQUIRE_THAT(sine.frequency(), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(sine.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(sine.next(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(sine.phase(), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(sine.next(), WithinAbs(1.0f, 1e-6f));
+    sine.reset();
+    REQUIRE_THAT(sine.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(sine.next(), WithinAbs(0.0f, 1e-6f));
+
+    Oscillator saw;
+    saw.set_sample_rate(10.0f);
+    saw.set_frequency(3.0f);
+    saw.set_waveform(Oscillator::Waveform::saw);
+
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(std::isfinite(saw.next()));
+    }
+    REQUIRE_THAT(saw.phase(), WithinAbs(0.2f, 1e-6f));
+
+    Oscillator square;
+    square.set_sample_rate(10.0f);
+    square.set_frequency(3.0f);
+    square.set_waveform(Oscillator::Waveform::square);
+
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(std::isfinite(square.next()));
+    }
+    REQUIRE_THAT(square.phase(), WithinAbs(0.2f, 1e-6f));
+
+    Oscillator triangle;
+    triangle.set_sample_rate(10.0f);
+    triangle.set_frequency(3.0f);
+    triangle.set_waveform(Oscillator::Waveform::triangle);
+
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(std::isfinite(triangle.next()));
+    }
+    REQUIRE_THAT(triangle.phase(), WithinAbs(0.2f, 1e-6f));
+}
+
 // ── SVF ──────────────────────────────────────────────────────────────────────
 
 TEST_CASE("SVF lowpass attenuates high frequencies", "[signal][svf]") {
@@ -678,6 +758,35 @@ TEST_CASE("NoiseGate passes loud signals", "[signal][gate]") {
     REQUIRE_THAT(out, WithinAbs(loud, 0.01));
 }
 
+TEST_CASE("NoiseGate clamps range, instant timing, reset, and buffers",
+          "[signal][gate][issue-645]") {
+    NoiseGate instant;
+    instant.set_sample_rate(1000.0f);
+    instant.set_params({-20.0f, 20.0f, 0.0f, 0.0f, -12.0f});
+
+    REQUIRE(instant.process(0.0f) == 0.0f);
+
+    const float quiet = 0.001f;
+    const float expected_range_gain = std::pow(10.0f, -12.0f / 20.0f);
+    REQUIRE_THAT(instant.process(quiet),
+                 WithinAbs(quiet * expected_range_gain, 1e-7f));
+    REQUIRE_THAT(instant.process(1.0f), WithinAbs(1.0f, 1e-6f));
+
+    float buffer[] = {quiet, 1.0f, -quiet};
+    instant.process(buffer, 3);
+    REQUIRE_THAT(buffer[0], WithinAbs(quiet * expected_range_gain, 1e-7f));
+    REQUIRE_THAT(buffer[1], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(-quiet * expected_range_gain, 1e-7f));
+
+    NoiseGate held;
+    held.set_sample_rate(1000.0f);
+    held.set_params({-20.0f, 20.0f, 0.0f, 1000.0f, -12.0f});
+    REQUIRE(std::abs(held.process(quiet)) < quiet);
+    REQUIRE(held.process(1.0f) < 1.0f);
+    held.reset();
+    REQUIRE_THAT(held.process(1.0f), WithinAbs(1.0f, 1e-6f));
+}
+
 // ── Panner ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Panner center", "[signal][panner]") {
@@ -746,6 +855,46 @@ TEST_CASE("Chorus produces stereo output", "[signal][chorus]") {
     REQUIRE(sum_r > 0);
     // Left and right should differ (stereo widening)
     REQUIRE(std::abs(sum_l - sum_r) > 0.01f);
+}
+
+TEST_CASE("Chorus dry mix, phase wrap, and reset are deterministic",
+          "[signal][chorus][issue-645]") {
+    Chorus dry;
+    dry.prepare(32.0f);
+    dry.set_rate(32.0f);
+    dry.set_depth(1.0f);
+    dry.set_delay_ms(20.0f);
+    dry.set_mix(0.0f);
+
+    for (float input : {1.0f, -0.5f, 0.25f}) {
+        auto out = dry.process(input);
+        REQUIRE_THAT(out.left, WithinAbs(input, 1e-6f));
+        REQUIRE_THAT(out.right, WithinAbs(input, 1e-6f));
+    }
+
+    Chorus chorus;
+    chorus.prepare(1000.0f);
+    chorus.set_rate(1000.0f);
+    chorus.set_depth(1.0f);
+    chorus.set_delay_ms(1.0f);
+    chorus.set_mix(1.0f);
+
+    const std::array<float, 6> input{{1.0f, 0.5f, -0.25f, 0.0f, 0.125f, 0.0f}};
+    std::array<Chorus::StereoSample, input.size()> first{};
+    std::array<Chorus::StereoSample, input.size()> second{};
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        first[i] = chorus.process(input[i]);
+        REQUIRE(std::isfinite(first[i].left));
+        REQUIRE(std::isfinite(first[i].right));
+    }
+
+    chorus.reset();
+    for (size_t i = 0; i < input.size(); ++i) {
+        second[i] = chorus.process(input[i]);
+        REQUIRE_THAT(second[i].left, WithinAbs(first[i].left, 1e-6f));
+        REQUIRE_THAT(second[i].right, WithinAbs(first[i].right, 1e-6f));
+    }
 }
 
 // ── Phaser ───────────────────────────────────────────────────────────────────
@@ -819,6 +968,55 @@ TEST_CASE("Reverb produces decay tail", "[signal][reverb]") {
     REQUIRE(energy > 0.001f); // Should have reverb tail
 }
 
+TEST_CASE("Reverb handles zero decay, damping clamp, dry mix, and reset",
+          "[signal][reverb][issue-645]") {
+    Reverb reverb;
+    reverb.prepare(441.0f);
+    reverb.set_decay(0.0f);
+    reverb.set_damping(-1.0f);
+    reverb.set_mix(1.0f);
+
+    (void)reverb.process(1.0f);
+
+    float early_energy = 0.0f;
+    float late_energy = 0.0f;
+    for (int i = 0; i < 40; ++i) {
+        auto out = reverb.process(0.0f);
+        REQUIRE(std::isfinite(out.left));
+        REQUIRE(std::isfinite(out.right));
+        float energy = out.left * out.left + out.right * out.right;
+        if (i < 20) {
+            early_energy += energy;
+        } else {
+            late_energy += energy;
+        }
+    }
+
+    REQUIRE(early_energy > 0.0f);
+    REQUIRE_THAT(late_energy, WithinAbs(0.0f, 1e-6f));
+
+    reverb.set_decay(0.5f);
+    reverb.set_damping(4.0f);
+    (void)reverb.process(1.0f);
+    reverb.reset();
+
+    for (int i = 0; i < 24; ++i) {
+        auto out = reverb.process(0.0f);
+        REQUIRE_THAT(out.left, WithinAbs(0.0f, 1e-6f));
+        REQUIRE_THAT(out.right, WithinAbs(0.0f, 1e-6f));
+    }
+
+    Reverb dry;
+    dry.prepare(441.0f);
+    dry.set_decay(2.0f);
+    dry.set_damping(2.0f);
+    dry.set_mix(0.0f);
+
+    auto out = dry.process(0.25f);
+    REQUIRE_THAT(out.left, WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(out.right, WithinAbs(0.25f, 1e-6f));
+}
+
 // ── LadderFilter ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
@@ -836,6 +1034,35 @@ TEST_CASE("LadderFilter lowpass behavior", "[signal][ladder]") {
     }
     float rms = std::sqrt(sum_sq / 4210.0f);
     REQUIRE(rms < 0.05f); // 24dB/oct should heavily attenuate
+}
+
+TEST_CASE("LadderFilter resets buffer state and clamps resonance inputs",
+          "[signal][ladder][issue-645]") {
+    LadderFilter ladder;
+    ladder.set_sample_rate(48000.0f);
+    ladder.set_frequency(1200.0f);
+    ladder.set_resonance(-2.0f);
+
+    float impulse[] = {1.0f, 0.0f, 0.0f, 0.0f};
+    ladder.process(impulse, 4);
+    for (float sample : impulse) {
+        REQUIRE(std::isfinite(sample));
+    }
+
+    ladder.reset();
+    REQUIRE_THAT(ladder.process(0.0f), WithinAbs(0.0f, 1e-6f));
+
+    ladder.set_resonance(3.0f);
+    ladder.set_frequency(8000.0f);
+    for (int i = 0; i < 32; ++i) {
+        const float sample = (i == 0) ? 0.75f : 0.0f;
+        REQUIRE(std::isfinite(ladder.process(sample)));
+    }
+
+    float unchanged[] = {0.25f, -0.25f};
+    ladder.process(unchanged, 0);
+    REQUIRE_THAT(unchanged[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(unchanged[1], WithinAbs(-0.25f, 1e-6f));
 }
 
 // ── LinkwitzRiley ────────────────────────────────────────────────────────────
@@ -868,6 +1095,55 @@ TEST_CASE("LinkwitzRiley splits into low and high bands", "[signal][lr]") {
         }
     }
     REQUIRE(high_energy > low_energy * 10.0f); // High band should dominate
+}
+
+TEST_CASE("LinkwitzRiley reset clears history while preserving coefficients",
+          "[signal][lr][issue-645]") {
+    auto impulse_response = [](LinkwitzRiley& lr) {
+        std::vector<LinkwitzRiley::BandSplit> response;
+        response.reserve(24);
+        for (int i = 0; i < 24; ++i) {
+            response.push_back(lr.process(i == 0 ? 1.0f : 0.0f));
+        }
+        return response;
+    };
+
+    LinkwitzRiley fresh;
+    fresh.set_frequency(1200.0f, 48000.0f);
+    auto expected = impulse_response(fresh);
+
+    LinkwitzRiley reused;
+    reused.set_frequency(1200.0f, 48000.0f);
+    for (int i = 0; i < 128; ++i) {
+        auto split = reused.process((i % 3 == 0) ? 0.75f : -0.25f);
+        REQUIRE(std::isfinite(split.low));
+        REQUIRE(std::isfinite(split.high));
+    }
+
+    reused.reset();
+    auto actual = impulse_response(reused);
+
+    REQUIRE(actual.size() == expected.size());
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        REQUIRE_THAT(actual[i].low, WithinAbs(expected[i].low, 1e-6f));
+        REQUIRE_THAT(actual[i].high, WithinAbs(expected[i].high, 1e-6f));
+    }
+}
+
+TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
+          "[signal][lr][issue-645]") {
+    for (float cutoff : {0.0f, 20.0f, 20000.0f, 24000.0f}) {
+        LinkwitzRiley lr;
+        lr.set_frequency(cutoff, 48000.0f);
+
+        for (int i = 0; i < 64; ++i) {
+            float input = (i == 0) ? 1.0f : ((i % 2 == 0) ? 0.125f : -0.125f);
+            auto split = lr.process(input);
+            INFO("cutoff=" << cutoff << " sample=" << i);
+            REQUIRE(std::isfinite(split.low));
+            REQUIRE(std::isfinite(split.high));
+        }
+    }
 }
 
 // ── WindowFunction ───────────────────────────────────────────────────────────

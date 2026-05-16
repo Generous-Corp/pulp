@@ -76,3 +76,18 @@ TEST_CASE("path_to_sdf: mask threshold treats 127 outside and 128 inside",
     REQUIRE(sdf[0] == 0);
     REQUIRE(sdf[1] == 255);
 }
+
+TEST_CASE("path_to_sdf: one-pixel islands saturate in both directions",
+          "[canvas][sdf][path][coverage][issue-650]") {
+    std::uint8_t mask[9] = {
+        0, 0, 0,
+        0, 255, 0,
+        0, 0, 0,
+    };
+
+    auto sdf = path_to_sdf(mask, 3, 3, 1);
+    REQUIRE(sdf.size() == 9);
+    REQUIRE(sdf[4] == 255);
+    REQUIRE(sdf[0] == 0);
+    REQUIRE(sdf[1] == 0);
+}

@@ -41,3 +41,26 @@ TEST_CASE("plugin-side consumer can iterate UMP packets via the sidecar",
     REQUIRE(buf.ump()->size() == 2);     // UMP sidecar visible
     REQUIRE((*buf.ump())[0].packet.message_type() == UmpMessageType::Midi2ChannelVoice);
 }
+
+TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits",
+          "[midi][buffer][ump][issue-645]") {
+    MidiBuffer buf;
+    UmpBuffer first;
+    UmpBuffer second;
+    first.add(UmpPacket::note_on_2(0, 1, 60, 0x8000), 32);
+    second.add(UmpPacket::note_on_2(0, 2, 67, 0x4000), 64);
+
+    buf.attach_ump(&first);
+    buf.add(MidiEvent::note_on(0, 60, 100));
+    REQUIRE(buf.ump() == &first);
+    REQUIRE(buf.ump()->size() == 1);
+
+    buf.clear();
+    REQUIRE(buf.empty());
+    REQUIRE(buf.ump() == &first);
+    REQUIRE(buf.ump()->size() == 1);
+
+    buf.attach_ump(&second);
+    REQUIRE(buf.ump() == &second);
+    REQUIRE((*buf.ump())[0].packet.channel() == 2);
+}

@@ -21,6 +21,13 @@ uint32_t read_muid_at(const std::vector<uint8_t>& msg, std::size_t offset) {
         | (static_cast<uint32_t>(msg[offset + 3]) << 21);
 }
 
+uint32_t read_uint7_at(const std::vector<uint8_t>& msg, std::size_t offset, std::size_t bytes) {
+    uint32_t value = 0;
+    for (std::size_t i = 0; i < bytes; ++i)
+        value |= static_cast<uint32_t>(msg[offset + i]) << (7 * i);
+    return value;
+}
+
 std::vector<uint8_t> make_ci_header(CiMessageType type, MUID source, MUID destination) {
     std::vector<uint8_t> msg{0xF0, 0x7E, 0x7F, 0x0D,
                              static_cast<uint8_t>(type), 0x02};
@@ -56,6 +63,34 @@ TEST_CASE("CiDiscovery creates valid inquiry", "[midi][ci]") {
     REQUIRE(msg[4] == 0x70);       // Discovery inquiry
 }
 
+TEST_CASE("CiDiscovery discovery inquiry encodes local identity fields",
+          "[midi][ci][issue-645]") {
+    CiDiscovery ci;
+    CiDeviceInfo info;
+    info.muid = MUID{0x01234567};
+    info.manufacturer_id = 0x00123456;
+    info.family_id = 0x2345;
+    info.model_id = 0x3456;
+    info.software_version = 0x01234567;
+    info.ci_version = 3;
+    info.max_sysex_size = 96;
+    ci.set_device_info(info);
+
+    auto msg = ci.create_discovery_inquiry();
+
+    REQUIRE(msg.size() == 31);
+    REQUIRE(msg[4] == static_cast<uint8_t>(CiMessageType::DiscoveryInquiry));
+    REQUIRE(msg[5] == 3);
+    REQUIRE(read_muid_at(msg, 6) == info.muid.value);
+    REQUIRE(read_muid_at(msg, 10) == MUID::broadcast().value);
+    REQUIRE(read_uint7_at(msg, 14, 3) == info.manufacturer_id);
+    REQUIRE(read_uint7_at(msg, 17, 2) == info.family_id);
+    REQUIRE(read_uint7_at(msg, 19, 2) == info.model_id);
+    REQUIRE(read_uint7_at(msg, 21, 4) == info.software_version);
+    REQUIRE(msg[25] == 0x07);
+    REQUIRE(read_uint7_at(msg, 26, 4) == info.max_sysex_size);
+}
+
 TEST_CASE("CiDiscovery profile inquiry encodes destination",
           "[midi][ci][issue-645]") {
     CiDiscovery ci;
@@ -81,6 +116,39 @@ TEST_CASE("CiDiscovery responds to inquiry", "[midi][ci]") {
     REQUIRE_FALSE(reply.empty());
     REQUIRE(reply.front() == 0xF0);
     REQUIRE(reply[4] == 0x71);  // Discovery reply
+}
+
+TEST_CASE("CiDiscovery discovery reply addresses source and encodes responder identity",
+          "[midi][ci][issue-645]") {
+    CiDiscovery responder;
+    CiDeviceInfo info;
+    info.muid = MUID{0x0002468A};
+    info.manufacturer_id = 0x00010203;
+    info.family_id = 0x0203;
+    info.model_id = 0x0304;
+    info.software_version = 0x00040506;
+    info.ci_version = 4;
+    info.max_sysex_size = 120;
+    responder.set_device_info(info);
+
+    MUID peer{0x00013579};
+    auto inquiry = make_ci_header(CiMessageType::DiscoveryInquiry,
+                                  peer, MUID::broadcast());
+    inquiry.push_back(0xF7);
+
+    auto reply = responder.process_message(inquiry.data(), inquiry.size());
+
+    REQUIRE(reply.size() == 31);
+    REQUIRE(reply[4] == static_cast<uint8_t>(CiMessageType::DiscoveryReply));
+    REQUIRE(reply[5] == info.ci_version);
+    REQUIRE(read_muid_at(reply, 6) == info.muid.value);
+    REQUIRE(read_muid_at(reply, 10) == peer.value);
+    REQUIRE(read_uint7_at(reply, 14, 3) == info.manufacturer_id);
+    REQUIRE(read_uint7_at(reply, 17, 2) == info.family_id);
+    REQUIRE(read_uint7_at(reply, 19, 2) == info.model_id);
+    REQUIRE(read_uint7_at(reply, 21, 4) == info.software_version);
+    REQUIRE(read_uint7_at(reply, 26, 4) == info.max_sysex_size);
+    REQUIRE(reply.back() == 0xF7);
 }
 
 TEST_CASE("CiDiscovery ignores malformed and unhandled messages",
@@ -194,6 +262,21 @@ TEST_CASE("CiDiscovery property exchange", "[midi][ci]") {
     REQUIRE(*val == "PulpSynth");
 
     REQUIRE_FALSE(ci.get_property("nonexistent").has_value());
+}
+
+TEST_CASE("CiDiscovery properties accept empty and overwritten values",
+          "[midi][ci][issue-645]") {
+    CiDiscovery ci;
+
+    ci.set_property("", "");
+    REQUIRE(ci.get_property("").has_value());
+    REQUIRE(*ci.get_property("") == "");
+
+    ci.set_property("DeviceName", "First");
+    ci.set_property("DeviceName", "Second");
+    auto value = ci.get_property("DeviceName");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == "Second");
 }
 
 TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
