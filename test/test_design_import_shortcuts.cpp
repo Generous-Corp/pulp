@@ -12,8 +12,14 @@
 #include <pulp/view/design_import.hpp>
 #include <algorithm>
 
+using pulp::view::CodeGenMode;
+using pulp::view::CodeGenOptions;
+using pulp::view::DesignIR;
 using pulp::view::DetectedShortcut;
 using pulp::view::extract_keyboard_shortcuts;
+using pulp::view::generate_pulp_js;
+using pulp::view::key_string_to_keycode;
+using pulp::view::modifier_strings_to_mask;
 using pulp::view::serialize_detected_shortcuts;
 
 TEST_CASE("extract_keyboard_shortcuts finds bare e.key === literal", "[design-import][shortcuts]") {
@@ -139,4 +145,128 @@ TEST_CASE("serialize_detected_shortcuts emits stable JSON", "[design-import][sho
     REQUIRE(mods_pos != std::string::npos);
     REQUIRE(json.find("\"meta\"", mods_pos) != std::string::npos);
     REQUIRE(json.find("\"source_location\": \"editor.tsx:42\"") != std::string::npos);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// V2 wire-up tests — helpers + codegen emission
+// ────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("key_string_to_keycode maps DOM key names", "[design-import][shortcuts][v2]") {
+    REQUIRE(key_string_to_keycode("Escape") == 274);     // KeyCode::escape
+    REQUIRE(key_string_to_keycode("escape") == 274);     // case-insensitive
+    REQUIRE(key_string_to_keycode("Enter") == 273);
+    REQUIRE(key_string_to_keycode("Return") == 273);     // alias
+    REQUIRE(key_string_to_keycode("Tab") == 272);
+    REQUIRE(key_string_to_keycode("ArrowLeft") == 256);
+    REQUIRE(key_string_to_keycode("Left") == 256);       // alias
+    REQUIRE(key_string_to_keycode("s") == 's');          // 115
+    REQUIRE(key_string_to_keycode("S") == 's');          // upper→lower
+    REQUIRE(key_string_to_keycode("F12") == 301);
+    REQUIRE(key_string_to_keycode("Space") == ' ');
+}
+
+TEST_CASE("key_string_to_keycode returns 0 for unknown", "[design-import][shortcuts][v2]") {
+    REQUIRE(key_string_to_keycode("") == 0);
+    REQUIRE(key_string_to_keycode("Boop") == 0);
+    REQUIRE(key_string_to_keycode("@") == 0);  // not in alphanumeric range
+}
+
+TEST_CASE("modifier_strings_to_mask combines bits + 'meta' maps to kModCmd", "[design-import][shortcuts][v2]") {
+    REQUIRE(modifier_strings_to_mask({}) == 0);
+    REQUIRE(modifier_strings_to_mask({"shift"}) == 1);              // kModShift
+    REQUIRE(modifier_strings_to_mask({"ctrl"}) == 2);               // kModCtrl
+    REQUIRE(modifier_strings_to_mask({"alt"}) == 4);                // kModAlt
+    // "meta" -> kModCmd (platform-primary) per the extractor's
+    // cross-platform metaKey||ctrlKey collapse. kModCmd is bit 4 = 16.
+    REQUIRE(modifier_strings_to_mask({"meta"}) == 16);
+    REQUIRE(modifier_strings_to_mask({"meta", "shift"}) == 17);
+    REQUIRE(modifier_strings_to_mask({"unknown-mod"}) == 0);        // dropped silently
+}
+
+TEST_CASE("generate_pulp_js emits registerShortcut + handler thunk per shortcut", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut esc;
+    esc.key = "Escape";
+    esc.modifiers = {};
+    opts.shortcuts.push_back(esc);
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"meta"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;  // empty root — we only care about the shortcut block
+
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Each shortcut produces:
+    //   1. globalThis.__pulpShortcutHandler_N = function() { ... }
+    //   2. registerShortcut(keycode, mask, '__pulpShortcutHandler_N')
+    REQUIRE(js.find("globalThis.__pulpShortcutHandler_0") != std::string::npos);
+    REQUIRE(js.find("globalThis.__pulpShortcutHandler_1") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(274, 0, '__pulpShortcutHandler_0')") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 16, '__pulpShortcutHandler_1')") != std::string::npos);
+
+    // Synthetic-keydown re-dispatch: each thunk calls __dispatch__ with
+    // a properly-shaped W3C-ish event object so React handlers fire.
+    REQUIRE(js.find("__dispatch__('__global__', 'keydown'") != std::string::npos);
+    REQUIRE(js.find("key: 'Escape'") != std::string::npos);
+    REQUIRE(js.find("key: 's'") != std::string::npos);
+    REQUIRE(js.find("metaKey: true") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js skips shortcuts whose key doesn't resolve", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut weird;
+    weird.key = "MysteryKey";
+    opts.shortcuts.push_back(weird);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Unmapped key produces no registerShortcut entry. No __pulpShortcutHandler
+    // is emitted either (we don't want orphan handlers).
+    REQUIRE(js.find("registerShortcut") == std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler_0") == std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js with empty shortcuts emits no shortcut block", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    // opts.shortcuts is default-empty.
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("registerShortcut") == std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler") == std::string::npos);
+}
+
+TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import][shortcuts][v2]") {
+    // Pre-fix this returned ["meta", "alt", "shift"] for every Escape match
+    // because the modifier-detection window saw the modifier checks from
+    // sibling branches. Now it walks back only within the same if condition.
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            const onKey = (e) => {
+                if (e.key === 'Escape') closeAll();
+                if ((e.metaKey || e.ctrlKey) && e.key === 's') save();
+                if (e.shiftKey && e.altKey && e.key === 'F') openFlare();
+            };
+        )JS", "");
+    // Sorted by key: Escape, F, s.
+    REQUIRE(out.size() == 3);
+    REQUIRE(out[0].key == "Escape");
+    REQUIRE(out[0].modifiers.empty());  // bare check, no modifiers
+    REQUIRE(out[1].key == "F");
+    REQUIRE(out[2].key == "s");
+    REQUIRE(out[2].modifiers.size() == 1);
+    REQUIRE(out[2].modifiers[0] == "meta");
 }

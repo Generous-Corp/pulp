@@ -485,12 +485,41 @@ struct CodeGenOptions {
     bool preview_mode = false;        // Use minimal widget style (design preview)
     std::string root_variable = "root";
     int indent_spaces = 2;
+
+    /// pulp #2116 V2 — shortcuts pulled from the source by
+    /// `extract_keyboard_shortcuts(...)` (Strategy A: synthetic keydown
+    /// re-dispatch). The generator emits one `registerShortcut(...)` plus
+    /// a matching `__pulpShortcutHandler_N` thunk per entry. The thunk
+    /// calls `__dispatch__('__global__', 'keydown', {...})` so the
+    /// original React handlers in the bundled JS still own the closure
+    /// state — we just intercept the OS chord and re-fire the synthetic
+    /// keydown into the engine. Empty vector = no shortcut emission.
+    std::vector<DetectedShortcut> shortcuts;
 };
 
 /// Generate Pulp JS code from a DesignIR.
 /// Native mode (default) uses createCol/createRow/createKnob + setFlex.
 /// Web-compat mode uses document.createElement + el.style.
 std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts = {});
+
+// ── Shortcut helpers (V2 — used by both the generator and any test/
+//    runtime caller that needs to map DetectedShortcut → registerShortcut
+//    args). String forms come from `extract_keyboard_shortcuts`; integer
+//    forms feed `registerShortcut(key, modifiers, callback)` and the
+//    runtime KeyCode enum.
+
+/// Map a W3C `KeyboardEvent.key` (or `KeyboardEvent.code`) string to a
+/// Pulp `KeyCode` integer. Returns 0 (KeyCode::unknown) for unrecognized
+/// strings — caller should skip those shortcuts (with a warning) rather
+/// than wire them with a bogus binding.
+int key_string_to_keycode(const std::string& key);
+
+/// Combine modifier strings (`"shift"`, `"ctrl"`, `"alt"`, `"meta"`)
+/// into the bitmask `registerShortcut` consumes. `"meta"` maps to
+/// `kModCmd` (the platform-primary modifier) per the cross-platform
+/// idiom captured in `extract_keyboard_shortcuts` (metaKey || ctrlKey
+/// collapses to "meta"). Unknown strings are silently dropped.
+int modifier_strings_to_mask(const std::vector<std::string>& mods);
 
 // ── W3C Design Tokens ───────────────────────────────────────────────────
 
