@@ -42,6 +42,8 @@ public:
 private:
     std::atomic<bool> running_{false};
     std::thread thread_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
     std::vector<std::string> last_volumes_;
 };
 

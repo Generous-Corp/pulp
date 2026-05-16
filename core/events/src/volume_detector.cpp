@@ -17,8 +17,12 @@ void MountedVolumeListChangeDetector::start(std::chrono::milliseconds interval) 
 
     thread_ = std::thread([this, interval]() {
         while (running_.load()) {
-            std::this_thread::sleep_for(interval);
-            if (!running_.load()) break;
+            {
+                std::unique_lock lock(mutex_);
+                if (cv_.wait_for(lock, interval, [this] { return !running_.load(); })) {
+                    break;
+                }
+            }
 
             auto current = get_mounted_volumes();
             if (current != last_volumes_) {
@@ -31,6 +35,7 @@ void MountedVolumeListChangeDetector::start(std::chrono::milliseconds interval) 
 
 void MountedVolumeListChangeDetector::stop() {
     running_.store(false);
+    cv_.notify_all();
     if (thread_.joinable()) thread_.join();
 }
 

@@ -102,6 +102,37 @@ TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
     REQUIRE(log->stopped == 1);
 }
 
+TEST_CASE("NSD can browse again after stop",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    nsd.browse("_pulp._tcp");
+    nsd.stop();
+    nsd.browse("_http._tcp");
+    nsd.stop();
+
+    REQUIRE(log->browse_types == std::vector<std::string>{"_pulp._tcp", "_http._tcp"});
+    REQUIRE(log->stopped == 2);
+}
+
+TEST_CASE("NSD unregister after backend removal is a no-op",
+          "[events][service-discovery][codecov]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    nsd.unregister_service();
+    REQUIRE(log->unregistered == 1);
+
+    nsd.install_backend(nullptr);
+    nsd.unregister_service();
+    REQUIRE(log->unregistered == 1);
+}
+
 TEST_CASE("NSD browse backend can publish through the dispatcher",
           "[events][service-discovery][issue-642]") {
     NetworkServiceDiscovery nsd;
@@ -535,6 +566,25 @@ TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
 
     detector.stop();
     REQUIRE_FALSE(detector.is_running());
+}
+
+TEST_CASE("MountedVolumeListChangeDetector stop wakes a long poll promptly",
+          "[events][volume][lifecycle][codecov]") {
+#ifdef _WIN32
+    SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
+    return;
+#endif
+
+    MountedVolumeListChangeDetector detector;
+    detector.start(std::chrono::hours(1));
+    REQUIRE(detector.is_running());
+
+    const auto start = std::chrono::steady_clock::now();
+    detector.stop();
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    REQUIRE_FALSE(detector.is_running());
+    REQUIRE(elapsed < 500ms);
 }
 
 TEST_CASE("LockingAsyncUpdater trigger_and_wait handles synchronously",

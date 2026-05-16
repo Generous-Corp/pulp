@@ -3,6 +3,7 @@
 #include <pulp/events/async_updater.hpp>
 #include <pulp/events/child_process_manager.hpp>
 #include <pulp/events/interprocess_connection.hpp>
+#include <pulp/events/volume_detector.hpp>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -154,6 +155,65 @@ TEST_CASE("EventLoop dispatch_after handles multiple ready tasks",
     REQUIRE(wait_until([&] { return calls.load() == 3; }, 2000ms));
 }
 
+TEST_CASE("EventLoop skips empty dispatched tasks",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch({});
+    loop.dispatch([&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 2000ms));
+}
+
+TEST_CASE("EventLoop skips empty delayed tasks",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch_after(1ms, {});
+    loop.dispatch_after(2ms, [&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 2000ms));
+}
+
+TEST_CASE("EventLoop dispatch_after runs due tasks immediately",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch_after(0ms, [&] { calls.fetch_add(1); });
+    loop.dispatch_after(-1ms, [&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 2; }, 2000ms));
+}
+
+TEST_CASE("EventLoop ignores new dispatches after stop",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    loop.stop();
+
+    std::atomic<int> calls{0};
+    loop.dispatch([&] { calls.fetch_add(1); });
+    loop.dispatch_after(0ms, [&] { calls.fetch_add(1); });
+    std::this_thread::sleep_for(20ms);
+
+    REQUIRE(calls.load() == 0);
+}
+
+TEST_CASE("EventLoop runs tasks dispatched from the loop thread",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch([&] {
+        calls.fetch_add(1);
+        loop.dispatch([&] { calls.fetch_add(1); });
+    });
+
+    REQUIRE(wait_until([&] { return calls.load() == 2; }, 2000ms));
+}
+
 TEST_CASE("Timer basic operation", "[events][timer]") {
     EventLoop loop;
 
@@ -242,6 +302,55 @@ TEST_CASE("Timer exposes interval and idempotent stop state",
     timer.stop();
     REQUIRE_FALSE(timer.is_active());
     timer.stop();
+    REQUIRE_FALSE(timer.is_active());
+}
+
+TEST_CASE("Timer tolerates empty callbacks",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+
+    Timer one_shot(loop, 1ms, {}, false);
+    one_shot.start();
+    REQUIRE(wait_until([&] { return !one_shot.is_active(); }, 2000ms));
+
+    Timer repeating(loop, 1ms, {}, true);
+    repeating.start();
+    REQUIRE(wait_until([&] { return repeating.is_active(); }, 2000ms));
+    std::this_thread::sleep_for(10ms);
+    repeating.stop();
+    REQUIRE_FALSE(repeating.is_active());
+}
+
+TEST_CASE("Timer one-shot can be restarted after firing",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 1ms, [&] { count.fetch_add(1); }, false);
+
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 1; }, kTimerAsyncBudget));
+    REQUIRE_FALSE(timer.is_active());
+
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 2; }, kTimerAsyncBudget));
+    REQUIRE_FALSE(timer.is_active());
+}
+
+TEST_CASE("Timer stop before first fire permits a later restart",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 50ms, [&] { count.fetch_add(1); }, false);
+
+    timer.start();
+    timer.stop();
+    std::this_thread::sleep_for(80ms);
+    REQUIRE(count.load() == 0);
+    REQUIRE_FALSE(timer.is_active());
+
+    timer.set_interval(1ms);
+    timer.start();
+    REQUIRE(wait_until([&] { return count.load() == 1; }, kTimerAsyncBudget));
     REQUIRE_FALSE(timer.is_active());
 }
 
@@ -486,6 +595,72 @@ TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
     broadcaster.remove_listener(second);
     broadcaster.send_action("ignored");
     REQUIRE(seen.size() == 5);
+}
+
+TEST_CASE("ActionBroadcaster skips empty callbacks",
+          "[events][async_updater][action_broadcaster][codecov]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+
+    auto empty = broadcaster.add_listener({});
+    auto live = broadcaster.add_listener(
+        [&](std::string_view action) { seen.emplace_back(action); });
+
+    broadcaster.send_action("refresh");
+    REQUIRE(seen == std::vector<std::string>{"refresh"});
+
+    broadcaster.remove_listener(empty);
+    broadcaster.remove_listener(live);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 1);
+}
+
+TEST_CASE("ActionBroadcaster snapshots callbacks during dispatch",
+          "[events][async_updater][action_broadcaster][codecov]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+    int first_id = -1;
+    int second_id = -1;
+    int added_id = -1;
+
+    first_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("first:" + std::string(action));
+        broadcaster.remove_listener(first_id);
+        broadcaster.remove_listener(second_id);
+        added_id = broadcaster.add_listener([&](std::string_view later) {
+            seen.emplace_back("added:" + std::string(later));
+        });
+    });
+
+    second_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("second:" + std::string(action));
+    });
+
+    broadcaster.send_action("refresh");
+    REQUIRE(seen == std::vector<std::string>{"first:refresh", "second:refresh"});
+
+    broadcaster.send_action("again");
+    REQUIRE(seen == std::vector<std::string>{
+        "first:refresh", "second:refresh", "added:again"});
+
+    broadcaster.remove_listener(added_id);
+}
+
+TEST_CASE("MountedVolumeListChangeDetector polls once before stop",
+          "[events][volume_detector][codecov]") {
+    MountedVolumeListChangeDetector detector;
+    std::atomic<int> changes{0};
+    detector.on_change = [&](const std::vector<std::string>&) {
+        changes.fetch_add(1);
+    };
+
+    detector.start(1ms);
+    REQUIRE(detector.is_running());
+
+    std::this_thread::sleep_for(30ms);
+    detector.stop();
+
+    REQUIRE_FALSE(detector.is_running());
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler is constructible as an RAII guard",

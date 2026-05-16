@@ -41,6 +41,11 @@ struct CapturingServer : InterprocessConnectionServer {
             last_text.assign(message);
             cv.notify_all();
         };
+        conn->on_disconnected = [this] {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++disconnects;
+            cv.notify_all();
+        };
 
         std::lock_guard<std::mutex> lock(mutex);
         accepted = std::move(conn);
@@ -52,6 +57,7 @@ struct CapturingServer : InterprocessConnectionServer {
     std::unique_ptr<InterprocessConnection> accepted;
     int binary_messages = 0;
     int text_messages = 0;
+    int disconnects = 0;
     size_t last_binary_size = 1;
     std::string last_text = "unset";
 };
@@ -299,6 +305,98 @@ TEST_CASE("IPC socket server virtual callback accepts empty frames",
     }
 
     client.disconnect();
+    if (server.accepted) server.accepted->disconnect();
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket server receives binary payload frames",
+          "[events][ipc][socket][codecov]") {
+    CapturingServer server;
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    const std::vector<uint8_t> payload{0x00, 0x01, 0x7f, 0xff};
+    REQUIRE(client.send_message(payload.data(), payload.size()));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.binary_messages == 1 && server.text_messages == 1;
+        }));
+        REQUIRE(server.last_binary_size == payload.size());
+        REQUIRE(server.last_text.size() == payload.size());
+    }
+
+    client.disconnect();
+    if (server.accepted) server.accepted->disconnect();
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket server observes client disconnect",
+          "[events][ipc][socket][codecov]") {
+    CapturingServer server;
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    client.disconnect();
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.disconnects == 1;
+        }));
+    }
+
+    if (server.accepted) server.accepted->disconnect();
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket client reports disconnect callback once",
+          "[events][ipc][socket][codecov]") {
+    CapturingServer server;
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    int disconnected = 0;
+    InterprocessConnection client;
+    client.on_disconnected = [&] { ++disconnected; };
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    client.disconnect();
+    client.disconnect();
+    REQUIRE(disconnected == 1);
+    REQUIRE_FALSE(client.is_connected());
+    REQUIRE(client.state() == IpcState::Disconnected);
+
     if (server.accepted) server.accepted->disconnect();
     server.stop();
     REQUIRE_FALSE(server.is_running());
