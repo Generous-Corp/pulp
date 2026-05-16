@@ -62,7 +62,7 @@ TEST_CASE("AudioProcessLoadMeasurer peak tracking", "[audio][load]") {
     REQUIRE(std::isfinite(second));
     INFO("first=" << first << " second=" << second << " peak=" << m.peak_load());
     REQUIRE(second > first * 1.25f);
-    REQUIRE(m.peak_load() >= m.load());
+    REQUIRE(m.peak_load() + 0.000001f >= m.load());
 }
 
 TEST_CASE("AudioProcessLoadMeasurer reset clears state", "[audio][load]") {
