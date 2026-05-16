@@ -91,6 +91,27 @@ limitations:
 
         self.assertEqual(ll.extract_limitations(matrix), [("runtime.midi", [])])
 
+    def test_extract_limitations_accepts_hyphenated_capability_paths(self) -> None:
+        matrix = """
+runtime:
+  audio-engine:
+    status: partial
+
+limitations:
+  runtime.audio-engine:
+    - text: "Hyphenated capability path."
+"""
+
+        self.assertEqual(
+            ll.extract_limitations(matrix),
+            [
+                (
+                    "runtime.audio-engine",
+                    [{"text": "Hyphenated capability path.", "tracked_in": ""}],
+                )
+            ],
+        )
+
 
 class CapabilityPathTests(unittest.TestCase):
     def test_capability_exists_walks_nested_yaml_keys(self) -> None:

@@ -9,6 +9,8 @@ support-matrix.yaml and capabilities.md happen to be clean.
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -94,12 +96,38 @@ class ParserTests(unittest.TestCase):
         values = {s for _, s in statuses}
         self.assertSetEqual(values, {"usable", "partial"})
 
+    def test_extract_all_statuses_strips_quote_styles(self):
+        statuses = cdc.extract_all_statuses(
+            "root:\n  a:\n    status: \"usable\"\n  b:\n    status: 'partial'\n"
+        )
+        self.assertEqual(statuses, [(3, "usable"), (5, "partial")])
+
     def test_parse_platform_maturity_rows_clean(self):
         rows = cdc.parse_platform_maturity_rows(CLEAN_CAPS)
         self.assertEqual(len(rows), 5)
         macos_voiceover = next(r for r in rows if r[2] == "macOS")
         self.assertEqual(macos_voiceover[0], "VoiceOver accessibility")
         self.assertEqual(macos_voiceover[1], "usable")
+
+    def test_parse_platform_maturity_rows_missing_table(self):
+        self.assertEqual(cdc.parse_platform_maturity_rows("# Capabilities\n"), [])
+
+    def test_parse_platform_maturity_rows_skips_malformed_rows(self):
+        caps = dedent(
+            """\
+            ### Platform Maturity
+
+            | Capability | Status | Platform | Notes |
+            |---|---|---|---|
+            | VoiceOver accessibility | usable | macOS | ok |
+            | malformed | row |
+            """
+        )
+
+        self.assertEqual(
+            cdc.parse_platform_maturity_rows(caps),
+            [("VoiceOver accessibility", "usable", "macOS")],
+        )
 
 
 class _FakeMain:
@@ -164,6 +192,22 @@ class IntegrationTests(unittest.TestCase):
         )
         with _FakeMain(broken_matrix, CLEAN_CAPS):
             self.assertEqual(cdc.main(), 1)
+
+    def test_missing_matrix_file_returns_input_error(self):
+        with _FakeMain(CLEAN_MATRIX, CLEAN_CAPS) as fake:
+            fake.matrix.unlink()
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(cdc.main(), 2)
+            self.assertIn("Failed to read", stderr.getvalue())
+
+    def test_missing_capabilities_file_returns_input_error(self):
+        with _FakeMain(CLEAN_MATRIX, CLEAN_CAPS) as fake:
+            fake.caps.unlink()
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(cdc.main(), 2)
+            self.assertIn("Failed to read", stderr.getvalue())
 
 
 if __name__ == "__main__":

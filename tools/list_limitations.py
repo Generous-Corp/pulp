@@ -41,7 +41,7 @@ def extract_limitations(text: str) -> list[tuple[str, list[dict[str, str]]]]:
             continue
         if not line.strip():
             continue
-        mk = re.match(r"^  ([A-Za-z0-9_.]+):\s*$", line)
+        mk = re.match(r"^  ([A-Za-z0-9_.-]+):\s*$", line)
         if mk:
             flush()
             current_path = mk.group(1)

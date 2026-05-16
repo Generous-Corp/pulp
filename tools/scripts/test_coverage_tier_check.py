@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
+import tempfile
 import unittest
+from unittest import mock
 
 import coverage_tier_check as ctc
 
@@ -366,6 +368,81 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Per-tier gate failed", body)
         self.assertIn("audio-critical", body)
         self.assertIn("infrastructure", body)
+
+
+class MainEntrypointTests(unittest.TestCase):
+
+    def test_main_skips_cleanly_when_cobertura_xml_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            report = root / "tier-report.md"
+            rc = ctc.main([
+                "--cobertura", str(root / "missing.xml"),
+                "--targets", str(root / "targets.yaml"),
+                "--compare-branch", "origin/main",
+                "--markdown-report", str(report),
+            ])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("Cobertura XML missing", report.read_text(encoding="utf-8"))
+
+    def test_main_writes_report_and_returns_zero_when_all_tiers_pass(self) -> None:
+        tiers = [ctc.Tier("audio-critical", 80, ("core/audio/**",))]
+        coverage = {
+            "core/audio/src/foo.cpp": ctc.FileCoverage(
+                path="core/audio/src/foo.cpp",
+                hits={10: 1, 11: 1},
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(ctc, "load_targets", return_value=tiers), \
+             mock.patch.object(ctc, "parse_cobertura", return_value=coverage), \
+             mock.patch.object(ctc, "diff_files", return_value=["core/audio/src/foo.cpp"]), \
+             mock.patch.object(ctc, "diff_lines", return_value={10, 11}):
+            root = pathlib.Path(td)
+            cobertura = root / "coverage.xml"
+            cobertura.write_text("<coverage />", encoding="utf-8")
+            report = root / "tier-report.md"
+
+            rc = ctc.main([
+                "--cobertura", str(cobertura),
+                "--targets", str(root / "targets.yaml"),
+                "--compare-branch", "origin/main",
+                "--markdown-report", str(report),
+            ])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("All touched tiers meet", report.read_text(encoding="utf-8"))
+
+    def test_main_returns_one_when_a_tier_fails(self) -> None:
+        tiers = [ctc.Tier("audio-critical", 80, ("core/audio/**",))]
+        coverage = {
+            "core/audio/src/foo.cpp": ctc.FileCoverage(
+                path="core/audio/src/foo.cpp",
+                hits={10: 1, 11: 0},
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(ctc, "load_targets", return_value=tiers), \
+             mock.patch.object(ctc, "parse_cobertura", return_value=coverage), \
+             mock.patch.object(ctc, "diff_files", return_value=["core/audio/src/foo.cpp"]), \
+             mock.patch.object(ctc, "diff_lines", return_value={10, 11}):
+            root = pathlib.Path(td)
+            cobertura = root / "coverage.xml"
+            cobertura.write_text("<coverage />", encoding="utf-8")
+            report = root / "tier-report.md"
+
+            rc = ctc.main([
+                "--cobertura", str(cobertura),
+                "--targets", str(root / "targets.yaml"),
+                "--compare-branch", "origin/main",
+                "--markdown-report", str(report),
+            ])
+
+            self.assertEqual(rc, 1)
+            self.assertIn("Per-tier gate failed", report.read_text(encoding="utf-8"))
 
 
 def _enumerate_first_party_sources() -> list[str]:
