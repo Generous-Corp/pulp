@@ -267,6 +267,22 @@ TEST_CASE("Timer exposes interval and idempotent stop state",
     REQUIRE_FALSE(timer.is_active());
 }
 
+TEST_CASE("Timer tolerates empty callbacks",
+          "[events][timer][codecov]") {
+    EventLoop loop;
+
+    Timer one_shot(loop, 1ms, {}, false);
+    one_shot.start();
+    REQUIRE(wait_until([&] { return !one_shot.is_active(); }, 2000ms));
+
+    Timer repeating(loop, 1ms, {}, true);
+    repeating.start();
+    REQUIRE(wait_until([&] { return repeating.is_active(); }, 2000ms));
+    std::this_thread::sleep_for(10ms);
+    repeating.stop();
+    REQUIRE_FALSE(repeating.is_active());
+}
+
 // #687 — stop()/start() pairs repeatedly on the owner thread while the
 // event-loop thread is running timer dispatches. Pre-fix, start()'s
 // `alive_ = make_shared<>(...)` raced with schedule_next()'s
