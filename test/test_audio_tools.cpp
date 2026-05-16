@@ -337,6 +337,21 @@ TEST_CASE("audio model store accepts overrides and legacy checkpoint metadata",
     REQUIRE(read_active_model_id(temp.path) == "clap_music_audioset_v1");
 }
 
+TEST_CASE("audio model store treats malformed install metadata as unloadable",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json",
+               "{ not-json");
+
+    auto installed = read_installed_model("clap_music_audioset_v1", temp.path);
+
+    REQUIRE(installed.metadata_found);
+    REQUIRE(installed.model_id == "clap_music_audioset_v1");
+    REQUIRE(installed.backend.empty());
+    REQUIRE_FALSE(installed.checkpoint_exists);
+    REQUIRE_FALSE(installed.loadable());
+}
+
 TEST_CASE("audio model and bundle JSON serializers include stable fields",
           "[audio][tools][codecov]") {
     ModelListResult list;
