@@ -33,6 +33,32 @@ TEST_CASE("check_notarization on nonexistent path is false", "[ship][codesign]")
     REQUIRE_FALSE(check_notarization("/nonexistent/binary"));
 }
 
+TEST_CASE("codesign rejects nonexistent path and identity",
+          "[ship][codesign][coverage][issue-644]") {
+    REQUIRE_FALSE(codesign("/nonexistent/binary", "Developer ID Application: Missing"));
+}
+
+TEST_CASE("codesign includes entitlements path on failure path",
+          "[ship][codesign][coverage][issue-644]") {
+    REQUIRE_FALSE(codesign("/nonexistent/binary",
+                           "Developer ID Application: Missing",
+                           "/nonexistent/entitlements.plist"));
+}
+
+TEST_CASE("notarization staple on nonexistent path is false",
+          "[ship][codesign][coverage][issue-644]") {
+    REQUIRE_FALSE(notarize_staple("/nonexistent/binary"));
+}
+
+TEST_CASE("create_pkg on nonexistent component is false",
+          "[ship][codesign][coverage][issue-644]") {
+    auto output = (fs::temp_directory_path() / "pulp-missing-component.pkg").string();
+    REQUIRE_FALSE(create_pkg("/nonexistent/component.vst3",
+                             output,
+                             "dev.pulp.missing",
+                             "1.0.0"));
+}
+
 TEST_CASE("list_signing_identities does not crash", "[ship][codesign]") {
     auto ids = list_signing_identities();
     // May be empty on CI, but should not crash

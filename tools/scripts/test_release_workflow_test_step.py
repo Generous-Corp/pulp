@@ -183,6 +183,67 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
         )
 
 
+class ReleaseCliDualBinaryPackaging(unittest.TestCase):
+    """release-cli.yml must keep `pulp` and `pulp-cpp` bundled and smoked.
+
+    The Rust CLI delegates several C++-owned subcommands to `pulp-cpp`.
+    A release archive that contains only `pulp` can pass a basic CLI smoke
+    test but fail later when a user runs a delegated command.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = RELEASE_CLI.read_text(encoding="utf-8")
+
+    def _find_step_run(self, step_name: str) -> str:
+        pattern = re.compile(
+            rf"-\s*name:\s*{re.escape(step_name)}\s*\n"
+            r"(?:(?!\n\s*-\s*name:).)*?"
+            r"\s*run:\s*(.+?)(?=\n\s*-\s*name:|\Z)",
+            re.DOTALL,
+        )
+        match = pattern.search(self.text)
+        self.assertIsNotNone(match, f"could not locate `{step_name}` step")
+        return match.group(1)
+
+    def test_unix_package_step_bundles_cpp_delegate(self) -> None:
+        run_block = self._find_step_run("Package CLI (Unix)")
+        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertRegex(run_block, r"--binary\s+build/pulp")
+        self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/pulp-cpp")
+        self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/pulp-mcp")
+        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.tar\.gz")
+
+    def test_windows_package_step_bundles_cpp_delegate(self) -> None:
+        run_block = self._find_step_run("Package CLI (Windows)")
+        self.assertIn("tools/scripts/package_cli.py", run_block)
+        self.assertRegex(run_block, r"--binary\s+build/pulp\.exe")
+        self.assertRegex(run_block, r"--cpp-binary\s+build/tools/cli/Release/pulp-cpp\.exe")
+        self.assertRegex(run_block, r"--mcp-binary\s+build/tools/mcp/Release/pulp-mcp\.exe")
+        self.assertRegex(run_block, r"--out\s+pulp-\$\{\{\s*matrix\.platform\s*\}\}\.zip")
+
+    def test_unix_smoke_step_exercises_all_cli_binaries(self) -> None:
+        run_block = self._find_step_run(
+            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Unix)"
+        )
+        self.assertRegex(run_block, r"for\s+ART\s+in\s+pulp\s+pulp-cpp\s+pulp-mcp")
+        self.assertIn('pulp-mcp) echo "--version"', run_block)
+        self.assertIn('"$BIN" $CMD', run_block)
+        self.assertIn("Library not loaded", run_block)
+        self.assertIn("cannot open shared object", run_block)
+
+    def test_windows_smoke_step_exercises_all_cli_binaries(self) -> None:
+        run_block = self._find_step_run(
+            "Smoke `pulp help` + `pulp-cpp help` + `pulp-mcp --version` (Windows)"
+        )
+        self.assertIn('"pulp.exe"      = "help"', run_block)
+        self.assertIn('"pulp-cpp.exe"  = "help"', run_block)
+        self.assertIn('"pulp-mcp.exe"  = "--version"', run_block)
+        self.assertIn("-ArgumentList $cmd", run_block)
+        self.assertIn("DLL was not found", run_block)
+        self.assertIn("missing.*\\.dll", run_block)
+
+
 class SignAndReleaseContentsWriteTest(unittest.TestCase):
     """#724: sign-and-release.yml must declare `contents: write` on its
     macOS job so the final `Create GitHub Release` step can call the

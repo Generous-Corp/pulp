@@ -128,6 +128,58 @@ class VersionFileIoTests(unittest.TestCase):
             self.assertIsNone(vbc.read_version(repo, vbc.VersionFile("plain.txt", "unknown")))
             self.assertFalse(vbc.write_version(repo, vbc.VersionFile("plain.txt", "unknown"), "1.0.0"))
 
+    def test_json_path_rejects_bad_array_segments_and_scalar_walks(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / "marketplace.json").write_text(
+                '{"plugins": [{"version": "1.0.0"}], "scalar": "value"}\n',
+                encoding="utf-8",
+            )
+
+            bad_index = vbc.VersionFile("marketplace.json", "json_path", "plugins.first.version")
+            scalar = vbc.VersionFile("marketplace.json", "json_path", "scalar.version")
+
+            self.assertIsNone(vbc.read_version(repo, bad_index))
+            self.assertFalse(vbc.write_version(repo, bad_index, "2.0.0"))
+            self.assertIsNone(vbc.read_version(repo, scalar))
+            self.assertFalse(vbc.write_version(repo, scalar, "2.0.0"))
+
+    def test_load_config_strips_metadata_and_defaults_trailer_key(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = pathlib.Path(td) / "versioning.json"
+            cfg_path.write_text(
+                json.dumps(
+                    {
+                        "$schema": "https://example.invalid/schema.json",
+                        "_comment": "ignored",
+                        "generated_globs": ["build/**"],
+                        "surfaces": {
+                            "sdk": {
+                                "_comment": "ignored",
+                                "label": "SDK",
+                                "version_files": [
+                                    {
+                                        "_comment": "ignored",
+                                        "path": "sdk.json",
+                                        "kind": "json_field",
+                                        "field": "version",
+                                    }
+                                ],
+                                "trigger_paths": ["src/**"],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            cfg = vbc.load_config(cfg_path)
+
+        self.assertEqual(cfg.generated_globs, ["build/**"])
+        self.assertEqual(cfg.trailer_version_bump, "Version-Bump")
+        self.assertEqual(cfg.surfaces[0].name, "sdk")
+        self.assertEqual(cfg.surfaces[0].version_files[0].field, "version")
+
     def test_script_entrypoint_help_exits_zero(self) -> None:
         script = pathlib.Path(vbc.__file__).resolve()
         with mock.patch.object(sys, "argv", [str(script), "--help"]), \
@@ -688,6 +740,18 @@ class AssessmentReportApplyTests(unittest.TestCase):
             vbc,
             "git_log_subjects_and_bodies",
             return_value=[("sha", "chore(versions): bump SDK", "")],
+        ):
+            self.assertTrue(vbc._range_has_bump_commit("base", "head"))
+        with mock.patch.object(
+            vbc,
+            "git_log_subjects_and_bodies",
+            return_value=[("sha", "chore: bump SDK to v1.2.3", "")],
+        ):
+            self.assertFalse(vbc._range_has_bump_commit("base", "head"))
+        with mock.patch.object(
+            vbc,
+            "git_log_subjects_and_bodies",
+            return_value=[("sha", "chore: bump versions for release", "")],
         ):
             self.assertTrue(vbc._range_has_bump_commit("base", "head"))
 

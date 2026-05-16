@@ -193,3 +193,69 @@ TEST_CASE("NSIS script maps standalone and unknown formats to INSTDIR", "[ship][
     REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.exe\""));
     REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.lv2\""));
 }
+
+TEST_CASE("NSIS script handles empty plugin list with only post and uninstall sections",
+          "[ship][installer][coverage][issue-644]") {
+    auto config = make_test_config();
+    config.plugins.clear();
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("Name \"TestPlugin\""));
+    REQUIRE_THAT(script, ContainsSubstring("Section \"Uninstall\""));
+    REQUIRE_THAT(script, ContainsSubstring("Section \"-Post\""));
+    REQUIRE(script.find("TestPlugin (VST3)") == std::string::npos);
+    REQUIRE(script.find("TestPlugin (CLAP)") == std::string::npos);
+}
+
+TEST_CASE("NSIS script honors configured output path and install root",
+          "[ship][installer][coverage][issue-644]") {
+    auto config = make_test_config();
+    config.output_path = "dist/TestPlugin Setup.exe";
+    config.publisher = "Acme Audio";
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("OutFile \"dist/TestPlugin Setup.exe\""));
+    REQUIRE_THAT(script, ContainsSubstring("InstallDir \"$PROGRAMFILES\\Acme Audio\\TestPlugin\""));
+    REQUIRE_THAT(script, ContainsSubstring("InstallDirRegKey HKLM \"Software\\Acme Audio\\TestPlugin\""));
+}
+
+TEST_CASE("NSIS script installs file plugins without recursive flag",
+          "[ship][installer][coverage][issue-644]") {
+    ScopedTempDir temp;
+    auto plugin = temp.path / "TestPlugin.clap";
+    std::ofstream(plugin) << "plugin";
+
+    auto config = make_test_config();
+    config.plugins = {{plugin.string(), "", "clap"}};
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("File \"" + plugin.string() + "\""));
+    REQUIRE(script.find("File /r \"" + plugin.string() + "\"") == std::string::npos);
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$COMMONFILES\\CLAP\\TestPlugin.clap\""));
+}
+
+TEST_CASE("NSIS script uses per-user plugin common directories",
+          "[ship][installer][coverage][issue-644]") {
+    auto config = make_test_config();
+    config.per_user_install = true;
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$LOCALAPPDATA\\Programs\\Common\\VST3\""));
+    REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$LOCALAPPDATA\\Programs\\Common\\CLAP\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$LOCALAPPDATA\\Programs\\Common\\VST3\\TestPlugin.vst3\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$LOCALAPPDATA\\Programs\\Common\\CLAP\\TestPlugin.clap\""));
+}
+
+TEST_CASE("NSIS script keeps install_dir field non-authoritative for format destinations",
+          "[ship][installer][coverage][issue-644]") {
+    auto config = make_test_config();
+    config.plugins = {
+        {"/tmp/custom/TestPlugin.vst3", "C:/Ignored/VST3", "vst3"},
+        {"/tmp/custom/TestPlugin.clap", "C:/Ignored/CLAP", "clap"},
+    };
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$COMMONFILES\\VST3\""));
+    REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$COMMONFILES\\CLAP\""));
+    REQUIRE(script.find("C:/Ignored") == std::string::npos);
+}

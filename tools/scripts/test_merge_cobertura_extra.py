@@ -62,6 +62,32 @@ class ParseXmlEdgeTests(unittest.TestCase):
             },
         )
 
+    def test_parse_normalizes_windows_paths_and_filters_ignored_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            coverage = ET.Element("coverage")
+            classes = ET.SubElement(
+                ET.SubElement(ET.SubElement(coverage, "packages"), "package"),
+                "classes",
+            )
+            for filename in (
+                r"core\format\src\clap_adapter.cpp",
+                r"test\test_host.cpp",
+                r"build\generated.cpp",
+                r"external\dep.cpp",
+            ):
+                cls = ET.SubElement(
+                    classes,
+                    "class",
+                    attrib={"name": filename, "filename": filename},
+                )
+                lines = ET.SubElement(cls, "lines")
+                ET.SubElement(lines, "line", attrib={"number": "1", "hits": "1"})
+
+            parsed = mc.parse_xml(_write_tree(tmp / "windows.xml", coverage))
+
+        self.assertEqual(parsed, {"core/format/src/clap_adapter.cpp": {1: 1}})
+
 
 class RenderEdgeTests(unittest.TestCase):
     def test_render_handles_empty_totals_and_empty_file_line_sets(self) -> None:
@@ -109,6 +135,28 @@ class CliEntrypointTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("merged 1 XML(s)", proc.stderr)
         self.assertEqual(reparsed, {"core/cli.cpp": {9: 2}})
+
+    def test_main_returns_distinct_code_when_all_inputs_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            out = tmp / "merged.xml"
+
+            rc = mc.main([str(tmp / "missing.xml"), "--out", str(out)])
+
+        self.assertEqual(rc, mc.EXIT_ALL_INPUTS_MISSING)
+        self.assertFalse(out.exists())
+
+    def test_main_rejects_corrupt_xml_without_empty_input_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            corrupt = tmp / "corrupt.xml"
+            corrupt.write_text("<coverage>", encoding="utf-8")
+            out = tmp / "merged.xml"
+
+            rc = mc.main(["--out", str(out), str(corrupt)])
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

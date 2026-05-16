@@ -144,6 +144,24 @@ class CodegenAndMainExtra(unittest.TestCase):
         self.assertIn("const MigrationEntry* const kMigrationIndex = nullptr;", generated)
         self.assertIn("const std::size_t kMigrationIndexSize = 0;", generated)
 
+    def test_emit_cpp_nonbreaking_default_and_source_comments(self):
+        entry = _bmi.Entry(
+            version="0.40.0",
+            breaking=False,
+            applies_if="",
+            summary="plain",
+            body="body",
+            source_path=pathlib.Path("docs/migrations/v0.40.0.md"),
+        )
+
+        generated = _bmi.emit_cpp([entry])
+
+        self.assertIn("// source: docs/migrations/v0.40.0.md", generated)
+        self.assertIn('"0.40.0"', generated)
+        self.assertIn("false", generated)
+        self.assertIn("const MigrationEntry* const kMigrationIndex = kTable;", generated)
+        self.assertIn("sizeof(kTable) / sizeof(kTable[0])", generated)
+
     def test_main_success_sorts_skips_readme_escapes_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
@@ -200,6 +218,19 @@ class CodegenAndMainExtra(unittest.TestCase):
 
         self.assertEqual(result, 2)
         self.assertIn("docs dir not found", stderr)
+
+    def test_main_empty_docs_dir_writes_null_index(self):
+        with tempfile.TemporaryDirectory() as td:
+            docs = pathlib.Path(td) / "docs"
+            docs.mkdir()
+            out = pathlib.Path(td) / "generated" / "migration_index.cpp"
+
+            result = _bmi.main(["--docs-dir", str(docs), "--out", str(out)])
+
+            self.assertEqual(result, 0)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("No migration docs found", text)
+            self.assertIn("kMigrationIndex = nullptr", text)
 
     def test_main_duplicate_versions_fail_before_writing(self):
         with tempfile.TemporaryDirectory() as td:

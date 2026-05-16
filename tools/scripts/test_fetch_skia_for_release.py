@@ -104,12 +104,94 @@ class ExpectedLibraryPath(unittest.TestCase):
 
 
 class UnknownMatrixPlatform(unittest.TestCase):
+    def test_missing_platform_argument_returns_usage_error(self):
+        with _in_tempdir():
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = fetch_skia.main(["fetch_skia_for_release.py"])
+
+        self.assertEqual(rc, 2)
+        self.assertIn("usage:", err.getvalue())
+
     def test_returns_zero_with_warning(self):
         with _in_tempdir():
-            rc = fetch_skia.main(
-                ["fetch_skia_for_release.py", "amiga-68k"]
-            )
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "amiga-68k"]
+                )
+
         self.assertEqual(rc, 0)
+        self.assertIn("unknown matrix platform", err.getvalue())
+
+
+class ManifestValidation(unittest.TestCase):
+    def test_missing_manifest_fails_for_known_platform(self):
+        with _in_tempdir():
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+        self.assertEqual(rc, 1)
+
+    def test_manifest_without_skia_dependency_fails(self):
+        with _in_tempdir() as td:
+            (td / "tools" / "deps").mkdir(parents=True)
+            (td / "tools" / "deps" / "manifest.json").write_text(
+                json.dumps({"dependencies": [{"name": "Other"}]}),
+                encoding="utf-8",
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+        self.assertEqual(rc, 1)
+
+    def test_known_platform_without_asset_skips(self):
+        with _in_tempdir() as td:
+            (td / "tools" / "deps").mkdir(parents=True)
+            manifest = {
+                "dependencies": [
+                    {
+                        "name": "Skia",
+                        "determinism": {"release_assets": {}},
+                    }
+                ]
+            }
+            (td / "tools" / "deps" / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "windows-arm64"]
+            )
+
+        self.assertEqual(rc, 0)
+
+    def test_known_platform_without_asset_reports_matrix_and_manifest_key(self):
+        with _in_tempdir() as td:
+            (td / "tools" / "deps").mkdir(parents=True)
+            manifest = {
+                "dependencies": [
+                    {
+                        "name": "Skia",
+                        "determinism": {"release_assets": {}},
+                    }
+                ]
+            }
+            (td / "tools" / "deps" / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "windows-arm64"]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("matrix=windows-arm64", out.getvalue())
+        self.assertIn("manifest key 'win-arm64'", out.getvalue())
 
 
 class FlatLayoutSucceeds(unittest.TestCase):
@@ -136,6 +218,7 @@ class FlatLayoutSucceeds(unittest.TestCase):
             )
             self.assertTrue(expected.is_file())
             self.assertEqual(expected.read_bytes(), b"skia-flat")
+            self.assertFalse((td / "skia-release-asset.zip").exists())
 
 
 class ArchSubdirLayoutFlattens(unittest.TestCase):
@@ -173,6 +256,28 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
                 "arm64/ subdir should be removed after flatten",
             )
 
+    def test_arch_subdir_with_nested_dir_keeps_nonempty_dir(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/arm64/libskia.a": b"skia-arch",
+                "build/mac-gpu/lib/Release/arm64/obj/keep.txt": b"keep",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/mac-gpu/lib/Release"
+            )
+            self.assertTrue((release_dir / "libskia.a").is_file())
+            self.assertTrue((release_dir / "arm64" / "obj" / "keep.txt").is_file())
+
     def test_linux_x64_arch_subdir(self):
         with _in_tempdir() as td:
             zip_path = td / "skia-linux.zip"
@@ -193,6 +298,56 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             self.assertTrue(expected.is_file())
             self.assertEqual(expected.read_bytes(), b"linux-skia")
 
+    def test_windows_x64_arch_subdir(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-win.zip"
+            payload = {
+                "build/win-gpu/lib/Release/x64/skia.lib": b"windows-skia",
+                "build/win-gpu/lib/Release/x64/skparagraph.lib": b"windows-para",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "win-x64"
+            )
+
+            rc = fetch_skia.main(["fetch_skia_for_release.py", "windows-x64"])
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/win-gpu/lib/Release"
+            )
+            self.assertEqual((release_dir / "skia.lib").read_bytes(), b"windows-skia")
+            self.assertEqual(
+                (release_dir / "skparagraph.lib").read_bytes(), b"windows-para"
+            )
+
+    def test_arch_subdir_does_not_clobber_existing_flat_file(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/arm64/libskia.a": b"arch-copy",
+                "build/mac-gpu/lib/Release/libdawn_combined.a": b"already-flat",
+                "build/mac-gpu/lib/Release/arm64/libdawn_combined.a": b"dawn",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/mac-gpu/lib/Release"
+            )
+            self.assertEqual((release_dir / "libskia.a").read_bytes(), b"arch-copy")
+            self.assertEqual(
+                (release_dir / "libdawn_combined.a").read_bytes(), b"already-flat"
+            )
+            self.assertTrue((release_dir / "arm64" / "libdawn_combined.a").is_file())
+
 
 class MissingLibFails(unittest.TestCase):
     """Zip without libs anywhere must still surface a clear error."""
@@ -211,6 +366,27 @@ class MissingLibFails(unittest.TestCase):
                 ["fetch_skia_for_release.py", "darwin-arm64"]
             )
             self.assertEqual(rc, 1, "missing libskia.a must exit non-zero")
+
+    def test_no_lib_prints_directory_listing(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-empty.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/README.txt": b"no libs here",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "darwin-arm64"]
+                )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("expected library not found", err.getvalue())
+        self.assertIn("README.txt", err.getvalue())
 
 
 class Sha256MismatchFails(unittest.TestCase):

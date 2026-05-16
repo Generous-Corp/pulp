@@ -60,6 +60,22 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(vh.load_config(config)["unix_targets"][0]["host"], "linux")
             self.assertEqual(vh.load_config(config)["windows_targets"][0]["host"], "win")
 
+    def test_load_config_preserves_extra_keys_for_future_callers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = pathlib.Path(td) / "hosts.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "unix_targets": [],
+                        "windows_targets": [],
+                        "notes": {"owner": "release"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(vh.load_config(config)["notes"], {"owner": "release"})
+
 
 class SubprocessTests(unittest.TestCase):
     def test_current_branch_returns_stripped_git_output(self) -> None:
@@ -99,6 +115,16 @@ class SubprocessTests(unittest.TestCase):
         self.assertIn("success: OK", text)
         self.assertIn("failure: FAILED (7)", text)
 
+    def test_run_uses_repo_root_for_subprocess(self) -> None:
+        with mock.patch.object(
+            vh.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["true"], 0),
+        ) as run:
+            self.assertTrue(vh.run("rooted", ["true"]))
+
+        run.assert_called_once_with(["true"], cwd=vh.ROOT)
+
 
 class RemoteCommandTests(unittest.TestCase):
     def test_unix_remote_command_quotes_repo_and_branch_and_can_skip_tests(self) -> None:
@@ -117,6 +143,12 @@ class RemoteCommandTests(unittest.TestCase):
         self.assertIn("$repo='C:\\repos\\pulp''s'", command)
         self.assertIn("$branch='feature/one''two'", command)
         self.assertIn("-NoTests:$false", command)
+
+    def test_windows_remote_command_can_skip_tests(self) -> None:
+        command = vh.windows_remote_command("C:\\repo", "main", True)
+
+        self.assertIn("-NoTests:$true", command)
+        self.assertIn("validate-build.ps1", command)
 
 
 class MainTests(unittest.TestCase):
@@ -200,6 +232,58 @@ class MainTests(unittest.TestCase):
                     rc = vh.main()
 
         self.assertEqual(rc, 1)
+
+    def test_main_continues_after_local_failure_to_collect_remote_results(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = pathlib.Path(td) / "hosts.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "unix_targets": [{"host": "linux-host", "path": "/srv/pulp"}],
+                        "windows_targets": [{"host": "win-host", "path": "C:\\pulp"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            labels: list[str] = []
+
+            def fake_run(label: str, cmd: list[str]) -> bool:
+                labels.append(label)
+                return label != "local"
+
+            with mock.patch.object(vh, "run", side_effect=fake_run):
+                with argv(
+                    ["validate_hosts.py", "--config", str(config), "--branch", "local/test"]
+                ):
+                    rc = vh.main()
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(labels, ["local", "ssh linux-host", "ssh win-host"])
+
+    def test_main_uses_current_branch_when_branch_argument_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = pathlib.Path(td) / "missing-hosts.json"
+            observed: list[tuple[str, list[str]]] = []
+
+            def fake_run(label: str, cmd: list[str]) -> bool:
+                observed.append((label, cmd))
+                return True
+
+            with mock.patch.object(vh, "current_branch", return_value="feature/current"), \
+                 mock.patch.object(vh, "run", side_effect=fake_run):
+                with argv(["validate_hosts.py", "--config", str(config)]):
+                    rc = vh.main()
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0][0], "local")
+        self.assertEqual(observed[0][1], [
+            "bash",
+            "./validate-build.sh",
+            "--quiet",
+            "--ref",
+            "feature/current",
+        ])
 
     def test_script_entrypoint_exits_with_main_status(self) -> None:
         with tempfile.TemporaryDirectory() as td:

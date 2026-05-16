@@ -236,6 +236,58 @@ TEST_CASE("Appcast from_xml ignores malformed enclosure length", "[ship][appcast
     REQUIRE(parsed->items[1].file_size == 0);
 }
 
+TEST_CASE("Appcast XML uses short version as build number when build is empty",
+          "[ship][appcast][coverage][issue-644]") {
+    Appcast feed;
+    feed.title = "Fallback Feed";
+    feed.link = "https://example.com/appcast.xml";
+    feed.description = "Fallback build number";
+
+    AppcastItem item;
+    item.version = "6.2.1";
+    item.title = "Version 6.2.1";
+    item.pub_date = "Sat, 06 Jun 2026 12:00:00 +0000";
+    item.download_url = "https://example.com/Pulp-6.2.1.pkg";
+    item.file_size = 621;
+    feed.items.push_back(item);
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(xml.find("<sparkle:version>6.2.1</sparkle:version>") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:shortVersionString>6.2.1</sparkle:shortVersionString>") != std::string::npos);
+}
+
+TEST_CASE("Appcast from_xml accepts rss with item-only metadata",
+          "[ship][appcast][coverage][issue-644]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <item>
+      <title>Nameless Release</title>
+      <sparkle:version>700</sparkle:version>
+      <sparkle:shortVersionString>7.0.0</sparkle:shortVersionString>
+      <enclosure url="https://example.com/Pulp-7.0.0.pkg" length="700" />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->title == "Nameless Release");
+    REQUIRE(parsed->link.empty());
+    REQUIRE(parsed->description.empty());
+    REQUIRE(parsed->items.size() == 1);
+    REQUIRE(parsed->items[0].title == "Nameless Release");
+    REQUIRE(parsed->items[0].build_number == "700");
+    REQUIRE(parsed->items[0].version == "7.0.0");
+}
+
+TEST_CASE("Appcast from_xml only requires rss marker",
+          "[ship][appcast][coverage][issue-644]") {
+    auto parsed = Appcast::from_xml("<rss version=\"2.0\"></rss>");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->items.empty());
+}
+
 TEST_CASE("Version comparison", "[ship][version]") {
     REQUIRE(compare_versions("1.0.0", "1.0.0") == 0);
     REQUIRE(compare_versions("1.0.0", "1.0.1") == -1);
@@ -249,6 +301,15 @@ TEST_CASE("Version comparison tolerates non-numeric segments", "[ship][version]"
     REQUIRE(compare_versions("01.002.0003", "1.2.3") == 0);
     REQUIRE(compare_versions("1.beta.5", "1.0.7") == -1);
     REQUIRE(compare_versions("1..5", "1.0.4") == 1);
+}
+
+TEST_CASE("Version comparison pads and orders long mixed versions",
+          "[ship][version][coverage][issue-644]") {
+    REQUIRE(compare_versions("", "0") == 0);
+    REQUIRE(compare_versions("1.0.0", "1.0.0.0.0") == 0);
+    REQUIRE(compare_versions("1.0.0.0.1", "1.0.0.0") == 1);
+    REQUIRE(compare_versions("2.alpha.0", "2.0.1") == -1);
+    REQUIRE(compare_versions("2026.05.15", "2026.5.14") == 1);
 }
 
 // #295 P0 regression: sign_file_ed25519 MUST NOT silently return an

@@ -115,6 +115,60 @@ class SurfaceExtraTests(unittest.TestCase):
     def test_matches_any_glob_returns_false_for_empty_pattern_set(self) -> None:
         self.assertFalse(rpc._matches_any_glob("tools/scripts/run.py", []))
 
+    def test_selected_surfaces_appends_always_include_surface(self) -> None:
+        selected = rpc._selected_surfaces(
+            [rpc.REPO_ROOT / "tools/scripts/test_alpha.py"]
+        )
+
+        self.assertGreaterEqual(len(selected), 2)
+        self.assertEqual(selected[0].source_roots, ("tools/scripts",))
+        self.assertTrue(selected[-1].always_include)
+
+    def test_normalized_source_roots_drops_children_when_parent_selected(self) -> None:
+        surfaces = [
+            rpc.CoverageSurface(("tools",), ("tools/test_*.py",)),
+            rpc.CoverageSurface(("tools/scripts",), ("tools/scripts/test_*.py",)),
+            rpc.CoverageSurface(("core/view/js",), ("tools/test_*.py",)),
+        ]
+
+        self.assertEqual(rpc._normalized_source_roots(surfaces), ["tools", "core/view/js"])
+
+    def test_report_source_files_respects_omit_globs_and_private_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            script_dir = root / "tools" / "scripts"
+            script_dir.mkdir(parents=True)
+            keep = script_dir / "run_me.py"
+            keep.write_text("print('keep')\n", encoding="utf-8")
+            (script_dir / "test_run_me.py").write_text("print('test')\n", encoding="utf-8")
+            (script_dir / "_private.py").write_text("print('private')\n", encoding="utf-8")
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                files = rpc._report_source_files(
+                    ["tools/scripts"],
+                    ["tools/scripts/test_*.py", "tools/scripts/_*.py"],
+                )
+
+        self.assertEqual(files, [keep])
+
+    def test_write_coveragerc_requires_selected_sources_and_writes_omit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = pathlib.Path(td)
+            with mock.patch.object(rpc, "OUTPUT_DIR", out), \
+                 mock.patch.object(rpc, "HTML_DIR", out / "html"), \
+                 mock.patch.object(rpc, "XML_FILE", out / "coverage.xml"), \
+                 mock.patch.object(rpc, "RCFILE", out / ".coveragerc"):
+                with self.assertRaises(ValueError):
+                    rpc._write_coveragerc([])
+
+                rpc._write_coveragerc(
+                    [rpc.CoverageSurface(("tools/scripts",), ("tools/scripts/test_*.py",))]
+                )
+                text = (out / ".coveragerc").read_text(encoding="utf-8")
+
+        self.assertIn("source =\n    tools/scripts", text)
+        self.assertIn("omit =\n    tools/scripts/test_*.py", text)
+
 
 if __name__ == "__main__":
     unittest.main()

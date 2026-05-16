@@ -23,6 +23,32 @@ spec.loader.exec_module(resolver)
 
 
 class ResolverEdgeTests(unittest.TestCase):
+    def test_load_selector_accepts_string_and_array_json(self) -> None:
+        self.assertEqual(
+            resolver._load_selector('"ubuntu-latest"', "Linux"),
+            '"ubuntu-latest"',
+        )
+        self.assertEqual(
+            resolver._load_selector('["self-hosted","macos"]', "macOS"),
+            '["self-hosted", "macos"]',
+        )
+
+    def test_load_selector_rejects_invalid_json_with_target_name(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ctx:
+                resolver._load_selector("{bad", "Windows")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Windows runner selector JSON is not valid", stderr.getvalue())
+
+    def test_env_nonempty_handles_missing_none_and_whitespace(self) -> None:
+        with mock.patch.dict(os.environ, {"EMPTY": "   ", "VALUE": " label "}, clear=True):
+            self.assertEqual(resolver._env_nonempty(None), "")
+            self.assertEqual(resolver._env_nonempty("MISSING"), "")
+            self.assertEqual(resolver._env_nonempty("EMPTY"), "")
+            self.assertEqual(resolver._env_nonempty("VALUE"), "label")
+
     def test_optional_namespace_returns_empty_when_namespace_has_no_selector(self) -> None:
         with mock.patch.dict(
             os.environ,
@@ -77,6 +103,55 @@ class ResolverEdgeTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("Unsupported runner_provider: self-hosted", stderr.getvalue())
+
+    def test_provider_mode_can_read_custom_requested_provider_env(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PULP_RUNNER_PROVIDER": "local",
+                "LOCAL_LINUX_RUNS_ON_JSON": '["self-hosted","linux"]',
+            },
+            clear=True,
+        ):
+            with contextlib.redirect_stdout(stdout):
+                rc = resolver.main(
+                    [
+                        "--target-name",
+                        "Linux (x64)",
+                        "--mode",
+                        "provider",
+                        "--requested-provider-env",
+                        "PULP_RUNNER_PROVIDER",
+                        "--github-hosted-label",
+                        "ubuntu-latest",
+                        "--local-env",
+                        "LOCAL_LINUX_RUNS_ON_JSON",
+                    ]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stdout.getvalue(), '["self-hosted", "linux"]')
+
+    def test_optional_namespace_main_prints_empty_for_github_hosted(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch.dict(os.environ, {"REQUESTED_PROVIDER": "github-hosted"}, clear=True):
+            with contextlib.redirect_stdout(stdout):
+                rc = resolver.main(
+                    [
+                        "--target-name",
+                        "macOS (ARM64)",
+                        "--mode",
+                        "optional-namespace",
+                        "--explicit-env",
+                        "EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
+                        "--namespace-env",
+                        "NAMESPACE_MACOS_RUNS_ON_JSON",
+                    ]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stdout.getvalue(), "")
 
 
 if __name__ == "__main__":

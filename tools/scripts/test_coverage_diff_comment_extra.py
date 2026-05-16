@@ -36,11 +36,64 @@ class RenderPlainReportTests(unittest.TestCase):
         self.assertIn("core/runtime/src/base64.cpp", body)
         self.assertIn("<details>", body)
 
+    def test_top_level_heading_only_report_still_renders_details(self) -> None:
+        body = cdc.render(
+            "# Diff Coverage\n",
+            flip_date="2026-05-05",
+            threshold=80,
+        )
+
+        self.assertIn("<details>", body)
+        self.assertIn("</details>", body)
+        self.assertNotIn("# Diff Coverage", body)
+
+    def test_required_empty_report_uses_required_banner_without_details(self) -> None:
+        body = cdc.render(
+            "",
+            flip_date="2026-05-05",
+            threshold=80,
+            advisory=False,
+        )
+
+        self.assertIn("## Diff coverage (required)", body)
+        self.assertIn("Diff coverage threshold: **80%**", body)
+        self.assertIn("did not touch any instrumented source", body)
+        self.assertNotIn("informational only", body)
+        self.assertNotIn("<details>", body)
+
 
 class ReadReportEdgeTests(unittest.TestCase):
     def test_directory_report_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertIsNone(cdc._read_report(pathlib.Path(tmpdir)))
+
+
+class MainExtraTests(unittest.TestCase):
+    def test_main_no_advisory_flag_writes_required_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = pathlib.Path(tmpdir)
+            report = tmp / "coverage-diff.md"
+            out = tmp / "coverage-diff-comment.md"
+            report.write_text(PLAIN_REPORT, encoding="utf-8")
+
+            rc = cdc.main(
+                [
+                    "--report",
+                    str(report),
+                    "--flip-date",
+                    "2026-05-05",
+                    "--threshold",
+                    "80",
+                    "--no-advisory",
+                    "--out",
+                    str(out),
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            body = out.read_text(encoding="utf-8")
+            self.assertIn("## Diff coverage (required)", body)
+            self.assertIn("core/runtime/src/base64.cpp", body)
 
 
 class ScriptEntrypointTests(unittest.TestCase):

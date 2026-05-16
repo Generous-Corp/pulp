@@ -56,6 +56,17 @@ class AndroidSdkDiscoveryTests(unittest.TestCase):
                  mock.patch.object(android_target.os, "getlogin", return_value="tester"):
                 self.assertEqual(android_target.find_android_sdk(), str(sdk))
 
+    def test_find_android_sdk_checks_linux_default_location(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            sdk = home / "Android" / "Sdk"
+            sdk.mkdir(parents=True)
+
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                 mock.patch.object(android_target.Path, "home", return_value=home), \
+                 mock.patch.object(android_target.os, "getlogin", return_value="tester"):
+                self.assertEqual(android_target.find_android_sdk(), str(sdk))
+
     def test_find_android_sdk_returns_empty_string_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             home = pathlib.Path(td)
@@ -64,6 +75,24 @@ class AndroidSdkDiscoveryTests(unittest.TestCase):
                  mock.patch.object(android_target.Path, "home", return_value=home), \
                  mock.patch.object(android_target.os, "getlogin", return_value="tester"):
                 self.assertEqual(android_target.find_android_sdk(), "")
+
+    def test_find_android_sdk_ignores_missing_env_paths_and_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            sdk = home / "Android" / "Sdk"
+            sdk.mkdir(parents=True)
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "ANDROID_HOME": str(home / "missing-home"),
+                    "ANDROID_SDK_ROOT": str(home / "missing-root"),
+                },
+                clear=True,
+            ), \
+                 mock.patch.object(android_target.Path, "home", return_value=home), \
+                 mock.patch.object(android_target.os, "getlogin", return_value="tester"):
+                self.assertEqual(android_target.find_android_sdk(), str(sdk))
 
 
 class NdkDiscoveryTests(unittest.TestCase):
@@ -142,6 +171,21 @@ class PrerequisiteTests(unittest.TestCase):
              ):
             self.assertEqual(android_target.check_prerequisites(), ["Java not found in PATH"])
 
+    def test_check_prerequisites_reports_empty_java_version_output(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["java", "-version"],
+            0,
+            stderr="",
+        )
+
+        with mock.patch.object(android_target, "find_android_sdk", return_value="/sdk"), \
+             mock.patch.object(android_target, "find_ndk", return_value="/sdk/ndk/30"), \
+             mock.patch.object(android_target.subprocess, "run", return_value=completed):
+            self.assertEqual(
+                android_target.check_prerequisites(),
+                ["Java 17+ required. Found: "],
+            )
+
 
 class BuildAndroidTests(unittest.TestCase):
     def test_build_android_fails_when_gradlew_is_missing(self) -> None:
@@ -211,6 +255,24 @@ class BuildAndroidTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], [str(gradlew), "assembleDebug"])
         self.assertIn("Android APK built", out.getvalue())
         self.assertIn("2.0 MB", out.getvalue())
+
+    def test_build_android_reports_success_when_expected_apk_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            android_dir = root / "android"
+            android_dir.mkdir()
+            gradlew = android_dir / "gradlew"
+            gradlew.write_text("#!/bin/sh\n", encoding="utf-8")
+            completed = subprocess.CompletedProcess([str(gradlew), "assembleDebug"], 0)
+
+            out = io.StringIO()
+            with mock.patch.object(android_target, "find_android_sdk", return_value="/sdk"), \
+                 mock.patch.object(android_target.subprocess, "run", return_value=completed), \
+                 contextlib.redirect_stdout(out):
+                rc = android_target.build_android(root, verbose=True)
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Build succeeded but APK path not found", out.getvalue())
 
     def test_build_android_returns_gradle_failure_status(self) -> None:
         with tempfile.TemporaryDirectory() as td:

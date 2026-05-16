@@ -228,6 +228,16 @@ void write_fake_gradlew(const fs::path& project_dir, const fs::path& log_path) {
 #endif
 }
 
+void write_failing_gradlew(const fs::path& project_dir, int exit_code) {
+#ifdef _WIN32
+    write_tool(project_dir / "gradlew.bat",
+        "exit /b " + std::to_string(exit_code) + "\r\n");
+#else
+    write_tool(project_dir / "gradlew",
+        "exit " + std::to_string(exit_code) + "\n");
+#endif
+}
+
 void write_fake_bundletool(const fs::path& path, const fs::path& log_path) {
 #ifdef _WIN32
     write_tool(path,
@@ -304,6 +314,143 @@ TEST_CASE("Android SDK discovery falls back to SDK root and dedicated NDK home",
     REQUIRE(find_android_ndk() == standalone_ndk);
 }
 
+TEST_CASE("Android SDK discovery skips invalid primary env roots",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = make_fake_sdk(temp.path);
+    auto invalid_sdk = temp.path / "invalid-sdk";
+    auto invalid_ndk = temp.path / "invalid-ndk";
+    fs::create_directories(invalid_sdk);
+    fs::create_directories(invalid_ndk);
+
+    ScopedEnvVar android_home("ANDROID_HOME", invalid_sdk.string());
+    ScopedEnvVar android_sdk_root("ANDROID_SDK_ROOT", sdk.string());
+    ScopedEnvVar android_ndk_home("ANDROID_NDK_HOME", invalid_ndk.string());
+
+    REQUIRE(detect_android_sdk() == sdk);
+    REQUIRE(find_android_ndk() == sdk / "ndk" / "27.0.12077973");
+}
+
+TEST_CASE("Android SDK discovery returns empty for invalid env roots",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto invalid_home = temp.path / "not-an-sdk";
+    fs::create_directories(invalid_home);
+
+    ScopedEnvVar android_home("ANDROID_HOME", invalid_home.string());
+    ScopedEnvVar android_sdk_root("ANDROID_SDK_ROOT", invalid_home.string());
+    ScopedEnvVar android_ndk_home("ANDROID_NDK_HOME", (temp.path / "not-an-ndk").string());
+    ScopedEnvVar home("HOME", (temp.path / "home").string());
+    ScopedUnsetEnvVar userprofile("USERPROFILE");
+
+    REQUIRE(detect_android_sdk().empty());
+    REQUIRE(find_android_ndk().empty());
+    REQUIRE(android_build_tools_version().empty());
+    REQUIRE(find_android_build_tool("apksigner").empty());
+}
+
+TEST_CASE("Android SDK discovery ignores empty tool directories",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = temp.path / "sdk";
+    fs::create_directories(sdk / "build-tools");
+    fs::create_directories(sdk / "ndk");
+
+    ScopedEnvVar android_home("ANDROID_HOME", sdk.string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedUnsetEnvVar android_ndk_home("ANDROID_NDK_HOME");
+
+    REQUIRE(detect_android_sdk() == sdk);
+    REQUIRE(android_build_tools_version().empty());
+    REQUIRE(find_android_ndk().empty());
+}
+
+TEST_CASE("Android SDK discovery treats malformed revisions as zero",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = temp.path / "sdk";
+    fs::create_directories(sdk / "build-tools" / "preview");
+    fs::create_directories(sdk / "build-tools" / "1.preview");
+    fs::create_directories(sdk / "build-tools" / "1.0.1");
+    fs::create_directories(sdk / "ndk" / "beta" / "toolchains");
+    fs::create_directories(sdk / "ndk" / "1.0.1" / "toolchains");
+
+    ScopedEnvVar android_home("ANDROID_HOME", sdk.string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedUnsetEnvVar android_ndk_home("ANDROID_NDK_HOME");
+
+    REQUIRE(android_build_tools_version() == "1.0.1");
+    REQUIRE(find_android_ndk() == sdk / "ndk" / "1.0.1");
+}
+
+TEST_CASE("Android SDK discovery handles very large revision components",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto sdk = temp.path / "sdk";
+    const std::string huge = "999999999999999999999999999999";
+    fs::create_directories(sdk / "build-tools" / "100.0.0");
+    fs::create_directories(sdk / "build-tools" / huge);
+    fs::create_directories(sdk / "ndk" / "100.0.0" / "toolchains");
+    fs::create_directories(sdk / "ndk" / huge / "toolchains");
+
+    ScopedEnvVar android_home("ANDROID_HOME", sdk.string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedUnsetEnvVar android_ndk_home("ANDROID_NDK_HOME");
+
+    REQUIRE(android_build_tools_version() == huge);
+    REQUIRE(find_android_ndk() == sdk / "ndk" / huge);
+}
+
+TEST_CASE("Android Java version detection parses quoted java output",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto bin_dir = temp.path / "bin";
+    fs::create_directories(bin_dir);
+
+#ifdef _WIN32
+    write_tool(tool_path(bin_dir, "java"),
+        "echo openjdk version \"21.0.2\" 2026-01-16\r\n"
+        "exit /b 0\r\n");
+#else
+    write_tool(bin_dir / "java",
+        "echo 'openjdk version \"21.0.2\" 2026-01-16' >&2\n");
+#endif
+
+    auto old_path = read_env_var("PATH").value_or("");
+#ifdef _WIN32
+    ScopedEnvVar path_env("PATH", bin_dir.string() + ";" + old_path);
+#else
+    ScopedEnvVar path_env("PATH", bin_dir.string() + ":" + old_path);
+#endif
+
+    REQUIRE(detect_java_version() == "21.0.2");
+}
+
+TEST_CASE("Android Java version detection returns empty for unquoted output",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto bin_dir = temp.path / "bin";
+    fs::create_directories(bin_dir);
+
+#ifdef _WIN32
+    write_tool(tool_path(bin_dir, "java"),
+        "echo openjdk version 21.0.2\r\n"
+        "exit /b 0\r\n");
+#else
+    write_tool(bin_dir / "java",
+        "echo 'openjdk version 21.0.2' >&2\n");
+#endif
+
+    auto old_path = read_env_var("PATH").value_or("");
+#ifdef _WIN32
+    ScopedEnvVar path_env("PATH", bin_dir.string() + ";" + old_path);
+#else
+    ScopedEnvVar path_env("PATH", bin_dir.string() + ":" + old_path);
+#endif
+
+    REQUIRE(detect_java_version().empty());
+}
+
 TEST_CASE("Android signing helpers use SDK tools and parse APK verification output", "[ship][android]") {
     TempDir temp;
     auto sdk = make_fake_sdk(temp.path);
@@ -342,6 +489,30 @@ TEST_CASE("Android signing helpers use SDK tools and parse APK verification outp
     REQUIRE_THAT(log, ContainsSubstring("sign"));
     REQUIRE_THAT(log, ContainsSubstring("--ks-key-alias"));
     REQUIRE_THAT(log, ContainsSubstring("verify --print-certs --verbose"));
+}
+
+TEST_CASE("Android signing helpers fail cleanly when SDK tools are unavailable",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    ScopedEnvVar android_home("ANDROID_HOME", (temp.path / "missing-sdk").string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedEnvVar home("HOME", (temp.path / "home").string());
+    ScopedUnsetEnvVar userprofile("USERPROFILE");
+
+    auto apk = temp.path / "app.apk";
+    std::ofstream(apk) << "apk";
+
+    AndroidKeystoreConfig keystore;
+    keystore.keystore_path = temp.path / "release.jks";
+    keystore.store_password = "store-pass";
+    keystore.key_alias = "release";
+
+    REQUIRE_FALSE(zipalign_apk(apk, temp.path / "aligned.apk"));
+    REQUIRE_FALSE(sign_apk(apk, keystore));
+
+    auto info = check_android_signing(apk);
+    REQUIRE_FALSE(info.is_signed);
+    REQUIRE_THAT(info.error, ContainsSubstring("apksigner not found"));
 }
 
 TEST_CASE("Android AAB signing and verification use jarsigner on PATH", "[ship][android]") {
@@ -413,6 +584,47 @@ TEST_CASE("Android Gradle packaging collects APK and AAB artifacts", "[ship][and
     REQUIRE_THAT(args, ContainsSubstring("-Pandroid.injected.signing.key.alias=release"));
 }
 
+TEST_CASE("Android Gradle packaging supports APK-only and AAB-only builds",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto project = temp.path / "android";
+    fs::create_directories(project);
+    auto gradle_log = temp.path / "gradle.args";
+    write_fake_gradlew(project, gradle_log);
+
+    auto apk_only = build_android_package(project, {}, nullptr, false, true);
+    INFO(apk_only.error);
+    REQUIRE(apk_only.success);
+    REQUIRE(apk_only.apk_path.filename() == "app-release.apk");
+    REQUIRE(apk_only.aab_path.empty());
+    REQUIRE_THAT(read_text(gradle_log), ContainsSubstring("assembleRelease"));
+    REQUIRE(read_text(gradle_log).find("bundleRelease") == std::string::npos);
+
+    fs::remove_all(project / "app" / "build" / "outputs");
+    auto aab_only = build_android_package(project, {}, nullptr, true, false);
+    INFO(aab_only.error);
+    REQUIRE(aab_only.success);
+    REQUIRE(aab_only.apk_path.empty());
+    REQUIRE(aab_only.aab_path.filename() == "app-release.aab");
+    REQUIRE_THAT(read_text(gradle_log), ContainsSubstring("bundleRelease"));
+    REQUIRE(read_text(gradle_log).find("assembleRelease") == std::string::npos);
+}
+
+TEST_CASE("Android Gradle packaging reports command failures",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto project = temp.path / "android";
+    fs::create_directories(project);
+    write_failing_gradlew(project, 7);
+
+    auto result = build_android_package(project, {"arm64-v8a"}, nullptr, true, true);
+
+    REQUIRE_FALSE(result.success);
+    REQUIRE(result.apk_path.empty());
+    REQUIRE(result.aab_path.empty());
+    REQUIRE_THAT(result.error, ContainsSubstring("Gradle build failed (exit code 7)"));
+}
+
 TEST_CASE("Android Gradle packaging reports missing wrapper and missing artifacts", "[ship][android]") {
     TempDir temp;
     auto missing_wrapper = build_android_package(temp.path / "missing", {}, nullptr, true, true);
@@ -461,4 +673,38 @@ TEST_CASE("Android bundletool conversion passes optional signing config", "[ship
     REQUIRE_THAT(args, ContainsSubstring("--bundle=" + aab.string()));
     REQUIRE_THAT(args, ContainsSubstring("--output=" + apks.string()));
     REQUIRE_THAT(args, ContainsSubstring("--ks-key-alias=release"));
+}
+
+TEST_CASE("Android bundletool conversion supports unsigned output",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    auto bundletool = tool_path(temp.path, "bundletool");
+    auto bundletool_log = temp.path / "bundletool-unsigned.args";
+    write_fake_bundletool(bundletool, bundletool_log);
+    ScopedEnvVar bundletool_env("BUNDLETOOL", bundletool.string());
+
+    auto aab = temp.path / "app-release.aab";
+    auto apks = temp.path / "app-release.apks";
+    std::ofstream(aab) << "aab";
+
+    REQUIRE(aab_to_apks(aab, apks, nullptr));
+    REQUIRE(fs::exists(apks));
+
+    auto args = read_text(bundletool_log);
+    REQUIRE_THAT(args, ContainsSubstring("build-apks"));
+    REQUIRE_THAT(args, ContainsSubstring("--overwrite"));
+    REQUIRE(args.find("--ks=") == std::string::npos);
+}
+
+TEST_CASE("Android bundletool conversion reports missing command",
+          "[ship][android][coverage][issue-644]") {
+    TempDir temp;
+    ScopedEnvVar bundletool_env("BUNDLETOOL", (temp.path / "missing-bundletool").string());
+
+    auto aab = temp.path / "app-release.aab";
+    auto apks = temp.path / "app-release.apks";
+    std::ofstream(aab) << "aab";
+
+    REQUIRE_FALSE(aab_to_apks(aab, apks, nullptr));
+    REQUIRE_FALSE(fs::exists(apks));
 }

@@ -165,6 +165,37 @@ class ValidationHelperTests(unittest.TestCase):
         self.assertIn("custom", warnings[0])
         self.assertIn("not in known-allowed list", warnings[0])
 
+    def test_structural_validation_accepts_matching_mobile_package(self) -> None:
+        errors, warnings = vr.validate_structural(
+            {
+                "registry_version": 2,
+                "packages": {
+                    "good-mobile": {
+                        "version": "1.2.3",
+                        "verification": {
+                            "verified_version": "1.2.3",
+                            "build_status": {"Android-arm64": "pass"},
+                        },
+                        "platforms": {"Android": {}, "iOS": {}},
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_license_validation_warns_for_missing_license(self) -> None:
+        errors, warnings = vr.validate_licenses(
+            {"packages": {"missing-license": {"version": "1.0.0"}}}
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            warnings,
+            ["  missing-license: license '' not in known-allowed list — review required"],
+        )
+
 
 class MainTests(unittest.TestCase):
     def test_script_entrypoint_invokes_main_for_help(self) -> None:
@@ -316,6 +347,84 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(rc, 1)
         self.assertIn("1 packages validated, 0 errors, 2 warnings", out.getvalue())
+
+    def test_main_non_strict_allows_warnings_and_skips_license_check(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "registry.json"
+            schema = root / "schema.json"
+            write_json(
+                registry,
+                {
+                    "registry_version": 2,
+                    "packages": {
+                        "desktop-only": {
+                            "version": "1.0.0",
+                            "license": "Commercial",
+                            "verification": {
+                                "verified_version": "0.9.0",
+                                "build_status": {"Linux-x64": "pass"},
+                            },
+                            "platforms": {"Linux": {}},
+                        },
+                    },
+                },
+            )
+            write_json(schema, {})
+
+            out = io.StringIO()
+            with mock.patch.object(vr, "REGISTRY", registry), \
+                 mock.patch.object(vr, "SCHEMA", schema), \
+                 mock.patch.object(vr, "validate_schema", return_value=[]), \
+                 argv(["validate_registry.py"]), \
+                 contextlib.redirect_stdout(out):
+                rc = vr.main()
+
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("desktop-only", text)
+        self.assertIn("Warnings:", text)
+        self.assertNotIn("License warnings:", text)
+        self.assertIn("1 packages validated, 0 errors, 2 warnings", text)
+
+    def test_main_marks_package_status_fail_when_errors_reference_slug(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            registry = root / "registry.json"
+            schema = root / "schema.json"
+            write_json(
+                registry,
+                {
+                    "registry_version": 2,
+                    "packages": {
+                        "bad-license": {
+                            "version": "1.0.0",
+                            "license": "AGPL-3.0-only",
+                            "verification": {
+                                "verified_version": "1.0.0",
+                                "build_status": {"Android-arm64": "pass"},
+                            },
+                            "platforms": {"Android": {}},
+                        },
+                    },
+                },
+            )
+            write_json(schema, {})
+
+            out = io.StringIO()
+            with mock.patch.object(vr, "REGISTRY", registry), \
+                 mock.patch.object(vr, "SCHEMA", schema), \
+                 mock.patch.object(vr, "validate_schema", return_value=[]), \
+                 argv(["validate_registry.py", "--check-licenses"]), \
+                 contextlib.redirect_stdout(out):
+                rc = vr.main()
+
+        self.assertEqual(rc, 1)
+        text = out.getvalue()
+        self.assertIn("bad-license", text)
+        self.assertIn("FAIL", text)
+        self.assertIn("License errors:", text)
+        self.assertIn("1 packages validated, 1 errors, 0 warnings", text)
 
 
 if __name__ == "__main__":
