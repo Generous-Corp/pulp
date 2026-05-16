@@ -181,6 +181,47 @@ TEST_CASE("audio model status reports configured checkpoint loadability", "[audi
     REQUIRE(status.message == "configured model is loadable");
 }
 
+TEST_CASE("audio model status reports malformed state files",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    write_text(temp.path / "audio" / "model-state.json", "{ not-json");
+
+    auto status = query_model_status(temp.path);
+
+    REQUIRE(status.state_file_found);
+    REQUIRE(status.state_path == temp.path / "audio" / "model-state.json");
+    REQUIRE_FALSE(status.loadable());
+    REQUIRE(status.message.find("failed to parse") != std::string::npos);
+}
+
+TEST_CASE("audio model status reads legacy model.json and installed metadata fallbacks",
+          "[audio][tools][codecov]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "clap.pt";
+    write_text(checkpoint, "stub");
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "clap",
+  "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+    write_text(temp.path / "audio" / "model.json", R"JSON({
+  "model_id": "clap_music_audioset_v1"
+}
+)JSON");
+
+    auto status = query_model_status(temp.path);
+
+    REQUIRE(status.state_file_found);
+    REQUIRE(status.state_path == temp.path / "audio" / "model.json");
+    REQUIRE(status.configured_model_id == "clap_music_audioset_v1");
+    REQUIRE(status.backend == "clap");
+    REQUIRE(status.checkpoint_ref == "hf://lukewys/laion_clap/music.pt");
+    REQUIRE(status.resolved_checkpoint_path == checkpoint);
+    REQUIRE(status.loadable());
+}
+
 TEST_CASE("audio model activate writes state from installed metadata", "[audio][tools]") {
     TempDir temp;
     auto checkpoint = temp.path / "models" / "clap.pt";
