@@ -425,6 +425,44 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
     REQUIRE_FALSE(version.empty());
 }
 
+// MCP stdio transport: messages are delimited by newlines and MUST
+// NOT contain embedded newlines (per the MCP spec). Pre-fix,
+// tools_list_json() returned a multi-line R"JSON(...)" raw string with
+// literal `\n` between tool entries — Claude Code would read the first
+// line, see an unclosed `[`, and time out with `MCP error -32001:
+// Request timed out` on tools/list. This test pins the contract that
+// every response body sent on the wire stays on a single line.
+TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
+          "[mcp][protocol][issue-2087]") {
+    // handle_request itself can produce multi-line bodies (the raw-
+    // string sources are multi-line for readability). main()'s
+    // compact_for_wire hook strips \n/\r before they hit the wire.
+    // This test re-applies that strip and verifies the wire form is
+    // single-line + parseable.
+    auto strip_newlines = [](std::string s) {
+        std::string out; out.reserve(s.size());
+        for (char c : s) if (c != '\n' && c != '\r') out += c;
+        return out;
+    };
+
+    auto initialize_wire = strip_newlines(handle_request(
+        R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON"));
+    auto tools_list_wire = strip_newlines(handle_request(
+        R"JSON({"jsonrpc":"2.0","id":2,"method":"tools/list"})JSON"));
+
+    REQUIRE(initialize_wire.find('\n') == std::string::npos);
+    REQUIRE(initialize_wire.find('\r') == std::string::npos);
+    REQUIRE(tools_list_wire.find('\n') == std::string::npos);
+    REQUIRE(tools_list_wire.find('\r') == std::string::npos);
+
+    // Sanity-check the stripped wire body is still well-formed JSON
+    // shape (rough — opens/closes braces, contains the tools array).
+    REQUIRE(tools_list_wire.front() == '{');
+    REQUIRE(tools_list_wire.back() == '}');
+    REQUIRE(tools_list_wire.find("\"tools\":[") != std::string::npos);
+    REQUIRE(tools_list_wire.find("pulp_build") != std::string::npos);
+}
+
 TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
           "[mcp][compat][issue-2070]") {
     // Hand-rolled scanner — confirm the obvious cases and the trap

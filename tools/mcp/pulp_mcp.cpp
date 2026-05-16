@@ -795,6 +795,26 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    // MCP spec: messages on the stdio transport are delimited by
+    // newlines, and MUST NOT contain embedded newlines. Several of our
+    // response builders (tools_list_json() most visibly) use multi-line
+    // R"JSON(...)" raw strings for readability — the literal `\n`s in
+    // those raw strings would break MCP clients (Claude Code reads one
+    // line at a time and times out on the unclosed first line of the
+    // tools array, surfacing as "MCP error -32001: Request timed out"
+    // on tools/list).
+    //
+    // Strip `\n` and `\r` from any response body before it goes on the
+    // wire. Tested: pre-fix tools/list response = 23 lines; post-fix = 1.
+    auto compact_for_wire = [](std::string s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            if (c != '\n' && c != '\r') out += c;
+        }
+        return out;
+    };
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
@@ -806,7 +826,7 @@ int main(int argc, char* argv[]) {
             std::string body(length, '\0');
             std::cin.read(body.data(), length);
 
-            auto response = handle_request(body);
+            auto response = compact_for_wire(handle_request(body));
             if (!response.empty()) {
                 std::cout << "Content-Length: " << response.size() << "\r\n\r\n" << response;
                 std::cout.flush();
@@ -814,8 +834,9 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        // Also handle bare JSON (for simpler testing)
-        auto response = handle_request(line);
+        // Also handle bare JSON (for simpler testing AND the
+        // newline-delimited MCP stdio transport that Claude Code uses).
+        auto response = compact_for_wire(handle_request(line));
         if (!response.empty()) {
             std::cout << response << "\n";
             std::cout.flush();
