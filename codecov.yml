@@ -101,6 +101,11 @@ ignore:
   # with scripts/run_coverage.sh IGNORE and
   # tools/scripts/run_python_coverage.py omit_globs.
   - "tools/sandbox-e2e/**"
+  # Visual harness pytest fixtures live under tools/harness/visual/tests/.
+  # The Python coverage lane omits these test files while measuring the
+  # harness implementation, so Codecov must not count the tests as
+  # patch-coverable product code.
+  - "tools/harness/visual/tests/**"
   # ── Aligned with tools/scripts/coverage_config.json `diff_cover_excludes` ──
   # The Pulp gate (`Diff coverage required` in coverage.yml) excludes these
   # files because they're either thin dispatchers exercised end-to-end via

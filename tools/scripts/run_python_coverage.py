@@ -92,6 +92,10 @@ COVERAGE_SURFACES = (
             # ignore entry for tools/sandbox-e2e/**.
             "tools/sandbox-e2e/*.py",
             "tools/sandbox-e2e/**/*.py",
+            # Visual harness pytest files are test code; keep them out of
+            # the measured source set and aligned with codecov.yml ignore.
+            "tools/harness/visual/tests/*.py",
+            "tools/harness/visual/tests/**/*.py",
         ),
         always_include=True,
     ),
