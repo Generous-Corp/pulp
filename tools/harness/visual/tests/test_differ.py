@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,9 +38,66 @@ class DifferTests(unittest.TestCase):
         self.assertEqual(diffs[0].path, "$.b")
         self.assertEqual(diffs[0].message, "missing key")
 
+    def test_extra_key_array_length_bool_and_value_mismatches_are_reported(self) -> None:
+        diffs = differ.compare(
+            {"enabled": True, "items": ["a", "b"], "mode": "fit"},
+            {"enabled": False, "items": ["a"], "mode": "fill", "extra": 3},
+        )
+
+        messages = {(d.path, d.message) for d in diffs}
+        self.assertIn(("$.enabled", "boolean mismatch"), messages)
+        self.assertIn(("$.items", "array length mismatch"), messages)
+        self.assertIn(("$.mode", "value mismatch"), messages)
+        self.assertIn(("$.extra", "unexpected key"), messages)
+
+    def test_type_changed_number_to_bool_is_not_treated_as_numeric(self) -> None:
+        diffs = differ.compare({"opacity": 1}, {"opacity": True})
+
+        self.assertEqual(len(diffs), 1)
+        self.assertEqual(diffs[0].path, "$.opacity")
+        self.assertEqual(diffs[0].message, "boolean mismatch")
+
+    def test_format_differences_limits_output_and_formats_empty_list(self) -> None:
+        diffs = [
+            differ.Difference(f"$.items[{i}]", i, i + 1, "value mismatch")
+            for i in range(3)
+        ]
+
+        self.assertEqual(differ.format_differences([]), "")
+        text = differ.format_differences(diffs, limit=2)
+        self.assertIn("$.items[0]: value mismatch", text)
+        self.assertIn("... 1 more difference(s)", text)
+        self.assertNotIn("$.items[2]", text)
+
+    def test_load_json_and_diff_files_use_file_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = root / "expected.json"
+            actual = root / "actual.json"
+            expected.write_text('{"rect":{"x":1.0}}', encoding="utf-8")
+            actual.write_text('{"rect":{"x":1.5}}', encoding="utf-8")
+
+            self.assertEqual(differ.load_json(expected), {"rect": {"x": 1.0}})
+            diffs = differ.diff_files(expected, actual, tolerance=0.1)
+
+        self.assertEqual(len(diffs), 1)
+        self.assertEqual(diffs[0].path, "$.rect.x")
+
     def test_tolerance_from_fixture_prefers_rect_value(self) -> None:
         self.assertEqual(
             differ.tolerance_from_fixture({"tolerance": {"rect": 0.25}}),
+            0.25,
+        )
+
+    def test_tolerance_from_fixture_precedence_and_invalid_values(self) -> None:
+        self.assertEqual(differ.tolerance_from_fixture(None, default=0.5), 0.5)
+        self.assertEqual(differ.tolerance_from_fixture({"tolerance": "loose"}), 0.001)
+        self.assertEqual(
+            differ.tolerance_from_fixture({"tolerance": {"semantic": "0.125", "rect": 1}}),
+            0.125,
+        )
+        self.assertEqual(
+            differ.tolerance_from_fixture({"tolerance": {"number": "bad"}}, default=0.25),
             0.25,
         )
 
