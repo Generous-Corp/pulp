@@ -117,6 +117,40 @@ TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range][cod
     REQUIRE_THAT(fixed.denormalize(0.75f), WithinAbs(5.0, 0.001));
 }
 
+TEST_CASE("ParamValue tracks modulation and copy move state",
+          "[state][value][codecov]") {
+    ParamRange range{-1.0f, 1.0f, 0.0f, 0.5f};
+    ParamValue value(0.25f);
+
+    REQUIRE_THAT(value.get(), WithinAbs(0.25, 0.001));
+    REQUIRE_THAT(value.get_normalized(range), WithinAbs(0.625, 0.001));
+
+    value.set_normalized(1.0f, range);
+    REQUIRE_THAT(value.get(), WithinAbs(1.0, 0.001));
+
+    value.set_mod_offset(-0.25f);
+    value.add_mod_offset(-0.25f);
+    REQUIRE_THAT(value.get_modulated(), WithinAbs(0.5, 0.001));
+
+    ParamValue copied(value);
+    REQUIRE_THAT(copied.get(), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(copied.get_modulated(), WithinAbs(1.0, 0.001));
+
+    ParamValue assigned;
+    assigned = value;
+    REQUIRE_THAT(assigned.get(), WithinAbs(1.0, 0.001));
+
+    value.reset_mod();
+    REQUIRE_THAT(value.get_modulated(), WithinAbs(1.0, 0.001));
+
+    ParamValue moved(std::move(value));
+    REQUIRE_THAT(moved.get(), WithinAbs(1.0, 0.001));
+
+    ParamValue move_assigned;
+    move_assigned = std::move(moved);
+    REQUIRE_THAT(move_assigned.get(), WithinAbs(1.0, 0.001));
+}
+
 TEST_CASE("StateStore basic operations", "[state][store]") {
     StateStore store;
 
