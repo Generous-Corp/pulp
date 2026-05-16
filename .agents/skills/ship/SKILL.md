@@ -21,6 +21,8 @@ triggers:
 
 The `pulp ship` command handles the full distribution pipeline: code signing, Apple notarization, platform-specific packaging, update feed generation, and Android APK/AAB builds.
 
+For the end-to-end release pipeline that turns a merged PR into a published GitHub Release (auto-release.yml → sign-and-release.yml → release-cli.yml, the 11 published assets, and the failure-mode triage by which asset is missing), see [`docs/guides/release-pipeline.md`](../../../docs/guides/release-pipeline.md). Cross-reference comments at the top of `release-cli.yml` and `sign-and-release.yml` point back to that doc — keep them in sync when either workflow changes ownership of appcast generation, draft creation, or the matrix-tarball upload.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before running `pulp ship ...`, source the shared skew-check helper so

@@ -1,5 +1,9 @@
 name: Sign and Release
 
+# End-to-end release pipeline documented in
+# docs/guides/release-pipeline.md — keep that doc in sync when you change
+# this workflow.
+
 on:
   push:
     tags: ['v*']

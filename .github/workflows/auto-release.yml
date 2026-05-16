@@ -1,5 +1,9 @@
 name: Auto-Release on Version Bump
 
+# End-to-end release pipeline documented in
+# docs/guides/release-pipeline.md — keep that doc in sync when you change
+# this workflow.
+#
 # Component J of the versioning-v2 design. On every push to main, diff the
 # version-bearing files against the previous push range. If a version
 # moved, create the corresponding tag; the existing tag-triggered
