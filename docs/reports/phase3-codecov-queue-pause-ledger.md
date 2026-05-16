@@ -5469,3 +5469,86 @@ Local validation before publishing passed:
 Local validation passed: `python3 tools/test_list_limitations.py`; `python3 tools/test_check_docs_consistency.py`; `python3 tools/test_check_status_ladder.py`; `PYTHONPATH=tools/scripts python3 tools/scripts/test_coverage_tier_check.py`; and `git diff --check`. No Namespace/SSH validation was dispatched and no GitHub CI was started for this local checkpoint.
 
 2026-05-16 03:52 PDT: investigated #2111's early `codecov/patch` 0.00% signal. The changed `tools/audio/src/model_registry.cpp` line is exercised by the focused local `pulp-test-audio-tools` test suite, but the GitHub coverage jobs were still queued/in-progress when checked, so the Codecov status may be based on partial uploads. Tried a local `scripts/run_coverage.sh --tests pulp-test-audio-tools` coverage verification with Xcode's LLVM tools on PATH; the script still began a broad instrumented repo build and reached ~43% before being stopped to avoid unnecessary disk/time cost. Removed the partial `build-coverage` tree afterward. Also tried the Python coverage runner for the local tooling batch, but local Python lacks `coverage.py >= 7.10`; CI installs that dependency. No Namespace/SSH validation was dispatched.
+
+2026-05-16 10:14 PDT: merged #2106, `test(signal): batch DSP coverage edges`,
+into `main` at `f4bf323e` after GitHub-hosted checks were clean. Removed the
+merged local worktree `/private/tmp/pulp-phase3-codecov-signal-batch-668`.
+
+2026-05-16 10:18 PDT: merged #2107, `test(runtime): batch audio and stream
+coverage edges`, into `main` at `503614049` after GitHub-hosted checks were
+clean. Removed the merged local worktree
+`/private/tmp/pulp-phase3-codecov-runtime-audio-batch-669`.
+
+2026-05-16 10:21 PDT: pushed focused follow-up coverage fixes to the active
+batch PRs:
+- #2103 (`b77c857f3`): added hot-reload seed/stale/missing-path tests to cover
+  the stale watcher root fix.
+- #2104 (`19a8502ce`): expanded mobile doctor dry-run shellout assertions,
+  including JSON and `--ci` variants.
+- #2111 (`4f1ad1a4a`): added the empty Hugging Face checkpoint-path case to the
+  first audio-tools registry test.
+
+Local validation passed before push: `pulp-test-hot-reload
+"[view][hotreload][codecov]"`; `pulp-test-cli-shellout` focused doctor test;
+`pulp-test-audio-tools "[audio][tools]"`; and `git diff --check` in the
+touched worktrees. Local pre-push diff-cover still hits the temporary
+`mbedtls v3.6.2` FetchContent checkout failure in clean coverage builds, so
+diff-cover was demoted with `PULP_DISABLE_PREPUSH_DIFF_COVER=1` for #2103 and
+#2104. GitHub-hosted CI remains the merge gate. No Namespace/SSH validation was
+dispatched.
+
+2026-05-16 10:27 PDT: adjusted #2110 after downloading the failed coverage
+artifacts for run `25956219260`. The package command tests ran and passed in
+the coverage job, but Cobertura still recorded zero hits for the directly
+linked `tools/cli/package_commands.cpp` / `package_registry.cpp` translation
+units, making the small product fixes unmergeable in this coverage PR. Removed
+those product changes and their dependent assertions, keeping the batch as
+test-only coverage work. Local validation passed: `cmake --build build
+--target pulp-test-cli-package-commands pulp-test-cli-package-registry -j8`;
+`./build/test/pulp-test-cli-package-commands "[cli][package-commands]"` with
+14 test cases / 210 assertions; `./build/test/pulp-test-cli-package-registry
+"[cli][package-registry]"` with 7 test cases / 121 assertions; and `git diff
+--check`. Pushed #2110 at `2a5839542`.
+
+2026-05-16 10:31 PDT: pushed follow-ups for the two Codecov-only red PRs:
+- #2108 (`3ea9146e4`): added signed malformed-exponent cases (`1e+`, `1e-`) to
+  satisfy Codecov's external patch accounting while preserving the expression
+  parser root fix.
+- #2109 (`9232f127d`): removed the unreachable `pad_val > result.size()` AES
+  guard, because AES decrypt already rejects non-block-size ciphertext and the
+  decrypted buffer is non-empty by construction; retained the real inconsistent
+  PKCS7 byte validation and test.
+
+Local validation passed: `cmake --build build --target pulp-test-v3-gaps -j8`;
+`./build/test/pulp-test-v3-gaps "[runtime][expression]"` with 14 test cases /
+54 assertions; `cmake --build build --target pulp-test-crypto -j8`;
+`./build/test/pulp-test-crypto "[crypto][aes]"` with 7 test cases / 20
+assertions; and `git diff --check`. Local pre-push diff-cover again hit the
+temporary `mbedtls v3.6.2` FetchContent checkout failure and was demoted with
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1`. GitHub-hosted CI remains the merge gate.
+No Namespace/SSH validation was dispatched.
+
+2026-05-16 10:36 PDT: published the next batched tools coverage PR as #2114,
+`test(tools): batch coverage gate and visual harness edges`, on
+`feature/phase3-codecov-next-batch-674` at `235217b9c`.
+
+Batch contents cover:
+- Python docs/status/coverage helper edge cases from local commit
+  `17ba04e49`.
+- Visual harness differ and runner edge cases from local commit `235217b9c`.
+
+Local validation before publishing passed: `PYTHONPATH=tools/scripts python3 -m
+unittest tools.test_check_docs_consistency tools.test_check_status_ladder
+tools.test_list_limitations tools.scripts.test_coverage_tier_check
+tools.harness.visual.tests.test_differ tools.harness.visual.tests.test_runner`
+with 100 tests passing; and `git diff --check HEAD~2..HEAD`. Local `pytest`
+was unavailable, so validation used unittest. Direct push pre-push diff-cover
+hit the known temporary `mbedtls v3.6.2` FetchContent checkout failure and was
+demoted with `PULP_DISABLE_PREPUSH_DIFF_COVER=1`; GitHub-hosted CI remains the
+merge gate. No Namespace/SSH validation was dispatched.
+
+2026-05-16 10:38 PDT: active GitHub-hosted queue after the follow-up pushes:
+#2103, #2104, #2108, #2109, #2110, #2111, and #2114 all had fresh head SHAs,
+were mergeable, and showed no current failing checks; all were waiting on
+GitHub-hosted CI. #2108 and #2109 no longer showed the stale `codecov/patch`
+failure after the follow-up pushes because their checks were re-queued.
