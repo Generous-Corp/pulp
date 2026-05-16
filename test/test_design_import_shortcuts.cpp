@@ -47,7 +47,13 @@ TEST_CASE("extract_keyboard_shortcuts handles inline onKeyDown JSX", "[design-im
     REQUIRE(out[1].key == "Escape");
 }
 
-TEST_CASE("extract_keyboard_shortcuts captures meta modifier", "[design-import][shortcuts]") {
+TEST_CASE("extract_keyboard_shortcuts captures meta + ctrl separately", "[design-import][shortcuts]") {
+    // Codex P1 review on #2119: the cross-platform `metaKey || ctrlKey`
+    // idiom now yields BOTH "meta" AND "ctrl" modifiers. generate_pulp_js
+    // emits a separate registerShortcut for each physical chord so a user
+    // can hit Cmd+S on macOS or Ctrl+S on Win/Linux and the synthetic
+    // event carries the right modifier flags. Previously the extractor
+    // collapsed to a single "meta", which broke Ctrl-only handlers.
     auto out = extract_keyboard_shortcuts(
         R"JS(
             const onKey = (e) => {
@@ -56,8 +62,37 @@ TEST_CASE("extract_keyboard_shortcuts captures meta modifier", "[design-import][
         )JS", "");
     REQUIRE(out.size() == 1);
     REQUIRE(out[0].key == "s");
-    // metaKey || ctrlKey collapses to a single "meta" entry — that's the
-    // cross-platform shortcut idiom we want native Pulp to bind once.
+    REQUIRE(out[0].modifiers.size() == 2);
+    auto has = [&](const std::string& m) {
+        return std::find(out[0].modifiers.begin(), out[0].modifiers.end(), m)
+            != out[0].modifiers.end();
+    };
+    REQUIRE(has("meta"));
+    REQUIRE(has("ctrl"));
+}
+
+TEST_CASE("extract_keyboard_shortcuts captures Ctrl-only modifier", "[design-import][shortcuts]") {
+    // Codex P1 case from #2119: `e.ctrlKey && e.key === 's'` is a
+    // Win/Linux-only Ctrl+S binding. Pre-fix the extractor renamed it to
+    // "meta" and V2 codegen emitted Cmd-only registerShortcut + a synthetic
+    // event with `ctrlKey: false` — so the source handler never fired.
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            if (e.ctrlKey && e.key === 's') save();
+        )JS", "");
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].key == "s");
+    REQUIRE(out[0].modifiers.size() == 1);
+    REQUIRE(out[0].modifiers[0] == "ctrl");
+}
+
+TEST_CASE("extract_keyboard_shortcuts captures Meta-only modifier", "[design-import][shortcuts]") {
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            if (e.metaKey && e.key === 's') save();
+        )JS", "");
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].key == "s");
     REQUIRE(out[0].modifiers.size() == 1);
     REQUIRE(out[0].modifiers[0] == "meta");
 }
@@ -267,6 +302,100 @@ TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import]
     REQUIRE(out[0].modifiers.empty());  // bare check, no modifiers
     REQUIRE(out[1].key == "F");
     REQUIRE(out[2].key == "s");
-    REQUIRE(out[2].modifiers.size() == 1);
-    REQUIRE(out[2].modifiers[0] == "meta");
+    // `metaKey || ctrlKey` now emits BOTH (Codex P1 #2119) so codegen can
+    // bind Cmd+S and Ctrl+S as distinct physical chords.
+    REQUIRE(out[2].modifiers.size() == 2);
+    auto s_has = [&](const std::string& m) {
+        return std::find(out[2].modifiers.begin(), out[2].modifiers.end(), m)
+            != out[2].modifiers.end();
+    };
+    REQUIRE(s_has("meta"));
+    REQUIRE(s_has("ctrl"));
+}
+
+TEST_CASE("key_string_to_keycode maps KeyboardEvent.code letter/digit forms", "[design-import][shortcuts][v2]") {
+    // Codex P2 review on #2119: the extractor pulls both `event.key` and
+    // `event.code` patterns. Without these mappings `event.code === 'KeyS'`
+    // and `event.code === 'Digit1'` fall through to 0 and codegen silently
+    // drops the shortcut.
+    REQUIRE(key_string_to_keycode("KeyS") == 's');
+    REQUIRE(key_string_to_keycode("KeyA") == 'a');
+    REQUIRE(key_string_to_keycode("KeyZ") == 'z');
+    REQUIRE(key_string_to_keycode("keys") == 's');     // case-insensitive prefix
+    REQUIRE(key_string_to_keycode("Digit0") == '0');
+    REQUIRE(key_string_to_keycode("Digit9") == '9');
+    REQUIRE(key_string_to_keycode("digit5") == '5');
+
+    // Non-letter / non-digit suffixes return 0, not garbage.
+    REQUIRE(key_string_to_keycode("Key1") == 0);       // not a letter
+    REQUIRE(key_string_to_keycode("DigitA") == 0);     // not a digit
+    REQUIRE(key_string_to_keycode("KeyAA") == 0);      // wrong length
+}
+
+TEST_CASE("generate_pulp_js emits two bindings for meta+ctrl cross-platform shortcut", "[design-import][shortcuts][v2]") {
+    // Codex P1 review on #2119: when the source author writes
+    // `(e.metaKey || e.ctrlKey) && e.key === 's'`, the codegen must emit
+    // both registerShortcut(kc, kModCmd, ...) and registerShortcut(kc,
+    // kModCtrl, ...) so the user gets Cmd+S on macOS and Ctrl+S on
+    // Win/Linux. Each handler thunk sets only the modifier flag that
+    // matches the physical chord, so the source handler's
+    // `e.metaKey || e.ctrlKey` check sees the right flag.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"meta", "ctrl"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Two distinct handlers + two distinct registerShortcut calls.
+    REQUIRE(js.find("__pulpShortcutHandler_0_cmd")  != std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler_0_ctrl") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 16, '__pulpShortcutHandler_0_cmd')")  != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 2, '__pulpShortcutHandler_0_ctrl')")  != std::string::npos);
+
+    // The Cmd-fired thunk sets metaKey:true, ctrlKey:false.
+    auto cmd_pos = js.find("__pulpShortcutHandler_0_cmd = function");
+    REQUIRE(cmd_pos != std::string::npos);
+    auto cmd_end = js.find("};", cmd_pos);
+    auto cmd_body = js.substr(cmd_pos, cmd_end - cmd_pos);
+    REQUIRE(cmd_body.find("metaKey: true")  != std::string::npos);
+    REQUIRE(cmd_body.find("ctrlKey: false") != std::string::npos);
+
+    // The Ctrl-fired thunk sets ctrlKey:true, metaKey:false.
+    auto ctrl_pos = js.find("__pulpShortcutHandler_0_ctrl = function");
+    REQUIRE(ctrl_pos != std::string::npos);
+    auto ctrl_end = js.find("};", ctrl_pos);
+    auto ctrl_body = js.substr(ctrl_pos, ctrl_end - ctrl_pos);
+    REQUIRE(ctrl_body.find("ctrlKey: true")  != std::string::npos);
+    REQUIRE(ctrl_body.find("metaKey: false") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js Ctrl-only emits ctrlKey:true synthetic event", "[design-import][shortcuts][v2]") {
+    // Codex P1 case: a Win/Linux-only `e.ctrlKey && e.key === 's'`
+    // handler must receive `ctrlKey: true` in the synthetic event so the
+    // source check passes.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"ctrl"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Single binding with kModCtrl mask (== 2).
+    REQUIRE(js.find("registerShortcut(115, 2, '__pulpShortcutHandler_0')") != std::string::npos);
+    auto pos = js.find("__pulpShortcutHandler_0 = function");
+    REQUIRE(pos != std::string::npos);
+    auto body = js.substr(pos, js.find("};", pos) - pos);
+    REQUIRE(body.find("ctrlKey: true")  != std::string::npos);
+    REQUIRE(body.find("metaKey: false") != std::string::npos);
 }

@@ -393,11 +393,17 @@ std::vector<std::string> collect_modifiers(const std::string& source, size_t key
         }
         mods.push_back(m);
     };
-    if (ctx.find(".metaKey") != std::string::npos ||
-        ctx.find(".ctrlKey") != std::string::npos) {
-        add("meta");
-    }
-    if (ctx.find(".altKey") != std::string::npos) add("alt");
+    // Emit `meta` and `ctrl` separately (Codex P1 review on #2119). The
+    // common cross-platform `e.metaKey || e.ctrlKey` idiom yields BOTH
+    // entries; generate_pulp_js() detects that combination and emits two
+    // registerShortcut calls (one per physical chord). When the source
+    // author writes only `e.ctrlKey` (Win/Linux-only) or only `e.metaKey`
+    // (macOS-only), we preserve that intent — earlier collapse turned
+    // every Ctrl-only handler into a Cmd-only binding and dropped the
+    // ctrlKey flag in the synthetic event.
+    if (ctx.find(".metaKey") != std::string::npos) add("meta");
+    if (ctx.find(".ctrlKey") != std::string::npos) add("ctrl");
+    if (ctx.find(".altKey")  != std::string::npos) add("alt");
     if (ctx.find(".shiftKey") != std::string::npos) add("shift");
     return mods;
 }
@@ -511,6 +517,24 @@ int key_string_to_keycode(const std::string& key) {
         if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ' ') {
             return static_cast<int>(c);
         }
+    }
+
+    // KeyboardEvent.code letter / digit forms (Codex P2 on #2119). The
+    // extractor pulls `event.code === 'KeyS'` and `event.code === 'Digit1'`
+    // patterns; before this they fell through to 0 and the codegen loop
+    // skipped the whole entry as "unmapped". Map them to the same ASCII
+    // codes single-char keys produce, so downstream code (registerShortcut
+    // mask + synthetic event payload) treats both forms identically.
+    if (key.size() == 4 && (key[0] == 'K' || key[0] == 'k') &&
+        (key[1] == 'e' || key[1] == 'E') && (key[2] == 'y' || key[2] == 'Y')) {
+        char c = key[3];
+        if (c >= 'A' && c <= 'Z') return static_cast<int>(c - 'A' + 'a');
+        if (c >= 'a' && c <= 'z') return static_cast<int>(c);
+    }
+    if (key.size() == 6 && (key.compare(0, 5, "Digit") == 0 ||
+                            key.compare(0, 5, "digit") == 0)) {
+        char c = key[5];
+        if (c >= '0' && c <= '9') return static_cast<int>(c);
     }
 
     // Multi-char named keys. W3C uses both `key` ("ArrowLeft") and `code`
@@ -4054,28 +4078,17 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
                << "// synthetic keydown so the original React handler in\n"
                << "// the bundled JS fires with its live closure state.\n";
         }
-        for (size_t i = 0; i < opts.shortcuts.size(); ++i) {
-            const auto& s = opts.shortcuts[i];
-            int kc = key_string_to_keycode(s.key);
-            if (kc == 0) {
-                if (opts.include_comments) {
-                    ss << "// shortcut #" << i << " skipped: unmapped key \""
-                       << s.key << "\" (handler: " << s.handler_excerpt << ")\n";
-                }
-                continue;
-            }
-            int mask = modifier_strings_to_mask(s.modifiers);
-            std::string handler = "__pulpShortcutHandler_" + std::to_string(i);
-
-            // String form passed back into __dispatch__ matches what the
-            // bundled React handlers compare against (`e.key === '…'`).
-            // For multi-char names we preserve case as-is; for single
-            // letters we keep the source casing (handlers commonly check
-            // lowercased so this is forgiving either way).
+        // Emit one (key, mask) -> handler binding. Generates the
+        // __dispatch__ thunk with the modifier flags that match the
+        // physical chord we're intercepting — so the bundled React
+        // handler's `e.ctrlKey`, `e.metaKey`, `e.metaKey || e.ctrlKey`
+        // checks all see the right state.
+        auto emit_binding = [&](int kc, int mask, const std::string& key_str,
+                                const std::string& handler) {
             ss << "globalThis." << handler << " = function() {\n";
             ss << "    if (typeof __dispatch__ !== 'function') return;\n";
             ss << "    __dispatch__('__global__', 'keydown', {\n";
-            ss << "        key: '" << s.key << "',\n";
+            ss << "        key: '" << key_str << "',\n";
             ss << "        keyCode: " << kc << ",\n";
             ss << "        ctrlKey: " << ((mask & kModCtrl) ? "true" : "false") << ",\n";
             ss << "        shiftKey: " << ((mask & kModShift) ? "true" : "false") << ",\n";
@@ -4088,6 +4101,45 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
             ss << "    });\n";
             ss << "};\n";
             ss << "registerShortcut(" << kc << ", " << mask << ", '" << handler << "');\n";
+        };
+
+        for (size_t i = 0; i < opts.shortcuts.size(); ++i) {
+            const auto& s = opts.shortcuts[i];
+            int kc = key_string_to_keycode(s.key);
+            if (kc == 0) {
+                if (opts.include_comments) {
+                    ss << "// shortcut #" << i << " skipped: unmapped key \""
+                       << s.key << "\" (handler: " << s.handler_excerpt << ")\n";
+                }
+                continue;
+            }
+
+            // Codex P1 on #2119: preserve Ctrl-only / Meta-only / cross-
+            // platform `metaKey||ctrlKey` intent. If BOTH modifiers were
+            // collected we emit two bindings so the user can hit either
+            // physical chord (Cmd on macOS, Ctrl on Win/Linux) and each
+            // synthetic event carries the right modifier flags.
+            bool has_meta = false, has_ctrl = false;
+            for (const auto& m : s.modifiers) {
+                if (m == "meta") has_meta = true;
+                else if (m == "ctrl") has_ctrl = true;
+            }
+            if (has_meta && has_ctrl) {
+                // Build the non-meta/ctrl portion of the mask once
+                // (shift, alt) and OR the platform modifier per emit.
+                std::vector<std::string> other_mods;
+                for (const auto& m : s.modifiers) {
+                    if (m != "meta" && m != "ctrl") other_mods.push_back(m);
+                }
+                int base = modifier_strings_to_mask(other_mods);
+                std::string base_handler = "__pulpShortcutHandler_" + std::to_string(i);
+                emit_binding(kc, base | kModCmd,  s.key, base_handler + "_cmd");
+                emit_binding(kc, base | kModCtrl, s.key, base_handler + "_ctrl");
+            } else {
+                int mask = modifier_strings_to_mask(s.modifiers);
+                std::string handler = "__pulpShortcutHandler_" + std::to_string(i);
+                emit_binding(kc, mask, s.key, handler);
+            }
         }
         ss << "\n";
     }
