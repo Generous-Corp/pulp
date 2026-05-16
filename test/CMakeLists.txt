@@ -1594,6 +1594,23 @@ catch_discover_tests(pulp-test-render-loop
     PROPERTIES
         LABELS coverage)
 
+add_executable(pulp-test-sdl3-surface
+    test_sdl3_surface.cpp
+    ${CMAKE_SOURCE_DIR}/core/render/src/sdl3_surface.cpp)
+target_include_directories(pulp-test-sdl3-surface PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-sdl3-surface PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+if(PULP_HAS_SDL3)
+    target_link_libraries(pulp-test-sdl3-surface PRIVATE
+        $<BUILD_INTERFACE:SDL3::SDL3-static>)
+    target_compile_definitions(pulp-test-sdl3-surface PRIVATE PULP_HAS_SDL3=1)
+endif()
+catch_discover_tests(pulp-test-sdl3-surface
+    PROPERTIES
+        LABELS coverage)
+
 # GPU-stack tests — pulp::render only exists when PULP_ENABLE_GPU=ON.
 # The sanitizer matrix builds with GPU off; without the guard configure
 # fails with "Target ... links to: pulp::render but the target was not

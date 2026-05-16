@@ -445,6 +445,121 @@ TEST_CASE("GraphSerializer serializes plugin formats and state blobs",
     }
 }
 
+TEST_CASE("GraphSerializer preserves unresolved plugin identity when reserializing",
+          "[host][serializer][issue-493]") {
+    SignalGraph src;
+    auto info = make_fake_plugin_info("MissingEcho", "pulp.test.missing.echo",
+                                      PluginFormat::CLAP, 2, 2);
+    src.add_plugin_node(info);
+
+    const auto first_json = GraphSerializer::to_json(src);
+    REQUIRE(first_json.find("\"unique_id\": \"pulp.test.missing.echo\"") !=
+            std::string::npos);
+    REQUIRE(first_json.find("\"state_b64\"") == std::string::npos);
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, first_json);
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.missing.echo"));
+    REQUIRE(dst.nodes().size() == 1);
+    REQUIRE(dst.nodes().front().type == NodeType::Plugin);
+    REQUIRE(dst.nodes().front().plugin == nullptr);
+
+    const auto second_json = GraphSerializer::to_json(dst);
+    REQUIRE(second_json.find("\"format\": \"clap\"") != std::string::npos);
+    REQUIRE(second_json.find("\"unique_id\": \"pulp.test.missing.echo\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"last_path\": \"/nonexistent/MissingEcho.clap\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"state_b64\"") == std::string::npos);
+}
+
+TEST_CASE("GraphSerializer preserves unresolved plugin display name",
+          "[host][serializer][issue-493]") {
+    const auto json = R"({
+      "format_version": 1,
+      "nodes": [
+        {
+          "id": 7,
+          "type": "plugin",
+          "name": "User Label",
+          "num_input_ports": 1,
+          "num_output_ports": 1,
+          "plugin": {
+            "format": "clap",
+            "unique_id": "pulp.test.renamed.missing",
+            "name": "Plugin Metadata Name",
+            "manufacturer": "PulpTest",
+            "version": "1.0.0",
+            "last_path": "/nonexistent/Plugin Metadata Name.clap"
+          }
+        }
+      ],
+      "connections": []
+    })";
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.renamed.missing"));
+    REQUIRE(dst.nodes().size() == 1);
+
+    const auto& node = dst.nodes().front();
+    REQUIRE(node.type == NodeType::Plugin);
+    REQUIRE(node.plugin == nullptr);
+    REQUIRE(node.name == "User Label");
+    REQUIRE(node.plugin_info.name == "Plugin Metadata Name");
+    REQUIRE(node.plugin_info.unique_id == "pulp.test.renamed.missing");
+
+    const auto second_json = GraphSerializer::to_json(dst);
+    REQUIRE(second_json.find("\"name\": \"User Label\"") != std::string::npos);
+    REQUIRE(second_json.find("\"name\": \"Plugin Metadata Name\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"unique_id\": \"pulp.test.renamed.missing\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"state_b64\"") == std::string::npos);
+}
+
+TEST_CASE("GraphSerializer clears partially loaded graphs after plugin field errors",
+          "[host][serializer][issue-493]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 2,
+      "type": "plugin",
+      "name": "Broken plugin",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "plugin": {
+        "format": "clap",
+        "unique_id": 123,
+        "name": "Broken plugin",
+        "manufacturer": "PulpTest",
+        "version": "1.0.0",
+        "last_path": "/missing/broken.clap"
+      }
+    }
+  ],
+  "connections": []
+})");
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("field deserialization failed") != std::string::npos);
+    REQUIRE(dst.nodes().empty());
+    REQUIRE(dst.connections().empty());
+}
+
 TEST_CASE("GraphSerializer round-trips MIDI routing", "[host][serializer]") {
     SignalGraph src;
     auto midi_in = src.add_midi_input_node();

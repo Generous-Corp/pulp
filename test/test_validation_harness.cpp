@@ -99,6 +99,12 @@ std::filesystem::path make_temp_path(const char* stem) {
     return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + ".json");
 }
 
+std::filesystem::path make_temp_dir(const char* stem) {
+    auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique);
+}
+
 } // anonymous namespace
 
 using Catch::Matchers::WithinAbs;
@@ -122,6 +128,20 @@ TEST_CASE("ValidationHarness set/get param", "[harness][phase2]") {
     REQUIRE_THAT(harness.get_param(2), WithinAbs(0.5, 0.01));
 }
 
+TEST_CASE("ValidationHarness configure creates artifact directory",
+          "[harness][phase2][coverage][issue-646]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    auto out_dir = make_temp_dir("pulp-harness-output-dir");
+    REQUIRE_FALSE(std::filesystem::exists(out_dir));
+
+    harness.configure({.output_dir = out_dir});
+
+    REQUIRE(std::filesystem::is_directory(out_dir));
+    std::error_code ec;
+    std::filesystem::remove_all(out_dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
 TEST_CASE("ValidationHarness processes silence blocks", "[harness][phase2]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 64});
@@ -132,6 +152,18 @@ TEST_CASE("ValidationHarness processes silence blocks", "[harness][phase2]") {
     REQUIRE(output.size() == 128);
 
     // All zeros (silence in, unity gain)
+    for (float s : output) {
+        REQUIRE_THAT(static_cast<double>(s), WithinAbs(0.0, 0.0001));
+    }
+}
+
+TEST_CASE("ValidationHarness process_blocks zero blocks returns one silent buffer",
+          "[harness][phase2][coverage][issue-646]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 8, .output_channels = 2});
+
+    auto output = harness.process_blocks(0);
+    REQUIRE(output.size() == 16);
     for (float s : output) {
         REQUIRE_THAT(static_cast<double>(s), WithinAbs(0.0, 0.0001));
     }
@@ -253,6 +285,29 @@ TEST_CASE("ValidationHarness generates valid report JSON", "[harness][phase2]") 
     REQUIRE_THAT(report, ContainsSubstring("\"total\": 50"));
 }
 
+TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
+          "[harness][phase2][coverage][issue-646]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({
+        .git_ref = "branch/quote\"slash\\",
+        .run_id = "run\nwith\ttabs",
+    });
+
+    pulp::format::ReportEntry entry;
+    entry.type = "validator";
+    entry.status = pulp::format::ValidationStatus::error;
+    entry.target = "Plugin \"A\"";
+    entry.error_message = "line1\nline2\\done";
+    entry.payload_json = "{\"tool\":\"fake\"}";
+    harness.add_entry(entry);
+
+    auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("branch/quote\\\"slash\\\\"));
+    REQUIRE_THAT(report, ContainsSubstring("run\\nwith\\ttabs"));
+    REQUIRE_THAT(report, ContainsSubstring("Plugin \\\"A\\\""));
+    REQUIRE_THAT(report, ContainsSubstring("line1\\nline2\\\\done"));
+}
+
 TEST_CASE("ValidationHarness empty report is valid", "[harness][phase2]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
@@ -291,6 +346,21 @@ TEST_CASE("ValidationHarness write_report creates file", "[harness][phase2]") {
     REQUIRE_FALSE(ec);
 }
 
+TEST_CASE("ValidationHarness write_report creates nested directories",
+          "[harness][phase2][coverage][issue-646]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-nested-report");
+    auto report_path = dir / "a" / "b" / "report.json";
+    REQUIRE(harness.write_report(report_path));
+    REQUIRE(std::filesystem::is_regular_file(report_path));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
 // ── Validator graceful degradation ──────────────────────────────────────────
 
 TEST_CASE("ValidationHarness run_validator skips missing tool", "[harness][phase2]") {
@@ -319,6 +389,23 @@ TEST_CASE("ValidationHarness run_validator errors on missing plugin", "[harness]
 
     REQUIRE(entry.status == pulp::format::ValidationStatus::error);
     REQUIRE_THAT(entry.error_message, ContainsSubstring("not found"));
+}
+
+TEST_CASE("ValidationHarness run_validator errors on unknown installed tool",
+          "[harness][phase2][coverage][issue-646]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto tmp_plugin = make_temp_path("fake-plugin-for-unknown-validator");
+    { std::ofstream f(tmp_plugin); f << "dummy"; }
+
+    auto entry = harness.run_validator("sh", tmp_plugin);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::error);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("Unknown validator tool: sh"));
+
+    std::error_code ec;
+    std::filesystem::remove(tmp_plugin, ec);
+    REQUIRE_FALSE(ec);
 }
 
 // ── Screenshot / inspector providers (#298) ─────────────────────────────────

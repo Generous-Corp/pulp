@@ -223,6 +223,23 @@ TEST_CASE("PresetManager load skips malformed parameter values", "[state][preset
     REQUIRE(load_callbacks == 1);
 }
 
+TEST_CASE("PresetManager load clamps out-of-range parameter values",
+          "[state][preset][coverage][issue-647]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-clamp");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto preset_path = sandbox.root / "Clamped.json";
+    write_text_file(preset_path,
+                    R"json({"parameters":{"Gain":999,"Mix":-50}})json");
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(store.get_value(1) == Catch::Approx(12.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(0.0f));
+    REQUIRE(pm.current_preset_name() == "Clamped");
+}
+
 TEST_CASE("PresetManager save scans subfolders and reports list changes", "[state][preset]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-save-subfolder");
     StateStore store;
@@ -247,6 +264,29 @@ TEST_CASE("PresetManager save scans subfolders and reports list changes", "[stat
     REQUIRE(presets.size() == 2);
     REQUIRE(presets[0].name == "Alpha");
     REQUIRE(presets[1].name == "Beta");
+}
+
+TEST_CASE("PresetManager user preset scan ignores non-json files and records nested folders",
+          "[state][preset][coverage][issue-647]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-scan-filter");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.save("Root"));
+    write_text_file(pm.user_presets_dir() / "Bank" / "Lead.json",
+                    R"json({"parameters":{"Gain":-6}})json");
+    write_text_file(pm.user_presets_dir() / "Bank" / "Ignore.txt", "not a preset");
+    std::error_code ec;
+    fs::create_directories(pm.user_presets_dir() / "EmptyDir", ec);
+    REQUIRE_FALSE(ec);
+
+    auto presets = pm.user_presets();
+    REQUIRE(presets.size() == 2);
+    REQUIRE(presets[0].name == "Lead");
+    REQUIRE(presets[0].folder == "Bank");
+    REQUIRE(presets[1].name == "Root");
+    REQUIRE(presets[1].folder.empty());
 }
 
 TEST_CASE("PresetManager rename and delete update current preset and callbacks", "[state][preset]") {
@@ -277,6 +317,25 @@ TEST_CASE("PresetManager rename and delete update current preset and callbacks",
     REQUIRE_FALSE(pm.rename(new_preset, "Again"));
     REQUIRE_FALSE(pm.delete_preset(new_preset));
     REQUIRE(list_changes == 2);
+}
+
+TEST_CASE("PresetManager delete missing user preset is inert",
+          "[state][preset][coverage][issue-647]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-delete-missing");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+
+    PresetInfo missing;
+    missing.name = "Missing";
+    missing.path = sandbox.root / "missing.json";
+    missing.is_factory = false;
+
+    REQUIRE_FALSE(pm.delete_preset(missing));
+    REQUIRE(list_changes == 0);
 }
 
 TEST_CASE("PresetManager import copies external presets into the user directory", "[state][preset]") {
@@ -327,4 +386,16 @@ TEST_CASE("PresetManager navigation wraps sorted presets and handles missing cur
 
     REQUIRE(pm.load_next());
     REQUIRE(pm.current_preset_name() == "Alpha");
+}
+
+TEST_CASE("PresetManager navigation on empty preset list returns false",
+          "[state][preset][coverage][issue-647]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-navigation-empty");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE_FALSE(pm.load_next());
+    REQUIRE_FALSE(pm.load_previous());
+    REQUIRE(pm.current_preset_name().empty());
 }

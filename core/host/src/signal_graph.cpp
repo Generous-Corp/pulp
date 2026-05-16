@@ -53,6 +53,24 @@ NodeId SignalGraph::add_plugin_node(const PluginInfo& info) {
     return nodes_.back().id;
 }
 
+NodeId SignalGraph::add_unresolved_plugin_node(const PluginInfo& info,
+                                               int num_inputs,
+                                               int num_outputs,
+                                               const std::string& name) {
+    GraphNode node;
+    node.id = next_id_++;
+    node.type = NodeType::Plugin;
+    node.name = name;
+    node.num_input_ports = num_inputs;
+    node.num_output_ports = num_outputs;
+    node.plugin_info = info;
+    node.plugin_info.num_inputs = num_inputs;
+    node.plugin_info.num_outputs = num_outputs;
+    nodes_.push_back(std::move(node));
+    invalidate_live_();
+    return nodes_.back().id;
+}
+
 NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot,
                                     int num_inputs, int num_outputs,
                                     const std::string& name) {

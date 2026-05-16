@@ -40,6 +40,7 @@ public:
     void hide() override {}
     bool is_visible() const override { return false; }
     void repaint() override {}
+    std::vector<uint8_t> capture_png() override { return {0x89, 'P', 'N', 'G'}; }
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
 };
@@ -487,6 +488,8 @@ TEST_CASE("WindowHost default content-size and resize callback are no-ops",
         resize_fired = true;
     });
     REQUIRE_FALSE(resize_fired);
+
+    REQUIRE(window.capture_back_buffer_png() == std::vector<uint8_t>{0x89, 'P', 'N', 'G'});
 }
 
 TEST_CASE("Standalone host sync installs a resize callback and applies initial size",

@@ -481,6 +481,35 @@ TEST_CASE("SignalGraph connections", "[host][graph]") {
     REQUIRE(graph.connections().size() == 1);
 }
 
+TEST_CASE("SignalGraph rejects missing-node and duplicate edge variants",
+          "[host][graph][issue-493]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(2);
+    auto gain = graph.add_gain_node("Gain");
+    auto output = graph.add_output_node(2);
+    auto midi_in = graph.add_midi_input_node("MIDI In");
+    auto midi_out = graph.add_midi_output_node("MIDI Out");
+
+    REQUIRE_FALSE(graph.connect(999, 0, gain, 0));
+    REQUIRE_FALSE(graph.connect(input, 0, 999, 0));
+    REQUIRE_FALSE(graph.disconnect(input, 0, gain, 0));
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE_FALSE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.disconnect(input, 0, gain, 0));
+    REQUIRE_FALSE(graph.disconnect(input, 0, gain, 0));
+
+    REQUIRE_FALSE(graph.connect_feedback(999, 0, output, 0));
+    REQUIRE_FALSE(graph.connect_feedback(gain, 0, 999, 0));
+    REQUIRE(graph.connect_feedback(gain, 0, output, 0));
+    REQUIRE_FALSE(graph.connect_feedback(gain, 0, output, 0));
+
+    REQUIRE_FALSE(graph.connect_midi(999, midi_out));
+    REQUIRE_FALSE(graph.connect_midi(midi_in, 999));
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE_FALSE(graph.connect_midi(midi_in, midi_out));
+}
+
 TEST_CASE("SignalGraph cycle detection", "[host][graph]") {
     SignalGraph graph;
     auto a = graph.add_input_node(2);
@@ -567,6 +596,71 @@ TEST_CASE("SignalGraph routes input -> gain -> output", "[host][graph][routing]"
         REQUIRE(std::abs(out_r[i] - 0.2f) < 1e-6f);
     }
     graph.release();
+}
+
+TEST_CASE("SignalGraph live gain updates and release silence output",
+          "[host][graph][routing][issue-493]") {
+    SignalGraph graph;
+    auto in  = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(in, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, out, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+
+    std::vector<float> input(16, 0.8f);
+    std::vector<float> output(16, -1.0f);
+    const float* in_ptrs[1] = {input.data()};
+    float* out_ptrs[1] = {output.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 16);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 16);
+
+    graph.process(out_view, in_view, 16);
+    for (float sample : output) REQUIRE_THAT(sample, WithinAbs(0.8f, 1e-6f));
+
+    REQUIRE(graph.set_node_gain(gain, 0.25f));
+    REQUIRE(graph.node_gain(gain) == 0.25f);
+    std::fill(output.begin(), output.end(), -1.0f);
+    graph.process(out_view, in_view, 16);
+    for (float sample : output) REQUIRE_THAT(sample, WithinAbs(0.2f, 1e-6f));
+
+    graph.release();
+    std::fill(output.begin(), output.end(), -1.0f);
+    graph.process(out_view, in_view, 16);
+    for (float sample : output) REQUIRE(sample == 0.0f);
+    REQUIRE(graph.latency_samples() == 0);
+    REQUIRE(graph.node_latency_samples(gain) == 0);
+}
+
+TEST_CASE("SignalGraph query helpers handle non-plugin and cleared nodes",
+          "[host][graph][issue-493]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(2);
+    auto gain = graph.add_gain_node("Gain");
+    auto output = graph.add_output_node(2);
+
+    REQUIRE_FALSE(graph.prepare(48000.0, 0));
+    REQUIRE_FALSE(graph.prepare(48000.0, -16));
+    REQUIRE_FALSE(graph.set_node_gain(999, 0.5f));
+    REQUIRE(graph.node_gain(999) == 1.0f);
+    REQUIRE_FALSE(graph.set_node_parameter(gain, 7, 0.25f));
+    REQUIRE(graph.get_node_parameter(gain, 7) == 0.0f);
+    REQUIRE_FALSE(graph.set_node_parameter(999, 7, 0.25f));
+    REQUIRE(graph.get_node_parameter(999, 7) == 0.0f);
+    REQUIRE(graph.node_latency_samples(999) == 0);
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.node_latency_samples(gain) == 0);
+
+    graph.clear();
+    REQUIRE(graph.nodes().empty());
+    REQUIRE(graph.connections().empty());
+    REQUIRE(graph.latency_samples() == 0);
+    REQUIRE(graph.node_latency_samples(gain) == 0);
+    REQUIRE(graph.node_gain(gain) == 1.0f);
 }
 
 TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {

@@ -213,6 +213,26 @@ TEST_CASE("plugin_state_io preserves legacy raw StateStore blobs and resets plug
     REQUIRE(restored.processor.last_payload.empty());
 }
 
+TEST_CASE("plugin_state_io envelope with empty plugin payload resets plugin state",
+          "[format][plugin-state][coverage][issue-647]") {
+    TestRig source;
+    source.store.set_value(1, -15.0f);
+    auto store_blob = source.store.serialize();
+    auto envelope = make_envelope(store_blob, {});
+
+    TestRig restored;
+    restored.store.set_value(1, 6.0f);
+    restored.processor.plugin_state = "stale";
+
+    REQUIRE(pulp::format::plugin_state_io::deserialize(envelope,
+                                                       restored.store,
+                                                       restored.processor));
+    REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-15.0, 0.01));
+    REQUIRE(restored.processor.plugin_state.empty());
+    REQUIRE(restored.processor.deserialize_calls == 1);
+    REQUIRE(restored.processor.last_payload.empty());
+}
+
 TEST_CASE("plugin_state_io serialize falls back to raw StateStore blobs when plugin payload is empty",
           "[format][plugin-state]") {
     TestRig source;
@@ -345,6 +365,44 @@ TEST_CASE("plugin_state_io rejects malformed blobs without touching live state",
         REQUIRE(restored.processor.plugin_state == "keep");
         REQUIRE(restored.processor.deserialize_calls == 0);
     }
+
+    SECTION("empty inner StateStore payload") {
+        const std::array<uint8_t, 4> plugin_blob = {'K', 'E', 'E', 'P'};
+        auto blob = make_envelope({}, plugin_blob);
+
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        restored.processor.plugin_state = "keep";
+
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(blob,
+                                                                 restored.store,
+                                                                 restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(3.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "keep");
+        REQUIRE(restored.processor.deserialize_calls == 0);
+    }
+}
+
+TEST_CASE("plugin_state_io rejects envelope CRC mismatch without plugin callback",
+          "[format][plugin-state][coverage][issue-647]") {
+    TestRig source;
+    source.store.set_value(1, -21.0f);
+    source.processor.plugin_state = "snapshot-c";
+    auto store_blob = source.store.serialize();
+    auto plugin_blob = source.processor.serialize_plugin_state();
+    auto blob = make_envelope(store_blob, plugin_blob);
+    blob[8] ^= 0x01; // mutate store size after CRC calculation
+
+    TestRig restored;
+    restored.store.set_value(1, 2.0f);
+    restored.processor.plugin_state = "keep";
+
+    REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(blob,
+                                                             restored.store,
+                                                             restored.processor));
+    REQUIRE_THAT(restored.store.get_value(1), WithinAbs(2.0, 0.01));
+    REQUIRE(restored.processor.plugin_state == "keep");
+    REQUIRE(restored.processor.deserialize_calls == 0);
 }
 
 TEST_CASE("plugin_state_io rolls back StateStore when plugin payload restore fails",

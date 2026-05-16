@@ -34,15 +34,27 @@ public:
         });
     }
 
-    void prepare(const pulp::format::PrepareContext&) override {}
+    void prepare(const pulp::format::PrepareContext& context) override {
+        ++prepare_calls;
+        last_prepare_context = context;
+    }
+
+    void release() override { ++release_calls; }
 
     void process(
         pulp::audio::BufferView<float>& output,
         const pulp::audio::BufferView<const float>& input,
-        pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer& midi_in, pulp::midi::MidiBuffer&,
         const pulp::format::ProcessContext& context) override
     {
         last_context = context;
+        ++process_calls;
+        midi_in_events = 0;
+        for (const auto& event : midi_in) {
+            if (event.is_note_on()) ++midi_note_ons;
+            ++midi_in_events;
+        }
+
         float db = state().get_value(1);
         float gain = std::pow(10.0f, db / 20.0f);
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
@@ -63,6 +75,12 @@ public:
     }
 
     std::string plugin_state;
+    pulp::format::PrepareContext last_prepare_context{};
+    int prepare_calls = 0;
+    int release_calls = 0;
+    int process_calls = 0;
+    int midi_in_events = 0;
+    int midi_note_ons = 0;
 };
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
@@ -100,6 +118,41 @@ TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
 
     // 0 dB = unity gain
     REQUIRE_THAT(out.channel(0)[0], WithinAbs(0.5, 0.001));
+}
+
+TEST_CASE("HeadlessHost forwards prepare context and release",
+          "[headless][coverage][issue-647]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+
+    host.prepare(96000.0, 1024, 1, 4);
+    REQUIRE(processor->prepare_calls == 1);
+    REQUIRE_THAT(processor->last_prepare_context.sample_rate,
+                 WithinAbs(96000.0, 0.001));
+    REQUIRE(processor->last_prepare_context.max_buffer_size == 1024);
+    REQUIRE(processor->last_prepare_context.input_channels == 1);
+    REQUIRE(processor->last_prepare_context.output_channels == 4);
+
+    host.release();
+    REQUIRE(processor->release_calls == 1);
+}
+
+TEST_CASE("HeadlessHost fills default process context",
+          "[headless][coverage][issue-647]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(44100.0, 512);
+
+    pulp::audio::Buffer<float> in(2, 32), out(2, 32);
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 32);
+    auto out_view = out.view();
+
+    last_context = {};
+    host.process(out_view, in_view);
+
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
+    REQUIRE(last_context.num_samples == 32);
 }
 
 TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {
@@ -152,6 +205,47 @@ TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping"
     REQUIRE(last_context.position_samples == 2048);
     REQUIRE(last_context.time_sig_numerator == 7);
     REQUIRE(last_context.time_sig_denominator == 8);
+}
+
+TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
+          "[headless][coverage][issue-647]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(48000.0, 256);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+
+    pulp::audio::Buffer<float> in(2, 16), out(2, 16);
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 16);
+    auto out_view = out.view();
+    pulp::midi::MidiBuffer midi_in;
+    pulp::midi::MidiBuffer midi_out;
+    midi_in.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
+
+    host.process(out_view, in_view, midi_in, midi_out);
+
+    REQUIRE(processor->process_calls == 1);
+    REQUIRE(processor->midi_in_events == 1);
+    REQUIRE(processor->midi_note_ons == 1);
+}
+
+TEST_CASE("HeadlessHost null processor process and release are no-ops",
+          "[headless][coverage][issue-647]") {
+    pulp::format::HeadlessHost host(create_null_processor);
+    host.prepare(48000.0, 64);
+
+    pulp::audio::Buffer<float> in(1, 4), out(1, 4);
+    for (std::size_t i = 0; i < 4; ++i) out.channel(0)[i] = 7.0f;
+    const float* in_ptrs[1] = {in.channel(0).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    auto out_view = out.view();
+
+    host.process(out_view, in_view);
+    host.release();
+
+    for (std::size_t i = 0; i < 4; ++i) {
+        REQUIRE_THAT(out.channel(0)[i], WithinAbs(7.0, 0.001));
+    }
 }
 
 TEST_CASE("HeadlessHost state round-trip", "[headless]") {

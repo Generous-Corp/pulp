@@ -2163,6 +2163,28 @@ TEST_CASE("Widget setters skip repaint when value is unchanged [issue-73]",
         knob.set_label("Cutoff");
         REQUIRE(host.repaint_count == after);
     }
+
+    SECTION("Fader::set_label idempotent") {
+        Fader fader;
+        CountingHost host;
+        fader.set_window_host(&host);
+        fader.set_label("Volume");
+        int after = host.repaint_count;
+
+        fader.set_label("Volume");
+        REQUIRE(host.repaint_count == after);
+    }
+
+    SECTION("ToggleButton::set_label idempotent") {
+        ToggleButton tb;
+        CountingHost host;
+        tb.set_window_host(&host);
+        tb.set_label("Bypass");
+        int after = host.repaint_count;
+
+        tb.set_label("Bypass");
+        REQUIRE(host.repaint_count == after);
+    }
 }
 
 TEST_CASE("Widget set_label programmatic mutation requests repaint [issue-73]",
@@ -2196,4 +2218,20 @@ TEST_CASE("Widget set_label programmatic mutation requests repaint [issue-73]",
         tb.set_label("Mute");
         REQUIRE(host.repaint_count > before);
     }
+}
+
+TEST_CASE("Knob format setter requests repaint without changing value [issue-73]",
+          "[view][widget][issue-73]") {
+    Knob knob;
+    knob.set_value(0.25f);
+    CountingHost host;
+    knob.set_window_host(&host);
+    int before = host.repaint_count;
+
+    knob.set_format([](float value) {
+        return std::to_string(static_cast<int>(value * 100.0f)) + "%";
+    });
+
+    REQUIRE(knob.value() == 0.25f);
+    REQUIRE(host.repaint_count > before);
 }

@@ -593,6 +593,90 @@ TEST_CASE("pulp status reports shipyard version and pin health",
 }
 #endif
 
+TEST_CASE("pulp config set/get/list round-trips isolated update settings",
+          "[cli][shellout][config][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-config-roundtrip");
+    fs::remove_all(home);
+    fs::create_directories(home);
+    write_text(home / "update-snooze", "dismissed\n");
+
+    ScopedEnvVar pulp_home("PULP_HOME");
+    pulp_home.set(home.string());
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto set_mode = run_pulp({"config", "set", "update.mode", "manual"}, 10000);
+    REQUIRE_FALSE(set_mode.timed_out);
+    REQUIRE(set_mode.exit_code == 0);
+    REQUIRE(set_mode.stdout_output.find("Set update.mode = manual") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(home / "update-snooze"));
+
+    auto get_mode = run_pulp({"config", "get", "update.mode"}, 10000);
+    REQUIRE_FALSE(get_mode.timed_out);
+    REQUIRE(get_mode.exit_code == 0);
+    REQUIRE(get_mode.stdout_output == "manual\n");
+
+    auto set_channel = run_pulp({"config", "set", "update.channel", "beta"}, 10000);
+    REQUIRE_FALSE(set_channel.timed_out);
+    REQUIRE(set_channel.exit_code == 0);
+    REQUIRE(set_channel.stdout_output.find("Set update.channel = beta") != std::string::npos);
+
+    auto list = run_pulp({"config", "list"}, 10000);
+    const auto config_body = read_file(home / "config.toml");
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("update.mode = manual") != std::string::npos);
+    REQUIRE(list.stdout_output.find("update.check_interval_hours = 24") != std::string::npos);
+    REQUIRE(list.stdout_output.find("update.channel = beta") != std::string::npos);
+    REQUIRE(list.stdout_output.find("update.bump_projects = prompt") != std::string::npos);
+    REQUIRE(config_body.find("[update]") != std::string::npos);
+    REQUIRE(config_body.find("mode = \"manual\"") != std::string::npos);
+    REQUIRE(config_body.find("channel = \"beta\"") != std::string::npos);
+}
+
+TEST_CASE("pulp config rejects malformed and invalid update keys",
+          "[cli][shellout][config][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-config-invalid");
+    fs::remove_all(home);
+    fs::create_directories(home);
+
+    ScopedEnvVar pulp_home("PULP_HOME");
+    pulp_home.set(home.string());
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto malformed_get = run_pulp({"config", "get", "update"}, 10000);
+    REQUIRE_FALSE(malformed_get.timed_out);
+    REQUIRE(malformed_get.exit_code != 0);
+    REQUIRE(malformed_get.stderr_output.find("key must be dotted") != std::string::npos);
+
+    auto unknown_key = run_pulp({"config", "set", "update.not_a_key", "value"}, 10000);
+    REQUIRE_FALSE(unknown_key.timed_out);
+    REQUIRE(unknown_key.exit_code != 0);
+    REQUIRE(unknown_key.stderr_output.find("unknown config key") != std::string::npos);
+
+    auto bad_mode = run_pulp({"config", "set", "update.mode", "weekly"}, 10000);
+    REQUIRE_FALSE(bad_mode.timed_out);
+    REQUIRE(bad_mode.exit_code != 0);
+    REQUIRE(bad_mode.stderr_output.find("update.mode must be one of") != std::string::npos);
+
+    auto bad_interval =
+        run_pulp({"config", "set", "update.check_interval_hours", "-1"}, 10000);
+    const bool config_written = fs::exists(home / "config.toml");
+    fs::remove_all(home);
+
+    REQUIRE_FALSE(bad_interval.timed_out);
+    REQUIRE(bad_interval.exit_code != 0);
+    REQUIRE(bad_interval.stderr_output.find("non-negative integer") != std::string::npos);
+    REQUIRE_FALSE(config_written);
+}
+
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
           "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

@@ -392,10 +392,16 @@ TEST_CASE("AAX model validates fourcc and native plugin id derivation helpers", 
     REQUIRE(pulp::format::aax::fourcc("abc") == 0);
     REQUIRE(pulp::format::aax::fourcc("abcde") == 0);
     REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::fourcc("Pulp")) == "Pulp");
+    REQUIRE(pulp::format::aax::parameter_id_string(0) == "p00000000");
+    REQUIRE(pulp::format::aax::parameter_id_string(42) == "p0000002A");
+    REQUIRE(pulp::format::aax::parameter_id_string(0xffffffffu) == "pFFFFFFFF");
 
     const auto base = pulp::format::aax::fourcc("ABCD");
     REQUIRE(pulp::format::aax::derive_native_plugin_id(base, 0) == base);
     REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 1)) == "ABC1");
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 10)) == "ABCA");
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 35)) == "ABCZ");
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 36)) == "ABCa");
     REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 61)) == "ABCz");
 
     const auto hashed = pulp::format::aax::derive_native_plugin_id(base, 62);
@@ -415,9 +421,67 @@ TEST_CASE("AAX model exposes stem mapping helpers for supported and unknown layo
     REQUIRE(pulp::format::aax::stem_kind_for_channels(9) == pulp::format::aax::StemKind::none);
 
     REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::stereo) == 2);
+    REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::surround_7_1) == 8);
     REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::surround_5_1)) == "5.1");
+    REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::surround_7_1)) == "7.1");
     REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::lcrs) == 0);
     REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::lcrs)) == "unknown");
+    REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::surround_6_0) == 0);
+    REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::surround_6_0)) == "unknown");
+}
+
+TEST_CASE("AAX model carries descriptor and parameter metadata into definitions", "[aax][model][coverage][issue-648]") {
+    auto codes = valid_codes();
+    auto descriptor = descriptor_with_buses(
+        {{"Main In", 2, false}},
+        {{"Main Out", 2, false}},
+        pulp::format::PluginCategory::Effect,
+        true,
+        true);
+    descriptor.name = "MetadataEffect";
+
+    ConfigurableProcessor::configure(
+        std::move(descriptor),
+        {
+            {
+                .id = 7,
+                .name = "Blend",
+                .unit = "%",
+                .range = {0.0f, 100.0f, 25.0f, 0.0f},
+                .to_string = [](float value) { return std::to_string(static_cast<int>(value)) + "%"; },
+                .from_string = [](const std::string& text) { return std::stof(text); },
+            },
+            {
+                .id = 8,
+                .name = "Shape",
+                .unit = "",
+                .range = {0.0f, 1.0f, 0.0f, 0.25f},
+            },
+        },
+        128);
+
+    auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(result.ok);
+    REQUIRE(result.definition.codes.manufacturer_id == codes.manufacturer_id);
+    REQUIRE(result.definition.supports_midi_input);
+    REQUIRE(result.definition.supports_midi_output);
+    REQUIRE(result.definition.uses_transport);
+    REQUIRE(result.definition.latency_samples == 128);
+    REQUIRE(result.definition.packet_float_count == 3);
+    REQUIRE(result.definition.parameters.size() == 2);
+    REQUIRE(result.definition.parameters[0].id == 7);
+    REQUIRE(result.definition.parameters[0].aax_id == "p00000007");
+    REQUIRE(result.definition.parameters[0].name == "Blend");
+    REQUIRE(result.definition.parameters[0].unit == "%");
+    REQUIRE(result.definition.parameters[0].range.default_value == 25.0f);
+    REQUIRE(result.definition.parameters[0].to_string(42.0f) == "42%");
+    REQUIRE(result.definition.parameters[0].from_string("64") == 64.0f);
+    REQUIRE_FALSE(result.definition.parameters[0].discrete);
+    REQUIRE(result.definition.parameters[1].discrete);
+    REQUIRE(result.definition.parameters[1].step_count == 5);
+    REQUIRE(result.definition.components.size() == 1);
+    REQUIRE(result.definition.components[0].native_plugin_id == codes.native_id_base);
+    REQUIRE(result.definition.components[0].description == "MetadataEffect stereo -> stereo");
 }
 
 TEST_CASE("AAX model truncates long labels and falls back for empty parameter names", "[aax][model]") {
