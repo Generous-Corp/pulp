@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/runtime/named_pipe.hpp>
+#include <pulp/runtime/network_stream.hpp>
 #include <pulp/runtime/stream.hpp>
 
 #include <array>
@@ -11,11 +12,13 @@
 #include <string>
 
 using pulp::runtime::FileStream;
+using pulp::runtime::HttpStream;
 using pulp::runtime::MemoryStream;
 using pulp::runtime::NamedPipe;
 using pulp::runtime::Stream;
 using pulp::runtime::StreamError;
 using pulp::runtime::StreamResult;
+using pulp::runtime::TcpStream;
 
 namespace {
 
@@ -117,6 +120,23 @@ TEST_CASE("MemoryStream zero-size, rewind, and clear edge paths", "[stream]") {
     REQUIRE(eof.closed());
 }
 
+TEST_CASE("StreamResult helpers classify non-ok states", "[stream][coverage][issue-656]") {
+    auto ok = StreamResult::make(3);
+    REQUIRE(ok.ok());
+    REQUIRE(ok.bytes == 3);
+    REQUIRE_FALSE(ok.closed());
+    REQUIRE_FALSE(ok.would_block());
+
+    auto blocked = StreamResult::fail(StreamError::WouldBlock);
+    REQUIRE_FALSE(blocked.ok());
+    REQUIRE(blocked.would_block());
+    REQUIRE_FALSE(blocked.closed());
+
+    auto invalid = StreamResult::fail(StreamError::Invalid);
+    REQUIRE_FALSE(invalid.ok());
+    REQUIRE_FALSE(invalid.closed());
+}
+
 TEST_CASE("FileStream round-trip via filesystem", "[stream]") {
     auto path = make_temp_path("pulp_stream");
     const std::uint8_t payload[] = {'p', 'u', 'l', 'p', 0, 1, 2, 3};
@@ -195,6 +215,45 @@ TEST_CASE("FileStream open failure leaves stream closed", "[stream]") {
     REQUIRE(r.closed());
 }
 
+TEST_CASE("FileStream zero-size operations and positions are stable", "[stream][coverage][issue-656]") {
+    auto path = make_temp_path("pulp_stream_position");
+    const std::uint8_t payload[] = {'x', 'y', 'z'};
+
+    {
+        FileStream stream(path.string(), FileStream::Mode::ReadWrite);
+        REQUIRE(stream.is_open());
+        REQUIRE(stream.position() == 0);
+
+        auto zero_write = stream.write(payload, 0);
+        REQUIRE(zero_write.ok());
+        REQUIRE(zero_write.bytes == 0);
+        REQUIRE(stream.position() == 0);
+
+        auto wrote = stream.write(payload, sizeof(payload));
+        REQUIRE(wrote.ok());
+        REQUIRE(wrote.bytes == sizeof(payload));
+        REQUIRE(stream.position() == sizeof(payload));
+        REQUIRE(stream.flush());
+    }
+
+    {
+        FileStream stream(path.string(), FileStream::Mode::Read);
+        std::uint8_t out[3]{};
+        auto zero_read = stream.read(out, 0);
+        REQUIRE(zero_read.ok());
+        REQUIRE(zero_read.bytes == 0);
+        REQUIRE(stream.position() == 0);
+    }
+
+    FileStream closed;
+    REQUIRE(closed.position() == static_cast<std::size_t>(-1));
+    REQUIRE_FALSE(closed.flush());
+    closed.close();
+    REQUIRE_FALSE(closed.is_open());
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("Stream polymorphic usage", "[stream]") {
     MemoryStream backing;
     Stream& s = backing;
@@ -209,6 +268,92 @@ TEST_CASE("Stream polymorphic usage", "[stream]") {
     REQUIRE(r.ok());
     REQUIRE(r.bytes == std::strlen(msg));
     REQUIRE(std::memcmp(buf.data(), msg, std::strlen(msg)) == 0);
+}
+
+TEST_CASE("FileStream ReadWrite mode tracks position and truncates on open",
+          "[stream][file][coverage][issue-641]") {
+    auto path = make_temp_path("pulp_stream_readwrite");
+    const std::uint8_t first[] = {'o', 'l', 'd'};
+    const std::uint8_t second[] = {'n', 'e', 'w', '!'};
+
+    {
+        FileStream seed(path.string(), FileStream::Mode::Write);
+        REQUIRE(seed.write(first, sizeof(first)).bytes == sizeof(first));
+        REQUIRE(seed.flush());
+    }
+
+    {
+        FileStream stream(path.string(), FileStream::Mode::ReadWrite);
+        REQUIRE(stream.is_open());
+        REQUIRE(stream.position() == 0);
+        REQUIRE(stream.write(second, sizeof(second)).bytes == sizeof(second));
+        REQUIRE(stream.position() == sizeof(second));
+        REQUIRE(stream.flush());
+    }
+
+    {
+        FileStream readback(path.string(), FileStream::Mode::Read);
+        std::array<std::uint8_t, sizeof(second)> out{};
+        auto got = readback.read(out.data(), out.size());
+        REQUIRE(got.ok());
+        REQUIRE(got.bytes == out.size());
+        REQUIRE(std::memcmp(out.data(), second, sizeof(second)) == 0);
+        REQUIRE(readback.read(out.data(), out.size()).closed());
+    }
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("MemoryStream clear keeps closed streams closed",
+          "[stream][memory][coverage][issue-641]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    stream.close();
+    stream.clear();
+
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+}
+
+TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
+          "[stream][tcp][coverage][issue-641]") {
+    TcpStream first;
+    TcpStream second;
+    std::uint8_t byte = 0;
+
+    REQUIRE_FALSE(first.is_open());
+    REQUIRE(first.read(&byte, 1).closed());
+    REQUIRE(first.write(&byte, 1).closed());
+
+    second = std::move(first);
+    REQUIRE_FALSE(second.is_open());
+    REQUIRE(second.read(&byte, 1).closed());
+    REQUIRE(second.write(&byte, 1).closed());
+}
+
+TEST_CASE("HttpStream invalid URLs fail without external transport",
+          "[stream][http][coverage][issue-641]") {
+    HttpStream stream;
+    HttpStream::Request request;
+    request.url = "not-a-url";
+    request.timeout_seconds = 1;
+
+    REQUIRE_FALSE(stream.fetch(request));
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.status_code() == 0);
+    REQUIRE(stream.transport_error() == "Invalid URL");
+
+    std::array<std::uint8_t, 8> out{};
+    REQUIRE(stream.read(out.data(), out.size()).error == StreamError::IoError);
+    REQUIRE(stream.write(out.data(), out.size()).error == StreamError::Invalid);
+    REQUIRE(stream.eof());
+
+    stream.close();
+    REQUIRE(stream.read(out.data(), out.size()).closed());
 }
 
 TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_pipe][issue-641]") {

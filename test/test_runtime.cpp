@@ -49,6 +49,29 @@ TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     }
 }
 
+TEST_CASE("SpscQueue reuses slots after wrap-around",
+          "[runtime][spsc][coverage][issue-641]") {
+    SpscQueue<int, 4> q;
+    REQUIRE(q.capacity() == 4);
+
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        REQUIRE(q.empty());
+        for (int i = 0; i < 4; ++i) {
+            REQUIRE(q.try_push(cycle * 10 + i));
+        }
+        REQUIRE_FALSE(q.try_push(999));
+        REQUIRE(q.size_approx() == 4);
+        for (int i = 0; i < 4; ++i) {
+            auto value = q.try_pop();
+            REQUIRE(value.has_value());
+            REQUIRE(*value == cycle * 10 + i);
+        }
+    }
+
+    REQUIRE(q.empty());
+    REQUIRE_FALSE(q.try_pop().has_value());
+}
+
 TEST_CASE("SpscQueue cross-thread", "[runtime][spsc]") {
     SpscQueue<int, 1024> q;
     constexpr int count = 10000;
@@ -106,6 +129,16 @@ TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]
         auto guard = make_scope_guard([&] { ++calls; });
         auto moved = std::move(guard);
         static_cast<void>(moved);
+    }
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
+          "[runtime][scope_guard][coverage][issue-641]") {
+    int calls = 0;
+    {
+        PULP_ON_SCOPE_EXIT(++calls);
+        REQUIRE(calls == 0);
     }
     REQUIRE(calls == 1);
 }

@@ -388,6 +388,25 @@ class ObjectDiscoveryParityTests(unittest.TestCase):
                 f"surface set, so dropping it here desyncs both lanes.",
             )
 
+    def test_static_archives_are_discovered_before_test_binaries(self) -> None:
+        """Duplicate maps must let executed test binaries win.
+
+        Production files linked into both libpulp-*.a and a test executable
+        can otherwise report the archive's zero-hit map even when CTest
+        exercised the code. The CI and local scripts should keep archives
+        first, then test binaries.
+        """
+
+        for path in (SCRIPT, CI_SCRIPT):
+            text = path.read_text()
+            archive_idx = text.index("libpulp-*.a")
+            tests_idx = text.index('"${BUILD_DIR}/test"')
+            self.assertLess(
+                archive_idx,
+                tests_idx,
+                f"{path} must discover static archives before test binaries",
+            )
+
 
 class TargetedCtestTests(unittest.TestCase):
     """Targeted local diff-cover runs must also limit the ctest pass."""

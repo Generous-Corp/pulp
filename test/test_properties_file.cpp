@@ -4,6 +4,7 @@
 #include <pulp/runtime/temporary_file.hpp>
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 using namespace pulp::state;
 using namespace pulp::runtime;
@@ -35,6 +36,21 @@ TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[stat
 
     REQUIRE_FALSE(props.get_int("count").has_value());
     REQUIRE_FALSE(props.get_double("gain").has_value());
+}
+
+TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
+          "[state][properties][issue-641]") {
+    PropertiesFile props;
+    props.set_string("word_false", "false");
+    props.set_string("zero", "0");
+    props.set_string("garbage", "not-a-bool");
+
+    REQUIRE(props.get_bool("word_false").has_value());
+    REQUIRE_FALSE(*props.get_bool("word_false"));
+    REQUIRE(props.get_bool("zero").has_value());
+    REQUIRE_FALSE(*props.get_bool("zero"));
+    REQUIRE(props.get_bool("garbage").has_value());
+    REQUIRE_FALSE(*props.get_bool("garbage"));
 }
 
 TEST_CASE("PropertiesFile set and get int", "[state][properties]") {
@@ -157,6 +173,21 @@ TEST_CASE("PropertiesFile load invalid JSON returns false", "[state][properties]
     REQUIRE_FALSE(props.load(tmp.path_string()));
 }
 
+TEST_CASE("PropertiesFile load non-object JSON leaves existing values intact",
+          "[state][properties][issue-641]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "[\"not\", \"an\", \"object\"]";
+    }
+
+    PropertiesFile props;
+    props.set_string("stale", "value");
+    REQUIRE_FALSE(props.load(tmp.path_string()));
+    REQUIRE(props.get_string("stale").value_or("") == "value");
+    REQUIRE(props.path() == tmp.path_string());
+}
+
 TEST_CASE("PropertiesFile load empty file clears existing values", "[state][properties]") {
     TemporaryFile tmp(".json");
     {
@@ -171,11 +202,53 @@ TEST_CASE("PropertiesFile load empty file clears existing values", "[state][prop
     REQUIRE(props.size() == 0);
 }
 
+TEST_CASE("PropertiesFile load skips unsupported JSON member types",
+          "[state][properties][json][issue-641]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << R"JSON({
+            "name": "Pulp",
+            "enabled": true,
+            "count": 7,
+            "gain": 0.5,
+            "ignored_null": null,
+            "ignored_array": [1, 2],
+            "ignored_object": {"nested": true}
+        })JSON";
+    }
+
+    PropertiesFile props;
+    REQUIRE(props.load(tmp.path_string()));
+    REQUIRE(props.size() == 4);
+    REQUIRE(props.get_string("name").value_or("") == "Pulp");
+    REQUIRE(props.get_bool("enabled").value_or(false));
+    REQUIRE(props.get_int("count").value_or(0) == 7);
+    REQUIRE_THAT(props.get_double("gain").value_or(0.0), WithinAbs(0.5, 1e-9));
+    REQUIRE_FALSE(props.contains("ignored_null"));
+    REQUIRE_FALSE(props.contains("ignored_array"));
+    REQUIRE_FALSE(props.contains("ignored_object"));
+}
+
 TEST_CASE("PropertiesFile save without path returns false", "[state][properties]") {
     PropertiesFile props;
     props.set_string("key", "value");
 
     REQUIRE_FALSE(props.save());
+}
+
+TEST_CASE("PropertiesFile save fails when destination is a directory",
+          "[state][properties][issue-641]") {
+    auto dir = std::filesystem::temp_directory_path() /
+               ("pulp_props_dir_dest_" + std::to_string(std::random_device{}()));
+    std::filesystem::create_directories(dir);
+
+    PropertiesFile props;
+    props.set_string("key", "value");
+    REQUIRE_FALSE(props.save(dir.string()));
+    REQUIRE(props.path() == dir.string());
+
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("PropertiesFile save creates parent directories", "[state][properties]") {
@@ -207,6 +280,21 @@ TEST_CASE("PropertiesFile save and reload preserves path", "[state][properties]"
     PropertiesFile props2;
     REQUIRE(props2.load(tmp.path_string()));
     REQUIRE(props2.get_string("key2").value_or("") == "val2");
+}
+
+TEST_CASE("PropertiesFile remove missing key and clear empty file are no-ops",
+          "[state][properties][issue-641]") {
+    PropertiesFile props;
+    props.remove("missing");
+    REQUIRE(props.size() == 0);
+
+    props.clear();
+    REQUIRE(props.keys().empty());
+
+    props.set_string("present", "yes");
+    props.remove("missing");
+    REQUIRE(props.size() == 1);
+    REQUIRE(props.contains("present"));
 }
 
 // ── ApplicationProperties ───────────────────────────────────────────────

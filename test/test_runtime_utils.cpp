@@ -1,15 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/runtime/memory_mapped_file.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
 #include <pulp/runtime/inter_process_lock.hpp>
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/expression.hpp>
 #include <pulp/runtime/http.hpp>
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/text_diff.hpp>
+#include <catch2/catch_approx.hpp>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 
 using namespace pulp::runtime;
 
@@ -44,6 +50,47 @@ TEST_CASE("TemporaryFile move semantics", "[runtime][temp_file]") {
     TemporaryFile b = std::move(a);
     REQUIRE(b.path() == path);
     REQUIRE(std::filesystem::exists(path));
+}
+
+TEST_CASE("TemporaryFile normalizes extensions without leading dots",
+          "[runtime][temp_file][issue-641]") {
+    TemporaryFile tmp("raw");
+    REQUIRE(tmp.path().extension() == ".raw");
+    REQUIRE(std::filesystem::exists(tmp.path()));
+}
+
+TEST_CASE("TemporaryFile move assignment removes the previous active file",
+          "[runtime][temp_file][issue-641]") {
+    std::filesystem::path old_path;
+    std::filesystem::path new_path;
+    {
+        TemporaryFile old_file(".old");
+        TemporaryFile new_file(".new");
+        old_path = old_file.path();
+        new_path = new_file.path();
+
+        old_file = std::move(new_file);
+        REQUIRE(old_file.path() == new_path);
+        REQUIRE_FALSE(std::filesystem::exists(old_path));
+        REQUIRE(std::filesystem::exists(new_path));
+    }
+
+    REQUIRE_FALSE(std::filesystem::exists(new_path));
+}
+
+TEST_CASE("TemporaryFile self move assignment preserves ownership",
+          "[runtime][temp_file][issue-641]") {
+    std::filesystem::path path;
+    {
+        TemporaryFile tmp(".self");
+        path = tmp.path();
+        auto& ref = tmp;
+        tmp = std::move(ref);
+        REQUIRE(tmp.path() == path);
+        REQUIRE(std::filesystem::exists(path));
+    }
+
+    REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
 // ── MemoryMappedFile ────────────────────────────────────────────────────
@@ -87,6 +134,123 @@ TEST_CASE("MemoryMappedFile move semantics", "[runtime][mmap]") {
     REQUIRE_FALSE(a.is_open());
 }
 
+TEST_CASE("MemoryMappedFile reopen closes the previous mapping",
+          "[runtime][mmap][issue-641]") {
+    TemporaryFile first(".bin");
+    TemporaryFile second(".bin");
+    {
+        std::ofstream f(first.path(), std::ios::binary);
+        f << "first";
+    }
+    {
+        std::ofstream f(second.path(), std::ios::binary);
+        f << "second-file";
+    }
+
+    MemoryMappedFile mmap;
+    REQUIRE(mmap.open(first.path_string()));
+    REQUIRE(mmap.size() == 5);
+    REQUIRE(mmap.open(second.path_string()));
+    REQUIRE(mmap.is_open());
+    REQUIRE(mmap.size() == 11);
+    REQUIRE(std::string(reinterpret_cast<const char*>(mmap.data()), mmap.size()) == "second-file");
+}
+
+TEST_CASE("MemoryMappedFile ReadWrite mode persists byte edits",
+          "[runtime][mmap][coverage][issue-641]") {
+    TemporaryFile tmp(".bin");
+    {
+        std::ofstream f(tmp.path(), std::ios::binary);
+        f << "abcde";
+    }
+
+    MemoryMappedFile mmap;
+    REQUIRE(mmap.open(tmp.path_string(), MapMode::ReadWrite));
+    REQUIRE(mmap.is_open());
+    REQUIRE(mmap.size() == 5);
+    REQUIRE(mmap.mutable_data() != nullptr);
+
+    mmap.mutable_data()[1] = static_cast<uint8_t>('A');
+    mmap.mutable_data()[3] = static_cast<uint8_t>('D');
+    mmap.close();
+    REQUIRE_FALSE(mmap.is_open());
+
+    std::ifstream f(tmp.path(), std::ios::binary);
+    std::string contents((std::istreambuf_iterator<char>(f)),
+                         std::istreambuf_iterator<char>());
+    REQUIRE(contents == "aAcDe");
+}
+
+TEST_CASE("MemoryMappedFile open failure clears an existing mapping",
+          "[runtime][mmap][coverage][issue-641]") {
+    TemporaryFile mapped(".bin");
+    {
+        std::ofstream f(mapped.path(), std::ios::binary);
+        f << "mapped";
+    }
+
+    TemporaryFile empty(".bin");
+
+    MemoryMappedFile mmap;
+    REQUIRE(mmap.open(mapped.path_string()));
+    REQUIRE(mmap.is_open());
+    REQUIRE(mmap.size() == 6);
+
+    REQUIRE_FALSE(mmap.open(empty.path_string()));
+    REQUIRE_FALSE(mmap.is_open());
+    REQUIRE(mmap.data() == nullptr);
+    REQUIRE(mmap.size() == 0);
+}
+
+TEST_CASE("MemoryMappedFile read-write maps persist and move assignment closes old map",
+          "[runtime][mmap][coverage][issue-656]") {
+    TemporaryFile first(".bin");
+    TemporaryFile second(".bin");
+    {
+        std::ofstream f(first.path(), std::ios::binary);
+        f << "abcd";
+    }
+    {
+        std::ofstream f(second.path(), std::ios::binary);
+        f << "wxyz";
+    }
+
+    MemoryMappedFile old_map;
+    REQUIRE(old_map.open(first.path_string(), MapMode::ReadOnly));
+    REQUIRE(old_map.is_open());
+
+    MemoryMappedFile writable;
+    REQUIRE(writable.open(second.path_string(), MapMode::ReadWrite));
+    REQUIRE(writable.is_open());
+    REQUIRE(writable.size() == 4);
+    writable.mutable_data()[1] = static_cast<uint8_t>('!');
+
+    old_map = std::move(writable);
+    REQUIRE(old_map.is_open());
+    REQUIRE_FALSE(writable.is_open());
+    REQUIRE(old_map.size() == 4);
+    REQUIRE(std::string(reinterpret_cast<const char*>(old_map.data()), old_map.size()) == "w!yz");
+
+    old_map.close();
+    std::ifstream f(second.path(), std::ios::binary);
+    std::string saved((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    REQUIRE(saved == "w!yz");
+}
+
+TEST_CASE("MemoryMappedFile rejects empty files and close is idempotent",
+          "[runtime][mmap][coverage][issue-656]") {
+    TemporaryFile tmp(".bin");
+
+    MemoryMappedFile mmap;
+    REQUIRE_FALSE(mmap.open(tmp.path_string()));
+    REQUIRE_FALSE(mmap.is_open());
+    REQUIRE(mmap.size() == 0);
+    REQUIRE(mmap.data() == nullptr);
+    mmap.close();
+    mmap.close();
+    REQUIRE_FALSE(mmap.is_open());
+}
+
 // ── DynamicLibrary ──────────────────────────────────────────────────────
 
 TEST_CASE("DynamicLibrary loads system library", "[runtime][dynlib]") {
@@ -128,6 +292,25 @@ TEST_CASE("InterProcessLock double lock succeeds", "[runtime][ipc_lock]") {
     InterProcessLock lock("test_lock_double");
     REQUIRE(lock.try_lock());
     REQUIRE(lock.try_lock());  // Already locked, should still return true
+}
+
+TEST_CASE("InterProcessLock unlock is idempotent and permits reacquire",
+          "[runtime][ipc_lock][coverage][issue-641]") {
+    InterProcessLock lock("test_lock_reacquire");
+    REQUIRE_FALSE(lock.is_locked());
+
+    lock.unlock();
+    REQUIRE_FALSE(lock.is_locked());
+
+    REQUIRE(lock.try_lock());
+    REQUIRE(lock.is_locked());
+    lock.unlock();
+    REQUIRE_FALSE(lock.is_locked());
+    lock.unlock();
+    REQUIRE_FALSE(lock.is_locked());
+
+    REQUIRE(lock.try_lock());
+    REQUIRE(lock.is_locked());
 }
 
 // ── ChildProcess ────────────────────────────────────────────────────────
@@ -239,6 +422,100 @@ TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
     REQUIRE(*decoded == data);
 }
 
+TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
+          "[runtime][base64][coverage][issue-641]") {
+    REQUIRE(base64_encode(nullptr, 0) == "");
+
+    const uint8_t bytes[] = {0x00, 0x10, 0x20, 0x30, 0xff};
+    auto encoded = base64_encode(bytes, sizeof(bytes));
+    REQUIRE(encoded == "ABAgMP8=");
+
+    auto decoded = base64_decode("ABAgMP8=");
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->size() == sizeof(bytes));
+    REQUIRE(std::equal(decoded->begin(), decoded->end(), std::begin(bytes)));
+
+    auto quartet = base64_decode("////");
+    REQUIRE(quartet.has_value());
+    REQUIRE(*quartet == std::vector<uint8_t>{0xff, 0xff, 0xff});
+}
+
+// ── Expression ─────────────────────────────────────────────────────────
+
+TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
+          "[runtime][expression][coverage][issue-641]") {
+    auto value = evaluate("2 + 3 * 4 ^ 2");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == Catch::Approx(50.0));
+
+    auto signed_power = evaluate("-2^2");
+    REQUIRE(signed_power.has_value());
+    REQUIRE(*signed_power == Catch::Approx(4.0));
+
+    auto grouped = evaluate("(-2)^2");
+    REQUIRE(grouped.has_value());
+    REQUIRE(*grouped == Catch::Approx(4.0));
+}
+
+TEST_CASE("Expression evaluator handles constants, functions, and scientific notation",
+          "[runtime][expression][coverage][issue-641]") {
+    auto trig = evaluate("sin(pi / 2) + cos(0)");
+    REQUIRE(trig.has_value());
+    REQUIRE(*trig == Catch::Approx(2.0));
+
+    auto clamped = evaluate("clamp(12, 10)");
+    REQUIRE(clamped.has_value());
+    REQUIRE(*clamped == Catch::Approx(10.0));
+
+    auto scientific = evaluate("1.5e2 + 2E-1");
+    REQUIRE(scientific.has_value());
+    REQUIRE(*scientific == Catch::Approx(150.2));
+}
+
+TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs",
+          "[runtime][expression][coverage][issue-641]") {
+    auto variable = evaluate("gain * 2 + offset", {{"gain", 0.75}, {"offset", 0.25}});
+    REQUIRE(variable.has_value());
+    REQUIRE(*variable == Catch::Approx(1.75));
+
+    REQUIRE_FALSE(evaluate("missing + 1").has_value());
+    REQUIRE_FALSE(evaluate("min(1)").has_value());
+    REQUIRE_FALSE(evaluate("(1 + 2").has_value());
+    REQUIRE_FALSE(evaluate("").has_value());
+}
+
+TEST_CASE("ExpressionEvaluator stores variables and clears them",
+          "[runtime][expression][coverage][issue-641]") {
+    ExpressionEvaluator evaluator;
+    evaluator.set("x", 4.0);
+    evaluator.set("y", 2.5);
+
+    REQUIRE(evaluator.get("x").has_value());
+    REQUIRE(*evaluator.get("x") == Catch::Approx(4.0));
+
+    auto value = evaluator.evaluate("x * y");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == Catch::Approx(10.0));
+
+    evaluator.clear_variables();
+    REQUIRE_FALSE(evaluator.get("x").has_value());
+    REQUIRE_FALSE(evaluator.evaluate("x").has_value());
+}
+
+TEST_CASE("ExpressionEvaluator dispatches registered unary functions",
+          "[runtime][expression][coverage][issue-641]") {
+    ExpressionEvaluator evaluator;
+    evaluator.register_function("db_to_gain", [](double db) {
+        return std::pow(10.0, db / 20.0);
+    });
+
+    auto unity = evaluator.evaluate("db_to_gain(0)");
+    REQUIRE(unity.has_value());
+    REQUIRE(*unity == Catch::Approx(1.0));
+
+    REQUIRE_FALSE(evaluator.evaluate("missing_fn(1)").has_value());
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
@@ -267,6 +544,26 @@ TEST_CASE("HTTP helpers reject invalid numeric URL ports",
     const auto too_large_port = http_post("http://example.com:65536/path", "body", "text/plain", 1);
     REQUIRE(too_large_port.status_code == 0);
     REQUIRE(too_large_port.error == "Invalid URL");
+}
+
+TEST_CASE("HttpResponse ok covers status code boundaries", "[runtime][http][url][coverage][issue-656]") {
+    HttpResponse response;
+    response.status_code = 199;
+    REQUIRE_FALSE(response.ok());
+    response.status_code = 200;
+    REQUIRE(response.ok());
+    response.status_code = 299;
+    REQUIRE(response.ok());
+    response.status_code = 300;
+    REQUIRE_FALSE(response.ok());
+}
+
+TEST_CASE("HTTP helpers reject malformed URL hosts and schemes",
+          "[runtime][http][url][coverage][issue-656]") {
+    REQUIRE(http_get("https://:443/path", 1).error == "Invalid URL");
+    REQUIRE(http_get("http://example.com:not-a-port/path", 1).error == "Invalid URL");
+    REQUIRE(http_post("file://example.com/path", "body", "text/plain", 1).error == "Invalid URL");
+    REQUIRE_FALSE(http_download("http://", "/tmp/pulp-url-invalid-download-656", 1));
 }
 
 // ── Text Diff ────────────────────────────────────────────────────────────
@@ -319,6 +616,26 @@ TEST_CASE("text_diff preserves equal lines across replacements and appends",
             "+ omega\n");
 }
 
+TEST_CASE("text_diff keeps repeated-line matches stable",
+          "[runtime][text-diff][coverage][issue-641]") {
+    auto diff = text_diff("same\nkeep\nsame\nremove\nsame",
+                          "same\nkeep\nsame\ninsert\nsame");
+
+    REQUIRE(diff.size() == 6);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "same");
+    REQUIRE(diff[1].op == DiffOp::Equal);
+    REQUIRE(diff[1].text == "keep");
+    REQUIRE(diff[2].op == DiffOp::Equal);
+    REQUIRE(diff[2].text == "same");
+    REQUIRE(diff[3].op == DiffOp::Delete);
+    REQUIRE(diff[3].text == "remove");
+    REQUIRE(diff[4].op == DiffOp::Insert);
+    REQUIRE(diff[4].text == "insert");
+    REQUIRE(diff[5].op == DiffOp::Equal);
+    REQUIRE(diff[5].text == "same");
+}
+
 // ── Range ───────────────────────────────────────────────────────────────
 
 TEST_CASE("Range basic operations", "[runtime][range]") {
@@ -359,6 +676,13 @@ TEST_CASE("Range constrain", "[runtime][range]") {
     REQUIRE(r.constrain(-5) == 0);
     REQUIRE(r.constrain(50) == 50);
     REQUIRE(r.constrain(200) == 99);
+}
+
+TEST_CASE("Range constrain handles empty and reversed integer ranges",
+          "[runtime][range][coverage][issue-641]") {
+    REQUIRE(IntRange(5, 5).constrain(100) == 5);
+    REQUIRE(IntRange(10, 5).constrain(-100) == 10);
+    REQUIRE(IntRange(-3, -1).constrain(9) == -2);
 }
 
 TEST_CASE("Range from_start_length", "[runtime][range]") {
@@ -402,3 +726,30 @@ TEST_CASE("FloatRange", "[runtime][range]") {
     REQUIRE(r.contains(0.5f));
     REQUIRE_FALSE(r.contains(1.0f));
 }
+
+
+TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
+          "[runtime][range][coverage][issue-641]") {
+    DoubleRange a(0.25, 2.75);
+    DoubleRange b(1.5, 4.0);
+
+    auto intersection = a.intersection(b);
+    REQUIRE_THAT(intersection.start, Catch::Matchers::WithinAbs(1.5, 1e-12));
+    REQUIRE_THAT(intersection.end, Catch::Matchers::WithinAbs(2.75, 1e-12));
+
+    auto combined = a.enclosing_union(b);
+    REQUIRE_THAT(combined.start, Catch::Matchers::WithinAbs(0.25, 1e-12));
+    REQUIRE_THAT(combined.end, Catch::Matchers::WithinAbs(4.0, 1e-12));
+}
+
+TEST_CASE("Range boundary touch points remain non-intersections",
+          "[runtime][range][coverage][issue-641]") {
+    REQUIRE_FALSE(IntRange(0, 10).intersects(IntRange(10, 20)));
+    REQUIRE(IntRange(0, 10).intersection(IntRange(10, 20)).empty());
+    REQUIRE(IntRange(10, 20).intersection(IntRange(0, 10)).empty());
+
+    REQUIRE(IntRange(5, 5).empty());
+    REQUIRE(IntRange(5, 4).empty());
+    REQUIRE(IntRange(5, 5).constrain(100) == 5);
+}
+

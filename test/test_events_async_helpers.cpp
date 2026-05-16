@@ -140,6 +140,26 @@ TEST_CASE("ActionBroadcaster ignores missing listener removals",
     REQUIRE(seen.size() == 3);
 }
 
+TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
+          "[events][async_updater][action_broadcaster][issue-642]") {
+    ActionBroadcaster broadcaster;
+
+    broadcaster.send_action("");
+    broadcaster.remove_listener(123);
+
+    std::vector<std::string> seen;
+    auto listener = broadcaster.add_listener(
+        [&](std::string_view action) { seen.emplace_back(action); });
+
+    broadcaster.send_action("");
+    broadcaster.send_action("named");
+    REQUIRE(seen == std::vector<std::string>{"", "named"});
+
+    broadcaster.remove_listener(listener);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 2);
+}
+
 TEST_CASE("MultiTimer stop all permits selective restart",
           "[events][async_updater][multi_timer][issue-642]") {
     RecordingMultiTimer timers;
@@ -161,6 +181,26 @@ TEST_CASE("MultiTimer stop all permits selective restart",
     timers.stop_timer(42);
     REQUIRE_FALSE(timers.is_timer_running(1));
     REQUIRE_FALSE(timers.is_timer_running(2));
+}
+
+TEST_CASE("MultiTimer restart keeps one running entry per id",
+          "[events][async_updater][multi_timer][issue-642]") {
+    RecordingMultiTimer timers;
+
+    timers.start_timer(7, 20);
+    timers.start_timer(7, 10);
+    timers.start_timer(7, 5);
+    REQUIRE(timers.is_timer_running(7));
+
+    timers.stop_timer(7);
+    REQUIRE_FALSE(timers.is_timer_running(7));
+
+    timers.start_timer(7, 1);
+    REQUIRE(timers.is_timer_running(7));
+
+    timers.stop_all_timers();
+    timers.stop_all_timers();
+    REQUIRE_FALSE(timers.is_timer_running(7));
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler has no observable test-lane side effects",

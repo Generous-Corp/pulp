@@ -187,10 +187,32 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # they're built from third-party sources not instrumented by our flags.
 BINARIES=()
 
-# Test executables — first, these drive the actual coverage hits. On
-# Windows/MSYS, CTest can run `.exe` files whose Unix executable bit is
-# not visible to `find -perm -u+x`; include `.exe` explicitly so their
-# coverage maps reach llvm-cov.
+# First-party static libraries — expose every instrumented TU regardless
+# of whether a test links it. Pattern is `libpulp-*.a` on macOS/Linux
+# and `pulp-*.lib` on Windows (clang-cl's MSVC-style driver emits `.lib`
+# archives, not `.a`). Without the `.lib` branch the Windows coverage
+# matrix leg silently skips the full-surface expansion, so the Windows
+# Codecov upload has only test-linked TUs — same narrow view this fix
+# was meant to close everywhere. Deliberately does not pick up
+# libausdk.a / libvst3-sdk.a (external SDKs, not our code); the
+# `pulp-*.lib` prefix is narrow enough to skip third-party .lib files
+# that also appear under the build tree.
+#
+# Keep archives before executables. Files compiled into both a static
+# archive and a test binary need the executed test binary's coverage map
+# to win; adding archives after tests can leave diff-cover with the
+# archive's zero-hit record for source that tests did exercise.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}" -type f \
+         \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
+         ! -path "${BUILD_DIR}/test/*" \
+         2>/dev/null || true
+)
+
+# Test executables — these drive the actual coverage hits. On Windows/MSYS,
+# CTest can run `.exe` files whose Unix executable bit is not visible to
+# `find -perm -u+x`; include `.exe` explicitly so their coverage maps reach
+# llvm-cov.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/test" -maxdepth 2 -type f \
          \( -perm -u+x -o -name '*.exe' \) \
@@ -216,23 +238,6 @@ if [[ ${#BINARIES[@]} -eq 0 ]]; then
     echo "run_coverage.sh: no test binaries found under ${BUILD_DIR}/test" >&2
     exit 1
 fi
-
-# First-party static libraries — expose every instrumented TU regardless
-# of whether a test links it. Pattern is `libpulp-*.a` on macOS/Linux
-# and `pulp-*.lib` on Windows (clang-cl's MSVC-style driver emits `.lib`
-# archives, not `.a`). Without the `.lib` branch the Windows coverage
-# matrix leg silently skips the full-surface expansion, so the Windows
-# Codecov upload has only test-linked TUs — same narrow view this fix
-# was meant to close everywhere. Deliberately does not pick up
-# libausdk.a / libvst3-sdk.a (external SDKs, not our code); the
-# `pulp-*.lib` prefix is narrow enough to skip third-party .lib files
-# that also appear under the build tree.
-while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
-    find "${BUILD_DIR}" -type f \
-         \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
-         ! -path "${BUILD_DIR}/test/*" \
-         2>/dev/null || true
-)
 
 # First-party non-test executables — CLI, standalone host, inspector.
 # Test binaries under build/test/ are already included above; exclude

@@ -318,6 +318,96 @@ TEST_CASE("NSD removing backend stops old backend and evicts discoveries",
     REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 1234));
 }
 
+TEST_CASE("NSD caches same-name services separately by type",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    NetworkServiceDiscovery::Service http;
+    http.name = "pulpd";
+    http.type = "_http._tcp";
+    http.hostname = "http.local";
+    http.port = 80;
+
+    NetworkServiceDiscovery::Service pulp = http;
+    pulp.type = "_pulp._tcp";
+    pulp.hostname = "pulp.local";
+    pulp.port = 4321;
+
+    nsd.notify_service_found(http);
+    nsd.notify_service_found(pulp);
+    REQUIRE(nsd.discovered().size() == 2);
+
+    nsd.notify_service_lost(http);
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().type == "_pulp._tcp");
+    REQUIRE(nsd.discovered().front().hostname == "pulp.local");
+}
+
+TEST_CASE("NSD install_backend nullptr without discoveries only stops old backend",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    int lost_count = 0;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service&) {
+        ++lost_count;
+    };
+
+    nsd.install_backend(nullptr);
+    REQUIRE_FALSE(nsd.has_backend());
+    REQUIRE(nsd.discovered().empty());
+    REQUIRE(lost_count == 0);
+    REQUIRE(log->stopped == 1);
+    REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 1234));
+}
+
+TEST_CASE("NSD stop forwards to backend even before browsing",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    nsd.install_backend(std::move(backend));
+
+    nsd.stop();
+    nsd.stop();
+
+    REQUIRE(log->stopped == 2);
+    REQUIRE(nsd.has_backend());
+}
+
+TEST_CASE("NSD discovery stores entries when callbacks are absent",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    NetworkServiceDiscovery::Service svc;
+    svc.name = "pulpd";
+    svc.type = "_pulp._tcp";
+    svc.hostname = "pulpd.local";
+    svc.address = "127.0.0.1";
+    svc.port = 4321;
+
+    nsd.notify_service_found(svc);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    nsd.notify_service_lost(svc);
+    REQUIRE(nsd.discovered().empty());
+}
+
+TEST_CASE("LockingAsyncUpdater trigger_and_wait handles every call synchronously",
+          "[events][service-discovery][locking-updater][issue-642]") {
+    RecordingLockingUpdater updater;
+
+    updater.trigger_and_wait();
+    updater.trigger_and_wait();
+    updater.trigger_and_wait();
+
+    REQUIRE(updater.handles.load() == 3);
+}
+
 TEST_CASE("NSD backend swap clears discoveries without lost callback",
           "[events][service-discovery][issue-642]") {
     NetworkServiceDiscovery nsd;

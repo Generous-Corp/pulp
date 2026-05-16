@@ -221,19 +221,21 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # the diff-cover gate. See issue #919 (Codex review on PR #919).
 BINARIES=()
 
-# 1. Test executables — primary coverage drivers.
-while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
-    find "${BUILD_DIR}/test" -maxdepth 2 -type f -perm -u+x \
-        ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
-)
-
-# 2. First-party static archives — expose every instrumented TU even
+# 1. First-party static archives — expose every instrumented TU even
 #    when no test transitively links it. `pulp-*.lib` covers Windows
-#    where clang-cl emits MSVC-style archives.
+#    where clang-cl emits MSVC-style archives. Keep these before test
+#    executables so duplicate source coverage maps from actually-run
+#    tests win over archive-only zero-hit records.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}" -type f \
         \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
         2>/dev/null || true
+)
+
+# 2. Test executables — primary coverage drivers.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}/test" -maxdepth 2 -type f -perm -u+x \
+        ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
 )
 
 # 3. First-party non-test executables — CLI, standalone host, inspector.

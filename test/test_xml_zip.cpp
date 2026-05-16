@@ -111,6 +111,46 @@ TEST_CASE("XmlDocument invalid XML", "[runtime][xml]") {
     REQUIRE_FALSE(doc.error().empty());
 }
 
+TEST_CASE("XmlDocument empty document queries are inert",
+          "[runtime][xml][coverage][issue-641]") {
+    XmlDocument doc;
+
+    REQUIRE_FALSE(doc.is_valid());
+    REQUIRE(doc.root_name().empty());
+    REQUIRE_FALSE(doc.root_attribute("missing").has_value());
+    REQUIRE_FALSE(doc.xpath_string("//missing").has_value());
+    REQUIRE(doc.xpath_strings("//missing").empty());
+
+    int walk_count = 0;
+    doc.walk([&](std::string_view, std::string_view) {
+        ++walk_count;
+    });
+    REQUIRE(walk_count == 0);
+}
+
+TEST_CASE("XmlDocument move construction and assignment preserve parsed state",
+          "[runtime][xml][coverage][issue-641]") {
+    XmlDocument original;
+    REQUIRE(original.parse(R"(<root name="first"><child>value</child></root>)"));
+
+    XmlDocument moved(std::move(original));
+    REQUIRE(moved.is_valid());
+    REQUIRE(moved.root_name() == "root");
+    REQUIRE(moved.root_attribute("name") == std::optional<std::string>{"first"});
+    REQUIRE_FALSE(original.is_valid());
+    REQUIRE(original.root_name().empty());
+
+    XmlDocument replacement;
+    REQUIRE(replacement.parse(R"(<replacement><leaf>next</leaf></replacement>)"));
+
+    moved = std::move(replacement);
+    REQUIRE(moved.is_valid());
+    REQUIRE(moved.root_name() == "replacement");
+    REQUIRE(moved.xpath_string("//leaf") == std::optional<std::string>{"next"});
+    REQUIRE_FALSE(replacement.is_valid());
+    REQUIRE(replacement.root_name().empty());
+}
+
 TEST_CASE("xml_generate creates document", "[runtime][xml]") {
     auto xml = xml_generate("preset", {
         {"name", "Default"},
@@ -124,6 +164,28 @@ TEST_CASE("xml_generate creates document", "[runtime][xml]") {
     auto name = doc.xpath_string("//name");
     REQUIRE(name.has_value());
     REQUIRE(*name == "Default");
+}
+
+TEST_CASE("xml_generate handles empty and repeated elements",
+          "[runtime][xml][coverage][issue-641]") {
+    auto xml = xml_generate("metadata", {
+        {"tag", "alpha"},
+        {"tag", "beta"},
+        {"empty", ""}
+    });
+
+    XmlDocument doc;
+    REQUIRE(doc.parse(xml));
+    REQUIRE(doc.root_name() == "metadata");
+
+    auto tags = doc.xpath_strings("//tag");
+    REQUIRE(tags.size() == 2);
+    REQUIRE(tags[0] == "alpha");
+    REQUIRE(tags[1] == "beta");
+
+    auto empty = doc.xpath_string("//empty");
+    REQUIRE(empty.has_value());
+    REQUIRE(empty->empty());
 }
 
 TEST_CASE("xml_generate escapes text content", "[runtime][xml]") {

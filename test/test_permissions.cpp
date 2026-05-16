@@ -162,6 +162,35 @@ TEST_CASE("nested PermissionsOverride clear exposes backend then restores outer 
     REQUIRE(query(Permission::Microphone) == outer_state);
 }
 
+TEST_CASE("PermissionsOverride clear on missing entries is a no-op",
+          "[platform][permissions][override][coverage][issue-649]") {
+    const auto backend_microphone = query(Permission::Microphone);
+    const auto backend_camera = query(Permission::Camera);
+
+    PermissionsOverride guard;
+    guard.clear(Permission::Microphone);
+    REQUIRE(query(Permission::Microphone) == backend_microphone);
+
+    guard.set(Permission::Camera, state_different_from(backend_camera));
+    guard.clear(Permission::Microphone);
+    REQUIRE(query(Permission::Microphone) == backend_microphone);
+    REQUIRE(query(Permission::Camera) == state_different_from(backend_camera));
+}
+
+TEST_CASE("empty nested PermissionsOverride preserves outer entries",
+          "[platform][permissions][override][coverage][issue-649]") {
+    const auto backend_microphone = query(Permission::Microphone);
+    const auto outer_state = state_different_from(backend_microphone);
+
+    PermissionsOverride outer;
+    outer.set(Permission::Microphone, outer_state);
+    {
+        PermissionsOverride inner;
+        REQUIRE(query(Permission::Microphone) == outer_state);
+    }
+    REQUIRE(query(Permission::Microphone) == outer_state);
+}
+
 TEST_CASE("has_platform_backend reports truthfully for the current target",
           "[platform][permissions]") {
 #if defined(PULP_PERMISSIONS_HAS_BACKEND)

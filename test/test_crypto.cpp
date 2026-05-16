@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <vector>
 
@@ -23,6 +25,20 @@ TEST_CASE("SHA-256 binary data", "[crypto][sha256]") {
     REQUIRE(digest.size() == 32);
 }
 
+TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
+          "[crypto][sha256][coverage][issue-641]") {
+    const std::vector<uint8_t> data = {'a', 'b', 'c', 0x00, 'd', 'e', 'f'};
+
+    auto digest = sha256(data.data(), data.size());
+    auto hex = sha256_hex(data.data(), data.size());
+
+    REQUIRE(digest.size() == 32);
+    REQUIRE(hex == "516a5e926ce20c5f4d80f00e1a01abdf14986def6588d6abeed9fce090bc660c");
+    REQUIRE(std::all_of(hex.begin(), hex.end(), [](unsigned char c) {
+        return std::isdigit(c) || (c >= 'a' && c <= 'f');
+    }));
+}
+
 // ── SHA-1 ───────────────────────────────────────────────────────────────
 
 TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
@@ -35,6 +51,17 @@ TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
     REQUIRE(digest == expected);
 }
 
+TEST_CASE("SHA-1 pointer overload preserves embedded NUL bytes",
+          "[crypto][sha1][coverage][issue-641]") {
+    const std::vector<uint8_t> data = {'w', 's', 0x00, 'k', 'e', 'y'};
+    const std::vector<uint8_t> expected = {
+        0xb1, 0x24, 0x2e, 0x4b, 0x0c, 0x53, 0x4d, 0x49, 0x0f, 0x5e,
+        0xf7, 0xee, 0x67, 0xb8, 0x80, 0xf0, 0xa2, 0xb8, 0x8a, 0x6b,
+    };
+
+    REQUIRE(sha1(data.data(), data.size()) == expected);
+}
+
 // ── MD5 ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("MD5 empty string", "[crypto][md5]") {
@@ -45,6 +72,17 @@ TEST_CASE("MD5 empty string", "[crypto][md5]") {
 TEST_CASE("MD5 known value", "[crypto][md5]") {
     auto hex = md5_hex("hello");
     REQUIRE(hex == "5d41402abc4b2a76b9719d911017c592");
+}
+
+TEST_CASE("MD5 binary data returns raw digest bytes",
+          "[crypto][md5][coverage][issue-641]") {
+    const std::vector<uint8_t> data = {0x00, 0xff, 0x10, 0x20, 0x00};
+    const std::vector<uint8_t> expected = {
+        0x96, 0x26, 0x6b, 0xae, 0xb1, 0xeb, 0x57, 0x35,
+        0xd5, 0x51, 0xca, 0xc2, 0xd9, 0xa8, 0x27, 0x75,
+    };
+
+    REQUIRE(md5(data.data(), data.size()) == expected);
 }
 
 // ── AES-256-CBC ─────────────────────────────────────────────────────────
@@ -86,6 +124,27 @@ TEST_CASE("AES empty plaintext", "[crypto][aes]") {
     REQUIRE(decrypted->empty());
 }
 
+TEST_CASE("AES exact block plaintext adds and removes full padding block",
+          "[crypto][aes][coverage][issue-641]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+    std::memset(key, 0x21, 32);
+    std::memset(iv, 0x43, 16);
+
+    std::string plaintext = "sixteen byte txt";
+    REQUIRE(plaintext.size() == 16);
+
+    auto encrypted = aes_encrypt(
+        reinterpret_cast<const uint8_t*>(plaintext.data()),
+        plaintext.size(), key, iv);
+    REQUIRE(encrypted.has_value());
+    REQUIRE(encrypted->size() == 32);
+
+    auto decrypted = aes_decrypt(encrypted->data(), encrypted->size(), key, iv);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(std::string(decrypted->begin(), decrypted->end()) == plaintext);
+}
+
 TEST_CASE("AES decrypt invalid data", "[crypto][aes]") {
     uint8_t key[32] = {};
     uint8_t iv[16] = {};
@@ -103,6 +162,24 @@ TEST_CASE("AES decrypt rejects non-block-aligned ciphertext", "[crypto][aes]") {
     uint8_t ciphertext[15] = {};
 
     auto result = aes_decrypt(ciphertext, sizeof(ciphertext), key, iv);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("AES decrypt rejects invalid PKCS7 padding bytes",
+          "[crypto][aes][coverage][issue-641]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+    std::memset(key, 0x5c, 32);
+    std::memset(iv, 0xa7, 16);
+
+    std::string plaintext = "padding check";
+    auto encrypted = aes_encrypt(
+        reinterpret_cast<const uint8_t*>(plaintext.data()),
+        plaintext.size(), key, iv);
+    REQUIRE(encrypted.has_value());
+
+    encrypted->back() ^= 0x01;
+    auto result = aes_decrypt(encrypted->data(), encrypted->size(), key, iv);
     REQUIRE_FALSE(result.has_value());
 }
 

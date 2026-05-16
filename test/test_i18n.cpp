@@ -11,8 +11,17 @@ TEST_CASE("i18n add and translate", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("greeting", "Hello");
     REQUIRE(strings.translate("greeting") == "Hello");
+    REQUIRE(strings.t("greeting") == "Hello");
     REQUIRE(strings.has("greeting"));
     REQUIRE(strings.count() == 1);
+}
+
+TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n][coverage][issue-656]") {
+    LocalisedStrings strings;
+    strings.add("mode", "old");
+    strings.add("mode", "new");
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("mode") == "new");
 }
 
 TEST_CASE("i18n translate missing key returns key", "[runtime][i18n]") {
@@ -40,6 +49,12 @@ TEST_CASE("i18n argument substitution leaves unmatched placeholders", "[runtime]
 
     REQUIRE(strings.translate("mixed", {"left", "right"}) == "left/{2}/right/left");
     REQUIRE(strings.translate("empty", {""}) == "beforeafter");
+}
+
+TEST_CASE("i18n argument substitution also applies to missing-key fallback",
+          "[runtime][i18n][issue-641]") {
+    LocalisedStrings strings;
+    REQUIRE(strings.translate("missing {0}/{1}/{2}", {"a", "b"}) == "missing a/b/{2}");
 }
 
 TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
@@ -96,6 +111,23 @@ TEST_CASE("i18n .strings parser ignores malformed lines", "[runtime][i18n]") {
     REQUIRE_FALSE(strings.has("missing_value"));
 }
 
+TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
+          "[runtime][i18n][coverage][issue-656]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"label\" = \"First\";\n";
+        f << "\"label\" = \"Second\";\n";
+        f << "\"other\" = \"Value\";\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("label") == "Second");
+    REQUIRE(strings.translate("other") == "Value");
+}
+
 // ── .po file format ─────────────────────────────────────────────────────
 
 TEST_CASE("i18n load .po file", "[runtime][i18n]") {
@@ -141,6 +173,24 @@ TEST_CASE("i18n .po parser handles continuations and empty entries", "[runtime][
     REQUIRE_FALSE(strings.has("empty_translation"));
 }
 
+TEST_CASE("i18n .po parser commits previous entry when new msgid starts",
+          "[runtime][i18n][issue-641]") {
+    TemporaryFile tmp(".po");
+    {
+        std::ofstream f(tmp.path());
+        f << "msgid \"first\"\n";
+        f << "msgstr \"one\"\n";
+        f << "msgid \"second\"\n";
+        f << "msgstr \"two\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_po_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("first") == "one");
+    REQUIRE(strings.translate("second") == "two");
+}
+
 // ── JSON file format ────────────────────────────────────────────────────
 
 TEST_CASE("i18n load JSON file", "[runtime][i18n]") {
@@ -184,6 +234,24 @@ TEST_CASE("i18n JSON parser handles escapes and keyless entries", "[runtime][i18
     REQUIRE(strings.translate("slash") == "path\\file");
 }
 
+TEST_CASE("i18n JSON parser accepts commas and duplicate keys", "[runtime][i18n][coverage][issue-656]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  \"mode\": \"old\",\n";
+        f << "  \"mode\": \"new\",\n";
+        f << "  \"tail\": \"kept\",\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("mode") == "new");
+    REQUIRE(strings.translate("tail") == "kept");
+}
+
 TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
     TemporaryFile tmp(".json");
 
@@ -205,6 +273,25 @@ TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
     REQUIRE(strings.count() == 0);
 }
 
+TEST_CASE("i18n JSON parser allows duplicate keys and trailing comma",
+          "[runtime][i18n][issue-641]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  \"name\": \"Old\",\n";
+        f << "  \"name\": \"New\",\n";
+        f << "  \"last\": \"value\",\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("name") == "New");
+    REQUIRE(strings.translate("last") == "value");
+}
+
 // ── File load failures ──────────────────────────────────────────────────
 
 TEST_CASE("i18n load nonexistent file returns false", "[runtime][i18n]") {
@@ -220,6 +307,18 @@ TEST_CASE("i18n global instance", "[runtime][i18n]") {
     auto& inst = LocalisedStrings::instance();
     inst.add("test_global", "works");
     REQUIRE(tr("test_global") == "works");
+    inst.add("test_global_args", "{0} works");
+    REQUIRE(tr("test_global_args", {"also"}) == "also works");
+    inst.clear();
+}
+
+TEST_CASE("i18n global tr supports argument substitution", "[runtime][i18n][issue-641]") {
+    auto& inst = LocalisedStrings::instance();
+    inst.clear();
+    inst.add("global_args", "{0}:{1}");
+
+    REQUIRE(tr("global_args", {"left", "right"}) == "left:right");
+
     inst.clear();
 }
 
