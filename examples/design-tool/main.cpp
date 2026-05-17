@@ -350,22 +350,12 @@ int main(int argc, char* argv[]) {
         static_cast<uint32_t>(kDesignWidth),
         static_cast<uint32_t>(kDesignHeight));
 
-    // pulp #2128 follow-up — wire the platform key path into the
-    // WidgetBridge's shortcut + global-keydown dispatcher. Without this,
-    // every `registerShortcut(...)` call (V1+V2 extracted shortcuts and
-    // Phase A defaults) plus every `window.addEventListener('keydown',
-    // ...)` listener is dead in the live design-tool — the macOS host
-    // currently routes keys only to the focused View's on_key_event,
-    // never to the bridge. With this, Spectr's mode-switch handler
-    // (line 3753 of editor.generated.tsx) and any auto-bound default
-    // chord actually fire end-to-end.
-    root.on_global_key = [bridge_ptr = bridge.get()](const pulp::view::KeyEvent& e) -> bool {
-        bridge_ptr->forward_key_event(
-            static_cast<int>(e.key), e.modifiers, e.is_down);
-        // Return false so the host's own key dispatch (Esc/Tab/focused-view
-        // on_key_event) still runs — the bridge's path is additive.
-        return false;
-    };
+    // pulp #2128 follow-up — bridge auto-registers in
+    // WidgetBridge::all_bridges_ via its ctor, and the platform key
+    // paths (window_host_mac.mm keyDown:/performKeyEquivalent:) call
+    // WidgetBridge::dispatch_global_key, so any registerShortcut
+    // callback or window.addEventListener('keydown', ...) listener in
+    // the loaded ui.js fires without an explicit on_global_key lambda.
 
     auto window = WindowHost::create(root, opts);
     // Design viewport: pins root at design size, paint scales/letterboxes

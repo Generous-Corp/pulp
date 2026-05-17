@@ -1941,6 +1941,16 @@ target_link_libraries(pulp-test-platform-key-wireup
 catch_discover_tests(pulp-test-platform-key-wireup
     PROPERTIES LABELS "parser-import")
 
+# pulp #2128 follow-up — pin WidgetBridge::dispatch_global_key fan-out
+# across the static all_bridges_ registry. Every live bridge gets the
+# key without any per-app on_global_key wiring; this is the framework
+# contract platform hosts depend on.
+add_executable(pulp-test-widget-bridge-dispatch-global-key
+    test_widget_bridge_dispatch_global_key.cpp)
+target_link_libraries(pulp-test-widget-bridge-dispatch-global-key
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-bridge-dispatch-global-key)
+
 # pulp #1035 — `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary
 # dependency) with a shell-out against the built CLI when available.

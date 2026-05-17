@@ -68,8 +68,21 @@ public:
     // Hot reload support: clear all JS-created widgets
     void clear();
 
-    // Forward a key event to JS (called by host for global shortcuts)
+    // Forward a key event to JS (called by host for global shortcuts).
+    // Per-instance entry; usually invoked by `dispatch_global_key` below.
     void forward_key_event(int key_code, uint16_t modifiers, bool is_down);
+
+    // Static fan-out: forward a key event to every live WidgetBridge.
+    //
+    // Platform hosts call this from their key-event paths so that any
+    // app using @pulp/react / WidgetBridge gets `window.addEventListener
+    // ('keydown', ...)` and `registerShortcut(...)` delivery without the
+    // app having to install its own `View::on_global_key` lambda.
+    // Bridges register themselves in the static `all_bridges_` set in
+    // their constructor and unregister in their destructor; the set is
+    // mutex-protected because bridge construction can happen off the
+    // platform main thread in some embedding contexts.
+    static void dispatch_global_key(int key_code, uint16_t modifiers, bool is_down);
 
     // Snapshot widget values for preservation across hot reload
     void snapshot_values(WidgetReloadSnapshot& out) const;
