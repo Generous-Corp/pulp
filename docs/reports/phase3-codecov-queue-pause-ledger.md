@@ -6617,3 +6617,19 @@ tools/scripts/local_diff_cover.sh pulp-test-runtime-utils`, which reported
 100% diff coverage for the changed `core/runtime/include/pulp/runtime/range.hpp`
 lines. This tranche is held locally and should be aggregated rather than
 submitted individually.
+
+2026-05-17 13:27 PDT: added another local-only held runtime timer tranche for
+the next large coverage batch. Timer tranche
+`feature/phase3-codecov-runtime-timer-batch-708` in
+`/private/tmp/pulp-phase3-codecov-runtime-timer-batch-708` is clean at commit
+`a6866e1dd` (`fix(runtime): allow timer self-stop`). The tranche hardens
+`HighResolutionTimer::stop()` so a callback may stop its own timer without
+attempting to join the current thread, with focused coverage in
+`test/test_runtime.cpp`. Validation passed locally: `git diff --check`,
+configured Debug build, built `pulp-test-runtime`, ran the direct regression
+test, ran focused CTest `HighResolutionTimer` (3/3), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='HighResolutionTimer'
+tools/scripts/local_diff_cover.sh pulp-test-runtime`, which reported 100% diff
+coverage for the changed `core/runtime/src/high_resolution_timer.cpp` lines.
+This tranche is held locally and should be aggregated rather than submitted
+individually.
