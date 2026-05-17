@@ -6449,6 +6449,26 @@ ran focused CTest `MemoryMessageChannel` (16/16), and ran local diff-cover at
 tranche is held locally and should be aggregated rather than submitted
 individually.
 
+2026-05-17 14:44 PDT: added another local-only held audio buffering tranche for
+the next large coverage batch. Buffering reader tranche
+`feature/phase3-codecov-audio-buffering-batch-712` in
+`/private/tmp/pulp-phase3-codecov-audio-buffering-batch-712` is clean at commit
+`418f6509885e` (`fix(audio): reject invalid buffering reader starts`) based on
+current `origin/main` (`5e1880924`). The tranche hardens
+`BufferingReader::start` so invalid channel/frame counts and overflowing sample
+capacities leave the reader stopped without spawning a background thread or
+attempting an oversized allocation. Focused coverage in
+`test/test_buffering_reader.cpp` verifies invalid starts, overflow rejection,
+invalid restarts clearing prior running state, and invalid read destinations.
+Validation passed locally: `git diff --check`, Debug configure, built
+`pulp-test-buffering-reader`, ran direct `*invalid*`, ran focused CTest
+`BufferingReader.*invalid` (3/3), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='BufferingReader.*invalid'
+tools/scripts/local_diff_cover.sh pulp-test-buffering-reader`, which reported
+100% diff coverage for `core/audio/include/pulp/audio/buffering_reader.hpp`.
+This tranche is held locally and should be aggregated rather than submitted
+individually.
+
 2026-05-17 12:38 PDT: added Hilbert's local-only held events tranche for the
 next large coverage batch. EventLoop tranche
 `feature/phase3-codecov-events-loop-batch-702` in
