@@ -10,10 +10,6 @@ namespace pulp::runtime {
 
 namespace {
 
-std::string value_to_json(const choc::value::ValueView& v) {
-    return choc::json::toString(v);
-}
-
 // Build a JSON-RPC response envelope. `id_json` is already JSON (null,
 // a number, or a quoted string). `result_json` is already JSON.
 std::string make_response(std::string_view id_json, std::string_view result_json) {
@@ -56,6 +52,12 @@ std::string make_notification(std::string_view method, std::string_view params_j
     }
     ss << "}";
     return ss.str();
+}
+
+bool has_valid_jsonrpc_version(const choc::value::ValueView& root) {
+    return root.hasObjectMember("jsonrpc")
+        && root["jsonrpc"].isString()
+        && std::string(root["jsonrpc"].getString()) == "2.0";
 }
 
 }  // namespace
@@ -148,12 +150,20 @@ void JsonRpcPeer::handle_object(std::string_view obj_json) {
     const bool has_error = root.hasObjectMember("error");
 
     if (has_method && has_id) {
+        if (!has_valid_jsonrpc_version(root) || !root["method"].isString()) {
+            if (channel_) {
+                channel_->send_text(make_error(choc::json::toString(root["id"]),
+                                               JsonRpcError::invalid_request()));
+            }
+            return;
+        }
         dispatch_request(obj_json);
     } else if (has_method && !has_id) {
-        // Notification
-        if (!root["method"].isString())
+        if (!has_valid_jsonrpc_version(root) || !root["method"].isString()) {
             return;
-        auto method = root["method"].getWithDefault<std::string>("");
+        }
+        // Notification
+        auto method = std::string(root["method"].getString());
         JsonRpcNotificationHandler handler;
         {
             std::lock_guard<std::mutex> lock(mutex_);

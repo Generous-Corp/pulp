@@ -707,6 +707,35 @@ TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without r
     REQUIRE(replies.empty());
 }
 
+TEST_CASE("JsonRpcPeer rejects invalid request envelopes before dispatch",
+          "[json_rpc][coverage][phase3][batch-704]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    int empty_method_calls = 0;
+    server.register_method("", [&](std::string_view) {
+        ++empty_method_calls;
+        return JsonRpcResult::ok("true");
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":7,"method":123,"params":[]})json"));
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"1.0","id":8,"method":"","params":[]})json"));
+
+    REQUIRE(replies.size() == 2);
+    REQUIRE(replies[0].find(R"("id":7)") != std::string::npos);
+    REQUIRE(replies[0].find("-32600") != std::string::npos);
+    REQUIRE(replies[1].find(R"("id":8)") != std::string::npos);
+    REQUIRE(replies[1].find("-32600") != std::string::npos);
+    REQUIRE(empty_method_calls == 0);
+}
+
 TEST_CASE("JsonRpcPeer destructor releases the channel callback",
           "[json_rpc][coverage][phase3]") {
     auto pair = MemoryMessageChannel::make_pair();
@@ -979,4 +1008,28 @@ TEST_CASE("JsonRpcPeer escapes outbound method and notification names",
 
     REQUIRE(client.notify(notification_name, R"([1])"));
     REQUIRE(wait_until([&] { return notification_params == "[1]"; }));
+}
+
+TEST_CASE("JsonRpcPeer drops invalid notifications without invoking handlers",
+          "[json_rpc][coverage][phase3][batch-704]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string unexpected_reply;
+    pair.first->on_message([&](const Message& message) {
+        unexpected_reply.assign(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    int empty_method_calls = 0;
+    server.on_notification("", [&](std::string_view) {
+        ++empty_method_calls;
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","method":false,"params":[]})json"));
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"1.0","method":"","params":[]})json"));
+
+    REQUIRE(unexpected_reply.empty());
+    REQUIRE(empty_method_calls == 0);
 }
