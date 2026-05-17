@@ -16,6 +16,7 @@ based on what's observable.
 | A running app + a node id + a scalar / geometry of interest | **Runtime trace** | `Motion.startTrace` over the inspector wire |
 | A captured frame sequence (no app instrumentation available) | **Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
 | A previously recorded `.motion.jsonl` fixture | **Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
+| An interaction that drives the suspect motion | **Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
 | Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both** | Record a fixture from the import, assert timing/monotonicity |
 
 ## Path A — Runtime trace
@@ -164,6 +165,49 @@ REQUIRE(diff.matches());  // or inspect diff.differences on failure
 
 `FixtureMatchOptions { component_epsilon, timing_epsilon_seconds,
 require_same_event_count }` controls tolerances.
+
+## Path D — Input recording and replay
+
+When the bug is "what the user did caused the wrong motion", record the
+interaction alongside the motion stream so a fresh tree can replay the same
+sequence deterministically.
+
+```cpp
+// Recording — paired with whatever motion sinks you already have.
+{
+    auto recorder = motion::make_input_recorder("/tmp/card-open.motion.jsonl");
+    root.simulate_hover({150, 150});
+    clock.tick(1.0f / 60.0f);
+    root.simulate_click({150, 150});
+    // ... drive your animation ...
+}   // RAII: destructor closes the sink + flips recording off.
+
+// Replay against a fresh tree on a fresh FrameClock.
+motion::replay_inputs("/tmp/card-open.motion.jsonl", fresh_root, fresh_clock);
+```
+
+`make_input_recorder(path)` installs a `make_fixture_sink(path)` AND flips
+the process-wide `input_recording_enabled()` flag. `View::simulate_*` checks
+that flag (a single relaxed atomic load, off by default) and emits a
+`SampleEvent::Kind::Input` carrying the `input_kind` ("click" / "drag" /
+"hover"), the recorded target's `View::id()`, and the root-space coords on
+the existing `components` map (sorted by name: `x`/`y` for click+hover;
+`start_x`/`start_y`/`end_x`/`end_y`/`steps` for drag).
+
+`replay_inputs(path, root, clock)`:
+
+- Walks every `Input` event in fixture order.
+- Advances `clock` to match the recorded `t_seconds` (first input anchors,
+  subsequent inputs tick by the delta).
+- Dispatches each input through `root` (not the recorded `view_id` — root
+  coords with `hit_test` land on the same descendant).
+- Returns the number of inputs replayed.
+
+The motion stream that emerges — when paired with the same animation
+primitives — matches the originally-recorded one within
+`FixtureMatchOptions::timing_epsilon_seconds`. Use the ID-keyed
+`assert_matches` for the comparison so reordered identical bursts don't
+false-fail.
 
 ## Agent contract
 

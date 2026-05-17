@@ -261,6 +261,64 @@ if (!diff.matches()) {
 `FixtureMatchOptions` controls per-component epsilon, timing epsilon, and
 whether event counts must match exactly.
 
+## Input recording and replay
+
+`View::simulate_click`, `simulate_drag`, and `simulate_hover` can be recorded
+into the same fixture format that carries motion samples. The recorded
+interactions can later be replayed against a fresh view tree on a scripted
+`FrameClock` to reproduce the original motion stream deterministically. Off by
+default everywhere — recording is opt-in.
+
+```cpp
+#include <pulp/view/motion.hpp>
+
+// Recording — paired with whatever motion sinks you already have.
+{
+    auto recorder = pulp::view::motion::make_input_recorder(
+        "/tmp/card-open.motion.jsonl");
+
+    root_view.simulate_hover({150, 150});
+    clock.tick(1.0f / 60.0f);
+    root_view.simulate_click({150, 150});
+    // ... drive your animation ...
+}   // recorder destructor closes the fixture sink + flips recording off.
+
+// Replay — into a brand-new view tree and clock.
+pulp::view::motion::replay_inputs(
+    "/tmp/card-open.motion.jsonl", fresh_root_view, fresh_clock);
+```
+
+A recorded `Input` event rides in the same JSONL alongside `baseline` /
+`sample` / `start` / `end`, with two extra fields:
+
+```jsonc
+{"kind":"input","view":"input","metric":"click",
+ "t":0.05,"frame":3,"precision":3,"trace_id":0,"metric_id":0,"burst_id":0,
+ "components":{"x":150,"y":150},"deltas":{},
+ "input_kind":"click","view_id":"target"}
+```
+
+`view_id` is the recorded target's `View::id()` (empty when the event didn't
+land on an id-bearing view). `components` carries root-space coordinates: `x`
+/ `y` for click and hover; `start_x` / `start_y` / `end_x` / `end_y` / `steps`
+for drag. Existing motion lines are untouched — input fields are only
+serialized when `kind == Input` so pre-Phase-10 fixtures round-trip
+byte-for-byte.
+
+`replay_inputs` walks the fixture, advances the supplied `FrameClock` to each
+input's recorded timestamp (delta-based: the first input anchors on its
+recorded `t`, subsequent inputs tick by the delta), resolves the target by
+`view_id` for diagnostic continuity, and dispatches through `root_view` so
+its `hit_test()` lands on the same descendant. Sinks installed on the
+Coordinator (typically the same `make_fixture_sink` paired with the
+recorder) re-capture the motion stream the replayed inputs produce, so a
+recorded fixture replayed against a fresh tree yields a byte-equivalent
+motion fixture (modulo timing tolerance from `FixtureMatchOptions`).
+
+The non-recording cost is a single relaxed atomic load
+(`input_recording_enabled()`) on each `simulate_*` call, so leaving the
+hooks in production code is free.
+
 ## Assertion helpers
 
 Use these for unit tests and for the assertion CLI. Each takes a `ScalarSample`
