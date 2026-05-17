@@ -195,6 +195,20 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_inspect_params",
         "pulp_inspect_performance",
         "pulp_inspect_screenshot",
+        // pulp #2153: pulp_motion_* wrappers expose the Motion.*
+        // inspector protocol as first-class MCP tools so an LLM can
+        // discover motion observability from tools/list without
+        // resorting to pulp_inspect_evaluate or `nc localhost 9147`.
+        "pulp_motion_disable_cost",
+        "pulp_motion_enable_cost",
+        "pulp_motion_list_traces",
+        "pulp_motion_load_fixture",
+        "pulp_motion_pause",
+        "pulp_motion_play",
+        "pulp_motion_scrub_to",
+        "pulp_motion_snapshot",
+        "pulp_motion_start_trace",
+        "pulp_motion_stop_trace",
         "pulp_screenshot",
         "pulp_simulate_click",
         "pulp_status",
@@ -495,6 +509,165 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
     REQUIRE(tools_list_wire.back() == '}');
     REQUIRE(tools_list_wire.find("\"tools\":[") != std::string::npos);
     REQUIRE(tools_list_wire.find("pulp_build") != std::string::npos);
+}
+
+// pulp #2153: every pulp_motion_* tool is recognised by the dispatcher
+// (no "Unknown tool" fall-through) AND routes through the same
+// project-root gate that pulp_inspect_* uses. From a tempdir all 10
+// tools must short-circuit with "Error: not in a Pulp project" before
+// shelling out to `pulp inspect`. This proves the dispatch arm exists
+// and the tool name is registered.
+TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
+          "[mcp][tools][motion][issue-2153]") {
+    TempDir temp;
+    ScopedCurrentPath cwd(temp.path);
+
+    // Tools that take no params at all — invoke with empty arguments.
+    const auto no_param_tools = {
+        "pulp_motion_snapshot",
+        "pulp_motion_list_traces",
+        "pulp_motion_play",
+        "pulp_motion_pause",
+        "pulp_motion_enable_cost",
+        "pulp_motion_disable_cost",
+    };
+    int id = 80;
+    for (const char* tool : no_param_tools) {
+        INFO("motion tool (no params): " << tool);
+        auto response = handle_request(tool_call(std::to_string(id++), tool));
+        // Reject reason proves the dispatcher recognised the tool and
+        // reached find_project_root() before shelling out.
+        require_contains(response, "Error: not in a Pulp project");
+        // Guard against the silent-regression case where the dispatch
+        // arm gets removed but the tools/list registration stays.
+        REQUIRE(response.find("Unknown tool") == std::string::npos);
+    }
+
+    // Tools that take params — confirm the same routing with a
+    // representative non-empty argument shape.
+    auto start_trace = handle_request(tool_call(
+        std::to_string(id++), "pulp_motion_start_trace",
+        R"JSON({"view_name":"Card","fps":30,"metrics":[{"kind":"geometry","name":"frame","node_id":"card"}]})JSON"));
+    require_contains(start_trace, "Error: not in a Pulp project");
+    REQUIRE(start_trace.find("Unknown tool") == std::string::npos);
+
+    auto stop_trace = handle_request(tool_call(
+        std::to_string(id++), "pulp_motion_stop_trace",
+        R"JSON({"trace_id":1})JSON"));
+    require_contains(stop_trace, "Error: not in a Pulp project");
+    REQUIRE(stop_trace.find("Unknown tool") == std::string::npos);
+
+    auto load_fixture = handle_request(tool_call(
+        std::to_string(id++), "pulp_motion_load_fixture",
+        R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
+    require_contains(load_fixture, "Error: not in a Pulp project");
+    REQUIRE(load_fixture.find("Unknown tool") == std::string::npos);
+
+    auto scrub_to = handle_request(tool_call(
+        std::to_string(id++), "pulp_motion_scrub_to",
+        R"JSON({"frame":42})JSON"));
+    require_contains(scrub_to, "Error: not in a Pulp project");
+    REQUIRE(scrub_to.find("Unknown tool") == std::string::npos);
+}
+
+// pulp #2153: code-shape check that the 10 pulp_motion_* MCP tools
+// map to the right Motion.* inspector protocol method names. Source
+// text assertion mirrors the existing inspector-mapping test — the
+// actual round-trip lands at MotionInspector::handle /
+// MotionScrubber::handle, which run inside the inspected process and
+// already have their own dedicated test coverage in
+// test_motion_inspector.cpp / test_motion_scrubber.cpp.
+TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
+          "[mcp][tools][motion][issue-2153]") {
+    auto src_path = std::filesystem::path(__FILE__).parent_path().parent_path()
+                    / "tools" / "mcp" / "pulp_mcp.cpp";
+    REQUIRE(std::filesystem::exists(src_path));
+
+    std::ifstream in(src_path);
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string src = buf.str();
+
+    const std::pair<const char*, const char*> mappings[] = {
+        {"pulp_motion_start_trace",   "Motion.startTrace"},
+        {"pulp_motion_stop_trace",    "Motion.stopTrace"},
+        {"pulp_motion_snapshot",      "Motion.snapshot"},
+        {"pulp_motion_list_traces",   "Motion.listTraces"},
+        {"pulp_motion_load_fixture",  "Motion.loadFixture"},
+        {"pulp_motion_scrub_to",      "Motion.scrubTo"},
+        {"pulp_motion_play",          "Motion.play"},
+        {"pulp_motion_pause",         "Motion.pause"},
+        {"pulp_motion_enable_cost",   "Motion.enableCost"},
+        {"pulp_motion_disable_cost",  "Motion.disableCost"},
+    };
+    for (const auto& [tool, method] : mappings) {
+        INFO("motion tool=" << tool << " method=" << method);
+        REQUIRE(src.find(tool) != std::string::npos);
+        REQUIRE(src.find(method) != std::string::npos);
+    }
+}
+
+// pulp #2153: confirm every pulp_motion_* tool advertised in
+// tools/list also exposes a discoverable input schema with descriptive
+// titles/descriptions. An LLM consumer pulls these directly from
+// tools/list to decide which tool to call; a missing description is
+// invisible breakage.
+TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
+          "[mcp][tools][motion][issue-2153]") {
+    auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":99,"method":"tools/list"})JSON");
+
+    // Each motion tool entry must include `"description":` with a
+    // non-empty string and `"inputSchema":{"type":"object"`. We
+    // assert both by searching for the tool name's name-key window
+    // and validating the immediate vicinity.
+    const auto tools_with_required_params = {
+        std::pair{"pulp_motion_start_trace",  "view_name"},
+        std::pair{"pulp_motion_stop_trace",   "trace_id"},
+        std::pair{"pulp_motion_load_fixture", "path"},
+        std::pair{"pulp_motion_scrub_to",     "frame"},
+    };
+    for (const auto& [tool, required] : tools_with_required_params) {
+        INFO("tool with required param: " << tool << " requires " << required);
+        std::string name_key = std::string(R"JSON("name":")JSON") + tool + R"JSON(")JSON";
+        auto pos = tools.find(name_key);
+        REQUIRE(pos != std::string::npos);
+        // Look within the next ~1500 chars for both a description
+        // field and the required array mentioning the expected
+        // param. Tools may have additional required fields beyond
+        // the one we're spot-checking (e.g. start_trace requires
+        // both view_name AND metrics), so we look for the param
+        // name as a quoted token inside any `"required":[...]`
+        // window rather than a single-element exact match.
+        auto window = tools.substr(pos, 1500);
+        REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
+        auto req_pos = window.find(R"JSON("required":[)JSON");
+        REQUIRE(req_pos != std::string::npos);
+        auto req_end = window.find(']', req_pos);
+        REQUIRE(req_end != std::string::npos);
+        auto required_window = window.substr(req_pos, req_end - req_pos + 1);
+        std::string needle = std::string("\"") + required + "\"";
+        INFO("required_window=" << required_window << " needle=" << needle);
+        REQUIRE(required_window.find(needle) != std::string::npos);
+    }
+
+    // Param-less tools still need a description + an inputSchema object.
+    const auto param_less_tools = {
+        "pulp_motion_snapshot",
+        "pulp_motion_list_traces",
+        "pulp_motion_play",
+        "pulp_motion_pause",
+        "pulp_motion_enable_cost",
+        "pulp_motion_disable_cost",
+    };
+    for (const char* tool : param_less_tools) {
+        INFO("param-less tool: " << tool);
+        std::string name_key = std::string(R"JSON("name":")JSON") + tool + R"JSON(")JSON";
+        auto pos = tools.find(name_key);
+        REQUIRE(pos != std::string::npos);
+        auto window = tools.substr(pos, 600);
+        REQUIRE(window.find(R"JSON("description":")JSON") != std::string::npos);
+        REQUIRE(window.find(R"JSON("inputSchema":{"type":"object")JSON") != std::string::npos);
+    }
 }
 
 TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
