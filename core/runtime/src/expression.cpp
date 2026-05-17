@@ -86,8 +86,20 @@ private:
         // Number
         if (pos_ < input_.size() && (std::isdigit(input_[pos_]) || input_[pos_] == '.')) {
             size_t start = pos_;
-            while (pos_ < input_.size() && (std::isdigit(input_[pos_]) || input_[pos_] == '.'))
+            bool has_digits = false;
+            while (pos_ < input_.size() && std::isdigit(input_[pos_])) {
                 pos_++;
+                has_digits = true;
+            }
+            if (pos_ < input_.size() && input_[pos_] == '.') {
+                pos_++;
+                while (pos_ < input_.size() && std::isdigit(input_[pos_])) {
+                    pos_++;
+                    has_digits = true;
+                }
+            }
+            if (!has_digits) throw std::runtime_error("Malformed number");
+
             // Handle scientific notation
             if (pos_ < input_.size() && (input_[pos_] == 'e' || input_[pos_] == 'E')) {
                 pos_++;

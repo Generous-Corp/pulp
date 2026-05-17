@@ -490,6 +490,9 @@ TEST_CASE("Expression rejects malformed calls and trailing tokens", "[runtime][e
     REQUIRE_FALSE(pulp::runtime::evaluate("unknown(1)").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("min(1)").has_value());
     REQUIRE_FALSE(pulp::runtime::evaluate("1 2").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1.2.3").has_value());
+
+    REQUIRE_THAT(*pulp::runtime::evaluate(".5 + 1."), WithinAbs(1.5, 1e-10));
 }
 
 TEST_CASE("Expression rejects malformed numeric and grouping syntax",
