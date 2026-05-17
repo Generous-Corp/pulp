@@ -10,6 +10,7 @@
 #include <pulp/inspect/inspector_server.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -256,4 +257,57 @@ TEST_CASE("Unknown Motion.* method returns an error", "[motion-inspector]") {
     MotionInspector mi(s.parent, /*server=*/nullptr);
     auto resp = mi.handle(make_request(1, "Motion.nope"));
     REQUIRE(resp.is_error);
+}
+
+// ── Bug-sweep regression — scroll-geometry inspector route ────────────
+
+TEST_CASE("Motion.startTrace registers a scroll-geometry trace by node id",
+          "[motion-inspector][bug-sweep]") {
+    Coordinator::instance().reset();
+    FrameClock clock;
+    Coordinator::instance().bind(clock);
+
+    pulp::view::View parent;
+    parent.set_bounds({0.f, 0.f, 400.f, 300.f});
+    auto scroll = std::make_unique<pulp::view::ScrollView>();
+    scroll->set_id("list");
+    scroll->set_bounds({0.f, 0.f, 200.f, 200.f});
+    scroll->set_content_size({800.f, 1600.f});
+    parent.add_child(std::move(scroll));
+
+    MotionInspector mi(parent, /*server=*/nullptr);
+
+    // Default props (empty array) — exercises the empty-array branch.
+    const std::string params = R"({
+        "view_name": "Panel", "fps": 60,
+        "metrics": [{ "kind": "scroll-geometry", "name": "scroll",
+                      "node_id": "list" }]
+    })";
+    auto resp = mi.handle(make_request(1, "Motion.startTrace", params));
+    REQUIRE_FALSE(resp.is_error);
+
+    // Explicit camelCase property names — exercises parse_scroll_property.
+    const std::string params2 = R"({
+        "view_name": "Panel", "fps": 60,
+        "metrics": [{ "kind": "scrollGeometry", "name": "scroll2",
+                      "node_id": "list",
+                      "properties": ["contentOffsetY", "visibleRectHeight"] }]
+    })";
+    auto resp2 = mi.handle(make_request(2, "Motion.startTrace", params2));
+    REQUIRE_FALSE(resp2.is_error);
+
+    // Pointing at a non-ScrollView surfaces a clean error rather than
+    // dynamic_cast-then-crash.
+    auto card = std::make_unique<pulp::view::View>();
+    card->set_id("card");
+    parent.add_child(std::move(card));
+    const std::string params3 = R"({
+        "view_name": "X", "fps": 60,
+        "metrics": [{ "kind": "scroll-geometry", "name": "s", "node_id": "card" }]
+    })";
+    auto resp3 = mi.handle(make_request(3, "Motion.startTrace", params3));
+    REQUIRE(resp3.is_error);
+    REQUIRE(resp3.params_json.find("not a ScrollView") != std::string::npos);
+
+    Coordinator::instance().reset();
 }

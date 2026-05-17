@@ -4,6 +4,7 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/motion_cost.hpp>
+#include <pulp/view/ui_components.hpp>  // ScrollView (Motion.startTrace scroll-geometry)
 #include <pulp/view/view.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -48,6 +49,29 @@ GeometrySpace parse_geometry_space(std::string_view s) {
     if (s == "window")      return GeometrySpace::Window;
     if (s == "screen")      return GeometrySpace::Screen;
     return GeometrySpace::Window;
+}
+
+// Phase 11c — camelCase property names mirror what TraceBuilder emits
+// into fixtures, so callers can pass the same names back through the
+// wire. Unknown names fall back to ContentOffsetX silently (defensive;
+// the inspector should not crash on a typo).
+pulp::view::motion::ScrollProperty parse_scroll_property(std::string_view s) {
+    using SP = pulp::view::motion::ScrollProperty;
+    if (s == "contentOffsetX")   return SP::ContentOffsetX;
+    if (s == "contentOffsetY")   return SP::ContentOffsetY;
+    if (s == "visibleRectMinX")  return SP::VisibleRectMinX;
+    if (s == "visibleRectMinY")  return SP::VisibleRectMinY;
+    if (s == "visibleRectWidth") return SP::VisibleRectWidth;
+    if (s == "visibleRectHeight")return SP::VisibleRectHeight;
+    if (s == "contentSizeWidth") return SP::ContentSizeWidth;
+    if (s == "contentSizeHeight")return SP::ContentSizeHeight;
+    if (s == "insetTop")         return SP::InsetTop;
+    if (s == "insetBottom")      return SP::InsetBottom;
+    if (s == "insetLeft")        return SP::InsetLeft;
+    if (s == "insetRight")       return SP::InsetRight;
+    if (s == "scrollableMaxX")   return SP::ScrollableMaxX;
+    if (s == "scrollableMaxY")   return SP::ScrollableMaxY;
+    return SP::ContentOffsetX;
 }
 
 GeometrySource parse_geometry_source(std::string_view s) {
@@ -206,6 +230,40 @@ InspectorMessage MotionInspector::start_trace(const InspectorMessage& req) {
                                     ? parse_geometry_source(m["source"].getString())
                                     : GeometrySource::Layout;
             builder.geometry(name, *target, std::move(props), space, source);
+        } else if (kind == "scroll-geometry" || kind == "scrollGeometry") {
+            // Phase 11c — scroll geometry tracing over a ScrollView.
+            // Accept both "scroll-geometry" (kebab-case, matches our
+            // other inspector spellings) and the camelCase form Swift
+            // / Kotlin facades pass through verbatim.
+            if (!m.hasObjectMember("node_id")) {
+                return make_error(req.id,
+                    "Motion.startTrace: scroll-geometry requires 'node_id'");
+            }
+            std::string node_id(m["node_id"].getString());
+            auto* view_target = pulp::view::ViewInspector::find_by_id(*root_, node_id);
+            if (!view_target) {
+                return make_error(req.id,
+                                  "Motion.startTrace: node not found: " + node_id);
+            }
+            auto* scroll_target = dynamic_cast<pulp::view::ScrollView*>(view_target);
+            if (!scroll_target) {
+                return make_error(req.id,
+                    "Motion.startTrace: scroll-geometry node is not a ScrollView: "
+                    + node_id);
+            }
+            std::vector<pulp::view::motion::ScrollProperty> props;
+            if (m.hasObjectMember("properties") && m["properties"].isArray()) {
+                const auto& parr = m["properties"];
+                for (uint32_t j = 0; j < parr.size(); ++j) {
+                    props.push_back(parse_scroll_property(parr[j].getString()));
+                }
+            }
+            // Empty props → builder's default 4-property set.
+            if (props.empty()) {
+                builder.scroll_geometry(name, *scroll_target);
+            } else {
+                builder.scroll_geometry(name, *scroll_target, std::move(props));
+            }
         } else {
             return make_error(req.id,
                               "Motion.startTrace: unsupported metric kind: " + kind);
