@@ -4,6 +4,8 @@
 #include <pulp/runtime/network_stream.hpp>
 #include <pulp/runtime/socket.hpp>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -20,6 +22,15 @@ std::optional<std::uint16_t> try_bind_loopback(Socket& server, std::uint16_t por
     if (!server.bind("127.0.0.1", port)) return std::nullopt;
     if (!server.listen(1)) return std::nullopt;
     return port;
+}
+
+std::optional<std::uint16_t> try_bind_udp(Socket& socket,
+                                          std::uint16_t start,
+                                          std::string_view address = "127.0.0.1") {
+    for (std::uint16_t port = start; port < start + 120; ++port) {
+        if (socket.bind(address, port)) return port;
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -42,6 +53,23 @@ TEST_CASE("IPv4 validation rejects malformed addresses",
     REQUIRE_FALSE(is_valid_ipv4("1.2.3"));
     REQUIRE_FALSE(is_valid_ipv4("1.2.3.4.5"));
     REQUIRE_FALSE(is_valid_ipv4(" 127.0.0.1"));
+}
+
+TEST_CASE("IPv4 validation rejects decorated dotted quads",
+          "[network_stream][ip-address][phase3]") {
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1:80"));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1/32"));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1\n"));
+    REQUIRE_FALSE(is_valid_ipv4("\t127.0.0.1"));
+    REQUIRE_FALSE(is_valid_ipv4("http://127.0.0.1"));
+}
+
+TEST_CASE("IPv4 validation accepts private network examples",
+          "[network_stream][ip-address][phase3]") {
+    REQUIRE(is_valid_ipv4("10.0.0.1"));
+    REQUIRE(is_valid_ipv4("172.16.0.1"));
+    REQUIRE(is_valid_ipv4("192.168.0.1"));
+    REQUIRE(is_valid_ipv4("169.254.10.20"));
 }
 
 TEST_CASE("local IPv4 helpers return valid fallback or interface addresses",
@@ -234,6 +262,278 @@ TEST_CASE("TcpStream detects peer-close on the next read",
         std::this_thread::sleep_for(5ms);
     }
     REQUIRE(saw_close);
+
+    stream.close();
+    server_thread.join();
+}
+
+// ── Socket edge cases ───────────────────────────────────────────────────
+
+TEST_CASE("Socket reports failures before create",
+          "[network_stream][socket][phase3]") {
+    Socket socket;
+    std::array<std::uint8_t, 4> buffer{1, 2, 3, 4};
+    std::string from = "unchanged";
+    std::uint16_t from_port = 99;
+
+    REQUIRE_FALSE(socket.is_open());
+    REQUIRE_FALSE(socket.bind("127.0.0.1", 1));
+    REQUIRE_FALSE(socket.listen());
+    REQUIRE_FALSE(socket.accept().has_value());
+    REQUIRE(socket.send(buffer.data(), buffer.size()) == -1);
+    REQUIRE(socket.send("payload") == -1);
+    REQUIRE(socket.send_to(buffer.data(), buffer.size(), "127.0.0.1", 1) == -1);
+    REQUIRE(socket.receive(buffer.data(), buffer.size()) == -1);
+    REQUIRE(socket.receive_from(buffer.data(), buffer.size(), from, from_port) == -1);
+    REQUIRE(from == "unchanged");
+    REQUIRE(from_port == 99);
+}
+
+TEST_CASE("Socket create close and recreate toggles open state",
+          "[network_stream][socket][phase3]") {
+    Socket socket;
+    REQUIRE(socket.create(SocketType::UDP));
+    REQUIRE(socket.is_open());
+    socket.close();
+    REQUIRE_FALSE(socket.is_open());
+
+    REQUIRE(socket.create(SocketType::TCP));
+    REQUIRE(socket.is_open());
+    socket.close();
+    socket.close();
+    REQUIRE_FALSE(socket.is_open());
+}
+
+TEST_CASE("UDP socket round-trips datagrams on loopback",
+          "[network_stream][socket][udp][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp(receiver, 45601);
+    if (!port) {
+        SUCCEED("could not bind UDP loopback; skipping");
+        return;
+    }
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 5> payload{'p', 'u', 'l', 'p', '!'};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port)
+            == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 16> buffer{};
+    std::string from;
+    std::uint16_t from_port = 0;
+    auto received = receiver.receive_from(buffer.data(), buffer.size(), from, from_port);
+    REQUIRE(received == static_cast<int>(payload.size()));
+    REQUIRE(std::equal(payload.begin(), payload.end(), buffer.begin()));
+    REQUIRE(from == "127.0.0.1");
+    REQUIRE(from_port != 0);
+}
+
+TEST_CASE("UDP bind accepts empty address as wildcard",
+          "[network_stream][socket][udp][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp(receiver, 45731, "");
+    if (!port) {
+        SUCCEED("could not bind UDP wildcard; skipping");
+        return;
+    }
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 3> payload{'a', 'n', 'y'};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port)
+            == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 8> buffer{};
+    std::string from;
+    std::uint16_t from_port = 0;
+    REQUIRE(receiver.receive_from(buffer.data(), buffer.size(), from, from_port)
+            == static_cast<int>(payload.size()));
+    REQUIRE(std::equal(payload.begin(), payload.end(), buffer.begin()));
+}
+
+TEST_CASE("UDP socket move construction transfers the descriptor",
+          "[network_stream][socket][udp][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp(receiver, 45861);
+    if (!port) {
+        SUCCEED("could not bind UDP loopback; skipping");
+        return;
+    }
+
+    Socket moved(std::move(receiver));
+    REQUIRE_FALSE(receiver.is_open());
+    REQUIRE(moved.is_open());
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 1> payload{0x42};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port)
+            == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 4> buffer{};
+    std::string from;
+    std::uint16_t from_port = 0;
+    REQUIRE(moved.receive_from(buffer.data(), buffer.size(), from, from_port) == 1);
+    REQUIRE(buffer[0] == 0x42);
+}
+
+TEST_CASE("UDP socket move assignment transfers the descriptor",
+          "[network_stream][socket][udp][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp(receiver, 45991);
+    if (!port) {
+        SUCCEED("could not bind UDP loopback; skipping");
+        return;
+    }
+
+    Socket moved;
+    REQUIRE(moved.create(SocketType::UDP));
+    moved = std::move(receiver);
+    REQUIRE_FALSE(receiver.is_open());
+    REQUIRE(moved.is_open());
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 2> payload{9, 7};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port)
+            == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 4> buffer{};
+    std::string from;
+    std::uint16_t from_port = 0;
+    REQUIRE(moved.receive_from(buffer.data(), buffer.size(), from, from_port)
+            == static_cast<int>(payload.size()));
+    REQUIRE(buffer[0] == 9);
+    REQUIRE(buffer[1] == 7);
+}
+
+TEST_CASE("UDP socket self move assignment preserves descriptor",
+          "[network_stream][socket][udp][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp(receiver, 46121);
+    if (!port) {
+        SUCCEED("could not bind UDP loopback; skipping");
+        return;
+    }
+
+    auto* same = &receiver;
+    receiver = std::move(*same);
+    REQUIRE(receiver.is_open());
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 1> payload{0x7f};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port)
+            == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 4> buffer{};
+    std::string from;
+    std::uint16_t from_port = 0;
+    REQUIRE(receiver.receive_from(buffer.data(), buffer.size(), from, from_port) == 1);
+    REQUIRE(buffer[0] == 0x7f);
+}
+
+TEST_CASE("UDP socket rejects TCP-only listen and accept",
+          "[network_stream][socket][udp][phase3]") {
+    Socket socket;
+    REQUIRE(socket.create(SocketType::UDP));
+    REQUIRE_FALSE(socket.listen());
+    REQUIRE_FALSE(socket.accept().has_value());
+}
+
+TEST_CASE("TcpStream can wrap an accepted Socket",
+          "[network_stream][tcp][socket][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+
+    std::uint16_t port = 0;
+    for (std::uint16_t candidate = 46251; candidate < 46330; ++candidate) {
+        if (auto bound = try_bind_loopback(listener, candidate)) {
+            port = *bound;
+            break;
+        }
+    }
+    if (port == 0) {
+        SUCCEED("could not bind loopback port; skipping");
+        return;
+    }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> done{false};
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        TcpStream stream(std::move(*accepted));
+        std::array<std::uint8_t, 8> buffer{};
+        auto read = stream.read(buffer.data(), buffer.size());
+        if (read.ok()) {
+            const std::array<std::uint8_t, 2> reply{'o', 'k'};
+            auto written = stream.write(reply.data(), reply.size());
+            done.store(written.ok());
+        }
+        stream.close();
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", port));
+    REQUIRE(client.send("hello") == 5);
+    std::array<std::uint8_t, 4> reply{};
+    REQUIRE(client.receive(reply.data(), reply.size()) == 2);
+    REQUIRE(reply[0] == 'o');
+    REQUIRE(reply[1] == 'k');
+    client.close();
+
+    server_thread.join();
+    REQUIRE(done.load());
+}
+
+TEST_CASE("TcpStream zero-byte I/O succeeds while connected",
+          "[network_stream][tcp][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+
+    std::uint16_t port = 0;
+    for (std::uint16_t candidate = 46331; candidate < 46410; ++candidate) {
+        if (auto bound = try_bind_loopback(listener, candidate)) {
+            port = *bound;
+            break;
+        }
+    }
+    if (port == 0) {
+        SUCCEED("could not bind loopback port; skipping");
+        return;
+    }
+
+    std::atomic<bool> ready{false};
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (accepted) {
+            std::this_thread::sleep_for(100ms);
+            accepted->close();
+        }
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    TcpStream stream;
+    REQUIRE(stream.connect("127.0.0.1", port));
+    std::array<std::uint8_t, 1> byte{0xaa};
+    auto zero_read = stream.read(byte.data(), 0);
+    auto zero_write = stream.write(byte.data(), 0);
+    REQUIRE(zero_read.ok());
+    REQUIRE(zero_read.bytes == 0);
+    REQUIRE(zero_write.ok());
+    REQUIRE(zero_write.bytes == 0);
+    REQUIRE(byte[0] == 0xaa);
 
     stream.close();
     server_thread.join();
