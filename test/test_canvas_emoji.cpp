@@ -65,10 +65,14 @@ std::filesystem::path validation_dir() {
 }
 
 bool png_writes_enabled() {
+    // Default off — CI doesn't need the PNGs. Set
+    // `PULP_EMOJI_TEST_WRITE_PNGS=1` locally when iterating on the
+    // rendering path and want to eyeball the output.
     if (const char* env = std::getenv("PULP_EMOJI_TEST_WRITE_PNGS")) {
-        return std::string(env) != "0";
+        std::string v(env);
+        return v == "1" || v == "true" || v == "TRUE" || v == "yes";
     }
-    return true;
+    return false;
 }
 
 void write_surface_png(SkSurface& surface, const std::string& name) {

@@ -357,20 +357,11 @@ private:
     float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px (pulp #927)
     // pulp #1737 — OpenType feature flags (e.g. tnum / smcp / onum /
     // lnum / pnum) for CSS font-variant. Captured by set_font_features
-    // / cleared by clear_font_features. Flushed into SkShaper's 8-arg
-    // shape() overload at fill_text / stroke_text time. Empty vector
-    // → SkShaper's default font features apply.
+    // / cleared by clear_font_features. Applied via
+    // `TextStyle::addFontFeature` in `make_paragraph()` at
+    // fill_text / stroke_text / measure_text time. Empty vector → no
+    // OpenType features set.
     std::vector<FontFeature> font_features_;
-    // Internal helper — routes a shape() call through the 8-arg
-    // overload + trivial RunIterators so font_features_ reaches
-    // HarfBuzz. Defined in skia_canvas.cpp; declared here to keep
-    // private. Forward-declared types (SkShaper, SkFont,
-    // SkTextBlobBuilderRunHandler) come from existing #includes.
-    void shape_with_features(class SkShaper& shaper,
-                             const std::string& text,
-                             const class SkFont& font,
-                             bool ltr,
-                             class SkTextBlobBuilderRunHandler* handler);
 
     // pulp #1737 / #1515 — pending mask state for save_layer_with_mask.
     // Each entry is the deferred mask composite to apply when the

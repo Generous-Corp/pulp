@@ -350,6 +350,15 @@ std::vector<FontRun> segment_emoji_runs(std::string_view utf8_text) {
 }
 
 bool contains_emoji(std::string_view utf8_text) {
+    // Pure-ASCII fast path: no codepoint in the Latin block can ever
+    // be an emoji-relevant character, so we can skip the UTF-8 decode
+    // entirely. This is the hot path for canvas2d labels.
+    bool has_high_byte = false;
+    for (unsigned char b : utf8_text) {
+        if (b >= 0x80) { has_high_byte = true; break; }
+    }
+    if (!has_high_byte) return false;
+
     const auto decoded = decode_utf8(utf8_text);
     for (const auto& dc : decoded) {
         switch (dc.kind) {

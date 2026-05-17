@@ -7,22 +7,6 @@
 #include <sstream>
 #include <unordered_map>
 
-// pulp #1737 (Codex P2 sweep on #1791) — Skia headers MUST be included
-// BEFORE `pulp/canvas/skia_canvas.hpp`. The hpp declares:
-//   void shape_with_features(class SkShaper& shaper,
-//                            const class SkFont& font,
-//                            ..., class SkTextBlobBuilderRunHandler*);
-// where each `class X` is an elaborated-type-specifier inside the
-// `pulp::canvas` namespace. Per C++ name lookup rules, if real Skia
-// declarations aren't visible yet, those specifiers INTRODUCE local
-// classes `pulp::canvas::SkShaper` etc. as incomplete types. Including
-// SkShaper.h afterward then adds `::SkShaper` separately, and inside
-// the SkiaCanvas methods (in `pulp::canvas`) unqualified `SkShaper`
-// resolves to the local incomplete type → "incomplete type" errors on
-// `SkShaper::Feature` and the TrivialRunIterator types. Pre-#1791 the
-// hpp had no such helper so this trap was latent; post-#1791 every
-// fresh worktree without the locally-applied include reorder fails to
-// build with PULP_HAS_SKIA. Fix is purely include-order, no API change.
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPaint.h"
@@ -1334,200 +1318,19 @@ void SkiaCanvas::clear_font_features() {
     font_features_.clear();
 }
 
-// ── Emoji-aware FontRunIterator ─────────────────────────────────────────
-// Walks `emoji_segmenter::segment_emoji_runs(text)` output and yields the
-// correct SkFont per run — primary for `Default`, emoji-substituted for
-// `Emoji`. HarfBuzz then shapes each run with the right typeface, which
-// means ZWJ sequences / regional flags / keycaps / skin-tone modifiers
-// stay clustered (because the segmenter pre-grouped them into one run).
-//
-// The emoji-substituted SkFont copies size + edging + subpixel settings
-// from the primary font so descenders / ascents / hinting policies stay
-// consistent across runs (e.g. label baselines don't shift mid-line).
-namespace {
-
-class EmojiAwareFontRunIterator final : public SkShaper::FontRunIterator {
-public:
-    EmojiAwareFontRunIterator(std::vector<FontRun> runs,
-                              SkFont primary_font,
-                              sk_sp<SkTypeface> emoji_typeface,
-                              std::size_t text_bytes)
-        : runs_(std::move(runs))
-        , primary_font_(std::move(primary_font))
-        , emoji_typeface_(std::move(emoji_typeface))
-        , text_bytes_(text_bytes) {
-        // Pre-bake emoji-substituted font so currentFont() returns a
-        // stable reference. If no emoji typeface is registered, fall
-        // back to the primary so a missing fallback still emits glyphs
-        // (tofu, but indistinguishable from any other unmapped glyph).
-        emoji_font_ = primary_font_;
-        if (emoji_typeface_) {
-            emoji_font_.setTypeface(emoji_typeface_);
-        }
-    }
-
-    // SkShaper iterator convention (matches `TrivialRunIterator` in
-    // SkShaper.h): `consume()` advances past the current run and sets
-    // state to it; `endOfCurrentRun()` then reports where that
-    // just-consumed run ends; `currentFont()` reports its font. Before
-    // the first `consume()` the iterator is "before any run" — end is 0.
-    void consume() override {
-        if (current_ < runs_.size()) ++current_;
-    }
-    std::size_t endOfCurrentRun() const override {
-        if (current_ == 0) return 0;  // before first consume
-        if (current_ <= runs_.size()) return runs_[current_ - 1].byte_end;
-        return text_bytes_;
-    }
-    bool atEnd() const override { return current_ >= runs_.size(); }
-    const SkFont& currentFont() const override {
-        // After `consume()`, `current_ - 1` indexes the just-consumed
-        // run. Before the first consume, fall back to the primary
-        // font — Skia may probe currentFont() before consume() in
-        // some shaper paths (defensive default).
-        if (current_ > 0 && current_ <= runs_.size()) {
-            if (runs_[current_ - 1].role == FontRunRole::Emoji
-                && emoji_typeface_) {
-                return emoji_font_;
-            }
-        }
-        return primary_font_;
-    }
-
-private:
-    std::vector<FontRun> runs_;
-    SkFont primary_font_;
-    sk_sp<SkTypeface> emoji_typeface_;
-    std::size_t text_bytes_;
-    std::size_t current_ = 0;
-    SkFont emoji_font_;
-};
-
-} // namespace
-
-// pulp emoji-parity — cluster-aware letter-spacing RunHandler.
-//
-// The legacy per-glyph path at the bottom of `fill_text` applies
-// `letter_spacing_` between every glyph pair, which is wrong for both
-// emoji clusters (👨‍👩‍👧 becomes "👨 ‍ 👩 ‍ 👧" with wide gaps) and
-// for plain-text features like Latin ligatures + combining marks. CSS
-// `letter-spacing` is defined on grapheme boundaries, not glyph
-// boundaries.
-//
-// This handler shapes with HarfBuzz (via the emoji-aware run iterator)
-// and then, in `commitRunBuffer`, walks the cluster array. When the
-// cluster changes between glyphs[i-1] and glyphs[i], it offsets all
-// subsequent glyph x positions by `letter_spacing_`. The result is a
-// blob whose total advance reflects (cluster_count - 1) * letter_spacing
-// extra width — exactly the CSS contract.
-class ClusterAwareLetterSpacingHandler final : public SkShaper::RunHandler {
-public:
-    explicit ClusterAwareLetterSpacingHandler(SkScalar letter_spacing)
-        : letter_spacing_(letter_spacing) {}
-
-    sk_sp<SkTextBlob> makeBlob() { return builder_.make(); }
-    SkPoint endPoint() const { return cursor_; }
-
-    void beginLine() override { cursor_ = {0, 0}; }
-    void runInfo(const RunInfo&) override {}
-    void commitRunInfo() override {}
-
-    Buffer runBuffer(const RunInfo& info) override {
-        // allocRunTextPos reserves storage for glyphs, xy positions,
-        // utf8 text, and cluster indices. allocRunPos doesn't allocate
-        // a cluster array, so the shaper has nowhere to write the
-        // cluster boundaries we need.
-        auto& run = builder_.allocRunTextPos(
-            info.fFont,
-            static_cast<int>(info.glyphCount),
-            static_cast<int>(info.utf8Range.size()));
-        saved_pos_ = run.points();
-        saved_clusters_ = run.clusters;
-        saved_glyph_count_ = static_cast<std::size_t>(info.glyphCount);
-        return Buffer{
-            run.glyphs,
-            run.points(),
-            nullptr,
-            run.clusters,
-            cursor_
-        };
-    }
-
-    void commitRunBuffer(const RunInfo& info) override {
-        // Skia has just filled the buffer with shaped glyph positions
-        // relative to `cursor_`. Walk the cluster array: each time
-        // adjacent glyphs land in different clusters, advance all
-        // following glyph x's by letter_spacing_. The shaper's reported
-        // `fAdvance` is the un-tracked run width, so we add the same
-        // total to `cursor_` to align the next run / record the final
-        // line advance for text-align calculations.
-        if (!saved_pos_ || !saved_clusters_ || saved_glyph_count_ == 0) {
-            cursor_.fX += info.fAdvance.fX;
-            cursor_.fY += info.fAdvance.fY;
-            saved_pos_ = nullptr;
-            saved_clusters_ = nullptr;
-            saved_glyph_count_ = 0;
-            return;
-        }
-        SkScalar extra = 0;
-        uint32_t prev_cluster = saved_clusters_[0];
-        for (std::size_t i = 0; i < saved_glyph_count_; ++i) {
-            if (i > 0 && saved_clusters_[i] != prev_cluster) {
-                extra += letter_spacing_;
-                prev_cluster = saved_clusters_[i];
-            }
-            saved_pos_[i].fX += extra;
-        }
-        cursor_.fX += info.fAdvance.fX + extra;
-        cursor_.fY += info.fAdvance.fY;
-        saved_pos_ = nullptr;
-        saved_clusters_ = nullptr;
-        saved_glyph_count_ = 0;
-    }
-
-    void commitLine() override {}
-
-private:
-    SkPoint* saved_pos_ = nullptr;
-    uint32_t* saved_clusters_ = nullptr;
-    std::size_t saved_glyph_count_ = 0;
-    SkScalar letter_spacing_;
-    SkPoint cursor_{0, 0};
-    SkTextBlobBuilder builder_;
-};
-
 // ── SkParagraph-based shape helper ─────────────────────────────────────
-// The Skia prebuilt's legacy `SkShaper::Make()` / `SkShapers::HB::ShapeXxx`
-// paths return zero-width handlers in this build (HarfBuzz internals do
-// not produce output through the 6/8-arg shape APIs). SkParagraph, which
-// uses `SkShapers::HB::ShapeThenWrap` indirectly with a properly-wired
-// ICU + font-collection harness, DOES produce correct shaped output for
-// the same text + typeface. Canvas2D text therefore routes through
-// `ParagraphBuilder` even though it's heavier than a single SkShaper
-// shape() call — accuracy beats overhead, and the FontCollection / SkUnicode
-// objects are cached per-process so the per-call cost is one
-// `ParagraphBuilder::make` + `Build` + `layout`.
-//
-// `make_paragraph(...)` builds a one-line paragraph styled with the
-// primary font + emoji-fallback family, returning the laid-out paragraph
-// plus the total intrinsic advance and alphabetic baseline. Caller paints
-// with `paragraph->paint(canvas, x, y - baseline)` so the alphabetic
-// baseline matches the y argument (Canvas2D `fillText` convention).
+// Canvas2D text routes through `SkParagraph` for cluster-aware shaping
+// + color-emoji fallback. SkParagraph uses HarfBuzz + ICU + the
+// `TextFontContext`'s FontCollection (which has the registered emoji
+// typeface in its default-family list) so ZWJ families, regional flag
+// pairs, keycaps, and skin-tone modifiers all shape as single grapheme
+// clusters routed to the emoji font.
 namespace {
 
 struct PreparedParagraph {
     std::unique_ptr<skia::textlayout::Paragraph> paragraph;
     float advance = 0;
     float alphabetic_baseline = 0;
-};
-
-// `font_features` is a sequence of OpenType feature tags + value pairs
-// (e.g. {tag="tnum", value=1}). The OpenType four-character tag is
-// packed into a uint32_t (`pulp::canvas::FontFeature::tag`) — we unpack
-// it back into a four-byte SkString here for `TextStyle::addFontFeature`.
-struct FontFeatureSpec {
-    std::uint32_t tag;
-    std::uint32_t value;
 };
 
 PreparedParagraph make_paragraph(const std::string& text,
@@ -1538,7 +1341,7 @@ PreparedParagraph make_paragraph(const std::string& text,
                                   float letter_spacing,
                                   bool ltr,
                                   std::optional<SkPaint> foreground_paint,
-                                  const std::vector<FontFeatureSpec>& features = {}) {
+                                  const std::vector<Canvas::FontFeature>& features = {}) {
     PreparedParagraph result;
     if (text.empty()) return result;
     auto ctx = pulp::canvas::TextFontContext::shared();
@@ -1596,105 +1399,6 @@ PreparedParagraph make_paragraph(const std::string& text,
 
 } // namespace
 
-// pulp emoji-parity (legacy / unused after the SkParagraph switch) —
-// kept for archaeological reference. The SkShaper paths return zero-
-// width handlers in this Skia prebuilt; see `make_paragraph` above for
-// the path we actually use.
-//
-// `features` may be null/empty — caller decides whether to forward CSS
-// font-variant tags (existing `is_ascii_only(text)` guard preserved).
-static void shape_emoji_aware(SkShaper& shaper,
-                              const std::string& text,
-                              const SkFont& primary_font,
-                              bool ltr,
-                              const SkShaper::Feature* features,
-                              std::size_t feature_count,
-                              SkShaper::RunHandler* handler) {
-    auto segmenter_runs = pulp::canvas::segment_emoji_runs(text);
-    sk_sp<SkTypeface> emoji_face;
-    if (!segmenter_runs.empty()) {
-        bool needs_emoji = false;
-        for (const auto& r : segmenter_runs) {
-            if (r.role == pulp::canvas::FontRunRole::Emoji) {
-                needs_emoji = true;
-                break;
-            }
-        }
-        if (needs_emoji) {
-            auto ctx = pulp::canvas::TextFontContext::shared();
-            emoji_face = ctx->emoji_typeface();
-        }
-    }
-
-    EmojiAwareFontRunIterator font_runs(std::move(segmenter_runs),
-                                        primary_font,
-                                        std::move(emoji_face),
-                                        text.size());
-    SkShaper::TrivialBiDiRunIterator     bidi_runs(ltr ? 0 : 1, text.size());
-    SkShaper::TrivialScriptRunIterator   script_runs(SkSetFourByteTag('L','a','t','n'), text.size());
-    SkShaper::TrivialLanguageRunIterator lang_runs("en", text.size());
-    shaper.shape(text.c_str(), text.size(),
-                 font_runs, bidi_runs, script_runs, lang_runs,
-                 features, feature_count,
-                 SK_ScalarInfinity, handler);
-}
-
-// pulp #1737 — internal helper that routes a shape() call through the
-// SkShaper 8-arg overload so the active font_features_ reach HarfBuzz.
-// Constructs the 4 trivial RunIterators (font / bidi / script /
-// language) — Pulp doesn't yet have script/language detection plumbing
-// so we pass identity values (Latn script, en language, bidi level
-// derived from `ltr`). When/if proper iterator construction lands the
-// trivial wrappers can be swapped for MakeFontMgrRunIterator etc.
-//
-// IMPORTANT (Codex P2 on #1791): callers MUST gate this routing on
-// `is_ascii_only(text)` to avoid feeding incorrect script/language
-// metadata into HarfBuzz for non-Latin / mixed-script input. The
-// legacy 6-arg shape() path (which uses Skia's internal script/lang
-// inference) is correct for non-ASCII text and remains the right
-// fallback when font_features are set but the text isn't Latin.
-//
-// The font_features_ vector is reinterpret-cast-friendly: our
-// FontFeature struct is layout-compatible with SkShaper::Feature
-// (uint32_t tag + uint32_t value + size_t start + size_t end). We
-// build a temporary vector of SkShaper::Feature values with start=0
-// + end=text.size() so the feature applies to the entire run.
-void SkiaCanvas::shape_with_features(SkShaper& shaper,
-                                     const std::string& text,
-                                     const SkFont& font,
-                                     bool ltr,
-                                     SkTextBlobBuilderRunHandler* handler) {
-    std::vector<SkShaper::Feature> sk_features;
-    sk_features.reserve(font_features_.size());
-    for (const auto& f : font_features_) {
-        sk_features.push_back({f.tag, f.value, 0, text.size()});
-    }
-    SkShaper::TrivialFontRunIterator     font_runs(font, text.size());
-    SkShaper::TrivialBiDiRunIterator     bidi_runs(ltr ? 0 : 1, text.size());
-    SkShaper::TrivialScriptRunIterator   script_runs(SkSetFourByteTag('L','a','t','n'), text.size());
-    SkShaper::TrivialLanguageRunIterator lang_runs("en", text.size());
-    shaper.shape(text.c_str(), text.size(),
-                 font_runs, bidi_runs, script_runs, lang_runs,
-                 sk_features.data(), sk_features.size(),
-                 SK_ScalarInfinity, handler);
-}
-
-// pulp #1737 (Codex P2 on #1791) — guard for the shape_with_features
-// routing decision. The Trivial{Script,Language}RunIterators we pass
-// hardcode Latn/en, which is only correct for ASCII / pure-Latin text.
-// For non-ASCII input, the legacy 6-arg shape() path uses Skia's
-// internal script/language inference — correct shaping without
-// features beats incorrect glyph selection with features.
-//
-// CSS font-variant features (tnum/smcp/onum/lnum/pnum) are themselves
-// Latin-typography concerns, so the gate matches the realistic
-// audience for these features.
-static bool is_ascii_only(const std::string& s) {
-    for (unsigned char b : s) {
-        if (b > 0x7F) return false;
-    }
-    return true;
-}
 
 void SkiaCanvas::set_text_align(TextAlign align) {
     text_align_ = align;
@@ -1735,77 +1439,42 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // draw call — producing a ghost/double image that worsens with each
     // nesting level in the widget paint pipeline.
     //
-    // pulp #927: when letter_spacing_ != 0 we cannot use the shaped blob
-    // verbatim — the shaper packs glyph positions ignorant of CSS
-    // letter-spacing. Fall through to the per-glyph builder below so the
-    // extra advance lands on the rendered output.
-    // pulp emoji-parity — route through SkParagraph. The legacy
-    // SkShaper APIs are broken in our Skia prebuilt and return zero-
-    // width shape output; SkParagraph wraps the same HarfBuzz / ICU
-    // bits with a working harness and additionally handles font fallback
-    // for color emoji codepoints (ZWJ families, flags, keycaps, skin
-    // tones, etc.) via the FontCollection's default emoji family list.
-    //
-    // The `font` argument above is no longer the actual shaping vehicle
-    // — it kept the bundled-font + cache-invalidation side effects of
-    // `make_font()`. SkParagraph re-resolves the typeface from the
-    // family name via `TextFontContext::font_collection()`'s asset
-    // manager. We pass `font_family_` directly so the cascade
-    // (registered → bundled → SkFontMgr) still applies.
-    const bool ltr = (direction_ != TextDirection::rtl);
-    std::vector<FontFeatureSpec> feature_specs;
-    feature_specs.reserve(font_features_.size());
-    for (const auto& f : font_features_) {
-        feature_specs.push_back({f.tag, f.value});
-    }
-    auto prepared = make_paragraph(text, font_family_, font_size_,
-                                    font_weight_, font_slant_,
-                                    letter_spacing_, ltr, paint,
-                                    feature_specs);
-    if (prepared.paragraph) {
-        float draw_x = x;
-        if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
-        else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
-        // SkParagraph paint(canvas, x, y) places the paragraph's TOP
-        // at (x, y). Canvas2D fillText(text, x, y) uses `y` as the
-        // alphabetic baseline. Translate so the baseline lands on `y`.
-        prepared.paragraph->paint(canvas_, draw_x,
-                                   y - prepared.alphabetic_baseline);
-        return;
-    }
-#endif
-
-#ifdef PULP_HAS_TEXT_SHAPING
-    // pulp emoji-parity — cluster-aware letter-spacing path. The legacy
-    // per-glyph fallback below applies letter_spacing_ between every
-    // pair of glyphs, which is wrong for emoji clusters (extends a
-    // family ZWJ sequence with ugly gaps) and for ligatures + combining
-    // marks. The ClusterAwareLetterSpacingHandler shapes with HarfBuzz
-    // and inserts tracking only at cluster boundaries, matching the CSS
-    // grapheme contract.
-    if (letter_spacing_ != 0.0f) {
-        auto shaper = SkShaper::Make(pulp::canvas::TextFontContext::shared()->font_manager());
-        if (shaper) {
-            ClusterAwareLetterSpacingHandler handler(letter_spacing_);
-            shape_emoji_aware(*shaper, text, font, /*ltr=*/true,
-                              nullptr, 0, &handler);
-            float total_w = handler.endPoint().x();
+    // SkParagraph handles cluster-aware emoji fallback, CSS letter-
+    // spacing, OpenType font features, and bidi direction. Hot-path
+    // labels that need none of these (plain ASCII, no features, no
+    // tracking) fall through to the per-glyph blob path below — same
+    // cost the pre-emoji code paid and no SkParagraph alloc per call.
+    const bool needs_paragraph =
+        !font_features_.empty()
+        || letter_spacing_ != 0.0f
+        || direction_ == TextDirection::rtl
+        || pulp::canvas::contains_emoji(text);
+    if (needs_paragraph) {
+        const bool ltr = (direction_ != TextDirection::rtl);
+        auto prepared = make_paragraph(text, font_family_, font_size_,
+                                        font_weight_, font_slant_,
+                                        letter_spacing_, ltr, paint,
+                                        font_features_);
+        if (prepared.paragraph) {
             float draw_x = x;
-            if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
-            else if (text_align_ == TextAlign::right) draw_x -= total_w;
-            auto blob = handler.makeBlob();
-            if (blob) {
-                canvas_->drawTextBlob(blob, draw_x, y, paint);
-                return;
-            }
+            if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
+            else if (text_align_ == TextAlign::right) draw_x -= prepared.advance;
+            // SkParagraph paint(canvas, x, y) places the paragraph TOP
+            // at (x, y); Canvas2D fillText puts the alphabetic baseline
+            // at y. Translate so the baseline lands on `y`.
+            prepared.paragraph->paint(canvas_, draw_x,
+                                       y - prepared.alphabetic_baseline);
+            return;
         }
     }
 #endif
 
-    // Fallback: per-glyph SkTextBlob without kerning/ligatures.
-    // Used when text shaping is disabled, SkShaper::Make() fails, or
-    // letter_spacing_ != 0 (pulp #927 — the shaped blob can't carry CSS
-    // letter-spacing so we lay glyphs out manually).
+    // Fallback: per-glyph SkTextBlob without kerning/ligatures. Hit
+    // only when text shaping is disabled (PULP_HAS_TEXT_SHAPING off) or
+    // `make_paragraph` could not build a paragraph (empty text or no
+    // FontCollection). letter_spacing_ is applied between every pair of
+    // glyphs here — wrong for grapheme clusters, but acceptable in the
+    // no-shaping degraded path.
     int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
     if (glyph_count <= 0) return;
 
@@ -1919,21 +1588,20 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     }
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // pulp emoji-parity — same SkParagraph path as fill_text. Color-
-    // emoji typefaces typically have CBDT/COLR bitmap glyphs with no
-    // outline tables, so strokeText effectively leaves them unchanged
-    // (CSS behavior). The Latin halves of mixed text still receive the
-    // stroke outline.
-    {
-        std::vector<FontFeatureSpec> stroke_specs;
-        stroke_specs.reserve(font_features_.size());
-        for (const auto& f : font_features_) {
-            stroke_specs.push_back({f.tag, f.value});
-        }
+    // Same SkParagraph path as fill_text; ASCII / no-features / no-
+    // tracking strokes skip it and use the per-glyph blob below. Color
+    // emoji typefaces typically have CBDT/COLR bitmaps with no outline
+    // tables, so strokeText effectively leaves them unchanged (CSS
+    // behavior). Latin text in mixed-emoji runs still gets the stroke.
+    const bool needs_paragraph =
+        !font_features_.empty()
+        || letter_spacing_ != 0.0f
+        || pulp::canvas::contains_emoji(text);
+    if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
                                         letter_spacing_, /*ltr=*/true,
-                                        stroke_paint, stroke_specs);
+                                        stroke_paint, font_features_);
         if (prepared.paragraph) {
             float draw_x = x;
             if (text_align_ == TextAlign::center) draw_x -= prepared.advance * 0.5f;
@@ -1942,28 +1610,6 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
                                        y - prepared.alphabetic_baseline);
             if (needs_restore) canvas_->restore();
             return;
-        }
-    }
-    // Legacy cluster-aware letter-spacing path — kept for non-
-    // SkParagraph builds. SkParagraph honors letter_spacing on its own
-    // via TextStyle::setLetterSpacing, so this block is unreachable in
-    // current builds but preserved as a fallback.
-    if (letter_spacing_ != 0.0f) {
-        auto shaper = SkShaper::Make(pulp::canvas::TextFontContext::shared()->font_manager());
-        if (shaper) {
-            ClusterAwareLetterSpacingHandler handler(letter_spacing_);
-            shape_emoji_aware(*shaper, text, font, /*ltr=*/true,
-                              nullptr, 0, &handler);
-            float total_w = handler.endPoint().x();
-            float draw_x = x;
-            if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
-            else if (text_align_ == TextAlign::right) draw_x -= total_w;
-            auto blob = handler.makeBlob();
-            if (blob) {
-                canvas_->drawTextBlob(blob, draw_x, y, stroke_paint);
-                if (needs_restore) canvas_->restore();
-                return;
-            }
         }
     }
 #endif
@@ -2098,44 +1744,25 @@ float SkiaCanvas::measure_text(const std::string& text) {
     if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // Use SkShaper for accurate post-kerning width when shaping is
-    // enabled — matches what fill_text() actually renders. Without
-    // this, measure_text returns unshaped widths that mismatch drawn
-    // text for kerning/ligature strings (e.g., "AV", "ffi").
-    //
-    // pulp #927: if letter_spacing_ != 0 we bypass the shaper because
-    // fill_text() also bypasses it in that case — measuring via the
-    // shaper would diverge from what's actually drawn.
-    // pulp emoji-parity — match fill_text by going through SkParagraph
-    // so labels reserve the correct width for emoji clusters and font-
-    // feature-affected advances (e.g. tnum reshapes digit widths).
-    {
-        std::vector<FontFeatureSpec> measure_specs;
-        measure_specs.reserve(font_features_.size());
-        for (const auto& f : font_features_) {
-            measure_specs.push_back({f.tag, f.value});
-        }
+    // SkParagraph is the only working shape path in our Skia prebuilt
+    // (legacy SkShaper APIs return zero-width). Hot-path labels (plain
+    // ASCII, no features, no tracking) skip it to avoid the per-call
+    // `ParagraphBuilder + Build + layout` cost — they're consistent
+    // with the per-glyph fallback below that fill_text also takes on
+    // the same input. Anything emoji-bearing or feature-tagged still
+    // goes through SkParagraph so the measured width matches what
+    // fill_text actually draws.
+    const bool needs_paragraph =
+        !font_features_.empty()
+        || letter_spacing_ != 0.0f
+        || pulp::canvas::contains_emoji(text);
+    if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
                                         letter_spacing_, /*ltr=*/true,
-                                        std::nullopt, measure_specs);
+                                        std::nullopt, font_features_);
         if (prepared.paragraph) {
             return prepared.advance;
-        }
-    }
-#endif
-
-#ifdef PULP_HAS_TEXT_SHAPING
-    // pulp emoji-parity — cluster-aware letter-spacing measurement.
-    // Mirror the fill_text path so Labels with tracked emoji clusters
-    // reserve the same horizontal space the renderer will draw.
-    if (letter_spacing_ != 0.0f) {
-        auto shaper = SkShaper::Make(pulp::canvas::TextFontContext::shared()->font_manager());
-        if (shaper) {
-            ClusterAwareLetterSpacingHandler handler(letter_spacing_);
-            shape_emoji_aware(*shaper, text, font, /*ltr=*/true,
-                              nullptr, 0, &handler);
-            return handler.endPoint().x();
         }
     }
 #endif
@@ -2193,21 +1820,21 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
         text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // pulp emoji-parity — `font.measureText` above counts emoji
-    // codepoints as tofu (.notdef advance) which mis-aligns labels.
-    // Re-measure via SkParagraph (which honors the emoji-fallback
-    // family list in the TextFontContext) so `width` matches what
-    // fill_text actually draws.
-    {
-        std::vector<FontFeatureSpec> mtf_specs;
-        mtf_specs.reserve(font_features_.size());
-        for (const auto& f : font_features_) {
-            mtf_specs.push_back({f.tag, f.value});
-        }
+    // `font.measureText` counts emoji codepoints as tofu (.notdef
+    // advance); re-measure via SkParagraph when the text contains
+    // emoji, font-features, or letter-spacing so `width` matches what
+    // fill_text actually draws. ASCII / no-feature labels keep the
+    // SkFont measurement above — same width fill_text emits via the
+    // per-glyph fallback path.
+    const bool needs_paragraph =
+        !font_features_.empty()
+        || letter_spacing_ != 0.0f
+        || pulp::canvas::contains_emoji(text);
+    if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
                                         letter_spacing_, /*ltr=*/true,
-                                        std::nullopt, mtf_specs);
+                                        std::nullopt, font_features_);
         if (prepared.paragraph) {
             advance = prepared.advance;
         }

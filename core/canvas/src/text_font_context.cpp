@@ -95,6 +95,8 @@ bool TextFontContext::has_emoji_typeface() const {
 }
 
 void TextFontContext::set_emoji_typeface(sk_sp<SkTypeface> face) {
+    // Read the immutable family name outside the lock — sk_sp is a
+    // local refbump and `getFamilyName` reads the immutable name table.
     std::string family_name;
     if (face) {
         SkString sk_family;
@@ -110,15 +112,9 @@ void TextFontContext::set_emoji_typeface(sk_sp<SkTypeface> face) {
         font_collection_.reset();
         typeface_provider_.reset();
     }
-    // Bump global generation so the static typeface cache in
-    // skia_canvas.cpp and the measurement cache in text_shaper.cpp flush
-    // their stale entries on the next lookup.
-    (void)font_registration_generation();  // touch — see note below.
-    // We can't write to the global counter from here without exposing a
-    // setter; instead the public `register_emoji_fallback(...)` thunk
-    // bumps it. set_emoji_typeface() is for callers who already manage
-    // the generation themselves (e.g. AssetManager batching multiple
-    // updates), so it deliberately doesn't auto-bump.
+    // Invalidate downstream caches (skia_canvas typeface cache,
+    // text_shaper segment cache).
+    bump_font_registration_generation();
 }
 
 sk_sp<skia::textlayout::FontCollection> TextFontContext::font_collection() const {
@@ -181,12 +177,9 @@ sk_sp<SkTypeface> TextFontContext::typeface_for_run(FontRunRole role,
 // ── Public registration API ────────────────────────────────────────────
 
 bool register_emoji_fallback(sk_sp<SkTypeface> face) {
-    auto ctx = TextFontContext::shared();
-    ctx->set_emoji_typeface(face);
-    // Bump generation so downstream caches (skia_canvas.cpp typeface
-    // cache, text_shaper.cpp segment cache, our own FontCollection
-    // generation) all invalidate on the next use.
-    bump_font_registration_generation();
+    // `set_emoji_typeface` invalidates downstream caches; no extra bump
+    // needed here.
+    TextFontContext::shared()->set_emoji_typeface(std::move(face));
     return true;
 }
 
