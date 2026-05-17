@@ -1948,6 +1948,52 @@ TEST_CASE("format_diff handles manually constructed operation order",
             "- removed\n");
 }
 
+TEST_CASE("text_diff tie-breaks replacements as delete before insert",
+          "[runtime][text-diff][coverage][phase3-large]") {
+    auto diff = text_diff("left\nmiddle\nright",
+                          "left\ncenter\nright");
+
+    REQUIRE(diff.size() == 4);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "left");
+    REQUIRE(diff[1].op == DiffOp::Delete);
+    REQUIRE(diff[1].text == "middle");
+    REQUIRE(diff[2].op == DiffOp::Insert);
+    REQUIRE(diff[2].text == "center");
+    REQUIRE(diff[3].op == DiffOp::Equal);
+    REQUIRE(diff[3].text == "right");
+}
+
+TEST_CASE("text_diff preserves blank lines as diff entries",
+          "[runtime][text-diff][coverage][phase3-large]") {
+    auto diff = text_diff("alpha\n\nomega",
+                          "alpha\ninserted\n\nomega");
+
+    REQUIRE(diff.size() == 4);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "alpha");
+    REQUIRE(diff[1].op == DiffOp::Insert);
+    REQUIRE(diff[1].text == "inserted");
+    REQUIRE(diff[2].op == DiffOp::Equal);
+    REQUIRE(diff[2].text.empty());
+    REQUIRE(diff[3].op == DiffOp::Equal);
+    REQUIRE(diff[3].text == "omega");
+}
+
+TEST_CASE("format_diff keeps empty inserted and deleted lines visible",
+          "[runtime][text-diff][coverage][phase3-large]") {
+    const std::vector<DiffEntry> diff{
+        {DiffOp::Equal, "context"},
+        {DiffOp::Delete, ""},
+        {DiffOp::Insert, ""},
+    };
+
+    REQUIRE(format_diff(diff) ==
+            "  context\n"
+            "- \n"
+            "+ \n");
+}
+
 TEST_CASE("text_diff treats trailing newline as no synthetic blank line",
           "[runtime][text-diff][coverage][phase3-large]") {
     auto diff = text_diff("alpha\nbeta\n", "alpha\nbeta");
