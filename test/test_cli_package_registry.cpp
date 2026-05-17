@@ -427,6 +427,9 @@ TEST_CASE("licenses, semver, and quality scoring classify local registry metadat
     REQUIRE(*major_only == *SemVer::parse("2.0.0"));
     REQUIRE_FALSE(SemVer::parse(""));
     REQUIRE_FALSE(SemVer::parse("1.two.3"));
+    REQUIRE_FALSE(SemVer::parse("1x.2.3"));
+    REQUIRE_FALSE(SemVer::parse("1.2.3.4"));
+    REQUIRE_FALSE(SemVer::parse("1..3"));
 
     auto release = *SemVer::parse("1.2.3");
     auto prerelease = *SemVer::parse("1.2.3-rc1");

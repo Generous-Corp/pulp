@@ -663,7 +663,11 @@ std::optional<SemVer> SemVer::parse(const std::string& s) {
     int idx = 0;
     std::istringstream ss(input);
     std::string token;
-    while (std::getline(ss, token, '.') && idx < 3) {
+    while (std::getline(ss, token, '.')) {
+        if (idx >= 3 || token.empty()) return std::nullopt;
+        for (unsigned char c : token) {
+            if (!std::isdigit(c)) return std::nullopt;
+        }
         try { parts[idx] = std::stoi(token); } catch (...) { return std::nullopt; }
         ++idx;
     }
