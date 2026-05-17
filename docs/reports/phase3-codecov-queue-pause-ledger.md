@@ -6526,3 +6526,20 @@ test, ran focused CTest `Analytics` (16/16), ran `git diff --check`, and ran
 pulp-test-analytics`, which reported 100% diff coverage for
 `core/runtime/src/analytics.cpp`. This tranche is held locally and should be
 aggregated rather than submitted individually.
+
+2026-05-17 13:15 PDT: added Sagan's local-only held MIDI tranche for the next
+large coverage batch. MIDI sequence tranche
+`feature/phase3-codecov-midi-batch-705` in
+`/private/tmp/pulp-phase3-codecov-midi-batch-705` is clean at commit
+`c37a5b323` (`fix(midi): preserve equal-time sequence order`). The tranche
+hardens `MidiMessageSequence::add_event` so equal-timestamp events preserve
+their original stream insertion order by using a stable sorted insertion point,
+with focused coverage in `test/test_midi.cpp` for mixed earlier/equal/later
+events and equal-time CC/note-on/note-off ordering. Validation passed locally:
+configured Debug build, built `pulp-test-midi`, ran the direct regression test,
+ran focused CTest for the regression, ran the full direct `pulp-test-midi`
+binary (20 cases / 286 assertions), ran `git diff --check`, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='MidiMessageSequence preserves same-timestamp
+insertion order' tools/scripts/local_diff_cover.sh pulp-test-midi`, which
+reported 100% diff coverage. This tranche is held locally and should be
+aggregated rather than submitted individually.
