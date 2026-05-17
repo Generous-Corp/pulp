@@ -6102,6 +6102,6 @@ ran `ctest --test-dir build -R 'offline_process|apply_gain'
 tools/scripts/local_diff_cover.sh pulp-test-offline-processor-edges`, which
 reported 100% diff coverage for `core/audio/src/offline_processor.cpp` and OK
 at/above the 75% floor. The worktree is clean and local-only at commit
-`ba069e562`; it has not been pushed or submitted yet. Together with held #687
+`f9d353040`; it has not been pushed or submitted yet. Together with held #687
 this gives 44 locally validated tests ready to combine into a larger future PR
 once the active GitHub queue has room.
