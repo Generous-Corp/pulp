@@ -355,6 +355,81 @@ TEST_CASE("PropertiesFile remove missing key and clear empty file are no-ops",
     REQUIRE(props.contains("present"));
 }
 
+TEST_CASE("PropertiesFile save and reload preserves escaped string values",
+          "[state][properties][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+
+    PropertiesFile props;
+    props.set_string("quote", R"(Pulp "quoted" \ path)");
+    props.set_string("newline", "line one\nline two");
+    REQUIRE(props.save(tmp.path_string()));
+
+    PropertiesFile reloaded;
+    REQUIRE(reloaded.load(tmp.path_string()));
+    REQUIRE(reloaded.get_string("quote").value_or("") == R"(Pulp "quoted" \ path)");
+    REQUIRE(reloaded.get_string("newline").value_or("") == "line one\nline two");
+}
+
+TEST_CASE("PropertiesFile set_path can clear the implicit save destination",
+          "[state][properties][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    PropertiesFile props;
+    props.set_string("key", "value");
+    REQUIRE(props.save(tmp.path_string()));
+
+    props.set_path("");
+
+    REQUIRE(props.path().empty());
+    REQUIRE_FALSE(props.save());
+}
+
+TEST_CASE("PropertiesFile successful load replaces stale values",
+          "[state][properties][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << R"json({"fresh":"yes","count":3})json";
+    }
+
+    PropertiesFile props;
+    props.set_string("stale", "old");
+    props.set_bool("enabled", true);
+
+    REQUIRE(props.load(tmp.path_string()));
+    REQUIRE_FALSE(props.contains("stale"));
+    REQUIRE_FALSE(props.contains("enabled"));
+    REQUIRE(props.get_string("fresh").value_or("") == "yes");
+    REQUIRE(props.get_int("count").value_or(0) == 3);
+}
+
+TEST_CASE("PropertiesFile setters copy string-view keys and values",
+          "[state][properties][coverage][phase3-large]") {
+    std::string key = "dynamic_key";
+    std::string value = "dynamic_value";
+
+    PropertiesFile props;
+    props.set_string(std::string_view(key), std::string_view(value));
+    key.assign("mutated_key");
+    value.assign("mutated_value");
+
+    REQUIRE(props.contains("dynamic_key"));
+    REQUIRE_FALSE(props.contains("mutated_key"));
+    REQUIRE(props.get_string("dynamic_key").value_or("") == "dynamic_value");
+}
+
+TEST_CASE("PropertiesFile remove and reinsert keeps sorted key enumeration",
+          "[state][properties][coverage][phase3-large]") {
+    PropertiesFile props;
+    props.set_string("b", "2");
+    props.set_string("a", "1");
+    props.set_string("c", "3");
+    props.remove("b");
+    props.set_string("b", "new");
+
+    REQUIRE(props.keys() == std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(props.get_string("b").value_or("") == "new");
+}
+
 // ── ApplicationProperties ───────────────────────────────────────────────
 
 TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][properties]") {

@@ -465,3 +465,112 @@ TEST_CASE("PresetManager navigation on empty preset list returns false",
     REQUIRE_FALSE(pm.load_previous());
     REQUIRE(pm.current_preset_name().empty());
 }
+
+TEST_CASE("PresetManager saved file includes metadata and parameter entries",
+          "[state][preset][coverage][phase3-large]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-save-metadata");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -3.0f);
+    REQUIRE(pm.save("Meta"));
+
+    auto preset = require_user_preset(pm, "Meta");
+    std::ifstream file(preset.path);
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+    REQUIRE(content.find(R"("name": "Meta")") != std::string::npos);
+    REQUIRE(content.find(R"("manufacturer": "TestCo")") != std::string::npos);
+    REQUIRE(content.find(R"("plugin": "TestPlugin")") != std::string::npos);
+    REQUIRE(content.find(R"("Gain")") != std::string::npos);
+    REQUIRE(content.find(R"("Mix")") != std::string::npos);
+}
+
+TEST_CASE("PresetManager saving the same name overwrites the user preset",
+          "[state][preset][coverage][phase3-large]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-save-overwrite");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -6.0f);
+    REQUIRE(pm.save("Same"));
+    store.set_value(1, -18.0f);
+    REQUIRE(pm.save("Same"));
+    store.set_value(1, 0.0f);
+
+    auto presets = pm.user_presets();
+    REQUIRE(presets.size() == 1);
+    REQUIRE(pm.load(presets.front()));
+    REQUIRE(store.get_value(1) == Catch::Approx(-18.0f));
+    REQUIRE(pm.current_preset_name() == "Same");
+}
+
+TEST_CASE("PresetManager direct path load reports stem in callback",
+          "[state][preset][coverage][phase3-large]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-direct-load-callback");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto preset_path = sandbox.root / "external" / "DirectName.json";
+    write_text_file(preset_path, R"json({"parameters":{"Gain":-10,"Mix":30}})json");
+
+    PresetInfo loaded;
+    pm.on_preset_loaded = [&](const PresetInfo& info) {
+        loaded = info;
+    };
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(loaded.name == "DirectName");
+    REQUIRE(loaded.path == preset_path);
+    REQUIRE_FALSE(loaded.is_factory);
+    REQUIRE(store.get_value(1) == Catch::Approx(-10.0f));
+}
+
+TEST_CASE("PresetManager import creates the user preset directory",
+          "[state][preset][coverage][phase3-large]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-import-creates-dir");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto external = sandbox.root / "external" / "Imported.json";
+    write_text_file(external, R"json({"parameters":{"Gain":-9}})json");
+    std::error_code ec;
+    fs::remove_all(pm.user_presets_dir(), ec);
+    REQUIRE_FALSE(fs::exists(pm.user_presets_dir()));
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+
+    auto imported = pm.import_file(external);
+
+    REQUIRE(imported.has_value());
+    REQUIRE(imported->name == "Imported");
+    REQUIRE(fs::exists(pm.user_presets_dir()));
+    REQUIRE(fs::exists(imported->path));
+    REQUIRE(list_changes == 1);
+    REQUIRE(pm.user_presets().size() == 1);
+}
+
+TEST_CASE("PresetManager rename failure leaves current preset unchanged",
+          "[state][preset][coverage][phase3-large]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-rename-missing-current");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    pm.set_current_preset_name("Current");
+
+    PresetInfo missing;
+    missing.name = "Current";
+    missing.path = sandbox.root / "missing.json";
+    missing.is_factory = false;
+
+    REQUIRE_FALSE(pm.rename(missing, "Renamed"));
+    REQUIRE(pm.current_preset_name() == "Current");
+    REQUIRE_FALSE(fs::exists(sandbox.root / "Renamed.json"));
+}

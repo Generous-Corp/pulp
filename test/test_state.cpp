@@ -457,3 +457,101 @@ TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state
     REQUIRE(began == std::vector<ParamID>{2});
     REQUIRE(ended == std::vector<ParamID>{2});
 }
+
+TEST_CASE("ParamRange ignores negative step and still clamps output",
+          "[state][range][coverage][phase3-large]") {
+    ParamRange range{0.0f, 10.0f, 5.0f, -2.0f};
+
+    REQUIRE_THAT(range.denormalize(0.25f), WithinAbs(2.5, 0.001));
+    REQUIRE_THAT(range.denormalize(-1.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(10.0, 0.001));
+}
+
+TEST_CASE("ParamRange quantization clamps non-divisible upper steps",
+          "[state][range][coverage][phase3-large]") {
+    ParamRange range{0.0f, 10.0f, 0.0f, 3.0f};
+
+    REQUIRE_THAT(range.denormalize(0.14f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.denormalize(0.45f), WithinAbs(6.0, 0.001));
+    REQUIRE_THAT(range.denormalize(0.95f), WithinAbs(9.0, 0.001));
+    REQUIRE_THAT(range.denormalize(1.0f), WithinAbs(9.0, 0.001));
+}
+
+TEST_CASE("ParamValue copy and assignment reset modulation offset",
+          "[state][value][coverage][phase3-large]") {
+    ParamValue source(2.0f);
+    source.set_mod_offset(3.0f);
+
+    ParamValue copied(source);
+    ParamValue assigned;
+    assigned = source;
+
+    REQUIRE_THAT(source.get_modulated(), WithinAbs(5.0, 0.001));
+    REQUIRE_THAT(copied.get(), WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(copied.get_modulated(), WithinAbs(2.0, 0.001));
+    REQUIRE_THAT(assigned.get_modulated(), WithinAbs(2.0, 0.001));
+}
+
+TEST_CASE("StateStore listener snapshot defers newly added listeners",
+          "[state][listener][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.0f}));
+
+    std::vector<float> first_listener_values;
+    std::vector<float> late_listener_values;
+    store.add_listener([&](ParamID, float value) {
+        first_listener_values.push_back(value);
+        if (first_listener_values.size() == 1) {
+            store.add_listener([&](ParamID, float late_value) {
+                late_listener_values.push_back(late_value);
+            });
+        }
+    });
+
+    store.set_value(1, 0.25f);
+    REQUIRE(first_listener_values == std::vector<float>{0.25f});
+    REQUIRE(late_listener_values.empty());
+
+    store.set_value(1, 0.5f);
+    REQUIRE(first_listener_values == std::vector<float>{0.25f, 0.5f});
+    REQUIRE(late_listener_values == std::vector<float>{0.5f});
+}
+
+TEST_CASE("StateStore gesture callbacks can be replaced and cleared",
+          "[state][store][coverage][phase3-large]") {
+    StateStore store;
+    std::vector<ParamID> began;
+    std::vector<ParamID> ended;
+
+    store.set_gesture_callbacks(
+        [&](ParamID id) { began.push_back(id); },
+        [&](ParamID id) { ended.push_back(id); });
+    store.begin_gesture(11);
+    store.end_gesture(11);
+
+    store.set_gesture_callbacks({}, {});
+    store.begin_gesture(22);
+    store.end_gesture(22);
+
+    REQUIRE(began == std::vector<ParamID>{11});
+    REQUIRE(ended == std::vector<ParamID>{11});
+}
+
+TEST_CASE("StateStore deserialize keeps complete prefix on short declared count",
+          "[state][serialize][coverage][phase3-large]") {
+    StateStore source;
+    auto p1 = make_param_info(1, "One", "", {0.0f, 1.0f, 0.0f});
+    source.add_parameter(p1);
+    source.set_value(1, 0.75f);
+
+    auto data = source.serialize();
+    write_le_u32(data, 8, 2u);
+    const auto payload_size = data.size() - 4;
+    write_le_u32(data, payload_size, test_crc32(data.data(), payload_size));
+
+    StateStore target;
+    target.add_parameter(p1);
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(1), WithinAbs(0.75, 0.001));
+}

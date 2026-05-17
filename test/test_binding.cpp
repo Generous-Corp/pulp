@@ -357,3 +357,73 @@ TEST_CASE("create_bindings for all params", "[binding]") {
     REQUIRE(bindings[0].info()->name == "Gain");
     REQUIRE(bindings[1].info()->name == "Mix");
 }
+
+TEST_CASE("create_bindings returns empty for an empty store",
+          "[binding][coverage][phase3-large]") {
+    StateStore store;
+
+    auto bindings = create_bindings(store);
+
+    REQUIRE(bindings.empty());
+}
+
+TEST_CASE("Binding edit history can be detached before gesture end",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding b(*store, 1);
+    EditHistory history;
+
+    b.set_edit_history(&history);
+    b.begin_gesture();
+    b.set(-9.0f);
+    b.set_edit_history(nullptr);
+    b.end_gesture();
+
+    REQUIRE_THAT(b.get(), WithinAbs(-9.0, 0.01));
+    REQUIRE_FALSE(history.can_undo());
+    REQUIRE(b.edit_history() == nullptr);
+}
+
+TEST_CASE("Binding set suppresses notifications within epsilon",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding b(*store, 1);
+    int call_count = 0;
+    b.on_change([&](float) { ++call_count; });
+
+    b.set(1e-8f);
+
+    REQUIRE(call_count == 0);
+    REQUIRE_THAT(b.get(), WithinAbs(1e-8, 1e-9));
+}
+
+TEST_CASE("Binding set after clamping compares against clamped store value",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding b(*store, 1);
+    int call_count = 0;
+    b.on_change([&](float) { ++call_count; });
+
+    b.set(999.0f);
+    b.set(500.0f);
+
+    REQUIRE(call_count == 1);
+    REQUIRE_THAT(b.get(), WithinAbs(24.0, 0.01));
+}
+
+TEST_CASE("Binding poll updates baseline after the first notification",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding b(*store, 1);
+    int call_count = 0;
+    b.on_change([&](float value) {
+        ++call_count;
+        REQUIRE_THAT(value, WithinAbs(-6.0, 0.01));
+    });
+
+    store->set_value(1, -6.0f);
+
+    REQUIRE(b.poll());
+    REQUIRE_FALSE(b.poll());
+    REQUIRE(call_count == 1);
+}

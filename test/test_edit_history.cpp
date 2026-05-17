@@ -170,3 +170,89 @@ TEST_CASE("EditHistory zero max depth performs actions without retaining history
     REQUIRE_FALSE(history.can_undo());
     REQUIRE_FALSE(history.undo());
 }
+
+TEST_CASE("EditHistory clear also drops redo history",
+          "[state][undo][coverage][phase3-large]") {
+    EditHistory history;
+    int v = 0;
+
+    history.perform([&] { v = 1; }, [&] { v = 0; }, "one");
+    history.perform([&] { v = 2; }, [&] { v = 1; }, "two");
+    REQUIRE(history.undo());
+    REQUIRE(v == 1);
+    REQUIRE(history.can_redo());
+
+    history.clear();
+
+    REQUIRE_FALSE(history.can_undo());
+    REQUIRE_FALSE(history.can_redo());
+    REQUIRE(history.undo_count() == 0);
+    REQUIRE(history.redo_count() == 0);
+    REQUIRE_FALSE(history.redo());
+}
+
+TEST_CASE("EditHistory increasing max depth preserves existing undo stack",
+          "[state][undo][coverage][phase3-large]") {
+    EditHistory history(2);
+    int v = 0;
+
+    history.perform([&] { v = 1; }, [&] { v = 0; }, "one");
+    history.perform([&] { v = 2; }, [&] { v = 1; }, "two");
+    history.set_max_depth(4);
+
+    REQUIRE(history.max_depth() == 4);
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo_description() == "two");
+
+    history.perform([&] { v = 3; }, [&] { v = 2; }, "three");
+    REQUIRE(history.undo_count() == 3);
+    REQUIRE(history.undo());
+    REQUIRE(v == 2);
+}
+
+TEST_CASE("EditHistory re-enabling coalescing affects subsequent actions only",
+          "[state][undo][coverage][phase3-large]") {
+    EditHistory history;
+    int v = 0;
+
+    history.set_coalesce(false);
+    history.perform([&] { v = 1; }, [&] { v = 0; }, "Drag");
+    history.perform([&] { v = 2; }, [&] { v = 1; }, "Drag");
+    REQUIRE(history.undo_count() == 2);
+
+    history.set_coalesce(true);
+    history.perform([&] { v = 3; }, [&] { v = 2; }, "Drag");
+
+    REQUIRE(v == 3);
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo());
+    REQUIRE(v == 2);
+    REQUIRE(history.undo());
+    REQUIRE(v == 0);
+}
+
+TEST_CASE("LambdaEdit tolerates empty callbacks and preserves description",
+          "[state][undo][coverage][phase3-large]") {
+    LambdaEdit action({}, {}, "empty");
+
+    action.redo();
+    action.undo();
+
+    REQUIRE(action.description() == "empty");
+}
+
+TEST_CASE("EditHistory coalesced replacement controls undo and redo values",
+          "[state][undo][coverage][phase3-large]") {
+    EditHistory history;
+    int v = 0;
+
+    history.perform([&] { v = 1; }, [&] { v = 0; }, "Drag");
+    history.perform([&] { v = 5; }, [&] { v = 4; }, "Drag");
+
+    REQUIRE(v == 5);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo());
+    REQUIRE(v == 4);
+    REQUIRE(history.redo());
+    REQUIRE(v == 5);
+}
