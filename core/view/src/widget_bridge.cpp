@@ -822,6 +822,14 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
 
 void WidgetBridge::dispatch_document_event(const std::string& event_type,
                                            const std::string& event_json_literal) {
+    // FOOTGUN: both arguments are concatenated into a JS expression
+    // verbatim. Call sites MUST pass trusted literals only — never
+    // user-provided or untrusted strings. Current callers
+    // (window_host_mac.mm Esc handler) pass hardcoded "mousedown" /
+    // "pointerdown" + a hardcoded literal "{clientX:-1,clientY:-1,
+    // target:null}". If a future call site needs runtime values,
+    // build the JSON via a serializer and re-validate this contract.
+    //
     // Codex P1 (PR #2139): same lifetime-safety rationale as
     // dispatch_global_key above — hold the lock through iteration.
     const std::string js =

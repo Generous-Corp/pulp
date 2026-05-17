@@ -189,6 +189,17 @@ Remaining DIVERGE after Wave 4 cleanup:
 - `html/Element_addEventListener` for hover events (PR #1173,
   pulp #1149 part a): `registerHover` is now called when a hover
   listener is registered, so the C++ side actually fires.
+- `html/Document_addEventListener` (pulp #2128 follow-up, PR #2139):
+  `document.addEventListener` / `removeEventListener` /
+  `dispatchEvent` are now real on the document object, where they
+  were previously installed as no-ops (pulp #2101 — silently dropped
+  to keep Three.js OrbitControls cleanup from throwing). The
+  platform Esc handler also fires a synthetic
+  `document.dispatchEvent({type:'mousedown'})` so React click-outside
+  popovers (`document.addEventListener('mousedown', onDoc)`) close
+  without per-app wiring. `removeEventListener` still silently
+  ignores unknown handlers — the Three.js cleanup contract is
+  preserved.
 
 ## Element surface — supported
 
