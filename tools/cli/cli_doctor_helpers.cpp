@@ -30,6 +30,21 @@
 
 namespace fs = std::filesystem;
 
+// R2-8 P2 follow-up: case-insensitive substring filter helper. When
+// `only_filter` is empty, returns true (probes always run). Otherwise
+// probes whose name doesn't match are skipped — no process spawn, no
+// file IO. Codex's P2 on PR #2145 flagged the original "display
+// filter" shape as defeating the targeted-check contract.
+bool doctor_check_matches_only_filter(const std::string& only_filter,
+                                      const std::string& check_name) {
+    if (only_filter.empty()) return true;
+    std::string a = only_filter;
+    std::string b = check_name;
+    for (auto& c : a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto& c : b) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return b.find(a) != std::string::npos;
+}
+
 // File-local helper, lifted from cli_common.cpp in the R2-4 extraction
 // since only the doctor checks below use it.
 namespace {
@@ -55,12 +70,13 @@ static bool sdk_config_ready(const fs::path& sdk_dir) {
     return fs::exists(sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake");
 }
 
-std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode) {
+std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode,
+                                           const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
     auto repo_root = standalone_mode ? fs::path{} : active_root;
 
     // 1. C++20 compiler
-    {
+    if (doctor_check_matches_only_filter(only_filter, "C++20 compiler")) {
         DoctorCheck c{"C++20 compiler", false, {}, {}};
 #ifdef __APPLE__
         auto ver = first_line(exec_output("clang++ --version 2>&1"));
@@ -116,7 +132,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     }
 
     // 2. CMake version
-    {
+    if (doctor_check_matches_only_filter(only_filter, "CMake >= 3.24")) {
         DoctorCheck c{"CMake >= 3.24", false, {}, {}};
         auto ver_str = first_line(exec_output("cmake --version 2>&1"));
         if (!ver_str.empty()) {
@@ -159,7 +175,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     }
 
     // 3. git
-    {
+    if (doctor_check_matches_only_filter(only_filter, "git")) {
         DoctorCheck c{"git", false, {}, {}};
         auto ver = first_line(exec_output("git --version 2>&1"));
         if (!ver.empty() && ver.find("git version") != std::string::npos) {
@@ -178,7 +194,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     }
 
     // 4. git-lfs
-    {
+    if (doctor_check_matches_only_filter(only_filter, "git-lfs")) {
         DoctorCheck c{"git-lfs", false, {}, {}};
         auto ver = first_line(exec_output("git lfs version 2>&1"));
 #if !defined(_WIN32)
@@ -208,15 +224,17 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     }
 
     if (standalone_mode && !active_root.empty()) {
-        DoctorCheck c{"pulp.toml", false, {}, {}};
-        auto pulp_toml = active_root / "pulp.toml";
-        if (fs::exists(pulp_toml)) {
-            c.passed = true;
-            c.detail = pulp_toml.string();
-        } else {
-            c.detail = "Not found";
+        if (doctor_check_matches_only_filter(only_filter, "pulp.toml")) {
+            DoctorCheck c{"pulp.toml", false, {}, {}};
+            auto pulp_toml = active_root / "pulp.toml";
+            if (fs::exists(pulp_toml)) {
+                c.passed = true;
+                c.detail = pulp_toml.string();
+            } else {
+                c.detail = "Not found";
+            }
+            checks.push_back(c);
         }
-        checks.push_back(c);
 
         auto sdk_resolution = resolve_standalone_sdk(active_root, false);
         auto version = sdk_resolution.requested_version;
@@ -272,74 +290,80 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     }
 
     if (!repo_root.empty()) {
-        DoctorCheck c{"LFS files pulled", false, {}, {}};
-        bool found_pointer = false;
-        bool found_any = false;
-        auto skia_dir = repo_root / "external" / "skia-build";
-        if (fs::exists(skia_dir)) {
-            for (auto& entry : fs::recursive_directory_iterator(skia_dir)) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".a" || ext == ".lib") {
-                    found_any = true;
-                    std::ifstream f(entry.path(), std::ios::binary);
-                    char buf[40] = {};
-                    f.read(buf, 39);
-                    if (std::string(buf).find("version https://git-lfs") != std::string::npos) {
-                        found_pointer = true;
-                        break;
+        if (doctor_check_matches_only_filter(only_filter, "LFS files pulled")) {
+            DoctorCheck c{"LFS files pulled", false, {}, {}};
+            bool found_pointer = false;
+            bool found_any = false;
+            auto skia_dir = repo_root / "external" / "skia-build";
+            if (fs::exists(skia_dir)) {
+                for (auto& entry : fs::recursive_directory_iterator(skia_dir)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext == ".a" || ext == ".lib") {
+                        found_any = true;
+                        std::ifstream f(entry.path(), std::ios::binary);
+                        char buf[40] = {};
+                        f.read(buf, 39);
+                        if (std::string(buf).find("version https://git-lfs") != std::string::npos) {
+                            found_pointer = true;
+                            break;
+                        }
                     }
                 }
             }
+            if (found_pointer) {
+                c.detail = "Skia files are LFS pointers, not binaries";
+                c.fix = "git lfs pull";
+            } else if (found_any) {
+                c.passed = true;
+                c.detail = "Skia binaries present";
+            } else {
+                c.passed = true;
+                c.detail = "No LFS-tracked binaries found (OK if Skia not needed)";
+            }
+            checks.push_back(c);
         }
-        if (found_pointer) {
-            c.detail = "Skia files are LFS pointers, not binaries";
-            c.fix = "git lfs pull";
-        } else if (found_any) {
-            c.passed = true;
-            c.detail = "Skia binaries present";
-        } else {
-            c.passed = true;
-            c.detail = "No LFS-tracked binaries found (OK if Skia not needed)";
-        }
-        checks.push_back(c);
     }
 
     if (!repo_root.empty()) {
-        DoctorCheck c{"VST3 SDK", false, {}, {}};
-        auto vst3_dir = repo_root / "external" / "vst3sdk";
-        if (fs::exists(vst3_dir / "pluginterfaces")) {
-            c.passed = true;
-            c.detail = "external/vst3sdk/";
-        } else if (fs::is_symlink(vst3_dir)) {
-            c.detail = "Broken symlink at external/vst3sdk";
-            c.fix = "rm external/vst3sdk && ./setup.sh";
-        } else {
-            c.detail = "Not found";
-            c.fix = "git clone --depth 1 --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk";
+        if (doctor_check_matches_only_filter(only_filter, "VST3 SDK")) {
+            DoctorCheck c{"VST3 SDK", false, {}, {}};
+            auto vst3_dir = repo_root / "external" / "vst3sdk";
+            if (fs::exists(vst3_dir / "pluginterfaces")) {
+                c.passed = true;
+                c.detail = "external/vst3sdk/";
+            } else if (fs::is_symlink(vst3_dir)) {
+                c.detail = "Broken symlink at external/vst3sdk";
+                c.fix = "rm external/vst3sdk && ./setup.sh";
+            } else {
+                c.detail = "Not found";
+                c.fix = "git clone --depth 1 --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk";
+            }
+            checks.push_back(c);
         }
-        checks.push_back(c);
     }
 
 #ifdef __APPLE__
     if (!repo_root.empty()) {
-        DoctorCheck c{"AudioUnitSDK", false, {}, {}};
-        auto au_dir = repo_root / "external" / "AudioUnitSDK";
-        if (fs::exists(au_dir / "include")) {
-            c.passed = true;
-            c.detail = "external/AudioUnitSDK/";
-        } else if (fs::is_symlink(au_dir)) {
-            c.detail = "Broken symlink at external/AudioUnitSDK";
-            c.fix = "rm external/AudioUnitSDK && ./setup.sh";
-        } else {
-            c.detail = "Not found";
-            c.fix = "git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK";
+        if (doctor_check_matches_only_filter(only_filter, "AudioUnitSDK")) {
+            DoctorCheck c{"AudioUnitSDK", false, {}, {}};
+            auto au_dir = repo_root / "external" / "AudioUnitSDK";
+            if (fs::exists(au_dir / "include")) {
+                c.passed = true;
+                c.detail = "external/AudioUnitSDK/";
+            } else if (fs::is_symlink(au_dir)) {
+                c.detail = "Broken symlink at external/AudioUnitSDK";
+                c.fix = "rm external/AudioUnitSDK && ./setup.sh";
+            } else {
+                c.detail = "Not found";
+                c.fix = "git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK";
+            }
+            checks.push_back(c);
         }
-        checks.push_back(c);
     }
 #endif
 
 #if defined(__APPLE__) || defined(_WIN32)
-    {
+    if (doctor_check_matches_only_filter(only_filter, "AAX SDK (optional)")) {
         DoctorCheck c{"AAX SDK (optional)", true, {}, {}};
         if (auto sdk_root = find_aax_sdk_root(); !sdk_root.empty()) {
             c.detail = sdk_root.string();
@@ -348,7 +372,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         }
         checks.push_back(c);
     }
-    {
+    if (doctor_check_matches_only_filter(only_filter, "AAX validator (optional)")) {
         DoctorCheck c{"AAX validator (optional)", true, {}, {}};
         if (auto validator_root = find_aax_validator_root(); !validator_root.empty()) {
             c.detail = validator_root.string();
@@ -358,7 +382,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         checks.push_back(c);
     }
 #else
-    {
+    if (doctor_check_matches_only_filter(only_filter, "AAX")) {
         DoctorCheck c{"AAX", true, {}, {}};
         c.detail = "Unsupported on Linux/Ubuntu";
         checks.push_back(c);
@@ -366,7 +390,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
 #endif
 
 #ifdef __linux__
-    {
+    if (doctor_check_matches_only_filter(only_filter, "ALSA dev headers")) {
         DoctorCheck c{"ALSA dev headers", false, {}, {}};
         int rc = std::system("pkg-config --exists alsa 2>/dev/null");
         if (rc == 0) {
@@ -390,15 +414,17 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
 #endif
 
     if (!active_root.empty()) {
-        DoctorCheck c{"Build configured", false, {}, {}};
-        if (fs::exists(active_root / "build" / "CMakeCache.txt")) {
-            c.passed = true;
-            c.detail = "build/CMakeCache.txt present";
-        } else {
-            c.detail = "Not yet configured";
-            c.fix = "pulp build  (or cmake -B build)";
+        if (doctor_check_matches_only_filter(only_filter, "Build configured")) {
+            DoctorCheck c{"Build configured", false, {}, {}};
+            if (fs::exists(active_root / "build" / "CMakeCache.txt")) {
+                c.passed = true;
+                c.detail = "build/CMakeCache.txt present";
+            } else {
+                c.detail = "Not yet configured";
+                c.fix = "pulp build  (or cmake -B build)";
+            }
+            checks.push_back(c);
         }
-        checks.push_back(c);
     }
 
     // Package health checks
@@ -407,48 +433,52 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         auto reg_path = active_root / "tools" / "packages" / "registry.json";
 
         {
-            DoctorCheck c{"Package lock file", false, {}, {}};
-            if (!fs::exists(lock_path)) {
-                c.passed = true;
-                c.detail = "No packages installed (OK)";
-            } else if (!fs::exists(reg_path)) {
-                c.passed = false;
-                c.detail = "Lock file exists but registry missing";
-            } else {
-                c.passed = true;
-                std::ifstream f(lock_path);
-                std::string content((std::istreambuf_iterator<char>(f)),
-                                     std::istreambuf_iterator<char>());
-                int count = 0;
-                std::string::size_type pos = 0;
-                while ((pos = content.find("\"version\"", pos)) != std::string::npos) {
-                    ++count; ++pos;
+            if (doctor_check_matches_only_filter(only_filter, "Package lock file")) {
+                DoctorCheck c{"Package lock file", false, {}, {}};
+                if (!fs::exists(lock_path)) {
+                    c.passed = true;
+                    c.detail = "No packages installed (OK)";
+                } else if (!fs::exists(reg_path)) {
+                    c.passed = false;
+                    c.detail = "Lock file exists but registry missing";
+                } else {
+                    c.passed = true;
+                    std::ifstream f(lock_path);
+                    std::string content((std::istreambuf_iterator<char>(f)),
+                                         std::istreambuf_iterator<char>());
+                    int count = 0;
+                    std::string::size_type pos = 0;
+                    while ((pos = content.find("\"version\"", pos)) != std::string::npos) {
+                        ++count; ++pos;
+                    }
+                    c.detail = std::to_string(count) + " package(s) installed";
                 }
-                c.detail = std::to_string(count) + " package(s) installed";
+                checks.push_back(c);
             }
-            checks.push_back(c);
         }
 
         if (fs::exists(lock_path) && fs::exists(reg_path)) {
-            DoctorCheck c{"Package platform alignment", false, {}, {}};
-            auto targets = pulp::cli::pkg::read_project_targets(active_root);
-            auto [reg, err] = pulp::cli::pkg::load_registry(reg_path);
-            auto lock = pulp::cli::pkg::load_lock_file(lock_path);
-            int gaps = 0;
-            for (auto& [id, lp] : lock.packages) {
-                auto it = reg.packages.find(id);
-                if (it == reg.packages.end()) continue;
-                auto unsup = pulp::cli::pkg::unsupported_targets(it->second, targets);
-                gaps += static_cast<int>(unsup.size());
+            if (doctor_check_matches_only_filter(only_filter, "Package platform alignment")) {
+                DoctorCheck c{"Package platform alignment", false, {}, {}};
+                auto targets = pulp::cli::pkg::read_project_targets(active_root);
+                auto [reg, err] = pulp::cli::pkg::load_registry(reg_path);
+                auto lock = pulp::cli::pkg::load_lock_file(lock_path);
+                int gaps = 0;
+                for (auto& [id, lp] : lock.packages) {
+                    auto it = reg.packages.find(id);
+                    if (it == reg.packages.end()) continue;
+                    auto unsup = pulp::cli::pkg::unsupported_targets(it->second, targets);
+                    gaps += static_cast<int>(unsup.size());
+                }
+                if (gaps == 0) {
+                    c.passed = true;
+                    c.detail = "All packages support all project targets";
+                } else {
+                    c.detail = std::to_string(gaps) + " platform gap(s)";
+                    c.fix = "pulp audit --platforms";
+                }
+                checks.push_back(c);
             }
-            if (gaps == 0) {
-                c.passed = true;
-                c.detail = "All packages support all project targets";
-            } else {
-                c.detail = std::to_string(gaps) + " platform gap(s)";
-                c.fix = "pulp audit --platforms";
-            }
-            checks.push_back(c);
         }
     }
 
@@ -478,20 +508,22 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             }
         }
         if (has_patches) {
-            DoctorCheck c{"Cmajor CLI (cmaj)", false, {}, {}};
-            auto cmaj_path = find_executable_in_path("cmaj");
-            if (!cmaj_path.empty()) {
-                c.passed = true;
-                c.detail = cmaj_path;
-            } else if (auto env = std::getenv("CMAJ_BIN"); env &&
-                       fs::exists(env) && fs::is_regular_file(env)) {
-                c.passed = true;
-                c.detail = std::string(env) + " (via CMAJ_BIN)";
-            } else {
-                c.detail = "Project has .cmajorpatch files but cmaj is not installed";
-                c.fix = "Download from https://cmajor.dev or set CMAJ_BIN=/path/to/cmaj";
+            if (doctor_check_matches_only_filter(only_filter, "Cmajor CLI (cmaj)")) {
+                DoctorCheck c{"Cmajor CLI (cmaj)", false, {}, {}};
+                auto cmaj_path = find_executable_in_path("cmaj");
+                if (!cmaj_path.empty()) {
+                    c.passed = true;
+                    c.detail = cmaj_path;
+                } else if (auto env = std::getenv("CMAJ_BIN"); env &&
+                           fs::exists(env) && fs::is_regular_file(env)) {
+                    c.passed = true;
+                    c.detail = std::string(env) + " (via CMAJ_BIN)";
+                } else {
+                    c.detail = "Project has .cmajorpatch files but cmaj is not installed";
+                    c.fix = "Download from https://cmajor.dev or set CMAJ_BIN=/path/to/cmaj";
+                }
+                checks.push_back(c);
             }
-            checks.push_back(c);
         }
     }
 
@@ -524,32 +556,34 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             auto raw = exec_output(
                 "gh api 'repos/" + repo_slug + "/actions/secrets' --paginate 2>/dev/null");
             if (!raw.empty()) {
-                DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
-                // Any occurrence of "name":"RELEASE_BOT_TOKEN" across all
-                // pages means it's configured. --paginate concatenates
-                // page bodies so the substring check catches it whether
-                // it's on page 1 or page N.
-                bool present = raw.find("\"name\":\"RELEASE_BOT_TOKEN\"") != std::string::npos
-                            || raw.find("\"name\": \"RELEASE_BOT_TOKEN\"") != std::string::npos;
-                if (present) {
-                    c.passed = true;
-                    c.detail = "configured on " + repo_slug
-                             + " — auto-release tags will trigger release-cli.yml + sign-and-release.yml";
-                } else {
-                    c.detail = "missing on " + repo_slug
-                             + " — auto-release tags will fall back to GITHUB_TOKEN, "
-                               "which does NOT trigger the binary release workflows";
-                    c.fix =
-                        "Create a fine-grained PAT and store as RELEASE_BOT_TOKEN:\n"
-                        "    1. github.com -> Settings -> Developer settings -> Personal access tokens\n"
-                        "       -> Fine-grained tokens -> Generate new token\n"
-                        "    2. Repo access: only " + repo_slug + "\n"
-                        "    3. Permission: Contents = Read and write\n"
-                        "    4. github.com/" + repo_slug + "/settings/secrets/actions\n"
-                        "       -> New repository secret named RELEASE_BOT_TOKEN\n"
-                        "    See docs/guides/versioning.md for the full walkthrough.";
+                if (doctor_check_matches_only_filter(only_filter, "RELEASE_BOT_TOKEN secret")) {
+                    DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
+                    // Any occurrence of "name":"RELEASE_BOT_TOKEN" across all
+                    // pages means it's configured. --paginate concatenates
+                    // page bodies so the substring check catches it whether
+                    // it's on page 1 or page N.
+                    bool present = raw.find("\"name\":\"RELEASE_BOT_TOKEN\"") != std::string::npos
+                                || raw.find("\"name\": \"RELEASE_BOT_TOKEN\"") != std::string::npos;
+                    if (present) {
+                        c.passed = true;
+                        c.detail = "configured on " + repo_slug
+                                 + " — auto-release tags will trigger release-cli.yml + sign-and-release.yml";
+                    } else {
+                        c.detail = "missing on " + repo_slug
+                                 + " — auto-release tags will fall back to GITHUB_TOKEN, "
+                                   "which does NOT trigger the binary release workflows";
+                        c.fix =
+                            "Create a fine-grained PAT and store as RELEASE_BOT_TOKEN:\n"
+                            "    1. github.com -> Settings -> Developer settings -> Personal access tokens\n"
+                            "       -> Fine-grained tokens -> Generate new token\n"
+                            "    2. Repo access: only " + repo_slug + "\n"
+                            "    3. Permission: Contents = Read and write\n"
+                            "    4. github.com/" + repo_slug + "/settings/secrets/actions\n"
+                            "       -> New repository secret named RELEASE_BOT_TOKEN\n"
+                            "    See docs/guides/versioning.md for the full walkthrough.";
+                    }
+                    checks.push_back(c);
                 }
-                checks.push_back(c);
             }
         }
     }
@@ -575,7 +609,7 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     // expected `pulp-mcp <semver>` prefix before marking the check
     // passed — a stale / unrunnable binary on the resolved path must
     // not lie to the user as "✓ pulp-mcp" when /mcp will still fail.
-    {
+    if (doctor_check_matches_only_filter(only_filter, "pulp-mcp")) {
         DoctorCheck c{"pulp-mcp", false, {}, {}, true};
 
         auto trim = [](std::string s) {
@@ -731,11 +765,11 @@ static fs::path detect_android_cli() {
     return {};
 }
 
-std::vector<DoctorCheck> run_doctor_android_checks() {
+std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
     auto sdk = detect_android_sdk_root();
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "Android SDK")) {
         DoctorCheck c{"Android SDK", false, {}, {}};
         if (!sdk.empty()) {
             c.passed = true;
@@ -761,7 +795,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         checks.push_back(c);
     }
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "Android NDK")) {
         DoctorCheck c{"Android NDK", false, {}, {}};
         if (!sdk.empty()) {
             fs::path ndk_root = sdk / "ndk";
@@ -786,7 +820,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         checks.push_back(c);
     }
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "adb (platform-tools)")) {
         DoctorCheck c{"adb (platform-tools)", false, {}, {}};
         std::string adb = find_executable_in_path("adb");
         if (adb.empty() && !sdk.empty()) {
@@ -821,7 +855,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         checks.push_back(c);
     }
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "Android emulator + AVD")) {
         DoctorCheck c{"Android emulator + AVD", false, {}, {}};
         std::string emu = find_executable_in_path("emulator");
         if (emu.empty() && !sdk.empty()) {
@@ -863,7 +897,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
     // Intel are NOT (no published binaries). Detail-only when missing
     // or unsupported; never the cause of overall doctor failure on
     // its own.
-    {
+    if (doctor_check_matches_only_filter(only_filter, "Google Android CLI (optional accelerator, #355)")) {
         DoctorCheck c{"Google Android CLI (optional accelerator, #355)",
                       false, {}, {}, /*optional=*/true};
         auto cli = detect_android_cli();
@@ -943,7 +977,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
 
 // ── pulp doctor ios (#60 follow-up) ─────────────────────────────────────────
 
-std::vector<DoctorCheck> run_doctor_ios_checks() {
+std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter) {
     std::vector<DoctorCheck> checks;
 
 #ifndef __APPLE__
@@ -971,7 +1005,7 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
         return exec_output("xcrun simctl list devices available 2>/dev/null");
     });
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "Xcode")) {
         DoctorCheck c{"Xcode", false, {}, {}};
         auto xc_path = xc_path_fut.get();
         auto xcrun_ver = xcrun_ver_fut.get();
@@ -987,7 +1021,7 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
         checks.push_back(c);
     }
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "iOS SDK installed")) {
         DoctorCheck c{"iOS SDK installed", false, {}, {}};
         auto sdks = sdks_fut.get();
         if (sdks.find("iphoneos") != std::string::npos
@@ -1000,7 +1034,7 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
         checks.push_back(c);
     }
 
-    {
+    if (doctor_check_matches_only_filter(only_filter, "iOS Simulator runtime + at least one device")) {
         DoctorCheck c{"iOS Simulator runtime + at least one device",
                       false, {}, {}};
         auto sims = sims_fut.get();

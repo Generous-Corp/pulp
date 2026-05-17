@@ -400,14 +400,28 @@ int cmd_doctor(const std::vector<std::string>& args) {
         std::cout << "\n";
     }
 
+    // R2-8 `--list`: enumerate available check names by running with a
+    // pseudo-filter that matches no check, then re-enumerate from a
+    // hardcoded discovery pass. Simpler: pass an unmatched filter so
+    // the result is empty, then list the names statically. Even simpler:
+    // for `list`, run with the empty filter (full set, expensive) just
+    // to get names. That's still cheap on a fresh machine because
+    // probes return fast when tools are absent. But Codex P2 wants
+    // `list` to be free. Workaround: when listing, only iterate
+    // hardcoded short-circuit by running with a sentinel filter that
+    // a separate "names-only" code path could honor. For now keep the
+    // pragmatic behavior — listing runs the probes once. Optimizing
+    // list-only is queued as a follow-up.
     std::vector<DoctorCheck> checks;
-    if (mode == "android")    checks = run_doctor_android_checks();
-    else if (mode == "ios")   checks = run_doctor_ios_checks();
-    else                      checks = run_doctor_checks(active_root, standalone_mode);
+    // R2-8 P2 fix (Codex on #2145): pass the filter into the run
+    // functions so individual probes can short-circuit. Previous
+    // implementation ran every probe then filtered the output —
+    // which defeated the speed promise of `--only`.
+    const std::string filter_for_run = list_mode ? std::string{} : only_filter;
+    if (mode == "android")    checks = run_doctor_android_checks(filter_for_run);
+    else if (mode == "ios")   checks = run_doctor_ios_checks(filter_for_run);
+    else                      checks = run_doctor_checks(active_root, standalone_mode, filter_for_run);
 
-    // R2-8 `--list`: enumerate available check names and exit. Lets
-    // users discover what `--only <name>` accepts without grepping
-    // source. Lists the active mode's checks (android / ios / default).
     if (list_mode) {
         std::cout << "Available doctor checks";
         if (!mode.empty()) std::cout << " (" << mode << " mode)";
@@ -421,27 +435,14 @@ int cmd_doctor(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // R2-8 `--only <name>`: filter to checks whose name matches the
-    // given string (case-insensitive substring). Useful for retrying
-    // a single check after fixing one issue, or for CI gating on a
-    // specific subset.
-    if (!only_filter.empty()) {
-        std::string filter_lc = only_filter;
-        for (auto& ch : filter_lc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-        std::vector<DoctorCheck> filtered;
-        for (const auto& c : checks) {
-            std::string name_lc = c.name;
-            for (auto& ch : name_lc) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (name_lc.find(filter_lc) != std::string::npos) {
-                filtered.push_back(c);
-            }
-        }
-        if (filtered.empty()) {
-            std::cerr << "pulp doctor --only: no check matched '" << only_filter << "'.\n";
-            std::cerr << "Run `pulp doctor list` to see available checks.\n";
-            return 2;
-        }
-        checks = std::move(filtered);
+    // R2-8 `--only`: empty-checks-after-filter means the filter
+    // didn't match anything. The probes already short-circuited
+    // (see filter_for_run above) so this is purely a usability
+    // signal, not work avoidance.
+    if (!only_filter.empty() && checks.empty()) {
+        std::cerr << "pulp doctor --only: no check matched '" << only_filter << "'.\n";
+        std::cerr << "Run `pulp doctor list` to see available checks.\n";
+        return 2;
     }
 
     int pass_count = 0, fail_count = 0, optional_skipped = 0;
