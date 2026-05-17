@@ -6449,6 +6449,25 @@ ran focused CTest `MemoryMessageChannel` (16/16), and ran local diff-cover at
 tranche is held locally and should be aggregated rather than submitted
 individually.
 
+2026-05-17 14:15 PDT: added another local-only held audio mmap tranche for the
+next large coverage batch. Memory-mapped reader tranche
+`feature/phase3-codecov-audio-mmap-batch-714` in
+`/private/tmp/pulp-phase3-codecov-audio-mmap-batch-714` is clean at commit
+`49224ffa35c5` (`fix(audio): reject null mmap read destinations`) based on
+current `origin/main` (`5e1880924`). The tranche hardens
+`MemoryMappedAudioReader::read_frames` so nonzero channel reads reject a null
+destination array or null per-channel destination before copying, while
+preserving the zero-channel no-op path. Focused coverage in
+`test/test_audio_file.cpp` verifies whole-array null rejection, missing-channel
+rejection without mutating existing destinations, and zero-channel acceptance.
+Validation passed locally: `git diff --check`, Debug build of
+`pulp-test-audio-file`, direct `*null frame destinations*`, focused CTest
+`MemoryMappedAudioReader rejects null` (1/1), and
+`PULP_DIFF_COVER_CTEST_REGEX='MemoryMappedAudioReader rejects null'
+tools/scripts/local_diff_cover.sh pulp-test-audio-file`, which reported 100%
+diff coverage for `core/audio/src/mmap_reader.cpp`. This tranche is held
+locally and should be aggregated rather than submitted individually.
+
 2026-05-17 14:44 PDT: added another local-only held audio buffering tranche for
 the next large coverage batch. Buffering reader tranche
 `feature/phase3-codecov-audio-buffering-batch-712` in
