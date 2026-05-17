@@ -6341,3 +6341,24 @@ socket coverage tag (4 cases / 23 assertions), and ran local diff-cover with
 the focused socket/TcpStream CTest selection (6/6 passed, 87% diff coverage).
 Pushed the repair to `feature/phase3-codecov-batch-682` so GitHub-hosted CI and
 Codecov can rerun on the new head.
+
+2026-05-17 11:31 PDT: added two more local-only held tranches for the next
+large GitHub-hosted coverage batch. Runtime text-diff tranche
+`feature/phase3-codecov-runtime-batch-698` in
+`/private/tmp/pulp-phase3-codecov-runtime-batch-698` is clean at commit
+`9825ad24bd` (`test(runtime): cover text diff edge formatting`) and adds
+coverage for replacement tie-breaking, blank-line preservation, and formatted
+empty insert/delete lines in `test/test_runtime_utils.cpp`. Validation passed:
+`git diff --check`, configured Debug build, built `pulp-test-runtime-utils`,
+ran the focused direct Catch2 tag (3 cases / 19 assertions), ran focused CTest
+`text_diff|format_diff` (7/7), and ran local diff-cover; the diff-cover report
+had no source lines because this tranche is test-only. Expression-parser tranche
+`feature/phase3-codecov-events-batch-698` in
+`/private/tmp/pulp-phase3-codecov-events-batch-698` is clean at commit
+`5790f1e417` (`test: cover chained expression powers`) and fixes chained power
+parsing to be right-associative while covering chained powers, explicit left
+grouping, and negative exponent chaining. Validation passed: built
+`pulp-test-runtime-utils`, ran direct `[runtime][expression]`, ran focused
+CTest `Expression` (6/6), and ran local diff-cover at 100% for the changed
+source line. Both tranches remain unpushed and should be aggregated rather than
+submitted individually.
