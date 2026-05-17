@@ -768,6 +768,29 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 // ── Keyboard input ───────────────────────────────────────────────
 
+// pulp #2128 follow-up — NSResponder routes Cmd-modified key chords
+// through performKeyEquivalent:, NOT keyDown:. Without this override,
+// `Cmd+,` / `Cmd+S` / any global-modifier chord that the View::
+// on_global_key (and through it, WidgetBridge::forward_key_event +
+// registerShortcut) was supposed to intercept never reaches the bridge
+// at all. Bare keys still come through keyDown:.
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    if (!self.rootView || !self.rootView->on_global_key) return NO;
+    auto key  = keyCodeFromNS(event.keyCode);
+    auto mods = modifiersFromNSFlags(event.modifierFlags);
+    pulp::view::KeyEvent gke;
+    gke.key = key;
+    gke.modifiers = mods;
+    gke.is_down = true;
+    gke.is_repeat = event.isARepeat;
+    // The bridge fan-out (forward_key_event → registerShortcut +
+    // __dispatch__('__global__','keydown',...)) runs unconditionally;
+    // returning NO lets the responder chain also consider standard menu
+    // shortcuts so we don't break Cmd+W close, Cmd+Q quit, etc.
+    self.rootView->on_global_key(gke);
+    return NO;
+}
+
 - (void)keyDown:(NSEvent*)event {
     @try {
         try {

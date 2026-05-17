@@ -1931,6 +1931,16 @@ target_link_libraries(pulp-test-design-import-shortcuts
 catch_discover_tests(pulp-test-design-import-shortcuts
     PROPERTIES LABELS "parser-import")
 
+# pulp #2128 follow-up — design-tool platform key wire-up E2E. Pins the
+# `WindowHost → root.on_global_key → bridge.forward_key_event →
+# registerShortcut + __dispatch__('__global__','keydown',...)` chain that
+# every auto-bound default chord (and Spectr's mode-switch) depends on.
+add_executable(pulp-test-platform-key-wireup test_platform_key_wireup.cpp)
+target_link_libraries(pulp-test-platform-key-wireup
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-platform-key-wireup
+    PROPERTIES LABELS "parser-import")
+
 # pulp #1035 — `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary
 # dependency) with a shell-out against the built CLI when available.
@@ -2448,4 +2458,26 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
     )
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
+
+    # pulp #2128 follow-up — pin the macOS performKeyEquivalent: route that
+    # delivers Cmd-modified chords into rootView->on_global_key. Without
+    # the override, every auto-bound default chord (Cmd+, Cmd+? Cmd+S) is
+    # silently consumed by NSResponder's first-responder chain.
+    add_executable(pulp-test-mac-perform-key-equivalent
+        test_mac_perform_key_equivalent.mm
+    )
+    target_link_libraries(pulp-test-mac-perform-key-equivalent PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # PulpView's Obj-C class metadata only registers when the linker keeps
+    # window_host_mac.mm.o — but no C++ symbol the test references lives in
+    # that .o, so static-lib pruning drops it. Force-load the one specific
+    # object to register the class without dragging in every other .mm
+    # (which would duplicate-symbol on PulpAccessibilityElement).
+    target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
+        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view.dir/platform/mac/window_host_mac.mm.o"
+    )
+    catch_discover_tests(pulp-test-mac-perform-key-equivalent)
 endif()
