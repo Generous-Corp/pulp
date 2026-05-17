@@ -2,51 +2,208 @@
 
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <vector>
 
 namespace pulp::view::motion {
 
-// ── Geometry walker (Layout source only in Phase 0) ──────────────────
+// ── Geometry walker — Layout + Presentation (Phase 2) ────────────────
+//
+// Layout source: walks parent `bounds().{x,y}` translations and ignores
+// paint-time transforms (transforms are paint-only per view.hpp).
+//
+// Presentation source: composes the full `paint_all()`-order affine
+// chain (bounds translate + transform-origin pivot + translate / rotate
+// / scale around it + the explicit 2D affine matrix) plus ScrollView's
+// child-offset translate for any ancestor scroll container. The chain
+// is built root-down, then the leaf's local-bounds corners are mapped
+// through it and the axis-aligned bounding box is reported.
 
 namespace {
 
-Rect layout_rect_in_global(const pulp::view::View& v) {
-    Rect r = v.bounds();
-    const pulp::view::View* p = v.parent();
-    while (p) {
-        const Rect pb = p->bounds();
-        r.x += pb.x;
-        r.y += pb.y;
-        p = p->parent();
+/// Column-major 2D affine. Maps (x, y) → (a·x + c·y + tx, b·x + d·y + ty).
+struct Mat2D {
+    float a = 1.0f, b = 0.0f, c = 0.0f, d = 1.0f, tx = 0.0f, ty = 0.0f;
+
+    static constexpr Mat2D identity() { return {}; }
+
+    /// Right-multiply: result = lhs * rhs. Mirrors `canvas.concat_*` ops
+    /// which post-multiply onto the current matrix.
+    static Mat2D multiply(const Mat2D& l, const Mat2D& r) {
+        return {
+            l.a * r.a + l.c * r.b,
+            l.b * r.a + l.d * r.b,
+            l.a * r.c + l.c * r.d,
+            l.b * r.c + l.d * r.d,
+            l.a * r.tx + l.c * r.ty + l.tx,
+            l.b * r.tx + l.d * r.ty + l.ty,
+        };
     }
-    return r;
+
+    static Mat2D translation(float x, float y) {
+        Mat2D m; m.tx = x; m.ty = y; return m;
+    }
+    static Mat2D scale_uniform(float s) {
+        Mat2D m; m.a = s; m.d = s; return m;
+    }
+    static Mat2D rotation_rad(float r) {
+        const float c = std::cos(r), s = std::sin(r);
+        Mat2D m;
+        m.a = c; m.b = s;
+        m.c = -s; m.d = c;
+        return m;
+    }
+    /// Raw affine in (a,b,c,d,e,f) form matching canvas::concat_transform.
+    static Mat2D affine(float a, float b, float c, float d, float e, float f) {
+        Mat2D m; m.a = a; m.b = b; m.c = c; m.d = d; m.tx = e; m.ty = f;
+        return m;
+    }
+
+    /// Apply the matrix to a 2D point.
+    void apply(float x, float y, float& out_x, float& out_y) const {
+        out_x = a * x + c * y + tx;
+        out_y = b * x + d * y + ty;
+    }
+};
+
+/// Compose this view's own paint-time transforms (translate + rotate +
+/// scale around transform-origin, then the full 2D matrix around the
+/// same origin when set explicitly). Excludes the leading
+/// `translate(bounds.x, bounds.y)` — callers compose that separately.
+Mat2D self_transform(const pulp::view::View& v) {
+    Mat2D m = Mat2D::identity();
+    const float w = v.bounds().width;
+    const float h = v.bounds().height;
+    const float ox = w * v.transform_origin_x();
+    const float oy = h * v.transform_origin_y();
+
+    const bool has_basic =
+        v.scale() != 1.0f || v.rotation() != 0.0f ||
+        v.translate_x() != 0.0f || v.translate_y() != 0.0f;
+    if (has_basic) {
+        m = Mat2D::multiply(m, Mat2D::translation(ox, oy));
+        if (v.translate_x() != 0.0f || v.translate_y() != 0.0f) {
+            m = Mat2D::multiply(m, Mat2D::translation(v.translate_x(),
+                                                      v.translate_y()));
+        }
+        if (v.rotation() != 0.0f) {
+            constexpr float kPi = 3.14159265358979323846f;
+            m = Mat2D::multiply(m, Mat2D::rotation_rad(v.rotation() * kPi / 180.0f));
+        }
+        if (v.scale() != 1.0f) {
+            m = Mat2D::multiply(m, Mat2D::scale_uniform(v.scale()));
+        }
+        m = Mat2D::multiply(m, Mat2D::translation(-ox, -oy));
+    }
+
+    if (v.has_transform_matrix()) {
+        float a, b, c, d, e, f;
+        v.get_transform_matrix(a, b, c, d, e, f);
+        const bool apply_origin = v.transform_origin_explicit();
+        if (apply_origin) m = Mat2D::multiply(m, Mat2D::translation(ox, oy));
+        m = Mat2D::multiply(m, Mat2D::affine(a, b, c, d, e, f));
+        if (apply_origin) m = Mat2D::multiply(m, Mat2D::translation(-ox, -oy));
+    }
+
+    return m;
+}
+
+/// Returns the parent-level paint contribution that the child sees on
+/// the canvas matrix when `parent` calls `paint_all` and then paints a
+/// child via `child->paint_all(canvas)`. For plain `View`, this is
+/// `translate(bounds.x, bounds.y) * self_transform`. For `ScrollView`,
+/// the override skips parent transforms and substitutes a scroll
+/// translate, so the contribution is
+/// `translate(bounds.x - scroll_x, bounds.y - scroll_y)`.
+Mat2D parent_to_child_origin(const pulp::view::View& parent) {
+    const auto& pb = parent.bounds();
+    if (auto* sv = dynamic_cast<const pulp::view::ScrollView*>(&parent)) {
+        return Mat2D::translation(pb.x - sv->scroll_x(), pb.y - sv->scroll_y());
+    }
+    Mat2D base = Mat2D::translation(pb.x, pb.y);
+    return Mat2D::multiply(base, self_transform(parent));
+}
+
+/// Build the matrix that maps `v`'s local coords into the global frame
+/// (root-relative). Walks root-down so multiplication order matches the
+/// canvas: M = T(root.bounds) * X(root) * T(c1.bounds) * X(c1) * …
+Mat2D local_to_global_matrix(const pulp::view::View& v,
+                             bool include_self_transform) {
+    std::vector<const pulp::view::View*> chain;
+    for (const pulp::view::View* p = &v; p; p = p->parent()) {
+        chain.push_back(p);
+    }
+    std::reverse(chain.begin(), chain.end());
+
+    Mat2D m = Mat2D::identity();
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        const pulp::view::View* node = chain[i];
+        const bool is_leaf = (i + 1 == chain.size());
+        if (!is_leaf) {
+            m = Mat2D::multiply(m, parent_to_child_origin(*node));
+        } else {
+            // Leaf: always apply its own bounds translate so we land
+            // on its top-left in parent's frame, then optionally its
+            // self transform.
+            m = Mat2D::multiply(m, Mat2D::translation(node->bounds().x,
+                                                       node->bounds().y));
+            if (include_self_transform) {
+                m = Mat2D::multiply(m, self_transform(*node));
+            }
+        }
+    }
+    return m;
+}
+
+/// Axis-aligned bounding box of the leaf's local rect `(0,0,w,h)` after
+/// being mapped through `m`.
+Rect aabb_local_through(const Mat2D& m, float w, float h) {
+    float xs[4]; float ys[4];
+    m.apply(0.f, 0.f, xs[0], ys[0]);
+    m.apply(w,   0.f, xs[1], ys[1]);
+    m.apply(0.f, h,   xs[2], ys[2]);
+    m.apply(w,   h,   xs[3], ys[3]);
+    float min_x = xs[0], max_x = xs[0], min_y = ys[0], max_y = ys[0];
+    for (int i = 1; i < 4; ++i) {
+        min_x = std::min(min_x, xs[i]);
+        max_x = std::max(max_x, xs[i]);
+        min_y = std::min(min_y, ys[i]);
+        max_y = std::max(max_y, ys[i]);
+    }
+    return { min_x, min_y, max_x - min_x, max_y - min_y };
+}
+
+Rect layout_rect_in_global(const pulp::view::View& v) {
+    const Mat2D m = local_to_global_matrix(v, /*include_self_transform=*/false);
+    return aabb_local_through(m, v.bounds().width, v.bounds().height);
+}
+
+Rect presentation_rect_in_global(const pulp::view::View& v) {
+    const Mat2D m = local_to_global_matrix(v, /*include_self_transform=*/true);
+    return aabb_local_through(m, v.bounds().width, v.bounds().height);
 }
 
 Rect resolve_geometry(pulp::view::View& v,
                       GeometrySpace space,
                       GeometrySource source) {
-    // Phase 0: Presentation falls back to Layout. Phase 2 ships the full
-    // paint_all()-order walker (transform-origin, transform_matrix,
-    // scroll, clip).
-    (void)source;
-    switch (space) {
-        case GeometrySpace::ViewLocal:
-            return { 0.0f, 0.0f, v.bounds().width, v.bounds().height };
-        case GeometrySpace::ViewGlobal:
-        case GeometrySpace::Window:
-        case GeometrySpace::Screen:
-            // Phase 0: Window/Screen collapse onto ViewGlobal. Phase 2
-            // adds window-origin and screen-origin offsets.
-            return layout_rect_in_global(v);
+    if (space == GeometrySpace::ViewLocal) {
+        return { 0.0f, 0.0f, v.bounds().width, v.bounds().height };
     }
-    return {};
+    // Window and Screen collapse onto ViewGlobal in Phase 2.
+    // Phase 6 adds window-origin / screen-origin offsets when the host
+    // exposes them.
+    return (source == GeometrySource::Presentation)
+               ? presentation_rect_in_global(v)
+               : layout_rect_in_global(v);
 }
 
 double extract_property(const Rect& r, GeometryProperty prop) {

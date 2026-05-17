@@ -5,6 +5,7 @@
 
 #include <pulp/view/motion.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -381,6 +382,182 @@ TEST_CASE("format_line Start/End markers include frame + time", "[motion]") {
 }
 
 // ── Emitted-event counter ────────────────────────────────────────────
+
+// ── Presentation geometry walker (Phase 2) ───────────────────────────
+
+namespace {
+double find_component(const std::vector<std::pair<std::string, double>>& comps,
+                      const std::string& name) {
+    for (const auto& [k, v] : comps) if (k == name) return v;
+    return 0.0;
+}
+}  // namespace
+
+TEST_CASE("Presentation: uniform scale expands AABB around transform origin",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 100.f, 100.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_scale(2.0f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == 1);
+    const auto& comps = fx.buffer.front().components;
+    // Scale 2 around the center (150, 125) → AABB is twice as wide/tall,
+    // centered on the same point. So minX = 150 - 100 = 50, minY = 125 - 50 = 75.
+    REQUIRE(find_component(comps, "minX")   == Approx(50.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY")   == Approx(75.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(200.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.01));
+}
+
+TEST_CASE("Layout source ignores paint-time scale", "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 100.f, 100.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_scale(2.0f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Layout)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX")   == Approx(100.f));
+    REQUIRE(find_component(comps, "minY")   == Approx(100.f));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f));
+    REQUIRE(find_component(comps, "height") == Approx(50.f));
+}
+
+TEST_CASE("Presentation: translate shifts the AABB", "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 50.f, 60.f, 100.f, 100.f });
+    v.set_translate(10.f, 20.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX") == Approx(60.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY") == Approx(80.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f));
+    REQUIRE(find_component(comps, "height") == Approx(100.f));
+}
+
+TEST_CASE("Presentation: 90deg rotation swaps width/height in AABB",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 0.f, 0.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_rotation(90.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // Width and height swap (with a small float tolerance).
+    REQUIRE(find_component(comps, "width")  == Approx(50.f).margin(0.5));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.5));
+}
+
+TEST_CASE("Presentation: 2D affine matrix (translate) applies",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 0.f, 0.f, 100.f, 100.f });
+    // Pure translate via 2D matrix: identity scale, e=10, f=20.
+    v.set_transform_matrix(1.f, 0.f, 0.f, 1.f, 10.f, 20.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX") == Approx(10.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY") == Approx(20.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.01));
+}
+
+TEST_CASE("Presentation: parent scale propagates to child position",
+          "[motion][presentation]") {
+    Fixture fx;
+    View parent;
+    parent.set_bounds({ 0.f, 0.f, 200.f, 200.f });
+    parent.set_transform_origin(0.0f, 0.0f);
+    parent.set_scale(2.0f);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({ 10.f, 20.f, 30.f, 40.f });
+    View* child_ptr = child.get();
+    parent.add_child(std::move(child));
+
+    auto handle = Coordinator::instance().trace("Child", { 60 })
+        .geometry("frame", *child_ptr,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // Parent scaled 2x from (0,0): child (10,20) → (20,40), size 30x40 → 60x80.
+    REQUIRE(find_component(comps, "minX")   == Approx(20.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY")   == Approx(40.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(60.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(80.f).margin(0.01));
+}
+
+TEST_CASE("Presentation walker handles ScrollView ancestor offset",
+          "[motion][presentation]") {
+    Fixture fx;
+    pulp::view::ScrollView scroll;
+    scroll.set_bounds({ 10.f, 20.f, 200.f, 100.f });
+    scroll.set_content_size({ 0.f, 600.f });
+
+    auto item = std::make_unique<View>();
+    item->set_bounds({ 0.f, 50.f, 100.f, 24.f });
+    View* item_ptr = item.get();
+    scroll.add_child(std::move(item));
+
+    scroll.set_scroll(0.f, 20.f);
+    // set_scroll animates by default; force the smoothed value to settle.
+    scroll.advance_animations(10.0f);
+
+    auto handle = Coordinator::instance().trace("Item", { 60 })
+        .geometry("frame", *item_ptr,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // ScrollView contributes translate(10, 20) - translate(0, 20) = (10, 0)
+    // before painting children. Item at (0, 50) → presentation (10, 50).
+    REQUIRE(find_component(comps, "minX") == Approx(10.f).margin(0.5));
+    REQUIRE(find_component(comps, "minY") == Approx(50.f).margin(0.5));
+}
 
 TEST_CASE("Emitted event counter advances", "[motion]") {
     Fixture fx;
