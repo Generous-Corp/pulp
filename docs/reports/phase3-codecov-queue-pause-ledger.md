@@ -6668,3 +6668,23 @@ tools/scripts/local_diff_cover.sh pulp-test-runtime-utils`, which reported 100%
 diff coverage for `core/runtime/src/identity.cpp`; after rebase, the direct
 focused test was rerun and passed. This tranche is held locally and should be
 aggregated rather than submitted individually.
+
+2026-05-17 13:51 PDT: added another local-only held state undo tranche for the
+next large coverage batch. Undo manager tranche
+`feature/phase3-codecov-state-undo-batch-711` in
+`/private/tmp/pulp-phase3-codecov-state-undo-batch-711` is clean at commit
+`2ea080bd2174` (`fix(state): trim undo history when lowering limit`) based on
+current `origin/main` (`5e1880924`). The tranche hardens
+`UndoManager::set_max_history` so lowering the history limit trims existing
+undo entries immediately and negative limits are normalized to zero instead of
+allowing future retention logic to walk past an empty history. Focused coverage
+in `test/test_undo_manager.cpp` verifies pre-existing history trimming, retained
+undo order, zero-limit retention disabling, and negative-limit normalization.
+Validation passed locally: `git diff --check`, Debug configure, built
+`pulp-test-undo-manager`, ran direct `*max_history*`, ran focused CTest
+`UndoManager.*max_history` (3/3), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='UndoManager.*max_history'
+tools/scripts/local_diff_cover.sh pulp-test-undo-manager`, which reported 100%
+diff coverage for `core/state/include/pulp/state/undo_manager.hpp`. This
+tranche is held locally and should be aggregated rather than submitted
+individually.
