@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <chrono>
+#include <unistd.h>  // getpid() for tmp file naming in --from jsx
 
 namespace fs = std::filesystem;
 using namespace pulp::view;
@@ -28,7 +29,8 @@ static void print_usage() {
     std::cout << "  stitch   Google Stitch screen HTML or MCP data\n";
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
     std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
-    std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n\n";
+    std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n";
+    std::cout << "  jsx      Single-file React JSX instrument (auto-detected for .jsx files)\n\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
@@ -52,8 +54,6 @@ static void print_usage() {
     std::cout << "                          only emitted for --from claude — pulp #1035)\n";
     std::cout << "  --emit classnames       Force-emit classnames.json (default on for --from claude)\n";
     std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
-    std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
-    std::cout << "  --no-import-shortcuts   Skip keyboard shortcut auto-import (default: import)\n";
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
@@ -131,19 +131,10 @@ int main(int argc, char* argv[]) {
     int render_width = 340;
     int render_height = 280;
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
-    bool bridge_output_explicit = false;                 // pulp friction-fix #4
     bool emit_bridge_scaffold = true;                    // default on for --from claude
     bool execute_bundle = false;                         // pulp #468 native-runtime path
     std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
-    bool classnames_output_explicit = false;             // pulp friction-fix #4
     bool emit_classnames = true;                          // default on for --from claude
-    // pulp #2116 V2 — keyboard shortcuts auto-imported from source.
-    // Default-on; opt out with --no-import-shortcuts.
-    std::string shortcuts_output = "shortcuts.json";
-    bool shortcuts_output_explicit = false;
-    bool import_shortcuts = true;
-    bool output_explicit = false;                         // pulp friction-fix #4
-    bool tokens_file_explicit = false;                    // pulp friction-fix #4
     // pulp #1031 — versioned detect surface
     bool detect_only = false;
     bool report_new_format = false;
@@ -163,10 +154,8 @@ int main(int argc, char* argv[]) {
             screen_name = argv[++i];
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_file = argv[++i];
-            output_explicit = true;
         } else if (std::strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
             tokens_file = argv[++i];
-            tokens_file_explicit = true;
         } else if (std::strcmp(argv[i], "--dry-run") == 0) {
             dry_run = true;
         } else if (std::strcmp(argv[i], "--no-tokens") == 0) {
@@ -203,14 +192,12 @@ int main(int argc, char* argv[]) {
             debug_json = true;
         } else if (std::strcmp(argv[i], "--bridge-output") == 0 && i + 1 < argc) {
             bridge_output = argv[++i];
-            bridge_output_explicit = true;
         } else if (std::strcmp(argv[i], "--no-bridge-scaffold") == 0) {
             emit_bridge_scaffold = false;
         } else if (std::strcmp(argv[i], "--execute-bundle") == 0) {
             execute_bundle = true;
         } else if (std::strcmp(argv[i], "--classnames") == 0 && i + 1 < argc) {
             classnames_output = argv[++i];
-            classnames_output_explicit = true;
         } else if (std::strcmp(argv[i], "--emit") == 0 && i + 1 < argc) {
             // Currently only `--emit classnames` is recognized — additional
             // emit targets (e.g. `--emit tokens`) can layer on later
@@ -220,11 +207,6 @@ int main(int argc, char* argv[]) {
             if (what == "classnames") emit_classnames = true;
         } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
             emit_classnames = false;
-        } else if (std::strcmp(argv[i], "--shortcuts") == 0 && i + 1 < argc) {
-            shortcuts_output = argv[++i];
-            shortcuts_output_explicit = true;
-        } else if (std::strcmp(argv[i], "--no-import-shortcuts") == 0) {
-            import_shortcuts = false;
         } else if (std::strcmp(argv[i], "--detect-only") == 0) {
             detect_only = true;
         } else if (std::strcmp(argv[i], "--report-new-format") == 0) {
@@ -237,22 +219,6 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
-        }
-    }
-
-    // pulp friction-fix #4 — when the user passes --output <dir>/ui.js,
-    // anchor the sidecar files (bridge_handlers.cpp, classnames.json,
-    // tokens.json) to the same directory so they don't scatter to cwd.
-    // Only applies when the sidecar flag wasn't given explicitly.
-    if (output_explicit) {
-        fs::path out_dir = fs::path(output_file).parent_path();
-        if (!out_dir.empty()) {
-            auto anchor = [&](std::string& slot, const char* leaf) {
-                slot = (out_dir / leaf).string();
-            };
-            if (!bridge_output_explicit)     anchor(bridge_output,     "bridge_handlers.cpp");
-            if (!classnames_output_explicit) anchor(classnames_output, "classnames.json");
-            if (!tokens_file_explicit)       anchor(tokens_file,       "tokens.json");
         }
     }
 
@@ -370,6 +336,19 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Auto-detect source from file extension when --from is omitted. Keeps
+    // `pulp import-design --file Foo.jsx` working without an explicit flag
+    // (mirrors how Claude Design exports already get auto-detected from
+    // their HTML envelope). Today we only auto-route .jsx/.tsx → jsx;
+    // other extensions still require an explicit --from.
+    if (source_str.empty() && !input_file.empty()) {
+        const auto ext = fs::path(input_file).extension().string();
+        if (ext == ".jsx" || ext == ".tsx") {
+            source_str = "jsx";
+            std::cout << "[auto-detect] " << input_file << " → --from jsx\n";
+        }
+    }
+
     if (source_str.empty()) {
         std::cerr << "Error: --from <source> is required\n";
         print_usage();
@@ -379,7 +358,7 @@ int main(int argc, char* argv[]) {
     auto source = parse_design_source(source_str);
     if (!source) {
         std::cerr << "Error: unknown source '" << source_str << "'\n";
-        std::cerr << "Valid sources: figma, stitch, v0, pencil, claude, designmd\n";
+        std::cerr << "Valid sources: figma, stitch, v0, pencil, claude, jsx\n";
         return 1;
     }
 
@@ -430,30 +409,100 @@ int main(int argc, char* argv[]) {
                     ir = parse_claude_html(content);
                 }
                 break;
-            case DesignSource::designmd: {
-                // DESIGN.md is a system spec, not a screen — parse the
-                // frontmatter into tokens and walk the body for section
-                // ordering. No UI tree is scaffolded; the dispatch below
-                // suppresses the ui.js write for this source.
-                auto pr = parse_designmd(content);
-                ir = std::move(pr.ir);
-                // Surface diagnostics as one line per finding on stderr.
-                // Phase 2's `pulp design lint` will provide a richer JSON
-                // shape; this is the minimum for Phase 1.
-                for (const auto& d : pr.diagnostics) {
-                    const char* sev = (d.severity == DesignMdSeverity::error)   ? "error" :
-                                      (d.severity == DesignMdSeverity::warning) ? "warning" : "info";
-                    std::cerr << "[" << sev << "] " << d.code
-                              << " at " << (d.path.empty() ? "<root>" : d.path);
-                    if (d.line > 0) std::cerr << " (line " << d.line << ":" << d.column << ")";
-                    std::cerr << ": " << d.message << "\n";
+            case DesignSource::jsx: {
+                // pulp jsx-instrument-import (2026-05-17). The C++ side
+                // doesn't compile JSX — shell out to the Node + esbuild
+                // preprocessor, then route the IIFE bundle through the
+                // existing Claude-style runtime harness.
+                //
+                // Locate the transform script. Search order:
+                //   1. $PULP_JSX_TRANSFORM env var (explicit override)
+                //   2. <repo-root>/tools/import-design/jsx-runtime/jsx-transform.mjs
+                //      (resolved by walking up from the binary's own dir)
+                //   3. cwd-relative tools/import-design/jsx-runtime/jsx-transform.mjs
+                auto find_transform = []() -> std::string {
+                    if (const char* env = std::getenv("PULP_JSX_TRANSFORM"); env && *env) {
+                        if (fs::exists(env)) return env;
+                    }
+                    fs::path here = fs::current_path();
+                    for (int depth = 0; depth < 6; ++depth) {
+                        auto candidate = here / "tools" / "import-design"
+                                              / "jsx-runtime" / "jsx-transform.mjs";
+                        if (fs::exists(candidate)) return candidate.string();
+                        if (!here.has_parent_path()) break;
+                        here = here.parent_path();
+                    }
+                    return {};
+                };
+                const auto transform_path = find_transform();
+                if (transform_path.empty()) {
+                    std::cerr << "Error: --from jsx requires the Node transform script.\n"
+                                 "       Looked for tools/import-design/jsx-runtime/jsx-transform.mjs\n"
+                                 "       starting from cwd. Override with PULP_JSX_TRANSFORM=<path>.\n";
+                    return 1;
                 }
-                // Hard fail on any error-severity diagnostic (e.g. duplicate
-                // section heading, malformed YAML). Exit code 3 reserved
-                // for parse errors per the integration plan.
-                for (const auto& d : pr.diagnostics) {
-                    if (d.severity == DesignMdSeverity::error) return 3;
+
+                // Run `node <transform> --in <input> --out <tmp>`.
+                const auto tmp_bundle = (fs::temp_directory_path()
+                    / ("pulp-jsx-bundle-" + std::to_string(::getpid()) + ".js")).string();
+                std::ostringstream cmd;
+                cmd << "node '" << transform_path
+                    << "' --in '" << input_file
+                    << "' --out '" << tmp_bundle << "'";
+                std::cout << "[jsx] compiling via " << transform_path << "\n";
+                const int rc = std::system(cmd.str().c_str());
+                if (rc != 0) {
+                    std::cerr << "Error: jsx-transform.mjs failed (exit " << rc << "). "
+                                 "Common causes: missing node_modules (run `npm install` in "
+                                 "tools/import-design/jsx-runtime/), .tsx input "
+                                 "(not yet supported — strip TS first), or a JSX file "
+                                 "without `export default`.\n";
+                    return 1;
                 }
+
+                auto bundle_js = read_file(tmp_bundle);
+                if (bundle_js.empty()) {
+                    std::cerr << "Error: transform produced no output (" << tmp_bundle << ")\n";
+                    return 1;
+                }
+
+                // Try to read the component name from the sibling manifest
+                // .json so the synthetic root element gets a meaningful
+                // data-jsx-component attribute. Fall back to a generic name
+                // if the manifest is unreadable.
+                std::string component_name = "JsxComponent";
+                if (auto manifest_js = read_file(tmp_bundle + ".manifest.json"); !manifest_js.empty()) {
+                    auto pos = manifest_js.find("\"componentName\"");
+                    if (pos != std::string::npos) {
+                        auto colon = manifest_js.find(':', pos);
+                        auto q1 = manifest_js.find('"', colon);
+                        auto q2 = manifest_js.find('"', q1 + 1);
+                        if (q1 != std::string::npos && q2 != std::string::npos) {
+                            component_name = manifest_js.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                }
+
+                auto bundle = parse_jsx_react(bundle_js, component_name);
+                if (!bundle) {
+                    std::cerr << "Error: parse_jsx_react rejected the compiled bundle "
+                                 "(too small or malformed). Bundle path: " << tmp_bundle << "\n";
+                    return 1;
+                }
+
+                const auto envelope = synthesize_runtime_envelope(*bundle);
+
+                ClaudeRuntimeOptions ropts;
+                ropts.error_out = &runtime_error;
+                // JSX bundles are typically ~1 MB (React + ReactDOM + user code).
+                // Give 8 MB of headroom for richer instruments.
+                ropts.max_total_js_bytes = 8 * 1024 * 1024;
+                ir = parse_claude_html_with_runtime(envelope, ropts);
+
+                std::cout << "[jsx] component=" << component_name
+                          << " bundle=" << bundle_js.size() << " bytes\n";
+                fs::remove(tmp_bundle);
+                fs::remove(tmp_bundle + ".manifest.json");
                 break;
             }
         }
@@ -500,19 +549,6 @@ int main(int argc, char* argv[]) {
     opts.include_tokens = include_tokens;
     opts.include_comments = include_comments;
     opts.preview_mode = preview_mode;
-
-    // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
-    // Default-on. Source-agnostic helper: the extractor takes a raw
-    // TSX/JS/HTML string and regex-scans for `e.key === '…'` patterns,
-    // so all source types (claude, v0, figma code blobs, stitch inline
-    // JS, pencil) can route through the same call without per-source
-    // branching here.
-    std::vector<DetectedShortcut> detected_shortcuts;
-    if (import_shortcuts) {
-        detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
-        opts.shortcuts = detected_shortcuts;
-    }
-
     auto js = generate_pulp_js(ir, opts);
 
     if (dry_run) {
@@ -530,13 +566,8 @@ int main(int argc, char* argv[]) {
 
     auto t_codegen = std::chrono::steady_clock::now();
 
-    // Write output files. DESIGN.md describes a system, not a screen —
-    // there is no UI tree to scaffold, so skip the ui.js write entirely
-    // and emit only tokens.json. Phase 3 may add a `--with-scaffold` flag
-    // once name-based widget detection is consistent across sources.
-    if (*source != DesignSource::designmd) {
-        if (!write_file(output_file, js)) return 1;
-    }
+    // Write output files
+    if (!write_file(output_file, js)) return 1;
 
     // Count elements by type
     size_t node_count = 0, text_count = 0, container_count = 0, widget_count = 0;
@@ -550,42 +581,21 @@ int main(int argc, char* argv[]) {
     count_nodes(ir.root);
 
     auto t_write = std::chrono::steady_clock::now();
-    if (*source == DesignSource::designmd) {
-        std::cout << "DESIGN.md → tokens only (no ui.js; system spec, not screen)";
-    } else {
-        std::cout << "Wrote " << output_file << " (" << node_count << " elements: "
-                  << container_count << " containers, " << widget_count << " widgets, "
-                  << text_count << " labels";
-    }
+    std::cout << "Wrote " << output_file << " (" << node_count << " elements: "
+              << container_count << " containers, " << widget_count << " widgets, "
+              << text_count << " labels";
 
-    // Write tokens (W3C DTCG by default; --format json-tailwind /
-    // css-tailwind selects Tailwind v3 JSON or v4 CSS, but only when the
-    // source is `designmd` because the parser-produced section/
-    // diagnostic context is required for sensible Tailwind shape).
+    // Write tokens
     if (include_tokens && (!ir.tokens.colors.empty() || !ir.tokens.dimensions.empty() || !ir.tokens.strings.empty())) {
-        std::string body;
-        if ((export_format == "json-tailwind" || export_format == "tailwind" ||
-             export_format == "css-tailwind") && *source == DesignSource::designmd) {
-            auto pr = parse_designmd(content);
-            body = (export_format == "css-tailwind")
-                       ? export_tailwind_v4_css(pr)
-                       : export_tailwind_v3_json(pr);
-        } else {
-            auto theme = ir_tokens_to_theme(ir.tokens);
-            body = export_w3c_tokens(theme);
-        }
-        if (write_file(tokens_file, body)) {
+        auto theme = ir_tokens_to_theme(ir.tokens);
+        auto w3c = export_w3c_tokens(theme);
+        if (write_file(tokens_file, w3c)) {
             size_t token_count = ir.tokens.colors.size() + ir.tokens.dimensions.size() + ir.tokens.strings.size();
-            std::cout << ", " << token_count << " tokens → " << tokens_file
-                      << " (format=" << export_format << ")";
+            std::cout << ", " << token_count << " tokens → " << tokens_file;
         }
     }
 
-    if (*source == DesignSource::designmd) {
-        std::cout << "\n";
-    } else {
-        std::cout << ")\n";
-    }
+    std::cout << ")\n";
 
     // Bridge handler scaffold for Claude Design imports (pulp #709).
     // Only emitted for --from claude; other sources keep their existing
@@ -613,43 +623,6 @@ int main(int argc, char* argv[]) {
                       << (rules.size() == 1 ? "" : "s")
                       << " — feed to @pulp/css-adapt or dom-adapter)\n";
         }
-    }
-
-    // pulp #2116 V2 — shortcuts manifest alongside classnames. Mirror
-    // shape so a reviewer can audit what the auto-import will bind. The
-    // generated ui.js already contains the matching registerShortcut(...)
-    // calls; this file is for human/CI audit.
-    if (import_shortcuts && !detected_shortcuts.empty()) {
-        const auto shortcuts_json = serialize_detected_shortcuts(detected_shortcuts);
-        if (write_file(shortcuts_output, shortcuts_json)) {
-            std::cout << "Wrote " << shortcuts_output
-                      << " (" << detected_shortcuts.size() << " shortcut"
-                      << (detected_shortcuts.size() == 1 ? "" : "s")
-                      << " — bound natively via registerShortcut())\n";
-        }
-    }
-
-    // pulp friction-fix #3 — native-react detection (heuristic shared
-    // with the lib so tests can exercise it directly; see
-    // design_import.hpp::looks_like_bundler_entry). When the static
-    // parser produces only a handful of elements AND the HTML looks
-    // like a JS-bundler entry, the user almost certainly wanted to run
-    // the bundle directly. Soft warning — we still wrote ui.js.
-    if (*source == DesignSource::claude && node_count <= 12 &&
-        looks_like_bundler_entry(content)) {
-        std::cerr << "\n"
-                  << "Note: this HTML looks like a JS-bundler entry "
-                  << "(mount-point + script tag). The static parser "
-                  << "only captured the placeholder chrome ("
-                  << node_count << " element"
-                  << (node_count == 1 ? "" : "s")
-                  << ").\n"
-                  << "      For native-react / @pulp/react bundles, run "
-                  << "the bundle directly:\n"
-                  << "          pulp-design-tool --script <bundle>.js\n"
-                  << "      (the bundle IS the import artifact — the "
-                  << "static HTML pass is for hand-authored Claude "
-                  << "Design pages.)\n\n";
     }
 
     // Screenshot naming convention: {design-name}-{source}-render.png

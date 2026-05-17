@@ -226,6 +226,19 @@ std::optional<ClaudeBundle> parse_stitch_react(const std::string& tsx);
 std::optional<ClaudeBundle> parse_jsx_react(const std::string& bundle_js,
                                             const std::string& component_name = "JsxComponent");
 
+/// Synthesize a Claude-style HTML envelope around an arbitrary ClaudeBundle
+/// so the existing `parse_claude_html_with_runtime` harness can consume it
+/// without a real Claude Design HTML wrapper on input. Used by `--from jsx`
+/// (and future direct-bundle import sources) so they can ride the existing
+/// runtime materialization path without each one re-implementing the
+/// ScriptEngine + WidgetBridge + DOM-walker boot sequence.
+///
+/// The envelope uses `compressed:false` raw base64 for the manifest entries
+/// — gzip+deflate is unnecessary overhead for in-process synthesis (the
+/// existing test harness already exercises this code path). The template
+/// HTML is JSON-escaped per the bundler/template script-tag contract.
+std::string synthesize_runtime_envelope(const ClaudeBundle& bundle);
+
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {
     /// Hard cap on bytes of bundled JS to evaluate. Bundles larger than

@@ -1999,6 +1999,44 @@ std::optional<ClaudeBundle> parse_jsx_react(const std::string& bundle_js,
     return bundle;
 }
 
+std::string synthesize_runtime_envelope(const ClaudeBundle& bundle) {
+    // Build a Claude-style HTML envelope around an arbitrary in-memory
+    // ClaudeBundle so `parse_claude_html_with_runtime` can consume it
+    // without a real Claude Design HTML wrapper on input. Uses raw base64
+    // (compressed:false) — gzip+deflate is unnecessary overhead for
+    // in-process synthesis. Matches the manifest_entry/build_envelope
+    // helpers in test_design_import_claude_runtime.cpp.
+
+    // Manifest: map of uuid → { mime, compressed:false, data: base64 }.
+    std::ostringstream manifest;
+    manifest << "{";
+    bool first = true;
+    for (const auto& asset : bundle.assets) {
+        if (!first) manifest << ",";
+        first = false;
+        const auto b64 = pulp::runtime::base64_encode(
+            asset.data.data(), asset.data.size());
+        manifest << "\"" << asset.uuid << "\":{"
+                 << "\"mime\":\"" << asset.mime << "\","
+                 << "\"compressed\":false,"
+                 << "\"data\":\"" << b64 << "\"}";
+    }
+    manifest << "}";
+
+    // Template HTML is JSON-escaped per the bundler/template script-tag
+    // contract — strings inside the script-tag body are quoted JSON.
+    // Reuse the file-scope json_string_literal helper.
+    const auto template_json = json_string_literal(bundle.template_html);
+
+    std::ostringstream html;
+    html << "<!DOCTYPE html><html><head><title>Pulp JSX Runtime Import</title>"
+            "</head><body>"
+            "<script type=\"__bundler/manifest\">" << manifest.str() << "</script>"
+            "<script type=\"__bundler/template\">" << template_json << "</script>"
+            "</body></html>";
+    return html.str();
+}
+
 // External-linkage thin wrapper around the anonymous-namespace
 // json_string_literal so widget_bridge.cpp (a separate TU) can use it
 // without re-implementing JSON escaping. Forward-declared in
