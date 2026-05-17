@@ -273,6 +273,7 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
+        core/platform/src/android/jni_motion.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
