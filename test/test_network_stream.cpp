@@ -604,6 +604,19 @@ TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
     REQUIRE(from_port != 0);
 }
 
+TEST_CASE("Socket UDP send_to and receive_from fail before create",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket socket;
+    std::array<std::uint8_t, 4> buffer{};
+    std::string from_address = "unchanged";
+    std::uint16_t from_port = 7777;
+
+    REQUIRE(socket.send_to(buffer.data(), buffer.size(), "127.0.0.1", 9) == -1);
+    REQUIRE(socket.receive_from(buffer.data(), buffer.size(), from_address, from_port) == -1);
+    REQUIRE(from_address == "unchanged");
+    REQUIRE(from_port == 7777);
+}
+
 TEST_CASE("Socket move construction transfers open UDP handle",
           "[network_stream][socket][coverage][phase3]") {
     Socket original;
