@@ -1472,6 +1472,12 @@ add_executable(pulp-test-motion test_motion.cpp)
 target_link_libraries(pulp-test-motion PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-motion)
 
+# MotionPreferences — Phase 8 reduced-motion policy + animation honoring
+add_executable(pulp-test-motion-preferences test_motion_preferences.cpp)
+target_link_libraries(pulp-test-motion-preferences PRIVATE
+    pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-motion-preferences)
+
 # Motion inspector — Phase 1 Motion.* protocol-domain tests
 if(TARGET pulp::inspect)
     add_executable(pulp-test-motion-inspector test_motion_inspector.cpp)

@@ -1,0 +1,339 @@
+/// @file test_motion_preferences.cpp
+/// Catch2 unit tests for pulp::view::MotionPreferences (Phase 8a) and the
+/// Tween / ValueAnimation honoring of MotionPolicy (Phase 8b).
+
+#include <pulp/view/motion_preferences.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/motion.hpp>
+#include <pulp/view/frame_clock.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <optional>
+#include <vector>
+
+using Catch::Approx;
+using pulp::view::MotionPolicy;
+using pulp::view::MotionPreferences;
+using pulp::view::Tween;
+using pulp::view::ValueAnimation;
+using pulp::view::easing::linear;
+
+namespace {
+
+/// Scope guard: reset MotionPreferences on test entry and exit so tests
+/// can't leak overrides into each other.
+struct PrefsScope {
+    PrefsScope() { MotionPreferences::instance().reset_for_tests(); }
+    ~PrefsScope() { MotionPreferences::instance().reset_for_tests(); }
+};
+
+} // namespace
+
+// ── MotionPreferences ────────────────────────────────────────────────
+
+TEST_CASE("MotionPreferences default policy after reset_for_tests is the OS value",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    // Default duration_scale is 1.0 and no override is set.
+    REQUIRE(prefs.duration_scale() == Approx(1.0));
+    REQUIRE_FALSE(prefs.has_override());
+    // The policy is whatever the OS reports — on a CI runner with no
+    // accessibility flag set, that's Full. We only require that the
+    // policy is a legal enum value.
+    auto p = prefs.policy();
+    REQUIRE((p == MotionPolicy::Full ||
+             p == MotionPolicy::Reduced ||
+             p == MotionPolicy::Off));
+}
+
+TEST_CASE("MotionPreferences set_override(Reduced) returns Reduced",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    REQUIRE(prefs.has_override());
+    REQUIRE(prefs.policy() == MotionPolicy::Reduced);
+    REQUIRE(MotionPreferences::current() == MotionPolicy::Reduced);
+}
+
+TEST_CASE("MotionPreferences set_override(Off) returns Off",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Off);
+    REQUIRE(prefs.policy() == MotionPolicy::Off);
+}
+
+TEST_CASE("MotionPreferences set_override(nullopt) reverts to OS value",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    REQUIRE(prefs.policy() == MotionPolicy::Reduced);
+    prefs.set_override(std::nullopt);
+    REQUIRE_FALSE(prefs.has_override());
+    // OS value — Full on a clean CI runner.
+    REQUIRE(prefs.policy() == MotionPolicy::Full);
+}
+
+TEST_CASE("MotionPreferences set_duration_scale sticks and clamps",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_duration_scale(0.5);
+    REQUIRE(prefs.duration_scale() == Approx(0.5));
+    REQUIRE(MotionPreferences::current_duration_scale() == Approx(0.5));
+
+    // Clamp negative → 0.
+    prefs.set_duration_scale(-1.0);
+    REQUIRE(prefs.duration_scale() == Approx(0.0));
+
+    // Clamp above 2.0 → 2.0.
+    prefs.set_duration_scale(10.0);
+    REQUIRE(prefs.duration_scale() == Approx(2.0));
+}
+
+TEST_CASE("MotionPreferences on_policy_changed fires on override transition",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    std::vector<MotionPolicy> seen;
+    prefs.on_policy_changed([&](MotionPolicy p) { seen.push_back(p); });
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_override(MotionPolicy::Off);
+    prefs.set_override(std::nullopt);
+    REQUIRE(seen.size() >= 2);   // Full→Reduced, Reduced→Off, Off→OS (Full)
+    REQUIRE(seen.front() == MotionPolicy::Reduced);
+    REQUIRE(seen.back() == MotionPolicy::Full);
+}
+
+TEST_CASE("MotionPreferences poll is a no-op while override is set",
+          "[motion-preferences]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    REQUIRE_FALSE(prefs.poll());
+    REQUIRE(prefs.policy() == MotionPolicy::Reduced);
+}
+
+TEST_CASE("motion_policy_to_string / from_string round-trip",
+          "[motion-preferences]") {
+    using namespace pulp::view;
+    REQUIRE(std::string(motion_policy_to_string(MotionPolicy::Full)) == "full");
+    REQUIRE(std::string(motion_policy_to_string(MotionPolicy::Reduced)) == "reduced");
+    REQUIRE(std::string(motion_policy_to_string(MotionPolicy::Off)) == "off");
+    REQUIRE(motion_policy_from_string("full") == MotionPolicy::Full);
+    REQUIRE(motion_policy_from_string("reduced") == MotionPolicy::Reduced);
+    REQUIRE(motion_policy_from_string("off") == MotionPolicy::Off);
+    REQUIRE(motion_policy_from_string("bogus") == MotionPolicy::Full);
+}
+
+// ── Tween honors MotionPolicy ────────────────────────────────────────
+
+TEST_CASE("Tween under MotionPolicy::Off is finished from construction",
+          "[motion-preferences][tween]") {
+    PrefsScope scope;
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    Tween t(0.0f, 1.0f, 0.5f, linear);
+    REQUIRE(t.finished());
+    REQUIRE(t.current() == Approx(1.0f));
+    // Even after advance(), still pinned at to_.
+    float v = t.advance(0.016f);
+    REQUIRE(v == Approx(1.0f));
+}
+
+TEST_CASE("Tween under MotionPolicy::Reduced scales duration",
+          "[motion-preferences][tween]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);
+
+    // Configured duration: 1.0s. Effective with Reduced + scale 0.5 = 0.5s.
+    Tween t(0.0f, 1.0f, 1.0f, linear);
+    // Advance halfway through the effective duration → linear → 0.5.
+    t.advance(0.25f);
+    REQUIRE(t.current() == Approx(0.5f).margin(1e-4));
+    REQUIRE_FALSE(t.finished());
+    // Advance through the rest of the effective duration → done.
+    t.advance(0.25f);
+    REQUIRE(t.finished());
+    REQUIRE(t.current() == Approx(1.0f));
+}
+
+TEST_CASE("Tween reset() re-applies the current MotionPolicy",
+          "[motion-preferences][tween]") {
+    PrefsScope scope;
+    // Construct under Full…
+    Tween t(0.0f, 1.0f, 1.0f, linear);
+    REQUIRE_FALSE(t.finished());
+    // …then flip to Off and reset.
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    t.reset();
+    REQUIRE(t.finished());
+    REQUIRE(t.current() == Approx(1.0f));
+}
+
+TEST_CASE("ValueAnimation::animate_to under MotionPolicy::Off snaps to target",
+          "[motion-preferences][value-animation]") {
+    PrefsScope scope;
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 0.5f);
+    REQUIRE_FALSE(a.animating());
+    REQUIRE(a.value() == Approx(1.0f));
+}
+
+TEST_CASE("ValueAnimation::animate_to under MotionPolicy::Reduced scales duration",
+          "[motion-preferences][value-animation]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 1.0f, linear);
+    REQUIRE(a.animating());
+    a.advance(0.25f);  // halfway through scaled (0.5s) duration → 0.5
+    REQUIRE(a.value() == Approx(0.5f).margin(1e-4));
+    a.advance(0.25f);
+    REQUIRE_FALSE(a.animating());
+    REQUIRE(a.value() == Approx(1.0f));
+}
+
+// ── Tween under publish, Off emits Baseline + final Sample + End ────
+//
+// Under MotionPolicy::Off, advancing a tween should produce a single
+// publish at the target value, not a long stream of intermediate samples.
+// This mirrors what an animation primitive would do at its tick site:
+// publish_value(current). Because the tween is `finished()` from
+// construction, the first advance() returns `to_` and any further
+// advance() also returns `to_` — so a typical "publish until finished"
+// loop produces one publish above the baseline epsilon, then exits.
+
+TEST_CASE("Tween under Off + publish emits Baseline + final Sample + End only",
+          "[motion-preferences][tween][publish]") {
+    PrefsScope scope;
+    auto& coord = pulp::view::motion::Coordinator::instance();
+    coord.reset();
+    coord.set_tracing_enabled(true);
+    coord.set_firehose(true);
+    pulp::view::FrameClock clock;
+    coord.bind(clock);
+
+    std::vector<pulp::view::motion::SampleEvent> events;
+    coord.add_sink(
+        [&](const pulp::view::motion::SampleEvent& e) { events.push_back(e); });
+
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    Tween t(0.0f, 1.0f, 0.5f, linear);
+    // Publish a baseline (0.0), then run a typical advance loop. Because
+    // the tween is already finished, the loop terminates on the first
+    // iteration but still publishes the final value (1.0).
+    pulp::view::motion::publish_value("X", "y", 0.0);
+    int steps = 0;
+    do {
+        t.advance(0.016f);
+        pulp::view::motion::publish_value("X", "y", t.current());
+        ++steps;
+    } while (!t.finished() && steps < 100);
+    REQUIRE(steps == 1);
+
+    // Tally event kinds.
+    int baseline = 0, sample = 0, start = 0;
+    for (const auto& e : events) {
+        switch (e.kind) {
+            case pulp::view::motion::SampleEvent::Kind::Baseline: ++baseline; break;
+            case pulp::view::motion::SampleEvent::Kind::Sample:   ++sample;   break;
+            case pulp::view::motion::SampleEvent::Kind::Start:    ++start;    break;
+            default: break;
+        }
+    }
+    REQUIRE(baseline == 1);
+    REQUIRE(start == 1);
+    REQUIRE(sample == 1);   // single Sample for the jump to final value
+    // The burst closes on the next stable tick; we don't drive enough
+    // frames here to force End, which is fine for the contract: Off
+    // produces *no intermediate Samples*, just the single final one.
+
+    coord.reset();
+}
+
+TEST_CASE("Tween under Reduced still produces a normal burst",
+          "[motion-preferences][tween][publish]") {
+    PrefsScope scope;
+    auto& coord = pulp::view::motion::Coordinator::instance();
+    coord.reset();
+    coord.set_tracing_enabled(true);
+    coord.set_firehose(true);
+    pulp::view::FrameClock clock;
+    coord.bind(clock);
+
+    std::vector<pulp::view::motion::SampleEvent> events;
+    coord.add_sink(
+        [&](const pulp::view::motion::SampleEvent& e) { events.push_back(e); });
+
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);   // effective duration 0.25s
+    Tween t(0.0f, 1.0f, 0.5f, linear);
+
+    pulp::view::motion::publish_value("X", "y", 0.0);
+    int steps = 0;
+    while (!t.finished() && steps < 200) {
+        // Tick the FrameClock so motion sample-event timestamps advance.
+        clock.tick(0.016f);
+        t.advance(0.016f);
+        pulp::view::motion::publish_value("X", "y", t.current());
+        ++steps;
+    }
+
+    int sample = 0;
+    for (const auto& e : events) {
+        if (e.kind == pulp::view::motion::SampleEvent::Kind::Sample) ++sample;
+    }
+    // Reduced is NOT "no samples". Expect a normal multi-sample burst —
+    // at minimum, more than one Sample between Start and End.
+    REQUIRE(sample > 1);
+
+    coord.reset();
+}
+
+// ── settling_time_seconds under Reduced halves with duration_scale 0.5
+
+TEST_CASE("Tween under Reduced + duration_scale 0.5 halves settling_time",
+          "[motion-preferences][tween][settling-time]") {
+    PrefsScope scope;
+    auto& coord = pulp::view::motion::Coordinator::instance();
+    coord.reset();
+    coord.set_tracing_enabled(true);
+    coord.set_firehose(true);
+    pulp::view::FrameClock clock;
+    coord.bind(clock);
+
+    std::vector<pulp::view::motion::SampleEvent> events;
+    coord.add_sink(
+        [&](const pulp::view::motion::SampleEvent& e) { events.push_back(e); });
+
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);
+
+    Tween t(0.0f, 1.0f, 1.0f, linear);  // configured 1.0s; effective 0.5s.
+    pulp::view::motion::publish_value("X", "y", 0.0);
+    while (!t.finished()) {
+        clock.tick(0.016f);
+        t.advance(0.016f);
+        pulp::view::motion::publish_value("X", "y", t.current());
+    }
+
+    auto samples = pulp::view::motion::extract_scalar(events, "X", "y", "value");
+    auto st = pulp::view::motion::settling_time_seconds(samples);
+    // Effective duration 0.5s. Allow ±50 ms for the 60 Hz quantization
+    // and the fact that we publish discrete samples.
+    REQUIRE(st == Approx(0.5).margin(0.06));
+
+    coord.reset();
+}

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <string>
 
+#include <pulp/view/motion_preferences.hpp>
+
 namespace pulp::view {
 
 class FrameClock; // forward declaration
@@ -52,16 +54,30 @@ struct StaticAnimationLimits {
 
 // ── Tween ────────────────────────────────────────────────────────────────────
 
-// Animates a float from start to end over a duration
+// Animates a float from start to end over a duration.
+//
+// Honors `MotionPreferences::current()` at construction and `reset()`:
+//   - Full     → animate over the configured duration (default).
+//   - Reduced  → scale the configured duration by `duration_scale`.
+//   - Off      → finish immediately at `to`; no intermediate values
+//                are produced.
 class Tween {
 public:
     Tween() = default;
     Tween(float from, float to, float duration_seconds, EasingFunction ease = easing::linear)
-        : from_(from), to_(to), duration_(duration_seconds), ease_(ease) {}
+        : from_(from), to_(to),
+          configured_duration_(duration_seconds),
+          duration_(duration_seconds), ease_(ease) {
+        apply_motion_policy_at_start();
+    }
 
     // Advance by dt seconds. Returns current value.
     float advance(float dt) {
         elapsed_ += dt;
+        if (duration_ <= 0.0f) {
+            current_ = to_;
+            return current_;
+        }
         float t = std::clamp(elapsed_ / duration_, 0.0f, 1.0f);
         float eased = ease_(t);
         current_ = from_ + (to_ - from_) * eased;
@@ -71,11 +87,35 @@ public:
     float current() const { return current_; }
     bool finished() const { return elapsed_ >= duration_; }
 
-    void reset() { elapsed_ = 0; current_ = from_; }
+    void reset() {
+        elapsed_ = 0;
+        current_ = from_;
+        duration_ = configured_duration_;
+        apply_motion_policy_at_start();
+    }
 
 private:
+    /// Read `MotionPreferences::current()` once and apply it to `duration_`
+    /// / `elapsed_` / `current_` so the tween starts already honoring the
+    /// policy. `Off` snaps to the target on tick 0; `Reduced` shrinks the
+    /// configured duration.
+    void apply_motion_policy_at_start() {
+        if (motion_policy_is_off()) {
+            duration_ = 0.0f;
+            elapsed_ = 0.0f;       // advance() returns to_ immediately
+            current_ = to_;
+            return;
+        }
+        if (MotionPreferences::current() == MotionPolicy::Reduced) {
+            const double scale = MotionPreferences::current_duration_scale();
+            duration_ = configured_duration_ * static_cast<float>(scale);
+        }
+    }
+
     float from_ = 0, to_ = 0;
-    float duration_ = 0;
+    float configured_duration_ = 0;  ///< Author-supplied duration; reset()
+                                     ///< re-applies the policy against this.
+    float duration_ = 0;             ///< Effective duration after policy.
     float elapsed_ = 0;
     float current_ = 0;
     EasingFunction ease_ = easing::linear;
@@ -165,13 +205,29 @@ public:
     explicit ValueAnimation(float initial) : current_(initial), target_(initial), from_(initial) {}
 
     /// Set a new target. Starts animating from current value.
+    ///
+    /// Honors `MotionPreferences::current()` at start:
+    ///   - Full     → animate over `duration`.
+    ///   - Reduced  → scale `duration` by `duration_scale`.
+    ///   - Off      → jump straight to `target`; no intermediate values.
     void animate_to(float target, float duration, EasingFunction ease = easing::ease_out_quad) {
         from_ = current_;
         target_ = target;
+        configured_duration_ = duration;
         duration_ = duration;
         elapsed_ = 0;
         ease_ = ease;
-        if (duration <= 0) {
+        if (motion_policy_is_off()) {
+            current_ = target;
+            duration_ = 0.0f;
+            animating_ = false;
+            return;
+        }
+        if (MotionPreferences::current() == MotionPolicy::Reduced) {
+            const double scale = MotionPreferences::current_duration_scale();
+            duration_ = duration * static_cast<float>(scale);
+        }
+        if (duration_ <= 0) {
             current_ = target;
             animating_ = false;
         } else {
@@ -216,6 +272,7 @@ private:
     float current_ = 0;
     float target_ = 0;
     float from_ = 0;
+    float configured_duration_ = 0;
     float duration_ = 0;
     float elapsed_ = 0;
     bool animating_ = false;
