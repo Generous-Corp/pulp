@@ -1452,6 +1452,11 @@ add_executable(pulp-test-frame-clock test_frame_clock.cpp)
 target_link_libraries(pulp-test-frame-clock PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-frame-clock)
 
+# Motion (agent-first motion observability) — Phase 0 bedrock tests
+add_executable(pulp-test-motion test_motion.cpp)
+target_link_libraries(pulp-test-motion PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-motion)
+
 # Widget animation behavior tests
 add_executable(pulp-test-widget-animation test_widget_animation.cpp)
 target_link_libraries(pulp-test-widget-animation PRIVATE pulp::view Catch2::Catch2WithMain)
