@@ -35,10 +35,12 @@ describe('@pulp/react build output (pulp #1292)', () => {
   it('dist/index.mjs exists and is small (no React inlined)', () => {
     const st = statSync(distMjs);
     // After externalizing react / react-reconciler / scheduler the bundle
-    // is ~27 KB. If anyone re-inlines react it jumps to ~950 KB. A 100 KB
-    // ceiling gives us comfortable headroom for the non-React surface to
-    // grow without letting React back in.
-    expect(st.size).toBeLessThan(100 * 1024);
+    // is ~106 KB (was ~27 KB pre-shortcuts; the rest is prop-applier +
+    // host-config + intrinsics surface that accumulated over time).
+    // If anyone re-inlines react it jumps to ~950 KB. A 130 KB ceiling
+    // keeps a wide gap from a React-inlined bundle while leaving room
+    // for the non-React surface to keep growing.
+    expect(st.size).toBeLessThan(130 * 1024);
   });
 
   it('keeps `react` as an external ESM import (not inlined)', () => {
