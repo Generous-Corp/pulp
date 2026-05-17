@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <utility>
@@ -397,6 +398,20 @@ TEST_CASE("Buffer self assignment preserves storage and channel pointers",
     REQUIRE(buffer.channel(1)[2] == -0.25f);
     REQUIRE(buffer.view().channel_ptr(0) == left);
     REQUIRE(buffer.view().channel_ptr(1) == right);
+}
+
+TEST_CASE("Buffer rejects dimensions that overflow sample storage",
+          "[audio][buffer][coverage][phase3]") {
+    const auto max = std::numeric_limits<std::size_t>::max();
+    REQUIRE_THROWS_AS((Buffer<float>(2, max)), std::length_error);
+
+    Buffer<float> buf(1, 2);
+    buf.channel(0)[0] = 0.25f;
+    REQUIRE_THROWS_AS(buf.resize(2, max), std::length_error);
+
+    REQUIRE(buf.num_channels() == 1);
+    REQUIRE(buf.num_samples() == 2);
+    REQUIRE(buf.channel(0)[0] == 0.25f);
 }
 
 TEST_CASE("AudioFileData reports shape from first channel",

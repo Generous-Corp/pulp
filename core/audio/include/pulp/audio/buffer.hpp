@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace pulp::audio {
@@ -110,14 +112,8 @@ public:
     /// @param num_channels  Number of audio channels.
     /// @param num_samples   Number of samples per channel.
     Buffer(std::size_t num_channels, std::size_t num_samples)
-        : num_channels_(num_channels)
-        , num_samples_(num_samples)
     {
-        data_.resize(num_channels * num_samples, SampleType{0});
-        ptrs_.resize(num_channels);
-        for (std::size_t ch = 0; ch < num_channels; ++ch) {
-            ptrs_[ch] = data_.data() + ch * num_samples;
-        }
+        resize(num_channels, num_samples);
     }
 
     Buffer(const Buffer& other)
@@ -162,9 +158,10 @@ public:
 
     /// Resize the buffer, reallocating if necessary. New samples are zero-filled.
     void resize(std::size_t num_channels, std::size_t num_samples) {
+        const auto sample_count = checked_sample_count(num_channels, num_samples);
         num_channels_ = num_channels;
         num_samples_ = num_samples;
-        data_.resize(num_channels * num_samples, SampleType{0});
+        data_.resize(sample_count, SampleType{0});
         refresh_channel_pointers();
     }
 
@@ -193,6 +190,15 @@ public:
     }
 
 private:
+    static std::size_t checked_sample_count(std::size_t num_channels,
+                                            std::size_t num_samples) {
+        if (num_channels != 0 &&
+            num_samples > std::numeric_limits<std::size_t>::max() / num_channels) {
+            throw std::length_error("audio buffer dimensions overflow");
+        }
+        return num_channels * num_samples;
+    }
+
     void refresh_channel_pointers() {
         ptrs_.resize(num_channels_);
         for (std::size_t ch = 0; ch < num_channels_; ++ch) {
