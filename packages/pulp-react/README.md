@@ -39,6 +39,19 @@ render(<App analyzerData={[0.1, 0.3, 0.5, 0.7, 0.9, 0.6, 0.2]} />);
 
 Pre-compile JSX with esbuild/Babel at your plugin's build step. The compiled bundle runs in Pulp's JS engine (QuickJS / JSC / V8) and emits `createCol` / `createRow` / `createPanel` / etc. calls to the bridge — which lays out via Yoga, paints via Skia, composites via Dawn.
 
+## Keyboard shortcuts
+
+```tsx
+import { useShortcut } from '@pulp/react';
+
+function SettingsButton({ onOpen }) {
+  useShortcut('cmd+,', onOpen);
+  return <Button onClick={onOpen}>Settings…</Button>;
+}
+```
+
+`useShortcut(spec, handler, deps?, source?)` wires the chord through Pulp's platform key path (`window_host_mac.mm performKeyEquivalent:` → `WidgetBridge::dispatch_global_key`) so it fires even when no widget is focused. Specs: `'escape'`, `'s'`, `'cmd+,'`, `'shift+cmd+s'`. Recognized modifiers: `cmd` / `meta` / `ctrl` / `shift` / `alt` (or `opt`). Two components registering the same chord from different `source` labels emit a `console.warn` clash diagnostic; same-source re-registration (remount) stays quiet. See [`src/shortcuts.ts`](src/shortcuts.ts) for the full primitive surface (`registerShortcut`, `parseShortcut`).
+
 ## Intrinsic primitives
 
 | Component | Bridge call | Use for |
