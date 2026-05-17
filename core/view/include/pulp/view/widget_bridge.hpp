@@ -59,6 +59,23 @@ public:
     // Load and execute a UI script
     void load_script(const std::string& code);
 
+    /// Phase 9: load_script overload that retains a script identifier.
+    /// `script_id` is recorded as `active_script_id_` and threaded into
+    /// every rAF callback registered while the script is active so
+    /// `motion.publishValue(...)` calls from inside an rAF body emit
+    /// events tagged with `source_kind="rAF"`,
+    /// `source_id="<script_id>:<callback_id>"`. The legacy overload
+    /// continues to work unchanged.
+    void load_script(const std::string& code, const std::string& script_id);
+
+    /// Set the active script identifier without re-evaluating a script.
+    /// Useful when the same engine evaluates fragments from multiple
+    /// sources and the caller wants subsequent rAF/timer callbacks to
+    /// attribute to a different surface. Pass an empty string to clear.
+    void set_active_script_id(const std::string& script_id);
+
+    const std::string& active_script_id() const noexcept { return active_script_id_; }
+
     // Get a widget by its JS-assigned ID
     View* widget(const std::string& id);
 
@@ -223,6 +240,11 @@ private:
         std::make_shared<std::vector<AsyncExecResult>>();
     std::vector<int> pending_frame_ids_;
     bool frame_preamble_loaded_ = false;
+    // Phase 9: identity of the most-recently loaded script (via
+    // `load_script(code, script_id)` or `set_active_script_id`). When
+    // non-empty, rAF callbacks and `motion.publishValue` bindings use
+    // it as the `source_id` prefix on emitted motion events.
+    std::string active_script_id_;
     // pulp #468 — install_runtime_import_handlers() is idempotent. Tracked
     // per-bridge (not as a static thread_local on `this`, because heap reuse
     // across tests gave duplicate addresses → spurious skip).

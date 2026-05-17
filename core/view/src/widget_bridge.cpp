@@ -1,6 +1,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/motion.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
@@ -915,6 +916,20 @@ void WidgetBridge::load_script(const std::string& code) {
     eval_or_throw(engine_, "user_script", code + "\n;void 0");
     // Flush any pending requestAnimationFrame callbacks
     eval_or_throw(engine_, "flush_frames", "if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
+}
+
+void WidgetBridge::load_script(const std::string& code,
+                               const std::string& script_id) {
+    // Phase 9: record the script identity BEFORE eval so any
+    // requestAnimationFrame calls made during eval already see the new
+    // active script. Cleared by the caller (or by a subsequent
+    // load_script call) when the script's surface goes away.
+    active_script_id_ = script_id;
+    load_script(code);
+}
+
+void WidgetBridge::set_active_script_id(const std::string& script_id) {
+    active_script_id_ = script_id;
 }
 
 View* WidgetBridge::widget(const std::string& id) {
@@ -6751,16 +6766,96 @@ void WidgetBridge::register_api() {
         if (ids.empty()) {
             return choc::value::Value();
         }
-        std::string batch;
-        batch.reserve(ids.size() * 24);
+        // Phase 9: invoke each callback under its own ambient
+        // provenance. The script identity (set via
+        // `load_script(code, script_id)` / `set_active_script_id`) is
+        // prefixed onto the callback id so a published value emitted
+        // from inside an rAF body inherits source_id =
+        // "<script_id>:<callback_id>". One callback at a time so the
+        // ambient slot is correct per-invocation.
+        const bool stamp = !active_script_id_.empty();
         for (auto id : ids) {
-            batch += "__invokeFrame__(";
-            batch += std::to_string(id);
-            batch += ");";
+            if (stamp) {
+                motion::Provenance p;
+                p.source_kind = "rAF";
+                p.source_id = active_script_id_ + ":" + std::to_string(id);
+                motion::set_ambient_provenance(std::move(p));
+            }
+            std::string call = "__invokeFrame__(" + std::to_string(id) + ");void 0;";
+            engine_.evaluate(call);
+            if (stamp) motion::clear_ambient_provenance();
         }
-        engine_.evaluate(batch + "void 0;");
         return choc::value::Value();
     });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 9: motion observability — JS-side bridge for the publish
+    // channel + ambient provenance slot.
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Exposes:
+    //   motion.publishValue(viewName, metricName, value)
+    //   motion.setProvenance(kind, id)         // sticky
+    //   motion.clearProvenance()
+    //
+    // The C++ side already off-by-defaults when tracing is disabled, so
+    // calling these in production code is cheap. Design-import codegen
+    // can emit `motion.setProvenance("design-import", "figma:Card/Hover")`
+    // alongside its `view.animate({...})` so the emitted trace carries
+    // the vendor + node identity. rAF callbacks pick up
+    // `source_kind="rAF"` automatically via the ambient slot set by
+    // `__flushFrames__` when an active script id is configured.
+
+    engine_.register_function("__motionPublishValue__",
+        [](choc::javascript::ArgumentList args) {
+            auto view = args.get<std::string>(0, "");
+            auto metric = args.get<std::string>(1, "");
+            auto value = args.get<double>(2, 0.0);
+            if (!view.empty() && !metric.empty()) {
+                motion::publish_value(std::move(view), std::move(metric), value);
+            }
+            return choc::value::Value();
+        });
+
+    engine_.register_function("__motionSetProvenance__",
+        [](choc::javascript::ArgumentList args) {
+            motion::Provenance p;
+            p.source_kind = args.get<std::string>(0, "");
+            p.source_id = args.get<std::string>(1, "");
+            // Optional file + line for callers that want to point at a
+            // specific JSX/JS source line.
+            p.source_file = args.get<std::string>(2, "");
+            p.source_line = args.get<int>(3, 0);
+            motion::set_ambient_provenance(std::move(p));
+            return choc::value::Value();
+        });
+
+    engine_.register_function("__motionClearProvenance__",
+        [](choc::javascript::ArgumentList) {
+            motion::clear_ambient_provenance();
+            return choc::value::Value();
+        });
+
+    // Install the JS-side `motion` global wrapping the natives.
+    // Idempotent — re-evaluating the same definition is a no-op.
+    engine_.evaluate(
+        "if (typeof globalThis.motion === 'undefined') {"
+        "  globalThis.motion = {"
+        "    publishValue: function(view, metric, value) {"
+        "      return __motionPublishValue__(String(view), String(metric), Number(value));"
+        "    },"
+        "    setProvenance: function(kind, id, file, line) {"
+        "      return __motionSetProvenance__(String(kind || ''), String(id || ''),"
+        "                                     String(file || ''), Number(line || 0));"
+        "    },"
+        "    set_provenance: function(kind, id, file, line) {"
+        "      return globalThis.motion.setProvenance(kind, id, file, line);"
+        "    },"
+        "    clearProvenance: function() { return __motionClearProvenance__(); },"
+        "  };"
+        "}"
+        "void 0;"
+    );
 
     // pulp #915 — native setTimeout / setInterval scheduling. JS-side
     // setTimeout/setInterval generate the id and stash the callback in
