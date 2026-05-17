@@ -6596,3 +6596,24 @@ which reported 100% diff coverage for `core/runtime/src/base64.cpp`, then
 rebased onto current `origin/main` and reran the direct regression test. This
 tranche is held locally and should be aggregated rather than submitted
 individually.
+
+2026-05-17 14:10 PDT: added Halley's local-only held runtime range tranche for
+the next large coverage batch. Range tranche
+`feature/phase3-codecov-range-batch-707` in
+`/private/tmp/pulp-phase3-codecov-range-batch-707` is clean at commit
+`9bc8fb308` (`fix(runtime): preserve floating range constrain bounds`). The
+tranche fixes `Range<T>::constrain` for floating ranges: integral ranges
+continue to clamp to `end - 1`, while floating ranges now clamp to
+`std::nextafter(end, start)` so half-open `[start, end)` semantics are
+preserved for `FloatRange` and `DoubleRange`. Focused coverage was added in
+`test/test_runtime_utils.cpp` for upper/lower floating clamps. Validation
+passed locally: configured Debug build, built `pulp-test-runtime-utils`, ran
+focused CTest `Range constrain preserves floating half-open upper bound` (1/1),
+ran direct `[runtime][range]` (14 cases / 54 assertions), ran the full direct
+`pulp-test-runtime-utils` binary (65 cases / 284 assertions), ran `git diff
+--check`, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='Range constrain|FloatRange|DoubleRange'
+tools/scripts/local_diff_cover.sh pulp-test-runtime-utils`, which reported
+100% diff coverage for the changed `core/runtime/include/pulp/runtime/range.hpp`
+lines. This tranche is held locally and should be aggregated rather than
+submitted individually.
