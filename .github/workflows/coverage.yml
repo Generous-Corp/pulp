@@ -447,20 +447,14 @@ jobs:
             exit 1
           }
           size=$(wc -c < "$xml")
-          echo "coverage.cobertura.xml size: ${size} bytes"
-          # Pulp #605 — file-non-empty is necessary but not sufficient.
-          # A well-formed but structurally EMPTY XML (lines-valid=0)
-          # will be rejected by Codecov v5 as "Unusable report" and the
-          # dashboard stays empty despite green CI and a successful
-          # upload. Assert the XML actually contains coverage data
-          # before we ship it.
-          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
-          if [ "${lines_valid}" = "0" ]; then
-            echo "::error::coverage.cobertura.xml is structurally empty (lines-valid=0)."
-            echo "::error::llvm-cov / lcov_cobertura filtered out every source file — check scripts/run_coverage.sh's COVERAGE_IGNORE_REGEX and -object list against the actual profraw source paths."
-            exit 1
-          fi
-          echo "coverage.cobertura.xml has lines-valid=${lines_valid}"
+          # A2 first cut: assertion logic extracted to
+          # tools/scripts/verify_cobertura_xml.py so the inline-Python
+          # heredoc isn't duplicated across the native + Python lanes
+          # (and stays unit-testable). #605 contract preserved
+          # verbatim — non-empty file + lines-valid > 0.
+          python3 tools/scripts/verify_cobertura_xml.py "$xml" \
+            --label "coverage.cobertura.xml" \
+            --hint "llvm-cov / lcov_cobertura filtered out every source file — check scripts/run_coverage.sh's COVERAGE_IGNORE_REGEX and -object list against the actual profraw source paths."
 
       - name: Verify Python Cobertura XML exists
         # coverage.py emits Cobertura XML too. Keep the same
@@ -475,15 +469,10 @@ jobs:
             echo "::error::Python tools coverage likely failed — check the 'Run Python tools coverage' step above."
             exit 1
           }
-          size=$(wc -c < "$xml")
-          echo "coverage.python.xml size: ${size} bytes"
-          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
-          if [ "${lines_valid}" = "0" ]; then
-            echo "::error::coverage.python.xml is structurally empty (lines-valid=0)."
-            echo "::error::coverage.py did not record any executable tools/scripts lines."
-            exit 1
-          fi
-          echo "coverage.python.xml has lines-valid=${lines_valid}"
+          # A2 first cut: shared verifier (see native lane above).
+          python3 tools/scripts/verify_cobertura_xml.py "$xml" \
+            --label "coverage.python.xml" \
+            --hint "coverage.py did not record any executable tools/scripts lines."
 
       - name: Verify Apple LCOV exists
         # Swift coverage is exported to repo-relative LCOV so Codecov
