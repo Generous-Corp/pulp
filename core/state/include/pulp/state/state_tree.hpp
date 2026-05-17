@@ -160,8 +160,10 @@ public:
         if (value_ != new_value) {
             T old = std::move(value_);
             value_ = std::move(new_value);
-            for (auto& [id, fn] : listeners_)
-                fn(old, value_);
+            for (auto& [id, fn] : listeners_) {
+                (void)id;
+                if (fn) fn(old, value_);
+            }
         }
     }
 

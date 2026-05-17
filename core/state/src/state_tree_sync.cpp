@@ -9,9 +9,11 @@ void StateTreeSynchroniser::attach(StateTree::Ptr tree) {
     if (!tree_) return;
 
     listener_id_ = tree_->add_listener(
-        [this](StateTree&, std::string_view prop, const PropertyValue&, const PropertyValue& new_val) {
+        [this](StateTree& node, std::string_view prop, const PropertyValue&, const PropertyValue& new_val) {
             SyncDelta delta;
-            delta.type = SyncDeltaType::PropertySet;
+            delta.type = std::holds_alternative<std::monostate>(new_val) && !node.has(prop)
+                ? SyncDeltaType::PropertyRemove
+                : SyncDeltaType::PropertySet;
             delta.path = tree_->type_name();
             delta.key = std::string(prop);
             delta.value = new_val;
@@ -150,15 +152,18 @@ std::vector<SyncDelta> StateTreeSynchroniser::decode(const uint8_t* data, size_t
             if (pos + len > size) break;
             d.value = std::string(reinterpret_cast<const char*>(data + pos), len); pos += len;
         } else if (val_type == 2) {
+            if (pos + 8 > size) break;
             int64_t v = 0;
-            for (int b = 0; b < 8 && pos < size; ++b)
+            for (int b = 0; b < 8; ++b)
                 v |= static_cast<int64_t>(data[pos++]) << (b * 8);
             d.value = v;
         } else if (val_type == 3) {
+            if (pos + 8 > size) break;
             double v;
             std::memcpy(&v, data + pos, 8); pos += 8;
             d.value = v;
         } else if (val_type == 4) {
+            if (pos >= size) break;
             d.value = data[pos++] != 0;
         }
 

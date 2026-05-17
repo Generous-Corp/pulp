@@ -1,6 +1,7 @@
 #include <pulp/view/hot_reload.hpp>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 namespace pulp::view {
 
@@ -9,6 +10,8 @@ HotReloader::HotReloader(const std::filesystem::path& js_file, ReloadCallback on
     , entry_file_(js_file.filename().string())
     , on_reload_(std::move(on_reload))
 {
+    seed_observed_write_times();
+
     auto dir = js_file.parent_path();
     watcher_ = std::make_unique<choc::file::Watcher>(
         dir,
@@ -26,6 +29,8 @@ HotReloader::HotReloader(const std::filesystem::path& directory,
     , entry_file_(entry_file)
     , on_reload_(std::move(on_reload))
 {
+    seed_observed_write_times();
+
     watcher_ = std::make_unique<choc::file::Watcher>(
         directory,
         [this](const choc::file::Watcher::Event& event) {
@@ -62,6 +67,9 @@ void HotReloader::on_file_changed(const choc::file::Watcher::Event& event) {
     if (ext != ".js" && ext != ".mjs")
         return;
 
+    if (!should_reload_for_modified_file(event.file))
+        return;
+
     // Read the entry file (not necessarily the changed file — could be an import)
     auto entry_path = watched_path_;
     if (std::filesystem::is_directory(watched_path_))
@@ -81,6 +89,50 @@ std::string HotReloader::read_file(const std::filesystem::path& path) {
     std::ostringstream ss;
     ss << file.rdbuf();
     return ss.str();
+}
+
+void HotReloader::seed_observed_write_times() {
+    auto remember = [this](const std::filesystem::path& path) {
+        const auto ext = path.extension().string();
+        if (ext != ".js" && ext != ".mjs")
+            return;
+
+        std::error_code ec;
+        const auto write_time = std::filesystem::last_write_time(path, ec);
+        if (!ec)
+            observed_write_times_[path.lexically_normal().string()] = write_time;
+    };
+
+    std::error_code ec;
+    if (std::filesystem::is_directory(watched_path_, ec)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(
+                 watched_path_,
+                 std::filesystem::directory_options::skip_permission_denied,
+                 ec)) {
+            if (ec)
+                break;
+            if (entry.is_regular_file(ec))
+                remember(entry.path());
+            ec.clear();
+        }
+    } else {
+        remember(watched_path_);
+    }
+}
+
+bool HotReloader::should_reload_for_modified_file(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto write_time = std::filesystem::last_write_time(path, ec);
+    if (ec)
+        return false;
+
+    const auto key = path.lexically_normal().string();
+    auto it = observed_write_times_.find(key);
+    if (it != observed_write_times_.end() && write_time <= it->second)
+        return false;
+
+    observed_write_times_[key] = write_time;
+    return true;
 }
 
 } // namespace pulp::view

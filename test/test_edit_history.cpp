@@ -129,3 +129,44 @@ TEST_CASE("EditHistory empty undo/redo returns false", "[state][undo]") {
     REQUIRE_FALSE(history.undo());
     REQUIRE_FALSE(history.redo());
 }
+
+TEST_CASE("EditHistory lowering max depth trims existing undo stack",
+          "[state][undo][codecov]") {
+    EditHistory history(5);
+    int v = 0;
+
+    for (int i = 1; i <= 4; ++i) {
+        const int previous = v;
+        const int next = i;
+        history.perform([&v, next]() { v = next; },
+                        [&v, previous]() { v = previous; },
+                        "Step " + std::to_string(i));
+    }
+
+    REQUIRE(history.undo_count() == 4);
+    history.set_max_depth(2);
+
+    REQUIRE(history.max_depth() == 2);
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo_description() == "Step 4");
+
+    REQUIRE(history.undo());
+    REQUIRE(v == 3);
+    REQUIRE(history.undo());
+    REQUIRE(v == 2);
+    REQUIRE_FALSE(history.can_undo());
+}
+
+TEST_CASE("EditHistory zero max depth performs actions without retaining history",
+          "[state][undo][codecov]") {
+    EditHistory history(0);
+    int v = 0;
+
+    history.perform([&] { v = 1; }, [&] { v = 0; }, "No history");
+
+    REQUIRE(v == 1);
+    REQUIRE(history.max_depth() == 0);
+    REQUIRE(history.undo_count() == 0);
+    REQUIRE_FALSE(history.can_undo());
+    REQUIRE_FALSE(history.undo());
+}

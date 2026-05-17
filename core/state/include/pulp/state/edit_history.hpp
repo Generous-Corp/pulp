@@ -105,7 +105,11 @@ public:
         return undo_stack_.empty() ? "" : undo_stack_.back()->description();
     }
 
-    void set_max_depth(size_t depth) { max_depth_ = depth; }
+    void set_max_depth(size_t depth) {
+        max_depth_ = depth;
+        while (undo_stack_.size() > max_depth_)
+            undo_stack_.erase(undo_stack_.begin());
+    }
     size_t max_depth() const { return max_depth_; }
 
 private:

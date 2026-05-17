@@ -82,6 +82,20 @@ TEST_CASE("PropertiesFile set and get bool", "[state][properties]") {
     REQUIRE(*val == false);
 }
 
+TEST_CASE("PropertiesFile bool getter accepts true and numeric-one strings",
+          "[state][properties][codecov]") {
+    PropertiesFile props;
+    props.set_string("true_text", "true");
+    props.set_string("one_text", "1");
+    props.set_string("false_text", "false");
+    props.set_string("other_text", "yes");
+
+    REQUIRE(props.get_bool("true_text").value_or(false));
+    REQUIRE(props.get_bool("one_text").value_or(false));
+    REQUIRE_FALSE(props.get_bool("false_text").value_or(true));
+    REQUIRE_FALSE(props.get_bool("other_text").value_or(true));
+}
+
 TEST_CASE("PropertiesFile remove", "[state][properties]") {
     PropertiesFile props;
     props.set_string("key", "value");
@@ -186,6 +200,50 @@ TEST_CASE("PropertiesFile load non-object JSON leaves existing values intact",
     REQUIRE_FALSE(props.load(tmp.path_string()));
     REQUIRE(props.get_string("stale").value_or("") == "value");
     REQUIRE(props.path() == tmp.path_string());
+}
+
+TEST_CASE("PropertiesFile load rejects non-object JSON without clearing values",
+          "[state][properties][codecov]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << R"json(["not", "an", "object"])json";
+    }
+
+    PropertiesFile props;
+    props.set_string("existing", "kept");
+
+    REQUIRE_FALSE(props.load(tmp.path_string()));
+    REQUIRE(props.path() == tmp.path_string());
+    REQUIRE(props.get_string("existing").value_or("") == "kept");
+}
+
+TEST_CASE("PropertiesFile load coerces scalar JSON members and skips nested values",
+          "[state][properties][codecov]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << R"json({
+            "name": "Pulp",
+            "enabled": true,
+            "count": 42,
+            "wide": 4294967296,
+            "gain": -3.5,
+            "nested": {"skip": true},
+            "items": [1, 2, 3]
+        })json";
+    }
+
+    PropertiesFile props;
+    REQUIRE(props.load(tmp.path_string()));
+
+    REQUIRE(props.get_string("name").value_or("") == "Pulp");
+    REQUIRE(props.get_bool("enabled").value_or(false));
+    REQUIRE(props.get_int("count").value_or(0) == 42);
+    REQUIRE(props.get_int("wide").value_or(0) == 4294967296LL);
+    REQUIRE_THAT(props.get_double("gain").value_or(0.0), WithinAbs(-3.5, 0.001));
+    REQUIRE_FALSE(props.contains("nested"));
+    REQUIRE_FALSE(props.contains("items"));
 }
 
 TEST_CASE("PropertiesFile load empty file clears existing values", "[state][properties]") {

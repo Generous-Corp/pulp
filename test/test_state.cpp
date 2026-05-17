@@ -2,6 +2,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/state/state.hpp>
 #include <cstring>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 using namespace pulp::state;
@@ -43,6 +45,26 @@ static uint32_t crc32_simple_for_test(const std::vector<uint8_t>& data,
     return ~crc;
 }
 
+static uint32_t test_crc32(const uint8_t* data, std::size_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (std::size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j) {
+            const uint32_t mask = (crc & 1u) ? 0xFFFFFFFFu : 0u;
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
+}
+
+static void write_le_u32(std::vector<uint8_t>& data, std::size_t offset, uint32_t value) {
+    REQUIRE(offset + 4 <= data.size());
+    data[offset + 0] = static_cast<uint8_t>(value & 0xFF);
+    data[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    data[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    data[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
 TEST_CASE("ParamRange normalization", "[state][range]") {
     ParamRange range{0.0f, 100.0f, 50.0f, 0.0f};
 
@@ -80,6 +102,53 @@ TEST_CASE("ParamRange zero-width ranges normalize safely",
     REQUIRE_THAT(range.normalize(100.0f), WithinAbs(0.0, 0.001));
     REQUIRE_THAT(range.denormalize(0.25f), WithinAbs(7.0, 0.001));
     REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(7.0, 0.001));
+}
+
+TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range][codecov]") {
+    ParamRange range{-10.0f, 10.0f, 0.0f, 0.0f};
+
+    REQUIRE_THAT(range.normalize(-100.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(range.normalize(100.0f), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(range.denormalize(-1.0f), WithinAbs(-10.0, 0.001));
+    REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(10.0, 0.001));
+
+    ParamRange fixed{5.0f, 5.0f, 5.0f, 1.0f};
+    REQUIRE_THAT(fixed.normalize(123.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(fixed.denormalize(0.75f), WithinAbs(5.0, 0.001));
+}
+
+TEST_CASE("ParamValue tracks modulation and copy move state",
+          "[state][value][codecov]") {
+    ParamRange range{-1.0f, 1.0f, 0.0f, 0.5f};
+    ParamValue value(0.25f);
+
+    REQUIRE_THAT(value.get(), WithinAbs(0.25, 0.001));
+    REQUIRE_THAT(value.get_normalized(range), WithinAbs(0.625, 0.001));
+
+    value.set_normalized(1.0f, range);
+    REQUIRE_THAT(value.get(), WithinAbs(1.0, 0.001));
+
+    value.set_mod_offset(-0.25f);
+    value.add_mod_offset(-0.25f);
+    REQUIRE_THAT(value.get_modulated(), WithinAbs(0.5, 0.001));
+
+    ParamValue copied(value);
+    REQUIRE_THAT(copied.get(), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(copied.get_modulated(), WithinAbs(1.0, 0.001));
+
+    ParamValue assigned;
+    assigned = value;
+    REQUIRE_THAT(assigned.get(), WithinAbs(1.0, 0.001));
+
+    value.reset_mod();
+    REQUIRE_THAT(value.get_modulated(), WithinAbs(1.0, 0.001));
+
+    ParamValue moved(std::move(value));
+    REQUIRE_THAT(moved.get(), WithinAbs(1.0, 0.001));
+
+    ParamValue move_assigned;
+    move_assigned = std::move(moved);
+    REQUIRE_THAT(move_assigned.get(), WithinAbs(1.0, 0.001));
 }
 
 TEST_CASE("StateStore basic operations", "[state][store]") {
@@ -255,6 +324,42 @@ TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0, 0.001));
 }
 
+TEST_CASE("StateStore deserialize clamps values to current ranges",
+          "[state][serialize][codecov]") {
+    StateStore source;
+    source.add_parameter(make_param_info(1, "Wide", "", {0.0f, 100.0f, 50.0f}));
+    source.set_value(1, 80.0f);
+    auto data = source.serialize();
+
+    StateStore target;
+    target.add_parameter(make_param_info(1, "Narrow", "", {0.0f, 1.0f, 0.5f}));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(1), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("StateStore deserialize rejects bad magic and future versions",
+          "[state][serialize][codecov]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(1, -12.0f);
+
+    auto data = store.serialize();
+
+    auto bad_magic = data;
+    bad_magic[0] = 'X';
+    REQUIRE_FALSE(store.deserialize(bad_magic));
+
+    auto future_version = data;
+    write_le_u32(future_version, 4, store.state_version() + 1);
+    const auto payload_size = future_version.size() - 4;
+    const auto crc = test_crc32(future_version.data(), payload_size);
+    write_le_u32(future_version, payload_size, crc);
+
+    REQUIRE_FALSE(store.deserialize(future_version));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(-12.0, 0.001));
+}
+
 TEST_CASE("StateStore change listener", "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
@@ -269,6 +374,22 @@ TEST_CASE("StateStore change listener", "[state][listener]") {
     store.set_value(1, 0.8f);
     REQUIRE(changed_id == 1);
     REQUIRE_THAT(changed_value, WithinAbs(0.8, 0.001));
+}
+
+TEST_CASE("StateStore skips empty change listeners", "[state][listener][codecov]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
+
+    int calls = 0;
+    store.add_listener({});
+    store.add_listener([&](ParamID id, float value) {
+        REQUIRE(id == 1);
+        REQUIRE_THAT(value, WithinAbs(0.75, 0.001));
+        ++calls;
+    });
+
+    store.set_value(1, 0.75f);
+    REQUIRE(calls == 1);
 }
 
 TEST_CASE("StateStore modulation offsets and default resets", "[state][store]") {

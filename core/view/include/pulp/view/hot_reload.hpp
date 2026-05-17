@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <atomic>
+#include <unordered_map>
 
 namespace pulp::view {
 
@@ -47,6 +48,7 @@ private:
     std::string entry_file_;
     ReloadCallback on_reload_;
     std::unique_ptr<choc::file::Watcher> watcher_;
+    std::unordered_map<std::string, std::filesystem::file_time_type> observed_write_times_;
 
     std::mutex pending_mutex_;
     std::string pending_code_;
@@ -55,6 +57,8 @@ private:
 
     void on_file_changed(const choc::file::Watcher::Event& event);
     std::string read_file(const std::filesystem::path& path);
+    void seed_observed_write_times();
+    bool should_reload_for_modified_file(const std::filesystem::path& path);
 };
 
 } // namespace pulp::view

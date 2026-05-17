@@ -169,6 +169,20 @@ TEST_CASE("PresetManager refresh resets cache", "[state][preset]") {
     pm.refresh();
 }
 
+TEST_CASE("PresetManager navigation returns false with no presets",
+          "[state][preset][codecov]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-empty-navigation");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.all_presets().empty());
+    REQUIRE(pm.user_presets().empty());
+    REQUIRE(pm.factory_presets().empty());
+    REQUIRE_FALSE(pm.load_next());
+    REQUIRE_FALSE(pm.load_previous());
+}
+
 TEST_CASE("PresetManager load rejects malformed files without changing dirty state", "[state][preset]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-reject");
     StateStore store;
@@ -238,6 +252,58 @@ TEST_CASE("PresetManager load clamps out-of-range parameter values",
     REQUIRE(store.get_value(1) == Catch::Approx(12.0f));
     REQUIRE(store.get_value(2) == Catch::Approx(0.0f));
     REQUIRE(pm.current_preset_name() == "Clamped");
+}
+
+TEST_CASE("PresetManager discovery ignores non-json files and reports nested folders",
+          "[state][preset][codecov]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-discovery-filter");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    write_text_file(pm.user_presets_dir() / "readme.txt", "not a preset");
+    write_text_file(pm.user_presets_dir() / "Bank" / "Lead.json",
+                    R"json({"parameters":{"Gain":-9,"Mix":60}})json");
+    write_text_file(pm.user_presets_dir() / "Bank" / "Nested" / "Pad.json",
+                    R"json({"parameters":{"Gain":-18,"Mix":80}})json");
+
+    auto presets = pm.user_presets();
+    REQUIRE(presets.size() == 2);
+    REQUIRE(presets[0].name == "Lead");
+    REQUIRE(presets[0].folder == "Bank");
+    REQUIRE_FALSE(presets[0].is_factory);
+    REQUIRE(presets[1].name == "Pad");
+    REQUIRE(presets[1].folder.find("Nested") != std::string::npos);
+}
+
+TEST_CASE("PresetManager load via PresetInfo and rename preserves other current names",
+          "[state][preset][codecov]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-info-load-rename");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -6.0f);
+    REQUIRE(pm.save("First"));
+    store.set_value(1, -12.0f);
+    REQUIRE(pm.save("Second"));
+
+    auto first = require_user_preset(pm, "First");
+    auto second = require_user_preset(pm, "Second");
+
+    store.set_value(1, 0.0f);
+    REQUIRE(pm.load(first));
+    REQUIRE(pm.current_preset_name() == "First");
+    REQUIRE(store.get_value(1) == Catch::Approx(-6.0f));
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+    REQUIRE(pm.rename(second, "RenamedSecond"));
+
+    REQUIRE(pm.current_preset_name() == "First");
+    REQUIRE(list_changes == 1);
+    REQUIRE_FALSE(fs::exists(second.path));
+    REQUIRE(fs::exists(pm.user_presets_dir() / "RenamedSecond.json"));
 }
 
 TEST_CASE("PresetManager save scans subfolders and reports list changes", "[state][preset]") {

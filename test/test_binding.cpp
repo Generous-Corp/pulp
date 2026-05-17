@@ -162,6 +162,48 @@ TEST_CASE("Binding on_change does not fire for same value", "[binding]") {
     REQUIRE(call_count == 1);
 }
 
+TEST_CASE("Binding skips empty change callbacks and reports clamped values",
+          "[binding][codecov]") {
+    auto store = make_store();
+    Binding b(*store, 1);
+
+    int call_count = 0;
+    float received = 0.0f;
+    b.on_change({});
+    b.on_change([&](float value) {
+        ++call_count;
+        received = value;
+    });
+
+    b.set(999.0f);
+
+    REQUIRE(call_count == 1);
+    REQUIRE_THAT(received, WithinAbs(24.0, 0.01));
+    REQUIRE_THAT(store->get_value(1), WithinAbs(24.0, 0.01));
+}
+
+TEST_CASE("Binding to unknown parameter is inert but remains store-bound",
+          "[binding][codecov]") {
+    auto store = make_store();
+    Binding b(*store, 999);
+
+    int call_count = 0;
+    b.on_change([&](float) { ++call_count; });
+
+    REQUIRE(b.is_bound());
+    REQUIRE(b.id() == 999);
+    REQUIRE(b.info() == nullptr);
+    REQUIRE_THAT(b.get(), WithinAbs(0.0, 0.01));
+    REQUIRE_THAT(b.get_normalized(), WithinAbs(0.0, 0.01));
+
+    b.set(10.0f);
+    b.set_normalized(0.75f);
+    b.reset();
+
+    REQUIRE_FALSE(b.poll());
+    REQUIRE(call_count == 0);
+}
+
 TEST_CASE("Binding poll detects external changes", "[binding]") {
     auto store = make_store();
     Binding b(*store,1);
@@ -189,6 +231,23 @@ TEST_CASE("Binding poll reports non-zero default once", "[binding]") {
     REQUIRE(b.poll());
     REQUIRE_THAT(received, WithinAbs(50.0, 0.01));
     REQUIRE_FALSE(b.poll());
+}
+
+TEST_CASE("create_bindings preserves parameter order and metadata",
+          "[binding][codecov]") {
+    auto store = make_store();
+    auto bindings = create_bindings(*store);
+
+    REQUIRE(bindings.size() == 2);
+    REQUIRE(bindings[0].id() == 1);
+    REQUIRE(bindings[0].info() != nullptr);
+    REQUIRE(bindings[0].info()->name == "Gain");
+    REQUIRE_THAT(bindings[0].get(), WithinAbs(0.0, 0.01));
+
+    REQUIRE(bindings[1].id() == 2);
+    REQUIRE(bindings[1].info() != nullptr);
+    REQUIRE(bindings[1].info()->name == "Mix");
+    REQUIRE_THAT(bindings[1].get(), WithinAbs(50.0, 0.01));
 }
 
 TEST_CASE("Binding reset to default", "[binding]") {
