@@ -823,6 +823,8 @@ TEST_CASE("MemoryMappedAudioReader rejects invalid destinations before decoding"
 
     REQUIRE(reader.read_frames(nullptr, 0, 0, 1));
     REQUIRE(reader.read_frames(missing_channels, 2, 0, 0));
+    float** no_channels = nullptr;
+    REQUIRE(reader.read_frames(no_channels, 0, 0, 1));
 
     reader.close();
     std::filesystem::remove(path);
