@@ -1484,6 +1484,13 @@ if(TARGET pulp::inspect)
     target_link_libraries(pulp-test-motion-inspector PRIVATE
         pulp::view pulp::inspect Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-motion-inspector)
+
+    # Motion scrubber — Phase 7 timeline scrubber that consumes
+    # .motion.jsonl fixtures and re-emits events up to a frame playhead.
+    add_executable(pulp-test-motion-scrubber test_motion_scrubber.cpp)
+    target_link_libraries(pulp-test-motion-scrubber PRIVATE
+        pulp::view pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-motion-scrubber)
 endif()
 
 # Motion end-to-end animation smoke — mirrors what a plugin author

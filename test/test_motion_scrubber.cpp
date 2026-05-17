@@ -1,0 +1,300 @@
+/// @file test_motion_scrubber.cpp
+/// Catch2 tests for pulp::inspect::MotionScrubber.
+///
+/// Coverage:
+///   * load_fixture / scrub_to playhead semantics over a real
+///     recorded fixture (forward + backward scrubs both re-emit
+///     the correct prefix);
+///   * play() jumps to max frame and emits every event;
+///   * DomainHandler protocol roundtrip for Motion.loadFixture +
+///     Motion.scrubTo + Motion.play + Motion.pause.
+
+#include <pulp/inspect/domain_handler.hpp>
+#include <pulp/inspect/motion_scrubber.hpp>
+#include <pulp/inspect/protocol.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/motion.hpp>
+
+#include <choc/text/choc_JSON.h>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
+using pulp::inspect::DomainHandler;
+using pulp::inspect::InspectorMessage;
+using pulp::inspect::MotionScrubber;
+using pulp::inspect::make_request;
+using pulp::view::FrameClock;
+using pulp::view::motion::Coordinator;
+using pulp::view::motion::SampleEvent;
+using pulp::view::motion::make_buffer_sink;
+using pulp::view::motion::make_fixture_sink;
+using pulp::view::motion::publish_value;
+
+namespace {
+
+std::string tmp_fixture_path(const std::string& tag) {
+    std::ostringstream ss;
+    ss << "/tmp/pulp-motion-scrubber-" << tag << "-"
+       << static_cast<long>(::getpid()) << "-"
+       << std::rand() << ".jsonl";
+    return ss.str();
+}
+
+/// Write a fixture with a non-trivial frame range. Returns the file
+/// path; the caller is responsible for deleting it.
+std::string record_sample_fixture(const std::string& tag, FrameClock& clock) {
+    const auto path = tmp_fixture_path(tag);
+    Coordinator::instance().reset();
+    Coordinator::instance().bind(clock);
+    Coordinator::instance().set_tracing_enabled(true);
+    Coordinator::instance().set_firehose(true);
+    const int sink_id = Coordinator::instance().add_sink(make_fixture_sink(path));
+
+    // Stage frame 0: baseline publish.
+    publish_value("Card", "opacity", 0.0);
+    clock.tick(1.0 / 60.0);
+
+    // Stage frame 1: change → Start + Sample at frame 1.
+    publish_value("Card", "opacity", 0.5);
+    clock.tick(1.0 / 60.0);
+
+    // Stage frame 2: continued change → Sample at frame 2.
+    publish_value("Card", "opacity", 0.75);
+    clock.tick(1.0 / 60.0);
+
+    // Stage frame 3: stable → End at frame 3.
+    publish_value("Card", "opacity", 0.75);
+    clock.tick(1.0 / 60.0);
+    publish_value("Card", "opacity", 0.75);
+
+    Coordinator::instance().remove_sink(sink_id);
+    Coordinator::instance().reset();
+    return path;
+}
+
+}  // namespace
+
+// ── load_fixture populates the scrubber but emits nothing yet ─────────
+
+TEST_CASE("MotionScrubber load_fixture is passive — no events until scrub",
+          "[motion-scrubber]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("passive", clock);
+
+    MotionScrubber scrub;
+    std::vector<SampleEvent> sink_events;
+    scrub.add_sink(make_buffer_sink(&sink_events));
+
+    REQUIRE(scrub.load_fixture(path));
+    REQUIRE(scrub.loaded());
+    REQUIRE(scrub.event_count() > 0);
+    REQUIRE(scrub.playhead_frame() == 0u);
+    REQUIRE_FALSE(scrub.playing());
+    REQUIRE(sink_events.empty());  // load is passive
+
+    std::remove(path.c_str());
+}
+
+// ── scrub_to(N) emits exactly the events with frame <= N ──────────────
+
+TEST_CASE("MotionScrubber scrub_to(N) re-emits prefix with frame <= N",
+          "[motion-scrubber]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("prefix", clock);
+
+    MotionScrubber scrub;
+    REQUIRE(scrub.load_fixture(path));
+
+    // Sanity: the recorded fixture covers at least frames 0..3.
+    REQUIRE(scrub.max_frame() >= 3u);
+
+    // Expected prefix counts based on the recorded fixture.
+    auto golden = pulp::view::motion::load_fixture(path);
+    auto expected_count_le = [&](std::uint64_t f) {
+        std::size_t n = 0;
+        for (const auto& e : golden) {
+            if (e.frame <= f) ++n;
+        }
+        return n;
+    };
+
+    // Scrub to frame 1.
+    {
+        std::vector<SampleEvent> buf;
+        int id = scrub.add_sink(make_buffer_sink(&buf));
+        const std::size_t emitted = scrub.scrub_to(1);
+        REQUIRE(emitted == expected_count_le(1));
+        REQUIRE(buf.size() == expected_count_le(1));
+        for (const auto& e : buf) REQUIRE(e.frame <= 1u);
+        REQUIRE(scrub.playhead_frame() == 1u);
+        scrub.remove_sink(id);
+    }
+
+    // Scrub forward to a higher frame — sink gets a larger prefix.
+    {
+        std::vector<SampleEvent> buf;
+        int id = scrub.add_sink(make_buffer_sink(&buf));
+        const std::size_t emitted = scrub.scrub_to(3);
+        REQUIRE(emitted == expected_count_le(3));
+        REQUIRE(buf.size() == expected_count_le(3));
+        for (const auto& e : buf) REQUIRE(e.frame <= 3u);
+        REQUIRE(scrub.playhead_frame() == 3u);
+        scrub.remove_sink(id);
+    }
+
+    // Scrub backwards to frame 0 — sink gets only the baseline prefix.
+    {
+        std::vector<SampleEvent> buf;
+        int id = scrub.add_sink(make_buffer_sink(&buf));
+        const std::size_t emitted = scrub.scrub_to(0);
+        REQUIRE(emitted == expected_count_le(0));
+        REQUIRE(buf.size() == expected_count_le(0));
+        for (const auto& e : buf) REQUIRE(e.frame == 0u);
+        REQUIRE(scrub.playhead_frame() == 0u);
+        // The prefix at frame 0 must be strictly smaller than the
+        // prefix at frame 3 — backwards scrub is observable.
+        REQUIRE(buf.size() < expected_count_le(3));
+        scrub.remove_sink(id);
+    }
+
+    std::remove(path.c_str());
+}
+
+// ── play() jumps to the max frame and emits every event ───────────────
+
+TEST_CASE("MotionScrubber play() emits every loaded event",
+          "[motion-scrubber]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("play", clock);
+
+    MotionScrubber scrub;
+    REQUIRE(scrub.load_fixture(path));
+
+    std::vector<SampleEvent> buf;
+    scrub.add_sink(make_buffer_sink(&buf));
+
+    const std::size_t emitted = scrub.play();
+    REQUIRE(scrub.playing());
+    REQUIRE(emitted == scrub.event_count());
+    REQUIRE(buf.size() == scrub.event_count());
+    REQUIRE(scrub.playhead_frame() == scrub.max_frame());
+
+    scrub.pause();
+    REQUIRE_FALSE(scrub.playing());
+
+    std::remove(path.c_str());
+}
+
+// ── Unloaded scrubber rejects scrub / play gracefully ────────────────
+
+TEST_CASE("MotionScrubber scrub_to / play are no-ops when no fixture loaded",
+          "[motion-scrubber]") {
+    MotionScrubber scrub;
+    REQUIRE_FALSE(scrub.loaded());
+    REQUIRE(scrub.scrub_to(10) == 0u);
+    REQUIRE(scrub.play() == 0u);
+}
+
+// ── DomainHandler protocol roundtrip ─────────────────────────────────
+
+TEST_CASE("DomainHandler routes Motion.loadFixture + scrubTo to MotionScrubber",
+          "[motion-scrubber][protocol]") {
+    FrameClock clock;
+    const auto path = record_sample_fixture("proto", clock);
+
+    MotionScrubber scrub;
+    DomainHandler dh;
+    dh.set_motion_scrubber(&scrub);
+
+    std::vector<SampleEvent> wire_events;
+    scrub.add_sink(make_buffer_sink(&wire_events));
+
+    // Motion.loadFixture
+    std::ostringstream load_params;
+    load_params << "{\"path\":\"" << path << "\"}";
+    auto load_resp = dh.handle(make_request(1, "Motion.loadFixture",
+                                            load_params.str()));
+    REQUIRE_FALSE(load_resp.is_error);
+    auto load_body = choc::json::parse(load_resp.params_json);
+    REQUIRE(load_body["ok"].getBool() == true);
+    REQUIRE(load_body["event_count"].getInt64() > 0);
+    REQUIRE(load_body["max_frame"].getInt64() >= 3);
+    REQUIRE(load_body.hasObjectMember("header"));
+    REQUIRE(load_body["header"]["version"].getInt64() ==
+            pulp::view::motion::kFixtureSchemaVersion);
+
+    // Motion.scrubTo frame 2
+    auto scrub_resp = dh.handle(make_request(2, "Motion.scrubTo",
+                                             "{\"frame\":2}"));
+    REQUIRE_FALSE(scrub_resp.is_error);
+    auto scrub_body = choc::json::parse(scrub_resp.params_json);
+    REQUIRE(scrub_body["playhead_frame"].getInt64() == 2);
+    const auto emitted = scrub_body["emitted_count"].getInt64();
+    REQUIRE(emitted > 0);
+    REQUIRE(static_cast<std::int64_t>(wire_events.size()) == emitted);
+    for (const auto& e : wire_events) REQUIRE(e.frame <= 2u);
+
+    // Motion.play
+    wire_events.clear();
+    auto play_resp = dh.handle(make_request(3, "Motion.play", "{}"));
+    REQUIRE_FALSE(play_resp.is_error);
+    auto play_body = choc::json::parse(play_resp.params_json);
+    REQUIRE(play_body["playing"].getBool() == true);
+    REQUIRE(static_cast<std::int64_t>(wire_events.size()) ==
+            play_body["emitted_count"].getInt64());
+    REQUIRE(scrub.playhead_frame() == scrub.max_frame());
+
+    // Motion.pause
+    auto pause_resp = dh.handle(make_request(4, "Motion.pause", "{}"));
+    REQUIRE_FALSE(pause_resp.is_error);
+    auto pause_body = choc::json::parse(pause_resp.params_json);
+    REQUIRE(pause_body["playing"].getBool() == false);
+
+    std::remove(path.c_str());
+}
+
+// ── Missing scrubber returns a targeted error ────────────────────────
+
+TEST_CASE("DomainHandler errors on scrubber methods without a scrubber attached",
+          "[motion-scrubber][protocol]") {
+    DomainHandler dh;
+    auto resp = dh.handle(make_request(1, "Motion.scrubTo", "{\"frame\":0}"));
+    REQUIRE(resp.is_error);
+    REQUIRE(resp.params_json.find("scrubber") != std::string::npos);
+}
+
+// ── scrubTo with no fixture loaded surfaces a usable error ──────────
+
+TEST_CASE("Motion.scrubTo errors when no fixture is loaded",
+          "[motion-scrubber][protocol]") {
+    MotionScrubber scrub;
+    DomainHandler dh;
+    dh.set_motion_scrubber(&scrub);
+    auto resp = dh.handle(make_request(1, "Motion.scrubTo", "{\"frame\":0}"));
+    REQUIRE(resp.is_error);
+}
+
+// ── Existing MotionInspector methods still flow when scrubber present ─
+
+TEST_CASE("Non-scrubber Motion.* methods still route to MotionInspector",
+          "[motion-scrubber][protocol]") {
+    // No MotionInspector attached, only a scrubber. The dispatcher
+    // must NOT consume Motion.startTrace into the scrubber — it should
+    // surface the "No motion inspector attached" error.
+    MotionScrubber scrub;
+    DomainHandler dh;
+    dh.set_motion_scrubber(&scrub);
+    auto resp = dh.handle(make_request(1, "Motion.startTrace",
+                                       R"({"view_name":"X","fps":60,"metrics":[]})"));
+    REQUIRE(resp.is_error);
+    REQUIRE(resp.params_json.find("motion inspector") != std::string::npos);
+}
