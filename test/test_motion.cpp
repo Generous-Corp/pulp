@@ -11,8 +11,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 using Catch::Approx;
@@ -660,6 +665,226 @@ TEST_CASE("publish_value respects epsilon threshold",
             e.kind == SampleEvent::Kind::Sample) ++change_events;
     }
     REQUIRE(change_events == 2);
+}
+
+// ── Fixture record / replay (Phase 5) ────────────────────────────────
+
+namespace {
+std::string tmp_fixture_path(const std::string& tag) {
+    std::ostringstream ss;
+    ss << "/tmp/pulp-motion-fixture-" << tag << "-"
+       << static_cast<long>(::getpid()) << "-"
+       << std::rand() << ".jsonl";
+    return ss.str();
+}
+}  // namespace
+
+TEST_CASE("Fixture round-trip: write events, load them back",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("roundtrip");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("Card", "opacity", 0.0);
+    publish_value("Card", "opacity", 0.5);
+    publish_value("Card", "opacity", 1.0);
+    publish_value("Card", "opacity", 1.0);  // → End
+
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.size() >= 4);
+
+    std::size_t baseline = 0, start = 0, sample = 0, end = 0;
+    for (const auto& e : loaded) {
+        if (e.kind == SampleEvent::Kind::Baseline) ++baseline;
+        if (e.kind == SampleEvent::Kind::Start)    ++start;
+        if (e.kind == SampleEvent::Kind::Sample)   ++sample;
+        if (e.kind == SampleEvent::Kind::End)      ++end;
+    }
+    REQUIRE(baseline == 1);
+    REQUIRE(start == 1);
+    REQUIRE(sample >= 1);
+    REQUIRE(end == 1);
+
+    std::remove(path.c_str());
+}
+
+TEST_CASE("Fixture replay re-emits events to a sink",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("replay");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 0.0);
+    publish_value("X", "y", 1.0);
+    publish_value("X", "y", 1.0);
+
+    std::vector<SampleEvent> replayed;
+    auto replay_count = replay_fixture(path, make_buffer_sink(&replayed));
+    REQUIRE(replay_count > 0);
+    REQUIRE(replayed.size() == static_cast<std::size_t>(replay_count));
+
+    bool has_baseline = false, has_end = false;
+    for (const auto& e : replayed) {
+        if (e.kind == SampleEvent::Kind::Baseline) has_baseline = true;
+        if (e.kind == SampleEvent::Kind::End) has_end = true;
+    }
+    REQUIRE(has_baseline);
+    REQUIRE(has_end);
+    std::remove(path.c_str());
+}
+
+TEST_CASE("Fixture load rejects unknown schema version",
+          "[motion][fixture]") {
+    const auto path = tmp_fixture_path("badschema");
+    {
+        std::ofstream f(path, std::ios::trunc);
+        f << "{\"motion_fixture_version\":999}\n";
+        f << "{\"kind\":\"baseline\",\"view\":\"V\",\"metric\":\"m\","
+             "\"t\":0,\"frame\":0,\"precision\":3,"
+             "\"components\":{\"value\":1.0},\"deltas\":{}}\n";
+    }
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches: identical fixtures produce empty diff",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("match");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 1.0);
+    publish_value("V", "v", 1.0);
+    auto a = load_fixture(path);
+    auto b = load_fixture(path);
+    auto diff = assert_matches(a, b);
+    REQUIRE(diff.matches());
+    REQUIRE(diff.differences.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches: component drift produces a diff item",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path1 = tmp_fixture_path("driftA");
+    const auto path2 = tmp_fixture_path("driftB");
+    Coordinator::instance().add_sink(make_fixture_sink(path1));
+    Coordinator::instance().set_firehose(true);
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 1.0);
+    publish_value("V", "v", 1.0);
+    auto golden = load_fixture(path1);
+
+    // Reset, then publish a similar series but with the second sample
+    // shifted by 0.5 (well above the default tolerance of 0.05).
+    Coordinator::instance().reset();
+    Coordinator::instance().bind(fx.clock);
+    Coordinator::instance().set_tracing_enabled(true);
+    Coordinator::instance().set_firehose(true);
+    Coordinator::instance().add_sink(make_fixture_sink(path2));
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 0.5);    // drift
+    publish_value("V", "v", 0.5);
+    auto captured = load_fixture(path2);
+
+    auto diff = assert_matches(golden, captured);
+    REQUIRE_FALSE(diff.matches());
+    bool found_drift = false;
+    for (const auto& it : diff.differences) {
+        if (it.kind == "component-drift") found_drift = true;
+    }
+    REQUIRE(found_drift);
+
+    std::remove(path1.c_str());
+    std::remove(path2.c_str());
+}
+
+// ── Assertion helpers (Phase 5) ──────────────────────────────────────
+
+TEST_CASE("extract_scalar pulls only the named (view, metric, comp)",
+          "[motion][assert]") {
+    std::vector<SampleEvent> events;
+    auto mk = [&](const std::string& v, const std::string& m,
+                  double t, double val) {
+        SampleEvent e;
+        e.kind = SampleEvent::Kind::Sample;
+        e.view_name = v;
+        e.metric_name = m;
+        e.t_seconds = t;
+        e.components = { {"value", val} };
+        events.push_back(e);
+    };
+    mk("A", "x", 0.0, 1.0);
+    mk("B", "x", 0.1, 99.0);  // wrong view
+    mk("A", "y", 0.2, 88.0);  // wrong metric
+    mk("A", "x", 0.3, 2.0);
+
+    auto series = extract_scalar(events, "A", "x");
+    REQUIRE(series.size() == 2);
+    REQUIRE(series[0].value == Approx(1.0));
+    REQUIRE(series[1].value == Approx(2.0));
+}
+
+TEST_CASE("is_monotonic detects direction reversal",
+          "[motion][assert]") {
+    std::vector<ScalarSample> ascending = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.9}, {0.3, 1.0}
+    };
+    REQUIRE(is_monotonic(ascending));
+
+    std::vector<ScalarSample> reverses = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.7}, {0.3, 0.4}, {0.4, 1.0}
+    };
+    REQUIRE_FALSE(is_monotonic(reverses));
+
+    std::vector<ScalarSample> descending = {
+        {0.0, 1.0}, {0.1, 0.5}, {0.2, 0.0}
+    };
+    REQUIRE(is_monotonic(descending));
+}
+
+TEST_CASE("settling_time_seconds spans first to last change",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.0}, {0.2, 0.5}, {0.4, 1.0}, {0.6, 1.0}, {0.8, 1.0}
+    };
+    REQUIRE(settling_time_seconds(s) == Approx(0.2));
+}
+
+TEST_CASE("start_delay_seconds = time from t0 to first change",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.0}, {0.2, 0.0}, {0.3, 0.5}, {0.4, 1.0}
+    };
+    REQUIRE(start_delay_seconds(s) == Approx(0.3));
+}
+
+TEST_CASE("overshoot reports peak excursion beyond final value",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 1.0}, {0.3, 1.2}, {0.4, 1.05}, {0.5, 1.0}
+    };
+    REQUIRE(overshoot(s) == Approx(0.2));
+}
+
+TEST_CASE("frame_jitter_seconds is 0 for constant cadence",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 1.0}, {0.3, 1.5}, {0.4, 2.0}
+    };
+    REQUIRE(frame_jitter_seconds(s) == Approx(0.0).margin(1e-9));
+}
+
+TEST_CASE("final_value returns the last sample's value",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.95}
+    };
+    REQUIRE(final_value(s) == Approx(0.95));
 }
 
 TEST_CASE("Emitted event counter advances", "[motion]") {

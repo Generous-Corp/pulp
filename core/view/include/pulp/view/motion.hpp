@@ -108,6 +108,114 @@ void publish_components(std::string view_name,
                         std::vector<std::pair<std::string, double>> components,
                         PublishOptions opts = {});
 
+// ── Record / replay fixtures (Phase 5) ───────────────────────────────
+//
+// A fixture is the on-disk form of a motion stream — one JSONL event
+// per line, preceded by a header line carrying the schema version. The
+// format is deliberately stable so checked-in goldens survive long
+// after the recording session.
+//
+// Layered intent:
+//   - `make_fixture_sink(path)` is a Sink that writes events to disk
+//     as they're emitted. Plug it into the Coordinator's sink set to
+//     record everything an active trace produces.
+//   - `replay_fixture(path, sink)` re-emits a fixture's events to any
+//     sink without running the original UI. Lets analyzers /
+//     assertions work offline on a captured run.
+//   - `assert_matches(golden, captured, opts)` compares two fixtures
+//     and returns a structured diff agents can act on.
+//
+// Fixture version 1 schema (one event per line, sorted-key JSON):
+//   {"kind":"baseline|sample|start|end",
+//    "view":"…","metric":"…","t":…,"frame":…,"precision":N,
+//    "components":{"k":v,…}, "deltas":{"k":v,…}}
+// Lines are separated by `\n`; the first line is the header:
+//   {"motion_fixture_version":1}
+
+constexpr int kFixtureSchemaVersion = 1;
+
+// (`make_fixture_sink` and `replay_fixture` are declared below
+// alongside the other Sink helpers so the `using Sink = …` typedef is
+// visible at their declaration site.)
+
+/// Load a fixture file into memory. Returns events in file order.
+/// Empty vector on missing / unreadable / unknown-version files.
+std::vector<SampleEvent> load_fixture(const std::string& path);
+
+/// Comparison result from `assert_matches`. Empty `differences` means
+/// the captured run matched the golden within tolerances.
+struct FixtureDiff {
+    struct Item {
+        std::string kind;      ///< "missing-event", "extra-event",
+                               ///< "component-drift", "timing-drift"
+        std::string view_name;
+        std::string metric_name;
+        std::string component_name;
+        std::string detail;
+        double observed = 0.0;
+        double expected = 0.0;
+    };
+    std::vector<Item> differences;
+    bool matches() const noexcept { return differences.empty(); }
+};
+
+struct FixtureMatchOptions {
+    double component_epsilon = 0.05;
+    double timing_epsilon_seconds = 0.05;
+    bool require_same_event_count = true;
+};
+
+FixtureDiff assert_matches(const std::vector<SampleEvent>& golden,
+                           const std::vector<SampleEvent>& captured,
+                           FixtureMatchOptions opts = {});
+
+// ── Assertion helpers (Phase 5) ──────────────────────────────────────
+//
+// Each helper operates on a flat sequence of scalars extracted from
+// the captured events. Use `extract_scalar(events, view, metric, comp)`
+// to pull the time-ordered series, then pass it to the assertion.
+// Helpers favor explicit semantics over heuristics — `is_monotonic` is
+// strictly monotonic (with epsilon), `settling_time_seconds` is "time
+// from first change to final stable value", etc.
+
+/// Flatten a fixture's events into a (time, value) series for one
+/// (view, metric, component) triple. Includes Baseline + Sample only;
+/// Start / End markers are skipped.
+struct ScalarSample { double t = 0.0; double value = 0.0; };
+std::vector<ScalarSample> extract_scalar(
+    const std::vector<SampleEvent>& events,
+    std::string_view view_name,
+    std::string_view metric_name,
+    std::string_view component_name = "value");
+
+/// Strict monotonicity check with epsilon. Direction inferred from the
+/// first non-zero change. Returns false if any subsequent change
+/// reverses direction beyond epsilon.
+bool is_monotonic(const std::vector<ScalarSample>& samples,
+                  double epsilon = 1e-6);
+
+/// Time from first change above epsilon to last change above epsilon.
+/// 0.0 if fewer than 2 changes.
+double settling_time_seconds(const std::vector<ScalarSample>& samples,
+                             double epsilon = 1e-6);
+
+/// Overshoot relative to the final value: max excursion beyond the
+/// final value's direction from the first stable region. Reported as a
+/// fraction of total displacement (0.0 = clean, 0.1 = 10% overshoot).
+double overshoot(const std::vector<ScalarSample>& samples,
+                 double epsilon = 1e-6);
+
+/// Time from t0 to the first change above epsilon.
+double start_delay_seconds(const std::vector<ScalarSample>& samples,
+                           double epsilon = 1e-6);
+
+/// Standard deviation of inter-sample intervals — proxy for frame-pacing
+/// jitter when the sampler is run at a fixed FPS.
+double frame_jitter_seconds(const std::vector<ScalarSample>& samples);
+
+/// Returns the last sample's value, or NaN when empty.
+double final_value(const std::vector<ScalarSample>& samples);
+
 // ── Sinks ────────────────────────────────────────────────────────────
 
 using Sink = std::function<void(const SampleEvent&)>;
@@ -118,6 +226,16 @@ Sink make_log_sink();
 /// Sink that appends events to a caller-owned buffer. For tests and
 /// in-process consumers; the buffer pointer must outlive the sink.
 Sink make_buffer_sink(std::vector<SampleEvent>* buffer);
+
+/// Sink that appends each `SampleEvent` as a JSONL line to `path`.
+/// Opens the file (truncates) on first event. Subsequent events
+/// append. Closes implicitly when the returned Sink is dropped.
+/// Pair with `Coordinator::add_sink(make_fixture_sink(path))`.
+Sink make_fixture_sink(std::string path);
+
+/// Read a fixture file from disk and dispatch each event to `sink`.
+/// Returns the number of events replayed, or `-1` on parse error.
+int replay_fixture(const std::string& path, const Sink& sink);
 
 // ── Forward declarations ─────────────────────────────────────────────
 

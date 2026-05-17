@@ -7,11 +7,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view::motion {
@@ -816,6 +821,531 @@ void Coordinator::publish_internal(std::string view_name,
         }
     }
     for (auto& [sink, ev] : pending) sink(ev);
+}
+
+// ── Fixture record / replay (Phase 5) ────────────────────────────────
+
+namespace {
+
+const char* sample_kind_string(SampleEvent::Kind k) {
+    switch (k) {
+        case SampleEvent::Kind::Baseline: return "baseline";
+        case SampleEvent::Kind::Sample:   return "sample";
+        case SampleEvent::Kind::Start:    return "start";
+        case SampleEvent::Kind::End:      return "end";
+    }
+    return "?";
+}
+
+bool kind_from_string(std::string_view s, SampleEvent::Kind& out) {
+    if (s == "baseline") { out = SampleEvent::Kind::Baseline; return true; }
+    if (s == "sample")   { out = SampleEvent::Kind::Sample;   return true; }
+    if (s == "start")    { out = SampleEvent::Kind::Start;    return true; }
+    if (s == "end")      { out = SampleEvent::Kind::End;      return true; }
+    return false;
+}
+
+/// Minimal JSON escape for the strings we control (view, metric,
+/// component names). Escapes `"`, `\\`, and control characters with
+/// the standard `\\uNNNN` form so the JSONL stays parseable. We don't
+/// need full Unicode handling — the strings are ASCII identifiers in
+/// practice.
+std::string json_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
+
+std::string format_number(double v) {
+    if (!std::isfinite(v)) return "null";
+    std::ostringstream ss;
+    ss << std::setprecision(15) << v;
+    return ss.str();
+}
+
+std::string serialize_components(
+    const std::vector<std::pair<std::string, double>>& comps
+) {
+    std::string out = "{";
+    bool first = true;
+    for (const auto& [k, v] : comps) {
+        if (!first) out += ",";
+        out += "\"" + json_escape(k) + "\":" + format_number(v);
+        first = false;
+    }
+    out += "}";
+    return out;
+}
+
+std::string serialize_event(const SampleEvent& e) {
+    std::ostringstream ss;
+    ss << "{\"kind\":\"" << sample_kind_string(e.kind) << "\""
+       << ",\"view\":\"" << json_escape(e.view_name) << "\""
+       << ",\"metric\":\"" << json_escape(e.metric_name) << "\""
+       << ",\"t\":" << format_number(e.t_seconds)
+       << ",\"frame\":" << e.frame
+       << ",\"precision\":" << e.precision
+       << ",\"components\":" << serialize_components(e.components)
+       << ",\"deltas\":" << serialize_components(e.deltas)
+       << "}";
+    return ss.str();
+}
+
+/// Hand-rolled JSON object parser limited to the shapes we emit.
+/// Returns false on syntax or extension errors.
+class FixtureLineParser {
+public:
+    explicit FixtureLineParser(const std::string& src) : s_(src) {}
+
+    bool parse_event(SampleEvent& out) {
+        SampleEvent e;
+        if (!expect('{')) return false;
+        bool first = true;
+        while (true) {
+            skip_ws();
+            if (peek() == '}') { ++pos_; break; }
+            if (!first && !expect(',')) return false;
+            first = false;
+            std::string key;
+            if (!parse_string(key) || !expect(':')) return false;
+            skip_ws();
+
+            if (key == "kind") {
+                std::string v;
+                if (!parse_string(v)) return false;
+                if (!kind_from_string(v, e.kind)) return false;
+            } else if (key == "view") {
+                if (!parse_string(e.view_name)) return false;
+            } else if (key == "metric") {
+                if (!parse_string(e.metric_name)) return false;
+            } else if (key == "t") {
+                if (!parse_number(e.t_seconds)) return false;
+            } else if (key == "frame") {
+                double f = 0; if (!parse_number(f)) return false;
+                e.frame = static_cast<std::uint64_t>(f);
+            } else if (key == "precision") {
+                double p = 0; if (!parse_number(p)) return false;
+                e.precision = static_cast<int>(p);
+            } else if (key == "components") {
+                if (!parse_components(e.components)) return false;
+            } else if (key == "deltas") {
+                if (!parse_components(e.deltas)) return false;
+            } else {
+                // Unknown key — skip its value tolerantly.
+                if (!skip_value()) return false;
+            }
+        }
+        out = std::move(e);
+        return true;
+    }
+
+    bool parse_header(int& version_out) {
+        if (!expect('{')) return false;
+        std::string key;
+        skip_ws();
+        if (peek() == '}') { ++pos_; version_out = 0; return false; }
+        if (!parse_string(key) || !expect(':')) return false;
+        if (key != "motion_fixture_version") return false;
+        double v = 0;
+        if (!parse_number(v)) return false;
+        skip_ws();
+        if (peek() == '}') { ++pos_; version_out = static_cast<int>(v); return true; }
+        return false;
+    }
+
+private:
+    const std::string& s_;
+    std::size_t pos_ = 0;
+
+    char peek() const { return pos_ < s_.size() ? s_[pos_] : '\0'; }
+    void skip_ws() { while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_; }
+    bool expect(char c) { skip_ws(); if (peek() != c) return false; ++pos_; return true; }
+
+    bool parse_string(std::string& out) {
+        skip_ws();
+        if (peek() != '"') return false;
+        ++pos_;
+        out.clear();
+        while (pos_ < s_.size() && s_[pos_] != '"') {
+            char c = s_[pos_++];
+            if (c == '\\' && pos_ < s_.size()) {
+                char esc = s_[pos_++];
+                switch (esc) {
+                    case '"':  out += '"';  break;
+                    case '\\': out += '\\'; break;
+                    case '/':  out += '/';  break;
+                    case 'n':  out += '\n'; break;
+                    case 'r':  out += '\r'; break;
+                    case 't':  out += '\t'; break;
+                    case 'b':  out += '\b'; break;
+                    case 'f':  out += '\f'; break;
+                    case 'u': {
+                        if (pos_ + 4 > s_.size()) return false;
+                        // We only emit ASCII (< 0x80) in `json_escape`, so any
+                        // `\\uNNNN` in our own fixtures will be < 0x80.
+                        unsigned int code = 0;
+                        for (int i = 0; i < 4; ++i) {
+                            char h = s_[pos_++];
+                            code <<= 4;
+                            if (h >= '0' && h <= '9') code |= (h - '0');
+                            else if (h >= 'a' && h <= 'f') code |= (h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') code |= (h - 'A' + 10);
+                            else return false;
+                        }
+                        if (code >= 0x80) return false;
+                        out += static_cast<char>(code);
+                        break;
+                    }
+                    default: return false;
+                }
+            } else {
+                out += c;
+            }
+        }
+        if (peek() != '"') return false;
+        ++pos_;
+        return true;
+    }
+
+    bool parse_number(double& out) {
+        skip_ws();
+        std::size_t start = pos_;
+        if (peek() == '-' || peek() == '+') ++pos_;
+        bool any_digit = false;
+        while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) { ++pos_; any_digit = true; }
+        if (pos_ < s_.size() && s_[pos_] == '.') {
+            ++pos_;
+            while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) { ++pos_; any_digit = true; }
+        }
+        if (pos_ < s_.size() && (s_[pos_] == 'e' || s_[pos_] == 'E')) {
+            ++pos_;
+            if (pos_ < s_.size() && (s_[pos_] == '-' || s_[pos_] == '+')) ++pos_;
+            while (pos_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[pos_]))) { ++pos_; any_digit = true; }
+        }
+        if (!any_digit) return false;
+        try {
+            out = std::stod(s_.substr(start, pos_ - start));
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+    bool parse_components(std::vector<std::pair<std::string, double>>& out) {
+        out.clear();
+        if (!expect('{')) return false;
+        skip_ws();
+        if (peek() == '}') { ++pos_; return true; }
+        while (true) {
+            std::string k;
+            if (!parse_string(k) || !expect(':')) return false;
+            double v;
+            if (!parse_number(v)) return false;
+            out.emplace_back(std::move(k), v);
+            skip_ws();
+            if (peek() == ',') { ++pos_; continue; }
+            if (peek() == '}') { ++pos_; return true; }
+            return false;
+        }
+    }
+
+    bool skip_value() {
+        skip_ws();
+        char c = peek();
+        if (c == '"') { std::string dummy; return parse_string(dummy); }
+        if (c == '{') {
+            ++pos_; int depth = 1;
+            while (pos_ < s_.size() && depth > 0) {
+                if (s_[pos_] == '{') ++depth;
+                else if (s_[pos_] == '}') --depth;
+                ++pos_;
+            }
+            return depth == 0;
+        }
+        if (c == '[') {
+            ++pos_; int depth = 1;
+            while (pos_ < s_.size() && depth > 0) {
+                if (s_[pos_] == '[') ++depth;
+                else if (s_[pos_] == ']') --depth;
+                ++pos_;
+            }
+            return depth == 0;
+        }
+        double n;
+        return parse_number(n);
+    }
+};
+
+/// Shared file handle owned by the sink lambda. Lazily opens on first
+/// event so empty traces don't create stale files. Header is written
+/// once; subsequent events are appended.
+struct FixtureFileSink {
+    std::string path;
+    std::shared_ptr<std::ofstream> stream;
+    bool header_written = false;
+
+    void ensure_open() {
+        if (!stream) {
+            stream = std::make_shared<std::ofstream>(path,
+                std::ios::out | std::ios::trunc | std::ios::binary);
+        }
+    }
+};
+
+}  // namespace
+
+Sink make_fixture_sink(std::string path) {
+    auto state = std::make_shared<FixtureFileSink>();
+    state->path = std::move(path);
+    return [state](const SampleEvent& e) {
+        state->ensure_open();
+        if (!state->stream || !state->stream->is_open()) return;
+        if (!state->header_written) {
+            *state->stream << "{\"motion_fixture_version\":"
+                           << kFixtureSchemaVersion << "}\n";
+            state->header_written = true;
+        }
+        *state->stream << serialize_event(e) << "\n";
+        state->stream->flush();
+    };
+}
+
+std::vector<SampleEvent> load_fixture(const std::string& path) {
+    std::vector<SampleEvent> out;
+    std::ifstream in(path, std::ios::in | std::ios::binary);
+    if (!in.is_open()) return out;
+    std::string line;
+    if (!std::getline(in, line)) return out;
+    FixtureLineParser header(line);
+    int version = 0;
+    if (!header.parse_header(version)) return out;
+    if (version != kFixtureSchemaVersion) return out;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        SampleEvent e;
+        FixtureLineParser p(line);
+        if (!p.parse_event(e)) return {};
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+int replay_fixture(const std::string& path, const Sink& sink) {
+    auto events = load_fixture(path);
+    if (events.empty()) return -1;
+    for (const auto& e : events) sink(e);
+    return static_cast<int>(events.size());
+}
+
+// ── assert_matches ──────────────────────────────────────────────────
+
+FixtureDiff assert_matches(const std::vector<SampleEvent>& golden,
+                           const std::vector<SampleEvent>& captured,
+                           FixtureMatchOptions opts) {
+    FixtureDiff diff;
+    const auto pos_kind = [](SampleEvent::Kind k) {
+        return k == SampleEvent::Kind::Baseline ||
+               k == SampleEvent::Kind::Sample ||
+               k == SampleEvent::Kind::Start ||
+               k == SampleEvent::Kind::End;
+    };
+    (void)pos_kind;
+
+    if (opts.require_same_event_count && golden.size() != captured.size()) {
+        FixtureDiff::Item item;
+        item.kind = "event-count-mismatch";
+        item.detail = "golden=" + std::to_string(golden.size()) +
+                      " captured=" + std::to_string(captured.size());
+        item.expected = static_cast<double>(golden.size());
+        item.observed = static_cast<double>(captured.size());
+        diff.differences.push_back(item);
+    }
+
+    const std::size_t n = std::min(golden.size(), captured.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& g = golden[i];
+        const auto& c = captured[i];
+        if (g.kind != c.kind || g.view_name != c.view_name ||
+            g.metric_name != c.metric_name) {
+            FixtureDiff::Item item;
+            item.kind = "event-mismatch";
+            item.view_name = g.view_name;
+            item.metric_name = g.metric_name;
+            item.detail = "event #" + std::to_string(i);
+            diff.differences.push_back(item);
+            continue;
+        }
+        if (std::fabs(g.t_seconds - c.t_seconds) > opts.timing_epsilon_seconds) {
+            FixtureDiff::Item item;
+            item.kind = "timing-drift";
+            item.view_name = g.view_name;
+            item.metric_name = g.metric_name;
+            item.detail = "event #" + std::to_string(i);
+            item.observed = c.t_seconds;
+            item.expected = g.t_seconds;
+            diff.differences.push_back(item);
+        }
+        const auto compare = [&](const auto& gc, const auto& cc, const char* tag) {
+            if (gc.size() != cc.size()) {
+                FixtureDiff::Item item;
+                item.kind = "component-count-mismatch";
+                item.view_name = g.view_name;
+                item.metric_name = g.metric_name;
+                item.detail = tag;
+                item.observed = static_cast<double>(cc.size());
+                item.expected = static_cast<double>(gc.size());
+                diff.differences.push_back(item);
+                return;
+            }
+            for (std::size_t k = 0; k < gc.size(); ++k) {
+                if (gc[k].first != cc[k].first) {
+                    FixtureDiff::Item item;
+                    item.kind = "component-mismatch";
+                    item.view_name = g.view_name;
+                    item.metric_name = g.metric_name;
+                    item.component_name = gc[k].first;
+                    item.detail = std::string(tag) + ", expected name " +
+                                  gc[k].first + " got " + cc[k].first;
+                    diff.differences.push_back(item);
+                    continue;
+                }
+                if (std::fabs(gc[k].second - cc[k].second) > opts.component_epsilon) {
+                    FixtureDiff::Item item;
+                    item.kind = "component-drift";
+                    item.view_name = g.view_name;
+                    item.metric_name = g.metric_name;
+                    item.component_name = gc[k].first;
+                    item.detail = tag;
+                    item.observed = cc[k].second;
+                    item.expected = gc[k].second;
+                    diff.differences.push_back(item);
+                }
+            }
+        };
+        compare(g.components, c.components, "components");
+        compare(g.deltas, c.deltas, "deltas");
+    }
+    return diff;
+}
+
+// ── Assertion helpers ─────────────────────────────────────────────────
+
+std::vector<ScalarSample> extract_scalar(
+    const std::vector<SampleEvent>& events,
+    std::string_view view_name,
+    std::string_view metric_name,
+    std::string_view component_name
+) {
+    std::vector<ScalarSample> out;
+    for (const auto& e : events) {
+        if (e.view_name != view_name || e.metric_name != metric_name) continue;
+        if (e.kind != SampleEvent::Kind::Baseline &&
+            e.kind != SampleEvent::Kind::Sample) continue;
+        for (const auto& [k, v] : e.components) {
+            if (k == component_name) {
+                out.push_back({e.t_seconds, v});
+                break;
+            }
+        }
+    }
+    return out;
+}
+
+bool is_monotonic(const std::vector<ScalarSample>& samples, double epsilon) {
+    int direction = 0;
+    double prev = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& s : samples) {
+        if (std::isnan(prev)) { prev = s.value; continue; }
+        const double dv = s.value - prev;
+        if (std::fabs(dv) <= epsilon) { prev = s.value; continue; }
+        const int dir = dv > 0 ? 1 : -1;
+        if (direction == 0) direction = dir;
+        else if (direction != dir) return false;
+        prev = s.value;
+    }
+    return true;
+}
+
+double settling_time_seconds(const std::vector<ScalarSample>& samples,
+                             double epsilon) {
+    double first_t = std::numeric_limits<double>::quiet_NaN();
+    double last_t = std::numeric_limits<double>::quiet_NaN();
+    double prev = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& s : samples) {
+        if (std::isnan(prev)) { prev = s.value; continue; }
+        if (std::fabs(s.value - prev) > epsilon) {
+            if (std::isnan(first_t)) first_t = s.t;
+            last_t = s.t;
+            prev = s.value;
+        }
+    }
+    if (std::isnan(first_t) || std::isnan(last_t)) return 0.0;
+    return last_t - first_t;
+}
+
+double overshoot(const std::vector<ScalarSample>& samples, double epsilon) {
+    if (samples.size() < 2) return 0.0;
+    const double start = samples.front().value;
+    const double end = samples.back().value;
+    const double range = end - start;
+    if (std::fabs(range) <= epsilon) return 0.0;
+    double peak = end;
+    for (const auto& s : samples) {
+        if (range > 0 && s.value > peak) peak = s.value;
+        if (range < 0 && s.value < peak) peak = s.value;
+    }
+    const double excursion = peak - end;
+    return std::fabs(excursion) / std::fabs(range);
+}
+
+double start_delay_seconds(const std::vector<ScalarSample>& samples,
+                           double epsilon) {
+    if (samples.empty()) return 0.0;
+    const double t0 = samples.front().t;
+    const double v0 = samples.front().value;
+    for (const auto& s : samples) {
+        if (std::fabs(s.value - v0) > epsilon) return s.t - t0;
+    }
+    return 0.0;
+}
+
+double frame_jitter_seconds(const std::vector<ScalarSample>& samples) {
+    if (samples.size() < 3) return 0.0;
+    std::vector<double> deltas;
+    deltas.reserve(samples.size() - 1);
+    for (std::size_t i = 1; i < samples.size(); ++i) {
+        deltas.push_back(samples[i].t - samples[i - 1].t);
+    }
+    double mean = 0.0;
+    for (double d : deltas) mean += d;
+    mean /= static_cast<double>(deltas.size());
+    double var = 0.0;
+    for (double d : deltas) var += (d - mean) * (d - mean);
+    var /= static_cast<double>(deltas.size());
+    return std::sqrt(var);
+}
+
+double final_value(const std::vector<ScalarSample>& samples) {
+    if (samples.empty()) return std::numeric_limits<double>::quiet_NaN();
+    return samples.back().value;
 }
 
 }  // namespace pulp::view::motion
