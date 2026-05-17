@@ -538,24 +538,12 @@ jobs:
           echo "Tip subject: ${subject}"
 
           # Bail early for non-fix/feat — the no-tag outcome is correct
-          # for those.
-          #
-          # Note: the heredoc body must be at column 1 (not the YAML
-          # indent level) because Python rejects leading whitespace on
-          # statements outside a block. This matches the existing
-          # `semver_cmp` heredoc pattern earlier in this file (#510 fix
-          # for the YAML/Python indent collision that broke #501).
-          if ! python3 - "$subject" <<'PYEOF'
-          import re, sys
-          # Same regex as tools/scripts/version_bump_check.py
-          # _FIX_FEAT_TITLE_RE — single source of truth lives in the
-          # script; we duplicate the literal here because shelling out
-          # to the script just for classification is overkill.
-          subject = sys.argv[1]
-          pat = re.compile(r"^(fix|feat)(\([^)]*\))?!?:\s")
-          sys.exit(0 if pat.match(subject.strip()) else 1)
-          PYEOF
-          then
+          # for those. B1 (2026-05): classification now shells out to
+          # `version_bump_check.py classify-subject` so the regex has a
+          # single source of truth. Previous inline-Python heredoc copied
+          # _FIX_FEAT_TITLE_RE verbatim and could silently drift; the
+          # lock-step risk was documented but not enforced.
+          if ! python3 tools/scripts/version_bump_check.py classify-subject "$subject"; then
               echo "Tip is not a fix:/feat: — no-tag outcome is expected. Done."
               exit 0
           fi

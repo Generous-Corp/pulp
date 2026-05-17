@@ -189,6 +189,35 @@ class VersionFileIoTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 0)
 
+    def test_classify_subject_subcommand_matches_fix_feat(self) -> None:
+        """B1 (2026-05): auto-release.yml's stranded-fix detector
+        shells out to `version_bump_check.py classify-subject <subject>`
+        for classification, replacing an inline _FIX_FEAT_TITLE_RE
+        copy that was a documented lock-step drift risk. Exit 0 on
+        match, 1 on non-match."""
+        import subprocess as sp
+        script = pathlib.Path(vbc.__file__).resolve()
+        cases = [
+            ("fix: foo", 0),
+            ("feat(view): something", 0),
+            ("fix(scope)!: breaking change", 0),
+            ("feat!: API break", 0),
+            ("chore: bump versions", 1),
+            ("docs: update", 1),
+            ("test: new", 1),
+            ("refactor: cleanup", 1),
+            ("FIX: capital not matched", 1),  # case-sensitive per the spec
+        ]
+        for subject, expected in cases:
+            r = sp.run(
+                ["python3", str(script), "classify-subject", subject],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(
+                r.returncode, expected,
+                msg=f"subject={subject!r} expected={expected} got={r.returncode}",
+            )
+
 
 class GitAndHeuristicTests(unittest.TestCase):
     def test_repo_root_glob_conventional_and_bump_edges(self) -> None:

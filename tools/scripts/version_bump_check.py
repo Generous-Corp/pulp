@@ -907,6 +907,15 @@ def check_fix_feat_requires_bump(
 
 
 def main(argv: list[str]) -> int:
+    # B1 (2026-05): if invoked as `version_bump_check.py classify-subject
+    # <subject>`, exit 0 when the subject matches the fix/feat regex and
+    # 1 otherwise. This lets .github/workflows/auto-release.yml's
+    # stranded-fix detector call the script for classification instead
+    # of duplicating `_FIX_FEAT_TITLE_RE` inline (the duplication was a
+    # documented lock-step drift risk).
+    if len(argv) >= 2 and argv[0] == "classify-subject":
+        return 0 if _is_fix_or_feat_title(argv[1]) else 1
+
     parser = argparse.ArgumentParser(description="Version-bump gate")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--head", default="HEAD")
