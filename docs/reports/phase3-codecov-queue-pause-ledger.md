@@ -6302,3 +6302,10 @@ validation after rebasing on current `origin/main` passed with 236/236 focused
 CTest cases and `tools/scripts/local_diff_cover.sh` reporting 100% diff
 coverage against `origin/main`. PR creation used the GitHub REST API because
 GraphQL was rate-limited.
+
+2026-05-17 11:13 PDT: repaired #2143's immediate GitHub policy failure. The
+first CI pass failed `Enforce version & skill sync` because the batch includes
+`fix(audio): reject ragged audio data processing`, which requires an SDK bump.
+Ran `python3 tools/scripts/version_bump_check.py --mode=apply`, committed the
+mechanical `CMakeLists.txt` bump as `bdf4adb6e`, and pushed the branch so
+GitHub-hosted CI could restart from the corrected head.
