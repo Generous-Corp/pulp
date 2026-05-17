@@ -8,8 +8,12 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/motion.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/inspector_window.hpp>
+#include <pulp/inspect/domain_handler.hpp>
+#include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -609,6 +613,60 @@ int main(int argc, char* argv[]) {
         std::cout << (ok ? "Screenshot saved to " + screenshot_path + "\n" : "Screenshot failed\n");
         pulp::inspect::g_active_inspector = nullptr;
         return ok ? 0 : 1;
+    }
+
+    // ── Motion observability wiring ─────────────────────────────────
+    //
+    // Bind the motion coordinator to the FrameClock so traces sample
+    // each tick. The InspectorServer + MotionInspector pair come up
+    // only when PULP_MOTION_SERVER=1 (defaults to off so the example
+    // doesn't open a TCP port unexpectedly). Logs always go through
+    // the default log sink when PULP_MOTION_LOG=1. A scope guard
+    // unbinds the coordinator before the local FrameClock dies, so
+    // the singleton's destructor never touches a dangling pointer.
+    pulp::view::motion::Coordinator::instance().bind(clock);
+    int motion_log_sink_id = 0;
+    std::unique_ptr<pulp::inspect::InspectorServer> motion_server;
+    std::unique_ptr<pulp::inspect::MotionInspector> motion_inspector;
+    std::unique_ptr<pulp::inspect::DomainHandler> motion_dispatch;
+    struct MotionGuard {
+        int& log_sink_id;
+        std::unique_ptr<pulp::inspect::MotionInspector>& inspector_ref;
+        ~MotionGuard() {
+            inspector_ref.reset();
+            auto& c = pulp::view::motion::Coordinator::instance();
+            if (log_sink_id) c.remove_sink(log_sink_id);
+            c.unbind();
+        }
+    } motion_guard{motion_log_sink_id, motion_inspector};
+
+    if (pulp::runtime::get_env("PULP_MOTION_LOG")) {
+        motion_log_sink_id =
+            pulp::view::motion::Coordinator::instance().install_default_log_sink();
+        pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
+    }
+    if (pulp::runtime::get_env("PULP_MOTION_SERVER")) {
+        motion_server = std::make_unique<pulp::inspect::InspectorServer>();
+        if (motion_server->start()) {
+            motion_inspector = std::make_unique<pulp::inspect::MotionInspector>(
+                root, motion_server.get());
+            motion_dispatch = std::make_unique<pulp::inspect::DomainHandler>();
+            motion_dispatch->set_root_view(&root);
+            motion_dispatch->set_motion_inspector(motion_inspector.get());
+            auto* dispatch = motion_dispatch.get();
+            motion_server->set_request_handler(
+                [dispatch](const pulp::inspect::InspectorMessage& req) {
+                    return dispatch->handle(req);
+                });
+            motion_server->advertise_port();
+            std::cout << "Motion inspector listening on port "
+                      << motion_server->port() << "\n";
+            pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
+        } else {
+            std::cerr << "Motion inspector server failed to start; "
+                         "PULP_MOTION_SERVER ignored.\n";
+            motion_server.reset();
+        }
     }
 
     std::cout << "Hover over knobs to see glow animation\n";

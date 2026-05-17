@@ -80,6 +80,17 @@ namespace methods {
     // Capture domain
     constexpr auto kCaptureScreenshot     = "Capture.screenshot";
     constexpr auto kCaptureScreenshotNode = "Capture.screenshotNode";
+
+    // Motion domain — agent-first motion observability.
+    // Requests:
+    constexpr auto kMotionStartTrace = "Motion.startTrace";
+    constexpr auto kMotionStopTrace  = "Motion.stopTrace";
+    constexpr auto kMotionSnapshot   = "Motion.snapshot";
+    constexpr auto kMotionListTraces = "Motion.listTraces";
+    // Events (broadcast to subscribed clients):
+    constexpr auto kMotionStart  = "Motion.start";
+    constexpr auto kMotionSample = "Motion.sample";
+    constexpr auto kMotionEnd    = "Motion.end";
 }
 
 } // namespace pulp::inspect
