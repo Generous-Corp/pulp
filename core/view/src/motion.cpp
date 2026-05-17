@@ -1895,6 +1895,62 @@ double final_value(const std::vector<ScalarSample>& samples) {
     return samples.back().value;
 }
 
+double local_step_outlier_ratio(const std::vector<ScalarSample>& samples,
+                                std::size_t window_radius,
+                                double epsilon) {
+    // Spec: returns 0.0 when samples.size() < 2*window_radius + 1.
+    // With samples.size() == 2r + 1 we have 2r steps total and a single
+    // valid sample index (r); the local window has the other 2r - 1
+    // steps as neighbors. Larger sample counts grow the candidate range.
+    if (window_radius == 0) return 0.0;
+    if (samples.size() < 2 * window_radius + 1) return 0.0;
+
+    // Pre-compute step magnitudes between consecutive samples. Step
+    // ending at sample index `i` (i >= 1) sits at `steps[i-1]`.
+    const std::size_t n = samples.size();
+    std::vector<double> steps;
+    steps.reserve(n - 1);
+    for (std::size_t i = 1; i < n; ++i) {
+        steps.push_back(std::fabs(samples[i].value - samples[i - 1].value));
+    }
+
+    const std::size_t r = window_radius;
+    double max_ratio = 0.0;
+    // Candidate sample indices `i` in [r, n - r) — half-open per spec.
+    for (std::size_t i = r; i + r < n; ++i) {
+        // Window of `2r + 1` sample indices [i - r, i + r]; for each,
+        // pick its incoming step (steps[k - 1]) when k >= 1. Skip the
+        // candidate's own step so the median excludes it.
+        std::vector<double> window;
+        window.reserve(2 * r);
+        for (std::size_t k = i - r; k <= i + r; ++k) {
+            if (k == i) continue;          // exclude candidate
+            if (k == 0) continue;          // no incoming step for the first sample
+            window.push_back(steps[k - 1]);
+        }
+        if (window.empty()) continue;
+
+        // Median via nth_element copy. For even counts, average the
+        // middle two for the same reason `frame_jitter_seconds` uses
+        // an averaging formulation — keeps the metric stable when an
+        // outlier sits exactly at the median index.
+        std::vector<double> tmp = window;
+        const std::size_t sz = tmp.size();
+        const std::size_t mid = sz / 2;
+        std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
+        double median = tmp[mid];
+        if ((sz & 1u) == 0) {
+            const double upper = tmp[mid];
+            std::nth_element(tmp.begin(), tmp.begin() + (mid - 1), tmp.end());
+            median = 0.5 * (tmp[mid - 1] + upper);
+        }
+        const double denom = std::max(median, epsilon);
+        const double ratio = steps[i - 1] / denom;
+        if (ratio > max_ratio) max_ratio = ratio;
+    }
+    return max_ratio;
+}
+
 // ── Input recording / replay (Phase 10) ──────────────────────────────
 //
 // Recording: View::simulate_* calls `record_simulated_input` which —
