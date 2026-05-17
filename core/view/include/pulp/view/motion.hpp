@@ -50,10 +50,45 @@ struct TraceOptions {
     int fps = 15;
 };
 
+// ── Provenance envelope (Phase 7) ────────────────────────────────────
+//
+// Opaque metadata describing *where* a trace came from. Carried on
+// TraceStarted (trace-level) and on burst Start events (burst-level).
+// Phase 7 ships the shape + plumbing; the richer adapters that fill
+// it from each animation surface (Tween / CSS / AnimatorSet / JS rAF
+// / design-import) land in Phase 9.
+
+struct Provenance {
+    std::string source_kind;   ///< "tween" | "css-transition" | "animator-set"
+                               ///< | "rAF" | "design-import" | "user" | "publish"
+    std::string source_id;     ///< Free-form id, e.g. "Card.opacity tween" or
+                               ///< "figma:LevelMeter/Panel" or "import:claude:1234"
+    std::string source_file;   ///< Optional, e.g. __FILE__ at attach site
+    int source_line = 0;       ///< Optional, e.g. __LINE__ at attach site
+
+    bool is_set() const noexcept {
+        return !source_kind.empty() || !source_id.empty() ||
+               !source_file.empty() || source_line != 0;
+    }
+};
+
 // ── Sample event ─────────────────────────────────────────────────────
+//
+// Per-tick or per-publish event in a motion stream. Schema v2 carries
+// stable identifiers (trace_id / metric_id / burst_id) so fixtures can
+// be compared by identity instead of position — reordered identical
+// bursts no longer false-fail an `assert_matches`.
 
 struct SampleEvent {
-    enum class Kind { Baseline, Sample, Start, End };
+    enum class Kind {
+        TraceStarted,  ///< Emitted once per trace registration. Carries
+                       ///< the trace's provenance envelope.
+        Baseline,      ///< First sample of a metric.
+        Sample,        ///< Value sample within a change burst.
+        Start,         ///< Burst opened (value drifted off baseline / last
+                       ///< stable).
+        End,           ///< Burst closed (value stabilized). Carries deltas.
+    };
 
     Kind kind = Kind::Baseline;
     std::string view_name;
@@ -61,6 +96,18 @@ struct SampleEvent {
     double t_seconds = 0.0;                  ///< Monotonic FrameClock::time().
     std::uint64_t frame = 0;                 ///< Monotonic FrameClock::frame().
     int precision = 3;
+
+    // Stable identifiers (schema v2). Sampler-driven traces get a
+    // positive `trace_id` from `register_trace`; publishes use 0 to
+    // signal the publish channel. `metric_id` is the metric's index
+    // within its trace (or 0 for publish). `burst_id` increments at
+    // each Start within a given (trace_id, metric_id).
+    int trace_id = 0;
+    int metric_id = 0;
+    int burst_id = 0;
+
+    Provenance provenance;  ///< Populated on TraceStarted; empty otherwise.
+
     std::vector<std::pair<std::string, double>> components;  ///< Sorted by name.
     std::vector<std::pair<std::string, double>> deltas;      ///< End events only.
 };
@@ -132,7 +179,7 @@ void publish_components(std::string view_name,
 // Lines are separated by `\n`; the first line is the header:
 //   {"motion_fixture_version":1}
 
-constexpr int kFixtureSchemaVersion = 1;
+constexpr int kFixtureSchemaVersion = 2;
 
 // (`make_fixture_sink` and `replay_fixture` are declared below
 // alongside the other Sink helpers so the `using Sink = …` typedef is
@@ -295,6 +342,10 @@ public:
                            GeometrySpace space = GeometrySpace::Window,
                            GeometrySource source = GeometrySource::Layout,
                            int precision = 2, double epsilon = 0.1);
+
+    /// Attach a provenance envelope to the trace. Emitted once on
+    /// the trace's `TraceStarted` event.
+    TraceBuilder& with_provenance(Provenance p);
 
     /// Register the trace with the coordinator and return an owning handle.
     TraceHandle attach();

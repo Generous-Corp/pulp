@@ -80,15 +80,45 @@ of where the view actually renders.
 Each tick produces zero or more `SampleEvent`s. The lifecycle for a single
 metric:
 
-1. **`Baseline`** on the first tick — initial value sample.
-2. **`Start`** on the first tick after a baseline where the value changed
-   beyond the metric's epsilon.
-3. **`Sample`** while the value continues changing.
-4. **`End`** on the first stable tick after a change burst, carrying
+1. **`TraceStarted`** once per trace registration (first tick after attach).
+   Carries the trace's `Provenance` envelope and the stable `trace_id`.
+2. **`Baseline`** on the first tick — initial value sample.
+3. **`Start`** on the first tick after a baseline where the value changed
+   beyond the metric's epsilon. Each burst gets a new `burst_id`.
+4. **`Sample`** while the value continues changing.
+5. **`End`** on the first stable tick after a change burst, carrying
    per-component deltas from the start of the burst.
+
+Every event carries stable identifiers (`trace_id`, `metric_id`, `burst_id`)
+so a fixture comparison can align bursts by identity rather than position —
+reordered identical bursts no longer false-fail an `assert_matches`.
 
 Timestamps are monotonic from `FrameClock::time()` and `FrameClock::frame()` —
 deterministic on the scripted-capture path, no wall-clock drift in CI.
+
+### Provenance
+
+A `Provenance` envelope describes where a trace came from — the animation
+primitive that emits it, the source file and line that registered it, or the
+imported-design node that authored it. Attach it on the builder:
+
+```cpp
+auto handle = Coordinator::instance()
+    .trace("Card", { 60 })
+    .with_provenance({ /*source_kind=*/"tween",
+                       /*source_id=*/"Card.opacity",
+                       /*source_file=*/__FILE__,
+                       /*source_line=*/__LINE__ })
+    .value("opacity", [&] { return opacity; })
+    .attach();
+```
+
+The envelope appears on the `TraceStarted` event and round-trips through
+fixtures. Agents reading a fixture can resolve "where does this animation
+live?" without grepping. The richer adapters that auto-populate provenance
+from `Tween` / CSS `TransitionSpec` / `AnimatorSet` / JS rAF / design-import
+land in a follow-up phase; today the envelope is opt-in via
+`with_provenance(...)`.
 
 ### Sinks
 

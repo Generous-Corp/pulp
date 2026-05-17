@@ -289,6 +289,7 @@ struct TraceBuilder::Spec {
     std::string view_name;
     TraceOptions opts;
     std::vector<std::unique_ptr<MetricBase>> metrics;
+    Provenance provenance;
 };
 
 // ── TraceBuilder ──────────────────────────────────────────────────────
@@ -341,6 +342,11 @@ TraceBuilder& TraceBuilder::geometry(std::string name,
     return *this;
 }
 
+TraceBuilder& TraceBuilder::with_provenance(Provenance p) {
+    if (spec_) spec_->provenance = std::move(p);
+    return *this;
+}
+
 TraceHandle TraceBuilder::attach() {
     if (!coord_) return TraceHandle();
     const int id = coord_->register_trace(spec_);
@@ -382,6 +388,19 @@ std::string format_line(const SampleEvent& e) {
     std::ostringstream ss;
     ss << "[PulpMotion][" << e.view_name << "][" << e.metric_name << "]";
     switch (e.kind) {
+        case SampleEvent::Kind::TraceStarted:
+            ss << " -- TraceStarted trace_id=" << e.trace_id
+               << " frame=" << e.frame
+               << " t=" << fmt_double(e.t_seconds, 6) << " --";
+            if (e.provenance.is_set()) {
+                ss << " source=" << e.provenance.source_kind;
+                if (!e.provenance.source_id.empty())
+                    ss << " id=" << e.provenance.source_id;
+                if (!e.provenance.source_file.empty())
+                    ss << " at=" << e.provenance.source_file
+                       << ":" << e.provenance.source_line;
+            }
+            break;
         case SampleEvent::Kind::Baseline:
         case SampleEvent::Kind::Sample: {
             bool first = true;
@@ -393,11 +412,13 @@ std::string format_line(const SampleEvent& e) {
             break;
         }
         case SampleEvent::Kind::Start:
-            ss << " -- Start frame=" << e.frame
+            ss << " -- Start burst=" << e.burst_id
+               << " frame=" << e.frame
                << " t=" << fmt_double(e.t_seconds, 6) << " --";
             break;
         case SampleEvent::Kind::End:
-            ss << " -- End frame=" << e.frame
+            ss << " -- End burst=" << e.burst_id
+               << " frame=" << e.frame
                << " t=" << fmt_double(e.t_seconds, 6) << " --";
             for (const auto& [k, v] : e.deltas) {
                 ss << " " << k << "Delta=" << fmt_double(v, e.precision);
@@ -451,6 +472,8 @@ struct PerMetricState {
     std::vector<std::pair<std::string, double>> motion_start;
     bool has_baseline = false;
     bool in_motion = false;
+    int next_burst_id = 1;       // Phase 7: assigned at each Start.
+    int current_burst_id = 0;    // 0 between bursts; set on Start.
 };
 
 struct ActiveTrace {
@@ -458,6 +481,7 @@ struct ActiveTrace {
     std::shared_ptr<TraceBuilder::Spec> spec;
     std::vector<PerMetricState> metrics;
     double accum_seconds = 0.0;
+    bool needs_trace_started = true;  // Phase 7: emit TraceStarted on first tick.
 };
 
 struct PublishKey {
@@ -476,6 +500,8 @@ struct PublishState {
     std::vector<std::pair<std::string, double>> motion_start;
     bool has_baseline = false;
     bool in_motion = false;
+    int next_burst_id = 1;
+    int current_burst_id = 0;
 };
 
 struct Coordinator::State {
@@ -656,6 +682,25 @@ void Coordinator::on_tick(float dt) {
             state_->clock ? state_->clock->frame() : 0;
 
         for (auto& [trace_id, trace] : state_->traces) {
+            // Phase 7: emit TraceStarted once per trace on its first tick.
+            if (trace.needs_trace_started) {
+                SampleEvent ev;
+                ev.kind = SampleEvent::Kind::TraceStarted;
+                ev.view_name = trace.spec->view_name;
+                ev.t_seconds = t_now;
+                ev.frame = f_now;
+                ev.trace_id = trace.id;
+                ev.metric_id = 0;
+                ev.burst_id = 0;
+                ev.provenance = trace.spec->provenance;
+                for (const auto& [sid, sink] : state_->sinks) {
+                    (void)sid;
+                    pending.emplace_back(sink, ev);
+                }
+                state_->emitted_count++;
+                trace.needs_trace_started = false;
+            }
+
             const int fps = std::max(1, trace.spec->opts.fps);
             const double period = 1.0 / static_cast<double>(fps);
             trace.accum_seconds += static_cast<double>(dt);
@@ -684,6 +729,9 @@ void Coordinator::on_tick(float dt) {
                     e.t_seconds = t_now;
                     e.frame = f_now;
                     e.precision = mstate.precision;
+                    e.trace_id = trace.id;
+                    e.metric_id = static_cast<int>(i);
+                    e.burst_id = mstate.current_burst_id;
                     e.components = std::move(comps);
                     e.deltas = std::move(deltas);
                     for (const auto& [sid, sink] : state_->sinks) {
@@ -705,6 +753,7 @@ void Coordinator::on_tick(float dt) {
                                                        mstate.epsilon);
                 if (changed) {
                     if (!mstate.in_motion) {
+                        mstate.current_burst_id = mstate.next_burst_id++;
                         enqueue(SampleEvent::Kind::Start, {});
                         mstate.motion_start = mstate.last_emitted;
                         mstate.in_motion = true;
@@ -724,6 +773,7 @@ void Coordinator::on_tick(float dt) {
                     enqueue(SampleEvent::Kind::End, {}, std::move(deltas));
                     mstate.in_motion = false;
                     mstate.motion_start.clear();
+                    mstate.current_burst_id = 0;
                 }
             }
         }
@@ -779,6 +829,12 @@ void Coordinator::publish_internal(std::string view_name,
             e.t_seconds = t_now;
             e.frame = f_now;
             e.precision = pstate.precision;
+            // Phase 7: publish channel uses trace_id = 0 (reserved).
+            // metric_id = 0; (view_name, metric_name) already identifies
+            // the metric. burst_id increments per (view, metric).
+            e.trace_id = 0;
+            e.metric_id = 0;
+            e.burst_id = pstate.current_burst_id;
             e.components = std::move(comps);
             e.deltas = std::move(deltas);
             for (const auto& [sid, sink] : state_->sinks) {
@@ -798,6 +854,7 @@ void Coordinator::publish_internal(std::string view_name,
                                                    pstate.epsilon);
             if (changed) {
                 if (!pstate.in_motion) {
+                    pstate.current_burst_id = pstate.next_burst_id++;
                     enqueue(SampleEvent::Kind::Start, {});
                     pstate.motion_start = pstate.last_emitted;
                     pstate.in_motion = true;
@@ -817,6 +874,7 @@ void Coordinator::publish_internal(std::string view_name,
                 enqueue(SampleEvent::Kind::End, {}, std::move(deltas));
                 pstate.in_motion = false;
                 pstate.motion_start.clear();
+                pstate.current_burst_id = 0;
             }
         }
     }
@@ -829,19 +887,21 @@ namespace {
 
 const char* sample_kind_string(SampleEvent::Kind k) {
     switch (k) {
-        case SampleEvent::Kind::Baseline: return "baseline";
-        case SampleEvent::Kind::Sample:   return "sample";
-        case SampleEvent::Kind::Start:    return "start";
-        case SampleEvent::Kind::End:      return "end";
+        case SampleEvent::Kind::TraceStarted: return "trace-started";
+        case SampleEvent::Kind::Baseline:     return "baseline";
+        case SampleEvent::Kind::Sample:       return "sample";
+        case SampleEvent::Kind::Start:        return "start";
+        case SampleEvent::Kind::End:          return "end";
     }
     return "?";
 }
 
 bool kind_from_string(std::string_view s, SampleEvent::Kind& out) {
-    if (s == "baseline") { out = SampleEvent::Kind::Baseline; return true; }
-    if (s == "sample")   { out = SampleEvent::Kind::Sample;   return true; }
-    if (s == "start")    { out = SampleEvent::Kind::Start;    return true; }
-    if (s == "end")      { out = SampleEvent::Kind::End;      return true; }
+    if (s == "trace-started") { out = SampleEvent::Kind::TraceStarted; return true; }
+    if (s == "baseline")      { out = SampleEvent::Kind::Baseline;     return true; }
+    if (s == "sample")        { out = SampleEvent::Kind::Sample;       return true; }
+    if (s == "start")         { out = SampleEvent::Kind::Start;        return true; }
+    if (s == "end")           { out = SampleEvent::Kind::End;          return true; }
     return false;
 }
 
@@ -895,6 +955,16 @@ std::string serialize_components(
     return out;
 }
 
+std::string serialize_provenance(const Provenance& p) {
+    std::string out = "{";
+    out += "\"source_kind\":\"" + json_escape(p.source_kind) + "\"";
+    out += ",\"source_id\":\"" + json_escape(p.source_id) + "\"";
+    out += ",\"source_file\":\"" + json_escape(p.source_file) + "\"";
+    out += ",\"source_line\":" + std::to_string(p.source_line);
+    out += "}";
+    return out;
+}
+
 std::string serialize_event(const SampleEvent& e) {
     std::ostringstream ss;
     ss << "{\"kind\":\"" << sample_kind_string(e.kind) << "\""
@@ -903,9 +973,15 @@ std::string serialize_event(const SampleEvent& e) {
        << ",\"t\":" << format_number(e.t_seconds)
        << ",\"frame\":" << e.frame
        << ",\"precision\":" << e.precision
+       << ",\"trace_id\":" << e.trace_id
+       << ",\"metric_id\":" << e.metric_id
+       << ",\"burst_id\":" << e.burst_id
        << ",\"components\":" << serialize_components(e.components)
-       << ",\"deltas\":" << serialize_components(e.deltas)
-       << "}";
+       << ",\"deltas\":" << serialize_components(e.deltas);
+    if (e.provenance.is_set()) {
+        ss << ",\"provenance\":" << serialize_provenance(e.provenance);
+    }
+    ss << "}";
     return ss.str();
 }
 
@@ -948,6 +1024,17 @@ public:
                 if (!parse_components(e.components)) return false;
             } else if (key == "deltas") {
                 if (!parse_components(e.deltas)) return false;
+            } else if (key == "trace_id") {
+                double v = 0; if (!parse_number(v)) return false;
+                e.trace_id = static_cast<int>(v);
+            } else if (key == "metric_id") {
+                double v = 0; if (!parse_number(v)) return false;
+                e.metric_id = static_cast<int>(v);
+            } else if (key == "burst_id") {
+                double v = 0; if (!parse_number(v)) return false;
+                e.burst_id = static_cast<int>(v);
+            } else if (key == "provenance") {
+                if (!parse_provenance(e.provenance)) return false;
             } else {
                 // Unknown key — skip its value tolerantly.
                 if (!skip_value()) return false;
@@ -955,6 +1042,32 @@ public:
         }
         out = std::move(e);
         return true;
+    }
+
+    bool parse_provenance(Provenance& out) {
+        if (!expect('{')) return false;
+        skip_ws();
+        if (peek() == '}') { ++pos_; return true; }
+        while (true) {
+            std::string k;
+            if (!parse_string(k) || !expect(':')) return false;
+            if (k == "source_kind") {
+                if (!parse_string(out.source_kind)) return false;
+            } else if (k == "source_id") {
+                if (!parse_string(out.source_id)) return false;
+            } else if (k == "source_file") {
+                if (!parse_string(out.source_file)) return false;
+            } else if (k == "source_line") {
+                double n = 0; if (!parse_number(n)) return false;
+                out.source_line = static_cast<int>(n);
+            } else {
+                if (!skip_value()) return false;
+            }
+            skip_ws();
+            if (peek() == ',') { ++pos_; continue; }
+            if (peek() == '}') { ++pos_; return true; }
+            return false;
+        }
     }
 
     bool parse_header(int& version_out) {
@@ -1157,17 +1270,40 @@ int replay_fixture(const std::string& path, const Sink& sink) {
 
 // ── assert_matches ──────────────────────────────────────────────────
 
+namespace {
+
+/// Burst identity used to align events across two fixtures. For events
+/// without burst_id (TraceStarted, Baseline) we fall back to
+/// `(view, metric, kind, trace_id, metric_id)`.
+struct EventKey {
+    std::string view;
+    std::string metric;
+    SampleEvent::Kind kind;
+    int trace_id = 0;
+    int metric_id = 0;
+    int burst_id = 0;
+
+    bool operator<(const EventKey& o) const {
+        if (view != o.view) return view < o.view;
+        if (metric != o.metric) return metric < o.metric;
+        if (kind != o.kind) return kind < o.kind;
+        if (trace_id != o.trace_id) return trace_id < o.trace_id;
+        if (metric_id != o.metric_id) return metric_id < o.metric_id;
+        return burst_id < o.burst_id;
+    }
+};
+
+EventKey key_of(const SampleEvent& e) {
+    return { e.view_name, e.metric_name, e.kind,
+             e.trace_id, e.metric_id, e.burst_id };
+}
+
+}  // namespace
+
 FixtureDiff assert_matches(const std::vector<SampleEvent>& golden,
                            const std::vector<SampleEvent>& captured,
                            FixtureMatchOptions opts) {
     FixtureDiff diff;
-    const auto pos_kind = [](SampleEvent::Kind k) {
-        return k == SampleEvent::Kind::Baseline ||
-               k == SampleEvent::Kind::Sample ||
-               k == SampleEvent::Kind::Start ||
-               k == SampleEvent::Kind::End;
-    };
-    (void)pos_kind;
 
     if (opts.require_same_event_count && golden.size() != captured.size()) {
         FixtureDiff::Item item;
@@ -1179,70 +1315,111 @@ FixtureDiff assert_matches(const std::vector<SampleEvent>& golden,
         diff.differences.push_back(item);
     }
 
-    const std::size_t n = std::min(golden.size(), captured.size());
-    for (std::size_t i = 0; i < n; ++i) {
-        const auto& g = golden[i];
-        const auto& c = captured[i];
-        if (g.kind != c.kind || g.view_name != c.view_name ||
-            g.metric_name != c.metric_name) {
+    // Phase 7 — ID-keyed grouping. For each (view, metric, kind,
+    // trace_id, metric_id, burst_id) group, compare in arrival order
+    // within the group. Bursts that appear in different order across
+    // fixtures still match if their identity matches.
+    std::map<EventKey, std::vector<const SampleEvent*>> g_groups;
+    std::map<EventKey, std::vector<const SampleEvent*>> c_groups;
+    for (const auto& e : golden)   g_groups[key_of(e)].push_back(&e);
+    for (const auto& e : captured) c_groups[key_of(e)].push_back(&e);
+
+    const auto compare_components = [&](const SampleEvent& g,
+                                        const SampleEvent& c,
+                                        const auto& gc, const auto& cc,
+                                        const char* tag) {
+        if (gc.size() != cc.size()) {
             FixtureDiff::Item item;
-            item.kind = "event-mismatch";
+            item.kind = "component-count-mismatch";
             item.view_name = g.view_name;
             item.metric_name = g.metric_name;
-            item.detail = "event #" + std::to_string(i);
+            item.detail = tag;
+            item.observed = static_cast<double>(cc.size());
+            item.expected = static_cast<double>(gc.size());
+            diff.differences.push_back(item);
+            return;
+        }
+        for (std::size_t k = 0; k < gc.size(); ++k) {
+            if (gc[k].first != cc[k].first) {
+                FixtureDiff::Item item;
+                item.kind = "component-mismatch";
+                item.view_name = g.view_name;
+                item.metric_name = g.metric_name;
+                item.component_name = gc[k].first;
+                item.detail = std::string(tag) + ", expected name " +
+                              gc[k].first + " got " + cc[k].first;
+                diff.differences.push_back(item);
+                continue;
+            }
+            if (std::fabs(gc[k].second - cc[k].second) > opts.component_epsilon) {
+                FixtureDiff::Item item;
+                item.kind = "component-drift";
+                item.view_name = g.view_name;
+                item.metric_name = g.metric_name;
+                item.component_name = gc[k].first;
+                item.detail = tag;
+                item.observed = cc[k].second;
+                item.expected = gc[k].second;
+                diff.differences.push_back(item);
+            }
+        }
+    };
+
+    // Walk the golden groups; for each, pair up with the captured
+    // group's events in arrival order.
+    for (const auto& [key, g_list] : g_groups) {
+        auto it = c_groups.find(key);
+        if (it == c_groups.end()) {
+            FixtureDiff::Item item;
+            item.kind = "missing-event";
+            item.view_name = key.view;
+            item.metric_name = key.metric;
+            item.detail = "burst_id=" + std::to_string(key.burst_id);
             diff.differences.push_back(item);
             continue;
         }
-        if (std::fabs(g.t_seconds - c.t_seconds) > opts.timing_epsilon_seconds) {
+        const auto& c_list = it->second;
+        const std::size_t n = std::min(g_list.size(), c_list.size());
+        if (g_list.size() != c_list.size()) {
             FixtureDiff::Item item;
-            item.kind = "timing-drift";
-            item.view_name = g.view_name;
-            item.metric_name = g.metric_name;
-            item.detail = "event #" + std::to_string(i);
-            item.observed = c.t_seconds;
-            item.expected = g.t_seconds;
+            item.kind = "group-count-mismatch";
+            item.view_name = key.view;
+            item.metric_name = key.metric;
+            item.detail = "burst_id=" + std::to_string(key.burst_id);
+            item.observed = static_cast<double>(c_list.size());
+            item.expected = static_cast<double>(g_list.size());
             diff.differences.push_back(item);
         }
-        const auto compare = [&](const auto& gc, const auto& cc, const char* tag) {
-            if (gc.size() != cc.size()) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto& g = *g_list[i];
+            const auto& c = *c_list[i];
+            if (std::fabs(g.t_seconds - c.t_seconds) > opts.timing_epsilon_seconds) {
                 FixtureDiff::Item item;
-                item.kind = "component-count-mismatch";
+                item.kind = "timing-drift";
                 item.view_name = g.view_name;
                 item.metric_name = g.metric_name;
-                item.detail = tag;
-                item.observed = static_cast<double>(cc.size());
-                item.expected = static_cast<double>(gc.size());
+                item.detail = "burst_id=" + std::to_string(g.burst_id);
+                item.observed = c.t_seconds;
+                item.expected = g.t_seconds;
                 diff.differences.push_back(item);
-                return;
             }
-            for (std::size_t k = 0; k < gc.size(); ++k) {
-                if (gc[k].first != cc[k].first) {
-                    FixtureDiff::Item item;
-                    item.kind = "component-mismatch";
-                    item.view_name = g.view_name;
-                    item.metric_name = g.metric_name;
-                    item.component_name = gc[k].first;
-                    item.detail = std::string(tag) + ", expected name " +
-                                  gc[k].first + " got " + cc[k].first;
-                    diff.differences.push_back(item);
-                    continue;
-                }
-                if (std::fabs(gc[k].second - cc[k].second) > opts.component_epsilon) {
-                    FixtureDiff::Item item;
-                    item.kind = "component-drift";
-                    item.view_name = g.view_name;
-                    item.metric_name = g.metric_name;
-                    item.component_name = gc[k].first;
-                    item.detail = tag;
-                    item.observed = cc[k].second;
-                    item.expected = gc[k].second;
-                    diff.differences.push_back(item);
-                }
-            }
-        };
-        compare(g.components, c.components, "components");
-        compare(g.deltas, c.deltas, "deltas");
+            compare_components(g, c, g.components, c.components, "components");
+            compare_components(g, c, g.deltas, c.deltas, "deltas");
+        }
     }
+
+    // Extra groups in captured that aren't in golden.
+    for (const auto& [key, _] : c_groups) {
+        if (g_groups.find(key) == g_groups.end()) {
+            FixtureDiff::Item item;
+            item.kind = "extra-event";
+            item.view_name = key.view;
+            item.metric_name = key.metric;
+            item.detail = "burst_id=" + std::to_string(key.burst_id);
+            diff.differences.push_back(item);
+        }
+    }
+
     return diff;
 }
 
@@ -1257,6 +1434,9 @@ std::vector<ScalarSample> extract_scalar(
     std::vector<ScalarSample> out;
     for (const auto& e : events) {
         if (e.view_name != view_name || e.metric_name != metric_name) continue;
+        // TraceStarted / Start / End are framing events with no
+        // sample components — skip them and pull only Baseline +
+        // Sample data.
         if (e.kind != SampleEvent::Kind::Baseline &&
             e.kind != SampleEvent::Kind::Sample) continue;
         for (const auto& [k, v] : e.components) {

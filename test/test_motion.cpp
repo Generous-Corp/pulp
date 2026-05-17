@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -29,19 +30,30 @@ using namespace pulp::view::motion;
 namespace {
 
 /// RAII fixture: resets the singleton coordinator, enables tracing,
-/// binds a fresh FrameClock, and installs a buffer sink.
+/// binds a fresh FrameClock, and installs two sinks — one that
+/// excludes the Phase 7 one-shot `TraceStarted` events (the default
+/// `buffer`, preserving pre-Phase-7 test assertions), and one that
+/// keeps every event (`full_buffer`, for Phase 7 tests that need to
+/// see registration events).
 class Fixture {
 public:
     Fixture() {
         Coordinator::instance().reset();
         Coordinator::instance().bind(clock);
         Coordinator::instance().set_tracing_enabled(true);
-        sink_id = Coordinator::instance().add_sink(make_buffer_sink(&buffer));
+        sink_id = Coordinator::instance().add_sink(
+            [this](const SampleEvent& e) {
+                full_buffer.push_back(e);
+                if (e.kind != SampleEvent::Kind::TraceStarted) {
+                    buffer.push_back(e);
+                }
+            });
     }
     ~Fixture() { Coordinator::instance().reset(); }
 
     FrameClock clock;
-    std::vector<SampleEvent> buffer;
+    std::vector<SampleEvent> buffer;        ///< data events only
+    std::vector<SampleEvent> full_buffer;   ///< includes TraceStarted
     int sink_id = 0;
 };
 
@@ -51,6 +63,29 @@ std::size_t count_kind(const std::vector<SampleEvent>& b,
     std::size_t n = 0;
     for (const auto& e : b) {
         if (e.kind == k && (metric.empty() || e.metric_name == metric)) ++n;
+    }
+    return n;
+}
+
+/// Find the first event matching (kind, optional metric). Returns nullptr
+/// if no match.
+const SampleEvent* first_of(const std::vector<SampleEvent>& b,
+                            SampleEvent::Kind k,
+                            const std::string& metric = {}) {
+    for (const auto& e : b) {
+        if (e.kind == k && (metric.empty() || e.metric_name == metric))
+            return &e;
+    }
+    return nullptr;
+}
+
+/// Number of data + framing events excluding the one-shot TraceStarted
+/// emission (Phase 7). Pre-Phase-7 tests assumed buffer.size() never
+/// counted a registration event.
+std::size_t data_event_count(const std::vector<SampleEvent>& b) {
+    std::size_t n = 0;
+    for (const auto& e : b) {
+        if (e.kind != SampleEvent::Kind::TraceStarted) ++n;
     }
     return n;
 }
@@ -85,8 +120,10 @@ TEST_CASE("Baseline emitted on first sample", "[motion]") {
 
     fx.clock.tick(1.0f / 60.0f);
     REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "opacity") == 1);
-    REQUIRE(fx.buffer.front().components.size() == 1);
-    REQUIRE(fx.buffer.front().components.front().second == Approx(1.0));
+    const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline, "opacity");
+    REQUIRE(baseline != nullptr);
+    REQUIRE(baseline->components.size() == 1);
+    REQUIRE(baseline->components.front().second == Approx(1.0));
 }
 
 TEST_CASE("No emission when value is stable", "[motion]") {
@@ -372,7 +409,9 @@ TEST_CASE("format_line Start/End markers include frame + time", "[motion]") {
     start.metric_name = "y";
     start.frame = 42;
     start.t_seconds = 1.5;
-    REQUIRE(format_line(start) == "[PulpMotion][X][y] -- Start frame=42 t=1.500000 --");
+    start.burst_id = 3;
+    REQUIRE(format_line(start) ==
+            "[PulpMotion][X][y] -- Start burst=3 frame=42 t=1.500000 --");
 
     SampleEvent end;
     end.kind = SampleEvent::Kind::End;
@@ -381,9 +420,10 @@ TEST_CASE("format_line Start/End markers include frame + time", "[motion]") {
     end.frame = 50;
     end.t_seconds = 2.0;
     end.precision = 2;
+    end.burst_id = 3;
     end.deltas = { {"x", 10.0}, {"y", -5.0} };
     REQUIRE(format_line(end) ==
-            "[PulpMotion][X][y] -- End frame=50 t=2.000000 -- xDelta=10.00 yDelta=-5.00");
+            "[PulpMotion][X][y] -- End burst=3 frame=50 t=2.000000 -- xDelta=10.00 yDelta=-5.00");
 }
 
 // ── Emitted-event counter ────────────────────────────────────────────
@@ -885,6 +925,185 @@ TEST_CASE("final_value returns the last sample's value",
         {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.95}
     };
     REQUIRE(final_value(s) == Approx(0.95));
+}
+
+// ── Phase 7: TraceStarted + stable IDs + Provenance ──────────────────
+
+TEST_CASE("TraceStarted emits exactly once with provenance",
+          "[motion][phase7]") {
+    Fixture fx;
+    Provenance prov;
+    prov.source_kind = "tween";
+    prov.source_id = "Card.opacity";
+    prov.source_file = "card.cpp";
+    prov.source_line = 412;
+
+    auto handle = Coordinator::instance().trace("Card", { 60 })
+        .with_provenance(prov)
+        .value("opacity", []{ return 0.0; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    fx.clock.tick(1.0f / 60.0f);
+    fx.clock.tick(1.0f / 60.0f);
+
+    // TraceStarted appears in full_buffer, not the filtered buffer.
+    std::size_t ts_count = 0;
+    const SampleEvent* ts_event = nullptr;
+    for (const auto& e : fx.full_buffer) {
+        if (e.kind == SampleEvent::Kind::TraceStarted) {
+            ++ts_count;
+            ts_event = &e;
+        }
+    }
+    REQUIRE(ts_count == 1);
+    REQUIRE(ts_event != nullptr);
+    REQUIRE(ts_event->provenance.source_kind == "tween");
+    REQUIRE(ts_event->provenance.source_id == "Card.opacity");
+    REQUIRE(ts_event->provenance.source_file == "card.cpp");
+    REQUIRE(ts_event->provenance.source_line == 412);
+    REQUIRE(ts_event->trace_id > 0);
+}
+
+TEST_CASE("Sample events carry stable trace_id/metric_id/burst_id",
+          "[motion][phase7]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .value("x", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);        // baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);        // burst 1 Start + Sample
+    fx.clock.tick(1.0f / 60.0f);        // burst 1 End
+    v = 2.0;
+    fx.clock.tick(1.0f / 60.0f);        // burst 2 Start + Sample
+    fx.clock.tick(1.0f / 60.0f);        // burst 2 End
+
+    int trace_id_seen = -1;
+    std::set<int> burst_ids_seen;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start) {
+            burst_ids_seen.insert(e.burst_id);
+        }
+        if (trace_id_seen < 0) trace_id_seen = e.trace_id;
+        REQUIRE(e.trace_id == trace_id_seen);
+        REQUIRE(e.metric_id == 0);
+    }
+    REQUIRE(burst_ids_seen.size() == 2);
+    REQUIRE(burst_ids_seen.count(1) == 1);
+    REQUIRE(burst_ids_seen.count(2) == 1);
+}
+
+TEST_CASE("Fixture round-trip preserves trace_id, metric_id, burst_id, and provenance",
+          "[motion][phase7][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("phase7");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+
+    Provenance prov;
+    prov.source_kind = "design-import";
+    prov.source_id = "figma:LevelMeter/Panel";
+
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("Panel", { 60 })
+        .with_provenance(prov)
+        .value("opacity", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);   // TraceStarted + Baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);   // Start + Sample
+    fx.clock.tick(1.0f / 60.0f);   // End
+
+    auto loaded = load_fixture(path);
+    REQUIRE_FALSE(loaded.empty());
+
+    // First event should be TraceStarted with provenance.
+    REQUIRE(loaded.front().kind == SampleEvent::Kind::TraceStarted);
+    REQUIRE(loaded.front().provenance.source_kind == "design-import");
+    REQUIRE(loaded.front().provenance.source_id == "figma:LevelMeter/Panel");
+
+    // IDs should be present on every event.
+    int trace_id = loaded.front().trace_id;
+    REQUIRE(trace_id > 0);
+    for (const auto& e : loaded) {
+        if (e.kind == SampleEvent::Kind::TraceStarted) continue;
+        REQUIRE(e.trace_id == trace_id);
+        REQUIRE(e.metric_id == 0);
+    }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("load_fixture rejects v1 schema (only v2 accepted)",
+          "[motion][phase7][fixture]") {
+    const auto path = tmp_fixture_path("v1reject");
+    {
+        std::ofstream f(path, std::ios::trunc);
+        f << "{\"motion_fixture_version\":1}\n";
+        f << "{\"kind\":\"baseline\",\"view\":\"V\",\"metric\":\"m\","
+             "\"t\":0,\"frame\":0,\"precision\":3,"
+             "\"components\":{\"value\":1.0},\"deltas\":{}}\n";
+    }
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches aligns events by stable IDs, not position",
+          "[motion][phase7][fixture]") {
+    // Two identical fixtures, but the second one has events shuffled
+    // (within burst order is preserved; across-burst order is not).
+    Fixture fx;
+    Provenance prov;
+    prov.source_kind = "test";
+    prov.source_id = "shuffle";
+
+    const auto path = tmp_fixture_path("shuffleA");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+
+    double v = 0.0;
+    auto h = Coordinator::instance().trace("V", { 60 })
+        .with_provenance(prov)
+        .value("x", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);   // baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);   // burst 1 Start+Sample
+    fx.clock.tick(1.0f / 60.0f);   // burst 1 End
+    v = 2.0;
+    fx.clock.tick(1.0f / 60.0f);   // burst 2 Start+Sample
+    fx.clock.tick(1.0f / 60.0f);   // burst 2 End
+
+    auto golden = load_fixture(path);
+    REQUIRE_FALSE(golden.empty());
+
+    // Build a shuffled "captured" — swap burst-1 and burst-2 events
+    // (the trace-started event stays at the front).
+    std::vector<SampleEvent> shuffled = golden;
+    // Keep TraceStarted + Baseline first, then put burst-2 events
+    // before burst-1 events. The grouped assertion should still match.
+    std::vector<SampleEvent> reorder;
+    for (const auto& e : shuffled) {
+        if (e.kind == SampleEvent::Kind::TraceStarted ||
+            e.kind == SampleEvent::Kind::Baseline) {
+            reorder.push_back(e);
+        }
+    }
+    for (const auto& e : shuffled) {
+        if (e.burst_id == 2) reorder.push_back(e);
+    }
+    for (const auto& e : shuffled) {
+        if (e.burst_id == 1) reorder.push_back(e);
+    }
+
+    FixtureMatchOptions opts;
+    opts.require_same_event_count = false;
+    auto diff = assert_matches(golden, reorder, opts);
+    REQUIRE(diff.matches());
+    std::remove(path.c_str());
 }
 
 TEST_CASE("Emitted event counter advances", "[motion]") {

@@ -200,11 +200,36 @@ Apply these on every motion debugging run:
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
 - `docs/guides/motion-observability.md` — full guide
 
+## Provenance
+
+Every trace can carry a `Provenance` envelope that flows through the fixture
+to agents reading a golden weeks later:
+
+```cpp
+auto handle = motion::Coordinator::instance()
+    .trace("Card", { 60 })
+    .with_provenance({ "tween", "Card.opacity", __FILE__, __LINE__ })
+    .value("opacity", [&]{ return opacity; })
+    .attach();
+```
+
+The envelope shows up on the trace's `TraceStarted` event and in the JSONL
+fixture. When you read a fixture and the burst looks wrong, the provenance
+tells you which file / Figma node / animator the trace was attached to —
+without grepping.
+
 ## Gotchas
 
 - Visual-analysis Python deps (numpy, Pillow, scikit-image) are intentionally
   not bundled in plugin/app artifacts. The CTest entry exits 3 (Skipped) when
   they are missing — that's expected on bare CI runners.
+- Fixture schema is at version 2. The loader rejects unknown versions; v1
+  fixtures are rejected outright (no v1 producer ships in the framework). Bumping
+  the schema is a deliberate break — write a migration tool, don't silently
+  accept old goldens.
+- `TraceStarted` is emitted once per trace registration on the first tick
+  after attach. Tests that count events should either filter it out or pass
+  through `data_event_count(buffer)`.
 - Window / Screen geometry spaces currently collapse onto ViewGlobal; window-
   origin and screen-origin offsets land when the host surfaces them. Use
   `ViewGlobal` for portable code.
