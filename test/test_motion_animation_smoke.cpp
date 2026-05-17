@@ -24,7 +24,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+
+#if defined(_WIN32)
+#include <process.h>
+#define pulp_smoke_getpid() static_cast<long>(::_getpid())
+#else
 #include <unistd.h>
+#define pulp_smoke_getpid() static_cast<long>(::getpid())
+#endif
 
 using Catch::Approx;
 using pulp::view::FrameClock;
@@ -35,9 +42,21 @@ using namespace pulp::view::motion;
 namespace {
 
 std::string smoke_fixture_path() {
+    // Cross-platform temp dir: TMPDIR / TMP / TEMP, fallback to /tmp
+    // (POSIX) or current dir (Windows when none set).
+    const char* tmp = std::getenv("TMPDIR");
+    if (!tmp) tmp = std::getenv("TMP");
+    if (!tmp) tmp = std::getenv("TEMP");
+    if (!tmp) {
+#if defined(_WIN32)
+        tmp = ".";
+#else
+        tmp = "/tmp";
+#endif
+    }
     std::ostringstream ss;
-    ss << "/tmp/pulp-motion-anim-smoke-"
-       << static_cast<long>(::getpid()) << "-"
+    ss << tmp << "/pulp-motion-anim-smoke-"
+       << pulp_smoke_getpid() << "-"
        << std::rand() << ".jsonl";
     return ss.str();
 }

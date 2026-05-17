@@ -18,8 +18,15 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#define pulp_test_getpid() static_cast<long>(::_getpid())
+#else
+#include <unistd.h>
+#define pulp_test_getpid() static_cast<long>(::getpid())
+#endif
 
 using Catch::Approx;
 using pulp::view::FrameClock;
@@ -711,9 +718,21 @@ TEST_CASE("publish_value respects epsilon threshold",
 
 namespace {
 std::string tmp_fixture_path(const std::string& tag) {
+    // Cross-platform temp dir: TMPDIR / TMP / TEMP, fallback to /tmp
+    // (POSIX) or current dir (Windows when none set).
+    const char* tmp = std::getenv("TMPDIR");
+    if (!tmp) tmp = std::getenv("TMP");
+    if (!tmp) tmp = std::getenv("TEMP");
+    if (!tmp) {
+#if defined(_WIN32)
+        tmp = ".";
+#else
+        tmp = "/tmp";
+#endif
+    }
     std::ostringstream ss;
-    ss << "/tmp/pulp-motion-fixture-" << tag << "-"
-       << static_cast<long>(::getpid()) << "-"
+    ss << tmp << "/pulp-motion-fixture-" << tag << "-"
+       << pulp_test_getpid() << "-"
        << std::rand() << ".jsonl";
     return ss.str();
 }
