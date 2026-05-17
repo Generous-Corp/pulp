@@ -5957,3 +5957,35 @@ diff lines and OK at/above the 75% floor. The branch was pushed with
 `PULP_SKIP_DIFF_COVER=1` only after the local diff-cover pass. The PR was
 created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
 Namespace/SSH validation was dispatched.
+
+2026-05-16 20:58 PDT: addressed the real Codex review finding on #2130. Pushed
+follow-up `3a77e1f6d` (`test(runtime): join tcp coverage server threads
+safely`) on `feature/phase3-codecov-batch-684`, changing the TCP coverage tests
+so all assertions after starting a server thread are non-fatal until the thread
+has been joined. This preserves the same behavior checks while preventing
+aborted test cases from leaving joinable threads behind. Focused local
+validation passed: `git diff --check`, `cmake --build build --target
+pulp-test-network-stream -j$(sysctl -n hw.ncpu)`, and
+`./build/test/pulp-test-network-stream "[phase3]"` (92 assertions / 13 cases).
+The branch was pushed with `PULP_SKIP_DIFF_COVER=1`; GitHub-hosted checks are
+rerunning. No Namespace/SSH validation was dispatched.
+
+2026-05-16 20:58 PDT: opened the next large batched coverage PR as #2132,
+`test: batch runtime utility and environment coverage edges`, branch
+`feature/phase3-codecov-batch-685`, head
+`55a6242a9bb1d08c5a64ab0d065cd7ac98e713533`. This batch adds 12 focused tests
+across `test/test_runtime_utils.cpp` and `test/test_environment.cpp` covering
+DynamicLibrary closed lookups, move construction/assignment, failed reopen
+state, InterProcessLock contention, Environment publishes without listeners,
+multi-listener snapshots, token reset/self-move/move-unsubscribe behavior,
+subscriptions added during dispatch, and reset-to-default behavior. Local
+validation before PR: `git diff --check`; built `pulp-test-runtime-utils
+pulp-test-environment`; ran `./build/test/pulp-test-runtime-utils
+"[coverage][phase3]"` (25 assertions / 6 cases) and
+`./build/test/pulp-test-environment "[coverage][phase3]"` (34 assertions / 7
+cases); ran the 12-test `PULP_DIFF_COVER_CTEST_REGEX=...
+tools/scripts/local_diff_cover.sh` gate, which reported no uncovered measured
+diff lines and OK at/above the 75% floor. The branch was pushed with
+`PULP_SKIP_DIFF_COVER=1` only after the local diff-cover pass. The PR was
+created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
+Namespace/SSH validation was dispatched.
