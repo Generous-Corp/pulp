@@ -740,19 +740,16 @@ def apply_bumps(
         for vf in v.surface.version_files:
             if write_version(repo, vf, new_ver):
                 edited.append(vf.path)
-        # Changelog stub.
-        if v.surface.changelog:
-            cl_path = repo / v.surface.changelog
-            if cl_path.exists():
-                header = f"## [{new_ver}]\n\n"
-                cl_text = cl_path.read_text()
-                pos = cl_text.find("## [")
-                if pos != -1:
-                    cl_text = cl_text[:pos] + header + cl_text[pos:]
-                else:
-                    cl_text = header + cl_text
-                cl_path.write_text(cl_text)
-                edited.append(str(cl_path.relative_to(repo)))
+        # CHANGELOG.md is intentionally NOT written here (C1, 2026-05).
+        # Ownership moved to Shipyard post-tag sync via
+        # `.github/workflows/post-tag-sync.yml` and the
+        # `shipyard changelog regenerate` command. PR-side stub insertion
+        # was the source of repeated multi-PR-train rebases: PR A and PR
+        # B both insert `## [0.105.0]` headers, the first one merges, the
+        # second one conflicts on the same line. Letting Shipyard own the
+        # full regen at tag time eliminates the conflict class entirely.
+        # `versioning.json` still carries each surface's `changelog`
+        # field — Shipyard reads it.
     # Stage for commit so callers see them in `git status`.
     if edited:
         subprocess.run(["git", "-C", str(repo), "add", "--"] + edited, check=False)

@@ -595,11 +595,47 @@ class AssessmentReportApplyTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("bump required", text)
 
+    def test_apply_bumps_does_not_touch_changelog_post_c1(self) -> None:
+        """C1 contract: PR-side bumps write version files only.
+        CHANGELOG.md is owned by Shipyard post-tag sync. Two PRs each
+        proposing a minor bump must not race on the same changelog
+        line (which is what motivated this decoupling).
+        """
+        with tempfile.TemporaryDirectory() as td:
+            repo = pathlib.Path(td)
+            (repo / "sdk.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+            cl_text = (
+                "# Changelog\n\n"
+                "## [1.0.0]\n\n"
+                "- some bullet\n"
+            )
+            (repo / "CHANGELOG.md").write_text(cl_text, encoding="utf-8")
+            surface = vbc.Surface(
+                "sdk",
+                "SDK",
+                [vbc.VersionFile("sdk.json", "json_field", "version")],
+                ["src/**"],
+                changelog="CHANGELOG.md",
+            )
+            verdict = vbc.Verdict(surface, "minor", None, "1.0.0", "minor")
+            with mock.patch.object(vbc, "already_bumped", return_value=False), \
+                 mock.patch.object(vbc, "version_at_base", return_value="1.0.0"), \
+                 mock.patch.object(vbc.subprocess, "run"):
+                edited = vbc.apply_bumps([verdict], "base", repo)
+            # Only the version file is edited; CHANGELOG.md is byte-stable.
+            self.assertEqual(edited, ["sdk.json"])
+            self.assertEqual((repo / "CHANGELOG.md").read_text(), cl_text)
+
     def test_apply_bumps_uses_base_version_and_stages_changes(self) -> None:
+        # Post-C1 (2026-05): apply_bumps writes version files only.
+        # CHANGELOG.md is owned by Shipyard's post-tag sync, not by
+        # the PR-side bump step. The surface's `changelog` field is
+        # still respected by Shipyard at release time.
         with tempfile.TemporaryDirectory() as td:
             repo = pathlib.Path(td)
             (repo / "package.json").write_text('{"version": "1.2.4"}\n', encoding="utf-8")
-            (repo / "CHANGELOG.md").write_text("# Changelog\n\n## [1.2.3]\n", encoding="utf-8")
+            cl_before = "# Changelog\n\n## [1.2.3]\n"
+            (repo / "CHANGELOG.md").write_text(cl_before, encoding="utf-8")
             surface = vbc.Surface(
                 "plugin",
                 "Plugin",
@@ -613,9 +649,10 @@ class AssessmentReportApplyTests(unittest.TestCase):
                  mock.patch.object(vbc.subprocess, "run") as run:
                 edited = vbc.apply_bumps([verdict], "base", repo)
 
-            self.assertEqual(edited, ["package.json", "CHANGELOG.md"])
+            self.assertEqual(edited, ["package.json"])
             self.assertEqual(json.loads((repo / "package.json").read_text())["version"], "1.3.0")
-            self.assertIn("## [1.3.0]", (repo / "CHANGELOG.md").read_text())
+            # CHANGELOG.md untouched.
+            self.assertEqual((repo / "CHANGELOG.md").read_text(), cl_before)
             run.assert_called_once()
 
     def test_apply_bumps_skip_and_fallback_edges(self) -> None:
@@ -639,7 +676,8 @@ class AssessmentReportApplyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             repo = pathlib.Path(td)
             (repo / "sdk.json").write_text('{"version": "2.0.0"}\n', encoding="utf-8")
-            (repo / "CHANGELOG.md").write_text("# Changelog\n\nNo releases yet.\n", encoding="utf-8")
+            cl_before = "# Changelog\n\nNo releases yet.\n"
+            (repo / "CHANGELOG.md").write_text(cl_before, encoding="utf-8")
             changelog_surface = vbc.Surface(
                 "sdk",
                 "SDK",
@@ -653,9 +691,10 @@ class AssessmentReportApplyTests(unittest.TestCase):
                  mock.patch.object(vbc.subprocess, "run") as run:
                 edited = vbc.apply_bumps([verdict], "base", repo)
 
-            self.assertEqual(edited, ["sdk.json", "CHANGELOG.md"])
+            # Post-C1: CHANGELOG no longer in `edited`; left untouched.
+            self.assertEqual(edited, ["sdk.json"])
             self.assertEqual(json.loads((repo / "sdk.json").read_text())["version"], "2.1.0")
-            self.assertTrue((repo / "CHANGELOG.md").read_text().startswith("## [2.1.0]"))
+            self.assertEqual((repo / "CHANGELOG.md").read_text(), cl_before)
             run.assert_called_once()
 
         with tempfile.TemporaryDirectory() as td:
