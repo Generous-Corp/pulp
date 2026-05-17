@@ -29,6 +29,14 @@ int line_end_for_position(const std::string& text, int position) {
 }
 
 int vertical_line_position(const std::string& text, int caret, int direction) {
+    // NOTE: this helper walks hard `\n` line breaks only. Soft-wrap
+    // navigation across visually-wrapped lines is a follow-up — the
+    // wrap geometry only exists in the cached LayoutSnapshot populated
+    // by `paint()`. Driving Up/Down through that snapshot requires
+    // moving the column-bookkeeping out of `caret_position_` (so the
+    // caret can ride wrap-induced visual rows without changing logical
+    // position) and is out of scope for the multi-line test slice.
+    // See planning/2026-05-17-visage-feature-parity-audit.md §P3.
     caret = clamp_position(text, caret);
     const int current_start = line_start_for_position(text, caret);
     const int current_end = line_end_for_position(text, caret);
@@ -248,7 +256,9 @@ void TextEditor::on_mouse_event(const MouseEvent& event) {
     }
     if (!event.is_down) return;
 
-    int pos = char_index_at_x(event.position.x);
+    int pos = multi_line
+        ? char_index_at_point(event.position.x, event.position.y)
+        : char_index_at_x(event.position.x);
 
     if (event.click_count == 3) {
         // Triple-click: select all (line in multi-line)
@@ -514,6 +524,33 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         }
         scroll_offset_ = std::clamp(scroll_offset_, 0.0f, std::max(0.0f, total_h - visible_h));
 
+        // Populate the cached layout snapshot so the mouse hit-test and
+        // `caret_rect()` see the same visual rows the user does. We do
+        // this *after* `scroll_offset_` has settled so the recorded
+        // baselines reflect the final layout, and we measure each char
+        // prefix once via the supplied Canvas so RecordingCanvas /
+        // SkiaCanvas / CGCanvas all stay in lock-step.
+        last_layout_.multi_line = true;
+        last_layout_.lines.clear();
+        last_layout_.lines.reserve(lines.size());
+        last_layout_.fallback_char_w = canvas.measure_text("M");
+        for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+            const auto& src = lines[static_cast<size_t>(i)];
+            LayoutSnapshot::Line dst;
+            dst.start = src.start;
+            dst.end = src.end;
+            dst.top_y = inner_y + i * line_h - scroll_offset_;
+            dst.baseline_y = dst.top_y + font_size_;
+            dst.inner_x = inner_x;
+            dst.line_height = line_h;
+            dst.x_offsets.resize(src.text.size() + 1);
+            dst.x_offsets[0] = 0.f;
+            for (size_t j = 1; j <= src.text.size(); ++j) {
+                dst.x_offsets[j] = canvas.measure_text(src.text.substr(0, j));
+            }
+            last_layout_.lines.push_back(std::move(dst));
+        }
+
         if (display.empty() && !placeholder.empty() && !has_focus()) {
             canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::hex(0x808090)));
             canvas.fill_text(placeholder, inner_x, inner_y + font_size_);
@@ -548,6 +585,27 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     const float text_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f) + metrics.ascent;
     const float total_text_w = display.empty() ? 0.0f : canvas.measure_text(display);
     const float caret_w = canvas.measure_text(display.substr(0, static_cast<size_t>(caret_position_)));
+
+    // Stash a single-row snapshot so `caret_rect()` returns the same
+    // baseline-relative geometry the paint actually draws. The single-
+    // line branch has only one visual row, so we record one Line with
+    // cumulative x offsets for every char in `display`.
+    last_layout_.multi_line = false;
+    last_layout_.fallback_char_w = canvas.measure_text("M");
+    last_layout_.lines.clear();
+    LayoutSnapshot::Line line_snap;
+    line_snap.start = 0;
+    line_snap.end = static_cast<int>(display.size());
+    line_snap.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
+    line_snap.baseline_y = text_y;
+    line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : font_size_;
+    line_snap.inner_x = text_inner_x;
+    line_snap.x_offsets.resize(display.size() + 1);
+    line_snap.x_offsets[0] = 0.f;
+    for (size_t j = 1; j <= display.size(); ++j) {
+        line_snap.x_offsets[j] = canvas.measure_text(display.substr(0, j));
+    }
+    last_layout_.lines.push_back(std::move(line_snap));
 
     if (has_focus() || has_selection()) {
         if (caret_w - scroll_offset_ > text_inner_w) {
@@ -626,6 +684,92 @@ int TextEditor::char_index_at_x(float x) const {
     float text_x = std::max(9.0f, border_width() + 7.0f) - scroll_offset_;
     int index = static_cast<int>((x - text_x) / char_w + 0.5f);
     return std::clamp(index, 0, static_cast<int>(text_.size()));
+}
+
+int TextEditor::char_index_at_point(float x, float y) const {
+    // If paint() has not yet populated a layout snapshot (e.g. the first
+    // mouse event arrives before the first frame), fall back to the
+    // legacy x-only routine — the y is just lost in that case, same as
+    // before. Once the first paint runs, the cache is authoritative.
+    if (last_layout_.lines.empty() || !last_layout_.multi_line) {
+        return char_index_at_x(x);
+    }
+
+    // Pick the row by y: clamp to first/last row when the click is
+    // above/below the content, otherwise find the row whose vertical
+    // band contains y. This keeps a click in the gap between rows from
+    // collapsing to row 0.
+    const auto& rows = last_layout_.lines;
+    int row_index = 0;
+    if (y <= rows.front().top_y) {
+        row_index = 0;
+    } else if (y >= rows.back().top_y + rows.back().line_height) {
+        row_index = static_cast<int>(rows.size()) - 1;
+    } else {
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+            const auto& row = rows[static_cast<size_t>(i)];
+            if (y >= row.top_y && y < row.top_y + row.line_height) {
+                row_index = i;
+                break;
+            }
+        }
+    }
+
+    const auto& row = rows[static_cast<size_t>(row_index)];
+    const float local_x = x - row.inner_x;
+    if (row.x_offsets.empty()) return row.start;
+
+    // Nearest-edge hit-test: find the char boundary whose x is closest
+    // to the click. Matches the half-glyph convention single-line uses.
+    int best = 0;
+    float best_dist = std::abs(local_x - row.x_offsets[0]);
+    for (size_t j = 1; j < row.x_offsets.size(); ++j) {
+        float d = std::abs(local_x - row.x_offsets[j]);
+        if (d < best_dist) {
+            best_dist = d;
+            best = static_cast<int>(j);
+        }
+    }
+    return std::clamp(row.start + best, 0, static_cast<int>(text_.size()));
+}
+
+Rect TextEditor::caret_rect() const {
+    // No paint has run yet: anchor the caret to the inner padding so an
+    // IME host querying us before the first frame still gets a
+    // non-degenerate rect. All coordinates returned by `caret_rect()`
+    // are in local view space, matching what `paint()` records.
+    if (last_layout_.lines.empty()) {
+        Rect fallback;
+        fallback.x = std::max(9.0f, border_width() + 7.0f);
+        fallback.y = 2.0f;
+        fallback.width = 1.5f;
+        fallback.height = std::max(font_size_, local_bounds().height - 4.0f);
+        return fallback;
+    }
+
+    // Find the row that owns the caret. The wrap path puts the caret on
+    // the row whose [start,end] band brackets the codepoint; the
+    // single-line path always has exactly one row so this still works.
+    int row_index = 0;
+    for (int i = 0; i < static_cast<int>(last_layout_.lines.size()); ++i) {
+        const auto& row = last_layout_.lines[static_cast<size_t>(i)];
+        if (caret_position_ >= row.start && caret_position_ <= row.end) {
+            row_index = i;
+            break;
+        }
+    }
+
+    const auto& row = last_layout_.lines[static_cast<size_t>(row_index)];
+    int col = std::clamp(caret_position_ - row.start, 0,
+                         static_cast<int>(row.x_offsets.empty() ? 0 : row.x_offsets.size() - 1));
+    float caret_x = row.inner_x + (row.x_offsets.empty() ? 0.f : row.x_offsets[static_cast<size_t>(col)]);
+
+    Rect r;
+    r.x = caret_x;
+    r.y = row.top_y;
+    r.width = 1.5f;
+    r.height = row.line_height;
+    return r;
 }
 
 void TextEditor::notify_change() {

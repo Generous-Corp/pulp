@@ -131,6 +131,15 @@ public:
     /// Caret position in the text, for IME cursor rect queries.
     int caret_pos() const { return caret_position_; }
 
+    /// Caret bounding rect in local view coordinates. Returns the position
+    /// the caret occupies after the most recent paint — both single-line
+    /// (uses measured text width and the editor's vertical centering) and
+    /// multi-line (uses the cached wrapped-line layout so the rect rides
+    /// the correct visual row even when wrap is engaged). When `paint()`
+    /// has not yet been called the rect collapses to the inner padding
+    /// origin so IME hosts still get a sane (if non-precise) anchor.
+    Rect caret_rect() const;
+
 private:
     std::string text_;
     int caret_position_ = 0;     ///< Cursor position (character index)
@@ -150,6 +159,27 @@ private:
     std::vector<std::pair<std::string, int>> undo_history_;
     std::vector<std::pair<std::string, int>> redo_history_;
 
+    /// Snapshot of the most recent paint's layout, populated for both
+    /// single-line and multi-line modes. The mouse handler and
+    /// `caret_rect()` consult this so click-to-caret in line 2+ of a
+    /// wrapped paragraph picks the right visual row and the IME caret
+    /// rect reflects what the user actually sees.
+    struct LayoutSnapshot {
+        struct Line {
+            int start = 0;          ///< Codepoint index of first char on this visual line
+            int end = 0;            ///< Codepoint index one past the last char
+            float baseline_y = 0.f; ///< Baseline y in local coords
+            float top_y = 0.f;      ///< Top y in local coords (used for hit-test)
+            float inner_x = 0.f;    ///< Left x in local coords (after scroll)
+            float line_height = 0.f;///< Vertical span of this visual line
+            std::vector<float> x_offsets; ///< Cumulative x of each char start; size = (end-start)+1
+        };
+        std::vector<Line> lines;
+        bool multi_line = false;     ///< True when populated by the multi-line branch
+        float fallback_char_w = 0.f; ///< Used when paint hasn't run yet (single-line caret hint)
+    };
+    mutable LayoutSnapshot last_layout_;
+
     void push_undo();
     void insert_text(const std::string& t);
     void delete_selection();
@@ -164,6 +194,11 @@ private:
     void move_to_end(bool extend_selection);
 
     int char_index_at_x(float x) const;
+    /// Multi-line aware hit-test. When `paint()` has populated a layout
+    /// snapshot the y coordinate selects the visual row; the x coordinate
+    /// then picks the nearest character within that row's measured glyph
+    /// offsets. Falls back to `char_index_at_x` when no snapshot exists.
+    int char_index_at_point(float x, float y) const;
     bool is_word_char(char c) const;
 
     void notify_change();
