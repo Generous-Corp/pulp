@@ -38,7 +38,19 @@ public:
                 std::function<float(float)> generator)
         : min_(min_input), max_(max_input)
     {
+        if (size <= 0) return;
+
         table_.resize(static_cast<size_t>(size));
+
+        if (size == 1 || max_ == min_) {
+            std::fill(table_.begin(), table_.end(), generator(min_));
+            inv_range_ = 0.0f;
+            return;
+        }
+
+        if (max_ < min_)
+            std::swap(min_, max_);
+
         inv_range_ = static_cast<float>(size - 1) / (max_ - min_);
 
         for (int i = 0; i < size; ++i) {
@@ -69,6 +81,8 @@ public:
 
     /// Direct table access (no interpolation).
     float operator[](int index) const {
+        if (table_.empty()) return 0.0f;
+
         return table_[static_cast<size_t>(std::clamp(index, 0,
             static_cast<int>(table_.size()) - 1))];
     }

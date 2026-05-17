@@ -691,6 +691,7 @@ TEST_CASE("LookupTable empty returns input", "[signal][lookup]") {
     LookupTable empty;
     REQUIRE_THAT(empty.process(5.0f), WithinAbs(5.0, 0.001));
     REQUIRE(empty.empty());
+    REQUIRE_THAT(empty[0], WithinAbs(0.0f, 0.001f));
 }
 
 TEST_CASE("LookupTable buffer processing", "[signal][lookup]") {
@@ -732,6 +733,30 @@ TEST_CASE("LookupTable interpolates between adjacent entries",
     REQUIRE_THAT(table.process(0.25f), WithinAbs(2.5f, 1e-6f));
     REQUIRE_THAT(table.process(0.5f), WithinAbs(5.0f, 1e-6f));
     REQUIRE_THAT(table.process(1.5f), WithinAbs(15.0f, 1e-6f));
+}
+
+TEST_CASE("LookupTable degenerate tables stay finite and indexable",
+          "[signal][lookup][coverage][phase3-large]") {
+    LookupTable single(1, 4.0f, 9.0f, [](float x) { return x * 2.0f; });
+    REQUIRE(single.size() == 1);
+    REQUIRE_THAT(single.process(-100.0f), WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(single.process(100.0f), WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(single[-4], WithinAbs(8.0f, 1e-6f));
+    REQUIRE_THAT(single[4], WithinAbs(8.0f, 1e-6f));
+
+    LookupTable flat(4, 3.0f, 3.0f, [](float x) { return x + 1.0f; });
+    REQUIRE(flat.size() == 4);
+    REQUIRE_THAT(flat.process(3.0f), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(flat.process(30.0f), WithinAbs(4.0f, 1e-6f));
+}
+
+TEST_CASE("LookupTable accepts reversed input ranges",
+          "[signal][lookup][coverage][phase3-large]") {
+    LookupTable reversed(5, 1.0f, -1.0f, [](float x) { return x; });
+
+    REQUIRE_THAT(reversed.process(-2.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(reversed.process(2.0f), WithinAbs(1.0f, 1e-6f));
 }
 
 // ── TptFilter ────────────────────────────────────────────────────────────
