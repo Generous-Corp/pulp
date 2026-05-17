@@ -5,6 +5,28 @@
 
 namespace pulp::runtime {
 
+namespace {
+
+std::string normalize_extension(std::string_view extension) {
+    std::string normalized;
+    normalized.reserve(extension.size());
+    for (char c : extension) {
+        normalized += (c == '/' || c == '\\') ? '_' : c;
+    }
+    return normalized;
+}
+
+void append_extension(std::ostringstream& stream, std::string_view extension) {
+    if (extension.empty())
+        return;
+
+    if (extension[0] != '.')
+        stream << '.';
+    stream << normalize_extension(extension);
+}
+
+}  // namespace
+
 TemporaryFile::TemporaryFile(std::string_view extension) {
     auto tmp_dir = std::filesystem::temp_directory_path();
 
@@ -16,11 +38,7 @@ TemporaryFile::TemporaryFile(std::string_view extension) {
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::ostringstream ss;
         ss << "pulp_" << std::hex << dist(gen);
-        if (!extension.empty()) {
-            if (extension[0] != '.')
-                ss << '.';
-            ss << extension;
-        }
+        append_extension(ss, extension);
 
         auto candidate = tmp_dir / ss.str();
         if (!std::filesystem::exists(candidate)) {
@@ -34,11 +52,7 @@ TemporaryFile::TemporaryFile(std::string_view extension) {
     // Fallback: use a simple timestamp-based name
     std::ostringstream ss;
     ss << "pulp_tmp_" << std::hex << std::random_device{}();
-    if (!extension.empty()) {
-        if (extension[0] != '.')
-            ss << '.';
-        ss << extension;
-    }
+    append_extension(ss, extension);
     path_ = tmp_dir / ss.str();
     std::ofstream{path_};
 }

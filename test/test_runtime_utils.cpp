@@ -373,6 +373,16 @@ TEST_CASE("TemporaryFile supports extensionless paths",
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("TemporaryFile treats separator characters as extension text",
+          "[runtime][temp_file][coverage][phase3]") {
+    TemporaryFile tmp("nested/name\\raw");
+
+    REQUIRE(tmp.path().filename().string().find('/') == std::string::npos);
+    REQUIRE(tmp.path().filename().string().find('\\') == std::string::npos);
+    REQUIRE(tmp.path().filename().string().ends_with(".nested_name_raw"));
+    REQUIRE(std::filesystem::exists(tmp.path()));
+}
+
 TEST_CASE("TemporaryFile move assignment removes the previous active file",
           "[runtime][temp_file][issue-641]") {
     std::filesystem::path old_path;
