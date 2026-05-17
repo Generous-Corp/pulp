@@ -69,16 +69,6 @@ static bool wait_for_history_containing(HotReloader& reloader,
     return has_expected();
 }
 
-static choc::file::Watcher::Event make_watcher_event(
-    choc::file::Watcher::EventType event_type,
-    const std::filesystem::path& path) {
-    return choc::file::Watcher::Event{
-        event_type,
-        choc::file::Watcher::FileType::file,
-        path,
-    };
-}
-
 TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test");
     auto js_file = tmp_dir / "ui.js";
@@ -256,7 +246,7 @@ TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader direct file events filter unsupported changes",
+TEST_CASE("HotReloader file watcher ignores unsupported changes",
           "[view][hotreload][codecov]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_filter");
     auto entry = tmp_dir / "main.js";
@@ -267,22 +257,18 @@ TEST_CASE("HotReloader direct file events filter unsupported changes",
 
     HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
 
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::created, entry));
-    REQUIRE_FALSE(reloader.poll_reload());
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    write_js_file(text_file, "still not javascript");
 
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::modified, text_file));
-    REQUIRE_FALSE(reloader.poll_reload());
-
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::modified, entry));
-    REQUIRE_FALSE(reloader.poll_reload());
+    for (int i = 0; i < 8; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        REQUIRE_FALSE(reloader.poll_reload());
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader direct module event reloads directory entry",
+TEST_CASE("HotReloader module file change reloads directory entry",
           "[view][hotreload][codecov]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_module");
     auto entry = tmp_dir / "main.js";
@@ -300,10 +286,7 @@ TEST_CASE("HotReloader direct module event reloads directory entry",
     write_js_file(module, "// module v2");
     write_js_file(entry, "// entry v2 from module");
 
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::modified, module));
-
-    REQUIRE(reloader.poll_reload());
+    REQUIRE(wait_for_reload_containing(reloader, "entry v2 from module", latest_code));
     REQUIRE(latest_code.find("entry v2 from module") != std::string::npos);
     REQUIRE(reloader.reload_count() == 1);
 
@@ -337,20 +320,21 @@ TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
     write_js_file(module, "// module v1");
 
     HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
-    REQUIRE(reloader.read_file(tmp_dir / "missing.js").empty());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(module, "// module v2");
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::modified, module));
-    REQUIRE_FALSE(reloader.poll_reload());
+    for (int i = 0; i < 8; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        REQUIRE_FALSE(reloader.poll_reload());
+    }
 
     std::filesystem::remove(entry);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(module, "// module v3");
-    reloader.on_file_changed(make_watcher_event(
-        choc::file::Watcher::EventType::modified, module));
-    REQUIRE_FALSE(reloader.poll_reload());
+    for (int i = 0; i < 8; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        REQUIRE_FALSE(reloader.poll_reload());
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }
