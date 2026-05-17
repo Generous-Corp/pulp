@@ -7007,3 +7007,22 @@ trimmed, supported suffixes still parse, and unknown suffixes such as
 and ran `PULP_DIFF_COVER_CTEST_REGEX='Dimension parse|Dimension DPI' tools/scripts/local_diff_cover.sh pulp-test-rendering-integration`, which reported 100% diff coverage for the active branch diff including
 `core/view/include/pulp/view/geometry.hpp`. These tranches are held locally
 and should be aggregated into a larger PR rather than submitted individually.
+
+2026-05-17 15:52 PDT: added another local-only held view SVG gradient parser
+tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`fa070764f` (`fix(view): harden svg gradient numeric parsing`) on top of the
+same held batch. The tranche hardens `SvgPathWidget`'s CSS linear-gradient
+numeric parsing so malformed angle tokens, overflowing RGB numbers, and
+malformed stop positions fail closed to the existing solid-fill fallback
+instead of risking parser exceptions or partial numeric acceptance. Focused
+coverage in `test/test_svg_path_widget.cpp` verifies malformed gradient
+numbers do not throw during paint and still use the solid fallback color.
+Validation passed locally: `git diff --check`, built
+`pulp-test-svg-path-widget`, ran direct `[view][svg-path][issue-932][issue-1737]`,
+ran focused CTest `SvgPathWidget .*gradient` (4/4), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='SvgPathWidget .*gradient' tools/scripts/local_diff_cover.sh pulp-test-svg-path-widget`, which reported 100% diff coverage for
+`core/view/src/svg_path_widget.cpp` and 100% overall branch diff coverage.
+This tranche is held locally and should be aggregated into a larger PR rather
+than submitted individually.
