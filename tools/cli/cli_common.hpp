@@ -244,17 +244,28 @@ struct DoctorCheck {
     bool optional = false;
 };
 
-std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode);
+// `only_filter` (R2-8 P2 follow-up): case-insensitive substring. When
+// non-empty, individual probes whose name doesn't match are SKIPPED —
+// no process spawn, no file IO — so `pulp doctor --only git` actually
+// runs only git probes instead of running everything and filtering the
+// output (the original R2-8 shape, which Codex flagged on PR #2145).
+std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode,
+                                           const std::string& only_filter = {});
 
 // `pulp doctor android` — Android NDK / SDK / emulator checks plus
 // optional Google "Android CLI" detection (#355). Passes the host
 // platform implicitly via #ifdef in the implementation.
-std::vector<DoctorCheck> run_doctor_android_checks();
+std::vector<DoctorCheck> run_doctor_android_checks(const std::string& only_filter = {});
 
 // `pulp doctor ios` — Xcode + iOS Simulator checks. macOS-only;
 // returns a single explanatory entry on other hosts so users still
 // see a useful message.
-std::vector<DoctorCheck> run_doctor_ios_checks();
+std::vector<DoctorCheck> run_doctor_ios_checks(const std::string& only_filter = {});
+
+// Helper: case-insensitive substring match used by all three run_doctor_*
+// functions to short-circuit probes. Empty filter = always-run.
+bool doctor_check_matches_only_filter(const std::string& only_filter,
+                                      const std::string& check_name);
 
 // ── Interactive Prompts ─────────────────────────────────────────────────────
 

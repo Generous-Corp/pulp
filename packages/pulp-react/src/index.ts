@@ -104,3 +104,12 @@ export type {
 // ── Re-export the mock bridge for downstream tests ─────────────────
 export { createMockBridge } from './bridge.js';
 export type { MockBridge, MockBridgeCall } from './bridge.js';
+
+// ── Keyboard shortcuts (pulp #135 Phase B) ─────────────────────────
+export {
+    useShortcut,
+    registerShortcut,
+    parseShortcut,
+    MOD_SHIFT, MOD_CTRL, MOD_ALT, MOD_META, MOD_CMD,
+} from './shortcuts.js';
+export type { ParsedShortcut } from './shortcuts.js';

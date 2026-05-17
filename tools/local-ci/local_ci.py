@@ -63,6 +63,10 @@ from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
+# Make sibling helper modules importable even when local_ci.py is loaded via
+# importlib.util.spec_from_file_location (the path the unit tests take).
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 PRIORITY_VALUES = {"low": 10, "normal": 50, "high": 100}
 WAIT_POLL_SECS = 3
 KEEP_COMPLETED_JOBS = 25
@@ -173,116 +177,29 @@ def run_ssh_subprocess(
         time.sleep(retry_delay_secs * attempt)
 
 
-def state_dir() -> Path:
-    override = os.environ.get("PULP_LOCAL_CI_HOME")
-    if override:
-        return Path(override).expanduser()
-
-    home = Path.home()
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Pulp" / "local-ci"
-
-    xdg_state = os.environ.get("XDG_STATE_HOME")
-    if xdg_state:
-        return Path(xdg_state).expanduser() / "pulp" / "local-ci"
-    return home / ".local" / "state" / "pulp" / "local-ci"
-
-
-def config_path() -> Path:
-    override = os.environ.get("PULP_LOCAL_CI_CONFIG")
-    if override:
-        return Path(override).expanduser()
-
-    shared = state_dir() / "config.json"
-    if shared.exists():
-        return shared
-
-    return SCRIPT_DIR / "config.json"
-
-
-def worktree_config_path() -> Path:
-    return SCRIPT_DIR / "config.json"
-
-
-def shared_config_path() -> Path:
-    return state_dir() / "config.json"
-
-
-def queue_path() -> Path:
-    return state_dir() / "queue.json"
-
-
-def results_dir() -> Path:
-    return state_dir() / "results"
-
-
-def cloud_runs_dir() -> Path:
-    return state_dir() / "cloud-runs"
-
-
-def evidence_path() -> Path:
-    return state_dir() / "evidence.json"
-
-
-def logs_dir() -> Path:
-    return state_dir() / "logs"
-
-
-def bundles_dir() -> Path:
-    return state_dir() / "bundles"
-
-
-def prepared_dir() -> Path:
-    return state_dir() / "prepared"
-
-
-def desktop_state_dir() -> Path:
-    return state_dir() / "desktop-automation"
-
-
-def desktop_receipts_dir() -> Path:
-    return desktop_state_dir() / "receipts"
-
-
-def queue_lock_path() -> Path:
-    return state_dir() / "queue.lock"
-
-
-def evidence_lock_path() -> Path:
-    return state_dir() / "evidence.lock"
-
-
-def drain_lock_path() -> Path:
-    return state_dir() / "drain.lock"
-
-
-def runner_info_path() -> Path:
-    return state_dir() / "runner.json"
-
-
-def ensure_state_dirs() -> None:
-    state_dir().mkdir(parents=True, exist_ok=True)
-    results_dir().mkdir(parents=True, exist_ok=True)
-    cloud_runs_dir().mkdir(parents=True, exist_ok=True)
-    logs_dir().mkdir(parents=True, exist_ok=True)
-    bundles_dir().mkdir(parents=True, exist_ok=True)
-    desktop_state_dir().mkdir(parents=True, exist_ok=True)
-    desktop_receipts_dir().mkdir(parents=True, exist_ok=True)
-
-
-def job_logs_dir(job_id: str) -> Path:
-    return logs_dir() / job_id
-
-
-def target_log_path(job_id: str, target_name: str) -> Path:
-    return job_logs_dir(job_id) / f"{target_name}.log"
-
-
-def prepare_target_log(job_id: str, target_name: str) -> Path:
-    path = target_log_path(job_id, target_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("")
-    return path
+from state_paths import (  # noqa: E402  -- re-exported for in-file consumers
+    state_dir,
+    config_path,
+    worktree_config_path,
+    shared_config_path,
+    queue_path,
+    results_dir,
+    cloud_runs_dir,
+    evidence_path,
+    logs_dir,
+    bundles_dir,
+    prepared_dir,
+    desktop_state_dir,
+    desktop_receipts_dir,
+    queue_lock_path,
+    evidence_lock_path,
+    drain_lock_path,
+    runner_info_path,
+    ensure_state_dirs,
+    job_logs_dir,
+    target_log_path,
+    prepare_target_log,
+)
 
 
 def format_size_bytes(value: int | float | None) -> str:

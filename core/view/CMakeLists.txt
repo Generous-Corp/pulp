@@ -165,6 +165,8 @@ target_sources(pulp-view PRIVATE
     src/view.cpp
     src/yoga_layout.cpp
     src/widgets.cpp
+    src/widgets/label.cpp
+    src/widgets/visualizers.cpp
     src/widget_bridge.cpp
     src/widget_bridge_input.cpp
     src/editor_bridge.cpp

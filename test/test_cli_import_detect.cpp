@@ -154,6 +154,221 @@ TEST_CASE("clause matcher honors the fingerprint vocabulary", "[cli][import-dete
     }
 }
 
+TEST_CASE("clause matcher handles filename regex flags and invalid patterns",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::InputSnapshot snap;
+    snap.filename = "DESIGN.md";
+    snap.directory_basenames = {"DESIGN.md"};
+
+    det::FingerprintClause c;
+    c.kind = det::FingerprintClause::Kind::filename;
+    c.regex = "(?i)^design\\.md$";
+    CHECK(det::match_clause(c, snap));
+
+    c.regex = "^design\\.md$";
+    CHECK_FALSE(det::match_clause(c, snap));
+
+    c.regex = "[unterminated";
+    CHECK_FALSE(det::match_clause(c, snap));
+}
+
+TEST_CASE("clause matcher rejects empty filename and script clauses",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::InputSnapshot snap;
+    det::FingerprintClause c;
+
+    c.kind = det::FingerprintClause::Kind::filename;
+    c.regex = ".*";
+    CHECK_FALSE(det::match_clause(c, snap));
+
+    c.kind = det::FingerprintClause::Kind::html_script_src;
+    c.regex = "cdn";
+    CHECK_FALSE(det::match_clause(c, snap));
+
+    c.kind = det::FingerprintClause::Kind::html_script_type;
+    c.value = "module";
+    CHECK_FALSE(det::match_clause(c, snap));
+}
+
+TEST_CASE("clause matcher covers frontmatter fence and required key clauses",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::InputSnapshot snap;
+    snap.has_frontmatter_fence = true;
+    snap.frontmatter_keys = {"name", "colors", "typography"};
+
+    det::FingerprintClause fence;
+    fence.kind = det::FingerprintClause::Kind::frontmatter_fence;
+    CHECK(det::match_clause(fence, snap));
+
+    det::FingerprintClause required;
+    required.kind = det::FingerprintClause::Kind::frontmatter_key;
+    required.required = "name";
+    CHECK(det::match_clause(required, snap));
+
+    required.required = "layout";
+    CHECK_FALSE(det::match_clause(required, snap));
+}
+
+TEST_CASE("clause matcher covers frontmatter any-of keys",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::InputSnapshot snap;
+    snap.has_frontmatter_fence = true;
+    snap.frontmatter_keys = {"tokens", "spacing"};
+
+    det::FingerprintClause c;
+    c.kind = det::FingerprintClause::Kind::frontmatter_key;
+    c.any_of = {"colors", "spacing"};
+    CHECK(det::match_clause(c, snap));
+
+    c.any_of = {"colors", "typography"};
+    CHECK_FALSE(det::match_clause(c, snap));
+}
+
+TEST_CASE("detect enforces all-of formats before considering a match",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "design-md";
+    source.parser_version = "1.0";
+
+    det::FormatEntry strict;
+    strict.format_version = "2026.05";
+    strict.parser_version = source.parser_version;
+    strict.match = "all-of";
+
+    det::FingerprintClause filename;
+    filename.kind = det::FingerprintClause::Kind::filename;
+    filename.raw_kind = "filename";
+    filename.regex = "(?i)^design\\.md$";
+    strict.fingerprint.push_back(filename);
+
+    det::FingerprintClause frontmatter;
+    frontmatter.kind = det::FingerprintClause::Kind::frontmatter_key;
+    frontmatter.raw_kind = "frontmatter-key";
+    frontmatter.required = "name";
+    strict.fingerprint.push_back(frontmatter);
+
+    source.formats.push_back(strict);
+    manifest.sources.push_back(source);
+
+    det::InputSnapshot snap;
+    snap.filename = "DESIGN.md";
+    auto partial = det::detect(manifest, snap);
+    CHECK(partial.ok);
+    CHECK(partial.source.empty());
+
+    snap.has_frontmatter_fence = true;
+    snap.frontmatter_keys = {"name"};
+    auto full = det::detect(manifest, snap);
+    CHECK(full.source == "design-md");
+    CHECK(full.matched_clauses == 2);
+}
+
+TEST_CASE("detect enforces minimum confidence thresholds",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "threshold";
+    source.parser_version = "1.0";
+
+    det::FormatEntry fmt;
+    fmt.format_version = "2026.05";
+    fmt.parser_version = source.parser_version;
+    fmt.min_confidence_pct = 75;
+
+    det::FingerprintClause a;
+    a.kind = det::FingerprintClause::Kind::directory_files;
+    a.raw_kind = "directory-files";
+    a.files = {"code.html"};
+    fmt.fingerprint.push_back(a);
+
+    det::FingerprintClause b = a;
+    b.files = {"DESIGN.md"};
+    fmt.fingerprint.push_back(b);
+
+    det::FingerprintClause c = a;
+    c.files = {"screen.png"};
+    fmt.fingerprint.push_back(c);
+
+    det::FingerprintClause d = a;
+    d.files = {"tokens.json"};
+    fmt.fingerprint.push_back(d);
+
+    source.formats.push_back(fmt);
+    manifest.sources.push_back(source);
+
+    det::InputSnapshot snap;
+    snap.is_directory = true;
+    snap.directory_basenames = {"code.html", "DESIGN.md"};
+    CHECK(det::detect(manifest, snap).source.empty());
+
+    snap.directory_basenames.push_back("screen.png");
+    auto accepted = det::detect(manifest, snap);
+    CHECK(accepted.source == "threshold");
+    CHECK(accepted.confidence_pct == 75);
+}
+
+TEST_CASE("detect prefers higher confidence when match counts tie",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "tie";
+    source.parser_version = "1.0";
+
+    det::FingerprintClause code;
+    code.kind = det::FingerprintClause::Kind::directory_files;
+    code.raw_kind = "directory-files";
+    code.files = {"code.html"};
+
+    det::FormatEntry broad;
+    broad.format_version = "broad";
+    broad.parser_version = source.parser_version;
+    broad.fingerprint = {code};
+    broad.fingerprint.push_back(code);
+    broad.fingerprint.back().files = {"missing-one"};
+
+    det::FormatEntry narrow;
+    narrow.format_version = "narrow";
+    narrow.parser_version = source.parser_version;
+    narrow.fingerprint = {code};
+
+    source.formats = {broad, narrow};
+    manifest.sources.push_back(source);
+
+    det::InputSnapshot snap;
+    snap.is_directory = true;
+    snap.directory_basenames = {"code.html"};
+    auto result = det::detect(manifest, snap);
+    CHECK(result.format_version == "narrow");
+    CHECK(result.confidence_pct == 100);
+}
+
+TEST_CASE("snapshot_input extracts Markdown frontmatter only from markdown files",
+          "[cli][import-detect][coverage][phase3-large]") {
+    auto dir = fs::temp_directory_path() / "pulp-import-detect-phase3-frontmatter";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    auto cleanup = [&]() { fs::remove_all(dir); };
+
+    auto md = dir / "DESIGN.md";
+    {
+        std::ofstream f(md);
+        f << "---\nname: Demo\ncolors:\n  primary: blue\n---\n# Body\n";
+    }
+    auto snap = det::snapshot_input(md);
+    CHECK(snap.has_frontmatter_fence);
+    CHECK(snap.frontmatter_keys == std::vector<std::string>{"name", "colors"});
+
+    auto html = dir / "DESIGN.html";
+    {
+        std::ofstream f(html);
+        f << "---\nname: Demo\n---\n";
+    }
+    auto html_snap = det::snapshot_input(html);
+    CHECK_FALSE(html_snap.has_frontmatter_fence);
+    cleanup();
+}
+
 TEST_CASE("detect picks the highest-confidence format", "[cli][import-detect][issue-1031]") {
     auto compat = locate_compat_json();
     REQUIRE_FALSE(compat.empty());
@@ -381,4 +596,30 @@ TEST_CASE("report-new-format diffs unknown tokens against the closest match",
     CHECK(json.find("\"candidate-source\": \"stitch\"") != std::string::npos);
     CHECK(json.find("rainbow-gradient") != std::string::npos);
     CHECK(json.find("\"based-on\":") != std::string::npos);
+}
+
+TEST_CASE("report-new-format caps token suggestions at twenty entries",
+          "[cli][import-detect][coverage][phase3-large]") {
+    det::ImportsManifest manifest;
+    det::SourceEntry source;
+    source.source = "stitch";
+    det::FormatEntry fmt;
+    fmt.format_version = "2025.04";
+    det::FingerprintClause known_tokens;
+    known_tokens.kind = det::FingerprintClause::Kind::tailwind_config_token;
+    known_tokens.any_of = {"known-token"};
+    fmt.fingerprint.push_back(known_tokens);
+    source.formats.push_back(fmt);
+    manifest.sources.push_back(source);
+
+    det::DetectionResult closest;
+    closest.source = "stitch";
+    closest.format_version = "2025.04";
+
+    det::InputSnapshot snap;
+    for (int i = 0; i < 25; ++i)
+        snap.tailwind_tokens.push_back("token-" + std::to_string(i));
+
+    auto report = det::build_new_format_report(manifest, snap, closest);
+    CHECK(report.additions.size() == 20);
 }

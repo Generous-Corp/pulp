@@ -63,6 +63,7 @@ target_link_libraries(pulp-canvas PUBLIC pulp::runtime)
 if(PULP_HAS_SKIA)
     target_sources(pulp-canvas PRIVATE
         src/skia_canvas.cpp
+        src/skia_canvas_mask.cpp
         src/bundled_fonts.cpp
         # TextFontContext glues emoji_segmenter into the SkShaper +
         # SkParagraph paths and owns the per-context FontCollection used

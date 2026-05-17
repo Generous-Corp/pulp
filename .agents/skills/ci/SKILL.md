@@ -765,6 +765,16 @@ validation, and merge-on-green.
 Use this only when debugging the legacy local CI controller itself. It does
 not provide the same Shipyard state discipline as `shipyard pr`.
 
+**Module layout (post-2026-05-17 R2-1 split):**
+`tools/local-ci/local_ci.py` is the orchestrator; reusable seams have
+been moved into sibling modules so newer code can import them without
+pulling in the entire 11k-line file. `state_paths.py` owns
+`state_dir()`, `queue_path()`, `results_dir()`, `logs_dir()`,
+`ensure_state_dirs()`, and the lock-path helpers. The original symbols
+are still re-exported from `local_ci.py`, so any old `mod.state_dir()`
+test patch keeps working — but new code should import directly from
+`state_paths` to avoid the god-module dependency.
+
 ```bash
 # Legacy fallback only
 python3 tools/local-ci/local_ci.py ship [branch]

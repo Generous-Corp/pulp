@@ -242,6 +242,15 @@ declare global {
     /// Release the named view if (and only if) it currently holds the
     /// active overlay slot. Idempotent. Optional at runtime.
     const releaseOverlay: ((id: string) => void) | undefined;
+
+    // ── Keyboard shortcuts (pulp #135 Phase B) ──────────────────────
+    /// Register a top-level keyboard shortcut. The platform host
+    /// (window_host_mac.mm `performKeyEquivalent:` and friends)
+    /// invokes `callbackName` as a global function when the chord
+    /// fires. There is no unregister C++-side; the `useShortcut`
+    /// hook works around this via a per-chord dispatcher pattern.
+    /// Optional at runtime so older bridges still link.
+    const registerShortcut: ((keyCode: number, modMask: number, callbackName: string) => void) | undefined;
 }
 
 /// Test-only mock-bridge for unit tests. Replaces all the global
@@ -380,6 +389,12 @@ export function createMockBridge(): MockBridge {
         'createSvgLine', 'setSvgLine',
         // pulp #1148 — generalized overlay-click routing
         'claimOverlay', 'releaseOverlay',
+        // pulp #135 Phase B — runtime keyboard shortcut injection.
+        // C++ surface (widget_bridge.cpp `registerShortcut`):
+        //   registerShortcut(keyCode: int, modMask: int, callbackName: string)
+        // useShortcut hook in shortcuts.ts wraps this with a dispatcher
+        // pattern so unregistration works without a bridge change.
+        'registerShortcut',
         // pulp #1899 (gap #3) — string-token bridge fns. setStringToken
         // writes theme.strings[name]; getStringToken reads it back. The
         // prop-applier _resolveVar helper consults getStringToken to

@@ -5,6 +5,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/modal.hpp>
+#include <pulp/view/widget_bridge.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -768,6 +769,33 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 // ── Keyboard input ───────────────────────────────────────────────
 
+// pulp #2128 follow-up — NSResponder routes Cmd-modified key chords
+// through performKeyEquivalent:, NOT keyDown:. Without this override,
+// every Cmd+,/Cmd+S/Cmd+? chord is consumed by the responder chain and
+// never reaches View::on_global_key OR WidgetBridge::dispatch_global_key,
+// so `registerShortcut(...)` callbacks and `window.addEventListener
+// ('keydown', ...)` listeners are silently dead for Cmd-modified chords.
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+    if (!self.rootView) return NO;
+    auto key  = keyCodeFromNS(event.keyCode);
+    auto mods = modifiersFromNSFlags(event.modifierFlags);
+    pulp::view::KeyEvent gke;
+    gke.key = key;
+    gke.modifiers = mods;
+    gke.is_down = true;
+    gke.is_repeat = event.isARepeat;
+    if (self.rootView->on_global_key) self.rootView->on_global_key(gke);
+    // Fan out to every live WidgetBridge so `@pulp/react` apps (Spectr,
+    // etc.) and the design-tool both receive Cmd-modified chords without
+    // each having to wire its own `on_global_key` lambda.
+    pulp::view::WidgetBridge::dispatch_global_key(
+        static_cast<int>(key), mods, /*is_down=*/true);
+    // Return NO so the responder chain still considers standard menu
+    // shortcuts (Cmd+W close, Cmd+Q quit, etc.) — the bridge fan-out is
+    // additive, not consuming.
+    return NO;
+}
+
 - (void)keyDown:(NSEvent*)event {
     @try {
         try {
@@ -833,6 +861,17 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                 return;
             }
         }
+
+        // pulp #2128 follow-up — fan out to every live WidgetBridge so
+        // `@pulp/react` apps (Spectr) receive bare-key shortcuts like
+        // 'S' or Escape that React effects bind via
+        // `window.addEventListener('keydown', ...)`. The bridge's own
+        // registered-shortcut path suppresses bare keys when a text-input
+        // widget owns focus (see WidgetBridge::forward_key_event), so
+        // typing `?` into a search box doesn't trigger a `?` shortcut.
+        // This is additive — focused-view delivery still runs below.
+        pulp::view::WidgetBridge::dispatch_global_key(
+            static_cast<int>(key), mods, /*is_down=*/true);
 
         if (key == pulp::view::KeyCode::escape && self.rootView) {
             if (auto* modal = find_topmost_modal(self.rootView)) {

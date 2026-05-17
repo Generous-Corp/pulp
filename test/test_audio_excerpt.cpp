@@ -277,3 +277,34 @@ TEST_CASE("AudioSubsectionReader ignores invalid read destinations",
     REQUIRE(dest[0] == -1.0f);
     REQUIRE(dest[1] == -2.0f);
 }
+
+TEST_CASE("AudioSubsectionReader zero-fills ragged source channels",
+          "[audio][subsection][codecov]") {
+    AudioFileData audio;
+    audio.sample_rate = 48000;
+    audio.channels = {
+        {0.0f, 0.5f, 1.0f, 1.5f},
+        {10.0f},
+    };
+
+    AudioSubsectionReader reader(audio, 0, 4);
+    REQUIRE(reader.is_valid());
+    REQUIRE(reader.num_channels() == 2);
+    REQUIRE(reader.num_frames() == 4);
+    REQUIRE(reader.sample(1, 0) == 10.0f);
+    REQUIRE(reader.sample(1, 1) == 0.0f);
+
+    float dest[] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    reader.read_frames(dest, 1, 0, 4);
+    REQUIRE(dest[0] == 10.0f);
+    REQUIRE(dest[1] == 0.0f);
+    REQUIRE(dest[2] == 0.0f);
+    REQUIRE(dest[3] == 0.0f);
+
+    auto extracted = reader.extract();
+    REQUIRE(extracted.sample_rate == 48000);
+    REQUIRE(extracted.num_channels() == 2);
+    REQUIRE(extracted.num_frames() == 4);
+    REQUIRE(extracted.channels[0] == std::vector<float>{0.0f, 0.5f, 1.0f, 1.5f});
+    REQUIRE(extracted.channels[1] == std::vector<float>{10.0f, 0.0f, 0.0f, 0.0f});
+}

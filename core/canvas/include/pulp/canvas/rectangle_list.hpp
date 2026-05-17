@@ -21,6 +21,7 @@ struct Rect {
     }
 
     bool intersects(const Rect& other) const {
+        if (empty() || other.empty()) return false;
         return x < other.right() && right() > other.x &&
                y < other.bottom() && bottom() > other.y;
     }

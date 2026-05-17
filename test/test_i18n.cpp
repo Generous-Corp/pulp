@@ -105,6 +105,27 @@ TEST_CASE("i18n argument substitution also applies to missing-key fallback",
     REQUIRE(strings.translate("missing {0}/{1}/{2}", {"a", "b"}) == "missing a/b/{2}");
 }
 
+TEST_CASE("i18n argument substitution handles adjacent placeholders",
+          "[runtime][i18n][coverage][phase3-large]") {
+    LocalisedStrings strings;
+    strings.add("compact", "{0}{1}{0}");
+    REQUIRE(strings.translate("compact", {"A", "B"}) == "ABA");
+}
+
+TEST_CASE("i18n argument substitution treats double braces as literal text",
+          "[runtime][i18n][coverage][phase3-large]") {
+    LocalisedStrings strings;
+    strings.add("template", "{{0}} {0}");
+    REQUIRE(strings.translate("template", {"value"}) == "{value} value");
+}
+
+TEST_CASE("i18n argument substitution applies later indexes after earlier replacements",
+          "[runtime][i18n][coverage][phase3-large]") {
+    LocalisedStrings strings;
+    strings.add("nested", "{0} {1}");
+    REQUIRE(strings.translate("nested", {"{1}", "done"}) == "done done");
+}
+
 TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("a", "1");
@@ -176,6 +197,49 @@ TEST_CASE("i18n .strings parser lets later entries replace earlier ones",
     REQUIRE(strings.translate("other") == "Value");
 }
 
+TEST_CASE("i18n .strings parser accepts keys and values with spaces",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"menu title\" = \"Save Project\";\n";
+        f << "\" padded \" = \" value with spaces \";\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.translate("menu title") == "Save Project");
+    REQUIRE(strings.translate(" padded ") == " value with spaces ");
+}
+
+TEST_CASE("i18n .strings parser keeps entries without semicolons",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"loose\" = \"accepted\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.translate("loose") == "accepted");
+}
+
+TEST_CASE("i18n .strings parser permits empty keys",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".strings");
+    {
+        std::ofstream f(tmp.path());
+        f << "\"\" = \"metadata\";\n";
+        f << "\"normal\" = \"value\";\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_strings_file(tmp.path_string()));
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.translate("") == "metadata");
+}
+
 // ── .po file format ─────────────────────────────────────────────────────
 
 TEST_CASE("i18n load .po file", "[runtime][i18n]") {
@@ -237,6 +301,55 @@ TEST_CASE("i18n .po parser commits previous entry when new msgid starts",
     REQUIRE(strings.count() == 2);
     REQUIRE(strings.translate("first") == "one");
     REQUIRE(strings.translate("second") == "two");
+}
+
+TEST_CASE("i18n .po parser replaces duplicate msgids",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".po");
+    {
+        std::ofstream f(tmp.path());
+        f << "msgid \"mode\"\n";
+        f << "msgstr \"old\"\n";
+        f << "msgid \"mode\"\n";
+        f << "msgstr \"new\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_po_file(tmp.path_string()));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("mode") == "new");
+}
+
+TEST_CASE("i18n .po parser ignores msgids without translations",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".po");
+    {
+        std::ofstream f(tmp.path());
+        f << "msgid \"missing\"\n";
+        f << "msgid \"present\"\n";
+        f << "msgstr \"yes\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_po_file(tmp.path_string()));
+    REQUIRE_FALSE(strings.has("missing"));
+    REQUIRE(strings.translate("present") == "yes");
+}
+
+TEST_CASE("i18n .po parser accepts empty msgid continuations",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".po");
+    {
+        std::ofstream f(tmp.path());
+        f << "msgid \"prefix\"\n";
+        f << "\"\"\n";
+        f << "\"_suffix\"\n";
+        f << "msgstr \"value\"\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_po_file(tmp.path_string()));
+    REQUIRE(strings.translate("prefix_suffix") == "value");
 }
 
 // ── JSON file format ────────────────────────────────────────────────────
@@ -338,6 +451,47 @@ TEST_CASE("i18n JSON parser allows duplicate keys and trailing comma",
     REQUIRE(strings.count() == 2);
     REQUIRE(strings.translate("name") == "New");
     REQUIRE(strings.translate("last") == "value");
+}
+
+TEST_CASE("i18n JSON parser accepts compact objects without whitespace",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\"a\":\"1\",\"b\":\"2\"}";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.translate("a") == "1");
+    REQUIRE(strings.translate("b") == "2");
+}
+
+TEST_CASE("i18n JSON parser treats unknown escapes as literal escaped char",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\"slash\":\"\\/\",\"bell\":\"\\a\"}";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.translate("slash") == "/");
+    REQUIRE(strings.translate("bell") == "a");
+}
+
+TEST_CASE("i18n JSON parser tolerates missing closing brace after entries",
+          "[runtime][i18n][coverage][phase3-large]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\"partial\":\"kept\"";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.translate("partial") == "kept");
 }
 
 // ── File load failures ──────────────────────────────────────────────────

@@ -57,3 +57,28 @@ TEST_CASE("pulp upgrade URL: version field flows into the release tag verbatim",
     auto r = pulp_upgrade_url_for("1.2.3-rc.1", "darwin", "arm64");
     REQUIRE(r.url.find("v1.2.3-rc.1/") != std::string::npos);
 }
+
+TEST_CASE("pulp upgrade URL: unknown non-Windows platforms keep tarball shape",
+          "[cli][upgrade][url][coverage][phase3-large]") {
+    auto r = pulp_upgrade_url_for("2.0.0", "freebsd", "x64");
+    REQUIRE(r.asset == "pulp-freebsd-x64.tar.gz");
+    REQUIRE(r.url.find("/v2.0.0/pulp-freebsd-x64.tar.gz") != std::string::npos);
+}
+
+TEST_CASE("pulp upgrade URL: platform comparison is intentionally exact",
+          "[cli][upgrade][url][coverage][phase3-large]") {
+    auto r = pulp_upgrade_url_for("2.0.0", "Windows", "x64");
+    REQUIRE(r.asset == "pulp-Windows-x64.tar.gz");
+}
+
+TEST_CASE("pulp upgrade URL: asset name is reused verbatim as URL suffix",
+          "[cli][upgrade][url][coverage][phase3-large]") {
+    auto r = pulp_upgrade_url_for("2.1.0", "darwin", "arm64");
+    REQUIRE(r.url.ends_with("/" + r.asset));
+}
+
+TEST_CASE("pulp upgrade URL: empty version still produces the v-prefixed tag slot",
+          "[cli][upgrade][url][coverage][phase3-large]") {
+    auto r = pulp_upgrade_url_for("", "linux", "x64");
+    REQUIRE(r.url.find("/download/v/pulp-linux-x64.tar.gz") != std::string::npos);
+}

@@ -62,6 +62,16 @@ static choc::audio::AudioFileFormatList make_format_list() {
     return list;
 }
 
+static bool has_consistent_channel_lengths(const AudioFileData& data) {
+    if (data.empty()) return false;
+
+    const auto expected_frames = data.num_frames();
+    return std::all_of(data.channels.begin(), data.channels.end(),
+                       [expected_frames](const auto& channel) {
+                           return channel.size() == expected_frames;
+                       });
+}
+
 std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
     try {
         auto formats = make_format_list();
@@ -116,7 +126,7 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
 }
 
 bool write_wav_file(const std::string& path, const AudioFileData& data) {
-    if (data.empty()) return false;
+    if (!has_consistent_channel_lengths(data)) return false;
 
     try {
         choc::audio::WAVAudioFileFormat<true> wav;

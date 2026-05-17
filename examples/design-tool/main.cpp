@@ -350,6 +350,13 @@ int main(int argc, char* argv[]) {
         static_cast<uint32_t>(kDesignWidth),
         static_cast<uint32_t>(kDesignHeight));
 
+    // pulp #2128 follow-up — bridge auto-registers in
+    // WidgetBridge::all_bridges_ via its ctor, and the platform key
+    // paths (window_host_mac.mm keyDown:/performKeyEquivalent:) call
+    // WidgetBridge::dispatch_global_key, so any registerShortcut
+    // callback or window.addEventListener('keydown', ...) listener in
+    // the loaded ui.js fires without an explicit on_global_key lambda.
+
     auto window = WindowHost::create(root, opts);
     // Design viewport: pins root at design size, paint scales/letterboxes
     // to fit. Aspect-lock makes macOS enforce the aspect on user drag so

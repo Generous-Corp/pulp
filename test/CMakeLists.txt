@@ -273,6 +273,7 @@ catch_discover_tests(pulp-test-cli-shellout)
 add_executable(pulp-test-cli-shell-quote
     test_cli_shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
@@ -333,6 +334,11 @@ add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-install)
+
+add_executable(pulp-test-cli-json-parser test_cli_json_parser.cpp)
+target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-json-parser PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-json-parser)
 
 # CLI version diagnostics (#499 Slice 1): pure-logic tests for the
 # semver parser, plugin.json scraper, and skew analyzer that sit
@@ -536,6 +542,7 @@ configure_file(
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
@@ -769,6 +776,10 @@ catch_discover_tests(pulp-test-clap-ara-extension)
 add_executable(pulp-test-processor-ara-hook test_processor_ara_hook.cpp)
 target_link_libraries(pulp-test-processor-ara-hook PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-processor-ara-hook)
+# Processor and descriptor default contracts
+add_executable(pulp-test-processor-defaults test_processor_defaults.cpp)
+target_link_libraries(pulp-test-processor-defaults PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-processor-defaults)
 # TableModel data/sort layer (workstream 07 slice 7.3)
 add_executable(pulp-test-table-model test_table_model.cpp)
 target_link_libraries(pulp-test-table-model PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -1176,6 +1187,10 @@ catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
 add_executable(pulp-test-audio-file test_audio_file.cpp)
 target_link_libraries(pulp-test-audio-file PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-file)
+
+add_executable(pulp-test-offline-processor-edges test_offline_processor_edges.cpp)
+target_link_libraries(pulp-test-offline-processor-edges PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-offline-processor-edges)
 
 add_executable(pulp-test-ogg-reader test_ogg_reader.cpp)
 target_link_libraries(pulp-test-ogg-reader PRIVATE pulp::audio Catch2::Catch2WithMain)
@@ -1942,6 +1957,26 @@ target_link_libraries(pulp-test-design-import-shortcuts
 catch_discover_tests(pulp-test-design-import-shortcuts
     PROPERTIES LABELS "parser-import")
 
+# pulp #2128 follow-up — design-tool platform key wire-up E2E. Pins the
+# `WindowHost → root.on_global_key → bridge.forward_key_event →
+# registerShortcut + __dispatch__('__global__','keydown',...)` chain that
+# every auto-bound default chord (and Spectr's mode-switch) depends on.
+add_executable(pulp-test-platform-key-wireup test_platform_key_wireup.cpp)
+target_link_libraries(pulp-test-platform-key-wireup
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-platform-key-wireup
+    PROPERTIES LABELS "parser-import")
+
+# pulp #2128 follow-up — pin WidgetBridge::dispatch_global_key fan-out
+# across the static all_bridges_ registry. Every live bridge gets the
+# key without any per-app on_global_key wiring; this is the framework
+# contract platform hosts depend on.
+add_executable(pulp-test-widget-bridge-dispatch-global-key
+    test_widget_bridge_dispatch_global_key.cpp)
+target_link_libraries(pulp-test-widget-bridge-dispatch-global-key
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-bridge-dispatch-global-key)
+
 # pulp #1035 — `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary
 # dependency) with a shell-out against the built CLI when available.
@@ -2459,4 +2494,26 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         Catch2::Catch2WithMain
     )
     catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
+
+    # pulp #2128 follow-up — pin the macOS performKeyEquivalent: route that
+    # delivers Cmd-modified chords into rootView->on_global_key. Without
+    # the override, every auto-bound default chord (Cmd+, Cmd+? Cmd+S) is
+    # silently consumed by NSResponder's first-responder chain.
+    add_executable(pulp-test-mac-perform-key-equivalent
+        test_mac_perform_key_equivalent.mm
+    )
+    target_link_libraries(pulp-test-mac-perform-key-equivalent PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # PulpView's Obj-C class metadata only registers when the linker keeps
+    # window_host_mac.mm.o — but no C++ symbol the test references lives in
+    # that .o, so static-lib pruning drops it. Force-load the one specific
+    # object to register the class without dragging in every other .mm
+    # (which would duplicate-symbol on PulpAccessibilityElement).
+    target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
+        "LINKER:-force_load,${CMAKE_BINARY_DIR}/core/view/CMakeFiles/pulp-view.dir/platform/mac/window_host_mac.mm.o"
+    )
+    catch_discover_tests(pulp-test-mac-perform-key-equivalent)
 endif()

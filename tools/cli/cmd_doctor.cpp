@@ -66,7 +66,10 @@ int cmd_doctor(const std::vector<std::string>& args) {
     bool scan_parents = false;    // --scan-parents: issue #552 Slice 1b
     bool caches_mode = false;     // --caches: issue #744
     bool json_mode = false;       // --json (works with --versions and --caches)
-    for (auto& arg : args) {
+    bool list_mode = false;       // --list / `pulp doctor list` (R2-8)
+    std::string only_filter;      // --only <name> (R2-8)
+    for (size_t i = 0; i < args.size(); ++i) {
+        const auto& arg = args[i];
         if (arg == "--fix") fix_mode = true;
         else if (arg == "--ci") ci_mode = true;
         else if (arg == "--dry-run") dry_run = true;
@@ -75,18 +78,30 @@ int cmd_doctor(const std::vector<std::string>& args) {
         else if (arg == "--scan-parents") scan_parents = true;
         else if (arg == "--caches") caches_mode = true;
         else if (arg == "--json") json_mode = true;
-        else if (arg.rfind("--", 0) == 0) {
+        else if (arg == "--list") list_mode = true;
+        else if (arg == "--only" && i + 1 < args.size()) {
+            only_filter = args[++i];
+        } else if (arg.rfind("--only=", 0) == 0) {
+            only_filter = arg.substr(7);
+        } else if (arg.rfind("--", 0) == 0) {
             std::cerr << "pulp doctor: unknown flag: " << arg << "\n";
-            std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json]\n";
+            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
             return 2;
         } else if (mode.empty()) {
             mode = arg;
         }
     }
 
+    // R2-8: `pulp doctor list` is a synonym for `--list`. Lets users
+    // discover available check names before passing one to --only.
+    if (mode == "list") {
+        list_mode = true;
+        mode.clear();
+    }
+
     if (!mode.empty() && mode != "android" && mode != "ios") {
         std::cerr << "pulp doctor: unknown subcommand '" << mode << "'\n";
-        std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json]\n";
+        std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
         return 2;
     }
 
@@ -385,10 +400,50 @@ int cmd_doctor(const std::vector<std::string>& args) {
         std::cout << "\n";
     }
 
+    // R2-8 `--list`: enumerate available check names by running with a
+    // pseudo-filter that matches no check, then re-enumerate from a
+    // hardcoded discovery pass. Simpler: pass an unmatched filter so
+    // the result is empty, then list the names statically. Even simpler:
+    // for `list`, run with the empty filter (full set, expensive) just
+    // to get names. That's still cheap on a fresh machine because
+    // probes return fast when tools are absent. But Codex P2 wants
+    // `list` to be free. Workaround: when listing, only iterate
+    // hardcoded short-circuit by running with a sentinel filter that
+    // a separate "names-only" code path could honor. For now keep the
+    // pragmatic behavior — listing runs the probes once. Optimizing
+    // list-only is queued as a follow-up.
     std::vector<DoctorCheck> checks;
-    if (mode == "android")    checks = run_doctor_android_checks();
-    else if (mode == "ios")   checks = run_doctor_ios_checks();
-    else                      checks = run_doctor_checks(active_root, standalone_mode);
+    // R2-8 P2 fix (Codex on #2145): pass the filter into the run
+    // functions so individual probes can short-circuit. Previous
+    // implementation ran every probe then filtered the output —
+    // which defeated the speed promise of `--only`.
+    const std::string filter_for_run = list_mode ? std::string{} : only_filter;
+    if (mode == "android")    checks = run_doctor_android_checks(filter_for_run);
+    else if (mode == "ios")   checks = run_doctor_ios_checks(filter_for_run);
+    else                      checks = run_doctor_checks(active_root, standalone_mode, filter_for_run);
+
+    if (list_mode) {
+        std::cout << "Available doctor checks";
+        if (!mode.empty()) std::cout << " (" << mode << " mode)";
+        std::cout << ":\n";
+        for (const auto& c : checks) {
+            std::cout << "  " << c.name;
+            if (c.optional) std::cout << "  (optional)";
+            std::cout << "\n";
+        }
+        std::cout << "\nRun a single check with: pulp doctor --only \"<name>\"\n";
+        return 0;
+    }
+
+    // R2-8 `--only`: empty-checks-after-filter means the filter
+    // didn't match anything. The probes already short-circuited
+    // (see filter_for_run above) so this is purely a usability
+    // signal, not work avoidance.
+    if (!only_filter.empty() && checks.empty()) {
+        std::cerr << "pulp doctor --only: no check matched '" << only_filter << "'.\n";
+        std::cerr << "Run `pulp doctor list` to see available checks.\n";
+        return 2;
+    }
 
     int pass_count = 0, fail_count = 0, optional_skipped = 0;
     for (auto& c : checks) {

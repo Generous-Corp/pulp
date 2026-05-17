@@ -8,6 +8,21 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01090"></a>
+## [0.109.0] - 2026-05-17
+
+- fix(view): WidgetBridge static registry — generic keyboard dispatch (closes platform-key-wireup gap, #2128 follow-up) ([#2137](https://github.com/danielraffel/pulp/pull/2137))
+- docs(pulp-react): document useShortcut hook in README ([#2154](https://github.com/danielraffel/pulp/pull/2154))
+- feat(pulp-react): useShortcut hook + clash detection (pulp #135 Phase B) ([#2144](https://github.com/danielraffel/pulp/pull/2144))
+- test: batch runtime primitive coverage edges ([#2124](https://github.com/danielraffel/pulp/pull/2124))
+- test(canvas): batch attributed text layout coverage edges ([#2135](https://github.com/danielraffel/pulp/pull/2135))
+- test: batch runtime utility and environment coverage edges ([#2132](https://github.com/danielraffel/pulp/pull/2132))
+- test(view): batch lifecycle widget coverage edges ([#2134](https://github.com/danielraffel/pulp/pull/2134))
+- test(runtime): batch network stream socket coverage edges ([#2130](https://github.com/danielraffel/pulp/pull/2130))
+- test(osc): batch codec and bundle coverage edges ([#2129](https://github.com/danielraffel/pulp/pull/2129))
+- test: batch runtime and audio coverage edges ([#2123](https://github.com/danielraffel/pulp/pull/2123))
+- refactor: ops batch 2 — 9 first-cuts (C3 + B3 + B1 + A2 + A3 + B4 + #19/#22/#23) ([#2138](https://github.com/danielraffel/pulp/pull/2138))
+
 <a id="v01080"></a>
 ## [0.108.0] - 2026-05-17
 
@@ -16,8 +31,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test: batch state coverage edges ([#2103](https://github.com/danielraffel/pulp/pull/2103))
 
 <a id="v01070"></a>
-## [0.108.0]
-
 ## [0.107.0] - 2026-05-17
 
 - feat(create): default new projects to Release; --debug opts in ([#2133](https://github.com/danielraffel/pulp/pull/2133))
@@ -1871,6 +1884,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.109.0]: https://github.com/danielraffel/pulp/releases/tag/v0.109.0
 [0.108.0]: https://github.com/danielraffel/pulp/releases/tag/v0.108.0
 [0.107.0]: https://github.com/danielraffel/pulp/releases/tag/v0.107.0
 [0.106.0]: https://github.com/danielraffel/pulp/releases/tag/v0.106.0
