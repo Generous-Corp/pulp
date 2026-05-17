@@ -6448,3 +6448,49 @@ ran focused CTest `MemoryMessageChannel` (16/16), and ran local diff-cover at
 100% on the changed `core/runtime/src/memory_message_channel.cpp` lines. This
 tranche is held locally and should be aggregated rather than submitted
 individually.
+
+2026-05-17 12:38 PDT: added Hilbert's local-only held events tranche for the
+next large coverage batch. EventLoop tranche
+`feature/phase3-codecov-events-loop-batch-702` in
+`/Users/danielraffel/Code/pulp-worktrees/phase3-codecov-events-loop-batch-702`
+is clean at commit `647384bda` (`fix(events): allow loop-thread stop`). The
+tranche fixes `EventLoop::stop()` so it can be called from the event-loop
+thread without joining itself, with regression coverage in
+`test/test_events.cpp`. Validation passed: `git diff --check`, configured
+Debug build, built `pulp-test-events`, ran the direct regression test, ran
+direct `[events][event_loop]` (13 cases / 34 assertions), ran focused CTest
+`EventLoop` (13/13), and ran local diff-cover at 100% on the changed
+`core/events/src/event_loop.cpp` lines. This tranche is held locally and
+should be aggregated rather than submitted individually.
+
+2026-05-17 13:02 PDT: added a local-only held runtime micro-batch for the next
+large coverage batch. Runtime tranche `feature/phase3-codecov-runtime-batch-703`
+in `/private/tmp/pulp-phase3-codecov-runtime-batch-703` is clean and currently
+contains five local commits:
+`0f3fa4eb6` (`fix(runtime): prefilter small prime composites`),
+`730732d14` (`fix(runtime): reject nul-padded ipv4 inputs`),
+`f26e6bb14` (`fix(runtime): reject nul-padded env names`),
+`4d76f3fe6` (`fix(runtime): preserve high-bit big integers`), and
+`0849229d2` (`fix(runtime): reject nul-padded http urls`). The tranche hardens
+runtime parsing/boundary behavior for small-prime composite prefilters,
+embedded-NUL IPv4 inputs, embedded-NUL environment names, high-bit `uint64_t`
+BigInteger construction, and embedded-NUL HTTP URLs. Validation passed locally:
+focused builds and direct tests for `pulp-test-v3-gaps`,
+`pulp-test-network-stream`, `pulp-test-runtime`, `pulp-test-license`, and
+`pulp-test-runtime-utils`; focused CTest selections for the touched behavior;
+and combined local diff-cover with regex
+`is_prime|generate_prime|sieve_primes|IPv4 validation|Runtime environment helpers|BigInteger|HTTP helpers`,
+which reported 100% diff coverage across the changed
+`core/runtime/include/pulp/runtime/system.hpp`, `core/runtime/src/big_integer.cpp`,
+`core/runtime/src/http.cpp`, `core/runtime/src/ip_address.cpp`, and
+`core/runtime/src/primes.cpp` lines. This tranche is held locally and should be
+aggregated rather than submitted individually.
+
+2026-05-17 13:04 PDT: monitored open GitHub-hosted batch PRs. #2126
+`feature/phase3-codecov-batch-682` remains open at `5a6323a37` with 13 pending
+checks and 0 failing checks; most remaining work is queued/in-progress
+GitHub-hosted macOS/coverage/sanitizer/Android capacity. #2143
+`feature/phase3-codecov-batch-696` remains open at `bdf4adb6e` with 6 pending
+checks and 0 failing checks, all queued GitHub-hosted macOS/coverage/sanitizer
+lanes. Review/comment sweep found only Codecov and coverage-diff bot comments
+on these two PRs, with no human/Codex review findings requiring code changes.
