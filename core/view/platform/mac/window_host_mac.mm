@@ -874,6 +874,23 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             static_cast<int>(key), mods, /*is_down=*/true);
 
         if (key == pulp::view::KeyCode::escape && self.rootView) {
+            // pulp #2128 follow-up — fire a synthetic document-level
+            // outside-click event into every WidgetBridge so React
+            // popovers that close via the
+            // `document.addEventListener('mousedown', onDoc)` /
+            // `document.addEventListener('pointerdown', onDoc)`
+            // click-outside idiom (Spectr's PickerDropdown,
+            // ContextMenu, etc.) close on Esc without needing
+            // per-app wiring. Coords (-1, -1) and `target:null` are
+            // outside any real bounding box, so
+            // `ref.current.contains(e.target)` checks correctly
+            // resolve to "outside". This runs BEFORE the modal /
+            // ComboBox / active_overlay paths below — additive, not
+            // consuming.
+            pulp::view::WidgetBridge::dispatch_document_event(
+                "pointerdown", "{clientX:-1,clientY:-1,target:null}");
+            pulp::view::WidgetBridge::dispatch_document_event(
+                "mousedown",   "{clientX:-1,clientY:-1,target:null}");
             if (auto* modal = find_topmost_modal(self.rootView)) {
                 pulp::view::KeyEvent ke;
                 ke.key = key;

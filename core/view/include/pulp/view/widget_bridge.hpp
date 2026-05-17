@@ -84,6 +84,16 @@ public:
     // platform main thread in some embedding contexts.
     static void dispatch_global_key(int key_code, uint16_t modifiers, bool is_down);
 
+    // Static fan-out: fire a document-level event (`mousedown`,
+    // `pointerdown`, etc.) into every live WidgetBridge's JS document.
+    // Used by platform hosts to fire synthetic outside-click events on
+    // Esc so React popovers that use the
+    // `document.addEventListener('mousedown', onDoc)` click-outside
+    // idiom close automatically. `event_json_literal` is a JS object
+    // literal expression INCLUDING braces, e.g. `{clientX:-1,clientY:-1,target:null}`.
+    static void dispatch_document_event(const std::string& event_type,
+                                        const std::string& event_json_literal);
+
     // Snapshot widget values for preservation across hot reload
     void snapshot_values(WidgetReloadSnapshot& out) const;
     void snapshot_values(std::unordered_map<std::string, float>& out) const;

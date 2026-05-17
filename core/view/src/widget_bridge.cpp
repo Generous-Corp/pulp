@@ -536,6 +536,19 @@ function __dispatch__(id, eventName) {
             }
         }
     }
+    // pulp #2128 follow-up — fan to document-level listeners. React
+    // click-outside patterns (`document.addEventListener('mousedown',
+    // onDoc)`) are the common close-the-popover idiom; the framework
+    // fires synthetic outside-click events on Esc / overlay dismiss
+    // through this path, so any React popover using the pattern closes
+    // without needing per-app wiring.
+    if (id === 'document' && typeof document !== 'undefined' && document.dispatchEvent) {
+        var devt = args && args.length ? args[0] : {};
+        if (devt && typeof devt === 'object') {
+            devt.type = eventName;
+            document.dispatchEvent(devt);
+        }
+    }
 }
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
@@ -812,6 +825,26 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
     for (auto* b : all_bridges_set()) {
         b->forward_key_event(key_code, modifiers, is_down);
+    }
+}
+
+void WidgetBridge::dispatch_document_event(const std::string& event_type,
+                                           const std::string& event_json_literal) {
+    // Snapshot under lock (same reasoning as dispatch_global_key).
+    std::vector<WidgetBridge*> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(all_bridges_mutex());
+        snapshot.reserve(all_bridges_set().size());
+        for (auto* b : all_bridges_set()) snapshot.push_back(b);
+    }
+    // The JS preamble's __dispatch__ fan-out treats id='document' as a
+    // document.dispatchEvent fan-out (see preamble in this file). We
+    // evaluate the JS directly rather than going through a per-bridge
+    // method so the same string compiles once per bridge.
+    const std::string js =
+        "__dispatch__('document', '" + event_type + "', " + event_json_literal + ")";
+    for (auto* b : snapshot) {
+        b->engine_.evaluate(js);
     }
 }
 
