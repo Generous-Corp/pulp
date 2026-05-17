@@ -95,6 +95,10 @@ class PairMetrics:
     pixel_diff_mean: float # 0..1, mean abs diff
     pixel_diff_max: float  # 0..1, max abs diff
     diff_png_path: Optional[str] = None
+    # Confidence score 0..1 — see compute_confidence() for the
+    # heuristic. < 0.7 means the analyzer is unsure and the caller
+    # should escalate (more pairs, runtime trace, etc.).
+    confidence: float = 1.0
 
 
 @dataclass
@@ -297,6 +301,71 @@ def make_keyframe_sprite(
     sprite.save(str(dest_path), format="PNG")
 
 
+def compute_confidence(
+    pairs: List[PairMetrics], affine_block: Optional[dict] = None,
+) -> None:
+    """In-place assign `confidence ∈ [0..1]` to each pair.
+
+    Heuristic (cheap, deterministic, no extra deps):
+
+    * **SSIM band** — pairs in the moderately-changing band
+      (0.6 ≤ ssim < 0.99) get the highest base score. Near-identical
+      pairs (ssim ≥ 0.99) are confident-but-uninteresting; pairs
+      below 0.3 hint at noise / scene cut and lose confidence.
+    * **Local agreement** — a pair whose SSIM agrees with its
+      neighbours within 0.1 keeps full credit; outliers lose some.
+    * **Affine consistency** — when an affine block is available,
+      pairs whose mean diff is roughly consistent with the overall
+      translation magnitude get a small bonus; pairs that disagree
+      lose a small amount.
+    """
+    if not pairs:
+        return
+
+    def base_band(ssim: float) -> float:
+        if ssim >= 0.99:
+            return 0.85   # almost identical — confident but boring
+        if ssim >= 0.6:
+            return 0.95   # clean motion signal
+        if ssim >= 0.3:
+            return 0.7    # noisy
+        return 0.45       # scene cut / heavy noise — escalate
+
+    expected_diff: Optional[float] = None
+    if affine_block:
+        tr = affine_block.get("translation") or {}
+        mag = (float(tr.get("dx", 0.0)) ** 2
+               + float(tr.get("dy", 0.0)) ** 2) ** 0.5
+        if mag > 0 and len(pairs) > 0:
+            expected_diff = mag / max(1, len(pairs))
+
+    for i, p in enumerate(pairs):
+        score = base_band(p.ssim)
+        # Neighbour agreement (compare to the average of immediate neighbours).
+        neighbours = []
+        if i > 0:
+            neighbours.append(pairs[i - 1].ssim)
+        if i + 1 < len(pairs):
+            neighbours.append(pairs[i + 1].ssim)
+        if neighbours:
+            avg = sum(neighbours) / len(neighbours)
+            disagreement = abs(p.ssim - avg)
+            if disagreement < 0.1:
+                score += 0.02
+            elif disagreement > 0.3:
+                score -= 0.15
+        if expected_diff is not None and expected_diff > 0:
+            # Normalise the per-pair mean diff into a pixel-space
+            # proxy and compare against the affine estimate.
+            proxy = p.pixel_diff_mean * 255.0
+            ratio = (proxy + 1.0) / (expected_diff + 1.0)
+            if 0.5 <= ratio <= 2.0:
+                score += 0.03
+            else:
+                score -= 0.05
+        p.confidence = max(0.0, min(1.0, score))
+
+
 def estimate_affine_first_to_last(
     first_arr, last_arr, np_mod, Image,
 ) -> dict:
@@ -454,6 +523,13 @@ def select_keyframes(
 def write_summary_md(report: Report, output_dir: Path) -> None:
     md = []
     md.append("# Motion visual analysis\n")
+    md.append("> **Claim-evidence contract.** Every claim in this report cites "
+              "`pair NN→NN+1`, the artifact used (`frames/`, `diff/`, `grid/`, "
+              "`diff_grid/`, `keyframes.png`, `affine_first_to_last`), and a "
+              "confidence score `0.0..1.0`. **Confidence < 0.7 means the "
+              "analyzer is unsure** — escalate to `--max-diff-frames 0` "
+              "(all pairs), longer capture window, or fall back to a runtime "
+              "trace if instrumentation is available.\n")
     md.append(f"- schema_version: {report.schema_version}")
     md.append(f"- frames: {len(report.frames)}")
     md.append(f"- pairs: {len(report.pairs)}")
@@ -491,12 +567,27 @@ def write_summary_md(report: Report, output_dir: Path) -> None:
     md.append("")
 
     md.append("## Diff catalogue\n")
+    md.append("Each row cites: pair, artifact (`diff/<file>`), and "
+              "confidence. Confidence < 0.7 → escalate.\n")
     for p in report.pairs:
         if p.diff_png_path:
             md.append(
                 f"- pair `{p.from_index:04d}→{p.to_index:04d}`: "
                 f"ssim={p.ssim:.4f} mean_diff={p.pixel_diff_mean:.4f} "
-                f"max_diff={p.pixel_diff_max:.4f} ([diff]({p.diff_png_path}))"
+                f"max_diff={p.pixel_diff_max:.4f} "
+                f"confidence={p.confidence:.2f} "
+                f"([diff]({p.diff_png_path}))"
+            )
+
+    low = [p for p in report.pairs if p.confidence < 0.7]
+    if low:
+        md.append("")
+        md.append("## Low-confidence pairs (escalate)\n")
+        for p in low:
+            md.append(
+                f"- pair `{p.from_index:04d}→{p.to_index:04d}` "
+                f"confidence={p.confidence:.2f} — re-run with "
+                "`--max-diff-frames 0` or capture a runtime trace."
             )
 
     (output_dir / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
@@ -659,6 +750,10 @@ def analyze(
             first_arr, last_arr, np_mod, Image,
         )
 
+    # Confidence heuristic — assigns each pair a score in [0..1] that
+    # downstream agents can cite in the claim-evidence contract.
+    compute_confidence(pairs, affine_block=affine_block)
+
     summary = {
         "mean_ssim": (sum(p.ssim for p in pairs) / len(pairs)) if pairs else 1.0,
         "min_ssim": min((p.ssim for p in pairs), default=1.0),
@@ -668,6 +763,15 @@ def analyze(
         "max_pixel_diff": max((p.pixel_diff_max for p in pairs), default=0.0),
         "trimmed_leading_frames": trimmed_lead,
         "trimmed_trailing_frames": trimmed_trail,
+        "mean_confidence": (
+            sum(p.confidence for p in pairs) / len(pairs)
+        ) if pairs else 1.0,
+        "min_confidence": min((p.confidence for p in pairs), default=1.0),
+        "low_confidence_pairs": [
+            {"from_index": p.from_index, "to_index": p.to_index,
+             "confidence": p.confidence}
+            for p in pairs if p.confidence < 0.7
+        ],
     }
     report = Report(
         schema_version=REPORT_SCHEMA_VERSION,

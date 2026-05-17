@@ -136,18 +136,71 @@ python3 -m tools.motion.visual.analyze_sequence \
     --frames-dir ./captures/card-open/ \
     --output     ./reports/card-open/ \
     --keyframes 2
+
+# Recommended flags for design / motion review:
+python3 -m tools.motion.visual.analyze_sequence \
+    --frames-dir ./captures/card-open/ \
+    --output     ./reports/card-open/ \
+    --grid                      # alphanumeric cell overlay (A1..H12) on
+                                # frames/diffs/sprite so claims can cite a cell
+    --trim                      # drop idle prefix + suffix from the analysis
+                                # window (frames stay on disk)
+    --affine                    # estimate translation/rotation/scale first→last
+                                # (uses opencv if installed, else PIL-FFT
+                                # translation only — see requirements-optional.txt)
 ```
+
+Tunables: `--grid-rows N` (default 8, A..Z), `--grid-cols N` (default 12),
+`--grid-theme auto|light|dark` (default auto — samples corner luminance),
+`--trim-threshold` (default 0.01 mean-diff luminance fraction).
+
+### 2b. Motion-gated capture from a host source
+
+When you don't already have a frame directory, capture one with the
+gated helper. It only starts saving frames once real motion appears,
+so a short pre-roll doesn't pollute the analysis window.
+
+```bash
+# macOS window region (requires --bounds X,Y,W,H)
+python3 tools/motion/visual/capture_sim_frames.py \
+    --source macos --bounds 0,0,800,600 \
+    --output-dir ./captures/card-open/ \
+    --fps 30 --frame-count 60 \
+    --gate-threshold 4.0 --gate-consecutive 1 \
+    --idle-timeout 8
+
+# Booted iOS Simulator
+python3 tools/motion/visual/capture_sim_frames.py \
+    --source simulator \
+    --output-dir ./captures/card-open/ \
+    --fps 30 --frame-count 60
+```
+
+The capture tool exits 3 (ctest SKIP) when neither `screencapture`
+nor a booted simulator is available, so this composes cleanly with
+CI lanes that lack the platform tooling.
 
 ### 3. Read the report
 
 The pipeline writes `analysis.json` (machine-readable), `summary.md`
 (agent-readable), `diff/diff_NNNN_NNNN.png` (pairwise heatmaps), and
-`keyframes.png` (sprite). The JSON carries `schema_version` — refuse unknown
-versions.
+`keyframes.png` (sprite). With `--grid`: `grid/frame_NNNN.png`,
+`diff_grid/diff_NNNN_NNNN.png`, and `keyframes_grid.png` siblings.
+With `--affine`: an `analysis.json#affine_first_to_last` block and a
+`## Net motion` section in `summary.md`. With `--trim`:
+`summary.trimmed_leading_frames` / `summary.trimmed_trailing_frames`.
 
-Pair conclusions with evidence: cite pair index, SSIM, mean diff, and which
-artifacts you read. Confidence below 0.7 means escalate (more pairs, longer
-window, or fall back to a runtime trace if instrumentation is possible).
+The JSON carries `schema_version` — refuse unknown versions.
+
+**Claim-evidence contract.** Every claim you make from this report
+must cite: (1) pair index (`NN→NN+1`), (2) artifact type (`frames/`,
+`diff/`, `grid/`, `diff_grid/`, `keyframes.png`, or
+`affine_first_to_last`), and (3) a confidence score 0.0..1.0 from
+`pairs[].confidence` / `summary.mean_confidence`. **Confidence < 0.7
+means the analyzer is unsure** — escalate by re-running with
+`--max-diff-frames 0` (all pairs), a longer capture window, or fall
+back to a runtime trace (Path A) if instrumentation is possible. The
+`summary.md` preamble carries the same contract verbatim.
 
 ## Path C — Fixtures (record / replay / assert)
 
@@ -647,8 +700,12 @@ Apply these on every motion debugging run:
 - `inspect/src/motion_inspector.cpp` — protocol handler + event broadcaster
 - `inspect/include/pulp/inspect/motion_scrubber.hpp` — timeline scrubber (Phase 7)
 - `inspect/src/motion_scrubber.cpp` — passive fixture replay + scrubber dispatch
-- `tools/motion/visual/analyze_sequence.py` — visual analysis CLI
-- `tools/motion/visual/test_self_check.py` — pipeline self-check
+- `tools/motion/visual/analyze_sequence.py` — visual analysis CLI (grid overlay, --trim, --affine, claim-evidence contract)
+- `tools/motion/visual/capture_sim_frames.py` — motion-gated capture from macOS region or booted simulator
+- `tools/motion/visual/test_self_check.py` — pipeline self-check (baseline + claim-evidence assertions)
+- `tools/motion/visual/test_grid_overlay.py` — visual-plus self-check (grid, trim, affine)
+- `tools/motion/visual/test_capture_smoke.py` — gated-capture smoke (skip 3 without source)
+- `tools/motion/visual/requirements-optional.txt` — opt-in deps (opencv-python for full affine)
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
 - `apple/Sources/PulpSwift/PulpBridge.h` — Swift C ABI surface (Path G)
 - `apple/Sources/PulpSwift/PulpBridge.cpp` — Swift bridge shims (Path G)

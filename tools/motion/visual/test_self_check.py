@@ -101,6 +101,27 @@ def main() -> int:
                 print(f"self-check: pair {p} mean diff should be > 0",
                       file=sys.stderr)
                 return 1
+            # Claim-evidence contract: every pair carries confidence.
+            if "confidence" not in p:
+                print(f"self-check: pair {p} missing confidence field",
+                      file=sys.stderr)
+                return 1
+            if not (0.0 <= p["confidence"] <= 1.0):
+                print(f"self-check: pair {p} confidence out of [0,1]",
+                      file=sys.stderr)
+                return 1
+
+        # Summary surfaces aggregate confidence + the claim-evidence
+        # contract preamble in summary.md.
+        if "mean_confidence" not in data["summary"]:
+            print("self-check: missing summary.mean_confidence",
+                  file=sys.stderr)
+            return 1
+        md_text = md_path.read_text(encoding="utf-8")
+        if "Claim-evidence contract" not in md_text:
+            print("self-check: summary.md missing claim-evidence preamble",
+                  file=sys.stderr)
+            return 1
 
         # Keyframes must include first + last at minimum.
         roles = {k["role"] for k in data["keyframes"]}
