@@ -8,6 +8,7 @@
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/expression.hpp>
 #include <pulp/runtime/http.hpp>
+#include <pulp/runtime/identity.hpp>
 #include <pulp/runtime/ip_address.hpp>
 #include <pulp/runtime/primes.hpp>
 #include <pulp/runtime/range.hpp>
@@ -146,6 +147,31 @@ bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = std::ch
 }
 
 }  // namespace
+
+// ── Identity ────────────────────────────────────────────────────────────
+
+TEST_CASE("Uuid parses canonical and compact forms",
+          "[runtime][identity][coverage][phase3]") {
+    const auto canonical = std::string("12345678-90ab-4def-8123-456789abcdef");
+    const auto compact = std::string("1234567890ab4def8123456789abcdef");
+
+    auto from_canonical = Uuid::from_string(canonical);
+    auto from_compact = Uuid::from_string(compact);
+
+    REQUIRE_FALSE(from_canonical.is_nil());
+    REQUIRE(from_canonical == from_compact);
+    REQUIRE(from_canonical.to_string() == canonical);
+    REQUIRE(from_canonical.to_hex() == compact);
+}
+
+TEST_CASE("Uuid parser rejects malformed hex and dash placement",
+          "[runtime][identity][coverage][phase3]") {
+    REQUIRE(Uuid::from_string("").is_nil());
+    REQUIRE(Uuid::from_string("1234567890ab4def8123456789abcdez").is_nil());
+    REQUIRE(Uuid::from_string("12345678-90ab-4def-8123-456789abcdez").is_nil());
+    REQUIRE(Uuid::from_string("1234567890ab-4def-8123-456789abcdef").is_nil());
+    REQUIRE(Uuid::from_string("12345678-90ab-4def-8123-456789abcdef-").is_nil());
+}
 
 // ── ScopeGuard ─────────────────────────────────────────────────────────
 

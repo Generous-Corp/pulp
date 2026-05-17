@@ -37,6 +37,12 @@ static uint8_t hex_digit(char c) {
     return 0;
 }
 
+static bool is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') ||
+           (c >= 'a' && c <= 'f') ||
+           (c >= 'A' && c <= 'F');
+}
+
 Uuid Uuid::from_string(std::string_view str) {
     // Parse "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" (36 chars)
     // or compact "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" (32 chars)
@@ -54,7 +60,7 @@ Uuid Uuid::from_string(std::string_view str) {
     }
     if (hex.size() != 32) return id; // nil on parse failure
     for (char c : hex) {
-        if (!std::isxdigit(static_cast<unsigned char>(c))) return id;
+        if (!is_hex_digit(c)) return id;
     }
 
     for (int i = 0; i < 8; ++i) {
