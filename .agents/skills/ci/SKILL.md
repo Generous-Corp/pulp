@@ -781,12 +781,17 @@ pulling in the entire 11k-line file.
   evidence subsystems (`now_iso`, `current_branch`, `current_sha`,
   `git_root_for`, `resolve_git_ref_sha`, `short_sha`) plus the shared
   `ROOT` constant.
+- `io_utils.py` — owns the I/O + locking utilities (`tail_lines`,
+  `trim_line`, `atomic_write_text`, `image_change_summary`, `file_lock`)
+  plus the `LockBusyError` exception. `image_change_summary` falls back
+  to a SHA-256 file comparison when Pillow is missing so the test suite
+  keeps running on stripped images.
 
 All original symbols are re-exported from `local_ci.py`, so any old
-`mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()`
-test patch keeps working — but new code should import directly from
-`state_paths`, `normalize`, or `git_helpers` to avoid the god-module
-dependency.
+`mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
+`mod.file_lock(...)` test patch keeps working — but new code should
+import directly from `state_paths`, `normalize`, `git_helpers`, or
+`io_utils` to avoid the god-module dependency.
 
 ```bash
 # Legacy fallback only
