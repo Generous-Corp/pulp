@@ -43,6 +43,7 @@ Embedded at build time for deterministic text rendering. Both fonts are redistri
 |------|---------|---------|------|
 | **Inter** | SIL OFL 1.1 | Embedded UI font (`Inter-Regular.ttf`, version `4.001;git-9221beed3`) | [github.com/rsms/inter](https://github.com/rsms/inter) |
 | **JetBrains Mono** | SIL OFL 1.1 | Embedded monospace font (`JetBrainsMono-Regular.ttf`, version `2.304`) | [github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
+| **Noto Color Emoji** | SIL OFL 1.1 | Embedded cross-platform color-emoji typeface (`NotoColorEmoji.ttf`, COLRv1, `noto-emoji main @ 2026-05-17`). Gated by `PULP_BUNDLE_NOTO_COLOR_EMOJI` (defaults ON for Linux/Android/headless, OFF for macOS/Windows where the platform color-emoji typeface is preferred). | [github.com/googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji) |
 
 ### Plugin Format SDKs
 
