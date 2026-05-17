@@ -6862,3 +6862,22 @@ parameter values|PresetManager load skips malformed parameter values'
 tools/scripts/local_diff_cover.sh pulp-test-preset-manager`, which reported
 100% diff coverage for `core/state/src/preset_manager.cpp`. This tranche is
 held locally and should be aggregated rather than submitted individually.
+
+2026-05-17 14:59 PDT: added another local-only held state serialization
+tranche for the next large coverage batch. StateStore deserialize tranche
+`feature/phase3-codecov-state-deserialize-batch-721` in
+`/private/tmp/pulp-phase3-codecov-state-deserialize-batch-721` is clean at
+commit `3509eb1e27cc` (`fix(state): reject malformed serialized payload
+sizes`) based on current `origin/main` (`8b667f2641a9`). The tranche hardens
+`StateStore::deserialize()` so CRC-valid payloads whose declared parameter
+count does not match the actual fixed-width parameter entries are rejected
+before any partial state is applied. Focused coverage in `test/test_state.cpp`
+builds a CRC-valid truncated payload and verifies deserialization fails while
+preserving the target store's existing values. Validation passed locally:
+`git diff --check`, Debug configure, built `pulp-test-state`, ran direct
+`StateStore serialization`, ran focused CTest `StateStore serialization`
+(2/2), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='StateStore serialization'
+tools/scripts/local_diff_cover.sh pulp-test-state`, which reported 100% diff
+coverage for `core/state/src/store.cpp`. This tranche is held locally and
+should be aggregated rather than submitted individually.
