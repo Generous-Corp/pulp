@@ -6376,3 +6376,19 @@ configured Debug build, built `pulp-test-dsp-expansion`, ran direct
 (8/8), and ran local diff-cover at 100% on the changed
 `core/signal/include/pulp/signal/lookup_table.hpp` lines. This tranche is held
 locally and should be aggregated rather than submitted individually.
+
+2026-05-17 11:42 PDT: added Hooke's local-only held signal tranche for the
+next large coverage batch. Signal DryWetMixer tranche
+`feature/phase3-codecov-signal-batch-699` in
+`/private/tmp/pulp-phase3-codecov-signal-batch-699` is clean at commit
+`d44210a8c` (`test: cover dry wet mixer edge paths`). The tranche hardens
+`DryWetMixer` around negative latency, latency retuning, zero prepared
+channels, stale delay history, null/empty dry input, and over-channel latency
+processing, with focused coverage in `test/test_dsp_enhancements.cpp`.
+Validation passed: configured Debug build, built `pulp-test-dsp-enhancements`,
+ran the full direct binary (25 cases / 103 assertions), ran focused CTest
+covering DryWetMixer and neighboring DSP helpers (25/25), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='DryWetMixer'
+tools/scripts/local_diff_cover.sh pulp-test-dsp-enhancements`, which reported
+100% diff coverage. This tranche is held locally and should be aggregated
+rather than submitted individually.
