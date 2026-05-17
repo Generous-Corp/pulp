@@ -231,6 +231,46 @@ directory` spam on stderr, you're on an older checkout — the canonical
 exclude regex in `scripts/run_coverage.sh` filters these. Update to the
 latest `main`. Issue #569 has the details.
 
+### llvm-cov mis-attribution gotchas
+
+llvm-cov-export's Cobertura output sometimes reports lines as
+uncovered when they are demonstrably executed by passing tests. The
+two known shapes (both encountered on PR #2120 for a tiny focus-guard
+change):
+
+1. **Inline virtual function bodies in headers.** Methods like
+   `virtual bool accepts_text_input() const { return false; }` defined
+   inline in a header get 0% attribution when the test calls them
+   through a base pointer. The same body moved to a `.cpp` file
+   reports correctly. **Fix:** move the body to the `.cpp`. Keep the
+   declaration in the header.
+
+2. **`break;` inside a nested `if` inside a loop.** Patterns like
+   ```cpp
+   for (auto& s : list) {
+       if (s.key == key) {
+           if (suppress) { break; }
+           handle(s);
+       }
+   }
+   ```
+   sometimes report `break;` + the closing brace as uncovered even
+   though the suppression branch is observably hit (the test asserts
+   the handler was *not* called). **Fix:** flatten — `if (s.key !=
+   key) continue; if (suppress) break; handle(s);`. Same semantics,
+   instrumented cleanly.
+
+Before refactoring code to satisfy diff-cover, **open
+`build-coverage/coverage/index.html`** and confirm whether the lines
+are genuinely unexercised or whether llvm-cov is misattributing.
+Adding test cases that don't reach those lines won't help if the
+attribution itself is broken.
+
+Do not expand `diff_cover_excludes` to paper over instrumentation
+quirks — that mechanism is for thin dispatchers exercised end-to-end
+via shell-out tests, not for "the tooling is confused." File a
+follow-up issue if a new mis-attribution class shows up.
+
 ## How to interpret "my PR's coverage"
 
 Every PR gets a comment from Codecov once the Coverage workflow
