@@ -221,6 +221,7 @@ public:
 
     void set_direction(Direction d) { direction_ = d; }
     void set_content_size(Size size) { content_size_ = size; }
+    Size content_size() const { return content_size_; }
 
     float scroll_x() const { return smooth_scroll_x_.value(); }
     float scroll_y() const { return smooth_scroll_y_.value(); }

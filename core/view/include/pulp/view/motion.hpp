@@ -20,6 +20,7 @@
 namespace pulp::view {
 
 class FrameClock;
+class ScrollView;
 class View;
 
 namespace motion {
@@ -42,6 +43,22 @@ enum class GeometryProperty {
     MinX, MinY, MaxX, MaxY,
     MidX, MidY,
     Width, Height,
+};
+
+// ── Scroll taxonomy ──────────────────────────────────────────────────
+//
+// Properties readable from a `pulp::view::ScrollView` — content offset,
+// visible (viewport) rect, content size, content insets, and the max
+// scrollable extent on each axis. ScrollView does not currently expose
+// per-edge content insets; the four Inset* properties always report 0.0
+// and remain on the enum so callers can wire them once insets land
+// without breaking the API surface.
+enum class ScrollProperty {
+    ContentOffsetX, ContentOffsetY,
+    VisibleRectMinX, VisibleRectMinY, VisibleRectWidth, VisibleRectHeight,
+    ContentSizeWidth, ContentSizeHeight,
+    InsetTop, InsetBottom, InsetLeft, InsetRight,
+    ScrollableMaxX, ScrollableMaxY,   // max(0, contentSize - viewport) per axis
 };
 
 // ── Trace options ────────────────────────────────────────────────────
@@ -350,6 +367,23 @@ double frame_jitter_seconds(const std::vector<ScalarSample>& samples);
 /// Returns the last sample's value, or NaN when empty.
 double final_value(const std::vector<ScalarSample>& samples);
 
+/// Local-step outlier ratio. Given a sample series, computes for each
+/// sample the ratio of its step magnitude to the median step magnitude
+/// in a sliding window of `window_radius` neighbors on each side. Returns
+/// the maximum ratio observed. A value of 1.0 means every step is close
+/// to the local median (smooth); 5.0 means at least one step was 5x
+/// larger than its neighbors (a jump). Useful as a SEPARATE assertion
+/// from `is_monotonic` / `overshoot` — does NOT conflate continuity,
+/// timing, or direction into one number.
+///
+/// Returns `0.0` when `samples.size() < 2 * window_radius + 1`. The local
+/// median excludes the candidate step itself so a one-off jump cannot
+/// dominate its own reference window.
+double local_step_outlier_ratio(
+    const std::vector<ScalarSample>& samples,
+    std::size_t window_radius = 3,
+    double epsilon = 1e-9);
+
 // ── Sinks ────────────────────────────────────────────────────────────
 
 using Sink = std::function<void(const SampleEvent&)>;
@@ -504,6 +538,22 @@ public:
                            GeometrySpace space = GeometrySpace::Window,
                            GeometrySource source = GeometrySource::Layout,
                            int precision = 2, double epsilon = 0.1);
+
+    /// Scroll-geometry metric over a `ScrollView`. Emits the requested
+    /// `ScrollProperty` set as a multi-component sample using camelCase
+    /// component names (`"contentOffsetX"`, `"visibleRectMinY"`, …) so
+    /// fixture diffs read naturally next to `geometry()` traces. Passing
+    /// an empty `props` list defaults to the most common 4 properties
+    /// (`ContentOffsetX`, `ContentOffsetY`, `VisibleRectMinY`,
+    /// `VisibleRectHeight`).
+    TraceBuilder& scroll_geometry(
+        std::string name,
+        pulp::view::ScrollView& target,
+        std::vector<ScrollProperty> props = {
+            ScrollProperty::ContentOffsetX, ScrollProperty::ContentOffsetY,
+            ScrollProperty::VisibleRectMinY, ScrollProperty::VisibleRectHeight,
+        },
+        int precision = 2, double epsilon = 0.1);
 
     /// Attach a provenance envelope to the trace. Emitted once on
     /// the trace's `TraceStarted` event.
