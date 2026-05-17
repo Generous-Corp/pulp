@@ -186,6 +186,20 @@ TEST_CASE("ValidationHarness processes audio buffer with gain", "[harness][phase
                  Catch::Matchers::WithinRel(static_cast<double>(expected), 0.01));
 }
 
+TEST_CASE("ValidationHarness process_buffer auto-prepares with caller channel layout",
+          "[harness][phase2][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 3, .input_channels = 1, .output_channels = 1});
+
+    std::vector<float> input = {0.25f, -0.5f, 0.75f};
+    auto output = harness.process_buffer(input, 1, 3);
+
+    REQUIRE(output.size() == input.size());
+    REQUIRE_THAT(static_cast<double>(output[0]), WithinAbs(0.25, 0.0001));
+    REQUIRE_THAT(static_cast<double>(output[1]), WithinAbs(-0.5, 0.0001));
+    REQUIRE_THAT(static_cast<double>(output[2]), WithinAbs(0.75, 0.0001));
+}
+
 TEST_CASE("ValidationHarness MIDI note-on queuing", "[harness][phase2]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({.buffer_size = 64});
@@ -219,6 +233,22 @@ TEST_CASE("ValidationHarness MIDI note-off and CC helpers reach process_buffer",
     REQUIRE(last_processor->note_on_count_ == 1);
     REQUIRE(last_processor->note_off_count_ == 1);
     REQUIRE(last_processor->cc_count_ == 1);
+}
+
+TEST_CASE("ValidationHarness process_blocks consumes queued MIDI once",
+          "[harness][phase2][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 4});
+    harness.prepare();
+    REQUIRE(last_processor != nullptr);
+
+    harness.send_midi_note_on(0, 60, 100);
+    auto output = harness.process_blocks(3);
+
+    REQUIRE(output.size() == 8);
+    REQUIRE(last_processor->note_on_count_ == 1);
+    REQUIRE(last_processor->note_off_count_ == 0);
+    REQUIRE(last_processor->cc_count_ == 0);
 }
 
 TEST_CASE("ValidationHarness state round-trip", "[harness][phase2]") {
@@ -283,6 +313,24 @@ TEST_CASE("ValidationHarness generates valid report JSON", "[harness][phase2]") 
     REQUIRE_THAT(report, ContainsSubstring("\"abc1234\""));
     REQUIRE_THAT(report, ContainsSubstring("\"test-run-1\""));
     REQUIRE_THAT(report, ContainsSubstring("\"total\": 50"));
+}
+
+TEST_CASE("ValidationHarness report omits payload for unknown entry types",
+          "[harness][phase2][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    pulp::format::ReportEntry entry;
+    entry.type = "custom_probe";
+    entry.status = pulp::format::ValidationStatus::pass;
+    entry.target = "probe";
+    entry.payload_json = "{\"should_not_appear\":true}";
+    harness.add_entry(entry);
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("\"custom_probe\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"probe\""));
+    REQUIRE(report.find("should_not_appear") == std::string::npos);
 }
 
 TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
@@ -449,6 +497,24 @@ TEST_CASE("ValidationHarness screenshot passes when provider returns true",
     std::filesystem::remove("/tmp/test-provided.png");
 }
 
+TEST_CASE("ValidationHarness clearing screenshot provider restores skip behavior",
+          "[harness][phase2][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    harness.set_capture_screenshot_provider(
+        [](const std::filesystem::path&, uint32_t, uint32_t, float, const std::string&) {
+            return true;
+        });
+    REQUIRE(harness.capture_screenshot("/tmp/test-provider-clear.png").status ==
+            pulp::format::ValidationStatus::pass);
+
+    harness.set_capture_screenshot_provider({});
+    auto entry = harness.capture_screenshot("/tmp/test-provider-clear.png");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::skip);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("provider"));
+}
+
 TEST_CASE("ValidationHarness screenshot passes configured capture options to provider",
           "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
@@ -516,6 +582,21 @@ TEST_CASE("ValidationHarness inspector passes with provider",
     auto entry = harness.capture_inspector();
     REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"children\""));
+}
+
+TEST_CASE("ValidationHarness clearing inspector provider restores skip behavior",
+          "[harness][phase2][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    harness.set_capture_inspector_provider(
+        []() { return std::string("{\"type\":\"View\"}"); });
+    REQUIRE(harness.capture_inspector().status == pulp::format::ValidationStatus::pass);
+
+    harness.set_capture_inspector_provider({});
+    auto entry = harness.capture_inspector();
+    REQUIRE(entry.status == pulp::format::ValidationStatus::skip);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("provider"));
 }
 
 TEST_CASE("ValidationHarness inspector fails when provider returns empty tree",

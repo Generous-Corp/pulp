@@ -190,6 +190,29 @@ TEST_CASE("plugin_state_io round-trips parameter and plugin-owned state",
     REQUIRE(restored.processor.plugin_state == "bands=48;view=60-12000");
 }
 
+TEST_CASE("plugin_state_io preserves binary plugin-owned payload bytes",
+          "[format][plugin-state][coverage][phase3]") {
+    TestRig source;
+    source.store.set_value(1, -3.0f);
+    source.processor.plugin_state.assign(
+        std::string({'A', '\0', static_cast<char>(0x7F), static_cast<char>(0xFF), 'Z'}));
+
+    auto blob = pulp::format::plugin_state_io::serialize(source.store, source.processor);
+
+    TestRig restored;
+    restored.processor.plugin_state = "stale";
+    REQUIRE(pulp::format::plugin_state_io::deserialize(blob,
+                                                       restored.store,
+                                                       restored.processor));
+
+    const std::vector<uint8_t> expected = {
+        'A', 0x00, 0x7F, 0xFF, 'Z',
+    };
+    REQUIRE(restored.processor.last_payload == expected);
+    REQUIRE(restored.processor.serialize_plugin_state() == expected);
+    REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-3.0, 0.01));
+}
+
 TEST_CASE("plugin_state_io preserves legacy raw StateStore blobs and resets plugin payload",
           "[format][plugin-state]") {
     TestRig source;
@@ -336,6 +359,22 @@ TEST_CASE("plugin_state_io rejects malformed blobs without touching live state",
         REQUIRE(restored.processor.plugin_state == "keep");
     }
 
+    SECTION("declared plugin payload size exceeds bytes available") {
+        auto blob = make_envelope(legacy_blob);
+        write_u32(blob, 12, 1024);
+
+        TestRig restored;
+        restored.store.set_value(1, 3.0f);
+        restored.processor.plugin_state = "keep";
+
+        REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(blob,
+                                                                 restored.store,
+                                                                 restored.processor));
+        REQUIRE_THAT(restored.store.get_value(1), WithinAbs(3.0, 0.01));
+        REQUIRE(restored.processor.plugin_state == "keep");
+        REQUIRE(restored.processor.deserialize_calls == 0);
+    }
+
     SECTION("size mismatch with trailing bytes") {
         auto blob = make_envelope(legacy_blob);
         blob.push_back(0x7F);
@@ -424,5 +463,7 @@ TEST_CASE("plugin_state_io rolls back StateStore when plugin payload restore fai
     REQUIRE_THAT(restored.store.get_value(1), WithinAbs(5.0, 0.01));
     REQUIRE_THAT(restored.store.get_value(2), WithinAbs(12.0, 0.01));
     REQUIRE(restored.processor.plugin_state == "keep");
+    REQUIRE(restored.processor.last_payload ==
+            std::vector<uint8_t>({'k', 'e', 'e', 'p'}));
     REQUIRE(restored.processor.deserialize_calls == 2);
 }

@@ -84,6 +84,16 @@ TEST_CASE("DescriptorValidation: non-reverse-DNS bundle_id produces a warning on
     REQUIRE(descriptor_is_valid(issues));   // warnings don't fail the check
 }
 
+TEST_CASE("DescriptorValidation: reverse-DNS bundle_id requires at least three segments",
+          "[format][descriptor-validation][coverage][phase3]") {
+    auto d = well_formed_effect();
+    d.bundle_id = "com.plugin";
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_warning_on(issues, "bundle_id"));
+    REQUIRE(descriptor_is_valid(issues));
+}
+
 TEST_CASE("DescriptorValidation: malformed reverse-DNS bundle_id segments warn only",
           "[format][descriptor-validation][coverage][issue-493]") {
     for (const auto* bundle_id : {
@@ -210,6 +220,18 @@ TEST_CASE("DescriptorValidation: supports_mpe without accepts_midi warns",
     REQUIRE(has_warning_on(issues, "accepts_midi"));
 }
 
+TEST_CASE("DescriptorValidation: MPE and UMP sidecars share one warning on audio effects",
+          "[format][descriptor-validation][coverage][phase3]") {
+    auto d = well_formed_effect();
+    d.supports_mpe = true;
+    d.supports_ump = true;
+    d.accepts_midi = false;
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(warning_count_on(issues, "accepts_midi") == 1);
+    REQUIRE(descriptor_is_valid(issues));
+}
+
 TEST_CASE("DescriptorValidation: supports_ump follows the accepts_midi sidecar warning contract",
           "[format][descriptor-validation][coverage][issue-493]") {
     SECTION("UMP without MIDI input warns") {
@@ -311,4 +333,16 @@ TEST_CASE("DescriptorValidation: MIDI sidecar capabilities are warning-only with
     auto issues = validate_descriptor(d);
     REQUIRE(has_warning_on(issues, "accepts_midi"));
     REQUIRE(descriptor_is_valid(issues));
+}
+
+TEST_CASE("descriptor_is_valid treats warnings as valid and any error as invalid",
+          "[format][descriptor-validation][coverage][phase3]") {
+    REQUIRE(descriptor_is_valid({}));
+    REQUIRE(descriptor_is_valid({
+        {DescriptorIssueSeverity::Warning, "bundle_id", "warning"},
+    }));
+    REQUIRE_FALSE(descriptor_is_valid({
+        {DescriptorIssueSeverity::Warning, "bundle_id", "warning"},
+        {DescriptorIssueSeverity::Error, "name", "error"},
+    }));
 }
