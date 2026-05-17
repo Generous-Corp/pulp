@@ -1,4 +1,4 @@
-# codecov.yml — Codecov config for public/#566 Phase 1 (measurement baseline).
+# codecov.yml - Codecov config for public/#566 Phase 1 (measurement baseline).
 #
 # Primary consumers (in order): Pulp developers, dispatched agents, CI
 # enforcement, contributors reading PR comments. Public dashboard is a
@@ -12,14 +12,14 @@
 # Phase 2 adds ci/coverage-targets.yaml alongside this for the diff-cover
 # gate; Phase 4 introduces doc_path_map.json to prevent drift.
 
-# Notification gating — wait for all 4 platform coverage uploads before
+# Notification gating - wait for all 4 platform coverage uploads before
 # the bot computes + posts the patch coverage report. Without this,
 # Codecov posts as soon as it sees ANY upload (often Linux first, since
 # its build is fastest), which means Apple-only or Windows-only tested
 # paths get reported as 0% covered against partial data. PR #1873 was a
 # textbook example: a CLAP-fixture test that ran only on macOS was
 # reported as "0% patch coverage" by the bot because the macOS upload
-# hadn't arrived (and never did — see follow-up issue on the coverage
+# hadn't arrived (and never did - see follow-up issue on the coverage
 # workflow's `cancel-in-progress: true` concurrency policy that wipes
 # in-flight runs on force-push).
 #
@@ -32,7 +32,7 @@
 #
 # If you add or remove a coverage uploader, bump this number to match
 # or Codecov will silently wait forever for the missing one and never
-# post. After 7d it gives up and posts whatever it has — by then the
+# post. After 7d it gives up and posts whatever it has - by then the
 # PR has long since merged with a stale report.
 codecov:
   notify:
@@ -40,7 +40,7 @@ codecov:
 
 coverage:
   status:
-    # Project-wide status: "did we get worse?" Not a hard gate — we
+    # Project-wide status: "did we get worse?" Not a hard gate - we
     # already have continue-on-error on the coverage job and Phase 3
     # is where per-PR enforcement lands.
     project:
@@ -52,11 +52,11 @@ coverage:
     # Patch status: "is new code covered?" Advisory in the sense that
     # branch-protection does NOT require this check (so a sub-threshold
     # PR can still merge), but the check status now accurately reflects
-    # the threshold check — `success` if ≥75%, `failure` if <75%.
+    # the threshold check - `success` if >=75%, `failure` if <75%.
     #
     # Previously `informational: true` hardwired the status to `success`
     # even when patch coverage was 0%, which deceived devs reading the
-    # check line. The bot still posted a "❌ Patch coverage is X%"
+    # check line. The bot still posted a "[fail] Patch coverage is X%"
     # comment, but the status check itself said success, masking the
     # gap. Flipping to enforcing makes the signal accurate without
     # changing merge behavior (codecov/patch is not in
@@ -76,9 +76,9 @@ coverage:
 # so Codecov and our local tooling count the same set of files.
 # External FetchContent sources (Dawn, Skia, mbedTLS, QuickJS,
 # Catch2, etc.) and our test trees are never counted as coverage-
-# bearing. See planning/coverage-tooling-decision-2026-04-21.md §4.
+# bearing. See planning/coverage-tooling-decision-2026-04-21.md section 4.
 #
-# `ignore` is a TOP-LEVEL key in Codecov config — nesting it under
+# `ignore` is a TOP-LEVEL key in Codecov config - nesting it under
 # `coverage:` silently no-ops, which would count files we explicitly
 # want excluded and skew the baseline metrics. See Codecov config
 # schema: https://docs.codecov.com/docs/codecov-yaml
@@ -106,7 +106,7 @@ ignore:
   # harness implementation, so Codecov must not count the tests as
   # patch-coverable product code.
   - "tools/harness/visual/tests/**"
-  # ── Aligned with tools/scripts/coverage_config.json `diff_cover_excludes` ──
+  # -- Aligned with tools/scripts/coverage_config.json `diff_cover_excludes` --
   # The Pulp gate (`Diff coverage required` in coverage.yml) excludes these
   # files because they're either thin dispatchers exercised end-to-end via
   # shell-out tests (so direct line coverage doesn't propagate cleanly), or
@@ -114,11 +114,11 @@ ignore:
   # can't instrument uniformly. Without aligning the Codecov bot's ignore
   # list to the same set, the bot's `codecov/patch` check fires red on PRs
   # whose diff is mostly in these files (e.g. PR #1984's viewport-fit lived
-  # almost entirely in window_host_mac.mm — Pulp gate silent, bot screamed
+  # almost entirely in window_host_mac.mm - Pulp gate silent, bot screamed
   # 8.64% patch coverage). Both sides MUST count the same set.
   #
   # Drift between this list and coverage_config.json is detected by
-  # tools/scripts/test_codecov_config_sync.py — keep them in sync.
+  # tools/scripts/test_codecov_config_sync.py - keep them in sync.
   - "**/cmd_loop.cpp"
   - "**/pulp_import_design.cpp"
   - "**/cg_canvas.mm"
@@ -138,7 +138,7 @@ comment:
 
 # Flag definitions are retained for Phase 1 PR 4 (per-OS upload jobs)
 # and for future workflows that genuinely upload one file per flag.
-# The main coverage.yml upload does NOT attach any flags — Codecov
+# The main coverage.yml upload does NOT attach any flags - Codecov
 # rejects single-upload multi-flag submissions with "Multiple flags
 # detected. Please ensure one flag per upload." The per-subsystem /
 # per-platform / per-surface breakdown comes from `component_management`
@@ -150,7 +150,7 @@ comment:
 # means updating both blocks in this file; `tools/scripts/test_codecov_config.py`
 # checks them against the live `core/*` tree so drift fails fast.
 flags:
-  # Core subsystems — one flag per top-level core/** directory.
+  # Core subsystems - one flag per top-level core/** directory.
   audio:
     paths:
       - core/audio/
@@ -208,7 +208,7 @@ flags:
       - core/view/
     carryforward: true
 
-  # Platform flags (4) — cross-cut the subsystem flags. "What's host
+  # Platform flags (4) - cross-cut the subsystem flags. "What's host
   # coverage on Windows?" is answered by cross-filtering `host AND
   # windows`. Paths cover all subsystems because any subsystem can
   # have a Windows shim under its own `platform/windows/` tree.
@@ -238,7 +238,7 @@ flags:
       - core/**/wasapi/
     carryforward: true
 
-  # Surface flags (4) — non-core but first-party:
+  # Surface flags (4) - non-core but first-party:
   cli:
     paths:
       - tools/cli/
@@ -260,16 +260,16 @@ flags:
       - tools/
     carryforward: true
 
-  # OS flags (3) — Phase 1 PR 4 cross-platform coverage matrix. These
+  # OS flags (3) - Phase 1 PR 4 cross-platform coverage matrix. These
   # are NOT path-scoped; every file measured on a given matrix leg is
   # tagged with that OS's flag at upload time via the corresponding
   # matrix entry in .github/workflows/coverage.yml. Federate with the
   # subsystem + platform + surface flags above for cross-filtering:
   # `host AND os-windows` answers "what fraction of core/host is
-  # exercised when tests run on Windows?" — a different question from
+  # exercised when tests run on Windows?" - a different question from
   # `host AND windows` (which reads "what fraction of the windows/
   # shim files are covered at all"). See docs/guides/coverage.md
-  # §"Multi-OS coverage" for the rationale on Codecov-flag unions vs
+  # section "Multi-OS coverage" for the rationale on Codecov-flag unions vs
   # llvm-profdata merge.
   os-linux:
     carryforward: true
@@ -278,7 +278,7 @@ flags:
   os-windows:
     carryforward: true
 
-# carryforward: true on every flag — when a PR doesn't touch
+# carryforward: true on every flag - when a PR doesn't touch
 # a given subsystem, carry over the last known coverage for that
 # flag from main so the dashboard doesn't report a false 0%. Standard
 # Codecov practice for multi-job uploads (we have one job per OS
@@ -303,12 +303,12 @@ component_management:
         threshold: 1%
         informational: true
   individual_components:
-    # Core subsystems — mirror every top-level core/** directory.
+    # Core subsystems - mirror every top-level core/** directory.
     #
     # Subsystems that house platform-specific subtrees (`audio`, `midi`,
     # `view`, `render`, `platform`, `canvas`) explicitly exclude those
     # subtrees so each first-party file lands in exactly one component
-    # bucket — see #1055. Platform-specific code is owned by the
+    # bucket - see #1055. Platform-specific code is owned by the
     # `apple`/`android`/`linux`/`windows` components below; without the
     # `!`-exclude here those files were silently double-counted, inflating
     # coverage for both the subsystem and the platform.
@@ -375,10 +375,10 @@ component_management:
       paths:
         - "core/view/**"
         - "!core/view/platform/**"
-    # Platform (4) — cross-cut the subsystems. Patterns within each
+    # Platform (4) - cross-cut the subsystems. Patterns within each
     # platform component must not overlap each other (Codecov double-
     # counts files matched twice within the same component, inflating
-    # the line totals — caught on #1055 as `platform,android,android`
+    # the line totals - caught on #1055 as `platform,android,android`
     # 3-way matches).
     - component_id: android
       name: android
@@ -403,7 +403,7 @@ component_management:
         - "core/**/win/**"
         - "core/**/windows/**"
         - "core/**/wasapi/**"
-    # Surface (4) — `tools` excludes `tools/cli/**` so the more specific
+    # Surface (4) - `tools` excludes `tools/cli/**` so the more specific
     # `cli` component owns those files; otherwise every CLI file is
     # double-counted (#1055).
     - component_id: cli
