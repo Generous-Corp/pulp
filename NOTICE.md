@@ -492,6 +492,27 @@ copies or substantial portions of the Software.
 
 ---
 
+## Noto Color Emoji
+
+Copyright 2013 Google LLC
+
+SIL Open Font License, Version 1.1
+
+Licensed under the SIL Open Font License, Version 1.1 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at: https://openfontlicense.org
+
+The Font Software may be bundled and redistributed with software under the
+terms of the SIL OFL 1.1; see the Inter entry above for the full license
+text shared by all bundled fonts. The COLRv1 build sourced from
+https://github.com/googlefonts/noto-emoji is bundled at
+`external/fonts/NotoColorEmoji.ttf` and gated on the
+`PULP_BUNDLE_NOTO_COLOR_EMOJI` CMake option (defaults ON for Linux,
+Android, headless, and CI builds; OFF for macOS and Windows release
+builds, which delegate to the platform color-emoji typeface).
+
+---
+
 ## Oboe
 
 Copyright 2017 Google LLC

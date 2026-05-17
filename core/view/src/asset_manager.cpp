@@ -1,12 +1,23 @@
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/text_font_context.hpp>
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
 
 namespace pulp::view {
 
-AssetManager::AssetManager() = default;
+AssetManager::AssetManager() {
+    // pulp emoji-parity — auto-register the best available color-emoji
+    // typeface so plugin authors get visible emoji rendering without
+    // any explicit setup. On macOS / Windows this picks up the system
+    // "Apple Color Emoji" / "Segoe UI Emoji" typeface; on Linux /
+    // Android / headless it falls through to the bundled Noto Color
+    // Emoji (when `PULP_BUNDLE_NOTO_COLOR_EMOJI=ON`). Idempotent — a
+    // subsequent `pulp::canvas::register_emoji_fallback(...)` call from
+    // user code replaces the discovery result.
+    pulp::canvas::register_best_available_emoji_fallback();
+}
 AssetManager::~AssetManager() = default;
 
 AssetManager& AssetManager::instance() {

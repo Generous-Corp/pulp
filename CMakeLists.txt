@@ -768,6 +768,13 @@ endif()
 if(TARGET pulp-bundled-fonts)
     list(APPEND PULP_SDK_TARGETS pulp-bundled-fonts)
 endif()
+# Optional emoji typeface bundle — only present when
+# PULP_BUNDLE_NOTO_COLOR_EMOJI=ON (defaults ON for Linux/Android/headless,
+# OFF for macOS/Windows release builds that prefer the platform color
+# emoji typeface).
+if(TARGET pulp-bundled-noto-color-emoji)
+    list(APPEND PULP_SDK_TARGETS pulp-bundled-noto-color-emoji)
+endif()
 
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")

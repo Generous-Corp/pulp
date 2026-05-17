@@ -7,6 +7,7 @@
 // The API is identical — only the measurement accuracy differs.
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
 #include <cmath>
@@ -18,8 +19,11 @@
 #include "modules/skparagraph/include/ParagraphBuilder.h"
 #include "modules/skparagraph/include/ParagraphStyle.h"
 #include "modules/skparagraph/include/FontCollection.h"
+#include "modules/skparagraph/include/TextStyle.h"
 #include "modules/skshaper/include/SkShaper.h"
 #include "include/core/SkFontMgr.h"
+
+#include <pulp/canvas/text_font_context.hpp>
 
 // Platform font managers — must mirror what SkiaCanvas uses, otherwise
 // `mgr->matchFamilyStyle("Inter", ...)` returns null and SkFont falls
@@ -419,6 +423,10 @@ struct TextShaper::Impl {
         if (!font_mgr) {
             font_mgr = SkFontMgr::RefEmpty();
         }
+        // pulp emoji-parity — kept for backwards compat with the rest of
+        // text_shaper.cpp. The real fallback-aware FontCollection lives
+        // on the shared TextFontContext, which exposes it via
+        // `font_collection()` and rebuilds on registration changes.
         font_collection = sk_sp<skia::textlayout::FontCollection>(
             new skia::textlayout::FontCollection());
         font_collection->setDefaultFontManager(font_mgr);
@@ -444,12 +452,24 @@ struct TextShaper::Impl {
     };
     std::unordered_map<CacheKey, std::unordered_map<std::string, float>, CacheKeyHash> cache;
     std::mutex cache_mutex;
+    // Snapshot of `font_registration_generation()` when `cache` was last
+    // populated. If the generation advances (because `register_font(...)`
+    // or `register_emoji_fallback(...)` ran), the cache must be flushed —
+    // otherwise a label measured before an emoji fallback was wired up
+    // keeps its tofu-width forever.
+    std::uint64_t cached_generation = 0;
 
     float measure_segment(const std::string& text, const std::string& font_family, float font_size) {
+        std::uint64_t current_gen = font_registration_generation();
+
         // Check cache first
         CacheKey key{font_family, font_size};
         {
             std::lock_guard<std::mutex> lock(cache_mutex);
+            if (current_gen != cached_generation) {
+                cache.clear();
+                cached_generation = current_gen;
+            }
             auto font_it = cache.find(key);
             if (font_it != cache.end()) {
                 auto seg_it = font_it->second.find(text);
@@ -497,6 +517,44 @@ struct TextShaper::Impl {
             // overhangs.
             width = font.measureText(text.c_str(), text.size(),
                                      SkTextEncoding::kUTF8, nullptr);
+
+            // pulp emoji-parity — `SkFont::measureText` runs the
+            // primary typeface against every codepoint. Emoji codepoints
+            // (no glyph in Inter etc.) return tofu/.notdef advance,
+            // which collapses Label widths for any string mixing text +
+            // emoji. When `contains_emoji(text)` is true, re-measure
+            // via `ParagraphBuilder` using the shared TextFontContext's
+            // FontCollection — which has the registered color-emoji
+            // typeface in its default-family list, so emoji clusters
+            // shape against the right face and report real advance.
+            if (contains_emoji(text)) {
+                auto ctx = TextFontContext::shared();
+                auto fc = ctx->font_collection();
+                if (fc) {
+                    skia::textlayout::ParagraphStyle pstyle;
+                    skia::textlayout::TextStyle tstyle;
+                    std::vector<SkString> families;
+                    families.emplace_back(font_family.c_str());
+                    std::string emoji_family = ctx->emoji_family_name();
+                    if (!emoji_family.empty()) {
+                        families.emplace_back(emoji_family.c_str());
+                    }
+                    tstyle.setFontFamilies(families);
+                    tstyle.setFontSize(font_size);
+                    pstyle.setTextStyle(tstyle);
+                    auto pb = skia::textlayout::ParagraphBuilder::make(
+                        pstyle, fc);
+                    if (pb) {
+                        pb->addText(text.c_str(), text.size());
+                        auto paragraph = pb->Build();
+                        if (paragraph) {
+                            paragraph->layout(SK_ScalarInfinity);
+                            float pwidth = paragraph->getMaxIntrinsicWidth();
+                            if (pwidth > 0) width = pwidth;
+                        }
+                    }
+                }
+            }
         } else {
             // No platform font manager (or all matchers failed) — fall
             // back to the same character-width estimator the non-Skia
@@ -511,6 +569,14 @@ struct TextShaper::Impl {
         // Cache the result
         {
             std::lock_guard<std::mutex> lock(cache_mutex);
+            // Re-check: a concurrent register_font() between the earlier
+            // probe and this insert would otherwise leave us caching a
+            // measurement that pre-dates the new registration.
+            std::uint64_t now_gen = font_registration_generation();
+            if (now_gen != cached_generation) {
+                cache.clear();
+                cached_generation = now_gen;
+            }
             cache[key][text] = width;
         }
 

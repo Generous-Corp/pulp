@@ -1561,6 +1561,17 @@ target_compile_definitions(pulp-test-canvas PRIVATE
     "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
+# Emoji-parity tests — cover the segmenter + cluster-aware shaping +
+# letter-spacing + cache invalidation paths. Also writes PNGs to
+# `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
+# visual inspection of real-emoji rendering through Skia.
+add_executable(pulp-test-canvas-emoji test_canvas_emoji.cpp)
+target_link_libraries(pulp-test-canvas-emoji PRIVATE
+    pulp::canvas
+    Catch2::Catch2WithMain
+)
+catch_discover_tests(pulp-test-canvas-emoji)
+
 # SDF glyph atlas exploration (#76)
 add_executable(pulp-test-sdf-atlas test_sdf_atlas.cpp)
 target_link_libraries(pulp-test-sdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)

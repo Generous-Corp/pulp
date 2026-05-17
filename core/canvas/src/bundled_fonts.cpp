@@ -15,6 +15,7 @@
 #ifdef PULP_HAS_SKIA
 
 #include <array>
+#include <atomic>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -167,6 +168,20 @@ std::unordered_map<std::string, RegisteredEntry>& registered_fonts() {
     return map;
 }
 
+// Monotonic counter exposed via `font_registration_generation()`. Every
+// successful mutation of process-global font state bumps it so downstream
+// typeface caches (skia_canvas.cpp, text_shaper.cpp) can invalidate
+// themselves on the next lookup. Atomic so callers don't need to hold the
+// registration lock when probing.
+std::atomic<std::uint64_t>& registration_generation() {
+    static std::atomic<std::uint64_t> g{0};
+    return g;
+}
+
+void bump_generation() noexcept {
+    registration_generation().fetch_add(1, std::memory_order_acq_rel);
+}
+
 // Lazy, process-wide platform font manager. Parallels skia_canvas.cpp's
 // `get_font_manager()`. Duplicated here because `bundled_fonts.cpp` is
 // linked privately from pulp-canvas and must not call back into
@@ -244,6 +259,7 @@ bool register_font(const std::uint8_t* data, std::size_t size,
         std::lock_guard<std::mutex> guard(registered_mutex());
         registered_fonts()[family] = RegisteredEntry{std::move(face)};
     }
+    bump_generation();
     return true;
 }
 
@@ -267,6 +283,24 @@ bool is_font_registered(const std::string& family) {
     return map.find(family) != map.end();
 }
 
+std::uint64_t font_registration_generation() noexcept {
+    return registration_generation().load(std::memory_order_acquire);
+}
+
+void bump_font_registration_generation() noexcept {
+    bump_generation();
+}
+
 } // namespace pulp::canvas
 
 #endif // PULP_HAS_SKIA
+
+// Provide the no-Skia stubs so callers can read / bump the generation
+// unconditionally. With no Skia the bump is a no-op (there's nothing
+// downstream to invalidate) and the read always returns 0.
+#ifndef PULP_HAS_SKIA
+namespace pulp::canvas {
+std::uint64_t font_registration_generation() noexcept { return 0; }
+void bump_font_registration_generation() noexcept {}
+} // namespace pulp::canvas
+#endif

@@ -371,6 +371,24 @@
       ]
     },
     {
+      "name": "Noto Color Emoji",
+      "category": "fonts",
+      "license": "SIL OFL 1.1",
+      "version": "noto-emoji main @ 2026-05-17",
+      "source_kind": "vendored",
+      "repository": "https://github.com/googlefonts/noto-emoji",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Bundled cross-platform color-emoji typeface (COLRv1 build). SHA-256: 0ae57fe58645638523ba35f388d93739d292539a9acb84df5700c81b1e1a28d2. Gated by PULP_BUNDLE_NOTO_COLOR_EMOJI CMake option (defaults ON for Linux/Android/headless/CI, OFF for macOS/Windows release builds that use the platform color-emoji typeface).",
+      "source_files": [
+        "external/fonts/NotoColorEmoji.ttf",
+        "external/fonts/README.md",
+        "core/canvas/src/noto_color_emoji.cpp",
+        "core/canvas/src/noto_color_emoji_stub.cpp"
+      ]
+    },
+    {
       "name": "Oboe",
       "category": "audio",
       "license": "Apache-2.0",

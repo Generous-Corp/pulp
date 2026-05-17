@@ -19,6 +19,12 @@ target_sources(pulp-canvas PRIVATE
     src/msdf_atlas.cpp
     src/sdf_atlas_cache.cpp
     src/path_to_sdf.cpp
+    # emoji_segmenter is Skia-free so it builds on every config and
+    # supports the SkShaper / SkParagraph callers as well as standalone
+    # unit tests. Its job is to pre-segment text into emoji vs default
+    # runs so HarfBuzz can shape multi-codepoint emoji clusters as one
+    # cluster — see the header for the contract.
+    src/emoji_segmenter.cpp
     # font_registry_stubs.cpp provides non-Skia fallbacks for the public
     # font-registration API (pulp #1150). The real implementations live in
     # bundled_fonts.cpp, which is only compiled under PULP_HAS_SKIA. This
@@ -58,6 +64,10 @@ if(PULP_HAS_SKIA)
     target_sources(pulp-canvas PRIVATE
         src/skia_canvas.cpp
         src/bundled_fonts.cpp
+        # TextFontContext glues emoji_segmenter into the SkShaper +
+        # SkParagraph paths and owns the per-context FontCollection used
+        # for Label/measurement.
+        src/text_font_context.cpp
     )
 
     # Embed external/fonts/*.ttf into a static lib that pulp-canvas links
@@ -85,6 +95,37 @@ if(PULP_HAS_SKIA)
     # to add pulp-bundled-fonts to PULP_SDK_TARGETS for installs.
     set_target_properties(pulp-bundled-fonts PROPERTIES
         EXPORT_NAME bundled-fonts)
+
+    # Optional bundled Noto Color Emoji typeface — gated by the
+    # PULP_BUNDLE_NOTO_COLOR_EMOJI option so macOS / Windows release
+    # builds can drop the ~5 MB payload and delegate to the platform
+    # color-emoji typeface instead. Defaults ON for Linux, Android,
+    # headless / CI builds, and developer builds that want deterministic
+    # emoji rendering across platforms.
+    set(_pulp_default_noto ON)
+    if(APPLE OR WIN32)
+        # Platform color-emoji typeface ("Apple Color Emoji" / "Segoe UI
+        # Emoji") covers the release path; default off to avoid bloat.
+        set(_pulp_default_noto OFF)
+    endif()
+    option(PULP_BUNDLE_NOTO_COLOR_EMOJI
+           "Embed Noto Color Emoji as the cross-platform color-emoji fallback"
+           ${_pulp_default_noto})
+
+    if(PULP_BUNDLE_NOTO_COLOR_EMOJI)
+        pulp_add_binary_data(pulp-bundled-noto-color-emoji
+            SOURCES
+                ${CMAKE_SOURCE_DIR}/external/fonts/NotoColorEmoji.ttf
+            NAMESPACE pulp_bundled_noto_color_emoji
+        )
+        set_target_properties(pulp-bundled-noto-color-emoji PROPERTIES
+            EXPORT_NAME bundled-noto-color-emoji)
+        target_link_libraries(pulp-canvas PRIVATE pulp-bundled-noto-color-emoji)
+        target_sources(pulp-canvas PRIVATE src/noto_color_emoji.cpp)
+        target_compile_definitions(pulp-canvas PRIVATE PULP_BUNDLE_NOTO_COLOR_EMOJI=1)
+    else()
+        target_sources(pulp-canvas PRIVATE src/noto_color_emoji_stub.cpp)
+    endif()
 
     target_link_libraries(pulp-canvas PUBLIC skia::skia)
     if(TARGET skia::dawn)

@@ -38,6 +38,9 @@ bool is_font_registered(const std::string&) {
     return false;
 }
 
+std::uint64_t font_registration_generation() noexcept { return 0; }
+void bump_font_registration_generation() noexcept {}
+
 } // namespace pulp::canvas
 
 #endif // !PULP_HAS_SKIA

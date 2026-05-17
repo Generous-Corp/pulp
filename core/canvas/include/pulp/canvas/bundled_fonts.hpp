@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -85,6 +86,26 @@ bool register_font_file(const std::string& path,
 /// Comparison is exact-string (case-sensitive) against the registered
 /// name (override-or-table-derived).
 bool is_font_registered(const std::string& family);
+
+/// Monotonic counter that bumps every time a typeface registration mutates
+/// process-global font state (`register_font`, `register_font_file`,
+/// `register_emoji_fallback`). Downstream caches that key on typeface
+/// identity (the static `SkTypeface` cache in `skia_canvas.cpp`, the
+/// `(family,size)->text->width` cache in `text_shaper.cpp`) sample this
+/// before every lookup and flush themselves when it has advanced.
+///
+/// Without this, re-registering "MyBrand" with a different .ttf — or
+/// swapping the emoji fallback mid-process — would still resolve to the
+/// previously-cached `SkTypeface`, contradicting `register_font`'s
+/// documented "idempotent, invalidates the cache" contract.
+std::uint64_t font_registration_generation() noexcept;
+
+/// Force-bump the registration generation. Called from
+/// `register_emoji_fallback(...)` (defined in `text_font_context.cpp`)
+/// and other entry points that mutate process-global font state outside
+/// `register_font(...)`. Avoid calling from regular code — the standard
+/// registration entry points handle it for you.
+void bump_font_registration_generation() noexcept;
 
 #ifdef PULP_HAS_SKIA
 
