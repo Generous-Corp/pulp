@@ -946,6 +946,8 @@ TEST_CASE("StreamingWriter rejects invalid opens and closed writes",
         path.string(), 44100, static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1, 16));
     REQUIRE_FALSE(writer.open(
         path.string(), std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint16_t>::max(), 32));
+    REQUIRE_FALSE(writer.open(path.string(), 44100, std::numeric_limits<uint32_t>::max(), 16));
+    REQUIRE_FALSE(writer.open(path.string(), std::numeric_limits<uint32_t>::max(), 2, 16));
     REQUIRE_FALSE(writer.is_open());
 
     REQUIRE(writer.open(path.string(), 44100, 2, 16));
@@ -959,6 +961,7 @@ TEST_CASE("StreamingWriter rejects invalid opens and closed writes",
     REQUIRE(writer.write_frames(invalid_channels, 2, 1) == 0);
     REQUIRE(writer.write_frames(invalid_channels, 2, 0) == 0);
     REQUIRE(writer.write_frames(invalid_channels, 2, -1) == 0);
+
     const float* valid_channels[] = {&sample, &sample};
     REQUIRE(writer.write_frames(valid_channels, 2, std::numeric_limits<int>::max()) == 0);
     REQUIRE(writer.frames_written() == 0);
