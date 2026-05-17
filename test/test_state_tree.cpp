@@ -214,6 +214,57 @@ TEST_CASE("StateTree child insertion clamps invalid indexes and skips null child
     REQUIRE(root->child(1)->type_name() == "last");
 }
 
+TEST_CASE("StateTree reparenting detaches children from the old parent",
+          "[state][tree][codecov]") {
+    auto old_parent = StateTree::create("old");
+    auto new_parent = StateTree::create("new");
+    auto sibling = StateTree::create("sibling");
+    auto child = StateTree::create("child");
+
+    int old_removed_count = 0;
+    old_parent->add_child_removed_listener(
+        [&](StateTree&, StateTree& removed, int index) {
+            REQUIRE(&removed == child.get());
+            REQUIRE(index == 0);
+            ++old_removed_count;
+        });
+
+    old_parent->add_child(child);
+    old_parent->add_child(sibling);
+    REQUIRE(old_parent->child_count() == 2);
+
+    new_parent->add_child(child);
+
+    REQUIRE(old_removed_count == 1);
+    REQUIRE(old_parent->child_count() == 1);
+    REQUIRE(old_parent->child(0) == sibling);
+    REQUIRE(new_parent->child_count() == 1);
+    REQUIRE(new_parent->child(0) == child);
+    REQUIRE(child->parent() == new_parent.get());
+}
+
+TEST_CASE("StateTree insert reparents children at the requested new index",
+          "[state][tree][codecov]") {
+    auto old_parent = StateTree::create("old");
+    auto new_parent = StateTree::create("new");
+    auto first = StateTree::create("first");
+    auto moved = StateTree::create("moved");
+    auto last = StateTree::create("last");
+
+    old_parent->add_child(moved);
+    new_parent->add_child(first);
+    new_parent->add_child(last);
+
+    new_parent->insert_child(1, moved);
+
+    REQUIRE(old_parent->child_count() == 0);
+    REQUIRE(new_parent->child_count() == 3);
+    REQUIRE(new_parent->child(0) == first);
+    REQUIRE(new_parent->child(1) == moved);
+    REQUIRE(new_parent->child(2) == last);
+    REQUIRE(moved->parent() == new_parent.get());
+}
+
 // ── Listeners ───────────────────────────────────────────────────────────
 
 TEST_CASE("StateTree property change listener", "[state][tree]") {
