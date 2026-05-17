@@ -273,21 +273,51 @@ TEST_CASE("object-fit unknown keyword falls back to fill",
     REQUIRE_THAT(cv.draws[0].dh, WithinAbs(100.0f, 0.001f));
 }
 
-TEST_CASE("object-position pixel lengths offset by slack",
+TEST_CASE("object-position: length tokens offset by slack",
           "[widgets][image][object-position][coverage][phase3]") {
     using Catch::Matchers::WithinAbs;
     ImageView v;
-    configure_view(v, 200, 140, "contain", "25px 10px");
+    configure_view(v, 200, 150, "contain", "25px 10px");
     ImageStubCanvas cv;
-    cv.img_w = 100.0f;
-    cv.img_h = 100.0f;
+    cv.img_w = 50.0f; cv.img_h = 50.0f;
 
     v.paint(cv);
 
     REQUIRE(cv.draws.size() == 1);
-    REQUIRE_FALSE(cv.draws[0].has_src);
-    REQUIRE_THAT(cv.draws[0].dw, WithinAbs(140.0f, 0.001f));
-    REQUIRE_THAT(cv.draws[0].dh, WithinAbs(140.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dw, WithinAbs(150.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dh, WithinAbs(150.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dx, WithinAbs(25.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dy, WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("object-position: malformed numeric tokens fall back to center",
+          "[widgets][image][object-position][coverage][phase3]") {
+    using Catch::Matchers::WithinAbs;
+    ImageView v;
+    configure_view(v, 200, 150, "contain", "25pxjunk 10em");
+    ImageStubCanvas cv;
+    cv.img_w = 50.0f; cv.img_h = 50.0f;
+
+    v.paint(cv);
+
+    REQUIRE(cv.draws.size() == 1);
+    REQUIRE_THAT(cv.draws[0].dw, WithinAbs(150.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dh, WithinAbs(150.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dx, WithinAbs(25.0f, 0.001f));
+    REQUIRE_THAT(cv.draws[0].dy, WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("object-position: non-finite numeric tokens fall back to center",
+          "[widgets][image][object-position][coverage][phase3]") {
+    using Catch::Matchers::WithinAbs;
+    ImageView v;
+    configure_view(v, 200, 150, "contain", "1e999% 25%");
+    ImageStubCanvas cv;
+    cv.img_w = 50.0f; cv.img_h = 50.0f;
+
+    v.paint(cv);
+
+    REQUIRE(cv.draws.size() == 1);
     REQUIRE_THAT(cv.draws[0].dx, WithinAbs(25.0f, 0.001f));
     REQUIRE_THAT(cv.draws[0].dy, WithinAbs(0.0f, 0.001f));
 }
