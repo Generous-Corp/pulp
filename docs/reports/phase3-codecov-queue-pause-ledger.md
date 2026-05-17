@@ -6083,33 +6083,40 @@ no uncovered measured diff lines and OK at/above the 75% floor. The worktree is
 clean and local-only at commit `e1bb1c57c`; it has not been pushed or submitted
 yet.
 
-2026-05-16 22:22 PDT, updated 23:02 PDT: completed a second local-only held
+2026-05-16 22:22 PDT, updated 23:12 PDT: completed a second local-only held
 batch in `feature/phase3-codecov-batch-689` without opening a PR. The batch
-adds 19 focused audio/audio-file/offline-processing tests across new
-`test/test_offline_processor_edges.cpp`, its `test/CMakeLists.txt` target, and
-`test/test_audio_file.cpp`, plus narrow source hardening in
-`core/audio/src/offline_processor.cpp` and `core/audio/src/audio_file.cpp` so
-ragged `AudioFileData` is rejected before interleaving/writing instead of
+adds 20 focused audio/audio-file/audio-excerpt/offline-processing tests across
+new `test/test_offline_processor_edges.cpp`, its `test/CMakeLists.txt` target,
+`test/test_audio_file.cpp`, and `test/test_audio_excerpt.cpp`, plus narrow
+source hardening in `core/audio/src/offline_processor.cpp`,
+`core/audio/src/audio_file.cpp`, and
+`core/audio/include/pulp/audio/subsection_reader.hpp` so ragged `AudioFileData`
+is rejected or zero-filled before interleaving/writing/extracting instead of
 reading past a short channel. Coverage includes invalid `offline_process`
 inputs, ragged and empty trailing channel rejection, mono/stereo output shape,
 block metadata and tail frame counts, input interleaving and output
 deinterleaving, output buffer clearing, tail input padding clearing, block-size
 boundary behavior, `apply_gain` empty/multi-channel/zero/negative/ragged-channel
-behavior, and WAV writer rejection for non-empty ragged channels. Local
-validation passed: `git diff --check`; built `pulp-test-audio-file` and
+behavior, WAV writer rejection for non-empty ragged channels, and
+`AudioSubsectionReader` sample/read/extract zero-fill behavior for ragged source
+channels. Local validation passed: `git diff --check`; built
+`pulp-test-audio-excerpt`, `pulp-test-audio-file`, and
 `pulp-test-offline-processor-edges`; ran direct
+`./build/test/pulp-test-audio-excerpt "AudioSubsectionReader zero-fills ragged source channels"`
+(14 assertions / 1 case); ran direct
 `./build/test/pulp-test-audio-file "AudioFileData shape helpers and WAV writer reject first-channel empties"`
 (13 assertions / 1 case); ran direct
 `./build/test/pulp-test-offline-processor-edges` (59 assertions / 18 cases);
-ran `ctest --test-dir build -R 'AudioFileData shape helpers|offline_process|apply_gain'
+ran `ctest --test-dir build -R 'AudioSubsectionReader zero-fills|AudioFileData shape helpers|offline_process|apply_gain'
 --output-on-failure`; and ran
-`PULP_DIFF_COVER_CTEST_REGEX='AudioFileData shape helpers|offline_process|apply_gain'
-tools/scripts/local_diff_cover.sh pulp-test-audio-file pulp-test-offline-processor-edges`,
-which reported 100% diff coverage for `core/audio/src/audio_file.cpp` and
-`core/audio/src/offline_processor.cpp` and OK at/above the 75% floor. The
-worktree is clean and local-only at commit `0b17ac730`; it has not been pushed
-or submitted yet. Because this held batch now includes a real source fix, the
-future combined PR should use a `fix(audio): ...` title and include any
-version-bump trailer/commit required by Shipyard. Together with held #687 this
-gives 45 locally validated tests ready to combine into a larger future PR once
-the active GitHub queue has room.
+`PULP_DIFF_COVER_CTEST_REGEX='AudioSubsectionReader zero-fills|AudioFileData shape helpers|offline_process|apply_gain'
+tools/scripts/local_diff_cover.sh pulp-test-audio-excerpt pulp-test-audio-file pulp-test-offline-processor-edges`,
+which reported 100% diff coverage for
+`core/audio/include/pulp/audio/subsection_reader.hpp`,
+`core/audio/src/audio_file.cpp`, and `core/audio/src/offline_processor.cpp` and
+OK at/above the 75% floor. The worktree is clean and local-only at commit
+`a7edf6059`; it has not been pushed or submitted yet. Because this held batch
+now includes a real source fix, the future combined PR should use a
+`fix(audio): ...` title and include any version-bump trailer/commit required by
+Shipyard. Together with held #687 this gives 46 locally validated tests ready to
+combine into a larger future PR once the active GitHub queue has room.
