@@ -161,6 +161,7 @@ target_sources(pulp-view PRIVATE
     src/theme_contrast.cpp
     src/theme_presets.cpp
     src/appearance_tracker.cpp
+    src/motion_preferences.cpp
     src/asset_manager.cpp
     src/view.cpp
     src/yoga_layout.cpp
@@ -341,6 +342,7 @@ if(APPLE)
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
+            platform/mac/motion_preferences_mac.mm
             # #299: host-backend registration APIs. The stub files
             # compile set_factory/set_screenshot_provider etc.
             # unconditionally; only the create/render impls are
@@ -372,6 +374,7 @@ elseif(WIN32)
         src/window_host_stub.cpp
         platform/win/accessibility_win.cpp
         platform/win/appearance_win.cpp
+        platform/win/motion_preferences_win.cpp
     )
     # Workstream 04 #247 phase 1: UIAutomationCore for
     # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
