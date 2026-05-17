@@ -75,9 +75,18 @@ TEST_CASE("PropertiesFile numeric getters reject trailing text",
     PropertiesFile props;
     props.set_string("count", "12abc");
     props.set_string("gain", "3.5ms");
+    props.set_string("partial_count", "42xyz");
+    props.set_string("partial_gain", "1.5db");
+    props.set_string("spaced_count", "42 \t\n");
+    props.set_string("spaced_gain", "1.5 \r\n");
 
     REQUIRE_FALSE(props.get_int("count").has_value());
     REQUIRE_FALSE(props.get_double("gain").has_value());
+    REQUIRE_FALSE(props.get_int("partial_count").has_value());
+    REQUIRE_FALSE(props.get_double("partial_gain").has_value());
+    REQUIRE(props.get_int("spaced_count") == 42);
+    REQUIRE(props.get_double("spaced_gain").has_value());
+    REQUIRE_THAT(*props.get_double("spaced_gain"), WithinAbs(1.5, 0.001));
 }
 
 TEST_CASE("PropertiesFile numeric getters reject out-of-range strings",
