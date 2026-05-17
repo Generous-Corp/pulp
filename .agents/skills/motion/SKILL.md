@@ -31,15 +31,22 @@ source; **attach a trace and read the numbers**.
 
 ## Quick decision
 
+Eight paths — pick by what you have, all eight terminate at the same
+`motion::Coordinator` so fixtures, scrubber, cost, reduced-motion, and
+provenance work identically across surfaces.
+
 | You have | Path | Tool |
 |---|---|---|
-| A running app + a node id + a scalar / geometry of interest | **Runtime trace** | `Motion.startTrace` over the inspector wire |
-| A `ScrollView` whose offset / visible rect / content size you need to observe | **Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
-| A captured frame sequence (no app instrumentation available) | **Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
-| A previously recorded `.motion.jsonl` fixture | **Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
-| An interaction that drives the suspect motion | **Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
-| A fixture + an inspector client (design review / CI triage) | **Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` over the inspector wire |
-| Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both** | Record a fixture from the import, assert timing/monotonicity |
+| A running app + a node id + a scalar / geometry of interest | **A — Runtime trace** | `Motion.startTrace` over the inspector wire |
+| A `ScrollView` whose offset / visible rect / content size you need to observe | **A — Runtime trace (scroll)** | `Trace.scroll_geometry(name, scroll_view, props)` — emits `contentOffsetX/Y`, `visibleRect*`, `contentSize*`, `scrollableMax*`, `inset*` |
+| A captured frame sequence (no app instrumentation available) | **B — Visual analysis** | `tools/motion/visual/analyze_sequence.py` |
+| A previously recorded `.motion.jsonl` fixture | **C — Replay + assert** | `motion::replay_fixture` + `motion::assert_matches` |
+| An interaction that drives the suspect motion | **D — Input record + replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
+| A fixture + an inspector client (design review / CI triage) | **E — Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` over the inspector wire |
+| "Which animation is expensive and why?" | **F — Cost attribution** | `Motion.enableCost` + `CostAttributor` + `make_render_cost_probe` |
+| SwiftUI / UIKit / AppKit / iOS / macOS / AUv3 host code path | **G — Swift native** | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
+| Jetpack Compose or Android `View` code path | **H — Android native** | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
+| Imported design + intent doc (e.g. "fade in 350 ms ease-out") | **Both A + C** | Record a fixture from the import, assert timing / monotonicity |
 
 ## Path A — Runtime trace
 

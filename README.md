@@ -63,6 +63,7 @@ See [docs/agent-integrations.md](docs/agent-integrations.md) for details on each
 - Component inspector for debugging view hierarchy
 - AI design tool (`pulp design`) for generating UIs from prompts
 - Import from Figma, Stitch, and Pencil via MCP
+- Agent-first motion observability — runtime traces, fixture record/replay/assert, visual analysis, Swift + Kotlin facades, scrubber, cost attribution ([guide](docs/guides/motion-observability.md))
 
 **DSP & Audio**
 - 30+ signal processors: oscillator, filters, compressor, reverb, delay, FFT, envelope follower, and more

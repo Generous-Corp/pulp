@@ -7,7 +7,7 @@ Debug a motion behavior the framework's way: attach a runtime trace over
 the inspector wire, capture a fixture, and read the numbers — don't
 guess from source.
 
-## Six paths (pick by what you have)
+## Eight paths (pick by what you have)
 
 | You have | Path | Tool |
 |---|---|---|
@@ -17,6 +17,8 @@ guess from source.
 | An interaction to record | **Input record/replay** | `motion::make_input_recorder` + `motion::replay_inputs` |
 | A fixture to scrub | **Timeline scrubber** | `Motion.loadFixture` + `Motion.scrubTo` |
 | "Which animation is expensive?" | **Cost attribution** | `Motion.enableCost` + `CostAttributor` |
+| SwiftUI / UIKit / AppKit code path | **Swift facade** (Path G) | `View.pulpMotionTrace { Trace.* }` / `PulpMotionGeometryProbe` |
+| Compose / Android View code path | **Kotlin facade** (Path H) | `Modifier.pulpMotionGeometry { +Trace.* }` / `View.pulpMotionTrace` |
 
 ## Fastest path — quick trace via the standalone host
 

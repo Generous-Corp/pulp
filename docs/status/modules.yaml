@@ -100,9 +100,17 @@ modules:
       reference/imports/designmd.md.
       Motion observability subsystem (`pulp::view::motion`) — agent-first runtime
       sampler bound to FrameClock with epsilon-bounded Start/End burst framing,
-      paint_all()-order presentation geometry walker, publish channel + firehose,
-      versioned JSONL record/replay fixtures, and assertion helpers (is_monotonic,
-      settling_time_seconds, overshoot, start_delay_seconds, frame_jitter_seconds).
+      paint_all()-order presentation geometry walker, `scroll_geometry` trace
+      surfacing `ScrollView` contentOffset / visibleRect / contentSize /
+      scrollableMax / inset, publish channel + firehose, versioned JSONL
+      record/replay fixtures, and assertion helpers (is_monotonic,
+      settling_time_seconds, overshoot, start_delay_seconds,
+      frame_jitter_seconds, local_step_outlier_ratio).
+      Swift facade (`apple/Sources/PulpSwift/PulpMotion.swift`) and Kotlin
+      facade (`android/app/src/main/kotlin/com/pulp/motion/PulpMotion.kt`)
+      mirror the trace-builder DSL on SwiftUI / UIKit / AppKit and on
+      Compose / Android View, both gated by `PulpMotionBackend` seams for
+      JVM / `swift test` unit-test isolation.
       `MotionPreferences` (sibling of `AppearanceTracker`) reads the OS
       reduced-motion preference and exposes `MotionPolicy` (Full/Reduced/Off) +
       clamped `duration_scale`; Tween, ValueAnimation, TransitionSpec, and
@@ -112,6 +120,10 @@ modules:
       re-emits the prefix of events with `frame <= playhead` over the inspector
       wire via `Motion.loadFixture` / `.scrubTo` / `.play` / `.pause` — passive
       timeline replay for design review and CI artifact triage.
+      Visual-analyzer (`tools/motion/visual/analyze_sequence.py`) adds
+      `--grid` (alphanumeric A1..H12 cell overlay), `--trim` (drop idle
+      prefix/suffix), `--affine` (translation / rotation / scale first→last),
+      and a claim-evidence preamble with per-pair confidence scores.
       Off by default; see guides/motion-observability.md.
     status: usable
     dependencies: [canvas, events, state]

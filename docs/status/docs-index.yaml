@@ -52,7 +52,7 @@ docs:
   - slug: motion-observability
     path: guides/motion-observability.md
     kind: guide
-    summary: Agent-first motion observability — runtime scalar/geometry traces, presentation walker, fixtures (record/replay/assert), visual-analysis pipeline, inspector Motion.* domain
+    summary: Agent-first motion observability — runtime scalar/geometry/scroll-geometry traces, presentation walker, fixtures (record/replay/assert), input record/replay, timeline scrubber, cost attribution, reduced-motion policy, Swift + Kotlin facades, visual-analysis pipeline (grid/trim/affine + claim-evidence), inspector Motion.* domain
 
   - slug: parameters
     path: guides/parameters.md
