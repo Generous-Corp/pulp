@@ -107,3 +107,70 @@ TEST_CASE("SplashScreen paint records default text and image paths",
     REQUIRE(image_canvas.count(DrawCommand::Type::draw_image) == 1);
     REQUIRE(has_image(image_canvas, "assets/splash.png"));
 }
+
+TEST_CASE("SplashScreen manual dismiss waits for fade-out before callback",
+          "[view][splash][coverage][phase3]") {
+    SplashScreen splash;
+    splash.set_fade_in(0.1f);
+    splash.set_duration(10.0f);
+    splash.set_fade_out(0.5f);
+
+    int dismissed = 0;
+    splash.on_dismissed = [&] { ++dismissed; };
+
+    splash.show();
+    REQUIRE(splash.advance(0.1f));
+    splash.dismiss();
+    REQUIRE(splash.is_showing());
+    REQUIRE(splash.advance(0.25f));
+    REQUIRE(dismissed == 0);
+
+    REQUIRE_FALSE(splash.advance(0.25f));
+    REQUIRE_FALSE(splash.is_showing());
+    REQUIRE(dismissed == 1);
+}
+
+TEST_CASE("SplashScreen show restarts state after hidden dismiss",
+          "[view][splash][coverage][phase3]") {
+    SplashScreen splash;
+    splash.set_fade_in(0.2f);
+    splash.set_duration(0.2f);
+    splash.set_fade_out(0.2f);
+
+    splash.dismiss();
+    REQUIRE_FALSE(splash.is_showing());
+    REQUIRE_FALSE(splash.advance(1.0f));
+
+    splash.show();
+    REQUIRE(splash.is_showing());
+    REQUIRE(splash.advance(0.1f));
+
+    RecordingCanvas canvas;
+    splash.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(has_text(canvas, "Loading..."));
+}
+
+TEST_CASE("SplashScreen can be shown again after completion",
+          "[view][splash][coverage][phase3]") {
+    SplashScreen splash;
+    splash.set_fade_in(0.01f);
+    splash.set_duration(0.01f);
+    splash.set_fade_out(0.01f);
+
+    int dismissed = 0;
+    splash.on_dismissed = [&] { ++dismissed; };
+
+    splash.show();
+    REQUIRE(splash.advance(0.01f));
+    REQUIRE(splash.advance(0.01f));
+    REQUIRE_FALSE(splash.advance(0.01f));
+    REQUIRE(dismissed == 1);
+
+    splash.show();
+    REQUIRE(splash.is_showing());
+    REQUIRE(splash.advance(0.01f));
+    REQUIRE(splash.advance(0.01f));
+    REQUIRE_FALSE(splash.advance(0.01f));
+    REQUIRE(dismissed == 2);
+}

@@ -455,3 +455,75 @@ TEST_CASE("WindowManager all window types", "[view][multiwindow]") {
 
     REQUIRE(mgr.window_count() == 5);
 }
+
+TEST_CASE("WindowManager replacing a message handler drops the previous callback",
+          "[view][multiwindow][coverage][phase3]") {
+    WindowManager mgr;
+    View root;
+    StubWindowHost host;
+    auto id = mgr.register_window(&host, &root, WindowType::main);
+
+    int first = 0;
+    int second = 0;
+    mgr.set_message_handler(id, [&](const WindowMessage&) { ++first; });
+    mgr.set_message_handler(id, [&](const WindowMessage& msg) {
+        REQUIRE(msg.type == "replace");
+        ++second;
+    });
+
+    WindowMessage msg;
+    msg.type = "replace";
+    mgr.send_message(id, msg);
+    REQUIRE(first == 0);
+    REQUIRE(second == 1);
+}
+
+TEST_CASE("WindowManager saved state captures visibility and restore preserves other windows",
+          "[view][multiwindow][coverage][phase3]") {
+    WindowManager mgr;
+    View first_root;
+    View second_root;
+    StubWindowHost first_host;
+    StubWindowHost second_host;
+    auto first = mgr.register_window(&first_host, &first_root, WindowType::main);
+    auto second = mgr.register_window(&second_host, &second_root, WindowType::dialog);
+
+    WindowState hidden;
+    hidden.x = 12.0f;
+    hidden.y = 34.0f;
+    hidden.width = 640.0f;
+    hidden.height = 480.0f;
+    hidden.screen_id = 7;
+    hidden.is_visible = false;
+    mgr.restore_state(first, hidden);
+
+    WindowState ignored;
+    ignored.x = 99.0f;
+    mgr.restore_state(99999, ignored);
+
+    auto states = mgr.save_all_states();
+    REQUIRE(states.size() == 2);
+    REQUIRE(states.at(first).x == 12.0f);
+    REQUIRE(states.at(first).screen_id == 7);
+    REQUIRE_FALSE(states.at(first).is_visible);
+    REQUIRE(states.at(second).is_visible);
+    REQUIRE(states.at(second).width == 400.0f);
+}
+
+TEST_CASE("WindowManager shared theme getter and later registration stay in sync",
+          "[view][multiwindow][coverage][phase3]") {
+    WindowManager mgr;
+    Theme theme = Theme::dark();
+    theme.colors["bg.primary"] = color_from_hex(0x123456);
+    mgr.set_shared_theme(theme);
+
+    REQUIRE(mgr.shared_theme().color("bg.primary")->r8() == 0x12);
+
+    View root;
+    StubWindowHost host;
+    mgr.register_window(&host, &root, WindowType::palette);
+    auto resolved = root.resolve_color("bg.primary");
+    REQUIRE(resolved.r8() == 0x12);
+    REQUIRE(resolved.g8() == 0x34);
+    REQUIRE(resolved.b8() == 0x56);
+}

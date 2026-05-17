@@ -170,3 +170,83 @@ TEST_CASE("FrameClock zero dt is valid", "[view][frame_clock]") {
     REQUIRE(called == 1);
     REQUIRE_THAT(clock.time(), WithinAbs(0.0, 0.001));
 }
+
+TEST_CASE("FrameClock subscriber added during tick starts on the next frame",
+          "[view][frame_clock][coverage][phase3]") {
+    FrameClock clock;
+    int first_calls = 0;
+    int added_calls = 0;
+    bool added = false;
+
+    clock.subscribe([&](float) {
+        ++first_calls;
+        if (!added) {
+            added = true;
+            clock.subscribe([&](float) {
+                ++added_calls;
+                return true;
+            });
+        }
+        return true;
+    });
+
+    clock.tick(0.010f);
+    REQUIRE(first_calls == 1);
+    REQUIRE(added_calls == 0);
+    REQUIRE(clock.has_active_subscribers());
+
+    clock.tick(0.020f);
+    REQUIRE(first_calls == 2);
+    REQUIRE(added_calls == 1);
+}
+
+TEST_CASE("FrameClock subscriber can unsubscribe itself while returning true",
+          "[view][frame_clock][coverage][phase3]") {
+    FrameClock clock;
+    int id = 0;
+    int calls = 0;
+    id = clock.subscribe([&](float) {
+        ++calls;
+        clock.unsubscribe(id);
+        return true;
+    });
+
+    clock.tick(0.016f);
+    REQUIRE(calls == 1);
+    REQUIRE_FALSE(clock.has_active_subscribers());
+
+    clock.tick(0.016f);
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("FrameClock false-return compaction preserves later active subscribers",
+          "[view][frame_clock][coverage][phase3]") {
+    FrameClock clock;
+    int first = 0;
+    int second = 0;
+    int third = 0;
+
+    clock.subscribe([&](float) {
+        ++first;
+        return false;
+    });
+    clock.subscribe([&](float) {
+        ++second;
+        return true;
+    });
+    clock.subscribe([&](float) {
+        ++third;
+        return false;
+    });
+
+    clock.tick(0.016f);
+    REQUIRE(first == 1);
+    REQUIRE(second == 1);
+    REQUIRE(third == 1);
+    REQUIRE(clock.has_active_subscribers());
+
+    clock.tick(0.016f);
+    REQUIRE(first == 1);
+    REQUIRE(second == 2);
+    REQUIRE(third == 1);
+}
