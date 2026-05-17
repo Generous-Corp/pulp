@@ -36,11 +36,11 @@ bool EventLoop::is_current_thread() const {
 }
 
 void EventLoop::stop() {
-    if (!running_.exchange(false, std::memory_order_acq_rel))
+    if (running_.exchange(false, std::memory_order_acq_rel))
+        cv_.notify_one();
+    if (!thread_.joinable() || thread_.get_id() == std::this_thread::get_id())
         return;
-    cv_.notify_one();
-    if (thread_.joinable())
-        thread_.join();
+    thread_.join();
 }
 
 void EventLoop::run() {

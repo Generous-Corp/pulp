@@ -130,6 +130,25 @@ TEST_CASE("EventLoop reports thread identity and stop state",
     REQUIRE_FALSE(loop.running());
 }
 
+TEST_CASE("EventLoop can be stopped from its own thread",
+          "[events][event_loop][codecov]") {
+    EventLoop loop;
+    std::atomic<bool> ran_on_loop{false};
+    std::atomic<bool> stop_returned{false};
+
+    loop.dispatch([&] {
+        ran_on_loop.store(loop.is_current_thread());
+        loop.stop();
+        stop_returned.store(true);
+    });
+
+    REQUIRE(wait_until([&] { return stop_returned.load(); }, 2000ms));
+    REQUIRE(ran_on_loop.load());
+    REQUIRE_FALSE(loop.running());
+    loop.stop();
+    REQUIRE_FALSE(loop.running());
+}
+
 TEST_CASE("EventLoop stop drops future delayed work",
           "[events][event_loop][issue-642]") {
     std::atomic<int> calls{0};
