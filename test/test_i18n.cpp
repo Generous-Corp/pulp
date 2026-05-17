@@ -1,9 +1,57 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/i18n.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <cstdlib>
 #include <fstream>
+#include <optional>
+#include <string>
 
 using namespace pulp::runtime;
+
+namespace {
+
+class ScopedLang {
+public:
+    explicit ScopedLang(const char* value) {
+        if (const char* existing = std::getenv("LANG"))
+            previous_ = std::string(existing);
+        if (value)
+            set(value);
+        else
+            unset();
+    }
+
+    ~ScopedLang() {
+        if (previous_)
+            set(previous_->c_str());
+        else
+            unset();
+    }
+
+    ScopedLang(const ScopedLang&) = delete;
+    ScopedLang& operator=(const ScopedLang&) = delete;
+
+private:
+    static void set(const char* value) {
+#if defined(_WIN32)
+        _putenv_s("LANG", value);
+#else
+        setenv("LANG", value, 1);
+#endif
+    }
+
+    static void unset() {
+#if defined(_WIN32)
+        _putenv_s("LANG", "");
+#else
+        unsetenv("LANG");
+#endif
+    }
+
+    std::optional<std::string> previous_;
+};
+
+} // namespace
 
 // ── In-memory operations ────────────────────────────────────────────────
 
@@ -327,4 +375,21 @@ TEST_CASE("i18n global tr supports argument substitution", "[runtime][i18n][issu
 TEST_CASE("i18n system_locale returns non-empty", "[runtime][i18n]") {
     auto locale = LocalisedStrings::system_locale();
     REQUIRE_FALSE(locale.empty());
+}
+
+TEST_CASE("i18n system_locale normalizes LANG where supported",
+          "[runtime][i18n][coverage]") {
+    ScopedLang lang("fr_CA.UTF-8");
+
+#if defined(_WIN32)
+    REQUIRE(LocalisedStrings::system_locale() == "fr_CA.UTF-8");
+#else
+    REQUIRE(LocalisedStrings::system_locale() == "fr");
+#endif
+}
+
+TEST_CASE("i18n system_locale falls back when LANG is absent",
+          "[runtime][i18n][coverage]") {
+    ScopedLang lang(nullptr);
+    REQUIRE(LocalisedStrings::system_locale() == "en");
 }

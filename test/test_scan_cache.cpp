@@ -319,3 +319,135 @@ TEST_CASE("ScanCache load_from empty or malformed file keeps existing cache",
     REQUIRE(cache.size() == 1);
     REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
 }
+
+TEST_CASE("ScanCache put on a missing path records metadata but never hits",
+          "[scan_cache][codecov]") {
+    TempFile f;
+    HostScanCache cache;
+    auto info = sample_info();
+    info.path = f.path.string();
+
+    REQUIRE_FALSE(fs::exists(f.path));
+    cache.put(f.path.string(), info);
+
+    REQUIRE(cache.size() == 1);
+    REQUIRE_FALSE(cache.get(f.path.string()).has_value());
+    const auto& entry = cache.entries().at(f.path.string());
+    REQUIRE(entry.mtime == 0);
+    REQUIRE(entry.size == 0);
+    REQUIRE(entry.info.path == f.path.string());
+
+    f.write("plugin appears later");
+    REQUIRE_FALSE(cache.get(f.path.string()).has_value());
+}
+
+TEST_CASE("ScanCache erase and clear leave cache reusable",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    cache.put("/tmp/one.vst3", sample_info());
+
+    auto second = sample_info();
+    second.name = "Second";
+    second.unique_id = "com.pulp.second";
+    cache.put("/tmp/two.vst3", second);
+    REQUIRE(cache.size() == 2);
+
+    cache.erase("/tmp/one.vst3");
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/one.vst3") == 0);
+    REQUIRE(cache.entries().count("/tmp/two.vst3") == 1);
+
+    cache.erase("/tmp/does-not-exist.vst3");
+    REQUIRE(cache.size() == 1);
+
+    cache.clear();
+    REQUIRE(cache.size() == 0);
+
+    cache.put("/tmp/after-clear.vst3", sample_info());
+    REQUIRE(cache.size() == 1);
+}
+
+TEST_CASE("ScanCache from_json rejects non-array entries without replacing cache",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": {"path": "/tmp/not-an-array.vst3"}
+    })"));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
+TEST_CASE("ScanCache duplicate JSON entries keep the last valid record",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    REQUIRE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": [
+            {
+                "path": "/tmp/duplicate.clap",
+                "mtime": 1,
+                "size": 2,
+                "name": "First",
+                "manufacturer": "Pulp",
+                "version": "1.0",
+                "plugin_path": "/tmp/duplicate.clap",
+                "unique_id": "first-id",
+                "format": "clap",
+                "is_instrument": false,
+                "is_effect": true,
+                "num_inputs": 1,
+                "num_outputs": 1
+            },
+            {
+                "path": "/tmp/duplicate.clap",
+                "mtime": 3,
+                "size": 4,
+                "name": "Second",
+                "manufacturer": "Pulp",
+                "version": "2.0",
+                "plugin_path": "/tmp/duplicate.clap",
+                "unique_id": "second-id",
+                "format": "lv2",
+                "is_instrument": true,
+                "is_effect": false,
+                "num_inputs": 0,
+                "num_outputs": 2
+            }
+        ]
+    })"));
+
+    REQUIRE(cache.size() == 1);
+    const auto& entry = cache.entries().at("/tmp/duplicate.clap");
+    REQUIRE(entry.mtime == 3);
+    REQUIRE(entry.size == 4);
+    REQUIRE(entry.info.name == "Second");
+    REQUIRE(entry.info.unique_id == "second-id");
+    REQUIRE(entry.info.format == PluginFormat::LV2);
+    REQUIRE(entry.info.is_instrument);
+    REQUIRE_FALSE(entry.info.is_effect);
+    REQUIRE(entry.info.num_inputs == 0);
+    REQUIRE(entry.info.num_outputs == 2);
+}
+
+TEST_CASE("ScanCache save_to creates nested parent directories",
+          "[scan_cache][codecov]") {
+    TempFile f;
+    const auto root = f.path.parent_path() / (f.path.filename().string() + "-dir");
+    const auto cache_path = root / "nested" / "scan-cache.json";
+
+    HostScanCache a;
+    a.put("/tmp/nested-cache.vst3", sample_info());
+    REQUIRE(a.save_to(cache_path.string()));
+    REQUIRE(fs::exists(cache_path));
+
+    HostScanCache b;
+    REQUIRE(b.load_from(cache_path.string()));
+    REQUIRE(b.size() == 1);
+    REQUIRE(b.entries().at("/tmp/nested-cache.vst3").info.name == "Delay");
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}

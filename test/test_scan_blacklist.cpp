@@ -181,3 +181,72 @@ TEST_CASE("from_text tolerates signed stamp values from old blacklist files",
     REQUIRE(entry->second.size == -2);
     REQUIRE(entry->second.reason == "old stamp");
 }
+
+TEST_CASE("blacklisting a missing plugin records a durable manual block",
+          "[host][blacklist][codecov]") {
+    TempFile f;
+    ScanBlacklist bl;
+
+    REQUIRE_FALSE(fs::exists(f.path));
+    bl.blacklist(f.path.string(), "manual quarantine");
+
+    auto entry = bl.get(f.path.string());
+    REQUIRE(entry.has_value());
+    REQUIRE(entry->mtime == 0);
+    REQUIRE(entry->size == 0);
+    REQUIRE(entry->reason == "manual quarantine");
+    REQUIRE(bl.is_blacklisted(f.path.string()));
+
+    f.write("new plugin build");
+    REQUIRE_FALSE(bl.is_blacklisted(f.path.string()));
+}
+
+TEST_CASE("from_text duplicate blacklist records keep the last valid entry",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text(
+        "/plugin.vst3|1|2|first reason\n"
+        "/other.vst3|3|4|other reason\n"
+        "/plugin.vst3|5|6|second reason\n"));
+
+    REQUIRE(bl.size() == 2);
+    auto entry = bl.entries().find("/plugin.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.mtime == 5);
+    REQUIRE(entry->second.size == 6);
+    REQUIRE(entry->second.reason == "second reason");
+}
+
+TEST_CASE("from_text keeps unknown percent escapes literal",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/plugin%2Fname.vst3|7|8|bad%2Greason%7Cok\n"));
+
+    auto entry = bl.entries().find("/plugin%2Fname.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.reason == "bad%2Greason|ok");
+
+    const auto text = bl.to_text();
+    REQUIRE(text.find("/plugin%252Fname.vst3") != std::string::npos);
+    REQUIRE(text.find("bad%252Greason%7Cok") != std::string::npos);
+}
+
+TEST_CASE("save_to creates nested blacklist parent directories",
+          "[host][blacklist][codecov]") {
+    TempFile f;
+    const auto root = f.path.parent_path() / (f.path.filename().string() + "-dir");
+    const auto out_path = root / "nested" / "blacklist.txt";
+
+    ScanBlacklist a;
+    a.blacklist("/tmp/missing-plugin.clap", "timeout");
+    REQUIRE(a.save_to(out_path.string()));
+    REQUIRE(fs::exists(out_path));
+
+    ScanBlacklist b;
+    REQUIRE(b.load_from(out_path.string()));
+    REQUIRE(b.size() == 1);
+    REQUIRE(b.entries().at("/tmp/missing-plugin.clap").reason == "timeout");
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}

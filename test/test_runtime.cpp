@@ -1,16 +1,71 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
+#include <pulp/runtime/high_resolution_timer.hpp>
 #include <pulp/runtime/runtime.hpp>
 #include <pulp/runtime/temporary_file.hpp>
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 using namespace pulp::runtime;
+using namespace std::chrono_literals;
+
+namespace {
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char* name)
+        : name_(name)
+        , previous_(get_env(name)) {}
+
+    ~ScopedEnvVar() {
+        if (previous_) {
+#ifdef _WIN32
+            static_cast<void>(_putenv_s(name_, previous_->c_str()));
+#else
+            static_cast<void>(setenv(name_, previous_->c_str(), 1));
+#endif
+        } else {
+#ifdef _WIN32
+            static_cast<void>(_putenv_s(name_, ""));
+#else
+            static_cast<void>(unsetenv(name_));
+#endif
+        }
+    }
+
+    void set(std::string_view value) const {
+        std::string owned(value);
+#ifdef _WIN32
+        REQUIRE(_putenv_s(name_, owned.c_str()) == 0);
+#else
+        REQUIRE(setenv(name_, owned.c_str(), 1) == 0);
+#endif
+    }
+
+    void unset() const {
+#ifdef _WIN32
+        REQUIRE(_putenv_s(name_, "") == 0);
+#else
+        REQUIRE(unsetenv(name_) == 0);
+#endif
+    }
+
+private:
+    const char* name_;
+    std::optional<std::string> previous_;
+};
+
+} // namespace
 
 TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     SpscQueue<int, 16> q;
@@ -175,6 +230,30 @@ TEST_CASE("Runtime environment helpers", "[runtime][system]") {
     REQUIRE_FALSE(get_env("PULP_RUNTIME_TEST_ENV_DOES_NOT_EXIST"));
 }
 
+TEST_CASE("Runtime environment helpers treat unset and empty as missing",
+          "[runtime][system][codecov]") {
+    ScopedEnvVar env("PULP_RUNTIME_TEST_EMPTY_ENV");
+
+    env.unset();
+    REQUIRE_FALSE(get_env("PULP_RUNTIME_TEST_EMPTY_ENV").has_value());
+
+    env.set("");
+    REQUIRE_FALSE(get_env("PULP_RUNTIME_TEST_EMPTY_ENV").has_value());
+}
+
+TEST_CASE("Runtime environment helpers preserve non-empty values verbatim",
+          "[runtime][system][codecov]") {
+    ScopedEnvVar env("PULP_RUNTIME_TEST_VERBATIM_ENV");
+
+    env.set(" value with spaces = yes ");
+    auto value = get_env("PULP_RUNTIME_TEST_VERBATIM_ENV");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == " value with spaces = yes ");
+
+    env.set("0");
+    REQUIRE(get_env("PULP_RUNTIME_TEST_VERBATIM_ENV") == std::optional<std::string>{"0"});
+}
+
 TEST_CASE("Runtime GMT helper returns UTC tm", "[runtime][system]") {
     auto tm = gmtime_utc(static_cast<std::time_t>(0));
     REQUIRE(tm.tm_year == 70);
@@ -183,6 +262,17 @@ TEST_CASE("Runtime GMT helper returns UTC tm", "[runtime][system]") {
     REQUIRE(tm.tm_hour == 0);
     REQUIRE(tm.tm_min == 0);
     REQUIRE(tm.tm_sec == 0);
+}
+
+TEST_CASE("Runtime GMT helper handles leap-day timestamps",
+          "[runtime][system][codecov]") {
+    auto tm = gmtime_utc(static_cast<std::time_t>(951827696)); // 2000-02-29 12:34:56 UTC
+    REQUIRE(tm.tm_year == 100);
+    REQUIRE(tm.tm_mon == 1);
+    REQUIRE(tm.tm_mday == 29);
+    REQUIRE(tm.tm_hour == 12);
+    REQUIRE(tm.tm_min == 34);
+    REQUIRE(tm.tm_sec == 56);
 }
 
 TEST_CASE("Runtime localtime helper returns a normalized tm", "[runtime][system][coverage][phase3]") {
@@ -203,6 +293,39 @@ TEST_CASE("Runtime C string copy truncates safely", "[runtime][system]") {
     char buffer[5]{};
     copy_c_string(buffer, "abcdef");
     REQUIRE(std::string(buffer) == "abcd");
+}
+
+TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone",
+          "[runtime][system][codecov]") {
+    char exact[4]{};
+    copy_c_string(exact, "abc");
+    REQUIRE(exact[0] == 'a');
+    REQUIRE(exact[1] == 'b');
+    REQUIRE(exact[2] == 'c');
+    REQUIRE(exact[3] == '\0');
+
+    std::array<char, 6> padded{'?', '?', '?', '?', '?', '?'};
+    copy_c_string(padded.data(), padded.size(), "xy");
+    REQUIRE(padded[0] == 'x');
+    REQUIRE(padded[1] == 'y');
+    REQUIRE(padded[2] == '\0');
+    REQUIRE(padded[3] == '?');
+    REQUIRE(padded[4] == '?');
+    REQUIRE(padded[5] == '?');
+}
+
+TEST_CASE("Runtime C string copy respects string_view length with embedded nulls",
+          "[runtime][system][codecov]") {
+    std::array<char, 5> buffer{'?', '?', '?', '?', '?'};
+    constexpr char source[] = {'a', '\0', 'b'};
+
+    copy_c_string(buffer.data(), buffer.size(), std::string_view(source, sizeof(source)));
+
+    REQUIRE(buffer[0] == 'a');
+    REQUIRE(buffer[1] == '\0');
+    REQUIRE(buffer[2] == 'b');
+    REQUIRE(buffer[3] == '\0');
+    REQUIRE(buffer[4] == '?');
 }
 
 TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]") {
@@ -341,4 +464,58 @@ TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_lib
     REQUIRE_FALSE(moved.is_open());
     REQUIRE(assigned.is_open());
     REQUIRE(assigned.find_symbol(symbol) != nullptr);
+}
+
+TEST_CASE("HighResolutionTimer starts stops and reports running state",
+          "[runtime][timer][coverage][phase3]") {
+    HighResolutionTimer timer;
+    std::atomic<int> calls{0};
+
+    REQUIRE_FALSE(timer.is_running());
+    timer.start(5ms, [&] { calls.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(timer.is_running());
+
+    const auto deadline = std::chrono::steady_clock::now() + 250ms;
+    while (calls.load(std::memory_order_relaxed) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(2ms);
+    }
+
+    REQUIRE(calls.load(std::memory_order_relaxed) >= 2);
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
+
+    const auto stopped_count = calls.load(std::memory_order_relaxed);
+    std::this_thread::sleep_for(20ms);
+    REQUIRE(calls.load(std::memory_order_relaxed) == stopped_count);
+
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
+}
+
+TEST_CASE("HighResolutionTimer restart replaces callback",
+          "[runtime][timer][coverage][phase3]") {
+    HighResolutionTimer timer;
+    std::atomic<int> first{0};
+    std::atomic<int> second{0};
+
+    timer.start(20ms, [&] { first.fetch_add(1, std::memory_order_relaxed); });
+    std::this_thread::sleep_for(30ms);
+    timer.start(5ms, [&] { second.fetch_add(1, std::memory_order_relaxed); });
+
+    const auto first_after_restart = first.load(std::memory_order_relaxed);
+    const auto deadline = std::chrono::steady_clock::now() + 250ms;
+    while (second.load(std::memory_order_relaxed) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(2ms);
+    }
+
+    timer.stop();
+    REQUIRE(second.load(std::memory_order_relaxed) >= 2);
+    REQUIRE(first.load(std::memory_order_relaxed) == first_after_restart);
+
+    timer.start(5ms, {});
+    REQUIRE(timer.is_running());
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
 }

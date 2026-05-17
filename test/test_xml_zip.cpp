@@ -111,6 +111,45 @@ TEST_CASE("XmlDocument invalid XML", "[runtime][xml]") {
     REQUIRE_FALSE(doc.error().empty());
 }
 
+TEST_CASE("XmlDocument parse failure marks invalid and later success clears error",
+          "[runtime][xml][coverage]") {
+    XmlDocument doc;
+    REQUIRE(doc.parse(R"(<root name="before"><child>old</child></root>)"));
+    REQUIRE(doc.is_valid());
+    REQUIRE(doc.root_name() == "root");
+
+    REQUIRE_FALSE(doc.parse("<root><broken></root>"));
+    REQUIRE_FALSE(doc.is_valid());
+    REQUIRE_FALSE(doc.error().empty());
+
+    REQUIRE(doc.parse(R"(<next name="after"><child>new</child></next>)"));
+    REQUIRE(doc.is_valid());
+    REQUIRE(doc.error().empty());
+    REQUIRE(doc.root_name() == "next");
+    REQUIRE(doc.root_attribute("name") == std::optional<std::string>{"after"});
+    REQUIRE(doc.xpath_string("//child") == std::optional<std::string>{"new"});
+}
+
+TEST_CASE("XmlDocument load_file failure clears prior state and save_file reports bad paths",
+          "[runtime][xml][coverage]") {
+    TemporaryFile tmp(".xml");
+
+    XmlDocument doc;
+    REQUIRE(doc.parse("<settings><theme>dark</theme></settings>"));
+    REQUIRE(doc.save_file(tmp.path_string()));
+
+    XmlDocument loaded;
+    REQUIRE(loaded.load_file(tmp.path_string()));
+    REQUIRE(loaded.xpath_string("//theme") == std::optional<std::string>{"dark"});
+
+    REQUIRE_FALSE(loaded.load_file(tmp.path_string() + ".missing"));
+    REQUIRE_FALSE(loaded.is_valid());
+    REQUIRE_FALSE(loaded.error().empty());
+    REQUIRE(loaded.root_name().empty());
+
+    REQUIRE_FALSE(doc.save_file(tmp.path_string() + "/nested.xml"));
+}
+
 TEST_CASE("XmlDocument empty document queries are inert",
           "[runtime][xml][coverage][issue-641]") {
     XmlDocument doc;
@@ -202,6 +241,27 @@ TEST_CASE("xml_generate escapes text content", "[runtime][xml]") {
     REQUIRE(xml.find("A&amp;B &lt;Default&gt;") != std::string::npos);
 }
 
+TEST_CASE("xml_generate supports empty roots and escaped element names from callers",
+          "[runtime][xml][coverage]") {
+    auto empty = xml_generate("empty", {});
+    XmlDocument empty_doc;
+    REQUIRE(empty_doc.parse(empty));
+    REQUIRE(empty_doc.root_name() == "empty");
+    REQUIRE(empty_doc.xpath_strings("//*").size() == 1);
+
+    auto xml = xml_generate("preset", {
+        {"amp", "Tom & Jerry"},
+        {"apostrophe", "can't"},
+        {"quote", R"("quoted")"},
+    });
+    XmlDocument doc;
+    REQUIRE(doc.parse(xml));
+    REQUIRE(doc.xpath_string("//amp") == std::optional<std::string>{"Tom & Jerry"});
+    REQUIRE(doc.xpath_string("//apostrophe") == std::optional<std::string>{"can't"});
+    REQUIRE(doc.xpath_string("//quote") == std::optional<std::string>{R"("quoted")"});
+    REQUIRE(xml.find("Tom &amp; Jerry") != std::string::npos);
+}
+
 // ── ZIP/GZIP compression ────────────────────────────────────────────────
 
 TEST_CASE("gzip compress/decompress round-trip", "[runtime][zip]") {
@@ -253,6 +313,35 @@ TEST_CASE("gzip binary data round-trip", "[runtime][zip]") {
     auto decompressed = gzip_decompress(compressed->data(), compressed->size());
     REQUIRE(decompressed.has_value());
     REQUIRE(*decompressed == data);
+}
+
+TEST_CASE("gzip_decompress_string preserves embedded NUL bytes",
+          "[runtime][zip][coverage]") {
+    const std::vector<uint8_t> original = {
+        'p', 'u', 'l', 'p', 0x00, 'b', 'i', 'n', 0x00, 0xff,
+    };
+    auto compressed = gzip_compress(original.data(), original.size());
+    REQUIRE(compressed.has_value());
+
+    auto decompressed = gzip_decompress_string(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(decompressed->size() == original.size());
+    REQUIRE(std::memcmp(decompressed->data(), original.data(), original.size()) == 0);
+}
+
+TEST_CASE("deflate compression levels round-trip edge settings",
+          "[runtime][zip][coverage]") {
+    const std::string payload = "level check level check level check";
+    for (int level : {0, 9}) {
+        INFO("level: " << level);
+        auto compressed = deflate_compress(
+            reinterpret_cast<const uint8_t*>(payload.data()), payload.size(), level);
+        REQUIRE(compressed.has_value());
+
+        auto decompressed = deflate_decompress(compressed->data(), compressed->size());
+        REQUIRE(decompressed.has_value());
+        REQUIRE(std::string(decompressed->begin(), decompressed->end()) == payload);
+    }
 }
 
 // ── RFC 1952 gzip wire-format compliance (issue-468 follow-up) ──────────
@@ -346,6 +435,27 @@ TEST_CASE("gzip_decompress accepts optional RFC 1952 header fields", "[runtime][
     with_metadata.insert(with_metadata.end(), compressed->begin() + 10, compressed->end());
 
     auto out = gzip_decompress_string(with_metadata.data(), with_metadata.size());
+    REQUIRE(out.has_value());
+    REQUIRE(*out == original);
+}
+
+TEST_CASE("gzip_decompress accepts FTEXT flag and empty optional strings",
+          "[runtime][zip][coverage]") {
+    const std::string original = "text flag payload";
+    auto compressed = gzip_compress(original);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() > 18);
+
+    std::vector<uint8_t> with_flags = {
+        0x1f, 0x8b, 0x08, 0x19,  // FTEXT | FNAME | FCOMMENT
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff,
+        0x00,                    // empty FNAME
+        0x00,                    // empty FCOMMENT
+    };
+    with_flags.insert(with_flags.end(), compressed->begin() + 10, compressed->end());
+
+    auto out = gzip_decompress_string(with_flags.data(), with_flags.size());
     REQUIRE(out.has_value());
     REQUIRE(*out == original);
 }
@@ -452,4 +562,20 @@ TEST_CASE("gzip_decompress rejects trailing garbage after the last member",
     g->push_back('?');
     auto out = gzip_decompress(g->data(), g->size());
     REQUIRE_FALSE(out.has_value());
+}
+
+TEST_CASE("gzip_decompress rejects an invalid concatenated member header",
+          "[runtime][zip][coverage]") {
+    auto first = gzip_compress(std::string{"first"});
+    REQUIRE(first.has_value());
+
+    std::vector<uint8_t> concat;
+    concat.insert(concat.end(), first->begin(), first->end());
+    concat.insert(concat.end(), {
+        0x1f, 0x8b, 0x00, 0x00,  // bad compression method
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff,
+    });
+
+    REQUIRE_FALSE(gzip_decompress(concat.data(), concat.size()).has_value());
 }

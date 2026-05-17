@@ -162,6 +162,145 @@ TEST_CASE("TestSignalSource: reset clears state", "[format][test_signal]") {
     REQUIRE_THAT(buf2[0], WithinAbs(0.0f, 0.01f));
 }
 
+TEST_CASE("TestSignalSource: active flag follows config type",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    REQUIRE_FALSE(src.is_active());
+
+    src.set_config({TestSignalType::sine, 440.0f, 0.5f});
+    REQUIRE(src.is_active());
+
+    src.set_config({TestSignalType::file, 440.0f, 0.5f});
+    REQUIRE(src.is_active());
+
+    src.set_config({TestSignalType::none, 440.0f, 0.5f});
+    REQUIRE_FALSE(src.is_active());
+}
+
+TEST_CASE("TestSignalSource: config returns the last audio-thread-applied config",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    auto initial = src.config();
+    REQUIRE(initial.type == TestSignalType::none);
+    REQUIRE(initial.sine_frequency_hz == 440.0f);
+    REQUIRE(initial.sine_amplitude == 0.5f);
+
+    src.set_config({TestSignalType::sine, 220.0f, 0.25f});
+    REQUIRE(src.config().type == TestSignalType::none);
+
+    float sample = -1.0f;
+    float* output = &sample;
+    src.fill(&output, 1, 1);
+
+    auto applied = src.config();
+    REQUIRE(applied.type == TestSignalType::sine);
+    REQUIRE(applied.sine_frequency_hz == 220.0f);
+    REQUIRE(applied.sine_amplitude == 0.25f);
+}
+
+TEST_CASE("TestSignalSource: deterministic sine samples at quarter-cycle boundaries",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_sample_rate(4.0);
+    src.set_config({TestSignalType::sine, 1.0f, 0.75f});
+
+    std::vector<float> buf(4, 0.0f);
+    float* output = buf.data();
+    src.fill(&output, 1, 4);
+
+    REQUIRE_THAT(buf[0], WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(buf[1], WithinAbs(0.75f, 0.0001f));
+    REQUIRE_THAT(buf[2], WithinAbs(0.0f, 0.0001f));
+    REQUIRE_THAT(buf[3], WithinAbs(-0.75f, 0.0001f));
+}
+
+TEST_CASE("TestSignalSource: amplitude-only config changes keep phase continuity",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_sample_rate(4.0);
+    src.set_config({TestSignalType::sine, 1.0f, 1.0f});
+
+    float first = -1.0f;
+    float* first_output = &first;
+    src.fill(&first_output, 1, 1);
+    REQUIRE_THAT(first, WithinAbs(0.0f, 0.0001f));
+
+    src.set_config({TestSignalType::sine, 1.0f, 0.25f});
+    float second = -1.0f;
+    float* second_output = &second;
+    src.fill(&second_output, 1, 1);
+
+    REQUIRE_THAT(second, WithinAbs(0.25f, 0.0001f));
+}
+
+TEST_CASE("TestSignalSource: frequency changes reset sine phase",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_sample_rate(4.0);
+    src.set_config({TestSignalType::sine, 1.0f, 1.0f});
+
+    float first = -1.0f;
+    float* first_output = &first;
+    src.fill(&first_output, 1, 1);
+    REQUIRE_THAT(first, WithinAbs(0.0f, 0.0001f));
+
+    src.set_config({TestSignalType::sine, 2.0f, 1.0f});
+    float after_change = -1.0f;
+    float* changed_output = &after_change;
+    src.fill(&changed_output, 1, 1);
+
+    REQUIRE_THAT(after_change, WithinAbs(0.0f, 0.0001f));
+}
+
+TEST_CASE("TestSignalSource: zero-amplitude sine stays active but silent",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_sample_rate(48000.0);
+    src.set_config({TestSignalType::sine, 440.0f, 0.0f});
+    REQUIRE(src.is_active());
+
+    std::vector<float> buf(64, 1.0f);
+    float* output = buf.data();
+    src.fill(&output, 1, static_cast<int>(buf.size()));
+
+    for (float sample : buf) {
+        REQUIRE(sample == 0.0f);
+    }
+    REQUIRE(src.is_active());
+}
+
+TEST_CASE("TestSignalSource: file mode without loaded data is silent and not playing",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_config({TestSignalType::file, 440.0f, 1.0f});
+    REQUIRE(src.is_active());
+
+    src.play();
+    REQUIRE_FALSE(src.is_playing());
+    REQUIRE_FALSE(src.has_file());
+
+    std::vector<float> buf(8, -1.0f);
+    float* output = buf.data();
+    src.fill(&output, 1, static_cast<int>(buf.size()));
+
+    for (float sample : buf) {
+        REQUIRE(sample == 0.0f);
+    }
+    REQUIRE(src.file_position() == 0);
+}
+
+TEST_CASE("TestSignalSource: loop flag toggles independently of loaded file state",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    REQUIRE_FALSE(src.is_looping());
+
+    src.set_loop(true);
+    REQUIRE(src.is_looping());
+
+    src.set_loop(false);
+    REQUIRE_FALSE(src.is_looping());
+}
+
 TEST_CASE("TestSignalSource: invalid file load and unload reset playback state",
           "[format][test_signal][file]") {
     TestSignalSource src;
@@ -195,6 +334,70 @@ TEST_CASE("TestSignalSource: invalid file load and unload reset playback state",
     src.unload_file();
     REQUIRE_FALSE(src.has_file());
     REQUIRE_FALSE(src.is_playing());
+    REQUIRE(src.file_position() == 0);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("TestSignalSource: loading a new file rewinds and stops existing playback",
+          "[format][test_signal][file][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_config({TestSignalType::file, 440.0f, 1.0f});
+
+    auto first_path = unique_temp_wav_path("-first.wav");
+    auto second_path = unique_temp_wav_path("-second.wav");
+    std::filesystem::remove(first_path);
+    std::filesystem::remove(second_path);
+    REQUIRE(pulp::audio::write_wav_file(first_path.string(), make_test_audio()));
+    REQUIRE(pulp::audio::write_wav_file(second_path.string(), make_test_audio()));
+
+    REQUIRE(src.load_file(first_path.string()));
+    src.play();
+    REQUIRE(src.is_playing());
+
+    float buf[2] = {-1.0f, -1.0f};
+    float* output = buf;
+    src.fill(&output, 1, 2);
+    REQUIRE(src.file_position() == 2);
+
+    REQUIRE(src.load_file(second_path.string()));
+    REQUIRE(src.has_file());
+    REQUIRE_FALSE(src.is_playing());
+    REQUIRE(src.file_position() == 0);
+    REQUIRE(src.file_data() != nullptr);
+    REQUIRE(src.file_data()->num_frames() == 3);
+
+    std::filesystem::remove(first_path);
+    std::filesystem::remove(second_path);
+}
+
+TEST_CASE("TestSignalSource: reset stops file playback and rewinds without unloading",
+          "[format][test_signal][file][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_config({TestSignalType::file, 440.0f, 1.0f});
+
+    auto path = unique_temp_wav_path(".wav");
+    std::filesystem::remove(path);
+    REQUIRE(pulp::audio::write_wav_file(path.string(), make_test_audio()));
+    REQUIRE(src.load_file(path.string()));
+
+    src.play();
+    float played[2] = {-1.0f, -1.0f};
+    float* played_output = played;
+    src.fill(&played_output, 1, 2);
+    REQUIRE(src.file_position() == 2);
+    REQUIRE(src.is_playing());
+
+    src.reset();
+    REQUIRE(src.has_file());
+    REQUIRE_FALSE(src.is_playing());
+    REQUIRE(src.file_position() == 0);
+
+    float silent[2] = {-1.0f, -1.0f};
+    float* silent_output = silent;
+    src.fill(&silent_output, 1, 2);
+    REQUIRE(silent[0] == 0.0f);
+    REQUIRE(silent[1] == 0.0f);
     REQUIRE(src.file_position() == 0);
 
     std::filesystem::remove(path);
