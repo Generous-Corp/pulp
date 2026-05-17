@@ -17,6 +17,7 @@
 #include <iostream>
 
 #ifdef PULP_HAS_SKIA
+#include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #import <QuartzCore/CAMetalLayer.h>
@@ -1782,6 +1783,14 @@ public:
         : root_(root) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
+
+            // Phase 1a: arm the dirty tracker for the first frame and
+            // optionally enable debug-printing of the per-frame union rect.
+            tracker_.invalidate_all();
+            tracker_.set_viewport(options.width, options.height);
+            if (const char* env = std::getenv("PULP_PARTIAL_RENDERING_DEBUG")) {
+                partial_rendering_debug_ = (env[0] == '1');
+            }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
             NSWindowStyleMask style = NSWindowStyleMaskTitled
                 | NSWindowStyleMaskClosable
@@ -1899,6 +1908,11 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
+        // Phase 1a: until widgets pass per-rect bounds through
+        // request_repaint(), every host-level repaint() invalidates
+        // the whole viewport. Phase 1b adds the Rect overload.
+        tracker_.invalidate_all();
+        ++request_repaint_dirty_frames_;
     }
 
     std::vector<uint8_t> capture_png() override {
@@ -2125,6 +2139,20 @@ private:
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
+    // Phase 1a: partial-rendering POC. Tracks per-frame invalidations
+    // pushed by repaint() and the animation / FrameClock pump. The
+    // render gate still uses the existing needs_repaint_/animation
+    // flags so observable behaviour does not change in this slice —
+    // the tracker is plumbed-but-non-authoritative. Debug-printed once
+    // per painted frame when PULP_PARTIAL_RENDERING_DEBUG=1 in the
+    // environment so we can audit "the dirty rect we WOULD have
+    // clipped to" against the unconditional repaint that still ships.
+    // Phase 1b promotes the tracker to the authoritative gate + adds
+    // Skia clipIRect.
+    render::DirtyTracker tracker_;
+    bool partial_rendering_debug_ = false;
+    uint64_t pump_dirty_frames_ = 0;
+    uint64_t request_repaint_dirty_frames_ = 0;
     int frame_fail_count_ = 0;
     int frame_ok_count_ = 0;
     float width_ = 0, height_ = 0;
@@ -2262,6 +2290,8 @@ private:
                 static_cast<uint32_t>(std::max(0.0f, height)));
         }
         needs_repaint_ = true;
+        tracker_.set_viewport(width, height);
+        tracker_.invalidate_all();
     }
 
     void paint_scene(canvas::Canvas& canvas) {
@@ -2318,6 +2348,23 @@ private:
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
+        // Phase 1a: emit the per-frame dirty-rect decision the host
+        // WOULD use to clip in Phase 1b. The actual paint path is
+        // unchanged; this is a wiring trace only. Gated on env so
+        // production CI logs stay quiet.
+        if (partial_rendering_debug_ && tracker_.is_dirty()) {
+            auto b = tracker_.bounds();
+            fprintf(stderr,
+                    "[partial-render] frame=%llu full=%d rects=%zu union=(%.0f,%.0f,%.0fx%.0f) "
+                    "(req_repaint=%llu pump=%llu)\n",
+                    (unsigned long long)tracker_.frame_count(),
+                    tracker_.needs_full_repaint() ? 1 : 0,
+                    tracker_.dirty_rects().size(),
+                    b.x, b.y, b.w, b.h,
+                    (unsigned long long)request_repaint_dirty_frames_,
+                    (unsigned long long)pump_dirty_frames_);
+        }
+
         if (!gpu_surface_->begin_frame()) {
             frame_fail_count_++;
             if (frame_fail_count_ <= 3)
@@ -2354,6 +2401,10 @@ private:
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
+        // Phase 1a: clear the tracker AFTER present so the next frame
+        // starts clean. Phase 1b will gate begin_frame() on
+        // tracker_.is_dirty() before paying for any of the above work.
+        tracker_.clear();
         return captured;
     }
 
@@ -2401,6 +2452,14 @@ private:
                     advance_widget_animations(&self->root_, 1.0f / 60.0f);
                     if (animate || tick_subscribers) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
+                        // Phase 1a (Codex correction 2): animation /
+                        // frame-clock pumps mutate view state without
+                        // going through request_repaint(), so for the
+                        // tracker they count as a full-surface dirty
+                        // until Phase 1b audits and converts the
+                        // animating widget paths to per-rect repaints.
+                        self->tracker_.invalidate_all();
+                        ++self->pump_dirty_frames_;
                     }
                     self->render_frame();
                     self->render_dispatch_queued_.store(false, std::memory_order_release);
