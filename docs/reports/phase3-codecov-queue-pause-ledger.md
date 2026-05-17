@@ -5869,3 +5869,21 @@ gate, which reported no uncovered measured diff lines and OK at/above the 75%
 floor. The PR was created via REST because GraphQL remains exhausted and labeled
 `codecov`; GitHub-hosted CI is the merge gate. No Namespace/SSH validation was
 dispatched.
+
+2026-05-16 20:09 PDT: opened the next large batched coverage PR as #2126,
+`test(midi): batch ci and ump coverage edges`, branch
+`feature/phase3-codecov-batch-682`, head
+`df003e041a1411efbdb2111e3b33c8d6d471444a`. This batch adds 12 focused tests
+across `test/test_midi.cpp` and `test/test_midi_ci.cpp` covering MIDI-CI header
+rejection, direct-addressed discovery replies, minimal discovery reply storage,
+profile identity equality, empty profile reply counts, keyboard all-notes-off
+ordering/isolation, UMP note-off/CC conversion paths, MIDI 1.0 fallback
+group/offset preservation, pitch scaling boundaries, and flattening skip
+behavior for packets without MIDI 1.0 equivalents. Local validation before PR:
+`git diff --check`; built `pulp-test-midi pulp-test-midi-ci`; ran
+`./build/test/pulp-test-midi` and `./build/test/pulp-test-midi-ci`; ran the
+12-test `PULP_DIFF_COVER_CTEST_REGEX=... tools/scripts/local_diff_cover.sh`
+gate, which reported no uncovered measured diff lines and OK at/above the 75%
+floor. The branch was rebased onto current `origin/main` before push. The PR was
+created via REST because GraphQL remains exhausted and labeled `codecov`;
+GitHub-hosted CI is the merge gate. No Namespace/SSH validation was dispatched.
