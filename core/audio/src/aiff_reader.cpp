@@ -150,11 +150,13 @@ public:
         file.read(reinterpret_cast<char*>(header), 12);
         if (file.gcount() != 12) return std::nullopt;
         if (std::memcmp(header, "FORM", 4) != 0) return std::nullopt;
-        if (std::memcmp(header + 8, "AIFF", 4) != 0 &&
-            std::memcmp(header + 8, "AIFC", 4) != 0) return std::nullopt;
+        bool is_aifc = std::memcmp(header + 8, "AIFC", 4) == 0;
+        if (std::memcmp(header + 8, "AIFF", 4) != 0 && !is_aifc)
+            return std::nullopt;
 
         uint32_t num_channels = 0, num_frames = 0, bits_per_sample = 0;
         double sample_rate = 0;
+        bool unsupported_aifc_compression = false;
         std::vector<uint8_t> ssnd_data;
 
         while (file.good()) {
@@ -176,6 +178,8 @@ public:
                 num_frames = read_be32(comm + 2);
                 bits_per_sample = read_be16(comm + 6);
                 sample_rate = extended_to_double(comm + 8);
+                if (is_aifc && (chunk_size < 22 || std::memcmp(comm + 18, "NONE", 4) != 0))
+                    unsupported_aifc_compression = true;
                 // Skip remaining bytes in chunk (common in AIFC with compression type)
                 uint32_t remaining = chunk_size - bytes_to_read;
                 if (remaining > 0)
@@ -206,7 +210,8 @@ public:
             }
         }
 
-        if (num_channels == 0 || num_frames == 0 || sample_rate <= 0.0 || ssnd_data.empty())
+        if (num_channels == 0 || num_frames == 0 || sample_rate <= 0.0 ||
+            unsupported_aifc_compression || ssnd_data.empty())
             return std::nullopt;
 
         AudioFileData data;
@@ -256,7 +261,7 @@ public:
     }
 
     bool supports_extension(std::string_view ext) const override {
-        return ext == ".aiff" || ext == ".aif";
+        return ext == ".aiff" || ext == ".aif" || ext == ".aifc";
     }
     std::string format_name() const override { return "AIFF"; }
 };
