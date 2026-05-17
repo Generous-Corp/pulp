@@ -28,16 +28,12 @@ static bool winsock_init() {
 }
 static constexpr std::uintptr_t kInvalidSocketHandle =
     static_cast<std::uintptr_t>(INVALID_SOCKET);
-static SOCKET native_socket(std::uintptr_t fd) {
-    return static_cast<SOCKET>(fd);
-}
+#define NATIVE_SOCKET(fd) static_cast<SOCKET>(fd)
 #define SOCKET_CLOSE closesocket
 #define SOCKET_SHUTDOWN(fd) ::shutdown((fd), SD_BOTH)
 #else
 static constexpr int kInvalidSocketHandle = -1;
-static int native_socket(int fd) {
-    return fd;
-}
+#define NATIVE_SOCKET(fd) (fd)
 #define SOCKET_CLOSE ::close
 #define SOCKET_SHUTDOWN(fd) ::shutdown((fd), SHUT_RDWR)
 #endif
@@ -85,15 +81,15 @@ bool Socket::bind(std::string_view address, uint16_t port) {
         inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
 
     int opt = 1;
-    setsockopt(native_socket(fd_), SOL_SOCKET, SO_REUSEADDR,
+    setsockopt(NATIVE_SOCKET(fd_), SOL_SOCKET, SO_REUSEADDR,
                reinterpret_cast<const char*>(&opt), sizeof(opt));
 
-    return ::bind(native_socket(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
+    return ::bind(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
 }
 
 bool Socket::listen(int backlog) {
     if (fd_ == kInvalidSocketHandle) return false;
-    return ::listen(native_socket(fd_), backlog) == 0;
+    return ::listen(NATIVE_SOCKET(fd_), backlog) == 0;
 }
 
 std::optional<Socket> Socket::accept() {
@@ -102,7 +98,7 @@ std::optional<Socket> Socket::accept() {
     struct sockaddr_in client_addr{};
     socklen_t addr_len = sizeof(client_addr);
     auto client_fd =
-        ::accept(native_socket(fd_), reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
+        ::accept(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len);
 
     if (client_fd == static_cast<decltype(client_fd)>(kInvalidSocketHandle)) return std::nullopt;
 
@@ -121,12 +117,12 @@ bool Socket::connect(std::string_view address, uint16_t port) {
     std::string addr_str(address);
     inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
 
-    return ::connect(native_socket(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
+    return ::connect(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
 }
 
 int Socket::send(const uint8_t* data, size_t length) {
     if (fd_ == kInvalidSocketHandle) return -1;
-    return static_cast<int>(::send(native_socket(fd_), reinterpret_cast<const char*>(data),
+    return static_cast<int>(::send(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
                                    static_cast<int>(length), 0));
 }
 
@@ -144,7 +140,7 @@ int Socket::send_to(const uint8_t* data, size_t length,
     std::string addr_str(address);
     inet_pton(AF_INET, addr_str.c_str(), &addr.sin_addr);
 
-    return static_cast<int>(::sendto(native_socket(fd_), reinterpret_cast<const char*>(data),
+    return static_cast<int>(::sendto(NATIVE_SOCKET(fd_), reinterpret_cast<const char*>(data),
                                      static_cast<int>(length), 0,
                                      reinterpret_cast<struct sockaddr*>(&addr),
                                      sizeof(addr)));
@@ -152,7 +148,7 @@ int Socket::send_to(const uint8_t* data, size_t length,
 
 int Socket::receive(uint8_t* buffer, size_t buffer_size) {
     if (fd_ == kInvalidSocketHandle) return -1;
-    return static_cast<int>(::recv(native_socket(fd_), reinterpret_cast<char*>(buffer),
+    return static_cast<int>(::recv(NATIVE_SOCKET(fd_), reinterpret_cast<char*>(buffer),
                                    static_cast<int>(buffer_size), 0));
 }
 
@@ -162,7 +158,7 @@ int Socket::receive_from(uint8_t* buffer, size_t buffer_size,
 
     struct sockaddr_in addr{};
     socklen_t addr_len = sizeof(addr);
-    int bytes = static_cast<int>(::recvfrom(native_socket(fd_), reinterpret_cast<char*>(buffer),
+    int bytes = static_cast<int>(::recvfrom(NATIVE_SOCKET(fd_), reinterpret_cast<char*>(buffer),
                                             static_cast<int>(buffer_size), 0,
                                             reinterpret_cast<struct sockaddr*>(&addr),
                                             &addr_len));
@@ -178,9 +174,9 @@ int Socket::receive_from(uint8_t* buffer, size_t buffer_size,
 void Socket::close() {
     if (fd_ != kInvalidSocketHandle) {
         if (type_ == SocketType::TCP) {
-            (void)SOCKET_SHUTDOWN(native_socket(fd_));
+            (void)SOCKET_SHUTDOWN(NATIVE_SOCKET(fd_));
         }
-        SOCKET_CLOSE(native_socket(fd_));
+        SOCKET_CLOSE(NATIVE_SOCKET(fd_));
         fd_ = kInvalidSocketHandle;
     }
 }

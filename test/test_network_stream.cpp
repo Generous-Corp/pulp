@@ -617,6 +617,58 @@ TEST_CASE("Socket UDP send_to and receive_from fail before create",
     REQUIRE(from_port == 7777);
 }
 
+TEST_CASE("Socket TCP loopback send receive and close",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+
+    std::uint16_t port = 0;
+    for (std::uint16_t candidate = 46601; candidate < 46680; ++candidate) {
+        if (auto bound = try_bind_loopback(listener, candidate)) {
+            port = *bound;
+            break;
+        }
+    }
+    if (port == 0) {
+        SUCCEED("could not bind TCP loopback port; skipping");
+        return;
+    }
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> server_done{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 8> buffer{};
+        const int received = accepted->receive(buffer.data(), buffer.size());
+        if (received > 0) {
+            accepted->send(buffer.data(), static_cast<std::size_t>(received));
+        }
+        accepted->close();
+        server_done.store(true);
+    });
+    ThreadJoiner join_server{server_thread};
+
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", port));
+
+    const std::array<std::uint8_t, 4> payload{'t', 'c', 'p', '!'};
+    REQUIRE(client.send(payload.data(), payload.size()) == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 8> echo{};
+    REQUIRE(client.receive(echo.data(), echo.size()) == static_cast<int>(payload.size()));
+    REQUIRE(std::equal(payload.begin(), payload.end(), echo.begin()));
+
+    client.close();
+    join_server.join();
+    REQUIRE(server_done.load());
+}
+
 TEST_CASE("Socket move construction transfers open UDP handle",
           "[network_stream][socket][coverage][phase3]") {
     Socket original;
