@@ -277,6 +277,25 @@ TEST_CASE("PresetManager load accepts parameter values that end at EOF",
     REQUIRE_FALSE(pm.has_unsaved_changes());
 }
 
+TEST_CASE("PresetManager load rejects partial numeric parameter values", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-partial-numeric");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -12.0f);
+    store.set_value(2, 40.0f);
+
+    const auto preset_path = sandbox.root / "PartialNumeric.json";
+    write_text_file(preset_path,
+                    R"json({"parameters":{"Gain":-6.0,"Mix":25.5Hz}})json");
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(store.get_value(1) == Catch::Approx(-6.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(40.0f));
+    REQUIRE(pm.current_preset_name() == "PartialNumeric");
+}
+
 TEST_CASE("PresetManager load clamps out-of-range parameter values",
           "[state][preset][coverage][issue-647]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-clamp");

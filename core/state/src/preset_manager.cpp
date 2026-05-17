@@ -8,6 +8,14 @@ namespace fs = std::filesystem;
 
 namespace pulp::state {
 
+namespace {
+
+bool has_only_trailing_space(const std::string& value, std::size_t pos) {
+    return value.find_first_not_of(" \t\r\n", pos) == std::string::npos;
+}
+
+} // namespace
+
 // ── Platform paths ───────────────────────────────────────────────────────
 
 fs::path PresetManager::platform_presets_root() {
@@ -140,7 +148,9 @@ bool PresetManager::load(const fs::path& path) {
 
         std::string val_str = content.substr(val_start, val_end - val_start);
         try {
-            float value = std::stof(val_str);
+            std::size_t parsed = 0;
+            float value = std::stof(val_str, &parsed);
+            if (!has_only_trailing_space(val_str, parsed)) continue;
             store_.set_value(param.id, value);
         } catch (...) {
             continue;
