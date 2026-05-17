@@ -1,4 +1,13 @@
-# PulpConfig.cmake — find_package(Pulp) support for installed SDK consumers
+# PulpConfig.cmake — find_package(Pulp) support for installed SDK consumers.
+#
+# 2026-05 B3 refactor: PulpConfig is now a thin coordinator. The
+# previous 322-line monolith mixed package init, platform detection,
+# IMPORTED-target recreation, debug-SDK guard, and WebGPU import-lib
+# recovery in a single file — every regression in one of those areas
+# (e.g. the five `PkgConfig::*` target-recreation fixes in #2087's
+# follow-up trail) was a hot-path edit on a brittle file. Each
+# concern now lives in its own focused module, all under
+# `${CMAKE_CURRENT_LIST_DIR}/`, all installed alongside this file.
 
 @PACKAGE_INIT@
 
@@ -22,60 +31,11 @@ set(PULP_FORMAT_SOURCE_DIR "${PULP_SDK_DIR}/src/pulp/format")
 set(PULP_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/auv3")
 set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
 
-if(APPLE)
-    set(PULP_APPLE TRUE)
-    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set(PULP_IOS TRUE)
-        set(PULP_PLATFORM "ios")
-    else()
-        set(PULP_MACOS TRUE)
-        set(PULP_PLATFORM "mac")
-    endif()
-elseif(WIN32)
-    set(PULP_WINDOWS TRUE)
-    set(PULP_PLATFORM "win")
-elseif(UNIX)
-    set(PULP_LINUX TRUE)
-    set(PULP_PLATFORM "linux")
-endif()
+# Platform detection → PULP_APPLE / PULP_LINUX / PULP_WINDOWS / etc.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpPlatformConfig.cmake")
 
-if(PULP_LINUX)
-    find_dependency(ALSA)
-    # core/view + core/canvas link several `PkgConfig::*` imported
-    # targets on Linux when their dev headers are present. Those target
-    # names are baked into PulpTargets.cmake's link interfaces, so
-    # downstream `find_package(Pulp)` must re-create them via the same
-    # pkg_check_modules invocations — otherwise CMake aborts at
-    # consumer-configure time with:
-    #   The link interface of target "Pulp::view" contains:
-    #     PkgConfig::<name>
-    #   but the target was not found.
-    # The smoke workflow at .github/workflows/install-consumer-smoke.yml
-    # catches this on every PR (pulp #2087 follow-up). QUIET probes
-    # match the in-tree builds — a consumer without one of the dev
-    # headers degrades the same way the build does (no compile-time
-    # PULP_HAS_* define, no link-interface entry).
-    #
-    # Mirror is structural: any new `pkg_check_modules(... IMPORTED_TARGET ...)`
-    # in core/view or core/canvas needs a matching line here. The smoke
-    # workflow is the authoritative gate; if it fails on a missing
-    # PkgConfig::FOO downstream, add `pkg_check_modules(FOO IMPORTED_TARGET <mod>)`
-    # below.
-    find_dependency(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        # core/canvas: fontconfig — m144 Skia uses it for font enumeration.
-        pkg_check_modules(FONTCONFIG QUIET IMPORTED_TARGET fontconfig)
-        # core/view accessibility_linux.cpp — AtkRole + AtkObject bridge.
-        pkg_check_modules(PULP_ATK QUIET IMPORTED_TARGET atk)
-        pkg_check_modules(ATK_BRIDGE QUIET IMPORTED_TARGET atk-bridge-2.0)
-        # core/view WebView (PULP_BUILD_WEBVIEW=ON) — only relevant when
-        # the SDK was built with WebView. Probe with QUIET; if the
-        # consumer doesn't have the libs, find_package degrades the
-        # same way the SDK build would.
-        pkg_check_modules(GTK3 QUIET IMPORTED_TARGET gtk+-3.0)
-        pkg_check_modules(WEBKIT2GTK QUIET IMPORTED_TARGET webkit2gtk-4.1)
-    endif()
-endif()
+# Linux PkgConfig::* IMPORTED target recreation. No-op on non-Linux.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpPkgConfigImports.cmake")
 
 # The Pulp SDK is built and installed in the Release configuration only.
 # When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo
@@ -94,128 +54,12 @@ foreach(_pulp_cfg Debug MinSizeRel RelWithDebInfo)
 endforeach()
 unset(_pulp_cfg)
 
-# Debug-SDK perf-killer guard (pulp-internal task #35).
-#
-# A Pulp SDK that was itself BUILT with CMAKE_BUILD_TYPE=Debug ships
-# debug-mode Skia, debug-mode audio framework, and debug-mode JS
-# engine. Consuming it from a downstream plugin produces real-time
-# audio code so slow that buffer underruns happen on every reasonable
-# host — a UX failure mode that's hard to attribute to "the SDK
-# install is wrong" because the link succeeds and the plugin appears
-# to work, just very poorly.
-#
-# The CMakeLists.txt that produced this SDK install writes the
-# CMAKE_BUILD_TYPE it was configured with to `${PULP_SDK_DIR}/sdk_build_type.txt`.
-# If we can read that file and it contains "Debug", refuse the
-# find_package — with an escape hatch (`PULP_ALLOW_DEBUG_SDK=ON`) for
-# the rare developer who *does* want a Debug SDK (e.g. debugging
-# Skia internals from a host that doesn't care about real-time).
-#
-# Empty marker file (older SDK installs that predate the marker) and
-# multi-config generators (which install per-config without recording
-# a single canonical build-type) fall through silently — we cannot
-# tell, so we don't warn.
-set(_pulp_sdk_build_type_marker "${PULP_SDK_DIR}/sdk_build_type.txt")
-if(EXISTS "${_pulp_sdk_build_type_marker}")
-    file(READ "${_pulp_sdk_build_type_marker}" _pulp_sdk_build_type)
-    string(STRIP "${_pulp_sdk_build_type}" _pulp_sdk_build_type)
-    # CMake accepts CMAKE_BUILD_TYPE case-insensitively and preserves
-    # the user's spelling on disk, so `-DCMAKE_BUILD_TYPE=debug` /
-    # `DeBuG` are valid Debug builds whose marker won't STREQUAL
-    # "Debug". Normalize to lowercase before comparing — otherwise
-    # the guard silently no-ops on a real Debug install (Codex P1 on
-    # PR #1828).
-    string(TOLOWER "${_pulp_sdk_build_type}" _pulp_sdk_build_type_lc)
-    if(_pulp_sdk_build_type_lc STREQUAL "debug")
-        if(PULP_ALLOW_DEBUG_SDK)
-            message(WARNING
-                "Pulp SDK at '${PULP_SDK_DIR}' was built with "
-                "CMAKE_BUILD_TYPE=Debug. PULP_ALLOW_DEBUG_SDK=ON — proceeding, but expect "
-                "buffer underruns + slow paint on the resulting plugin. "
-                "See task #35 / pulp-internal #36 for the path-forward "
-                "plan to make a Debug SDK usable for data collection.")
-        else()
-            message(FATAL_ERROR
-                "Pulp SDK at '${PULP_SDK_DIR}' was built with "
-                "CMAKE_BUILD_TYPE=Debug. This SDK ships debug-mode "
-                "Skia / audio framework / JS engine — plugins linked "
-                "against it are NOT usable for real-time audio work "
-                "(buffer underruns, audible glitches, multi-second "
-                "paint hitches).\n"
-                "\n"
-                "Fix: rebuild the Pulp SDK with "
-                "CMAKE_BUILD_TYPE=Release and reinstall:\n"
-                "    cmake -S <pulp-src> -B build -DCMAKE_BUILD_TYPE=Release\n"
-                "    cmake --build build --target install\n"
-                "\n"
-                "Or, if you genuinely want a Debug SDK (e.g. debugging "
-                "Skia internals on a host that doesn't care about "
-                "real-time), re-configure your consumer with "
-                "-DPULP_ALLOW_DEBUG_SDK=ON to acknowledge the perf "
-                "implications and proceed anyway.")
-        endif()
-    endif()
-    unset(_pulp_sdk_build_type)
-    unset(_pulp_sdk_build_type_lc)
-endif()
-unset(_pulp_sdk_build_type_marker)
+# Debug-SDK perf-killer guard (task #35) + any future find_package-time
+# safety checks.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpSdkGuards.cmake")
 
-set(_pulp_webgpu_runtime
-    "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native${PULP_SDK_SHARED_LIBRARY_SUFFIX}")
-set(_pulp_webgpu_include_dir "${PULP_SDK_DIR}/external/webgpu/include")
-
-if(NOT TARGET webgpu
-   AND EXISTS "${_pulp_webgpu_runtime}"
-   AND EXISTS "${_pulp_webgpu_include_dir}")
-
-    # On Windows, MSVC needs an import library in addition to the
-    # runtime DLL. Modern wgpu-native builds ship the import library
-    # as `wgpu_native.dll.lib` (the MSVC IMPLIB convention since
-    # wgpu-native v0.19+); older builds shipped `wgpu_native.lib`.
-    # Look for either name. Fail fast with a clear message if neither
-    # is present so a broken SDK install (#94) gives a useful error
-    # instead of a confusing "IMPORTED_IMPLIB not set" later.
-    if(WIN32)
-        set(_pulp_webgpu_implib_candidates
-            "${PULP_SDK_LIBRARY_DIR}/wgpu_native.dll.lib"
-            "${PULP_SDK_LIBRARY_DIR}/wgpu_native.lib"
-            "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native.lib")
-        set(_pulp_webgpu_implib "")
-        foreach(_pulp_candidate IN LISTS _pulp_webgpu_implib_candidates)
-            if(EXISTS "${_pulp_candidate}")
-                set(_pulp_webgpu_implib "${_pulp_candidate}")
-                break()
-            endif()
-        endforeach()
-        unset(_pulp_candidate)
-        if(NOT _pulp_webgpu_implib)
-            message(FATAL_ERROR
-                "Pulp SDK is missing the wgpu_native import library. "
-                "Looked for: ${_pulp_webgpu_implib_candidates}. "
-                "This is a broken SDK install — the runtime DLL is present "
-                "but the import library needed for linking is not. "
-                "Reinstall the Pulp SDK (v0.2.2 or newer) to pick up the fix "
-                "from https://github.com/danielraffel/pulp/issues/94.")
-        endif()
-    endif()
-
-    add_library(webgpu SHARED IMPORTED)
-    set_target_properties(webgpu PROPERTIES
-        IMPORTED_LOCATION "${_pulp_webgpu_runtime}"
-        IMPORTED_LOCATION_RELEASE "${_pulp_webgpu_runtime}"
-        INTERFACE_COMPILE_DEFINITIONS "WEBGPU_BACKEND_WGPU"
-        INTERFACE_INCLUDE_DIRECTORIES
-            "${_pulp_webgpu_include_dir};${_pulp_webgpu_include_dir}/webgpu"
-    )
-
-    if(WIN32)
-        set_property(TARGET webgpu PROPERTY IMPORTED_IMPLIB "${_pulp_webgpu_implib}")
-        set_property(TARGET webgpu PROPERTY
-            IMPORTED_IMPLIB_RELEASE "${_pulp_webgpu_implib}")
-    elseif(UNIX AND NOT APPLE)
-        set_property(TARGET webgpu PROPERTY IMPORTED_NO_SONAME TRUE)
-    endif()
-endif()
+# `webgpu` IMPORTED target + target_copy_webgpu_binaries() helper.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpWebGpuImportedTarget.cmake")
 
 if(EXISTS "${PULP_SDK_DIR}/external/skia-build")
     set(_pulp_saved_skia_dir "${SKIA_DIR}")
@@ -237,21 +81,6 @@ if(NOT TARGET SDL3::Headers)
             INTERFACE_INCLUDE_DIRECTORIES "${_pulp_sdl3_headers_dir}"
         )
     endif()
-endif()
-
-if(NOT COMMAND target_copy_webgpu_binaries)
-    function(target_copy_webgpu_binaries target)
-        if(TARGET webgpu AND EXISTS "${_pulp_webgpu_runtime}")
-            add_custom_command(
-                TARGET ${target}
-                POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_pulp_webgpu_runtime}"
-                    $<TARGET_FILE_DIR:${target}>
-                COMMENT "Copying WebGPU runtime next to ${target}"
-            )
-        endif()
-    endfunction()
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
