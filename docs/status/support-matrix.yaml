@@ -648,7 +648,10 @@ ai_shader_design:
       setWidgetShader/clearWidgetShader for Knob/Fader/Toggle body-layer shaders.
       Shader `time` is now driven from FrameClock. Recommended workflow is
       preset/material-first restyling with audio-plugin style-family routing;
-      raw SkSL remains a developer escape hatch.
+      raw SkSL remains a developer escape hatch. The write-once-multi-backend
+      contract (SkSL → Skia Graphite → WGSL → Dawn → Metal / D3D12 / Vulkan /
+      OpenGL ES) and its fragment / post-effect scope limits are documented in
+      docs/reference/shaders.md.
   declarative_schema:
     status: usable
     notes: >
