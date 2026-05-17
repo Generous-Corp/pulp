@@ -20,6 +20,28 @@
 
 using namespace pulp::runtime;
 
+namespace {
+
+const char* system_library_path() {
+#if defined(_WIN32)
+    return "kernel32.dll";
+#elif defined(__APPLE__)
+    return "/usr/lib/libSystem.B.dylib";
+#else
+    return "libc.so.6";
+#endif
+}
+
+const char* system_library_symbol() {
+#if defined(_WIN32)
+    return "GetCurrentProcess";
+#else
+    return "malloc";
+#endif
+}
+
+}  // namespace
+
 // ── TemporaryFile ───────────────────────────────────────────────────────
 
 TEST_CASE("TemporaryFile creates and deletes", "[runtime][temp_file]") {
@@ -280,6 +302,52 @@ TEST_CASE("DynamicLibrary fails on nonexistent", "[runtime][dynlib]") {
     REQUIRE_FALSE(lib.error().empty());
 }
 
+TEST_CASE("DynamicLibrary closed lookup is null and close is idempotent",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE_FALSE(lib.is_open());
+    REQUIRE(lib.find_symbol(system_library_symbol()) == nullptr);
+    lib.close();
+    REQUIRE_FALSE(lib.is_open());
+}
+
+TEST_CASE("DynamicLibrary move construction transfers the handle",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE(lib.open(system_library_path()));
+    REQUIRE(lib.find_symbol(system_library_symbol()) != nullptr);
+
+    DynamicLibrary moved(std::move(lib));
+    REQUIRE(moved.is_open());
+    REQUIRE_FALSE(lib.is_open());
+    REQUIRE(moved.find_symbol(system_library_symbol()) != nullptr);
+}
+
+TEST_CASE("DynamicLibrary move assignment closes target and transfers source",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary target;
+    DynamicLibrary source;
+    REQUIRE(target.open(system_library_path()));
+    REQUIRE(source.open(system_library_path()));
+
+    target = std::move(source);
+
+    REQUIRE(target.is_open());
+    REQUIRE_FALSE(source.is_open());
+    REQUIRE(target.find_symbol(system_library_symbol()) != nullptr);
+}
+
+TEST_CASE("DynamicLibrary failed reopen clears a previously loaded handle",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE(lib.open(system_library_path()));
+    REQUIRE(lib.is_open());
+
+    REQUIRE_FALSE(lib.open("/tmp/nonexistent_lib_after_success_12345.dylib"));
+    REQUIRE_FALSE(lib.is_open());
+    REQUIRE_FALSE(lib.error().empty());
+}
+
 // ── InterProcessLock ────────────────────────────────────────────────────
 
 TEST_CASE("InterProcessLock acquires and releases", "[runtime][ipc_lock]") {
@@ -313,6 +381,20 @@ TEST_CASE("InterProcessLock unlock is idempotent and permits reacquire",
 
     REQUIRE(lock.try_lock());
     REQUIRE(lock.is_locked());
+}
+
+TEST_CASE("InterProcessLock competing instance waits for release",
+          "[runtime][ipc_lock][coverage][phase3]") {
+    const auto name = "test_lock_competing_phase3";
+    InterProcessLock first(name);
+    InterProcessLock second(name);
+
+    REQUIRE(first.try_lock());
+    REQUIRE_FALSE(second.try_lock());
+
+    first.unlock();
+    REQUIRE(second.try_lock());
+    REQUIRE(second.is_locked());
 }
 
 // ── ChildProcess ────────────────────────────────────────────────────────

@@ -612,3 +612,148 @@ TEST_CASE("Environment: snapshot is consistent with last publish",
     REQUIRE(got.keyboard.bottom == 220.0f);
     REQUIRE(got.safe_area.top   == 22.0f);
 }
+
+TEST_CASE("Environment: publish without listeners still updates snapshot",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    auto state = make_state(ColorScheme::dark, 1.25f, 48.0f);
+    state.lifecycle = LifecycleState::background;
+
+    Environment::inject_for_test(state);
+
+    auto got = Environment::instance().snapshot();
+    REQUIRE(got.color_scheme == ColorScheme::dark);
+    REQUIRE(got.display.scale == 1.25f);
+    REQUIRE(got.keyboard.bottom == 48.0f);
+    REQUIRE(got.lifecycle == LifecycleState::background);
+}
+
+TEST_CASE("Environment: multiple listeners receive the same change snapshot",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    int first_calls = 0;
+    int second_calls = 0;
+    EnvironmentChange first_change{};
+    EnvironmentChange second_change{};
+    EnvironmentState first_state{};
+    EnvironmentState second_state{};
+
+    auto first = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            ++first_calls;
+            first_state = s;
+            first_change = c;
+        });
+    auto second = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            ++second_calls;
+            second_state = s;
+            second_change = c;
+        });
+
+    auto state = make_state(ColorScheme::light, 2.5f);
+    Environment::inject_for_test(state);
+
+    REQUIRE(first_calls == 1);
+    REQUIRE(second_calls == 1);
+    REQUIRE(first_change.display);
+    REQUIRE(second_change.display);
+    REQUIRE(first_change.color_scheme);
+    REQUIRE(second_change.color_scheme);
+    REQUIRE(first_state.display.scale == 2.5f);
+    REQUIRE(second_state.display.scale == 2.5f);
+}
+
+TEST_CASE("Environment: default token reset is inert",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    Environment::Token token;
+    REQUIRE_FALSE(token.valid());
+
+    token.reset();
+    REQUIRE_FALSE(token.valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(Environment::instance().snapshot().color_scheme == ColorScheme::dark);
+}
+
+TEST_CASE("Environment: token self move assignment preserves subscription",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    int calls = 0;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++calls; });
+    REQUIRE(token.valid());
+
+    auto* same = &token;
+    token = std::move(*same);
+    REQUIRE(token.valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("Environment: move assigning an empty token unsubscribes existing listener",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    int calls = 0;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++calls; });
+    REQUIRE(token.valid());
+
+    Environment::Token empty;
+    token = std::move(empty);
+    REQUIRE_FALSE(token.valid());
+    REQUIRE_FALSE(empty.valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("Environment: listener subscribed during dispatch waits for next publish",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    int first_calls = 0;
+    int late_calls = 0;
+    std::unique_ptr<Environment::Token> late_token;
+
+    auto first = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) {
+            ++first_calls;
+            if (!late_token) {
+                late_token = std::make_unique<Environment::Token>(
+                    Environment::instance().subscribe(
+                        [&](const EnvironmentState&, EnvironmentChange) {
+                            ++late_calls;
+                        }));
+            }
+        });
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(first_calls == 1);
+    REQUIRE(late_calls == 0);
+    REQUIRE(late_token);
+    REQUIRE(late_token->valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::light));
+    REQUIRE(first_calls == 2);
+    REQUIRE(late_calls == 1);
+}
+
+TEST_CASE("Environment: reset restores defaults after published state",
+          "[environment][coverage][phase3]") {
+    Environment::reset_for_test();
+    auto state = make_state(ColorScheme::dark, 3.0f, 240.0f);
+    state.safe_area.bottom = 12.0f;
+    Environment::inject_for_test(state);
+
+    Environment::reset_for_test();
+
+    auto got = Environment::instance().snapshot();
+    REQUIRE(got.color_scheme == ColorScheme::unknown);
+    REQUIRE(got.lifecycle == LifecycleState::unknown);
+    REQUIRE(got.orientation == Orientation::unknown);
+    REQUIRE(got.display.scale == 1.0f);
+    REQUIRE(got.keyboard.bottom == 0.0f);
+    REQUIRE(got.safe_area.is_zero());
+}
