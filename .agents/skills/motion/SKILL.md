@@ -1,13 +1,33 @@
 ---
 name: motion
-description: Agent-first motion observability for Pulp views and animations. Single entry point for two paths — runtime scalar/geometry tracing (samples values + view geometry over time, attachable at runtime over the inspector wire, emits Start/End burst-framed events) and pixel-truth visual analysis (SSIM + diff heatmaps + keyframe sprites from frame sequences). Use when an animation timing / direction / easing / scroll / drift is suspect, when an imported design needs verification, or when a transition / GPU effect has no observable scalar.
+description: Debug or validate Pulp animations / transitions / scroll behavior using the runtime motion-trace system. TRIGGER on phrases like "animation is wrong", "transition timing off", "fade too late", "card slides too far", "scroll jumps on restore", "easing looks wonky", "imported Figma motion doesn't match source", "settle time / overshoot / drift / monotonic", "what value does the knob reach at frame N", "record this animation so I can replay it", "this animation is expensive — which one and why", "reduced-motion broken", "scrub a captured fixture". Runs over the inspector wire (no source edits needed), captures fixtures (.motion.jsonl), and ships assertion helpers (is_monotonic / settling_time_seconds / overshoot / start_delay_seconds / final_value). Off by default in prod.
 ---
 
 # Motion
 
-Diagnose animation, scroll, and transition behavior with the framework's
-agent-first motion observability system. Two paths share one skill — pick
-based on what's observable.
+Pulp's agent-first motion observability — sample view geometry / scalar
+values / scroll state over time, emit epsilon-bounded events with monotonic
+timestamps and burst framing, and route them to log lines + inspector
+events + JSONL fixtures. **You are reading this skill because an agent
+needs to debug, validate, or reproduce a motion behavior.**
+
+## When to rope this skill in
+
+Trigger this skill the moment a user (or your own reasoning) describes any
+of these symptoms — don't reach for `grep` or `git log`, attach a trace:
+
+- "this fade / slide / scale is too fast / too slow / starts late / ends early"
+- "the knob value isn't reaching its target" / "what value at frame N?"
+- "two elements drift apart during the transition"
+- "scroll position jumps when I restore state"
+- "imported design's motion doesn't match the source intent"
+- "is this animation monotonic / does it overshoot / how long to settle?"
+- "which animation is expensive and why?" → Path F (cost attribution)
+- "reduced-motion path is broken" → Path B + assert under MotionPolicy
+- "I want to scrub through a recorded fixture" → Path E (scrubber)
+
+If the user says any of those, this skill applies. Don't suggest reading
+source; **attach a trace and read the numbers**.
 
 ## Quick decision
 
