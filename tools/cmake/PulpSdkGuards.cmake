@@ -1,16 +1,31 @@
 # PulpSdkGuards.cmake — defensive guards for downstream find_package(Pulp).
 #
-# Extracted from PulpConfig.cmake.in in the 2026-05 B3 refactor.
-#
-# Currently:
-#   * Debug-SDK perf-killer guard — refuses a Debug-built Pulp SDK
-#     unless the consumer opts in via PULP_ALLOW_DEBUG_SDK=ON. The
-#     CMakeLists.txt that produced this SDK install writes the
-#     CMAKE_BUILD_TYPE it was configured with to
-#     `${PULP_SDK_DIR}/sdk_build_type.txt`. Multi-config generators
-#     don't record a single canonical build-type so we fall through
-#     silently on missing/empty marker files.
+# Extracted from PulpConfig.cmake.in in the 2026-05 B3 refactor. The
+# guard block below preserves its original header text on purpose so
+# the fixture `test/cmake/test_debug_sdk_guard.cmake` can locate it
+# by its regex.
 
+# Debug-SDK perf-killer guard (pulp-internal task #35).
+#
+# A Pulp SDK that was itself BUILT with CMAKE_BUILD_TYPE=Debug ships
+# debug-mode Skia, debug-mode audio framework, and debug-mode JS
+# engine. Consuming it from a downstream plugin produces real-time
+# audio code so slow that buffer underruns happen on every reasonable
+# host — a UX failure mode that's hard to attribute to "the SDK
+# install is wrong" because the link succeeds and the plugin appears
+# to work, just very poorly.
+#
+# The CMakeLists.txt that produced this SDK install writes the
+# CMAKE_BUILD_TYPE it was configured with to
+# `${PULP_SDK_DIR}/sdk_build_type.txt`. If we can read that file and
+# it contains "Debug", refuse the find_package — with an escape hatch
+# (`PULP_ALLOW_DEBUG_SDK=ON`) for the rare developer who *does* want
+# a Debug SDK.
+#
+# Empty marker file (older SDK installs that predate the marker) and
+# multi-config generators (which install per-config without recording
+# a single canonical build-type) fall through silently — we cannot
+# tell, so we don't warn.
 set(_pulp_sdk_build_type_marker "${PULP_SDK_DIR}/sdk_build_type.txt")
 if(EXISTS "${_pulp_sdk_build_type_marker}")
     file(READ "${_pulp_sdk_build_type_marker}" _pulp_sdk_build_type)
