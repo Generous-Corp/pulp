@@ -33,7 +33,7 @@ public:
     /// Read a frame from this subsection
     float sample(uint32_t channel, uint64_t frame) const {
         if (!source_ || channel >= num_channels() || frame >= length_) return 0.0f;
-        return source_->channels[channel][static_cast<size_t>(start_ + frame)];
+        return source_sample(channel, start_ + frame);
     }
 
     /// Copy frames from this subsection into a destination buffer
@@ -43,9 +43,8 @@ public:
         uint64_t actual_start = start_ + std::min(start, length_);
         uint64_t actual_count = std::min(count, length_ - std::min(start, length_));
 
-        auto& ch = source_->channels[channel];
         for (uint64_t i = 0; i < actual_count; ++i)
-            dest[i] = ch[static_cast<size_t>(actual_start + i)];
+            dest[i] = source_sample(channel, actual_start + i);
     }
 
     /// Extract this subsection as a new AudioFileData (copies data)
@@ -59,7 +58,7 @@ public:
             result.channels[ch].resize(static_cast<size_t>(length_));
             for (uint64_t i = 0; i < length_; ++i)
                 result.channels[ch][static_cast<size_t>(i)] =
-                    source_->channels[ch][static_cast<size_t>(start_ + i)];
+                    source_sample(ch, start_ + i);
         }
         return result;
     }
@@ -76,6 +75,12 @@ private:
     const AudioFileData* source_ = nullptr;
     uint64_t start_ = 0;
     uint64_t length_ = 0;
+
+    float source_sample(uint32_t channel, uint64_t frame) const {
+        const auto& ch = source_->channels[channel];
+        if (frame >= ch.size()) return 0.0f;
+        return ch[static_cast<size_t>(frame)];
+    }
 };
 
 }  // namespace pulp::audio

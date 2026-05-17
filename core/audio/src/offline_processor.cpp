@@ -6,12 +6,27 @@
 
 namespace pulp::audio {
 
+namespace {
+
+bool has_consistent_channel_lengths(const AudioFileData& input) {
+    if (input.empty()) return false;
+
+    const auto expected_frames = input.num_frames();
+    return std::all_of(input.channels.begin(), input.channels.end(),
+                       [expected_frames](const auto& channel) {
+                           return channel.size() == expected_frames;
+                       });
+}
+
+}  // namespace
+
 std::optional<AudioFileData> offline_process(
     const AudioFileData& input,
     OfflineProcessCallback process_fn,
     int block_size)
 {
-    if (input.empty() || !process_fn || block_size <= 0) return std::nullopt;
+    if (!has_consistent_channel_lengths(input) || !process_fn || block_size <= 0)
+        return std::nullopt;
 
     uint32_t channels = input.num_channels();
     uint64_t total_frames = input.num_frames();

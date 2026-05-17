@@ -1181,6 +1181,10 @@ add_executable(pulp-test-audio-file test_audio_file.cpp)
 target_link_libraries(pulp-test-audio-file PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-file)
 
+add_executable(pulp-test-offline-processor-edges test_offline_processor_edges.cpp)
+target_link_libraries(pulp-test-offline-processor-edges PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-offline-processor-edges)
+
 add_executable(pulp-test-ogg-reader test_ogg_reader.cpp)
 target_link_libraries(pulp-test-ogg-reader PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ogg-reader)

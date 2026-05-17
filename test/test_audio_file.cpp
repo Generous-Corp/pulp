@@ -447,6 +447,8 @@ TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empti
     REQUIRE(data.num_channels() == 2);
     REQUIRE(data.num_frames() == 3);
     REQUIRE_FALSE(data.empty());
+    REQUIRE_FALSE(write_wav_file(path.string(), data));
+    REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
 TEST_CASE("WAV helpers write deinterleaved channel data and reject malformed input",
