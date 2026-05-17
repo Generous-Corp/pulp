@@ -1353,7 +1353,37 @@ PreparedParagraph make_paragraph(const std::string& text,
                                 : skia::textlayout::TextDirection::kRtl);
     skia::textlayout::TextStyle tstyle;
     std::vector<SkString> families;
-    if (!family.empty()) families.emplace_back(family.c_str());
+    // Codex P2 (PR #2157): split CSS font-family lists. `family` can be a
+    // comma-separated CSS fallback list ("Inter, sans-serif"). Passing the
+    // whole string as one SkString makes SkParagraph treat it as a single
+    // literal family name and miss the fallback resolution. Split on commas
+    // and strip surrounding whitespace + optional quote marks so each entry
+    // resolves independently in the font collection.
+    if (!family.empty()) {
+        size_t cursor = 0;
+        while (cursor < family.size()) {
+            size_t comma = family.find(',', cursor);
+            std::string entry = family.substr(cursor,
+                comma == std::string::npos ? std::string::npos : comma - cursor);
+            // Trim ASCII whitespace.
+            size_t lo = entry.find_first_not_of(" \t\n\r\f\v");
+            size_t hi = entry.find_last_not_of(" \t\n\r\f\v");
+            if (lo != std::string::npos && hi != std::string::npos) {
+                entry = entry.substr(lo, hi - lo + 1);
+                // Strip a single matching pair of single or double quotes.
+                if (entry.size() >= 2
+                    && (entry.front() == '"' || entry.front() == '\'')
+                    && entry.front() == entry.back()) {
+                    entry = entry.substr(1, entry.size() - 2);
+                }
+                if (!entry.empty()) {
+                    families.emplace_back(entry.c_str());
+                }
+            }
+            if (comma == std::string::npos) break;
+            cursor = comma + 1;
+        }
+    }
     const std::string emoji_family = ctx->emoji_family_name();
     if (!emoji_family.empty()) {
         families.emplace_back(emoji_family.c_str());
@@ -1440,16 +1470,19 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // nesting level in the widget paint pipeline.
     //
     // SkParagraph handles cluster-aware emoji fallback, CSS letter-
-    // spacing, OpenType font features, and bidi direction. Hot-path
-    // labels that need none of these (plain ASCII, no features, no
-    // tracking) fall through to the per-glyph blob path below — same
-    // cost the pre-emoji code paid and no SkParagraph alloc per call.
-    const bool needs_paragraph =
-        !font_features_.empty()
-        || letter_spacing_ != 0.0f
-        || direction_ == TextDirection::rtl
-        || pulp::canvas::contains_emoji(text);
-    if (needs_paragraph) {
+    // spacing, OpenType font features, and bidi direction.
+    //
+    // Codex P1 (PR #2157): previously this branch was gated on
+    // `needs_paragraph` (features/letter-spacing/rtl/emoji) and routed
+    // plain LTR ASCII text into the per-glyph SkTextBlob fallback as a
+    // hot-path optimization. That fallback has NO kerning or ligatures,
+    // so common strings like "AV" / "ffi" / "fl" rendered with the
+    // wrong advances and bare-glyph spacing — a visual + width-sensitive
+    // regression vs. the pre-emoji code, which always shaped through
+    // SkParagraph. The per-glyph blob path is now only reached when
+    // shaping is compile-time disabled (`PULP_HAS_TEXT_SHAPING` off) or
+    // SkParagraph fails to build a paragraph at runtime.
+    {
         const bool ltr = (direction_ != TextDirection::rtl);
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
