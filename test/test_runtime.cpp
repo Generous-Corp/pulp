@@ -671,6 +671,27 @@ TEST_CASE("HighResolutionTimer restart replaces callback",
     REQUIRE_FALSE(timer.is_running());
 }
 
+TEST_CASE("HighResolutionTimer can stop from its own callback",
+          "[runtime][timer][coverage][phase3]") {
+    HighResolutionTimer timer;
+    std::atomic<int> calls{0};
+
+    timer.start(1ms, [&] {
+        calls.fetch_add(1, std::memory_order_relaxed);
+        timer.stop();
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + 250ms;
+    while (timer.is_running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    REQUIRE_FALSE(timer.is_running());
+    REQUIRE(calls.load(std::memory_order_relaxed) == 1);
+    timer.stop();
+    REQUIRE_FALSE(timer.is_running());
+}
+
 TEST_CASE("runtime logging wrappers accept formatted payloads",
           "[runtime][log][coverage][phase3]") {
     REQUIRE_NOTHROW(log_info("info {} {}", "message", 1));

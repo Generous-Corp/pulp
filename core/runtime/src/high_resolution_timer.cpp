@@ -52,7 +52,9 @@ void HighResolutionTimer::start(std::chrono::microseconds interval,
 
 void HighResolutionTimer::stop() {
     running_.store(false, std::memory_order_release);
-    if (thread_.joinable())
+    if (thread_.joinable() && thread_.get_id() == std::this_thread::get_id())
+        thread_.detach();
+    else if (thread_.joinable())
         thread_.join();
 }
 
