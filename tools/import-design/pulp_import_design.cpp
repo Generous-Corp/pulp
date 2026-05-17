@@ -523,15 +523,40 @@ int main(int argc, char* argv[]) {
         // Phase A defaults — only fire when the developer's React source
         // has a high-confidence match. `apply_default_shortcuts` lowers
         // accepted DefaultShortcutCandidates into the same DetectedShortcut
-        // form so they ride V2's codegen path with no fork.  Suppressed
+        // form so they ride V2's codegen path with no fork. Suppressed
         // chord-by-chord against `detected_shortcuts` so an extracted
-        // binding always wins.  Platform defaults macOS chords (Cmd+,,
-        // Cmd+?, etc.) — Win/Linux variants pick Ctrl/F1 at runtime.
+        // binding always wins.
+        //
+        // Codex P2 on #2128: the import CLI runs at build time, but the
+        // generated ui.js ships to many platforms (mac standalone, win
+        // standalone, plugin hosts on either). Emit BOTH macOS and
+        // Win/Linux variants — at runtime only the chord matching the
+        // physical key press fires its registerShortcut entry, so the
+        // user gets the right native binding on each platform without
+        // platform detection at codegen time. Mirrors the V2 dual emit
+        // for `metaKey||ctrlKey` (per-platform handlers, exact-mask
+        // match on the bridge side).
         if (default_shortcuts) {
             default_scan = detect_default_shortcuts(content, detected_shortcuts);
-            auto defaults = apply_default_shortcuts(
+            auto mac_defaults = apply_default_shortcuts(
                 default_scan.accepted, TargetPlatform::macos);
-            for (auto& d : defaults) detected_shortcuts.push_back(std::move(d));
+            auto win_defaults = apply_default_shortcuts(
+                default_scan.accepted, TargetPlatform::win_linux);
+            for (auto& d : mac_defaults) detected_shortcuts.push_back(std::move(d));
+            // Skip Win/Linux variants whose chord (key + mask) already
+            // came in via the mac pass — happens for keys without a
+            // platform delta (e.g. bare `?` for cheatsheet emits the
+            // same binding under both platforms).
+            for (auto& d : win_defaults) {
+                bool dup = false;
+                for (const auto& existing : detected_shortcuts) {
+                    if (existing.key == d.key && existing.modifiers == d.modifiers) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) detected_shortcuts.push_back(std::move(d));
+            }
         }
 
         opts.shortcuts = detected_shortcuts;
@@ -646,13 +671,21 @@ int main(int argc, char* argv[]) {
     if (import_shortcuts && !detected_shortcuts.empty()) {
         const auto shortcuts_json = serialize_detected_shortcuts(detected_shortcuts);
         if (write_file(shortcuts_output, shortcuts_json)) {
-            const size_t extracted_count = detected_shortcuts.size()
-                                         - default_scan.accepted.size();
+            // `default_scan.accepted` is the count of UI surfaces matched
+            // (one per Settings/Help/Cheatsheet/…). Each accepted surface
+            // emits up to TWO actual bindings (mac chord + win/linux
+            // variant) so the count of default-tagged DetectedShortcuts
+            // can be up to 2× the accepted-surfaces count.
+            size_t default_count = 0;
+            for (const auto& s : detected_shortcuts) {
+                if (s.pattern.rfind("default:", 0) == 0) ++default_count;
+            }
+            const size_t extracted_count = detected_shortcuts.size() - default_count;
             std::cout << "Wrote " << shortcuts_output
                       << " (" << detected_shortcuts.size() << " shortcut"
                       << (detected_shortcuts.size() == 1 ? "" : "s")
                       << " — " << extracted_count << " extracted, "
-                      << default_scan.accepted.size() << " platform-default"
+                      << default_count << " platform-default"
                       << " — bound natively via registerShortcut())\n";
         }
     }

@@ -762,3 +762,56 @@ TEST_CASE("default shortcuts: E2E — codegen emits default thunks too",
     REQUIRE(js.find("metaKey: true") != std::string::npos);
     REQUIRE(js.find("key: ','") != std::string::npos);
 }
+
+TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash (Codex P1 #2128)",
+          "[design-import][shortcuts][defaults][v2]") {
+    // Widening key_string_to_keycode to accept all printable ASCII lets
+    // `'` and `\` pass validation. Without escaping at emission time
+    // the generated `key: '...'` literal becomes syntactically invalid
+    // JS and the whole script fails to load. Pin the escape.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut quote;  quote.key = "'";  // single-quote literal
+    DetectedShortcut backslash; backslash.key = "\\";  // single backslash
+    opts.shortcuts = {quote, backslash};
+
+    DesignIR ir;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Both literals appear escaped — `key: '\''` and `key: '\\'`.
+    REQUIRE(js.find("key: '\\''")  != std::string::npos);
+    REQUIRE(js.find("key: '\\\\'") != std::string::npos);
+    // No unescaped raw `key: '''` would tokenize as empty-string + stray
+    // quote — assert that doesn't appear.
+    REQUIRE(js.find("key: '''") == std::string::npos);
+}
+
+TEST_CASE("default shortcuts: apply_default_shortcuts win_linux maps File-menu chords correctly",
+          "[design-import][shortcuts][defaults]") {
+    // P2 follow-up — every Cmd-on-mac default has a Ctrl-on-win/linux
+    // counterpart. Pin all four so a future re-map doesn't silently
+    // drop one platform.
+    auto chord_for = [&](DefaultShortcutPattern p) {
+        pulp::view::DefaultShortcutCandidate c;
+        c.pattern = p; c.target = "x"; c.confidence = "medium";
+        auto mac = apply_default_shortcuts({c}, TargetPlatform::macos)[0];
+        auto win = apply_default_shortcuts({c}, TargetPlatform::win_linux)[0];
+        return std::make_pair(mac, win);
+    };
+    for (auto p : {DefaultShortcutPattern::new_file,
+                   DefaultShortcutPattern::open_file,
+                   DefaultShortcutPattern::save_file,
+                   DefaultShortcutPattern::find}) {
+        auto [mac, win] = chord_for(p);
+        REQUIRE(mac.key == win.key);
+        REQUIRE(mac.modifiers == std::vector<std::string>{"meta"});
+        REQUIRE(win.modifiers == std::vector<std::string>{"ctrl"});
+    }
+
+    // Cheatsheet bare `?` is platform-agnostic (same chord both sides).
+    auto [csm, csw] = chord_for(DefaultShortcutPattern::cheatsheet);
+    REQUIRE(csm.key == "?");          REQUIRE(csw.key == "?");
+    REQUIRE(csm.modifiers.empty());   REQUIRE(csw.modifiers.empty());
+}
