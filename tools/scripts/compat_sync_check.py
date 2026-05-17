@@ -51,12 +51,22 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import subprocess  # noqa: F401  — kept so tests can `mock.patch.object(csc.subprocess, "run")`. Modules are singletons in sys.modules, so the patch reaches gate_common's calls too.
 import sys
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
+
+# Shared substrate (2026-05 refactor batch).
+from gate_common import (
+    repo_root,
+    git_diff_names,
+    git_range_trailers,
+    glob_to_regex as _glob_to_regex,
+    glob_match as _glob_match,
+    matches_any as _matches_any,
+    strip_meta as _strip_comments,
+)
 
 # All compat sections recognized by the gate. Mirrors the top-level
 # keys in compat.json. The wildcard `*` is allowed in
@@ -92,67 +102,10 @@ class Finding:
     detail: str           # human-readable "what's missing"
 
 
-# ── Git helpers ─────────────────────────────────────────────────────────
-
-
-def repo_root() -> Path:
-    out = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        check=True, capture_output=True, text=True,
-    )
-    return Path(out.stdout.strip())
-
-
-def git_diff_names(base: str, head: str) -> list[str]:
-    out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}..{head}"],
-        check=True, capture_output=True, text=True,
-    )
-    return [line for line in out.stdout.splitlines() if line.strip()]
-
-
-def git_range_trailers(base: str, head: str) -> dict[str, list[str]]:
-    """Collect trailers from ALL commits in `base..head`, merged.
-
-    CI checks out a synthetic merge commit as HEAD, so a bypass trailer
-    on the branch's tip commit wouldn't be seen if we only looked at
-    HEAD. Walk the whole range instead — any commit in the range
-    carries the bypass. Mirrors the pattern in skill_sync_check.py.
-    """
-    try:
-        body = subprocess.run(
-            ["git", "log", "--format=%B%x00", f"{base}..{head}"],
-            check=True, capture_output=True, text=True,
-        ).stdout
-    except subprocess.CalledProcessError:
-        return {}
-
-    result: dict[str, list[str]] = {}
-    for body_chunk in body.split("\x00"):
-        if not body_chunk.strip():
-            continue
-        trailers = subprocess.run(
-            ["git", "interpret-trailers", "--parse"],
-            input=body_chunk, capture_output=True, text=True,
-        )
-        for line in trailers.stdout.splitlines():
-            if ":" not in line:
-                continue
-            key, _, value = line.partition(":")
-            result.setdefault(key.strip().lower(), []).append(value.strip())
-    return result
+# Git helpers and `_strip_comments` come from gate_common.
 
 
 # ── Config loading ──────────────────────────────────────────────────────
-
-
-def _strip_comments(data: dict) -> dict:
-    if isinstance(data, dict):
-        return {
-            k: v for k, v in data.items()
-            if not k.startswith("_") and k != "$schema"
-        }
-    return data
 
 
 def load_compat_map(path: Path) -> CompatMap:
@@ -216,76 +169,7 @@ def load_compat_json(path: Path) -> dict:
         return {}
 
 
-# ── Glob matching (mirrors skill_sync_check) ───────────────────────────
-
-
-@lru_cache(maxsize=None)
-def _glob_to_regex(pattern: str) -> "re.Pattern[str]":
-    """Translate a gitignore-style glob into an anchored regex.
-
-    Mirrors ``skill_sync_check._glob_to_regex``. Kept here as a
-    deliberate copy so each gate stays a single-file script. Semantics:
-        - ``**`` matches zero or more path segments (including zero).
-        - ``*``  matches zero or more characters within a single segment.
-        - ``?``  matches exactly one character within a single segment.
-        - Patterns are anchored at both ends.
-    """
-    parts = pattern.split("/")
-    n = len(parts)
-
-    STARSTAR = object()
-    tokens: list = []
-    for part in parts:
-        if part == "**":
-            tokens.append(STARSTAR)
-            continue
-        seg = ""
-        for c in part:
-            if c == "*":
-                seg += "[^/]*"
-            elif c == "?":
-                seg += "[^/]"
-            else:
-                seg += re.escape(c)
-        tokens.append(seg)
-
-    out = ""
-    for i, tok in enumerate(tokens):
-        is_first = i == 0
-        is_last = i == n - 1
-        if tok is STARSTAR:
-            if is_first and is_last:
-                out += ".*"
-            elif is_first:
-                out += "(?:[^/]+/)*"
-            elif is_last:
-                if out.endswith("/"):
-                    out = out[:-1]
-                out += "(?:/.*)?"
-            else:
-                if not out.endswith("/"):
-                    out += "/"
-                out += "(?:[^/]+/)*"
-        else:
-            if not is_first:
-                if not out.endswith("/") and not out.endswith(")?") \
-                   and not out.endswith(")*"):
-                    out += "/"
-            out += tok
-
-    return re.compile("^" + out + "$")
-
-
-def _glob_match(path: str, pattern: str) -> bool:
-    return _glob_to_regex(pattern).match(path) is not None
-
-
-def _matches_any(path: str, patterns: Iterable[str]) -> bool:
-    p = path.replace(os.sep, "/")
-    for pat in patterns:
-        if _glob_match(p, pat):
-            return True
-    return False
+# Glob helpers come from gate_common.
 
 
 # ── Trailer parsing ─────────────────────────────────────────────────────

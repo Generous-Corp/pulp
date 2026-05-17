@@ -60,9 +60,22 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
+
+# Shared substrate (2026-05 refactor batch). `_strip_meta` is the
+# version-bump-specific alias for `strip_meta`; we keep the public alias
+# so other callers in this file (and any external imports) don't break.
+from gate_common import (
+    repo_root,
+    git_diff_names,
+    git_range_trailers,
+    git_commit_trailers,
+    glob_to_regex as _glob_to_regex,
+    glob_match as _glob_match,
+    matches_any as _matches_any,
+    strip_meta as _strip_meta,
+)
 
 
 # ── Types ───────────────────────────────────────────────────────────────
@@ -107,22 +120,9 @@ class Verdict:
 
 
 # ── Git helpers ─────────────────────────────────────────────────────────
-
-
-def repo_root() -> Path:
-    out = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        check=True, capture_output=True, text=True,
-    )
-    return Path(out.stdout.strip())
-
-
-def git_diff_names(base: str, head: str) -> list[str]:
-    out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}..{head}"],
-        check=True, capture_output=True, text=True,
-    )
-    return [line for line in out.stdout.splitlines() if line.strip()]
+# repo_root / git_diff_names / git_range_trailers / git_commit_trailers
+# come from gate_common (see top-of-file import). Surface-specific helpers
+# below.
 
 
 def git_diff_ignore_whitespace_nonempty(base: str, head: str, path: str) -> bool:
@@ -184,59 +184,7 @@ def git_commit_files(sha: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
-def git_range_trailers(base: str, head: str) -> dict[str, list[str]]:
-    """Collect trailers from every commit in base..head (CI checks out
-    a synthetic merge commit as HEAD, so a bypass on the branch tip
-    wouldn't be visible if we only looked at HEAD)."""
-    try:
-        body = subprocess.run(
-            ["git", "log", "--format=%B%x00", f"{base}..{head}"],
-            check=True, capture_output=True, text=True,
-        ).stdout
-    except subprocess.CalledProcessError:
-        return {}
-    result: dict[str, list[str]] = {}
-    for body_chunk in body.split("\x00"):
-        if not body_chunk.strip():
-            continue
-        trailers = subprocess.run(
-            ["git", "interpret-trailers", "--parse"],
-            input=body_chunk, capture_output=True, text=True,
-        )
-        for line in trailers.stdout.splitlines():
-            if ":" not in line:
-                continue
-            key, _, value = line.partition(":")
-            result.setdefault(key.strip().lower(), []).append(value.strip())
-    return result
-
-
-def git_commit_trailers(ref: str) -> dict[str, list[str]]:
-    try:
-        body = subprocess.run(
-            ["git", "log", "-1", "--format=%B", ref],
-            check=True, capture_output=True, text=True,
-        ).stdout
-    except subprocess.CalledProcessError:
-        return {}
-    trailers = subprocess.run(
-        ["git", "interpret-trailers", "--parse"],
-        input=body, capture_output=True, text=True,
-    )
-    result: dict[str, list[str]] = {}
-    for line in trailers.stdout.splitlines():
-        if ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        result.setdefault(key.strip().lower(), []).append(value.strip())
-    return result
-
-
 # ── Config loading ──────────────────────────────────────────────────────
-
-
-def _strip_meta(data: dict) -> dict:
-    return {k: v for k, v in data.items() if not k.startswith("_") and k != "$schema"}
 
 
 def load_config(path: Path) -> Config:
@@ -413,108 +361,11 @@ def write_version(repo: Path, vf: VersionFile, new: str) -> bool:
 
 
 # ── Matching / heuristics ───────────────────────────────────────────────
-
-
-@lru_cache(maxsize=None)
-def _glob_to_regex(pattern: str) -> "re.Pattern[str]":
-    """Translate a gitignore-style glob into an anchored regex.
-
-    Semantics (needed because Python's stdlib ``fnmatch`` and
-    ``pathlib.PurePath.match`` both fail to treat ``**`` as "zero or more
-    path segments" — they require at least one intermediate segment, so
-    ``tools/cli/**/*.cpp`` does NOT match ``tools/cli/cmd_doctor.cpp``):
-
-        - ``**`` matches zero or more path segments (including zero).
-        - ``*``  matches zero or more characters within a single segment.
-        - ``?``  matches exactly one character within a single segment.
-        - Patterns are anchored at both ends.
-
-    This is the single source of truth for matching changed-file paths
-    against ``versioning.json``'s trigger_paths / public_api_paths /
-    internal_only_paths / generated_globs. See 2026-04-20 incident
-    (#538/#540/#541/#546) where the previous ``fnmatch``-based matcher
-    silently failed to flag SDK changes touching ``tools/cli/*.cpp``.
-    """
-    parts = pattern.split("/")
-    n = len(parts)
-
-    STARSTAR = object()
-    tokens: list = []
-    for part in parts:
-        if part == "**":
-            tokens.append(STARSTAR)
-            continue
-        seg = ""
-        for c in part:
-            if c == "*":
-                seg += "[^/]*"
-            elif c == "?":
-                seg += "[^/]"
-            else:
-                seg += re.escape(c)
-        tokens.append(seg)
-
-    # Emit with preserved '/' boundaries so '**' can collapse to zero
-    # segments without deleting the surrounding slash anchors. Without
-    # this, `tools/cli/**/*.cpp` incorrectly matches `tools/clicmd.cpp`
-    # because the old emitter stripped the '/' before the middle '**'.
-    # See Codex 2026-04-21 review on #554.
-    out = ""
-    for i, tok in enumerate(tokens):
-        is_first = i == 0
-        is_last = i == n - 1
-        if tok is STARSTAR:
-            if is_first and is_last:
-                out += ".*"
-            elif is_first:
-                # Leading '**/' — zero or more '<segment>/' runs. Emits a
-                # trailing '/' only when at least one segment matches,
-                # so the next concrete token supplies its own boundary.
-                out += "(?:[^/]+/)*"
-            elif is_last:
-                # Trailing '/**' — match either '' or '/<rest>'. We keep
-                # the preceding '/' out of the match so `a/**` also
-                # matches `a` itself, matching fnmatch intuition.
-                if out.endswith("/"):
-                    out = out[:-1]
-                out += "(?:/.*)?"
-            else:
-                # Middle '/**/' — the preceding '/' stays in place as a
-                # required boundary. The '**' itself expands to zero or
-                # more full segments, each carrying its own trailing '/'.
-                # That preserves `tools/cli/**/*.cpp` anchoring on `tools/cli/`
-                # and forbids `tools/clicmd.cpp`. Old emitter stripped the
-                # '/' here, which was the #554 bug.
-                if not out.endswith("/"):
-                    out += "/"
-                out += "(?:[^/]+/)*"
-        else:
-            if not is_first:
-                # Only add a separator if the preceding emission hasn't
-                # already supplied one. After a middle '**' group the
-                # emission ends in ')*' whose last character before the
-                # quantifier is '/', and the preceding concrete token
-                # already left a '/' in `out`, so the boundary is
-                # guaranteed. Trailing '**' ends in ')?', which already
-                # contains its own optional '/'. Leading '**' similarly.
-                if not out.endswith("/") and not out.endswith(")?") \
-                   and not out.endswith(")*"):
-                    out += "/"
-            out += tok
-
-    return re.compile("^" + out + "$")
-
-
-def _glob_match(path: str, pattern: str) -> bool:
-    return _glob_to_regex(pattern).match(path) is not None
-
-
-def _matches_any(path: str, patterns: Iterable[str]) -> bool:
-    p = path.replace(os.sep, "/")
-    for pat in patterns:
-        if _glob_match(p, pat):
-            return True
-    return False
+# _glob_to_regex / _glob_match / _matches_any come from gate_common.
+# Single source of truth for matching changed-file paths against
+# versioning.json's trigger_paths / public_api_paths /
+# internal_only_paths / generated_globs. See gate_common.glob_to_regex
+# for the post-#554 slash-boundary semantics.
 
 
 def filter_generated(changed: list[str], globs: Iterable[str]) -> list[str]:
