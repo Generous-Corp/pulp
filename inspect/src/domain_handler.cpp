@@ -5,6 +5,7 @@
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/audio_inspector.hpp>
+#include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/render/render_pass.hpp>
@@ -36,8 +37,16 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "Runtime")     return handle_runtime(req);
     if (domain == "Audio")       return handle_audio(req);
     if (domain == "Capture")     return handle_capture(req);
+    if (domain == "Motion")      return handle_motion(req);
 
     return make_error(req.id, "Unknown domain: " + domain);
+}
+
+// ── Motion domain ───────────────────────────────────────────────────────────
+
+InspectorMessage DomainHandler::handle_motion(const InspectorMessage& req) {
+    if (!motion_) return make_error(req.id, "No motion inspector attached");
+    return motion_->handle(req);
 }
 
 // ── Inspector domain ────────────────────────────────────────────────────────

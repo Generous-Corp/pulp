@@ -1,0 +1,6 @@
+# Pulp Motion visual-analysis dependencies.
+# All MIT / BSD / Apache 2.0 — license-clean for the analysis lane.
+# Not redistributed in plugin/app artifacts.
+numpy>=1.24
+Pillow>=10.0
+scikit-image>=0.22

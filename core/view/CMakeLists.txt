@@ -186,6 +186,7 @@ target_sources(pulp-view PRIVATE
     src/widgets/svg_line.cpp
     src/visualization_bridge.cpp
     src/frame_clock.cpp
+    src/motion.cpp
     src/window_manager.cpp
     src/eq_curve_view.cpp
     src/midi_keyboard.cpp

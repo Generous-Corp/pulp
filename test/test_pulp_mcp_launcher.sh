@@ -42,8 +42,13 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 case1="$TMPDIR_T/case1"
 stage_fake_repo "$case1"
 
+# Override HOME to a clean tmpdir so the launcher's
+# `${HOME}/.pulp/bin/pulp-mcp` probe doesn't accidentally find a real
+# installed binary on a dev machine that has run `install.sh`.
+# Scrubbing PATH alone isn't enough — HOME is searched independently.
 set +e
-output=$(PATH=/usr/bin:/bin "$case1/tools/mcp/pulp-mcp-launcher" 2>&1)
+output=$(HOME="$TMPDIR_T/case1-home" PATH=/usr/bin:/bin \
+    "$case1/tools/mcp/pulp-mcp-launcher" 2>&1)
 rc=$?
 set -e
 
@@ -73,7 +78,8 @@ STUB
 chmod +x "$case2/build/tools/mcp/pulp-mcp"
 
 set +e
-output=$(PATH=/usr/bin:/bin "$case2/tools/mcp/pulp-mcp-launcher" 2>&1)
+output=$(HOME="$TMPDIR_T/case2-home" PATH=/usr/bin:/bin \
+    "$case2/tools/mcp/pulp-mcp-launcher" 2>&1)
 rc=$?
 set -e
 
@@ -101,7 +107,8 @@ STUB
 chmod +x "$pathdir/pulp-mcp"
 
 set +e
-output=$(PATH="$pathdir:/usr/bin:/bin" "$case3/tools/mcp/pulp-mcp-launcher" 2>&1)
+output=$(HOME="$TMPDIR_T/case3-home" PATH="$pathdir:/usr/bin:/bin" \
+    "$case3/tools/mcp/pulp-mcp-launcher" 2>&1)
 rc=$?
 set -e
 
@@ -127,7 +134,8 @@ STUB
 chmod +x "$case4/build/tools/mcp/pulp-mcp"
 
 set +e
-output=$(PATH=/usr/bin:/bin "$case4/tools/mcp/pulp-mcp-launcher" --foo bar baz 2>&1)
+output=$(HOME="$TMPDIR_T/case4-home" PATH=/usr/bin:/bin \
+    "$case4/tools/mcp/pulp-mcp-launcher" --foo bar baz 2>&1)
 rc=$?
 set -e
 

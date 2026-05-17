@@ -1,0 +1,1179 @@
+/// @file test_motion.cpp
+/// Catch2 unit tests for pulp::view::motion (Phase 0: coordinator,
+/// FrameClock binding, emission semantics, accumulator-gated FPS,
+/// Start/Sample/End burst framing, deltas, sinks, geometry walker).
+
+#include <pulp/view/motion.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/view.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#define pulp_test_getpid() static_cast<long>(::_getpid())
+#else
+#include <unistd.h>
+#define pulp_test_getpid() static_cast<long>(::getpid())
+#endif
+
+using Catch::Approx;
+using pulp::view::FrameClock;
+using pulp::view::Rect;
+using pulp::view::View;
+using namespace pulp::view::motion;
+
+namespace {
+
+/// RAII fixture: resets the singleton coordinator, enables tracing,
+/// binds a fresh FrameClock, and installs two sinks — one that
+/// excludes the Phase 7 one-shot `TraceStarted` events (the default
+/// `buffer`, preserving pre-Phase-7 test assertions), and one that
+/// keeps every event (`full_buffer`, for Phase 7 tests that need to
+/// see registration events).
+class Fixture {
+public:
+    Fixture() {
+        Coordinator::instance().reset();
+        Coordinator::instance().bind(clock);
+        Coordinator::instance().set_tracing_enabled(true);
+        sink_id = Coordinator::instance().add_sink(
+            [this](const SampleEvent& e) {
+                full_buffer.push_back(e);
+                if (e.kind != SampleEvent::Kind::TraceStarted) {
+                    buffer.push_back(e);
+                }
+            });
+    }
+    ~Fixture() { Coordinator::instance().reset(); }
+
+    FrameClock clock;
+    std::vector<SampleEvent> buffer;        ///< data events only
+    std::vector<SampleEvent> full_buffer;   ///< includes TraceStarted
+    int sink_id = 0;
+};
+
+std::size_t count_kind(const std::vector<SampleEvent>& b,
+                       SampleEvent::Kind k,
+                       const std::string& metric = {}) {
+    std::size_t n = 0;
+    for (const auto& e : b) {
+        if (e.kind == k && (metric.empty() || e.metric_name == metric)) ++n;
+    }
+    return n;
+}
+
+/// Find the first event matching (kind, optional metric). Returns nullptr
+/// if no match.
+const SampleEvent* first_of(const std::vector<SampleEvent>& b,
+                            SampleEvent::Kind k,
+                            const std::string& metric = {}) {
+    for (const auto& e : b) {
+        if (e.kind == k && (metric.empty() || e.metric_name == metric))
+            return &e;
+    }
+    return nullptr;
+}
+
+/// Number of data + framing events excluding the one-shot TraceStarted
+/// emission (Phase 7). Pre-Phase-7 tests assumed buffer.size() never
+/// counted a registration event.
+std::size_t data_event_count(const std::vector<SampleEvent>& b) {
+    std::size_t n = 0;
+    for (const auto& e : b) {
+        if (e.kind != SampleEvent::Kind::TraceStarted) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+// ── Binding ──────────────────────────────────────────────────────────
+
+TEST_CASE("Coordinator binds and unbinds a FrameClock", "[motion]") {
+    Fixture fx;
+    REQUIRE(Coordinator::instance().is_bound());
+    Coordinator::instance().unbind();
+    REQUIRE_FALSE(Coordinator::instance().is_bound());
+}
+
+TEST_CASE("Coordinator off by default after reset", "[motion]") {
+    Coordinator::instance().reset();
+    REQUIRE_FALSE(Coordinator::instance().tracing_enabled());
+    REQUIRE_FALSE(Coordinator::instance().is_bound());
+    REQUIRE(Coordinator::instance().active_trace_count() == 0);
+}
+
+// ── Emission semantics ───────────────────────────────────────────────
+
+TEST_CASE("Baseline emitted on first sample", "[motion]") {
+    Fixture fx;
+    double v = 1.0;
+    auto handle = Coordinator::instance()
+        .trace("Test", { /*fps=*/60 })
+        .value("opacity", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline, "opacity") == 1);
+    const auto* baseline = first_of(fx.buffer, SampleEvent::Kind::Baseline, "opacity");
+    REQUIRE(baseline != nullptr);
+    REQUIRE(baseline->components.size() == 1);
+    REQUIRE(baseline->components.front().second == Approx(1.0));
+}
+
+TEST_CASE("No emission when value is stable", "[motion]") {
+    Fixture fx;
+    double v = 0.5;
+    auto handle = Coordinator::instance()
+        .trace("Test", { 60 })
+        .value("opacity", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);  // baseline
+    const std::size_t after_baseline = fx.buffer.size();
+    for (int i = 0; i < 10; ++i) fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == after_baseline);
+}
+
+TEST_CASE("Burst: Baseline -> Start -> Samples -> End with delta", "[motion]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance()
+        .trace("Card", { 60 })
+        .value("opacity", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);              // baseline (v=0)
+    v = 0.25; fx.clock.tick(1.0f / 60.0f);    // Start + Sample
+    v = 0.50; fx.clock.tick(1.0f / 60.0f);    // Sample
+    v = 0.75; fx.clock.tick(1.0f / 60.0f);    // Sample
+    fx.clock.tick(1.0f / 60.0f);              // End (stable)
+
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Baseline) == 1);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Start) == 1);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::Sample) == 3);
+    REQUIRE(count_kind(fx.buffer, SampleEvent::Kind::End) == 1);
+
+    const SampleEvent* end = nullptr;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::End) { end = &e; break; }
+    }
+    REQUIRE(end != nullptr);
+    REQUIRE(end->deltas.size() == 1);
+    REQUIRE(end->deltas.front().first == "value");
+    REQUIRE(end->deltas.front().second == Approx(0.75));
+}
+
+TEST_CASE("Epsilon threshold suppresses jitter", "[motion]") {
+    Fixture fx;
+    double v = 1.0;
+    auto handle = Coordinator::instance()
+        .trace("Test", { 60 })
+        .value("x", [&]{ return v; }, /*precision=*/3, /*epsilon=*/0.01)
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);             // baseline
+    const std::size_t base = fx.buffer.size();
+    v = 1.005;
+    for (int i = 0; i < 5; ++i) fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == base);       // below epsilon: silent
+    v = 1.05;
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() > base);        // above epsilon: emits
+}
+
+TEST_CASE("Monotonic FrameClock timestamps stamped on events", "[motion]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance()
+        .trace("Test", { 60 })
+        .value("x", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);
+    v = 2.0;
+    fx.clock.tick(1.0f / 60.0f);
+
+    REQUIRE(fx.buffer.size() >= 3);
+    double prev_t = -1.0;
+    std::uint64_t prev_f = 0;
+    for (const auto& e : fx.buffer) {
+        REQUIRE(e.t_seconds >= prev_t);
+        REQUIRE(e.frame >= prev_f);
+        prev_t = e.t_seconds;
+        prev_f = e.frame;
+    }
+}
+
+// ── FPS gating ───────────────────────────────────────────────────────
+
+TEST_CASE("FPS gating samples at requested rate via accumulator", "[motion]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance()
+        .trace("Test", { /*fps=*/30 })
+        .value("v", [&]{ v += 1.0; return v; })  // changes every sample
+        .attach();
+
+    // 60 ticks at 60 fps = 1.0 s. Expect ~30 sample-ish events
+    // (Baseline + Samples), tolerating ±2 for FP drift.
+    for (int i = 0; i < 60; ++i) fx.clock.tick(1.0f / 60.0f);
+
+    const auto samples = count_kind(fx.buffer, SampleEvent::Kind::Sample)
+                       + count_kind(fx.buffer, SampleEvent::Kind::Baseline);
+    REQUIRE(samples >= 28);
+    REQUIRE(samples <= 32);
+}
+
+// ── Multi-component metrics ──────────────────────────────────────────
+
+TEST_CASE("multi() emits all components together", "[motion]") {
+    Fixture fx;
+    double x = 0.0, y = 0.0;
+    auto handle = Coordinator::instance()
+        .trace("Pointer", { 60 })
+        .multi("xy", {
+            {"x", [&]{ return x; }},
+            {"y", [&]{ return y; }},
+        })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == 1);
+    REQUIRE(fx.buffer.front().components.size() == 2);
+    // Components are emitted sorted by name.
+    REQUIRE(fx.buffer.front().components[0].first == "x");
+    REQUIRE(fx.buffer.front().components[1].first == "y");
+}
+
+// ── Multiple sinks / independent traces ──────────────────────────────
+
+TEST_CASE("Multiple traces are independent", "[motion]") {
+    Fixture fx;
+    double a = 0.0, b = 100.0;
+    auto h1 = Coordinator::instance().trace("A", { 60 })
+        .value("v", [&]{ return a; }).attach();
+    auto h2 = Coordinator::instance().trace("B", { 60 })
+        .value("v", [&]{ return b; }).attach();
+
+    fx.clock.tick(1.0f / 60.0f);                  // both emit baseline
+    a = 1.0;
+    fx.clock.tick(1.0f / 60.0f);                  // A: Start + Sample
+    fx.clock.tick(1.0f / 60.0f);                  // A: End
+
+    std::size_t a_baseline = 0, a_start = 0, a_end = 0;
+    std::size_t b_baseline = 0, b_start = 0, b_end = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.view_name == "A") {
+            if (e.kind == SampleEvent::Kind::Baseline) ++a_baseline;
+            if (e.kind == SampleEvent::Kind::Start) ++a_start;
+            if (e.kind == SampleEvent::Kind::End) ++a_end;
+        } else if (e.view_name == "B") {
+            if (e.kind == SampleEvent::Kind::Baseline) ++b_baseline;
+            if (e.kind == SampleEvent::Kind::Start) ++b_start;
+            if (e.kind == SampleEvent::Kind::End) ++b_end;
+        }
+    }
+    REQUIRE(a_baseline == 1);
+    REQUIRE(a_start == 1);
+    REQUIRE(a_end == 1);
+    REQUIRE(b_baseline == 1);
+    REQUIRE(b_start == 0);
+    REQUIRE(b_end == 0);
+}
+
+// ── Trace lifetime / sink lifetime ───────────────────────────────────
+
+TEST_CASE("TraceHandle RAII detaches on destruction", "[motion]") {
+    Fixture fx;
+    {
+        auto handle = Coordinator::instance()
+            .trace("Ephemeral", { 60 })
+            .value("x", []{ return 0.0; })
+            .attach();
+        REQUIRE(Coordinator::instance().active_trace_count() == 1);
+    }
+    REQUIRE(Coordinator::instance().active_trace_count() == 0);
+}
+
+TEST_CASE("Sink can be removed mid-stream", "[motion]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("X", { 60 })
+        .value("v", [&]{ return v; }).attach();
+
+    fx.clock.tick(1.0f / 60.0f);                  // baseline
+    Coordinator::instance().remove_sink(fx.sink_id);
+    const std::size_t base = fx.buffer.size();
+    for (int i = 0; i < 5; ++i) {
+        v += 1.0;
+        fx.clock.tick(1.0f / 60.0f);
+    }
+    REQUIRE(fx.buffer.size() == base);
+}
+
+TEST_CASE("Tracing disabled produces no events", "[motion]") {
+    Fixture fx;
+    Coordinator::instance().set_tracing_enabled(false);
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("X", { 60 })
+        .value("v", [&]{ return v; }).attach();
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.empty());
+}
+
+// ── Geometry walker (Layout source) ──────────────────────────────────
+
+TEST_CASE("geometry() samples view bounds in window space", "[motion]") {
+    Fixture fx;
+    View parent;
+    parent.set_bounds({ 10.f, 20.f, 400.f, 300.f });
+    auto child_owner = std::make_unique<View>();
+    child_owner->set_bounds({ 5.f, 7.f, 100.f, 50.f });
+    View* child = child_owner.get();
+    parent.add_child(std::move(child_owner));
+
+    auto handle = Coordinator::instance().trace("Child", { 60 })
+        .geometry("frame", *child,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Layout)
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == 1);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(comps.size() == 4);
+    // Components are sorted alphabetically (height, minX, minY, width).
+    auto find = [&](const std::string& name) -> double {
+        for (const auto& [k, v] : comps) if (k == name) return v;
+        return 0.0;
+    };
+    REQUIRE(find("minX") == Approx(15.f));   // parent.x + child.x = 10 + 5
+    REQUIRE(find("minY") == Approx(27.f));   // parent.y + child.y = 20 + 7
+    REQUIRE(find("width") == Approx(100.f));
+    REQUIRE(find("height") == Approx(50.f));
+}
+
+TEST_CASE("geometry() ViewLocal returns local-origin frame", "[motion]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 50.f, 60.f, 200.f, 100.f });
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::ViewLocal, GeometrySource::Layout)
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == 1);
+    auto find = [&](const std::string& name) -> double {
+        for (const auto& [k, val] : fx.buffer.front().components)
+            if (k == name) return val;
+        return 0.0;
+    };
+    REQUIRE(find("minX") == Approx(0.f));
+    REQUIRE(find("minY") == Approx(0.f));
+    REQUIRE(find("width") == Approx(200.f));
+    REQUIRE(find("height") == Approx(100.f));
+}
+
+// ── Line formatting ──────────────────────────────────────────────────
+
+TEST_CASE("format_line produces canonical PulpMotion output", "[motion]") {
+    SampleEvent e;
+    e.kind = SampleEvent::Kind::Sample;
+    e.view_name = "Card";
+    e.metric_name = "frame";
+    e.precision = 2;
+    // Components must already be sorted (the coordinator does this).
+    e.components = {
+        {"height", 80.0}, {"minX", 12.0}, {"minY", 34.0}, {"width", 120.0},
+    };
+    const auto s = format_line(e);
+    REQUIRE(s == "[PulpMotion][Card][frame] height=80.00 minX=12.00 minY=34.00 width=120.00");
+}
+
+TEST_CASE("format_line Start/End markers include frame + time", "[motion]") {
+    SampleEvent start;
+    start.kind = SampleEvent::Kind::Start;
+    start.view_name = "X";
+    start.metric_name = "y";
+    start.frame = 42;
+    start.t_seconds = 1.5;
+    start.burst_id = 3;
+    REQUIRE(format_line(start) ==
+            "[PulpMotion][X][y] -- Start burst=3 frame=42 t=1.500000 --");
+
+    SampleEvent end;
+    end.kind = SampleEvent::Kind::End;
+    end.view_name = "X";
+    end.metric_name = "y";
+    end.frame = 50;
+    end.t_seconds = 2.0;
+    end.precision = 2;
+    end.burst_id = 3;
+    end.deltas = { {"x", 10.0}, {"y", -5.0} };
+    REQUIRE(format_line(end) ==
+            "[PulpMotion][X][y] -- End burst=3 frame=50 t=2.000000 -- xDelta=10.00 yDelta=-5.00");
+}
+
+// ── Emitted-event counter ────────────────────────────────────────────
+
+// ── Presentation geometry walker (Phase 2) ───────────────────────────
+
+namespace {
+double find_component(const std::vector<std::pair<std::string, double>>& comps,
+                      const std::string& name) {
+    for (const auto& [k, v] : comps) if (k == name) return v;
+    return 0.0;
+}
+}  // namespace
+
+TEST_CASE("Presentation: uniform scale expands AABB around transform origin",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 100.f, 100.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_scale(2.0f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(fx.buffer.size() == 1);
+    const auto& comps = fx.buffer.front().components;
+    // Scale 2 around the center (150, 125) → AABB is twice as wide/tall,
+    // centered on the same point. So minX = 150 - 100 = 50, minY = 125 - 50 = 75.
+    REQUIRE(find_component(comps, "minX")   == Approx(50.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY")   == Approx(75.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(200.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.01));
+}
+
+TEST_CASE("Layout source ignores paint-time scale", "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 100.f, 100.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_scale(2.0f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Layout)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX")   == Approx(100.f));
+    REQUIRE(find_component(comps, "minY")   == Approx(100.f));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f));
+    REQUIRE(find_component(comps, "height") == Approx(50.f));
+}
+
+TEST_CASE("Presentation: translate shifts the AABB", "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 50.f, 60.f, 100.f, 100.f });
+    v.set_translate(10.f, 20.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX") == Approx(60.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY") == Approx(80.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f));
+    REQUIRE(find_component(comps, "height") == Approx(100.f));
+}
+
+TEST_CASE("Presentation: 90deg rotation swaps width/height in AABB",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 0.f, 0.f, 100.f, 50.f });
+    v.set_transform_origin(0.5f, 0.5f);
+    v.set_rotation(90.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // Width and height swap (with a small float tolerance).
+    REQUIRE(find_component(comps, "width")  == Approx(50.f).margin(0.5));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.5));
+}
+
+TEST_CASE("Presentation: 2D affine matrix (translate) applies",
+          "[motion][presentation]") {
+    Fixture fx;
+    View v;
+    v.set_bounds({ 0.f, 0.f, 100.f, 100.f });
+    // Pure translate via 2D matrix: identity scale, e=10, f=20.
+    v.set_transform_matrix(1.f, 0.f, 0.f, 1.f, 10.f, 20.f);
+
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .geometry("frame", v,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    REQUIRE(find_component(comps, "minX") == Approx(10.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY") == Approx(20.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(100.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(100.f).margin(0.01));
+}
+
+TEST_CASE("Presentation: parent scale propagates to child position",
+          "[motion][presentation]") {
+    Fixture fx;
+    View parent;
+    parent.set_bounds({ 0.f, 0.f, 200.f, 200.f });
+    parent.set_transform_origin(0.0f, 0.0f);
+    parent.set_scale(2.0f);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({ 10.f, 20.f, 30.f, 40.f });
+    View* child_ptr = child.get();
+    parent.add_child(std::move(child));
+
+    auto handle = Coordinator::instance().trace("Child", { 60 })
+        .geometry("frame", *child_ptr,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // Parent scaled 2x from (0,0): child (10,20) → (20,40), size 30x40 → 60x80.
+    REQUIRE(find_component(comps, "minX")   == Approx(20.f).margin(0.01));
+    REQUIRE(find_component(comps, "minY")   == Approx(40.f).margin(0.01));
+    REQUIRE(find_component(comps, "width")  == Approx(60.f).margin(0.01));
+    REQUIRE(find_component(comps, "height") == Approx(80.f).margin(0.01));
+}
+
+TEST_CASE("Presentation walker handles ScrollView ancestor offset",
+          "[motion][presentation]") {
+    Fixture fx;
+    pulp::view::ScrollView scroll;
+    scroll.set_bounds({ 10.f, 20.f, 200.f, 100.f });
+    scroll.set_content_size({ 0.f, 600.f });
+
+    auto item = std::make_unique<View>();
+    item->set_bounds({ 0.f, 50.f, 100.f, 24.f });
+    View* item_ptr = item.get();
+    scroll.add_child(std::move(item));
+
+    scroll.set_scroll(0.f, 20.f);
+    // set_scroll animates by default; force the smoothed value to settle.
+    scroll.advance_animations(10.0f);
+
+    auto handle = Coordinator::instance().trace("Item", { 60 })
+        .geometry("frame", *item_ptr,
+                  { GeometryProperty::MinX, GeometryProperty::MinY,
+                    GeometryProperty::Width, GeometryProperty::Height },
+                  GeometrySpace::Window, GeometrySource::Presentation)
+        .attach();
+    fx.clock.tick(1.0f / 60.0f);
+    const auto& comps = fx.buffer.front().components;
+    // ScrollView contributes translate(10, 20) - translate(0, 20) = (10, 0)
+    // before painting children. Item at (0, 50) → presentation (10, 50).
+    REQUIRE(find_component(comps, "minX") == Approx(10.f).margin(0.5));
+    REQUIRE(find_component(comps, "minY") == Approx(50.f).margin(0.5));
+}
+
+// ── Publish channel (Phase 3) ────────────────────────────────────────
+
+TEST_CASE("publish_value is a no-op when firehose is off", "[motion][publish]") {
+    Fixture fx;
+    REQUIRE(Coordinator::instance().firehose() == false);
+    publish_value("Card", "opacity", 0.5);
+    publish_value("Card", "opacity", 0.6);
+    REQUIRE(fx.buffer.empty());
+}
+
+TEST_CASE("publish_value with firehose emits a full Baseline/Start/Sample/End burst",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("Card", "opacity", 0.5);   // Baseline
+    publish_value("Card", "opacity", 0.6);   // Start + Sample
+    publish_value("Card", "opacity", 0.6);   // stable → End
+    publish_value("Card", "opacity", 0.6);   // still stable, no event
+
+    std::size_t baseline = 0, start = 0, sample = 0, end = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Baseline) ++baseline;
+        if (e.kind == SampleEvent::Kind::Start)    ++start;
+        if (e.kind == SampleEvent::Kind::Sample)   ++sample;
+        if (e.kind == SampleEvent::Kind::End)      ++end;
+    }
+    REQUIRE(baseline == 1);
+    REQUIRE(start == 1);
+    REQUIRE(sample == 1);
+    REQUIRE(end == 1);
+}
+
+TEST_CASE("publish_value End burst fires on first stable publish",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 0.0);   // Baseline
+    publish_value("X", "y", 1.0);   // Start + Sample
+    publish_value("X", "y", 1.0);   // stable → End
+
+    std::size_t start = 0, end = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start) ++start;
+        if (e.kind == SampleEvent::Kind::End)   ++end;
+    }
+    REQUIRE(start == 1);
+    REQUIRE(end == 1);
+}
+
+TEST_CASE("publish_components routes multiple keys independently",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_components("Card", "frame", { {"x", 0.0}, {"y", 0.0} });
+    publish_components("Toast", "alpha", { {"value", 1.0} });
+    publish_components("Card", "frame", { {"x", 5.0}, {"y", 0.0} });
+
+    std::size_t card_evts = 0, toast_evts = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.view_name == "Card")  ++card_evts;
+        if (e.view_name == "Toast") ++toast_evts;
+    }
+    REQUIRE(card_evts >= 3);  // Baseline + Start + Sample
+    REQUIRE(toast_evts == 1); // Baseline only
+}
+
+TEST_CASE("publish_value respects tracing_enabled gate",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+    Coordinator::instance().set_tracing_enabled(false);
+    publish_value("Card", "opacity", 0.5);
+    REQUIRE(fx.buffer.empty());
+}
+
+TEST_CASE("publish_value respects epsilon threshold",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 1.0, {3, /*epsilon=*/0.05});  // Baseline
+    publish_value("X", "y", 1.01);  // below epsilon → no Start/Sample
+    publish_value("X", "y", 1.02);  // still below
+
+    std::size_t change_events = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start ||
+            e.kind == SampleEvent::Kind::Sample) ++change_events;
+    }
+    REQUIRE(change_events == 0);
+
+    publish_value("X", "y", 1.10);  // crosses epsilon → Start + Sample
+    change_events = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start ||
+            e.kind == SampleEvent::Kind::Sample) ++change_events;
+    }
+    REQUIRE(change_events == 2);
+}
+
+// ── Fixture record / replay (Phase 5) ────────────────────────────────
+
+namespace {
+std::string tmp_fixture_path(const std::string& tag) {
+    // Cross-platform temp dir: TMPDIR / TMP / TEMP, fallback to /tmp
+    // (POSIX) or current dir (Windows when none set).
+    const char* tmp = std::getenv("TMPDIR");
+    if (!tmp) tmp = std::getenv("TMP");
+    if (!tmp) tmp = std::getenv("TEMP");
+    if (!tmp) {
+#if defined(_WIN32)
+        tmp = ".";
+#else
+        tmp = "/tmp";
+#endif
+    }
+    std::ostringstream ss;
+    ss << tmp << "/pulp-motion-fixture-" << tag << "-"
+       << pulp_test_getpid() << "-"
+       << std::rand() << ".jsonl";
+    return ss.str();
+}
+}  // namespace
+
+TEST_CASE("Fixture round-trip: write events, load them back",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("roundtrip");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("Card", "opacity", 0.0);
+    publish_value("Card", "opacity", 0.5);
+    publish_value("Card", "opacity", 1.0);
+    publish_value("Card", "opacity", 1.0);  // → End
+
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.size() >= 4);
+
+    std::size_t baseline = 0, start = 0, sample = 0, end = 0;
+    for (const auto& e : loaded) {
+        if (e.kind == SampleEvent::Kind::Baseline) ++baseline;
+        if (e.kind == SampleEvent::Kind::Start)    ++start;
+        if (e.kind == SampleEvent::Kind::Sample)   ++sample;
+        if (e.kind == SampleEvent::Kind::End)      ++end;
+    }
+    REQUIRE(baseline == 1);
+    REQUIRE(start == 1);
+    REQUIRE(sample >= 1);
+    REQUIRE(end == 1);
+
+    std::remove(path.c_str());
+}
+
+TEST_CASE("Fixture replay re-emits events to a sink",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("replay");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 0.0);
+    publish_value("X", "y", 1.0);
+    publish_value("X", "y", 1.0);
+
+    std::vector<SampleEvent> replayed;
+    auto replay_count = replay_fixture(path, make_buffer_sink(&replayed));
+    REQUIRE(replay_count > 0);
+    REQUIRE(replayed.size() == static_cast<std::size_t>(replay_count));
+
+    bool has_baseline = false, has_end = false;
+    for (const auto& e : replayed) {
+        if (e.kind == SampleEvent::Kind::Baseline) has_baseline = true;
+        if (e.kind == SampleEvent::Kind::End) has_end = true;
+    }
+    REQUIRE(has_baseline);
+    REQUIRE(has_end);
+    std::remove(path.c_str());
+}
+
+TEST_CASE("Fixture load rejects unknown schema version",
+          "[motion][fixture]") {
+    const auto path = tmp_fixture_path("badschema");
+    {
+        std::ofstream f(path, std::ios::trunc);
+        f << "{\"motion_fixture_version\":999}\n";
+        f << "{\"kind\":\"baseline\",\"view\":\"V\",\"metric\":\"m\","
+             "\"t\":0,\"frame\":0,\"precision\":3,"
+             "\"components\":{\"value\":1.0},\"deltas\":{}}\n";
+    }
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches: identical fixtures produce empty diff",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("match");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 1.0);
+    publish_value("V", "v", 1.0);
+    auto a = load_fixture(path);
+    auto b = load_fixture(path);
+    auto diff = assert_matches(a, b);
+    REQUIRE(diff.matches());
+    REQUIRE(diff.differences.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches: component drift produces a diff item",
+          "[motion][fixture]") {
+    Fixture fx;
+    const auto path1 = tmp_fixture_path("driftA");
+    const auto path2 = tmp_fixture_path("driftB");
+    Coordinator::instance().add_sink(make_fixture_sink(path1));
+    Coordinator::instance().set_firehose(true);
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 1.0);
+    publish_value("V", "v", 1.0);
+    auto golden = load_fixture(path1);
+
+    // Reset, then publish a similar series but with the second sample
+    // shifted by 0.5 (well above the default tolerance of 0.05).
+    Coordinator::instance().reset();
+    Coordinator::instance().bind(fx.clock);
+    Coordinator::instance().set_tracing_enabled(true);
+    Coordinator::instance().set_firehose(true);
+    Coordinator::instance().add_sink(make_fixture_sink(path2));
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v", 0.5);    // drift
+    publish_value("V", "v", 0.5);
+    auto captured = load_fixture(path2);
+
+    auto diff = assert_matches(golden, captured);
+    REQUIRE_FALSE(diff.matches());
+    bool found_drift = false;
+    for (const auto& it : diff.differences) {
+        if (it.kind == "component-drift") found_drift = true;
+    }
+    REQUIRE(found_drift);
+
+    std::remove(path1.c_str());
+    std::remove(path2.c_str());
+}
+
+// ── Assertion helpers (Phase 5) ──────────────────────────────────────
+
+TEST_CASE("extract_scalar pulls only the named (view, metric, comp)",
+          "[motion][assert]") {
+    std::vector<SampleEvent> events;
+    auto mk = [&](const std::string& v, const std::string& m,
+                  double t, double val) {
+        SampleEvent e;
+        e.kind = SampleEvent::Kind::Sample;
+        e.view_name = v;
+        e.metric_name = m;
+        e.t_seconds = t;
+        e.components = { {"value", val} };
+        events.push_back(e);
+    };
+    mk("A", "x", 0.0, 1.0);
+    mk("B", "x", 0.1, 99.0);  // wrong view
+    mk("A", "y", 0.2, 88.0);  // wrong metric
+    mk("A", "x", 0.3, 2.0);
+
+    auto series = extract_scalar(events, "A", "x");
+    REQUIRE(series.size() == 2);
+    REQUIRE(series[0].value == Approx(1.0));
+    REQUIRE(series[1].value == Approx(2.0));
+}
+
+TEST_CASE("is_monotonic detects direction reversal",
+          "[motion][assert]") {
+    std::vector<ScalarSample> ascending = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.9}, {0.3, 1.0}
+    };
+    REQUIRE(is_monotonic(ascending));
+
+    std::vector<ScalarSample> reverses = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.7}, {0.3, 0.4}, {0.4, 1.0}
+    };
+    REQUIRE_FALSE(is_monotonic(reverses));
+
+    std::vector<ScalarSample> descending = {
+        {0.0, 1.0}, {0.1, 0.5}, {0.2, 0.0}
+    };
+    REQUIRE(is_monotonic(descending));
+}
+
+TEST_CASE("settling_time_seconds spans first to last change",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.0}, {0.2, 0.5}, {0.4, 1.0}, {0.6, 1.0}, {0.8, 1.0}
+    };
+    REQUIRE(settling_time_seconds(s) == Approx(0.2));
+}
+
+TEST_CASE("start_delay_seconds = time from t0 to first change",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.0}, {0.2, 0.0}, {0.3, 0.5}, {0.4, 1.0}
+    };
+    REQUIRE(start_delay_seconds(s) == Approx(0.3));
+}
+
+TEST_CASE("overshoot reports peak excursion beyond final value",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 1.0}, {0.3, 1.2}, {0.4, 1.05}, {0.5, 1.0}
+    };
+    REQUIRE(overshoot(s) == Approx(0.2));
+}
+
+TEST_CASE("frame_jitter_seconds is 0 for constant cadence",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 1.0}, {0.3, 1.5}, {0.4, 2.0}
+    };
+    REQUIRE(frame_jitter_seconds(s) == Approx(0.0).margin(1e-9));
+}
+
+TEST_CASE("final_value returns the last sample's value",
+          "[motion][assert]") {
+    std::vector<ScalarSample> s = {
+        {0.0, 0.0}, {0.1, 0.5}, {0.2, 0.95}
+    };
+    REQUIRE(final_value(s) == Approx(0.95));
+}
+
+// ── Phase 7: TraceStarted + stable IDs + Provenance ──────────────────
+
+TEST_CASE("TraceStarted emits exactly once with provenance",
+          "[motion][phase7]") {
+    Fixture fx;
+    Provenance prov;
+    prov.source_kind = "tween";
+    prov.source_id = "Card.opacity";
+    prov.source_file = "card.cpp";
+    prov.source_line = 412;
+
+    auto handle = Coordinator::instance().trace("Card", { 60 })
+        .with_provenance(prov)
+        .value("opacity", []{ return 0.0; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);
+    fx.clock.tick(1.0f / 60.0f);
+    fx.clock.tick(1.0f / 60.0f);
+
+    // TraceStarted appears in full_buffer, not the filtered buffer.
+    std::size_t ts_count = 0;
+    const SampleEvent* ts_event = nullptr;
+    for (const auto& e : fx.full_buffer) {
+        if (e.kind == SampleEvent::Kind::TraceStarted) {
+            ++ts_count;
+            ts_event = &e;
+        }
+    }
+    REQUIRE(ts_count == 1);
+    REQUIRE(ts_event != nullptr);
+    REQUIRE(ts_event->provenance.source_kind == "tween");
+    REQUIRE(ts_event->provenance.source_id == "Card.opacity");
+    REQUIRE(ts_event->provenance.source_file == "card.cpp");
+    REQUIRE(ts_event->provenance.source_line == 412);
+    REQUIRE(ts_event->trace_id > 0);
+}
+
+TEST_CASE("Sample events carry stable trace_id/metric_id/burst_id",
+          "[motion][phase7]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("V", { 60 })
+        .value("x", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);        // baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);        // burst 1 Start + Sample
+    fx.clock.tick(1.0f / 60.0f);        // burst 1 End
+    v = 2.0;
+    fx.clock.tick(1.0f / 60.0f);        // burst 2 Start + Sample
+    fx.clock.tick(1.0f / 60.0f);        // burst 2 End
+
+    int trace_id_seen = -1;
+    std::set<int> burst_ids_seen;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start) {
+            burst_ids_seen.insert(e.burst_id);
+        }
+        if (trace_id_seen < 0) trace_id_seen = e.trace_id;
+        REQUIRE(e.trace_id == trace_id_seen);
+        REQUIRE(e.metric_id == 0);
+    }
+    REQUIRE(burst_ids_seen.size() == 2);
+    REQUIRE(burst_ids_seen.count(1) == 1);
+    REQUIRE(burst_ids_seen.count(2) == 1);
+}
+
+TEST_CASE("Fixture round-trip preserves trace_id, metric_id, burst_id, and provenance",
+          "[motion][phase7][fixture]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("phase7");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+
+    Provenance prov;
+    prov.source_kind = "design-import";
+    prov.source_id = "figma:LevelMeter/Panel";
+
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("Panel", { 60 })
+        .with_provenance(prov)
+        .value("opacity", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);   // TraceStarted + Baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);   // Start + Sample
+    fx.clock.tick(1.0f / 60.0f);   // End
+
+    auto loaded = load_fixture(path);
+    REQUIRE_FALSE(loaded.empty());
+
+    // First event should be TraceStarted with provenance.
+    REQUIRE(loaded.front().kind == SampleEvent::Kind::TraceStarted);
+    REQUIRE(loaded.front().provenance.source_kind == "design-import");
+    REQUIRE(loaded.front().provenance.source_id == "figma:LevelMeter/Panel");
+
+    // IDs should be present on every event.
+    int trace_id = loaded.front().trace_id;
+    REQUIRE(trace_id > 0);
+    for (const auto& e : loaded) {
+        if (e.kind == SampleEvent::Kind::TraceStarted) continue;
+        REQUIRE(e.trace_id == trace_id);
+        REQUIRE(e.metric_id == 0);
+    }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("load_fixture rejects v1 schema (only v2 accepted)",
+          "[motion][phase7][fixture]") {
+    const auto path = tmp_fixture_path("v1reject");
+    {
+        std::ofstream f(path, std::ios::trunc);
+        f << "{\"motion_fixture_version\":1}\n";
+        f << "{\"kind\":\"baseline\",\"view\":\"V\",\"metric\":\"m\","
+             "\"t\":0,\"frame\":0,\"precision\":3,"
+             "\"components\":{\"value\":1.0},\"deltas\":{}}\n";
+    }
+    auto loaded = load_fixture(path);
+    REQUIRE(loaded.empty());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("assert_matches aligns events by stable IDs, not position",
+          "[motion][phase7][fixture]") {
+    // Two identical fixtures, but the second one has events shuffled
+    // (within burst order is preserved; across-burst order is not).
+    Fixture fx;
+    Provenance prov;
+    prov.source_kind = "test";
+    prov.source_id = "shuffle";
+
+    const auto path = tmp_fixture_path("shuffleA");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+
+    double v = 0.0;
+    auto h = Coordinator::instance().trace("V", { 60 })
+        .with_provenance(prov)
+        .value("x", [&]{ return v; })
+        .attach();
+
+    fx.clock.tick(1.0f / 60.0f);   // baseline
+    v = 1.0;
+    fx.clock.tick(1.0f / 60.0f);   // burst 1 Start+Sample
+    fx.clock.tick(1.0f / 60.0f);   // burst 1 End
+    v = 2.0;
+    fx.clock.tick(1.0f / 60.0f);   // burst 2 Start+Sample
+    fx.clock.tick(1.0f / 60.0f);   // burst 2 End
+
+    auto golden = load_fixture(path);
+    REQUIRE_FALSE(golden.empty());
+
+    // Build a shuffled "captured" — swap burst-1 and burst-2 events
+    // (the trace-started event stays at the front).
+    std::vector<SampleEvent> shuffled = golden;
+    // Keep TraceStarted + Baseline first, then put burst-2 events
+    // before burst-1 events. The grouped assertion should still match.
+    std::vector<SampleEvent> reorder;
+    for (const auto& e : shuffled) {
+        if (e.kind == SampleEvent::Kind::TraceStarted ||
+            e.kind == SampleEvent::Kind::Baseline) {
+            reorder.push_back(e);
+        }
+    }
+    for (const auto& e : shuffled) {
+        if (e.burst_id == 2) reorder.push_back(e);
+    }
+    for (const auto& e : shuffled) {
+        if (e.burst_id == 1) reorder.push_back(e);
+    }
+
+    FixtureMatchOptions opts;
+    opts.require_same_event_count = false;
+    auto diff = assert_matches(golden, reorder, opts);
+    REQUIRE(diff.matches());
+    std::remove(path.c_str());
+}
+
+// ── Codex P1: NaN/Inf round-trip through fixture ─────────────────────
+
+TEST_CASE("Fixture round-trips NaN and Inf component values",
+          "[motion][fixture][codex-p1]") {
+    Fixture fx;
+    const auto path = tmp_fixture_path("nonfinite");
+    Coordinator::instance().add_sink(make_fixture_sink(path));
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("V", "v", 0.0);
+    publish_value("V", "v",
+                  std::numeric_limits<double>::quiet_NaN());  // burst Start
+    publish_value("V", "v",
+                  std::numeric_limits<double>::infinity());
+    publish_value("V", "v",
+                  -std::numeric_limits<double>::infinity());
+
+    auto loaded = load_fixture(path);
+    REQUIRE_FALSE(loaded.empty());
+
+    // Collect every "value" sample.
+    std::vector<double> values;
+    for (const auto& e : loaded) {
+        if (e.kind != SampleEvent::Kind::Baseline &&
+            e.kind != SampleEvent::Kind::Sample) continue;
+        for (const auto& [k, v] : e.components) {
+            if (k == "value") values.push_back(v);
+        }
+    }
+    REQUIRE(values.size() >= 4);
+
+    bool saw_nan = false, saw_pos_inf = false, saw_neg_inf = false;
+    for (double v : values) {
+        if (std::isnan(v)) saw_nan = true;
+        if (std::isinf(v) && v > 0) saw_pos_inf = true;
+        if (std::isinf(v) && v < 0) saw_neg_inf = true;
+    }
+    REQUIRE(saw_nan);
+    REQUIRE(saw_pos_inf);
+    REQUIRE(saw_neg_inf);
+    std::remove(path.c_str());
+}
+
+TEST_CASE("Emitted event counter advances", "[motion]") {
+    Fixture fx;
+    double v = 0.0;
+    auto handle = Coordinator::instance().trace("X", { 60 })
+        .value("v", [&]{ return v; }).attach();
+    REQUIRE(Coordinator::instance().emitted_event_count() == 0);
+    fx.clock.tick(1.0f / 60.0f);
+    REQUIRE(Coordinator::instance().emitted_event_count() >= 1);
+}

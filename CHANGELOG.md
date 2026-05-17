@@ -16,6 +16,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test: batch runtime and host coverage edges ([#2122](https://github.com/danielraffel/pulp/pull/2122))
 
 <a id="v01060"></a>
+## [0.41.0]
+
 ## [0.106.0] - 2026-05-17
 
 - feat(design-import): V2 wire-up — emit registerShortcut + synthetic keydown re-dispatch ([#2119](https://github.com/danielraffel/pulp/pull/2119))

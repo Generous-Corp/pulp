@@ -1452,6 +1452,43 @@ add_executable(pulp-test-frame-clock test_frame_clock.cpp)
 target_link_libraries(pulp-test-frame-clock PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-frame-clock)
 
+# Motion (agent-first motion observability) — Phase 0 bedrock tests
+add_executable(pulp-test-motion test_motion.cpp)
+target_link_libraries(pulp-test-motion PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-motion)
+
+# Motion inspector — Phase 1 Motion.* protocol-domain tests
+if(TARGET pulp::inspect)
+    add_executable(pulp-test-motion-inspector test_motion_inspector.cpp)
+    target_link_libraries(pulp-test-motion-inspector PRIVATE
+        pulp::view pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-motion-inspector)
+endif()
+
+# Motion end-to-end animation smoke — mirrors what a plugin author
+# would write: drive a real Tween, publish_value each tick, read the
+# fixture back, assert the shape matches the configured animation.
+add_executable(pulp-test-motion-animation-smoke test_motion_animation_smoke.cpp)
+target_link_libraries(pulp-test-motion-animation-smoke PRIVATE
+    pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-motion-animation-smoke)
+
+# Motion visual-analysis self-check — Phase 4 pipeline smoke.
+# Skips cleanly (exit 3) when Python deps are absent so CI without
+# numpy/Pillow/scikit-image doesn't false-fail.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME pulp-motion-visual-self-check
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_self_check.py
+    )
+    set_tests_properties(pulp-motion-visual-self-check PROPERTIES
+        SKIP_RETURN_CODE 3
+        LABELS "motion;visual"
+    )
+endif()
+
 # Widget animation behavior tests
 add_executable(pulp-test-widget-animation test_widget_animation.cpp)
 target_link_libraries(pulp-test-widget-animation PRIVATE pulp::view Catch2::Catch2WithMain)

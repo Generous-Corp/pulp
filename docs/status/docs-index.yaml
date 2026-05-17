@@ -49,6 +49,11 @@ docs:
     kind: example
     summary: Animated plugin UI with JS bridge and C++ examples
 
+  - slug: motion-observability
+    path: guides/motion-observability.md
+    kind: guide
+    summary: Agent-first motion observability — runtime scalar/geometry traces, presentation walker, fixtures (record/replay/assert), visual-analysis pipeline, inspector Motion.* domain
+
   - slug: parameters
     path: guides/parameters.md
     kind: guide

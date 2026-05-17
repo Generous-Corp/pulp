@@ -159,6 +159,15 @@
         "examples/jsfx-*/**"
       ]
     },
+    "motion": {
+      "paths": [
+        "core/view/include/pulp/view/motion.hpp",
+        "core/view/src/motion.cpp",
+        "inspect/include/pulp/inspect/motion_inspector.hpp",
+        "inspect/src/motion_inspector.cpp",
+        "tools/motion/**"
+      ]
+    },
     "mpe": {
       "paths": [
         "core/midi/include/**/*mpe*",

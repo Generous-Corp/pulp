@@ -98,6 +98,12 @@ modules:
       pulp import-design pipeline; design_import_designmd.cpp adds the Google DESIGN.md
       (Apache-2.0) reader, parsed via vendored yaml-cpp (MIT) — see
       reference/imports/designmd.md.
+      Motion observability subsystem (`pulp::view::motion`) — agent-first runtime
+      sampler bound to FrameClock with epsilon-bounded Start/End burst framing,
+      paint_all()-order presentation geometry walker, publish channel + firehose,
+      versioned JSONL record/replay fixtures, and assertion helpers (is_monotonic,
+      settling_time_seconds, overshoot, start_delay_seconds, frame_jitter_seconds).
+      Off by default; see guides/motion-observability.md.
     status: usable
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view
