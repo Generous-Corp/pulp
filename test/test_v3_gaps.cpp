@@ -320,10 +320,26 @@ TEST_CASE("is_prime known values", "[runtime][primes]") {
     REQUIRE_FALSE(pulp::runtime::is_prime(100));
 }
 
+TEST_CASE("is_prime rejects small and square composites",
+          "[runtime][primes][coverage][phase3]") {
+    REQUIRE_FALSE(pulp::runtime::is_prime(0));
+    REQUIRE_FALSE(pulp::runtime::is_prime(1));
+    REQUIRE_FALSE(pulp::runtime::is_prime(9));
+    REQUIRE_FALSE(pulp::runtime::is_prime(49));
+    REQUIRE_FALSE(pulp::runtime::is_prime(121));
+}
+
 TEST_CASE("generate_prime", "[runtime][primes]") {
     auto p = pulp::runtime::generate_prime(16);
     REQUIRE(p > 0);
     REQUIRE(pulp::runtime::is_prime(p));
+}
+
+TEST_CASE("generate_prime rejects unsupported bit widths",
+          "[runtime][primes][coverage][phase3]") {
+    REQUIRE(pulp::runtime::generate_prime(0) == 0);
+    REQUIRE(pulp::runtime::generate_prime(1) == 0);
+    REQUIRE(pulp::runtime::generate_prime(63) == 0);
 }
 
 TEST_CASE("sieve_primes", "[runtime][primes]") {
@@ -331,6 +347,14 @@ TEST_CASE("sieve_primes", "[runtime][primes]") {
     REQUIRE(primes.size() == 25);  // 25 primes below 100
     REQUIRE(primes[0] == 2);
     REQUIRE(primes.back() == 97);
+}
+
+TEST_CASE("sieve_primes handles small limits",
+          "[runtime][primes][coverage][phase3]") {
+    REQUIRE(pulp::runtime::sieve_primes(0).empty());
+    REQUIRE(pulp::runtime::sieve_primes(1).empty());
+    REQUIRE(pulp::runtime::sieve_primes(2) == std::vector<uint32_t>{2});
+    REQUIRE(pulp::runtime::sieve_primes(3) == std::vector<uint32_t>{2, 3});
 }
 
 // ── Expression evaluator ────────────────────────────────────────────────

@@ -78,6 +78,13 @@ TEST_CASE("BigInteger large numbers", "[crypto][bigint]") {
     REQUIRE(c.to_string() == "1000000000000000000");
 }
 
+TEST_CASE("BigInteger invalid decimal and hex parse as zero",
+          "[crypto][bigint][coverage][phase3]") {
+    REQUIRE(BigInteger::from_string("not-a-number").is_zero());
+    REQUIRE(BigInteger::from_hex("not-hex").is_zero());
+    REQUIRE(BigInteger::from_string("").is_zero());
+}
+
 TEST_CASE("BigInteger copy move hex and bit-count helpers", "[crypto][bigint][coverage][issue-656]") {
     auto value = BigInteger::from_hex("0100");
     REQUIRE(value.to_string() == "256");
@@ -151,6 +158,17 @@ TEST_CASE("LicenseValidator parse payload", "[crypto][license]") {
     // Without a public key set, signature verification fails
     auto status = validator.validate(encoded);
     REQUIRE(status == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator invalid public key keeps valid payload unsigned",
+          "[crypto][license][coverage][phase3]") {
+    LicenseValidator validator;
+    validator.set_public_key("not a pem public key");
+
+    std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
+    std::string key = base64_encode(payload) + "." + base64_encode("signature");
+
+    REQUIRE(validator.validate(key) == LicenseStatus::InvalidSignature);
 }
 
 TEST_CASE("LicenseValidator validate_and_parse extracts info", "[crypto][license]") {
@@ -240,6 +258,22 @@ TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
     std::string key = base64_encode(payload) + "." + base64_encode("signature") + "\r\n";
+
+    {
+        std::ofstream out(tmp.path());
+        REQUIRE(out.good());
+        out << key;
+    }
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator validate_file trims repeated CRLF endings",
+          "[crypto][license][coverage][phase3]") {
+    TemporaryFile tmp(".license");
+    std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
+    std::string key = base64_encode(payload) + "." + base64_encode("signature") + "\r\n\n";
 
     {
         std::ofstream out(tmp.path());

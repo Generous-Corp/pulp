@@ -376,6 +376,60 @@ TEST_CASE("MemoryStream clear keeps closed streams closed",
     REQUIRE(stream.write(&byte, 1).closed());
 }
 
+TEST_CASE("MemoryStream appends without rewinding the read cursor",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    std::uint8_t out[4]{};
+
+    auto first = stream.read(out, 2);
+    REQUIRE(first.ok());
+    REQUIRE(first.bytes == 2);
+    REQUIRE(stream.read_position() == 2);
+
+    const std::uint8_t extra[] = {4, 5};
+    auto wrote = stream.write(extra, sizeof(extra));
+    REQUIRE(wrote.ok());
+    REQUIRE(wrote.bytes == sizeof(extra));
+    REQUIRE(stream.size() == 5);
+    REQUIRE(stream.read_position() == 2);
+
+    auto tail = stream.read(out, sizeof(out));
+    REQUIRE(tail.ok());
+    REQUIRE(tail.bytes == 3);
+    REQUIRE(out[0] == 3);
+    REQUIRE(out[1] == 4);
+    REQUIRE(out[2] == 5);
+}
+
+TEST_CASE("FileStream reopen closes the previous handle",
+          "[stream][file][coverage][phase3]") {
+    auto first = make_temp_path("pulp_stream_reopen_first");
+    auto second = make_temp_path("pulp_stream_reopen_second");
+    const std::uint8_t a[] = {'a'};
+    const std::uint8_t b[] = {'b', 'b'};
+
+    FileStream stream(first.string(), FileStream::Mode::Write);
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.write(a, sizeof(a)).ok());
+    REQUIRE(stream.open(second.string(), FileStream::Mode::Write));
+    REQUIRE(stream.write(b, sizeof(b)).ok());
+    REQUIRE(stream.flush());
+    stream.close();
+
+    FileStream first_reader(first.string(), FileStream::Mode::Read);
+    std::uint8_t first_out = 0;
+    REQUIRE(first_reader.read(&first_out, 1).ok());
+    REQUIRE(first_out == 'a');
+
+    FileStream second_reader(second.string(), FileStream::Mode::Read);
+    std::uint8_t second_out[2]{};
+    REQUIRE(second_reader.read(second_out, sizeof(second_out)).bytes == sizeof(second_out));
+    REQUIRE(std::memcmp(second_out, b, sizeof(b)) == 0);
+
+    std::filesystem::remove(first);
+    std::filesystem::remove(second);
+}
+
 TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
           "[stream][tcp][coverage][issue-641]") {
     TcpStream first;
@@ -411,6 +465,26 @@ TEST_CASE("HttpStream invalid URLs fail without external transport",
 
     stream.close();
     REQUIRE(stream.read(out.data(), out.size()).closed());
+}
+
+TEST_CASE("HttpStream fetch resets a closed stream before reporting new failure",
+          "[stream][http][coverage][phase3]") {
+    HttpStream stream;
+    stream.close();
+
+    HttpStream::Request request;
+    request.url = "ftp://127.0.0.1/nope";
+    request.timeout_seconds = 1;
+
+    REQUIRE_FALSE(stream.fetch(request));
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.status_code() == 0);
+    REQUIRE(stream.transport_error() == "Invalid URL");
+
+    std::uint8_t byte = 0;
+    auto read = stream.read(&byte, 1);
+    REQUIRE_FALSE(read.ok());
+    REQUIRE(read.error == StreamError::IoError);
 }
 
 TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_pipe][issue-641]") {

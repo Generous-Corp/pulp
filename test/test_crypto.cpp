@@ -124,6 +124,23 @@ TEST_CASE("AES empty plaintext", "[crypto][aes]") {
     REQUIRE(decrypted->empty());
 }
 
+TEST_CASE("AES binary plaintext preserves embedded zero bytes",
+          "[crypto][aes][coverage][phase3]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+    std::memset(key, 0x33, 32);
+    std::memset(iv, 0x77, 16);
+
+    const std::vector<uint8_t> plaintext = {0x00, 0x01, 0xff, 0x00, 0x7f, 0x80};
+    auto encrypted = aes_encrypt(plaintext.data(), plaintext.size(), key, iv);
+    REQUIRE(encrypted.has_value());
+    REQUIRE(encrypted->size() == 16);
+
+    auto decrypted = aes_decrypt(encrypted->data(), encrypted->size(), key, iv);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(*decrypted == plaintext);
+}
+
 TEST_CASE("AES exact block plaintext adds and removes full padding block",
           "[crypto][aes][coverage][issue-641]") {
     uint8_t key[32] = {};
@@ -162,6 +179,15 @@ TEST_CASE("AES decrypt rejects non-block-aligned ciphertext", "[crypto][aes]") {
     uint8_t ciphertext[15] = {};
 
     auto result = aes_decrypt(ciphertext, sizeof(ciphertext), key, iv);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("AES decrypt rejects empty ciphertext",
+          "[crypto][aes][coverage][phase3]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+
+    auto result = aes_decrypt(nullptr, 0, key, iv);
     REQUIRE_FALSE(result.has_value());
 }
 
@@ -218,4 +244,13 @@ TEST_CASE("Machine ID is non-empty", "[crypto][machine_id]") {
     REQUIRE_FALSE(id.empty());
     // Should not be all zeros
     REQUIRE(id != std::string(64, '0'));
+}
+
+TEST_CASE("Machine ID is lowercase hexadecimal",
+          "[crypto][machine_id][coverage][phase3]") {
+    auto id = machine_id();
+    REQUIRE(id.size() == 64);
+    REQUIRE(std::all_of(id.begin(), id.end(), [](unsigned char c) {
+        return std::isdigit(c) || (c >= 'a' && c <= 'f');
+    }));
 }
