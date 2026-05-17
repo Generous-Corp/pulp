@@ -88,6 +88,11 @@ struct SampleEvent {
         Start,         ///< Burst opened (value drifted off baseline / last
                        ///< stable).
         End,           ///< Burst closed (value stabilized). Carries deltas.
+        Input,         ///< Recorded `View::simulate_*` interaction (Phase 10).
+                       ///< Carries `input_kind` ("click" / "drag" / "hover"),
+                       ///< the target view's id() if any, and root-space
+                       ///< coordinates in `components`. Replayed by
+                       ///< `replay_inputs` against a fresh tree.
     };
 
     Kind kind = Kind::Baseline;
@@ -110,6 +115,22 @@ struct SampleEvent {
 
     std::vector<std::pair<std::string, double>> components;  ///< Sorted by name.
     std::vector<std::pair<std::string, double>> deltas;      ///< End events only.
+
+    // ── Input fields (Phase 10, populated only when `kind == Input`) ─
+    //
+    // `input_kind` is one of `"click"`, `"drag"`, `"hover"`. `view_id`
+    // is the recorded target's `View::id()` (empty when the recorder
+    // captured an event that didn't land on an id-bearing view). The
+    // root-space coordinates ride on `components`:
+    //   - click/hover: `{ "x": ..., "y": ... }`
+    //   - drag       : `{ "start_x": ..., "start_y": ...,
+    //                     "end_x":   ..., "end_y":   ...,
+    //                     "steps":   ... }`
+    // (Sorted by name, same as every other event.) The optional name
+    // ride along with `view_name` set to "input" by convention so
+    // `format_line` and existing groupers don't trip on an empty view.
+    std::string input_kind;
+    std::string view_id;
 };
 
 /// Render the canonical `[PulpMotion][view][metric] ...` line for a sample event.
@@ -345,6 +366,71 @@ Sink make_fixture_sink(std::string path);
 /// Returns the number of events replayed, or `-1` on parse error.
 int replay_fixture(const std::string& path, const Sink& sink);
 
+// ── Input recording / replay (Phase 10) ──────────────────────────────
+//
+// Phase 10 wires `View::simulate_click` / `simulate_drag` /
+// `simulate_hover` into the same fixture stream that carries motion
+// samples. Recording is opt-in: nothing changes about simulate_* until
+// a caller installs a recorder, after which every simulate_* dispatch
+// emits an `Input` `SampleEvent` to the Coordinator's sinks (so the
+// already-installed `make_fixture_sink(path)` captures inputs alongside
+// samples). Replay reads the fixture, walks the view tree by `id()` to
+// reattach each input to a live target, and re-invokes the matching
+// `View::simulate_*`. The motion fixture that emerges from the replay
+// — when paired with the same animation primitives — matches the
+// originally-recorded one.
+//
+// Layered intent:
+//   - `make_input_recorder(path)` is a one-call companion to
+//     `make_fixture_sink(path)`: it installs a fixture sink AND turns
+//     on simulate_* recording, returning a handle whose destructor
+//     turns recording back off. Off by default everywhere else.
+//   - `replay_inputs(path, root_view, frame_clock)` reads the fixture
+//     and re-dispatches each `Input` event by `view_id` against
+//     `root_view`. The `frame_clock` is advanced between inputs to
+//     reproduce the original timing (FrameClock-relative).
+
+/// Recording handle returned by `make_input_recorder`. RAII: destruction
+/// removes the installed sink and turns input recording back off.
+class InputRecorder {
+public:
+    InputRecorder() noexcept = default;
+    InputRecorder(InputRecorder&&) noexcept;
+    InputRecorder& operator=(InputRecorder&&) noexcept;
+    InputRecorder(const InputRecorder&) = delete;
+    InputRecorder& operator=(const InputRecorder&) = delete;
+    ~InputRecorder();
+
+    /// Stop recording inputs and close the fixture sink. Idempotent.
+    void stop();
+
+    bool is_recording() const noexcept { return sink_id_ != 0; }
+
+private:
+    friend InputRecorder make_input_recorder(std::string path);
+    explicit InputRecorder(int sink_id) noexcept : sink_id_(sink_id) {}
+    int sink_id_ = 0;
+};
+
+/// Install a fixture sink at `path` and enable simulate_* recording.
+/// Returns an `InputRecorder` whose destructor stops both the sink and
+/// the recording. Off by default. Repeated calls install independent
+/// recorders; each gets its own sink id.
+InputRecorder make_input_recorder(std::string path);
+
+/// Process-wide entry point called by `View::simulate_*` when input
+/// recording is active. Public so the View free functions can reach
+/// it without a friend relationship; callers should prefer the
+/// `View::simulate_*` API.
+void record_simulated_input(const std::string& input_kind,
+                            const std::string& view_id,
+                            std::vector<std::pair<std::string, double>> coords);
+
+/// True while at least one `InputRecorder` is alive. Off by default;
+/// `View::simulate_*` gates on this so the non-recording cost stays a
+/// single load + branch.
+bool input_recording_enabled() noexcept;
+
 // ── Forward declarations ─────────────────────────────────────────────
 
 class Coordinator;
@@ -490,6 +576,11 @@ public:
     /// Callers should prefer the free functions for forward compatibility.
     void set_ambient_provenance_internal(Provenance p);
     Provenance current_ambient_provenance_internal() const;
+
+    // ── Phase 10: input recording dispatch ───────────────────────────
+    /// Stamp `e` with the bound FrameClock's `t`/`frame` and dispatch
+    /// it to every installed sink. Called by `record_simulated_input`.
+    void dispatch_input_event(SampleEvent e);
 
 private:
     Coordinator();

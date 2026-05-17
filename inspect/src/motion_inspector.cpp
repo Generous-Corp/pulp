@@ -58,6 +58,7 @@ const char* sample_kind_to_string(SampleEvent::Kind k) {
         case SampleEvent::Kind::Sample:       return "sample";
         case SampleEvent::Kind::Start:        return "start";
         case SampleEvent::Kind::End:          return "end";
+        case SampleEvent::Kind::Input:        return "input";
     }
     return "?";
 }
@@ -69,6 +70,7 @@ const char* event_method_for_kind(SampleEvent::Kind k) {
         case SampleEvent::Kind::Sample:       return methods::kMotionSample;
         case SampleEvent::Kind::Start:        return methods::kMotionStart;
         case SampleEvent::Kind::End:          return methods::kMotionEnd;
+        case SampleEvent::Kind::Input:        return methods::kMotionSample;
     }
     return methods::kMotionSample;
 }

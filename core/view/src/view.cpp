@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/motion.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <algorithm>
@@ -535,6 +536,17 @@ void View::paint_all(canvas::Canvas& canvas) {
 
 void View::simulate_click(Point root_pos) {
     auto* target = hit_test(root_pos);
+    // Phase 10: record the synthetic input into the active motion
+    // fixture BEFORE dispatch so replay sees the same target lookup
+    // the original recording captured (target id is what we resolve,
+    // not "wherever this click would land at replay time").
+    if (pulp::view::motion::input_recording_enabled()) {
+        const std::string id = target ? target->id() : std::string();
+        std::vector<std::pair<std::string, double>> coords;
+        coords.emplace_back("x", static_cast<double>(root_pos.x));
+        coords.emplace_back("y", static_cast<double>(root_pos.y));
+        pulp::view::motion::record_simulated_input("click", id, std::move(coords));
+    }
     if (!target) return;
 
     // Convert to target's local coordinates
@@ -569,6 +581,16 @@ void View::simulate_click(Point root_pos) {
 
 void View::simulate_drag(Point start, Point end, int steps) {
     auto* target = hit_test(start);
+    if (pulp::view::motion::input_recording_enabled()) {
+        const std::string id = target ? target->id() : std::string();
+        std::vector<std::pair<std::string, double>> coords;
+        coords.emplace_back("end_x",   static_cast<double>(end.x));
+        coords.emplace_back("end_y",   static_cast<double>(end.y));
+        coords.emplace_back("start_x", static_cast<double>(start.x));
+        coords.emplace_back("start_y", static_cast<double>(start.y));
+        coords.emplace_back("steps",   static_cast<double>(steps));
+        pulp::view::motion::record_simulated_input("drag", id, std::move(coords));
+    }
     if (!target) return;
 
     target->on_mouse_down(start);
@@ -1008,6 +1030,13 @@ void View::simulate_hover(Point root_pos) {
 
     // Set hover on the hit target
     auto* target = hit_test(root_pos);
+    if (pulp::view::motion::input_recording_enabled()) {
+        const std::string id = target ? target->id() : std::string();
+        std::vector<std::pair<std::string, double>> coords;
+        coords.emplace_back("x", static_cast<double>(root_pos.x));
+        coords.emplace_back("y", static_cast<double>(root_pos.y));
+        pulp::view::motion::record_simulated_input("hover", id, std::move(coords));
+    }
     if (target) target->set_hovered(true);
 }
 

@@ -7,6 +7,7 @@
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -423,6 +424,15 @@ std::string format_line(const SampleEvent& e) {
                << " t=" << fmt_double(e.t_seconds, 6) << " --";
             for (const auto& [k, v] : e.deltas) {
                 ss << " " << k << "Delta=" << fmt_double(v, e.precision);
+            }
+            break;
+        case SampleEvent::Kind::Input:
+            ss << " -- Input kind=" << e.input_kind
+               << " view_id=" << e.view_id
+               << " frame=" << e.frame
+               << " t=" << fmt_double(e.t_seconds, 6) << " --";
+            for (const auto& [k, v] : e.components) {
+                ss << " " << k << "=" << fmt_double(v, e.precision);
             }
             break;
     }
@@ -944,6 +954,32 @@ void Coordinator::publish_internal(std::string view_name,
     for (auto& [sink, ev] : pending) sink(ev);
 }
 
+// ── Coordinator::dispatch_input_event (Phase 10) ─────────────────────
+
+void Coordinator::dispatch_input_event(SampleEvent e) {
+    std::vector<std::pair<Sink, SampleEvent>> pending;
+    {
+        std::lock_guard<std::mutex> lock(state_->mtx);
+        if (state_->sinks.empty()) return;
+        // Stamp the bound clock's monotonic time/frame so replay can
+        // recover the original cadence. Input events bypass the
+        // tracing_enabled gate because recording is itself a separate
+        // opt-in (an `InputRecorder` was constructed); requiring both
+        // would be a footgun for "record an interaction without
+        // sampler-driven traces."
+        if (state_->clock) {
+            e.t_seconds = static_cast<double>(state_->clock->time());
+            e.frame = state_->clock->frame();
+        }
+        for (const auto& [sid, sink] : state_->sinks) {
+            (void)sid;
+            pending.emplace_back(sink, e);
+        }
+        state_->emitted_count++;
+    }
+    for (auto& [sink, ev] : pending) sink(ev);
+}
+
 // ── Fixture record / replay (Phase 5) ────────────────────────────────
 
 namespace {
@@ -955,6 +991,7 @@ const char* sample_kind_string(SampleEvent::Kind k) {
         case SampleEvent::Kind::Sample:       return "sample";
         case SampleEvent::Kind::Start:        return "start";
         case SampleEvent::Kind::End:          return "end";
+        case SampleEvent::Kind::Input:        return "input";
     }
     return "?";
 }
@@ -965,6 +1002,7 @@ bool kind_from_string(std::string_view s, SampleEvent::Kind& out) {
     if (s == "sample")        { out = SampleEvent::Kind::Sample;       return true; }
     if (s == "start")         { out = SampleEvent::Kind::Start;        return true; }
     if (s == "end")           { out = SampleEvent::Kind::End;          return true; }
+    if (s == "input")         { out = SampleEvent::Kind::Input;        return true; }
     return false;
 }
 
@@ -1052,6 +1090,13 @@ std::string serialize_event(const SampleEvent& e) {
     if (e.provenance.is_set()) {
         ss << ",\"provenance\":" << serialize_provenance(e.provenance);
     }
+    // Phase 10: input fields only emitted on Input events so existing
+    // motion lines stay byte-for-byte identical with pre-Phase-10
+    // captures.
+    if (e.kind == SampleEvent::Kind::Input) {
+        ss << ",\"input_kind\":\"" << json_escape(e.input_kind) << "\""
+           << ",\"view_id\":\"" << json_escape(e.view_id) << "\"";
+    }
     ss << "}";
     return ss.str();
 }
@@ -1106,6 +1151,10 @@ public:
                 e.burst_id = static_cast<int>(v);
             } else if (key == "provenance") {
                 if (!parse_provenance(e.provenance)) return false;
+            } else if (key == "input_kind") {
+                if (!parse_string(e.input_kind)) return false;
+            } else if (key == "view_id") {
+                if (!parse_string(e.view_id)) return false;
             } else {
                 // Unknown key — skip its value tolerantly.
                 if (!skip_value()) return false;
@@ -1689,6 +1738,106 @@ double frame_jitter_seconds(const std::vector<ScalarSample>& samples) {
 double final_value(const std::vector<ScalarSample>& samples) {
     if (samples.empty()) return std::numeric_limits<double>::quiet_NaN();
     return samples.back().value;
+}
+
+// ── Input recording / replay (Phase 10) ──────────────────────────────
+//
+// Recording: View::simulate_* calls `record_simulated_input` which —
+// when at least one InputRecorder is alive — builds an `Input`
+// SampleEvent and dispatches it to every installed sink. The
+// FrameClock-relative timestamp comes from the Coordinator's bound
+// clock so a replay can recover the original cadence.
+//
+// Replay: `replay_inputs` walks the fixture, resolves each Input's
+// `view_id` against `root_view` via DFS, advances `frame_clock` to
+// match the recorded `t_seconds`, and calls the matching
+// `View::simulate_*`. Sinks installed on the Coordinator (typically the
+// same `make_fixture_sink` paired with the recorder) re-capture the
+// motion stream the replayed inputs produce.
+
+namespace {
+
+/// Process-wide recording-active counter. Bumped by `make_input_recorder`,
+/// dropped by `InputRecorder::stop()` / destructor. `View::simulate_*`
+/// gates on this so the non-recording cost is a single relaxed load.
+std::atomic<int> g_recorder_count{0};
+
+}  // namespace
+
+bool input_recording_enabled() noexcept {
+    return g_recorder_count.load(std::memory_order_relaxed) > 0;
+}
+
+void record_simulated_input(const std::string& input_kind,
+                            const std::string& view_id,
+                            std::vector<std::pair<std::string, double>> coords) {
+    // Snapshot a SampleEvent::Kind::Input under the recorder mutex
+    // and let Coordinator's sinks pick it up. The Coordinator itself
+    // already serializes sink iteration internally on its own mutex
+    // via the publish path; we bypass it here because Input events
+    // don't participate in the Baseline/Start/Sample/End burst state
+    // machine — they're a flat event stream tagged into the same
+    // fixture for chronological replay.
+    auto& coord = Coordinator::instance();
+    if (!input_recording_enabled()) return;
+
+    SampleEvent e;
+    e.kind = SampleEvent::Kind::Input;
+    e.view_name = "input";   // sentinel so format_line groups under [input]
+    e.metric_name = input_kind;
+    e.input_kind = input_kind;
+    e.view_id = view_id;
+    e.components = std::move(coords);
+    // Coordinator owns the FrameClock binding; reach in via its
+    // public sink set and let the dispatch loop stamp `t`/`frame`
+    // ourselves. We keep the lookup simple — if the coordinator
+    // isn't bound, the event still serializes with t=0 / frame=0
+    // and replay falls back to elapsed-clock advance.
+    e.t_seconds = 0.0;
+    e.frame = 0;
+    // The dispatcher below mirrors Coordinator's pending-then-fire
+    // pattern so a sink that calls back into motion (e.g. write-then-
+    // log) doesn't deadlock.
+    coord.dispatch_input_event(e);
+}
+
+// ── InputRecorder ────────────────────────────────────────────────────
+
+InputRecorder::InputRecorder(InputRecorder&& o) noexcept : sink_id_(o.sink_id_) {
+    o.sink_id_ = 0;
+}
+
+InputRecorder& InputRecorder::operator=(InputRecorder&& o) noexcept {
+    if (this != &o) {
+        stop();
+        sink_id_ = o.sink_id_;
+        o.sink_id_ = 0;
+    }
+    return *this;
+}
+
+InputRecorder::~InputRecorder() { stop(); }
+
+void InputRecorder::stop() {
+    if (sink_id_ == 0) return;
+    Coordinator::instance().remove_sink(sink_id_);
+    sink_id_ = 0;
+    // Drop the recorder count last so any in-flight record_simulated_input
+    // either fully publishes (if it loaded the count before our store) or
+    // becomes a clean no-op (if it loaded after). Either is correct — the
+    // sink was already removed.
+    g_recorder_count.fetch_sub(1, std::memory_order_relaxed);
+}
+
+InputRecorder make_input_recorder(std::string path) {
+    // Bump the recorder-count first so any simulate_* dispatch racing
+    // against our sink install becomes a fully published event rather
+    // than a silently-dropped one. The sink id is the recorder's
+    // ownership token; we hand it back wrapped in the RAII handle.
+    g_recorder_count.fetch_add(1, std::memory_order_relaxed);
+    const int sink_id =
+        Coordinator::instance().add_sink(make_fixture_sink(std::move(path)));
+    return InputRecorder(sink_id);
 }
 
 }  // namespace pulp::view::motion
