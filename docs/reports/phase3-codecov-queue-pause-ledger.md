@@ -6281,3 +6281,24 @@ snapshotting the pre-tick subscriber count, copying callbacks before invoking
 them, and re-finding by id after callback return; because GraphQL comments were
 rate-limited, posted a REST issue comment documenting that the P1 review item
 is addressed by the branch implementation and test.
+
+2026-05-17 11:11 PDT: PR-management and new-batch checkpoint for the
+GitHub-hosted codecov queue. #2124 (`feature/phase3-codecov-batch-681`) was
+clean after the UBSan rerun and was squash-merged to `main` with SHA guard
+`067f9cb151879abc1802685672a9a62260ae705b`; merge commit
+`d1df9788a0135272a098432aea817b1a73afd6ca`. #2126
+(`feature/phase3-codecov-batch-682`) remains open with no failing checks and
+the full GitHub-hosted rerun still in progress after the socket native-handle,
+Codecov patch-coverage, and rebase-conflict repairs.
+
+2026-05-17 11:11 PDT: consolidated held local coverage tranches into
+`feature/phase3-codecov-batch-696` and opened GitHub PR #2143
+(`test: batch broad phase3 coverage edges`). The batch intentionally groups six
+previously validated local commits into one larger CI run: format default
+contracts, audio ragged-data hardening, runtime i18n/license/analytics,
+state/binding/edit-history/properties/preset coverage, CLI parser/import/SDK
+tarball/upgrade URL coverage, and canvas rectangle-list edge coverage. Local
+validation after rebasing on current `origin/main` passed with 236/236 focused
+CTest cases and `tools/scripts/local_diff_cover.sh` reporting 100% diff
+coverage against `origin/main`. PR creation used the GitHub REST API because
+GraphQL was rate-limited.
