@@ -645,6 +645,14 @@ int main(int argc, char* argv[]) {
             pulp::view::motion::Coordinator::instance().install_default_log_sink();
         pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
     }
+    if (pulp::runtime::get_env("PULP_MOTION_FIREHOSE")) {
+        pulp::view::motion::Coordinator::instance().set_firehose(true);
+        pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
+        if (!motion_log_sink_id) {
+            motion_log_sink_id =
+                pulp::view::motion::Coordinator::instance().install_default_log_sink();
+        }
+    }
     if (pulp::runtime::get_env("PULP_MOTION_SERVER")) {
         motion_server = std::make_unique<pulp::inspect::InspectorServer>();
         if (motion_server->start()) {

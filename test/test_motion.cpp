@@ -559,6 +559,109 @@ TEST_CASE("Presentation walker handles ScrollView ancestor offset",
     REQUIRE(find_component(comps, "minY") == Approx(50.f).margin(0.5));
 }
 
+// ── Publish channel (Phase 3) ────────────────────────────────────────
+
+TEST_CASE("publish_value is a no-op when firehose is off", "[motion][publish]") {
+    Fixture fx;
+    REQUIRE(Coordinator::instance().firehose() == false);
+    publish_value("Card", "opacity", 0.5);
+    publish_value("Card", "opacity", 0.6);
+    REQUIRE(fx.buffer.empty());
+}
+
+TEST_CASE("publish_value with firehose emits a full Baseline/Start/Sample/End burst",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("Card", "opacity", 0.5);   // Baseline
+    publish_value("Card", "opacity", 0.6);   // Start + Sample
+    publish_value("Card", "opacity", 0.6);   // stable → End
+    publish_value("Card", "opacity", 0.6);   // still stable, no event
+
+    std::size_t baseline = 0, start = 0, sample = 0, end = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Baseline) ++baseline;
+        if (e.kind == SampleEvent::Kind::Start)    ++start;
+        if (e.kind == SampleEvent::Kind::Sample)   ++sample;
+        if (e.kind == SampleEvent::Kind::End)      ++end;
+    }
+    REQUIRE(baseline == 1);
+    REQUIRE(start == 1);
+    REQUIRE(sample == 1);
+    REQUIRE(end == 1);
+}
+
+TEST_CASE("publish_value End burst fires on first stable publish",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 0.0);   // Baseline
+    publish_value("X", "y", 1.0);   // Start + Sample
+    publish_value("X", "y", 1.0);   // stable → End
+
+    std::size_t start = 0, end = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start) ++start;
+        if (e.kind == SampleEvent::Kind::End)   ++end;
+    }
+    REQUIRE(start == 1);
+    REQUIRE(end == 1);
+}
+
+TEST_CASE("publish_components routes multiple keys independently",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_components("Card", "frame", { {"x", 0.0}, {"y", 0.0} });
+    publish_components("Toast", "alpha", { {"value", 1.0} });
+    publish_components("Card", "frame", { {"x", 5.0}, {"y", 0.0} });
+
+    std::size_t card_evts = 0, toast_evts = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.view_name == "Card")  ++card_evts;
+        if (e.view_name == "Toast") ++toast_evts;
+    }
+    REQUIRE(card_evts >= 3);  // Baseline + Start + Sample
+    REQUIRE(toast_evts == 1); // Baseline only
+}
+
+TEST_CASE("publish_value respects tracing_enabled gate",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+    Coordinator::instance().set_tracing_enabled(false);
+    publish_value("Card", "opacity", 0.5);
+    REQUIRE(fx.buffer.empty());
+}
+
+TEST_CASE("publish_value respects epsilon threshold",
+          "[motion][publish]") {
+    Fixture fx;
+    Coordinator::instance().set_firehose(true);
+
+    publish_value("X", "y", 1.0, {3, /*epsilon=*/0.05});  // Baseline
+    publish_value("X", "y", 1.01);  // below epsilon → no Start/Sample
+    publish_value("X", "y", 1.02);  // still below
+
+    std::size_t change_events = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start ||
+            e.kind == SampleEvent::Kind::Sample) ++change_events;
+    }
+    REQUIRE(change_events == 0);
+
+    publish_value("X", "y", 1.10);  // crosses epsilon → Start + Sample
+    change_events = 0;
+    for (const auto& e : fx.buffer) {
+        if (e.kind == SampleEvent::Kind::Start ||
+            e.kind == SampleEvent::Kind::Sample) ++change_events;
+    }
+    REQUIRE(change_events == 2);
+}
+
 TEST_CASE("Emitted event counter advances", "[motion]") {
     Fixture fx;
     double v = 0.0;

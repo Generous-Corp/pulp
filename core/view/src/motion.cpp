@@ -414,6 +414,28 @@ Sink make_buffer_sink(std::vector<SampleEvent>* buffer) {
     };
 }
 
+// ── Publish channel (Phase 3) ────────────────────────────────────────
+
+void publish_value(std::string view_name,
+                   std::string metric_name,
+                   double value,
+                   PublishOptions opts) {
+    std::vector<std::pair<std::string, double>> comps;
+    comps.emplace_back("value", value);
+    publish_components(std::move(view_name), std::move(metric_name),
+                       std::move(comps), opts);
+}
+
+void publish_components(std::string view_name,
+                        std::string metric_name,
+                        std::vector<std::pair<std::string, double>> components,
+                        PublishOptions opts) {
+    if (components.empty()) return;
+    Coordinator::instance().publish_internal(std::move(view_name),
+                                             std::move(metric_name),
+                                             std::move(components), opts);
+}
+
 // ── Coordinator internals ─────────────────────────────────────────────
 
 struct PerMetricState {
@@ -433,6 +455,24 @@ struct ActiveTrace {
     double accum_seconds = 0.0;
 };
 
+struct PublishKey {
+    std::string view_name;
+    std::string metric_name;
+    bool operator<(const PublishKey& o) const {
+        if (view_name != o.view_name) return view_name < o.view_name;
+        return metric_name < o.metric_name;
+    }
+};
+
+struct PublishState {
+    int precision = 3;
+    double epsilon = 0.0001;
+    std::vector<std::pair<std::string, double>> last_emitted;
+    std::vector<std::pair<std::string, double>> motion_start;
+    bool has_baseline = false;
+    bool in_motion = false;
+};
+
 struct Coordinator::State {
     mutable std::mutex mtx;
     pulp::view::FrameClock* clock = nullptr;
@@ -444,6 +484,10 @@ struct Coordinator::State {
     std::map<int, ActiveTrace> traces;
     int next_trace_id = 1;
     std::size_t emitted_count = 0;
+    // Per-(view, metric) burst state for publish_*. Independent of the
+    // sampler-driven trace map above so publishes and sampled traces
+    // don't interfere even on the same view/metric name.
+    std::map<PublishKey, PublishState> publish_states;
 };
 
 // ── Coordinator ───────────────────────────────────────────────────────
@@ -554,6 +598,7 @@ void Coordinator::reset() {
     std::lock_guard<std::mutex> lock(state_->mtx);
     state_->sinks.clear();
     state_->traces.clear();
+    state_->publish_states.clear();
     state_->tracing_enabled = false;
     state_->firehose = false;
     state_->emitted_count = 0;
@@ -675,6 +720,98 @@ void Coordinator::on_tick(float dt) {
                     mstate.in_motion = false;
                     mstate.motion_start.clear();
                 }
+            }
+        }
+    }
+    for (auto& [sink, ev] : pending) sink(ev);
+}
+
+// ── Coordinator::publish_internal (Phase 3) ───────────────────────────
+//
+// Defined after on_tick so `components_differ` (anonymous namespace
+// above) is in scope.
+
+void Coordinator::publish_internal(std::string view_name,
+                                   std::string metric_name,
+                                   std::vector<std::pair<std::string, double>> components,
+                                   PublishOptions opts) {
+    if (components.empty()) return;
+    sort_components(components);
+
+    // Same Baseline / Start / Sample / End burst-framing semantics as
+    // the sampler-driven coordinator path, just keyed by (view, metric)
+    // and only running when firehose is on (Phase 3 scope; Phase 5 adds
+    // filter-scoped subscriptions that match without firehose).
+    std::vector<std::pair<Sink, SampleEvent>> pending;
+    {
+        std::lock_guard<std::mutex> lock(state_->mtx);
+        if (!state_->tracing_enabled || state_->sinks.empty()) return;
+        if (!state_->firehose) return;
+
+        const double t_now =
+            state_->clock ? static_cast<double>(state_->clock->time()) : 0.0;
+        const std::uint64_t f_now =
+            state_->clock ? state_->clock->frame() : 0;
+
+        const PublishKey key{view_name, metric_name};
+        auto& pstate = state_->publish_states[key];
+        // Sticky: the first publish for a (view, metric) sets precision
+        // and epsilon. Subsequent calls inherit those so callers can
+        // omit `PublishOptions` on every tick without changing the
+        // per-key threshold.
+        if (!pstate.has_baseline) {
+            pstate.precision = opts.precision;
+            pstate.epsilon = opts.epsilon;
+        }
+
+        auto enqueue = [&](SampleEvent::Kind kind,
+                           std::vector<std::pair<std::string, double>> comps,
+                           std::vector<std::pair<std::string, double>> deltas = {}) {
+            SampleEvent e;
+            e.kind = kind;
+            e.view_name = view_name;
+            e.metric_name = metric_name;
+            e.t_seconds = t_now;
+            e.frame = f_now;
+            e.precision = pstate.precision;
+            e.components = std::move(comps);
+            e.deltas = std::move(deltas);
+            for (const auto& [sid, sink] : state_->sinks) {
+                (void)sid;
+                pending.emplace_back(sink, e);
+            }
+            state_->emitted_count++;
+        };
+
+        if (!pstate.has_baseline) {
+            enqueue(SampleEvent::Kind::Baseline, components);
+            pstate.last_emitted = components;
+            pstate.has_baseline = true;
+        } else {
+            const bool changed = components_differ(components,
+                                                   pstate.last_emitted,
+                                                   pstate.epsilon);
+            if (changed) {
+                if (!pstate.in_motion) {
+                    enqueue(SampleEvent::Kind::Start, {});
+                    pstate.motion_start = pstate.last_emitted;
+                    pstate.in_motion = true;
+                }
+                enqueue(SampleEvent::Kind::Sample, components);
+                pstate.last_emitted = components;
+            } else if (pstate.in_motion) {
+                std::vector<std::pair<std::string, double>> deltas;
+                deltas.reserve(components.size());
+                for (const auto& [name, cur] : components) {
+                    double start = 0.0;
+                    for (const auto& [sn, sv] : pstate.motion_start) {
+                        if (sn == name) { start = sv; break; }
+                    }
+                    deltas.emplace_back(name, cur - start);
+                }
+                enqueue(SampleEvent::Kind::End, {}, std::move(deltas));
+                pstate.in_motion = false;
+                pstate.motion_start.clear();
             }
         }
     }

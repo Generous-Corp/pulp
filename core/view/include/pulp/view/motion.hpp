@@ -68,6 +68,46 @@ struct SampleEvent {
 /// Render the canonical `[PulpMotion][view][metric] ...` line for a sample event.
 std::string format_line(const SampleEvent& e);
 
+// ── Publish channel (Phase 3) ────────────────────────────────────────
+//
+// `publish_value()` is the entry point for any code that wants to make
+// its scalar / structured values observable without taking a
+// FrameClock sampler subscription. Typical callers are animation
+// primitives — a `Tween`, a CSS `TransitionSpec`, a JS rAF callback —
+// that already advance once per frame; calling publish at the same
+// tick site avoids the doubled-sampling cost.
+//
+// Routing:
+//   - When `Coordinator::tracing_enabled()` is false, publish is a
+//     no-op (cheap, branch-predictable; safe to leave in hot paths).
+//   - When `Coordinator::firehose()` is true, the published value fans
+//     out as a Sample event to every installed sink, with the same
+//     epsilon / Start/End burst semantics as sampler-driven traces.
+//   - When `firehose()` is false and no subscription is wired (Phase 5
+//     adds the subscription filter), publish is also a no-op.
+//
+// Filter-scoped subscriptions land in Phase 5 alongside the
+// `pulp motion trace --selector <id>` CLI surface; the publish channel
+// is the underlying primitive both modes share.
+
+struct PublishOptions {
+    int precision = 3;
+    double epsilon = 0.0001;
+};
+
+/// Single-component publish.
+void publish_value(std::string view_name,
+                   std::string metric_name,
+                   double value,
+                   PublishOptions opts = {});
+
+/// Multi-component publish (e.g., a 2D point or a geometry rect).
+/// Components are sorted by name before emission so log lines are stable.
+void publish_components(std::string view_name,
+                        std::string metric_name,
+                        std::vector<std::pair<std::string, double>> components,
+                        PublishOptions opts = {});
+
 // ── Sinks ────────────────────────────────────────────────────────────
 
 using Sink = std::function<void(const SampleEvent&)>;
@@ -204,6 +244,16 @@ public:
 
     /// Cumulative count of SampleEvents dispatched since `reset()`. For tests.
     std::size_t emitted_event_count() const noexcept;
+
+    // ── Phase 3: publish-channel internals ────────────────────────────
+    /// Called by `publish_value` / `publish_components`. Public so the
+    /// free functions can reach it without becoming friends; callers
+    /// should prefer the `publish_*` free functions for forward
+    /// compatibility.
+    void publish_internal(std::string view_name,
+                          std::string metric_name,
+                          std::vector<std::pair<std::string, double>> components,
+                          PublishOptions opts);
 
 private:
     Coordinator();
