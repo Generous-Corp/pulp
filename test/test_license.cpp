@@ -307,6 +307,87 @@ TEST_CASE("LicenseValidator validate rejects empty payload section",
     REQUIRE(validator.validate(".sig") == LicenseStatus::InvalidSignature);
 }
 
+TEST_CASE("LicenseValidator validate rejects malformed signature encoding",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
+    REQUIRE(validator.validate(base64_encode(payload) + ".###") == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator validate rejects decoded payload missing product id",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseValidator validator;
+    std::string payload = "{\"email\":\"user@example.com\",\"issued\":1700000000}";
+    REQUIRE(validator.validate(base64_encode(payload) + "." + base64_encode("sig")) ==
+            LicenseStatus::InvalidSignature);
+    REQUIRE_FALSE(validator.validate_and_parse(base64_encode(payload) + ".sig"));
+}
+
+TEST_CASE("LicenseValidator validate_and_parse accepts minimal product payload",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseValidator validator;
+    auto info = validator.validate_and_parse(base64_encode("{\"product_id\":\"PulpMini\"}") + ".sig");
+    REQUIRE(info.has_value());
+    REQUIRE(info->product_id == "PulpMini");
+    REQUIRE(info->user_email.empty());
+    REQUIRE(info->issued_timestamp == 0);
+    REQUIRE(info->expiry_timestamp == 0);
+}
+
+TEST_CASE("LicenseValidator validate_and_parse ignores malformed optional integers",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpMini\",\"expiry\":not-a-number}";
+    auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
+    REQUIRE(info.has_value());
+    REQUIRE(info->expiry_timestamp == 0);
+}
+
+TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
+          "[crypto][license][coverage][phase3-large]") {
+    TemporaryFile tmp(".license");
+    std::string payload = "{\"product_id\":\"PulpSynth\"}";
+    std::string key = base64_encode(payload) + "." + base64_encode("sig") + "\n\n";
+
+    {
+        std::ofstream out(tmp.path());
+        REQUIRE(out.good());
+        out << key;
+    }
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator machine check accepts copied machine id",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseValidator validator;
+    LicenseInfo info;
+    info.machine_id = std::string(machine_id());
+    REQUIRE(validator.is_valid_for_machine(info));
+}
+
+TEST_CASE("LicenseGenerator emits nullopt for empty private key with complete info",
+          "[crypto][license][coverage][phase3-large]") {
+    LicenseInfo info;
+    info.product_id = "PulpSynth";
+    info.user_email = "user@example.com";
+    info.machine_id = "machine";
+    info.edition = "pro";
+    info.issued_timestamp = 1700000000;
+    info.expiry_timestamp = 1800000000;
+
+    LicenseGenerator generator;
+    REQUIRE_FALSE(generator.generate(info));
+}
+
+TEST_CASE("OnlineActivation treats empty server URL as failed request",
+          "[crypto][license][coverage][phase3-large]") {
+    REQUIRE_FALSE(OnlineActivation::activate("", "serial", "product"));
+    REQUIRE_FALSE(OnlineActivation::deactivate("", "license"));
+    REQUIRE(OnlineActivation::check_status("", "license") == LicenseStatus::NotFound);
+}
+
 TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]") {
     LicenseInfo info;
     info.product_id = "PulpSynth";

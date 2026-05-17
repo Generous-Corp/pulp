@@ -254,6 +254,70 @@ TEST_CASE("FileAnalyticsDestination appends multiple flushes", "[runtime][analyt
     REQUIRE(content.find("\"event\":\"second\"") != std::string::npos);
 }
 
+TEST_CASE("FileAnalyticsDestination omits props object for empty properties",
+          "[runtime][analytics][coverage][phase3-large]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    AnalyticsEvent event;
+    event.name = "no_props";
+    event.timestamp = 2.5;
+    dest.log_event(event);
+    dest.flush();
+
+    std::ifstream f(tmp.path());
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"no_props\"") != std::string::npos);
+    REQUIRE(line.find("\"time\":2.5") != std::string::npos);
+    REQUIRE(line.find("\"props\"") == std::string::npos);
+}
+
+TEST_CASE("FileAnalyticsDestination buffers below auto flush threshold",
+          "[runtime][analytics][coverage][phase3-large]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    for (int i = 0; i < 99; ++i) {
+        AnalyticsEvent event;
+        event.name = "buffered";
+        dest.log_event(event);
+    }
+
+    {
+        std::ifstream before(tmp.path());
+        std::string line;
+        REQUIRE_FALSE(std::getline(before, line));
+    }
+
+    dest.flush();
+    std::ifstream after(tmp.path());
+    int lines = 0;
+    std::string line;
+    while (std::getline(after, line))
+        ++lines;
+    REQUIRE(lines == 99);
+}
+
+TEST_CASE("FileAnalyticsDestination second flush does not duplicate events",
+          "[runtime][analytics][coverage][phase3-large]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    AnalyticsEvent event;
+    event.name = "once";
+    dest.log_event(event);
+    dest.flush();
+    dest.flush();
+
+    std::ifstream f(tmp.path());
+    int lines = 0;
+    std::string line;
+    while (std::getline(f, line))
+        ++lines;
+    REQUIRE(lines == 1);
+}
+
 TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][issue-641]") {
     TemporaryFile tmp(".jsonl");
     auto path = tmp.path();
@@ -314,4 +378,56 @@ TEST_CASE("WidgetTracker forwards expected event names and properties",
     REQUIRE((*events)[1].properties.at("value") == "-6");
     REQUIRE((*events)[2].name == "preset_select");
     REQUIRE((*events)[2].properties.at("preset") == "Init");
+}
+
+TEST_CASE("Analytics forwards simple log with empty property map",
+          "[runtime][analytics][coverage][phase3-large]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.set_enabled(true);
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    a.log("plain");
+    REQUIRE(events->size() == 1);
+    REQUIRE(events->back().name == "plain");
+    REQUIRE(events->back().properties.empty());
+}
+
+TEST_CASE("Analytics disabled widget tracker calls skip destinations",
+          "[runtime][analytics][coverage][phase3-large]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    a.set_enabled(false);
+    WidgetTracker::track_click("disabled");
+    WidgetTracker::track_value_change("disabled", "0");
+    WidgetTracker::track_preset_select("disabled");
+
+    REQUIRE(events->empty());
+    a.set_enabled(true);
+}
+
+TEST_CASE("WidgetTracker preserves empty identifiers and values",
+          "[runtime][analytics][coverage][phase3-large]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.set_enabled(true);
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    WidgetTracker::track_click("");
+    WidgetTracker::track_value_change("", "");
+    WidgetTracker::track_preset_select("");
+
+    REQUIRE(events->size() == 3);
+    REQUIRE((*events)[0].properties.at("widget").empty());
+    REQUIRE((*events)[1].properties.at("widget").empty());
+    REQUIRE((*events)[1].properties.at("value").empty());
+    REQUIRE((*events)[2].properties.at("preset").empty());
 }
