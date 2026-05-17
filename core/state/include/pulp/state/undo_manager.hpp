@@ -189,7 +189,10 @@ public:
     }
 
     /// Set maximum undo history depth. Oldest entries are discarded.
-    void set_max_history(int max) { max_history_ = max; }
+    void set_max_history(int max) {
+        max_history_ = max < 0 ? 0 : max;
+        trim_to_max_history();
+    }
     int max_history() const { return max_history_; }
 
     /// Called whenever the undo/redo state changes.
@@ -205,10 +208,14 @@ private:
     void push_undo(UndoTransaction tx) {
         redo_stack_.clear(); // new action invalidates redo
         undo_stack_.push_back(std::move(tx));
+        trim_to_max_history();
+        if (on_state_changed) on_state_changed();
+    }
+
+    void trim_to_max_history() {
         while (static_cast<int>(undo_stack_.size()) > max_history_) {
             undo_stack_.erase(undo_stack_.begin());
         }
-        if (on_state_changed) on_state_changed();
     }
 };
 

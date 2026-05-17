@@ -162,6 +162,56 @@ TEST_CASE("UndoManager zero max history performs without retaining undo",
     REQUIRE(state_changes == 1);
 }
 
+TEST_CASE("UndoManager lowering max_history trims existing history",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int v = 0;
+
+    for (int i = 1; i <= 4; ++i) {
+        const int old = v;
+        const int next = i;
+        um.perform(UndoAction::create("Step " + std::to_string(i),
+            [&v, old] { v = old; },
+            [&v, next] { v = next; }));
+    }
+
+    REQUIRE(um.undo_count() == 4);
+    REQUIRE(um.undo_name() == "Step 4");
+
+    um.set_max_history(2);
+
+    REQUIRE(um.undo_count() == 2);
+    REQUIRE(um.undo_name() == "Step 4");
+    REQUIRE(um.undo());
+    REQUIRE(v == 3);
+    REQUIRE(um.undo());
+    REQUIRE(v == 2);
+    REQUIRE_FALSE(um.can_undo());
+}
+
+TEST_CASE("UndoManager zero and negative max_history disable retention",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int v = 0;
+
+    um.perform(UndoAction::create("A", [&] { v = 0; }, [&] { v = 1; }));
+    REQUIRE(um.undo_count() == 1);
+
+    um.set_max_history(0);
+    REQUIRE(um.max_history() == 0);
+    REQUIRE_FALSE(um.can_undo());
+
+    um.perform(UndoAction::create("B", [&] { v = 1; }, [&] { v = 2; }));
+    REQUIRE(v == 2);
+    REQUIRE_FALSE(um.can_undo());
+
+    um.set_max_history(-10);
+    REQUIRE(um.max_history() == 0);
+    um.perform(UndoAction::create("C", [&] { v = 2; }, [&] { v = 3; }));
+    REQUIRE(v == 3);
+    REQUIRE_FALSE(um.can_undo());
+}
+
 TEST_CASE("UndoManager clear removes all history", "[state][undo]") {
     UndoManager um;
     int v = 0;
