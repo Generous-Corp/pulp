@@ -436,6 +436,21 @@ TEST_CASE("LicenseValidator validate_and_parse rejects malformed payloads", "[cr
     REQUIRE_FALSE(validator.validate_and_parse(base64_encode(missing_product) + ".sig").has_value());
 }
 
+TEST_CASE("LicenseValidator validate_and_parse rejects malformed numeric timestamps", "[crypto][license]") {
+    LicenseValidator validator;
+
+    auto license_for = [](std::string_view payload) {
+        return base64_encode(payload) + ".sig";
+    };
+
+    REQUIRE_FALSE(validator.validate_and_parse(
+        license_for("{\"product_id\":\"PulpGain\",\"issued\":1700000000junk}")).has_value());
+    REQUIRE_FALSE(validator.validate_and_parse(
+        license_for("{\"product_id\":\"PulpGain\",\"expiry\":1700000000ms}")).has_value());
+    REQUIRE_FALSE(validator.validate_and_parse(
+        license_for("{\"product_id\":\"PulpGain\",\"issued\":92233720368547758070}")).has_value());
+}
+
 TEST_CASE("LicenseValidator parse_payload handles optional fields and bad integers",
           "[crypto][license][coverage]") {
     LicenseValidator validator;

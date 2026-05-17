@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <charconv>
 
 namespace pulp::runtime {
 
@@ -28,21 +29,27 @@ static std::string json_string_value(std::string_view json, std::string_view key
     return std::string(json.substr(start, end - start));
 }
 
-static int64_t json_int_value(std::string_view json, std::string_view key) {
+static bool json_int_value(std::string_view json, std::string_view key, int64_t& value) {
+    value = 0;
     std::string search = "\"" + std::string(key) + "\":";
     auto pos = json.find(search);
-    if (pos == std::string_view::npos) return 0;
+    if (pos == std::string_view::npos) return true;
+
     auto start = pos + search.size();
-    auto text = std::string(json.substr(start, 20));
-    char* end = nullptr;
-    auto value = std::strtoll(text.c_str(), &end, 10);
-    if (end == text.c_str()) return 0;
-    while (*end != '\0') {
-        if (*end == ',' || *end == '}') return value;
-        if (!std::isspace(static_cast<unsigned char>(*end))) return 0;
+    auto end = start;
+    if (end < json.size() && json[end] == '-') ++end;
+
+    auto digits_start = end;
+    while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end])))
         ++end;
-    }
-    return value;
+    if (end == digits_start) return true;
+
+    auto result = std::from_chars(json.data() + start, json.data() + end, value);
+    if (result.ec != std::errc{} || result.ptr != json.data() + end) return false;
+
+    while (end < json.size() && std::isspace(static_cast<unsigned char>(json[end])))
+        ++end;
+    return end == json.size() || json[end] == ',' || json[end] == '}';
 }
 
 // ── LicenseValidator ────────────────────────────────────────────────────
@@ -57,8 +64,8 @@ std::optional<LicenseInfo> LicenseValidator::parse_payload(std::string_view json
     info.user_email = json_string_value(json, "email");
     info.machine_id = json_string_value(json, "machine_id");
     info.edition = json_string_value(json, "edition");
-    info.issued_timestamp = json_int_value(json, "issued");
-    info.expiry_timestamp = json_int_value(json, "expiry");
+    if (!json_int_value(json, "issued", info.issued_timestamp)) return std::nullopt;
+    if (!json_int_value(json, "expiry", info.expiry_timestamp)) return std::nullopt;
 
     if (info.product_id.empty()) return std::nullopt;
     return info;
