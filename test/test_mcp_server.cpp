@@ -117,6 +117,40 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     require_contains(unknown, "Method not found: nope");
 }
 
+// MCP spec (JSON-RPC over stdio) requires that response messages not
+// contain embedded `\n` or `\r` — the transport delimits messages with
+// a single newline. A response carrying a raw newline gets split and
+// the client (Claude Code, Codex CLI, etc.) reads only the first
+// fragment, then times out waiting for the rest. PR #2091 fixed this
+// by piping every wire-bound response through a `compact_for_wire`
+// strip; this test pins the contract so a future regression on the
+// strip itself surfaces immediately.
+//
+// Pulp #2087 follow-up (B4 first cut): the bug shipped because there
+// was no protocol-shape test. The full B4 split is queued separately.
+TEST_CASE("MCP wire output never contains embedded newlines",
+          "[mcp][protocol][issue-2091]") {
+    const std::vector<std::string> requests = {
+        // initialize — large multi-key response.
+        R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON",
+        // tools/list — historically the largest response shape (~7KB
+        // for the full advertised set). The original bug surfaced
+        // here first because client parsers gave up on long messages.
+        R"JSON({"jsonrpc":"2.0","id":2,"method":"tools/list"})JSON",
+        // An unknown method — the error envelope must also be on one line.
+        R"JSON({"jsonrpc":"2.0","id":3,"method":"does/not/exist"})JSON",
+        // An unknown tool — error envelope routed through the tool path.
+        tool_call("4", "pulp_does_not_exist"),
+    };
+    for (const auto& req : requests) {
+        auto reply = handle_request(req);
+        INFO("request: " << req);
+        INFO("reply length: " << reply.size());
+        REQUIRE(reply.find('\n') == std::string::npos);
+        REQUIRE(reply.find('\r') == std::string::npos);
+    }
+}
+
 TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":4,"method":"tools/list"})JSON");
     require_contains(tools, R"JSON("id":4)JSON");
