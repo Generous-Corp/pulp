@@ -6881,3 +6881,25 @@ preserving the target store's existing values. Validation passed locally:
 tools/scripts/local_diff_cover.sh pulp-test-state`, which reported 100% diff
 coverage for `core/state/src/store.cpp`. This tranche is held locally and
 should be aggregated rather than submitted individually.
+
+2026-05-17 15:06 PDT: added another local-only held runtime expression parser
+tranche for the next large coverage batch. Expression parser tranche
+`feature/phase3-codecov-expression-number-batch-722` in
+`/private/tmp/pulp-phase3-codecov-expression-number-batch-722` is clean at
+commit `61ac6be8d9d4` (`fix(runtime): reject malformed expression decimals`)
+based on current `origin/main` (`8b667f2641a9`). The tranche hardens the
+expression numeric scanner so malformed decimals such as `1.2.3` are rejected
+instead of being partially parsed, while preserving valid leading and trailing
+decimal forms like `.5` and `1.`. Focused coverage in `test/test_v3_gaps.cpp`
+extends the malformed expression and numeric edge cases. Validation passed
+locally: `git diff --check`, Debug configure, built `pulp-test-v3-gaps`, ran
+direct `Expression rejects malformed calls and trailing tokens`, ran focused
+CTest for `Expression handles numeric edge syntax and safe division`,
+`Expression rejects malformed calls and trailing tokens`, and `Expression
+rejects malformed numeric and grouping syntax` (3/3), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='Expression rejects malformed calls and trailing
+tokens|Expression rejects malformed numeric and grouping syntax|Expression
+handles numeric edge syntax' tools/scripts/local_diff_cover.sh
+pulp-test-v3-gaps`, which reported 100% diff coverage for
+`core/runtime/src/expression.cpp`. This tranche is held locally and should be
+aggregated rather than submitted individually.
