@@ -256,6 +256,10 @@ TEST_CASE("HotReloader file watcher ignores unsupported changes",
     write_js_file(text_file, "not javascript");
 
     HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
+    for (int i = 0; i < 8; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        (void)reloader.poll_reload();
+    }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(text_file, "still not javascript");
