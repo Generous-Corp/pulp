@@ -1,7 +1,7 @@
 {
   "$schema": "./skill_path_map.schema.json",
   "schema_version": 1,
-  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted — and expected — for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
+  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing. Dual/triple ownership is permitted \u2014 and expected \u2014 for files that span multiple domains: e.g. core/format/src/au_adapter.mm is owned by both `auv3` (the adapter) and `view-bridge` (editor attach lifecycle), because a change to that file reasonably requires guidance updates on both sides. Dual ownership is not a mistake to collapse; use it when a single file legitimately teaches two skills.",
   "skills": {
     "aax": {
       "paths": [
@@ -11,7 +11,7 @@
         "tools/cmake/PulpAAX.cmake"
       ],
       "_doc": {
-        "empty-ok": "external/AAX-SDK/** intentionally empty — AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
+        "empty-ok": "external/AAX-SDK/** intentionally empty \u2014 AAX SDK is developer-supplied per docs/guides/ship.md and the aax skill"
       }
     },
     "ara": {
@@ -22,7 +22,7 @@
         "external/ara-sdk/**"
       ],
       "_doc": {
-        "empty-ok": "external/ara-sdk/** intentionally empty — ARA SDK is developer-supplied per the ara skill"
+        "empty-ok": "external/ara-sdk/** intentionally empty \u2014 ARA SDK is developer-supplied per the ara skill"
       }
     },
     "auv3": {
@@ -116,7 +116,7 @@
         "external/quickjs*/**"
       ],
       "_doc": {
-        "empty-ok": "external/quickjs*/** intentionally empty — QuickJS is fetched at configure time, not vendored"
+        "empty-ok": "external/quickjs*/** intentionally empty \u2014 QuickJS is fetched at configure time, not vendored"
       }
     },
     "faust": {
@@ -174,7 +174,13 @@
         "inspect/src/motion_inspector.cpp",
         "inspect/include/pulp/inspect/motion_scrubber.hpp",
         "inspect/src/motion_scrubber.cpp",
-        "tools/motion/**"
+        "tools/motion/**",
+        "apple/Sources/PulpSwift/PulpBridge.h",
+        "apple/Sources/PulpSwift/PulpBridge.cpp",
+        "apple/Sources/PulpSwift/PulpMotion.swift",
+        "apple/Sources/PulpSwift/PulpMotionProbe.swift",
+        "apple/Tests/PulpSwiftTests/PulpMotionTests.swift",
+        "test/test_motion_swift_bridge.cpp"
       ]
     },
     "mpe": {

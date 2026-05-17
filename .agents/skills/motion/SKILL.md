@@ -329,6 +329,120 @@ also reports `cost_enabled` and `cost_samples_emitted`.
 - The render-cost probe is read outside the coordinator lock; keep
   implementations cheap.
 
+## Path G — Swift native (iOS / AUv3 / macOS)
+
+When the suspect motion lives in a pure SwiftUI / UIKit / AppKit code
+path — an iOS AUv3 editor, a Swift host app, anything wired through
+`apple/Sources/PulpSwift/` — use the Swift facade. Samples flow into
+the same `motion::Coordinator` as the JS-bridge and design-import
+paths, so fixtures, scrubber, cost attribution, reduced-motion gating,
+and provenance envelopes all work identically.
+
+### Quick attach (SwiftUI)
+
+```swift
+import PulpSwift
+import SwiftUI
+
+struct CardView: View {
+    @State var opacity: Double = 1
+    var body: some View {
+        Rectangle()
+            .opacity(opacity)
+            .pulpMotionTrace("Card") {
+                Trace.value("opacity", opacity)
+                Trace.geometry("frame",
+                    properties: [.minX, .minY, .width, .height])
+                Trace.scrollGeometry("scroll")
+            }
+    }
+}
+```
+
+The `pulpMotionTrace(_:fps:_:)` modifier:
+
+- Registers a geometry trace stamped with `source_kind="swiftui"` /
+  `source_id=<view name>` provenance on `onAppear`.
+- Backs the view with a hidden `GeometryReader` that pushes every new
+  global-space frame into `pulp_motion_update_geometry`.
+- Detaches on `onDisappear` (RAII).
+- Short-circuits when `PulpMotion.isTracingEnabled` is false. No
+  registration, no probe, zero cost beyond a SwiftUI background view.
+
+### Direct publish (no SwiftUI)
+
+```swift
+PulpMotion.publishValue(view: "Card", metric: "opacity", value: 0.5)
+PulpMotion.publishComponents(view: "Card", metric: "frame",
+                             components: [("x", x), ("y", y)])
+```
+
+Both are guarded by the backend's `isTracingEnabled()` so they cost a
+single branch when motion is off.
+
+### UIKit / AppKit / non-SwiftUI probe
+
+```swift
+final class CardUIView: UIView {
+    private let probe = PulpMotionGeometryProbe(view: "Card")
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        probe.update(minX: frame.minX, minY: frame.minY,
+                     width: frame.width, height: frame.height)
+    }
+    // deinit auto-detaches.
+}
+```
+
+### Host wiring (once at app launch)
+
+`PulpSwift` is a pure-Swift package; the C bridge lives in
+`apple/Sources/PulpSwift/PulpBridge.cpp` (excluded from SwiftPM and
+linked by the AUv3 / standalone host). At launch the host installs a
+`PulpMotionBackend` that forwards into the C ABI:
+
+```swift
+var backend = PulpMotionBackend()
+backend.isTracingEnabled  = { pulp_motion_tracing_enabled() }
+backend.publishValue      = { v, m, val, eps, p in
+    v.withCString { vc in m.withCString { mc in
+        pulp_motion_publish_value(vc, mc, val, eps, Int32(p))
+    }}
+}
+// …same shape for publishComponents, ambient provenance,
+//   registerGeometryTrace, updateGeometry, detachTrace.
+PulpMotionRuntime.installBackend(backend)
+```
+
+In unit tests, install a recording backend instead — `swift test
+--package-path apple` runs the facade with no C++ host linked.
+
+### Off-by-default contract
+
+Every Swift entry point is a no-op when the process-wide Coordinator
+has tracing disabled. The C bridge double-checks
+(`pulp_motion_tracing_enabled()`) so even a misconfigured Swift caller
+cannot spam events in production.
+
+### Files
+
+- `apple/Sources/PulpSwift/PulpBridge.h` — C ABI (publish + provenance
+  + register / update / detach geometry).
+- `apple/Sources/PulpSwift/PulpBridge.cpp` — bridge to
+  `pulp::view::motion`. Internal mutex-protected registry keeps the
+  `TraceHandle` separate from the lambda-captured atomic rect so
+  `Coordinator::reset()` cannot self-deadlock.
+- `apple/Sources/PulpSwift/PulpMotion.swift` — `PulpMotion` facade,
+  `Trace.*` factories, `MotionGeometryProperty`,
+  `@MotionTraceBuilder`, `PulpMotionBackend` / `PulpMotionRuntime`.
+- `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI
+  `pulpMotionTrace(_:)` modifier + UIKit / AppKit
+  `PulpMotionGeometryProbe`.
+- `apple/Tests/PulpSwiftTests/PulpMotionTests.swift` — Swift facade
+  XCTest coverage.
+- `test/test_motion_swift_bridge.cpp` — Catch2 round-trip test for the
+  C ABI shims and Coordinator integration.
+
 ## Agent contract
 
 Apply these on every motion debugging run:
@@ -371,6 +485,10 @@ Apply these on every motion debugging run:
 - `tools/motion/visual/analyze_sequence.py` — visual analysis CLI
 - `tools/motion/visual/test_self_check.py` — pipeline self-check
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
+- `apple/Sources/PulpSwift/PulpBridge.h` — Swift C ABI surface (Path G)
+- `apple/Sources/PulpSwift/PulpBridge.cpp` — Swift bridge shims (Path G)
+- `apple/Sources/PulpSwift/PulpMotion.swift` — Swift facade + Trace DSL (Path G)
+- `apple/Sources/PulpSwift/PulpMotionProbe.swift` — SwiftUI / UIKit probe (Path G)
 - `docs/guides/motion-observability.md` — full guide
 
 ## Provenance

@@ -230,6 +230,73 @@ Per-(view, metric) `precision` and `epsilon` are sticky — set on the first
 publish and inherited on subsequent calls so hot-path callers can omit
 `PublishOptions` every tick.
 
+### Swift (SwiftUI / UIKit / AppKit)
+
+The same publish channel is reachable from Swift via `PulpSwift`. The Swift
+facade mirrors the trace-builder DSL so the API reads the same way from
+either language.
+
+```swift
+import PulpSwift
+import SwiftUI
+
+struct CardView: View {
+    @State private var opacity: Double = 1
+    var body: some View {
+        Rectangle()
+            .opacity(opacity)
+            .pulpMotionTrace("Card") {
+                Trace.value("opacity", opacity)
+                Trace.geometry("frame",
+                    properties: [.minX, .minY, .width, .height])
+                Trace.scrollGeometry("scroll")
+            }
+    }
+}
+```
+
+The `pulpMotionTrace(_:fps:_:)` modifier registers a Coordinator trace
+stamped with `source_kind="swiftui"` provenance, backs the view with a
+hidden `GeometryReader` probe that pushes every new global-space frame into
+`pulp_motion_update_geometry`, and detaches on `onDisappear`. The modifier
+short-circuits when `PulpMotion.isTracingEnabled` is false — zero cost
+beyond a SwiftUI background view in production.
+
+For non-SwiftUI code paths (UIKit, AppKit, plain audio-graph callbacks)
+the `PulpMotionGeometryProbe` class exposes the same attach / update /
+detach contract:
+
+```swift
+final class CardUIView: UIView {
+    private let probe = PulpMotionGeometryProbe(view: "Card")
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        probe.update(minX: frame.minX, minY: frame.minY,
+                     width: frame.width, height: frame.height)
+    }
+    // deinit auto-detaches.
+}
+```
+
+Direct scalar / component publishes:
+
+```swift
+PulpMotion.publishValue(view: "Card", metric: "opacity", value: 0.5)
+PulpMotion.publishComponents(view: "Card", metric: "frame",
+                             components: [("x", x), ("y", y)])
+
+PulpMotion.setAmbientProvenance(kind: "swiftui", id: "CardView")
+defer { PulpMotion.clearAmbientProvenance() }
+```
+
+Bridging model: `PulpSwift` is a pure-Swift package; the C bridge lives
+in `apple/Sources/PulpSwift/PulpBridge.{h,cpp}` and is linked by the
+AUv3 / standalone host. At launch the host installs a
+`PulpMotionBackend` whose closures forward into the C ABI
+(`pulp_motion_publish_value`, `pulp_motion_register_geometry_trace`,
+…). Unit tests install a recording backend instead so
+`swift test --package-path apple` runs without a C++ host.
+
 ## Fixtures (record / replay / assert)
 
 A fixture is the on-disk form of a motion stream — a versioned JSONL file that
