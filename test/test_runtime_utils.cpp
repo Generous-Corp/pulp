@@ -15,6 +15,7 @@
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/socket.hpp>
+#include <pulp/runtime/stream.hpp>
 #include <pulp/runtime/text_diff.hpp>
 #include "../external/cpp-httplib/httplib.h"
 #include <catch2/catch_approx.hpp>
@@ -1015,6 +1016,46 @@ TEST_CASE("is_process_running recognizes the current process",
 #endif
     REQUIRE(pid > 0);
     REQUIRE(is_process_running(pid));
+}
+
+// ── Stream ──────────────────────────────────────────────────────────────
+
+TEST_CASE("MemoryStream rejects nonzero null buffers",
+          "[runtime][stream][coverage][phase3]") {
+    MemoryStream stream({1, 2, 3});
+
+    auto read_result = stream.read(nullptr, 1);
+    REQUIRE_FALSE(read_result.ok());
+    REQUIRE(read_result.error == StreamError::Invalid);
+    REQUIRE(stream.read_position() == 0);
+
+    auto write_result = stream.write(nullptr, 1);
+    REQUIRE_FALSE(write_result.ok());
+    REQUIRE(write_result.error == StreamError::Invalid);
+    REQUIRE(stream.size() == 3);
+
+    REQUIRE(stream.read(nullptr, 0).ok());
+    REQUIRE(stream.write(nullptr, 0).ok());
+}
+
+TEST_CASE("FileStream rejects nonzero null buffers",
+          "[runtime][stream][coverage][phase3]") {
+    TemporaryFile tmp(".bin");
+
+    FileStream writer(tmp.path_string(), FileStream::Mode::Write);
+    REQUIRE(writer.is_open());
+    auto write_result = writer.write(nullptr, 1);
+    REQUIRE_FALSE(write_result.ok());
+    REQUIRE(write_result.error == StreamError::Invalid);
+    REQUIRE(writer.write(nullptr, 0).ok());
+    writer.close();
+
+    FileStream reader(tmp.path_string(), FileStream::Mode::Read);
+    REQUIRE(reader.is_open());
+    auto read_result = reader.read(nullptr, 1);
+    REQUIRE_FALSE(read_result.ok());
+    REQUIRE(read_result.error == StreamError::Invalid);
+    REQUIRE(reader.read(nullptr, 0).ok());
 }
 
 // ── Base64 ──────────────────────────────────────────────────────────────
