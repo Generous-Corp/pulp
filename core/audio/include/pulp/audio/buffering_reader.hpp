@@ -70,8 +70,10 @@ public:
             return;
         }
 
+        const auto sample_capacity =
+            static_cast<int64_t>(buffer_frames) * static_cast<int64_t>(num_channels);
         num_channels_ = num_channels;
-        buffer_size_ = buffer_frames * num_channels;
+        buffer_size_ = static_cast<int>(sample_capacity);
         buffer_.resize(static_cast<size_t>(buffer_size_), 0.0f);
         write_pos_ = 0;
         read_pos_ = 0;

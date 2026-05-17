@@ -5,9 +5,9 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <thread>
 #include <chrono>
-#include <limits>
 #include <vector>
 
 using namespace pulp::audio;
@@ -382,6 +382,56 @@ TEST_CASE("BufferingReader stop is safe to call multiple times", "[audio][buffer
     reader.stop();
     reader.stop(); // double stop — should be safe
     REQUIRE_FALSE(reader.is_running());
+}
+
+TEST_CASE("BufferingReader rejects invalid start configuration",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+    std::atomic<int> callback_count{0};
+    reader.set_read_callback([&](float*, int, int) {
+        callback_count.fetch_add(1);
+        return 1;
+    });
+
+    reader.start(0, 1024);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE_FALSE(reader.is_finished());
+    REQUIRE(reader.frames_available() == 0);
+
+    reader.start(2, 0);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 0);
+
+    reader.start(2, -32);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 0);
+
+    reader.start(2, std::numeric_limits<int>::max());
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 0);
+    REQUIRE(callback_count.load() == 0);
+}
+
+TEST_CASE("BufferingReader invalid restart clears prior running state",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+    reader.set_read_callback([](float* dest, int frames, int channels) {
+        for (int i = 0; i < frames * channels; ++i) dest[i] = 1.0f;
+        return frames;
+    });
+
+    reader.start(1, 1024);
+    REQUIRE(reader.is_running());
+    REQUIRE(wait_for_frames(reader, 1));
+
+    reader.start(-1, 1024);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE_FALSE(reader.is_finished());
+    REQUIRE(reader.frames_available() == 0);
+
+    float buf[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    REQUIRE(reader.read(buf, 4, 1) == 0);
+    REQUIRE(buf[0] == -1.0f);
 }
 
 TEST_CASE("BufferingReader channel mismatch returns 0", "[audio][buffering]") {
