@@ -777,11 +777,16 @@ pulling in the entire 11k-line file.
   `normalize_validation_mode`, `normalize_desktop_*`, `default_desktop_*`,
   `parse_config_bool`, `infer_desktop_adapter`, `normalize_desktop_config`)
   plus the `PRIORITY_VALUES` constant.
+- `git_helpers.py` — owns the git + time helpers used by the queue and
+  evidence subsystems (`now_iso`, `current_branch`, `current_sha`,
+  `git_root_for`, `resolve_git_ref_sha`, `short_sha`) plus the shared
+  `ROOT` constant.
 
 All original symbols are re-exported from `local_ci.py`, so any old
-`mod.state_dir()` / `mod.normalize_priority()` test patch keeps working
-— but new code should import directly from `state_paths` or `normalize`
-to avoid the god-module dependency.
+`mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()`
+test patch keeps working — but new code should import directly from
+`state_paths`, `normalize`, or `git_helpers` to avoid the god-module
+dependency.
 
 ```bash
 # Legacy fallback only
