@@ -61,7 +61,7 @@ private:
     // power = unary ('^' unary)?
     double parse_power() {
         double base = parse_unary();
-        if (match('^')) return std::pow(base, parse_unary());
+        if (match('^')) return std::pow(base, parse_power());
         return base;
     }
 

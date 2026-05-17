@@ -862,6 +862,21 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
     REQUIRE(value == 42);
 }
 
+TEST_CASE("Expression evaluator treats chained powers as right associative",
+          "[runtime][expression][coverage]") {
+    auto chained = evaluate("2 ^ 3 ^ 2");
+    REQUIRE(chained.has_value());
+    REQUIRE(*chained == Catch::Approx(512.0));
+
+    auto grouped_left = evaluate("(2 ^ 3) ^ 2");
+    REQUIRE(grouped_left.has_value());
+    REQUIRE(*grouped_left == Catch::Approx(64.0));
+
+    auto negative_exponent = evaluate("4 ^ 1 ^ -1");
+    REQUIRE(negative_exponent.has_value());
+    REQUIRE(*negative_exponent == Catch::Approx(4.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
