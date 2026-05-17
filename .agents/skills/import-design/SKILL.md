@@ -593,3 +593,22 @@ Two safety nets enforce the contract going forward:
 When adding a new live host (e.g. a future `examples/<thing>` binary), update **both**: append the new host to `HOST_FILES` in `host_pump_lint.py` AND to `HOSTS` in `live-host-pump-smoke.sh`. The lint catches source-level regressions at PR time; the smoke catches runtime breakage where the source pairing is correct but the run loop is misconfigured.
 
 For unobtrusive smoke / CI runs, the design-tool exposes `--no-show-window` (uses `WindowOptions.initially_hidden` to skip Dock icon + window display while keeping the full bridge run loop active) and `--exit-after-ms <N>` (clean `request_close()` after N ms). Both flags compose, so `pulp-design-tool --script <probe.js> --no-show-window --exit-after-ms 2000` runs the full live-host code path with no GUI flash.
+
+## Keyboard shortcut V2 wire-up
+
+The import path detects `keydown`/`keyup` global-shortcut handlers in React-style source and emits two pieces of generated code in the host JS bundle:
+
+1. **`registerShortcut(...)` calls** that bind each detected keycode + modifier combo to a synthetic-keydown re-dispatch handler. The native side intercepts the bare key (no DOM focus) and routes through this registration.
+2. **Synthetic keydown re-dispatch** that builds a `KeyboardEvent`-shaped object with the right `key`, `code`, `keyCode`, and modifier flags (`ctrlKey`, `metaKey`, `shiftKey`, `altKey`), then dispatches it to the document so the original React handler's `if (e.ctrlKey && e.key === 's')` branch fires.
+
+Two correctness gotchas the codegen MUST respect — both surfaced by real handler shapes:
+
+- **`metaKey` and `ctrlKey` are separate axes — don't collapse**. The collector emits BOTH `"meta"` and `"ctrl"` when the source has the cross-platform `e.metaKey || e.ctrlKey` idiom, and emits separate `registerShortcut(...)` bindings per platform half. The synthetic event sets `ctrlKey`/`metaKey` according to which mask bits are present — a Ctrl-only source handler (`e.ctrlKey && e.key === 's'` on Win/Linux) gets a `ctrlKey: true, metaKey: false` synthetic event, not the flat "always Cmd" form.
+- **`KeyboardEvent.code` letter/digit forms decode before keycode emission**. The extractor captures both `event.key` and `event.code`. `KeyS`, `KeyA`, …, `Digit1`, …, `Digit9` must be stripped to the letter/digit form before the keycode lookup, otherwise the table-miss returns `0` and `generate_pulp_js` drops the entire `registerShortcut(...)` line silently.
+
+If you add a new shortcut shape detector to the extractor, mirror it in:
+- The keycode table in `core/view/src/design_import.cpp::keycode_for(...)` (or its equivalent today)
+- The modifier collector that walks the surrounding boolean expression
+- The synthetic-event emitter that produces the `KeyboardEvent`-shaped JS object
+
+Test coverage lives in `test/test_design_import.cpp` (E2E roundtrip — codegen → WidgetBridge → React-style handler). The roundtrip exercises both the registerShortcut emission and the synthetic-keydown re-dispatch; failing either half is a hard test failure.

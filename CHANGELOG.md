@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v01050"></a>
+## [0.106.0]
+
 ## [0.105.0] - 2026-05-17
 
 - feat(view): focus-guard for bare-key global shortcuts ([#2120](https://github.com/danielraffel/pulp/pull/2120))
