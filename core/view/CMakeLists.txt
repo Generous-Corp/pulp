@@ -177,6 +177,7 @@ target_sources(pulp-view PRIVATE
     src/ui_components.cpp
     src/design_export.cpp
     src/design_import.cpp
+    src/design_import_shortcuts.cpp
     src/design_import_designmd.cpp
     src/screenshot_compare.cpp
     src/app_framework.cpp

@@ -1488,3 +1488,17 @@ unresponsive, not just the Worker), the machine-side recovery is:
 Agents should NOT do step 1–4 themselves; ask the human via
 `PushNotification`. Agents CAN and SHOULD run `shipyard rescue` for
 the PR-side recovery without waiting.
+
+## Cobertura artifact verification (A2 first cut, 2026-05)
+
+The "Cobertura is structurally non-empty" assertion (pulp #605 — a well-formed XML with `lines-valid="0"` gets rejected by Codecov v5 as "Unusable report") used to live as an inline `python3 -c '...'` heredoc in `coverage.yml`, duplicated for the native and Python lanes.
+
+It now lives in `tools/scripts/verify_cobertura_xml.py`. Both lane verifications call:
+
+```bash
+python3 tools/scripts/verify_cobertura_xml.py "$xml" \
+  --label "<lane>.xml" \
+  --hint "<upstream-step-likely-broken>"
+```
+
+If you add a third Cobertura artifact (e.g. a future Kotlin lane), reuse the same script — do not paste a new heredoc. Tests in `tools/scripts/test_verify_cobertura_xml.py` cover missing file, empty file, unparseable XML, lines-valid=0 (with and without `--hint`), lines-valid>0, and label propagation. The pattern follows B1's `classify-subject` extraction — script over inline-Python, single source of truth.

@@ -1119,3 +1119,4 @@ Gotchas:
     - `validate-build.sh` keeps Debug — that's the validator's job (catches debug-only assertion failures).
     - `cli_common.cpp`'s SDK install path already used Release.
   Follow-up scope (not done yet): `pulp build --debug` / `--release` that force a reconfigure of an existing `build/` directory.
+- **`pulp sdk available` + newer-SDK banner cache contract** (2026-05, #22/#23). `pulp sdk available` shells out to curl for the GitHub `/releases?per_page=30` endpoint and parses `tag_name` entries — no JSON dep. `maybe_print_newer_sdk_banner(installed)` caches the latest release at `~/.pulp/cache/latest_release.txt` (line 1 = version, line 2 = Unix timestamp) with a 24h TTL and a 2s curl timeout. The cache is best-effort — if curl fails the banner just doesn't print this run. Wired into `pulp sdk status` only; `pulp build` and `pulp create` deliberately stay quiet on the hot path. To invalidate the cache: `rm ~/.pulp/cache/latest_release.txt`.

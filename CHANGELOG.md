@@ -16,6 +16,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test: batch state coverage edges ([#2103](https://github.com/danielraffel/pulp/pull/2103))
 
 <a id="v01070"></a>
+## [0.108.0]
+
 ## [0.107.0] - 2026-05-17
 
 - feat(create): default new projects to Release; --debug opts in ([#2133](https://github.com/danielraffel/pulp/pull/2133))

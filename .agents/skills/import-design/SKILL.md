@@ -612,3 +612,9 @@ If you add a new shortcut shape detector to the extractor, mirror it in:
 - The synthetic-event emitter that produces the `KeyboardEvent`-shaped JS object
 
 Test coverage lives in `test/test_design_import.cpp` (E2E roundtrip — codegen → WidgetBridge → React-style handler). The roundtrip exercises both the registerShortcut emission and the synthetic-keydown re-dispatch; failing either half is a hard test failure.
+
+## Keyboard-shortcut extraction lives in its own TU (A3 first cut, 2026-05)
+
+`extract_keyboard_shortcuts` / `serialize_detected_shortcuts` / `key_string_to_keycode` / `modifier_strings_to_mask` plus the file-local helpers (`line_for_offset`, `collect_modifiers`, `extract_handler_excerpt`) now live in `core/view/src/design_import_shortcuts.cpp` — a focused ~270-line TU separated from the 4670-line `design_import.cpp` monolith. Public API declarations stay in `core/view/include/pulp/view/design_import.hpp` so no caller touches.
+
+Future shortcut work — regex tweaks, new modifier-string mappings, new `KeyboardEvent.code` patterns, JSON shape changes — should land in `design_import_shortcuts.cpp`. The remaining `design_import.cpp` content (Claude bundle envelope, parsers for v0/figma/stitch/rn/pencil, runtime-import wiring, codegen) is queued for its own splits (`claude_bundle.cpp` / `design_codegen.cpp` / `design_tokens.cpp`) as the A3 follow-up.

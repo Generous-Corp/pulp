@@ -575,7 +575,32 @@ static std::string tools_list_json() {
 ]})JSON";
 }
 
+// MCP spec: stdio transport messages are line-delimited and MUST NOT
+// contain embedded `\n` or `\r`. Several response builders use
+// multi-line R"JSON(...)" raw strings for readability. Strip those
+// here so every wire-bound response is a single line.
+//
+// B4 (2026-05): moved out of main()'s I/O loop into a free function +
+// applied at the bottom of handle_request, so the contract holds for
+// every caller — not just main's stdio path. Pinned by
+// `test/test_mcp_server.cpp` "MCP wire output never contains embedded
+// newlines" [issue-2091].
+static std::string compact_for_wire(std::string s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        if (c != '\n' && c != '\r') out += c;
+    }
+    return out;
+}
+
+static std::string handle_request_raw(const std::string& json);
+
 static std::string handle_request(const std::string& json) {
+    return compact_for_wire(handle_request_raw(json));
+}
+
+static std::string handle_request_raw(const std::string& json) {
     auto method = extract_string(json, "method");
     auto id = extract_raw(json, "id");
     if (id.empty()) id = "null";
@@ -796,24 +821,9 @@ int main(int argc, char* argv[]) {
     }
 
     // MCP spec: messages on the stdio transport are delimited by
-    // newlines, and MUST NOT contain embedded newlines. Several of our
-    // response builders (tools_list_json() most visibly) use multi-line
-    // R"JSON(...)" raw strings for readability — the literal `\n`s in
-    // those raw strings would break MCP clients (Claude Code reads one
-    // line at a time and times out on the unclosed first line of the
-    // tools array, surfacing as "MCP error -32001: Request timed out"
-    // on tools/list).
-    //
-    // Strip `\n` and `\r` from any response body before it goes on the
-    // wire. Tested: pre-fix tools/list response = 23 lines; post-fix = 1.
-    auto compact_for_wire = [](std::string s) {
-        std::string out;
-        out.reserve(s.size());
-        for (char c : s) {
-            if (c != '\n' && c != '\r') out += c;
-        }
-        return out;
-    };
+    // newlines and MUST NOT contain embedded `\n` or `\r`. The
+    // newline-stripping contract now lives inside `handle_request`
+    // itself (B4 2026-05), so callers here just pass through.
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -826,7 +836,7 @@ int main(int argc, char* argv[]) {
             std::string body(length, '\0');
             std::cin.read(body.data(), length);
 
-            auto response = compact_for_wire(handle_request(body));
+            auto response = handle_request(body);
             if (!response.empty()) {
                 std::cout << "Content-Length: " << response.size() << "\r\n\r\n" << response;
                 std::cout.flush();
@@ -836,7 +846,7 @@ int main(int argc, char* argv[]) {
 
         // Also handle bare JSON (for simpler testing AND the
         // newline-delimited MCP stdio transport that Claude Code uses).
-        auto response = compact_for_wire(handle_request(line));
+        auto response = handle_request(line);
         if (!response.empty()) {
             std::cout << response << "\n";
             std::cout.flush();

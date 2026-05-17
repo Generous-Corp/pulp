@@ -30,9 +30,14 @@ if(NOT PULP_SRC_DIR OR NOT FIXTURE_DIR OR NOT SCENARIO OR NOT EXPECTED_OUTCOME)
         "  -DPULP_SRC_DIR=...   -DFIXTURE_DIR=...   -DSCENARIO=...   -DEXPECTED_OUTCOME=...")
 endif()
 
-set(_template "${PULP_SRC_DIR}/tools/cmake/PulpConfig.cmake.in")
+# B3 (2026-05): the Debug-SDK guard block was extracted from
+# PulpConfig.cmake.in into PulpSdkGuards.cmake. The fixture follows
+# the move — the regex below still locates the same guard text in
+# the new home. If a future refactor unifies these again, point
+# `_template` back at PulpConfig.cmake.in.
+set(_template "${PULP_SRC_DIR}/tools/cmake/PulpSdkGuards.cmake")
 if(NOT EXISTS "${_template}")
-    message(FATAL_ERROR "PulpConfig.cmake.in not found at ${_template}")
+    message(FATAL_ERROR "PulpSdkGuards.cmake not found at ${_template}")
 endif()
 
 # Fabricate a minimal SDK layout under FIXTURE_DIR/sdk-install/.

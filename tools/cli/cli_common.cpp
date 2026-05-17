@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -627,6 +628,128 @@ std::string detect_platform() {
 #else
     return "unknown";
 #endif
+}
+
+// ── #2087 follow-up: newer-SDK-available banner ─────────────────────────
+//
+// Pulp #2087 follow-up (#22): emit a one-line banner when a newer SDK
+// is available on GitHub Releases. To keep CLI invocations fast and
+// avoid hitting GitHub on every command, we cache the result at
+// `~/.pulp/cache/latest_release.txt` with a 24h TTL. Cache is plain
+// text — first line is the version string (no leading `v`), second
+// line is the Unix timestamp of the fetch. Cache miss / stale →
+// opportunistic refresh via curl with a hard 2s timeout so a slow
+// network never blocks the user.
+
+namespace {
+
+constexpr int kLatestReleaseCacheTtlSeconds = 24 * 60 * 60;
+
+fs::path latest_release_cache_path() {
+    auto home = pulp_home();
+    return home.empty() ? fs::path{} : (home / "cache" / "latest_release.txt");
+}
+
+bool semver_strictly_greater(const std::string& a, const std::string& b) {
+    // Compare two `X.Y.Z` strings. Returns true iff a > b. Tolerates
+    // a leading `v` on either side and any pre-release suffix (which
+    // we ignore — pre-releases are intentionally not surfaced by the
+    // banner, the user opted into them by installing).
+    auto parse = [](std::string s) -> std::array<int, 3> {
+        if (!s.empty() && (s[0] == 'v' || s[0] == 'V')) s.erase(0, 1);
+        auto dash = s.find('-');
+        if (dash != std::string::npos) s.resize(dash);
+        std::array<int, 3> out{0, 0, 0};
+        std::sscanf(s.c_str(), "%d.%d.%d", &out[0], &out[1], &out[2]);
+        return out;
+    };
+    auto pa = parse(a);
+    auto pb = parse(b);
+    return pa > pb;
+}
+
+}  // namespace
+
+std::string latest_available_sdk_version() {
+    auto cache = latest_release_cache_path();
+    if (cache.empty()) return {};
+
+    // Try cache first.
+    if (fs::exists(cache)) {
+        std::ifstream in(cache);
+        std::string version_line, timestamp_line;
+        std::getline(in, version_line);
+        std::getline(in, timestamp_line);
+        try {
+            auto ts = std::stoll(timestamp_line);
+            auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (!version_line.empty()
+                && (now - ts) < kLatestReleaseCacheTtlSeconds) {
+                return version_line;
+            }
+        } catch (...) {
+            // Bad cache — fall through to refresh.
+        }
+    }
+
+    // Refresh — 2s timeout so a slow network never costs the user
+    // more than ~2 seconds. Failure is silent (returns empty); the
+    // banner just doesn't print this run.
+    std::string url = "https://api.github.com/repos/"
+                      + std::string(PULP_GITHUB_REPO)
+                      + "/releases/latest";
+    std::string cmd = "curl -fsSL --max-time 2 -H 'Accept: application/vnd.github+json' "
+                      + shell_quote(url) + " 2>/dev/null";
+    // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping used
+    // elsewhere in tools/cli/ so this builds on Windows.
+#if defined(_WIN32)
+    FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+    FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+    if (!pipe) return {};
+    std::string body;
+    char buf[4096];
+    while (size_t n = fread(buf, 1, sizeof(buf), pipe)) body.append(buf, n);
+#if defined(_WIN32)
+    if (_pclose(pipe) != 0 || body.empty()) return {};
+#else
+    if (pclose(pipe) != 0 || body.empty()) return {};
+#endif
+
+    // Custom raw-string delimiter `RE` — the default `R"(...)"` form
+    // would close at the first `)"` inside the regex (after the
+    // version-capture group), splitting the literal. CI on GCC caught
+    // this. The delimiter eliminates the ambiguity.
+    std::regex tag_re(R"RE("tag_name"\s*:\s*"v?([0-9]+\.[0-9]+\.[0-9]+)")RE");
+    std::smatch m;
+    if (!std::regex_search(body, m, tag_re)) return {};
+    std::string version = m[1].str();
+
+    // Write cache (best-effort; ignore failures).
+    std::error_code ec;
+    fs::create_directories(cache.parent_path(), ec);
+    if (!ec) {
+        std::ofstream out(cache);
+        if (out) {
+            auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            out << version << "\n" << now << "\n";
+        }
+    }
+    return version;
+}
+
+void maybe_print_newer_sdk_banner(const std::string& installed) {
+    if (installed.empty()) return;
+    auto latest = latest_available_sdk_version();
+    if (latest.empty()) return;
+    if (!semver_strictly_greater(latest, installed)) return;
+    std::cout << "  (Note: Pulp SDK v" << latest
+              << " is available — installed: v" << installed
+              << ". Run `pulp upgrade` or `pulp sdk install --version "
+              << latest << "` to update.)\n";
 }
 
 fs::path ensure_sdk(const std::string& version) {

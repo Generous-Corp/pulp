@@ -135,6 +135,18 @@ bool is_floating_sdk(const fs::path& project_root);
 // Return the newest installed SDK version under ~/.pulp/sdk/ — i.e.
 // the version `"latest"` resolves to. Empty if no SDKs are installed.
 std::string newest_installed_sdk();
+// Pulp #2087 follow-up (#22): cached query of "what's the newest SDK
+// available on GitHub Releases?". Returns the version string (without
+// the leading `v`) or empty if the cache is missing/stale and a fresh
+// query failed. Cached at ~/.pulp/cache/latest_release.txt with a 24h
+// TTL; refreshes opportunistically when called and the cache is
+// stale, but never blocks the caller for more than ~2s (curl timeout).
+std::string latest_available_sdk_version();
+// Print a one-line banner to stdout if `latest_available_sdk_version()`
+// returns a version newer than `installed`. No-op when the cache
+// returns nothing, when versions tie, or when installed > available
+// (the user is on a pre-release / development build).
+void maybe_print_newer_sdk_banner(const std::string& installed);
 fs::path read_sdk_path_hint(const fs::path& project_root);
 fs::path read_sdk_checkout_hint(const fs::path& project_root);
 struct StandaloneSdkResolution {

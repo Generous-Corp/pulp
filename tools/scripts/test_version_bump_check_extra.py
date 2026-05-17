@@ -189,6 +189,35 @@ class VersionFileIoTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 0)
 
+    def test_classify_subject_subcommand_matches_fix_feat(self) -> None:
+        """B1 (2026-05): auto-release.yml's stranded-fix detector
+        shells out to `version_bump_check.py classify-subject <subject>`
+        for classification, replacing an inline _FIX_FEAT_TITLE_RE
+        copy that was a documented lock-step drift risk. Exit 0 on
+        match, 1 on non-match."""
+        import subprocess as sp
+        script = pathlib.Path(vbc.__file__).resolve()
+        cases = [
+            ("fix: foo", 0),
+            ("feat(view): something", 0),
+            ("fix(scope)!: breaking change", 0),
+            ("feat!: API break", 0),
+            ("chore: bump versions", 1),
+            ("docs: update", 1),
+            ("test: new", 1),
+            ("refactor: cleanup", 1),
+            ("FIX: capital not matched", 1),  # case-sensitive per the spec
+        ]
+        for subject, expected in cases:
+            r = sp.run(
+                ["python3", str(script), "classify-subject", subject],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(
+                r.returncode, expected,
+                msg=f"subject={subject!r} expected={expected} got={r.returncode}",
+            )
+
 
 class GitAndHeuristicTests(unittest.TestCase):
     def test_repo_root_glob_conventional_and_bump_edges(self) -> None:
@@ -625,6 +654,70 @@ class AssessmentReportApplyTests(unittest.TestCase):
             # Only the version file is edited; CHANGELOG.md is byte-stable.
             self.assertEqual(edited, ["sdk.json"])
             self.assertEqual((repo / "CHANGELOG.md").read_text(), cl_text)
+
+    def test_intent_trailer_accepts_unbumped_files_when_flag_on(self) -> None:
+        """C3: an explicit `Version-Bump: <surface>=<level>` trailer
+        with --accept-intent-trailers must pass even when the version
+        files haven't been moved. Merge-time automation will apply the
+        actual bump using the next-available version from main, so two
+        PRs both declaring `sdk=minor` don't force-push each other."""
+        surface = vbc.Surface(
+            "sdk",
+            "SDK",
+            [vbc.VersionFile("CMakeLists.txt", "cmake_project_version")],
+            ["src/**"],
+        )
+        # Trailer declared the intent at "minor"; files not yet bumped.
+        verdict = vbc.Verdict(surface, "minor", "minor", "1.2.3", "minor")
+        with mock.patch.object(vbc, "already_bumped", return_value=False):
+            text, code = vbc.render_report(
+                [verdict], "report", "base", pathlib.Path("/tmp"),
+                accept_intent_trailers=True,
+            )
+        self.assertEqual(code, 0, msg=text)
+        self.assertIn("intent declared", text)
+        self.assertIn("sdk=minor", text)
+
+    def test_intent_trailer_still_fails_without_flag(self) -> None:
+        """Default behavior unchanged: without --accept-intent-trailers,
+        an unbumped surface with a trailer-only declaration still fails.
+        Until Shipyard wires the merge-time rewrite, this is the safe
+        default."""
+        surface = vbc.Surface(
+            "sdk",
+            "SDK",
+            [vbc.VersionFile("CMakeLists.txt", "cmake_project_version")],
+            ["src/**"],
+        )
+        verdict = vbc.Verdict(surface, "minor", "minor", "1.2.3", "minor")
+        with mock.patch.object(vbc, "already_bumped", return_value=False):
+            text, code = vbc.render_report(
+                [verdict], "report", "base", pathlib.Path("/tmp"),
+                # accept_intent_trailers defaults to False
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("bump required", text)
+
+    def test_intent_trailer_does_not_accept_skip_or_none(self) -> None:
+        """`skip` and `none` are not bump declarations — the intent-
+        trailer accept path must reject them so a skip doesn't silently
+        pass an unbumped surface."""
+        surface = vbc.Surface(
+            "sdk",
+            "SDK",
+            [vbc.VersionFile("CMakeLists.txt", "cmake_project_version")],
+            ["src/**"],
+        )
+        verdict_skip = vbc.Verdict(surface, "minor", "skip", "1.2.3", "minor")
+        with mock.patch.object(vbc, "already_bumped", return_value=False):
+            text, code = vbc.render_report(
+                [verdict_skip], "report", "base", pathlib.Path("/tmp"),
+                accept_intent_trailers=True,
+            )
+        # Skip-with-unbumped doesn't auto-pass via intent-trailer;
+        # it goes through the normal heuristic pipeline which already
+        # downgrades skip to final=none upstream.
+        self.assertNotIn("intent declared", text)
 
     def test_apply_bumps_uses_base_version_and_stages_changes(self) -> None:
         # Post-C1 (2026-05): apply_bumps writes version files only.

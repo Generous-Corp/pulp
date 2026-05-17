@@ -650,6 +650,7 @@ def render_report(
     mode: str,
     base: str,
     repo: Path,
+    accept_intent_trailers: bool = False,
 ) -> tuple[str, int]:
     lines: list[str] = []
     failures = 0
@@ -665,8 +666,24 @@ def render_report(
         all_bumped = all(bumped for _, bumped in per_file)
         any_bumped = any(bumped for _, bumped in per_file)
 
+        # C3 (2026-05): intent-trailer model. When the diff has an explicit
+        # `Version-Bump: <surface>=<patch|minor|major>` trailer AND
+        # `--accept-intent-trailers` is on, the gate treats the trailer as
+        # the bump declaration and does NOT require the version files to
+        # already be moved. Merge-time automation rewrites the files on
+        # merge using the next-available version from main, so two PRs
+        # both declaring `sdk=minor` don't race on the exact number.
+        # Defaults to OFF until Shipyard / merge automation wires it up.
+        intent_declared = (
+            accept_intent_trailers
+            and v.trailer_override in LEVELS
+            and v.trailer_override != "none"
+        )
+
         if all_bumped:
             tag = "✓ bumped"
+        elif intent_declared and not any_bumped:
+            tag = f"✓ intent declared (Version-Bump: {v.surface.name}={v.trailer_override})"
         elif any_bumped:
             unbumped = [vf.path for vf, b in per_file if not b]
             tag = f"✗ partial bump — not moved: {', '.join(unbumped)}"
@@ -683,7 +700,7 @@ def render_report(
             f"current={v.current_version or '?'} "
             f"{tag}"
         )
-        if not all_bumped:
+        if not all_bumped and not (intent_declared and not any_bumped):
             # Partial-bump is always a hard fail — split-brain versions are
             # never acceptable. Patch-suggested stays advisory only when
             # nothing has been bumped at all.
@@ -890,6 +907,15 @@ def check_fix_feat_requires_bump(
 
 
 def main(argv: list[str]) -> int:
+    # B1 (2026-05): if invoked as `version_bump_check.py classify-subject
+    # <subject>`, exit 0 when the subject matches the fix/feat regex and
+    # 1 otherwise. This lets .github/workflows/auto-release.yml's
+    # stranded-fix detector call the script for classification instead
+    # of duplicating `_FIX_FEAT_TITLE_RE` inline (the duplication was a
+    # documented lock-step drift risk).
+    if len(argv) >= 2 and argv[0] == "classify-subject":
+        return 0 if _is_fix_or_feat_title(argv[1]) else 1
+
     parser = argparse.ArgumentParser(description="Version-bump gate")
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--head", default="HEAD")
@@ -916,6 +942,22 @@ def main(argv: list[str]) -> int:
             "check is skipped (normal for push and workflow_dispatch)."
         ),
     )
+    parser.add_argument(
+        "--accept-intent-trailers",
+        action="store_true",
+        help=(
+            "Intent-trailer model (C3): when set, the gate accepts an "
+            "explicit `Version-Bump: <surface>=<patch|minor|major>` "
+            "trailer in lieu of actually bumping the version files. The "
+            "trailer declares INTENT; merge-time automation rewrites "
+            "files on merge using the next-available version from main. "
+            "Two PRs both declaring `sdk=minor` then don't race on the "
+            "exact number — each one's exact target is computed at "
+            "merge time, eliminating the force-push tax. Off by "
+            "default until Shipyard / merge automation supports the "
+            "rewrite step."
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root) if args.repo_root else repo_root()
@@ -935,7 +977,10 @@ def main(argv: list[str]) -> int:
         edited = apply_bumps(verdicts, args.base, root)
         # Re-assess after editing: re-read current versions and re-check.
         verdicts_after = assess_surfaces(cfg, changed, args.base, args.head, root)
-        text, code = render_report(verdicts_after, mode="report", base=args.base, repo=root)
+        text, code = render_report(
+            verdicts_after, mode="report", base=args.base, repo=root,
+            accept_intent_trailers=args.accept_intent_trailers,
+        )
         if edited:
             print("Edited files:")
             for e in edited:
@@ -959,7 +1004,10 @@ def main(argv: list[str]) -> int:
                 return 1
         return code
 
-    text, code = render_report(verdicts, args.mode, args.base, root)
+    text, code = render_report(
+        verdicts, args.mode, args.base, root,
+        accept_intent_trailers=args.accept_intent_trailers,
+    )
     if text:
         print(text)
 
