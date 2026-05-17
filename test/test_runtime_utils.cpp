@@ -867,6 +867,21 @@ TEST_CASE("FloatRange", "[runtime][range]") {
     REQUIRE_FALSE(r.contains(1.0f));
 }
 
+TEST_CASE("Range constrain preserves floating half-open upper bound",
+          "[runtime][range][coverage][phase3]") {
+    FloatRange floats(0.0f, 1.0f);
+    auto constrained_float = floats.constrain(2.0f);
+    REQUIRE(constrained_float < 1.0f);
+    REQUIRE(constrained_float > 0.0f);
+    REQUIRE(floats.contains(constrained_float));
+
+    DoubleRange doubles(-2.0, 2.0);
+    auto constrained_double = doubles.constrain(10.0);
+    REQUIRE(constrained_double < 2.0);
+    REQUIRE(constrained_double > 1.0);
+    REQUIRE(doubles.contains(constrained_double));
+    REQUIRE_THAT(doubles.constrain(-10.0), Catch::Matchers::WithinAbs(-2.0, 1e-12));
+}
 
 TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
           "[runtime][range][coverage][issue-641]") {
