@@ -122,6 +122,36 @@ Pulp fetches, vendors, or redistributes it independently. Otherwise the audit
 will require standalone NOTICE/licensing rows for something whose license and
 distribution boundary are already covered by the parent prebuilt.
 
+## Bundled Fonts (and similar opt-in compile-time assets)
+
+Bundled fonts under `external/fonts/*.ttf` (`Inter`, `JetBrains Mono`,
+`Noto Color Emoji`) are first-class manifest entries with `category: fonts`
+and a SHA-256 in the `notes` field. They are NOT the same as the
+"bundled-toolchain" pattern above — each font is fetched / vendored
+independently and Pulp redistributes it directly.
+
+Add a new bundled font the same way as any other dep:
+
+1. Vendor the file under `external/fonts/<Name>.ttf` (use `git add -f`
+   if `.gitignore` covers `/external/*/`).
+2. Add a row in `external/fonts/README.md` with the SHA-256, source URL,
+   and any gating notes (e.g. `Noto Color Emoji` is gated by
+   `PULP_BUNDLE_NOTO_COLOR_EMOJI` and ships in its own
+   `pulp_add_binary_data` static lib so macOS/Windows release builds
+   can drop the payload).
+3. Insert alphabetically into `DEPENDENCIES.md`, `NOTICE.md`, and
+   `tools/deps/manifest.json`.
+4. Wire CMake: add a `pulp_add_binary_data(...)` block in
+   `core/canvas/CMakeLists.txt`, register the resulting target in
+   `PULP_SDK_TARGETS` (parent `CMakeLists.txt`), and add the
+   accompanying C++ TU that calls
+   `pulp::canvas::register_font(...)` or
+   `pulp::canvas::register_emoji_fallback(...)` at startup.
+
+Gate large bundles (≥ 1 MB) behind a CMake option that defaults `OFF`
+where the platform provides a usable equivalent (e.g. emoji typefaces
+on macOS / Windows) and `ON` for headless / CI / Linux / Android.
+
 Synthetic missing-dep test: `tools/deps/test_audit.py::
 ManifestSourceScannerTests::test_uncovered_detection_catches_missing_pip_dep`
 — don't delete it. If the completeness gate regresses, this is the
