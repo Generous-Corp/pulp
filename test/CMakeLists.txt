@@ -1383,6 +1383,22 @@ target_link_libraries(pulp-test-motion-swift-bridge PRIVATE
     pulp::view pulp::state pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-motion-swift-bridge)
 
+# Motion Android JNI bridge — exercises the C ABI shims in
+# core/platform/src/android/jni_motion.cpp directly. The JNI shims
+# (`Java_com_pulp_motion_PulpMotionNative_*`) only compile under
+# __ANDROID__, but the underlying C ABI (`pulp_motion_*`) compiles on
+# every host so this test runs in the normal Linux/macOS CTest matrix.
+# Includes the Coordinator::reset() deadlock regression test that the
+# Swift bridge's sibling-struct fix is the load-bearing change for.
+add_executable(pulp-test-motion-android-bridge
+    test_motion_android_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/core/platform/src/android/jni_motion.cpp)
+target_include_directories(pulp-test-motion-android-bridge PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/platform/include)
+target_link_libraries(pulp-test-motion-android-bridge PRIVATE
+    pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-motion-android-bridge)
+
 # Motion visual-analysis self-check — Phase 4 pipeline smoke.
 # Skips cleanly (exit 3) when Python deps are absent so CI without
 # numpy/Pillow/scikit-image doesn't false-fail.
