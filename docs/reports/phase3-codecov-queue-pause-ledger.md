@@ -6024,3 +6024,54 @@ diff lines and OK at/above the 75% floor. The branch was pushed with
 `PULP_SKIP_DIFF_COVER=1` only after the local diff-cover pass. The PR was
 created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
 Namespace/SSH validation was dispatched.
+
+2026-05-16 21:38 PDT: addressed two queue-wide GitHub-hosted CI issues. #2103
+had a real macOS UBSan failure in `HotReloader file watcher ignores unsupported
+changes`: a pending startup reload could be observed during the unsupported-file
+loop. Pushed `7a55d961a` (`test(view): drain hot reload startup events`) after
+focused local validation with `git diff --check`, `cmake --build build --target
+pulp-test-hot-reload -j$(sysctl -n hw.ncpu)`, and
+`./build/test/pulp-test-hot-reload "HotReloader file watcher ignores unsupported
+changes"` (8 assertions / 1 case). #2132 had a real Windows coverage failure:
+the Codecov uploader decoded `codecov.yml` with the Windows default code page
+and crashed on UTF-8 punctuation in comments. Pushed `0ecd66bab` (`ci: keep
+codecov config ascii for windows uploader`) after confirming `LC_ALL=C rg -n
+"[^\x00-\x7F]" codecov.yml` returned no matches and `git diff --check` passed.
+The same one-file ASCII fix was then cherry-picked and pushed to the other open
+coverage branches #2103, #2123, #2124, #2126, #2129, #2130, and #2134 so they do
+not each burn a Windows coverage cycle on the same uploader crash. No
+Namespace/SSH validation was dispatched.
+
+2026-05-16 21:46 PDT: opened the next large batched coverage PR as #2135,
+`test(canvas): batch attributed text layout coverage edges`, branch
+`feature/phase3-codecov-batch-688`, head
+`7e4d1605da0ed47ca5d5b49dd263cf8f887fa140`. This batch adds 12 focused tests in
+`test/test_attributed_string.cpp` covering AttributedString empty-span
+concatenation and style setter preservation, TextLayout wrapped-style
+preservation, consecutive newlines, forced breaks, span-specific metrics,
+GlyphArrangement totals/hit-test thresholds/cross-line index lookup, and
+Parallelogram positive/negative shear hit testing. The branch also carries the
+ASCII `codecov.yml` fix for the Windows uploader. Local validation before PR:
+`git diff --check`; built `pulp-test-attributed-string`; ran
+`./build/test/pulp-test-attributed-string "[coverage][phase3]"` (56 assertions /
+12 cases); ran the 12-test `PULP_DIFF_COVER_CTEST_REGEX=...
+tools/scripts/local_diff_cover.sh` gate, which reported no uncovered measured
+diff lines and OK at/above the 75% floor. The PR was created via REST because
+GraphQL rate limits were exhausted, then labeled `codecov`; GitHub-hosted CI is
+the merge gate. No Namespace/SSH validation was dispatched.
+
+2026-05-16 21:54 PDT: continued the next local-only batch in
+`feature/phase3-codecov-batch-687` without opening a PR yet, to avoid adding
+another small CI job while the current queue drains. The batch currently adds 16
+focused format-layer tests across new `test/test_processor_defaults.cpp` and its
+`test/CMakeLists.txt` target, covering PluginDescriptor bus helpers and flags,
+PrepareContext/ProcessContext defaults and pass-through, editor/default
+ViewSize contracts, lifecycle no-op hooks, ARA default, state-store pointer
+wiring, and sidechain/MPE/UMP sidecar pointer set/clear behavior. Local
+validation passed: `git diff --check`; `cmake --build build --target
+pulp-test-processor-defaults -j$(sysctl -n hw.ncpu)`; direct
+`./build/test/pulp-test-processor-defaults` (98 assertions / 16 cases); and the
+16-test `PULP_DIFF_COVER_CTEST_REGEX=... tools/scripts/local_diff_cover.sh
+pulp-test-processor-defaults` gate, which reported no uncovered measured diff
+lines and OK at/above the 75% floor. The worktree is clean and local-only at
+commit `1f68a37e1`; it has not been pushed or submitted yet.
