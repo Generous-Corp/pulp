@@ -197,66 +197,12 @@ from state_paths import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 
-def format_size_bytes(value: int | float | None) -> str:
-    if value in (None, ""):
-        return ""
-    amount = float(value)
-    units = ["B", "KB", "MB", "GB", "TB"]
-    for unit in units:
-        if amount < 1024.0 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
-        amount /= 1024.0
-    return f"{amount:.1f} TB"
-
-
-def path_size_bytes(path: Path) -> int:
-    try:
-        if not path.exists():
-            return 0
-        if path.is_file():
-            return int(path.stat().st_size)
-    except OSError:
-        return 0
-
-    total = 0
-    for root, _dirs, files in os.walk(path):
-        for filename in files:
-            try:
-                total += int((Path(root) / filename).stat().st_size)
-            except OSError:
-                continue
-    return total
-
-
-def local_ci_state_footprint() -> dict:
-    entries = {}
-    total = 0
-    for label, path in (
-        ("bundles", bundles_dir()),
-        ("prepared", prepared_dir()),
-        ("logs", logs_dir()),
-        ("results", results_dir()),
-        ("cloud-runs", cloud_runs_dir()),
-    ):
-        size_bytes = path_size_bytes(path)
-        entries[label] = {
-            "path": path,
-            "size_bytes": size_bytes,
-        }
-        total += size_bytes
-    return {
-        "entries": entries,
-        "total_bytes": total,
-    }
-
-
-def describe_path_for_cleanup(path: Path) -> str:
-    try:
-        return str(path.relative_to(state_dir()))
-    except ValueError:
-        return str(path)
+from footprint import (  # noqa: E402  -- re-exported for in-file consumers
+    format_size_bytes,
+    path_size_bytes,
+    local_ci_state_footprint,
+    describe_path_for_cleanup,
+)
 
 
 def bundle_ref_name(job_id: str) -> str:

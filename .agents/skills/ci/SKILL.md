@@ -786,6 +786,10 @@ pulling in the entire 11k-line file.
   plus the `LockBusyError` exception. `image_change_summary` falls back
   to a SHA-256 file comparison when Pillow is missing so the test suite
   keeps running on stripped images.
+- `footprint.py` — owns disk-footprint accounting helpers
+  (`format_size_bytes`, `path_size_bytes`, `local_ci_state_footprint`,
+  `describe_path_for_cleanup`). Used by `pulp ci-local status` and the
+  cleanup paths to report how much disk the local CI state is using.
 
 All original symbols are re-exported from `local_ci.py`, so any old
 `mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
