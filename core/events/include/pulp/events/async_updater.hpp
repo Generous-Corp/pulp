@@ -106,14 +106,13 @@ public:
 
     /// Send an action to all listeners
     void send_action(std::string_view action) {
-        std::vector<ActionCallback> callbacks;
+        std::vector<std::pair<int, ActionCallback>> callbacks;
         callbacks.reserve(listeners_.size());
         for (const auto& [id, fn] : listeners_) {
-            (void)id;
-            callbacks.push_back(fn);
+            callbacks.push_back({id, fn});
         }
-        for (auto& fn : callbacks) {
-            if (fn) fn(action);
+        for (auto& [id, fn] : callbacks) {
+            if (fn && has_listener(id)) fn(action);
         }
     }
 
@@ -135,6 +134,11 @@ public:
 private:
     std::vector<std::pair<int, ActionCallback>> listeners_;
     int next_id_ = 0;
+
+    bool has_listener(int id) const {
+        return std::any_of(listeners_.begin(), listeners_.end(),
+                          [id](const auto& p) { return p.first == id; });
+    }
 };
 
 /// ScopedLowPowerModeDisabler — prevents OS power throttling during audio processing.

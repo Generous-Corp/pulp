@@ -179,30 +179,33 @@ TEST_CASE("ActionBroadcaster skips empty listener callbacks",
 }
 
 TEST_CASE("ActionBroadcaster tolerates listener mutation during dispatch",
-          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+          "[events][async_updater][action_broadcaster][coverage][phase3-large]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
-
     int second = -1;
+
     const auto first = broadcaster.add_listener([&](std::string_view action) {
         seen.emplace_back("first:" + std::string(action));
         broadcaster.remove_listener(second);
-        broadcaster.add_listener([&](std::string_view later) {
-            seen.emplace_back("third:" + std::string(later));
-        });
     });
     second = broadcaster.add_listener([&](std::string_view action) {
         seen.emplace_back("second:" + std::string(action));
+    });
+    const auto third = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("third:" + std::string(action));
         broadcaster.remove_listener(first);
     });
 
-    broadcaster.send_action("initial");
-    REQUIRE(seen == std::vector<std::string>{
-        "first:initial", "second:initial"});
+    broadcaster.send_action("refresh");
+    REQUIRE(seen == std::vector<std::string>{"first:refresh", "third:refresh"});
 
-    broadcaster.send_action("later");
+    broadcaster.send_action("again");
     REQUIRE(seen == std::vector<std::string>{
-        "first:initial", "second:initial", "third:later"});
+        "first:refresh", "third:refresh", "third:again"});
+
+    broadcaster.remove_listener(third);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 3);
 }
 
 TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
