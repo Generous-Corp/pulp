@@ -1769,6 +1769,14 @@ add_executable(pulp-test-text-editor test_text_editor.cpp)
 target_link_libraries(pulp-test-text-editor PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-editor)
 
+# TextEditor multi-line coverage (audit P3: wrap, click-to-caret in
+# wrapped rows, caret_rect pixel positioning, single-vs-multi Enter
+# contract). Keeps the original test_text_editor.cpp file unchanged
+# so the existing single-line surface stays pinned in isolation.
+add_executable(pulp-test-text-editor-multiline test_text_editor_multiline.cpp)
+target_link_libraries(pulp-test-text-editor-multiline PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-text-editor-multiline)
+
 # TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
 add_executable(pulp-test-text-input test_text_input.cpp)
 target_link_libraries(pulp-test-text-input PRIVATE pulp::view Catch2::Catch2WithMain)
