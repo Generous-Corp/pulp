@@ -5805,3 +5805,33 @@ exhausted`) reached clean REST check state, 21/21 successful checks, no pending
 or failing checks. Merged via REST with head-SHA guard as
 `6734320173dc3772727659758f6ca923216be48b`. Remaining open tracked test PRs are
 #2108 and #2103, both mergeable but unstable due Codecov patch checks.
+
+2026-05-16 19:39 PDT: resumed after compaction with GitHub GraphQL still rate
+limited, so PR creation/status actions are using REST where possible. Current
+tracked Codecov PR queue: #2103 at `f4f0ecc7` has no REST-reported failing
+checks and is waiting on GitHub-hosted Linux/Windows/macOS/coverage/sanitizer
+jobs; its Codex P2 on `core/state/src/state_tree_sync.cpp` is addressed on the
+branch by `d62f3a641` plus the null-property regression, with follow-up comments
+posted on the review thread. #2108 at `f1445ef0` has no REST-reported failing
+checks and is waiting on GitHub-hosted Linux/Windows/macOS/sanitizer/android
+jobs. #2122 at `3fd9ca36` has no REST-reported failing checks and is waiting on
+GitHub-hosted coverage/build/sanitizer jobs. No Namespace/SSH validation was
+dispatched.
+
+2026-05-16 19:39 PDT: opened the next large batched coverage PR as #2123,
+`test: batch runtime and audio coverage edges`, branch
+`feature/phase3-codecov-batch-680`, head
+`467c240401c1cd680e1ee2cbfda93705331c7387`. This batch adds 13 focused tests
+across `test/test_json_rpc.cpp`, `test/test_memory_message_channel.cpp`,
+`test/test_identity.cpp`, and `test/test_audio.cpp` covering JSON-RPC peer
+request/notification/response edges, memory channel close/replacement behavior,
+UUID/typed identity/event envelope edges, and audio buffer/channel layout edges.
+Local validation before PR: built
+`pulp-test-json-rpc pulp-test-memory-message-channel pulp-test-identity
+pulp-test-audio`; ran all four focused binaries successfully; ran the 13-test
+`PULP_DIFF_COVER_CTEST_REGEX=... tools/scripts/local_diff_cover.sh` gate, which
+reported no uncovered measured diff lines and OK at/above the 75% floor. The
+branch was pushed with `PULP_SKIP_DIFF_COVER=1` only after that local
+diff-cover run; pre-push gates otherwise passed. GitHub GraphQL exhaustion
+prevented enabling auto-merge immediately, so this PR is in REST-poll-and-merge
+tracking until checks are green. No Namespace/SSH validation was dispatched.
