@@ -5958,6 +5958,21 @@ diff lines and OK at/above the 75% floor. The branch was pushed with
 created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
 Namespace/SSH validation was dispatched.
 
+2026-05-16 21:23 PDT: addressed the real Codex review finding on #2134. Pushed
+follow-up `48731a7a2` (`fix(view): make frame clock tick subscription-safe`) on
+`feature/phase3-codecov-batch-686`, changing `FrameClock::tick` so callback
+iteration does not hold vector references across callbacks and so subscribers
+added during a tick start on the next frame. This fixes the underlying
+iterator-invalidation risk rather than weakening the test. Focused local
+validation passed: `git diff --check`, `cmake --build build --target
+pulp-test-frame-clock pulp-test-window-manager pulp-test-splash-screen
+pulp-test-panel -j$(sysctl -n hw.ncpu)`, the four focused
+`"[coverage][phase3]"` binaries, and the 12-test
+`PULP_DIFF_COVER_CTEST_REGEX=... tools/scripts/local_diff_cover.sh` gate. The
+diff-cover result was 83% for the production diff, above the 75% floor. The
+branch was pushed with `PULP_SKIP_DIFF_COVER=1` only after the local pass; no
+Namespace/SSH validation was dispatched.
+
 2026-05-16 21:15 PDT: opened the next large batched coverage PR as #2134,
 `test(view): batch lifecycle widget coverage edges`, branch
 `feature/phase3-codecov-batch-686`, head
