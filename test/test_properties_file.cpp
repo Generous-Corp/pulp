@@ -90,6 +90,25 @@ TEST_CASE("PropertiesFile numeric getters reject out-of-range strings",
     REQUIRE_FALSE(props.get_double("gain").has_value());
 }
 
+TEST_CASE("PropertiesFile numeric getters reject partial parses",
+          "[state][properties][coverage][phase3-large]") {
+    PropertiesFile props;
+    props.set_string("count_suffix", "512junk");
+    props.set_string("count_decimal", "512.5");
+    props.set_string("gain_suffix", "0.25db");
+    props.set_string("gain_pair", "0.25 0.5");
+    props.set_string("int_whitespace", "  -42 \t");
+    props.set_string("double_whitespace", " \n 0.125 \t");
+
+    REQUIRE_FALSE(props.get_int("count_suffix").has_value());
+    REQUIRE_FALSE(props.get_int("count_decimal").has_value());
+    REQUIRE_FALSE(props.get_double("gain_suffix").has_value());
+    REQUIRE_FALSE(props.get_double("gain_pair").has_value());
+    REQUIRE(props.get_int("int_whitespace").value_or(0) == -42);
+    REQUIRE_THAT(props.get_double("double_whitespace").value_or(0.0),
+                 WithinAbs(0.125, 1e-12));
+}
+
 TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
           "[state][properties][issue-641]") {
     PropertiesFile props;

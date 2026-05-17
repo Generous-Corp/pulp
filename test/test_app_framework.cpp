@@ -512,6 +512,28 @@ TEST_CASE("AppSettings invalid typed values return null or false",
     REQUIRE_FALSE(settings.load_window_state().has_value());
 }
 
+TEST_CASE("AppSettings numeric getters reject partial parses",
+          "[view][settings][coverage][phase3-large]") {
+    AppSettings settings("PulpTest");
+    settings.set_string("int_suffix", "256samples");
+    settings.set_string("int_decimal", "256.5");
+    settings.set_string("float_suffix", "0.75x");
+    settings.set_string("float_pair", "0.75 1.0");
+    settings.set_string("int_whitespace", " \t -12 ");
+    settings.set_string("float_whitespace", "\n 0.5 \t");
+
+    REQUIRE_FALSE(settings.get_int("int_suffix").has_value());
+    REQUIRE_FALSE(settings.get_int("int_decimal").has_value());
+    REQUIRE_FALSE(settings.get_float("float_suffix").has_value());
+    REQUIRE_FALSE(settings.get_float("float_pair").has_value());
+    REQUIRE(settings.get_int("int_whitespace").value_or(0) == -12);
+
+    auto value = settings.get_float("float_whitespace");
+    REQUIRE(value.has_value());
+    REQUIRE(value.value() > 0.499f);
+    REQUIRE(value.value() < 0.501f);
+}
+
 TEST_CASE("AppSettings window state round-trip", "[view][settings]") {
     AppSettings settings("PulpTest");
     settings.save_window_state(100, 200, 800, 600);

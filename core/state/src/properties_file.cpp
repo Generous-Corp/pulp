@@ -7,21 +7,8 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
-#include <cctype>
 
 namespace pulp::state {
-
-namespace {
-
-bool only_trailing_space(const std::string& text, std::size_t pos) {
-    while (pos < text.size()) {
-        if (!std::isspace(static_cast<unsigned char>(text[pos]))) return false;
-        ++pos;
-    }
-    return true;
-}
-
-}  // namespace
 
 // ── PropertiesFile ──────────────────────────────────────────────────────
 
