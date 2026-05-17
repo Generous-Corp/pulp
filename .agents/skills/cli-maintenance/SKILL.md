@@ -46,7 +46,7 @@ requires:
 audio, cache, clean, export-tokens, ci-local, design-debug, harness, help, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
-build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, upgrade, prototype-loop
+build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, upgrade, prototype-loop, motion
 
 ### 4. Update docs
 - [ ] Add/update section in `docs/reference/cli.md`
