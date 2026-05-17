@@ -1334,6 +1334,13 @@ TEST_CASE("FormatRegistry writes and reads AIFF files", "[audio][file][registry]
         data));
     REQUIRE_FALSE(registry.write(tmp_path.string(), AudioFileData{}));
 
+    auto ragged = data;
+    ragged.channels[1].pop_back();
+    auto ragged_path = unique_temp_audio_path("_aiff_ragged.aiff");
+    std::filesystem::remove(ragged_path);
+    REQUIRE_FALSE(registry.write(ragged_path.string(), ragged));
+    REQUIRE_FALSE(std::filesystem::exists(ragged_path));
+
     std::filesystem::remove(tmp_path);
 }
 

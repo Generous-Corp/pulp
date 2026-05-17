@@ -268,18 +268,33 @@ public:
     bool write(const std::string& path, const AudioFileData& data) override {
         if (!can_write_aiff_pcm16(data)) return false;
 
-        std::ofstream file(path, std::ios::binary);
-        if (!file) return false;
-
         uint32_t num_channels = data.num_channels();
-        uint32_t num_frames = static_cast<uint32_t>(data.num_frames());
+        uint64_t frames = data.num_frames();
+        if (num_channels > std::numeric_limits<uint16_t>::max()
+            || frames > std::numeric_limits<uint32_t>::max()) {
+            return false;
+        }
+        for (const auto& channel : data.channels)
+            if (channel.size() != static_cast<size_t>(frames))
+                return false;
+
+        uint32_t num_frames = static_cast<uint32_t>(frames);
         uint16_t bits = 16;
         int bytes_per_sample = 2;
 
-        uint32_t ssnd_data_size = num_frames * num_channels * bytes_per_sample;
+        uint64_t ssnd_data_bytes = static_cast<uint64_t>(num_frames)
+                                 * static_cast<uint64_t>(num_channels)
+                                 * static_cast<uint64_t>(bytes_per_sample);
+        if (ssnd_data_bytes > std::numeric_limits<uint32_t>::max() - 8u)
+            return false;
+
+        uint32_t ssnd_data_size = static_cast<uint32_t>(ssnd_data_bytes);
         uint32_t ssnd_chunk_size = ssnd_data_size + 8;  // +8 for offset and blockSize
         uint32_t comm_chunk_size = 18;
         uint32_t form_size = 4 + 8 + comm_chunk_size + 8 + ssnd_chunk_size;
+
+        std::ofstream file(path, std::ios::binary);
+        if (!file) return false;
 
         // FORM header
         uint8_t form[12];
