@@ -416,15 +416,19 @@ TEST_CASE("FileStream reopen closes the previous handle",
     REQUIRE(stream.flush());
     stream.close();
 
-    FileStream first_reader(first.string(), FileStream::Mode::Read);
-    std::uint8_t first_out = 0;
-    REQUIRE(first_reader.read(&first_out, 1).ok());
-    REQUIRE(first_out == 'a');
+    {
+        FileStream first_reader(first.string(), FileStream::Mode::Read);
+        std::uint8_t first_out = 0;
+        REQUIRE(first_reader.read(&first_out, 1).ok());
+        REQUIRE(first_out == 'a');
+    }
 
-    FileStream second_reader(second.string(), FileStream::Mode::Read);
-    std::uint8_t second_out[2]{};
-    REQUIRE(second_reader.read(second_out, sizeof(second_out)).bytes == sizeof(second_out));
-    REQUIRE(std::memcmp(second_out, b, sizeof(b)) == 0);
+    {
+        FileStream second_reader(second.string(), FileStream::Mode::Read);
+        std::uint8_t second_out[2]{};
+        REQUIRE(second_reader.read(second_out, sizeof(second_out)).bytes == sizeof(second_out));
+        REQUIRE(std::memcmp(second_out, b, sizeof(b)) == 0);
+    }
 
     std::filesystem::remove(first);
     std::filesystem::remove(second);
