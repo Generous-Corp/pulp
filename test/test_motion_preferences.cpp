@@ -82,12 +82,16 @@ TEST_CASE("MotionPreferences set_override(nullopt) reverts to OS value",
           "[motion-preferences]") {
     PrefsScope scope;
     auto& prefs = MotionPreferences::instance();
+    // Snapshot whatever the OS preference is on this runner BEFORE
+    // we override — macOS GitHub-hosted runners typically have
+    // Reduce Motion enabled (headless display), so we can't hardcode
+    // Full like the original test did.
+    const auto os_value = prefs.policy();
     prefs.set_override(MotionPolicy::Reduced);
     REQUIRE(prefs.policy() == MotionPolicy::Reduced);
     prefs.set_override(std::nullopt);
     REQUIRE_FALSE(prefs.has_override());
-    // OS value — Full on a clean CI runner.
-    REQUIRE(prefs.policy() == MotionPolicy::Full);
+    REQUIRE(prefs.policy() == os_value);
 }
 
 TEST_CASE("MotionPreferences set_duration_scale sticks and clamps",
@@ -111,14 +115,18 @@ TEST_CASE("MotionPreferences on_policy_changed fires on override transition",
           "[motion-preferences]") {
     PrefsScope scope;
     auto& prefs = MotionPreferences::instance();
+    // Snapshot the OS value first — macOS GitHub-hosted runners
+    // typically report Reduced, not Full, so the final transition
+    // lands at whatever the OS actually says.
+    const auto os_value = prefs.policy();
     std::vector<MotionPolicy> seen;
     prefs.on_policy_changed([&](MotionPolicy p) { seen.push_back(p); });
     prefs.set_override(MotionPolicy::Reduced);
     prefs.set_override(MotionPolicy::Off);
     prefs.set_override(std::nullopt);
-    REQUIRE(seen.size() >= 2);   // Full→Reduced, Reduced→Off, Off→OS (Full)
+    REQUIRE(seen.size() >= 2);   // OS→Reduced, Reduced→Off, Off→OS
     REQUIRE(seen.front() == MotionPolicy::Reduced);
-    REQUIRE(seen.back() == MotionPolicy::Full);
+    REQUIRE(seen.back() == os_value);
 }
 
 TEST_CASE("MotionPreferences poll is a no-op while override is set",
@@ -509,13 +517,17 @@ TEST_CASE("assert_matches with header overload accepts matching headers",
 TEST_CASE("Fixture recorded under Full omits-or-stores 'full' policy",
           "[motion-preferences][fixture]") {
     PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    // Explicitly force Full so the test is independent of the host
+    // runner's OS preference (macOS GitHub-hosted runners report
+    // Reduced because of their headless display configuration).
+    prefs.set_override(MotionPolicy::Full);
     auto& coord = pulp::view::motion::Coordinator::instance();
     coord.reset();
     coord.set_tracing_enabled(true);
     coord.set_firehose(true);
     pulp::view::FrameClock clock;
     coord.bind(clock);
-    // Default override on a clean CI runner is the OS value — Full.
     const auto path = make_tmp_fixture_path("full");
     std::remove(path.c_str());
     auto sink_id = coord.add_sink(pulp::view::motion::make_fixture_sink(path));
