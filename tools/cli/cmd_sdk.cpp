@@ -104,9 +104,17 @@ int cmd_sdk(const std::vector<std::string>& args) {
         // newer SDK is available on GitHub Releases. Cached at
         // ~/.pulp/cache/latest_release.txt with a 24h TTL — no
         // network call in the hot path most of the time.
+        //
+        // Codex P2 on PR #2138: only fire the banner against an
+        // actually-installed SDK version. Falling back to
+        // PULP_SDK_VERSION (the CLI's compile-time pin) here would
+        // print contradictory output on a fresh machine: "No SDK
+        // versions installed" followed by "installed: v..." against
+        // the pin. Skip cleanly when nothing is installed.
         std::string installed = newest_installed_sdk();
-        if (installed.empty()) installed = PULP_SDK_VERSION;
-        maybe_print_newer_sdk_banner(installed);
+        if (!installed.empty()) {
+            maybe_print_newer_sdk_banner(installed);
+        }
         return 0;
     }
 
@@ -126,7 +134,15 @@ int cmd_sdk(const std::vector<std::string>& args) {
                           + "/releases?per_page=30";
         std::string cmd = "curl -fsSL -H 'Accept: application/vnd.github+json' "
                           + shell_quote(url) + " 2>/dev/null";
+        // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping
+        // used elsewhere in tools/cli/ so this builds on the Windows
+        // CLI lane. Other call sites (cmd_overflow.cpp, cmd_macos.cpp,
+        // update_check.cpp) carry the same pattern.
+#if defined(_WIN32)
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
         FILE* pipe = popen(cmd.c_str(), "r");
+#endif
         if (!pipe) {
             std::cerr << "Error: could not invoke curl.\n";
             return 1;
@@ -136,7 +152,11 @@ int cmd_sdk(const std::vector<std::string>& args) {
         while (size_t n = fread(buf, 1, sizeof(buf), pipe)) {
             body.append(buf, n);
         }
+#if defined(_WIN32)
+        int rc = _pclose(pipe);
+#else
         int rc = pclose(pipe);
+#endif
         if (rc != 0 || body.empty()) {
             std::cerr << "Error: GitHub releases query failed";
             if (rc != 0) std::cerr << " (curl exit " << rc << ")";

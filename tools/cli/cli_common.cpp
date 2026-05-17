@@ -701,12 +701,22 @@ std::string latest_available_sdk_version() {
                       + "/releases/latest";
     std::string cmd = "curl -fsSL --max-time 2 -H 'Accept: application/vnd.github+json' "
                       + shell_quote(url) + " 2>/dev/null";
+    // Codex P1 on PR #2138: mirror the _WIN32 popen/pclose mapping used
+    // elsewhere in tools/cli/ so this builds on Windows.
+#if defined(_WIN32)
+    FILE* pipe = _popen(cmd.c_str(), "r");
+#else
     FILE* pipe = popen(cmd.c_str(), "r");
+#endif
     if (!pipe) return {};
     std::string body;
     char buf[4096];
     while (size_t n = fread(buf, 1, sizeof(buf), pipe)) body.append(buf, n);
+#if defined(_WIN32)
+    if (_pclose(pipe) != 0 || body.empty()) return {};
+#else
     if (pclose(pipe) != 0 || body.empty()) return {};
+#endif
 
     std::regex tag_re(R"("tag_name"\s*:\s*"v?([0-9]+\.[0-9]+\.[0-9]+)")");
     std::smatch m;
