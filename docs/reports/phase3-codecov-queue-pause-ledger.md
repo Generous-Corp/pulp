@@ -6082,3 +6082,22 @@ pulp-test-plugin-state-io pulp-test-descriptor-validation` gate, which reported
 no uncovered measured diff lines and OK at/above the 75% floor. The worktree is
 clean and local-only at commit `e1bb1c57c`; it has not been pushed or submitted
 yet.
+
+2026-05-16 22:22 PDT: completed a second local-only held batch in
+`feature/phase3-codecov-batch-689` without opening a PR. The batch adds 15
+focused audio/offline-processing tests across new
+`test/test_offline_processor_edges.cpp` and its `test/CMakeLists.txt` target.
+Coverage includes invalid `offline_process` inputs, mono/stereo output shape,
+block metadata and tail frame counts, input interleaving and output
+deinterleaving, output buffer clearing, tail input padding clearing, block-size
+boundary behavior, and `apply_gain` empty/multi-channel/zero/negative gain
+behavior. Local validation passed: `git diff --check`; configured `build`;
+built `pulp-test-offline-processor-edges`; ran direct
+`./build/test/pulp-test-offline-processor-edges` (53 assertions / 15 cases);
+ran `ctest --test-dir build -R 'offline_process|apply_gain'
+--output-on-failure`; and ran `PULP_DIFF_COVER_CTEST_REGEX='offline_process|apply_gain'
+tools/scripts/local_diff_cover.sh pulp-test-offline-processor-edges`, which
+reported no uncovered measured diff lines and OK at/above the 75% floor. The
+worktree is clean and local-only at commit `f7fa80d88`; it has not been pushed
+or submitted yet. Together with held #687 this gives 41 locally validated tests
+ready to combine into a larger future PR once the active GitHub queue has room.
