@@ -27,6 +27,8 @@
 #include <utility>
 #include <vector>
 
+#include <pulp/view/motion_preferences.hpp>
+
 namespace pulp::view {
 
 /// CSS easing function — maps a normalized progress t ∈ [0,1] to an
@@ -183,10 +185,43 @@ struct CssAnimation {
     float elapsed_seconds = 0.0f;
     bool active = true;
 
+    /// Internal: have we applied the current MotionPolicy to this
+    /// animation's effective duration yet? Lazy on the first `tick()`
+    /// so callers don't need to remember to call a setup step. The
+    /// policy snapshot taken here is what governs the animation's
+    /// behavior for its lifetime.
+    bool motion_policy_applied_ = false;
+
+    /// Apply the current MotionPolicy to `spec.duration_seconds` (and
+    /// `start_value` under Off, by forcing an immediate end). Idempotent
+    /// — repeated calls are no-ops after the first.
+    void apply_motion_policy() {
+        if (motion_policy_applied_) return;
+        motion_policy_applied_ = true;
+        if (motion_policy_is_off()) {
+            // Snap to the end value on the next tick.
+            spec.duration_seconds = 0.0f;
+            spec.delay_seconds = 0.0f;
+            return;
+        }
+        if (MotionPreferences::current() == MotionPolicy::Reduced) {
+            const double scale =
+                MotionPreferences::current_duration_scale();
+            spec.duration_seconds *= static_cast<float>(scale);
+        }
+    }
+
     /// Advance by `dt` seconds. Returns the current eased value. When
     /// `active` flips to false the caller should commit `end_value`
     /// and clean up.
+    ///
+    /// Honors `MotionPreferences::current()` on the first tick:
+    ///   - Off      → completes immediately with `end_value`.
+    ///   - Reduced  → effective duration is `spec.duration_seconds *
+    ///                duration_scale` (captured on first tick).
+    ///   - Full     → no change to the configured spec.
     float tick(float dt) {
+        if (!motion_policy_applied_) apply_motion_policy();
         elapsed_seconds += dt;
         const float total = spec.delay_seconds + spec.duration_seconds;
         if (elapsed_seconds >= total) {

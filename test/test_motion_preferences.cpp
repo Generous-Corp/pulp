@@ -4,6 +4,8 @@
 
 #include <pulp/view/motion_preferences.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/animator_set.hpp>
+#include <pulp/view/css_animation.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/frame_clock.hpp>
 
@@ -299,6 +301,86 @@ TEST_CASE("Tween under Reduced still produces a normal burst",
     REQUIRE(sample > 1);
 
     coord.reset();
+}
+
+// ── CssAnimation honors MotionPolicy ─────────────────────────────────
+
+TEST_CASE("CssAnimation under MotionPolicy::Off completes on first tick",
+          "[motion-preferences][css-animation]") {
+    PrefsScope scope;
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    pulp::view::CssAnimation a;
+    a.spec.duration_seconds = 0.5f;
+    a.spec.delay_seconds = 0.1f;
+    a.start_value = 0.0f;
+    a.end_value = 1.0f;
+    float v = a.tick(0.016f);
+    REQUIRE(v == Approx(1.0f));
+    REQUIRE_FALSE(a.active);
+}
+
+TEST_CASE("CssAnimation under MotionPolicy::Reduced scales duration",
+          "[motion-preferences][css-animation]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);
+    pulp::view::CssAnimation a;
+    a.spec.duration_seconds = 1.0f;     // effective 0.5s after scale
+    a.spec.delay_seconds = 0.0f;
+    a.start_value = 0.0f;
+    a.end_value = 1.0f;
+    // First tick captures the scaled spec.
+    a.tick(0.0f);
+    REQUIRE(a.spec.duration_seconds == Approx(0.5f));
+    // Drive to mid-way of effective duration.
+    a.tick(0.25f);
+    REQUIRE(a.active);
+    // Drive past the end.
+    a.tick(0.3f);
+    REQUIRE_FALSE(a.active);
+}
+
+// ── AnimatorSet honors MotionPolicy via underlying Tween ─────────────
+
+TEST_CASE("AnimatorSet under MotionPolicy::Off completes on first advance",
+          "[motion-preferences][animator-set]") {
+    PrefsScope scope;
+    MotionPreferences::instance().set_override(MotionPolicy::Off);
+    int updates = 0;
+    float last = -1.0f;
+    auto runner = pulp::view::AnimatorSetBuilder{}
+        .then(0.0f, 1.0f, 0.5f, [&](float v){ ++updates; last = v; })
+        .then(0.0f, 2.0f, 0.5f, [&](float v){ ++updates; last = v; })
+        .build_runner();
+    // A single advance should walk through all already-finished steps.
+    bool done = runner.advance(0.016f);
+    REQUIRE(done);
+    REQUIRE(last == Approx(2.0f));
+    REQUIRE(updates >= 2);  // one update per step's final value
+}
+
+TEST_CASE("AnimatorSet under MotionPolicy::Reduced scales each Tween's duration",
+          "[motion-preferences][animator-set]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_duration_scale(0.5);
+    // Two sequential 1s tweens → 1s total effective (each scaled to 0.5s).
+    auto runner = pulp::view::AnimatorSetBuilder{}
+        .then(0.0f, 1.0f, 1.0f, [](float){})
+        .then(1.0f, 2.0f, 1.0f, [](float){})
+        .build_runner();
+    bool done = false;
+    int ticks = 0;
+    while (!done && ticks < 200) {
+        done = runner.advance(0.016f);
+        ++ticks;
+    }
+    // ~1s of effective animation @ 60 Hz → ~63 ticks, plus a few for
+    // the inter-step carry. Allow generous margin.
+    REQUIRE(done);
+    REQUIRE(ticks < 80);
 }
 
 // ── settling_time_seconds under Reduced halves with duration_scale 0.5
