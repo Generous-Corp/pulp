@@ -723,18 +723,18 @@ static std::string build_shell_command(const std::string& cmd) {
 }
 
 // Static registry of live WidgetBridges. Platform hosts iterate this to
-// deliver key events without each app needing to wire its own
-// `View::on_global_key` lambda.
+// deliver key events and document-level events without each app needing
+// to wire its own `View::on_global_key` lambda.
 //
-// recursive_mutex (not plain mutex): the dispatch helpers below hold
-// the lock for the full fan-out — including the call into each
-// bridge's `forward_key_event` — to address Codex P1 (PR #2137 / #2139)
-// that a snapshot-then-unlock pattern UAFs if a bridge is destroyed on
-// another thread mid-iteration. forward_key_event evaluates JS, and
-// while Pulp's standard bridge ctor/dtor lifecycle is strictly
-// host-driven (never from JS), recursive_mutex lets us defensively
-// tolerate a future JS-callback path that might construct or destroy
-// a bridge on the same thread without deadlocking.
+// recursive_mutex (not plain mutex): the `dispatch_*` helpers below
+// hold the lock for the full fan-out — including the call into each
+// bridge's `forward_key_event` / JS evaluation — to address Codex P1
+// (PR #2137 / #2139) that a snapshot-then-unlock pattern UAFs if a
+// bridge is destroyed on another thread mid-iteration. Holding during
+// dispatch is safe: Pulp's standard bridge ctor/dtor lifecycle is
+// strictly host-driven (never invoked from JS), and recursive_mutex
+// defensively tolerates a future JS-callback path that might create
+// or destroy a bridge on the same thread without deadlocking.
 namespace {
 std::recursive_mutex& all_bridges_mutex() {
     static std::recursive_mutex m;
@@ -809,19 +809,11 @@ WidgetBridge::~WidgetBridge() {
 }
 
 void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is_down) {
-    // Codex P1 review (PR #2137): hold the registry lock for the entire
+    // Codex P1 (PR #2137): hold the registry lock for the entire
     // fan-out. Earlier draft copied raw pointers under-lock then
-    // iterated unlocked, which UAF's if a bridge is destroyed on
+    // iterated unlocked, which UAFs if a bridge is destroyed on
     // another thread (window teardown / hot reload) between snapshot
-    // and dispatch.
-    //
-    // Holding the non-recursive lock during dispatch is safe here:
-    // `forward_key_event` evaluates JS in the bridge's own engine, and
-    // WidgetBridge ctor/dtor only run on the host side (never from JS).
-    // The lock briefly blocks concurrent ctor/dtor — acceptable for a
-    // key-event-rate path. Reentrant ctor/dtor on the same thread
-    // would deadlock, but Pulp's bridge lifecycle is strictly
-    // host-driven, so that path is impossible by construction.
+    // and dispatch. recursive_mutex tolerates same-thread reentry.
     std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
     for (auto* b : all_bridges_set()) {
         b->forward_key_event(key_code, modifiers, is_down);
@@ -830,20 +822,12 @@ void WidgetBridge::dispatch_global_key(int key_code, uint16_t modifiers, bool is
 
 void WidgetBridge::dispatch_document_event(const std::string& event_type,
                                            const std::string& event_json_literal) {
-    // Snapshot under lock (same reasoning as dispatch_global_key).
-    std::vector<WidgetBridge*> snapshot;
-    {
-        std::lock_guard<std::mutex> lock(all_bridges_mutex());
-        snapshot.reserve(all_bridges_set().size());
-        for (auto* b : all_bridges_set()) snapshot.push_back(b);
-    }
-    // The JS preamble's __dispatch__ fan-out treats id='document' as a
-    // document.dispatchEvent fan-out (see preamble in this file). We
-    // evaluate the JS directly rather than going through a per-bridge
-    // method so the same string compiles once per bridge.
+    // Codex P1 (PR #2139): same lifetime-safety rationale as
+    // dispatch_global_key above — hold the lock through iteration.
     const std::string js =
         "__dispatch__('document', '" + event_type + "', " + event_json_literal + ")";
-    for (auto* b : snapshot) {
+    std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+    for (auto* b : all_bridges_set()) {
         b->engine_.evaluate(js);
     }
 }
