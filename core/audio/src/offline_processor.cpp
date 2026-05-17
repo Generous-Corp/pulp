@@ -30,6 +30,9 @@ std::optional<AudioFileData> offline_process(
 
     uint32_t channels = input.num_channels();
     uint64_t total_frames = input.num_frames();
+    for (const auto& channel : input.channels)
+        if (channel.size() != static_cast<size_t>(total_frames))
+            return std::nullopt;
 
     AudioFileData output;
     output.sample_rate = input.sample_rate;

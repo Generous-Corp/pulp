@@ -849,6 +849,17 @@ TEST_CASE("offline processing handles guards, block tails, and file dispatch",
     REQUIRE_FALSE(offline_process(input, [](const float*, float*, int, int, double) {}, 0).has_value());
     REQUIRE_FALSE(offline_process(input, [](const float*, float*, int, int, double) {}, -8).has_value());
 
+    auto ragged = input;
+    ragged.channels[1].pop_back();
+    bool called = false;
+    REQUIRE_FALSE(offline_process(
+        ragged,
+        [&](const float*, float*, int, int, double) {
+            called = true;
+        },
+        2).has_value());
+    REQUIRE_FALSE(called);
+
     std::vector<int> block_frames;
     auto output = offline_process(
         input,
