@@ -150,12 +150,12 @@ bool write_wav_file(const std::string& path, const AudioFileData& data) {
         auto writer = wav.createWriter(std::filesystem::path(path), props);
         if (!writer) return false;
 
-        uint32_t frames = static_cast<uint32_t>(data.num_frames());
-        choc::buffer::ChannelArrayBuffer<float> buffer(data.num_channels(), frames);
+        uint32_t frame_count = static_cast<uint32_t>(frames);
+        choc::buffer::ChannelArrayBuffer<float> buffer(data.num_channels(), frame_count);
 
         for (uint32_t ch = 0; ch < data.num_channels(); ++ch) {
             auto channel_view = buffer.getView().getChannel(ch);
-            for (uint32_t i = 0; i < frames; ++i)
+            for (uint32_t i = 0; i < frame_count; ++i)
                 channel_view.data.data[i] = data.channels[ch][i];
         }
 

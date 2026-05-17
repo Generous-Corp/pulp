@@ -580,6 +580,11 @@ TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empti
     REQUIRE_FALSE(data.empty());
     REQUIRE_FALSE(write_wav_file(path.string(), data));
     REQUIRE_FALSE(std::filesystem::exists(path));
+
+    auto ragged_path = unique_temp_audio_path("_ragged_channels.wav");
+    std::filesystem::remove(ragged_path);
+    REQUIRE_FALSE(write_wav_file(ragged_path.string(), data));
+    REQUIRE_FALSE(std::filesystem::exists(ragged_path));
 }
 
 TEST_CASE("WAV writer rejects zero sample-rate data without creating a file",
