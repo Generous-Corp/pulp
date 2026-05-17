@@ -5799,3 +5799,9 @@ mergeable but unstable due `codecov/patch`; the local diff-gate comment reports
 status appears stale or using a different surface while sanitizer lanes continue
 to run. Next action is to investigate/fix those Codecov patch statuses rather
 than merging around them.
+
+2026-05-16 15:50 PDT: #2118 (`docs(ci): codify REST fallback when GraphQL is
+exhausted`) reached clean REST check state, 21/21 successful checks, no pending
+or failing checks. Merged via REST with head-SHA guard as
+`6734320173dc3772727659758f6ca923216be48b`. Remaining open tracked test PRs are
+#2108 and #2103, both mergeable but unstable due Codecov patch checks.
