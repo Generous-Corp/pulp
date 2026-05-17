@@ -6331,3 +6331,13 @@ commits per PR, with held local tranches accumulated before submission. The
 goal is to keep GitHub-hosted CI efficient while still validating each tranche
 locally with focused CTest and local diff-cover before aggregation. The current
 OSC tranche remains local and should not be submitted by itself.
+
+2026-05-17 11:25 PDT: repaired #2126's latest Codecov app patch failure. The
+GitHub custom diff gate was above threshold, but the Codecov app check reported
+71.42% against the 75% patch target on the socket handle diff. Added
+coverage-tagged UDP guard coverage in commit `37e95417a`, validated with
+`git diff --check`, rebuilt `pulp-test-network-stream`, ran the focused direct
+socket coverage tag (4 cases / 23 assertions), and ran local diff-cover with
+the focused socket/TcpStream CTest selection (6/6 passed, 87% diff coverage).
+Pushed the repair to `feature/phase3-codecov-batch-682` so GitHub-hosted CI and
+Codecov can rerun on the new head.
