@@ -36,7 +36,7 @@ public:
 
     /// Add an event (maintains sorted order by timestamp)
     void add_event(const TimestampedMidiEvent& event) {
-        auto it = std::lower_bound(events_.begin(), events_.end(), event,
+        auto it = std::upper_bound(events_.begin(), events_.end(), event,
             [](const TimestampedMidiEvent& a, const TimestampedMidiEvent& b) {
                 return a.timestamp < b.timestamp;
             });

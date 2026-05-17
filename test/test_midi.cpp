@@ -573,18 +573,18 @@ TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx even
 
     REQUIRE(sequence.size() == 3);
     REQUIRE(sequence[0].is_cc());
-    REQUIRE(sequence[1].is_note_off());
-    REQUIRE_FALSE(sequence[1].is_note_on());
-    REQUIRE(sequence[2].is_sysex());
-    REQUIRE(sequence[2].sysex == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+    REQUIRE(sequence[1].is_sysex());
+    REQUIRE(sequence[1].sysex == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+    REQUIRE(sequence[2].is_note_off());
+    REQUIRE_FALSE(sequence[2].is_note_on());
 
     auto at_one_second = sequence.events_in_range(1.0, 1.1);
     REQUIRE(at_one_second.size() == 2);
-    REQUIRE(at_one_second[0]->is_note_off());
-    REQUIRE(at_one_second[1]->is_sysex());
+    REQUIRE(at_one_second[0]->is_sysex());
+    REQUIRE(at_one_second[1]->is_note_off());
 }
 
-TEST_CASE("MidiMessageSequence inserts equal timestamps before existing events",
+TEST_CASE("MidiMessageSequence preserves equal-timestamp insertion order",
           "[midi][sequence][coverage]") {
     MidiMessageSequence sequence;
 
@@ -593,9 +593,9 @@ TEST_CASE("MidiMessageSequence inserts equal timestamps before existing events",
     sequence.add_note_off(1.0, 0, 60);
 
     REQUIRE(sequence.size() == 3);
-    REQUIRE(sequence[0].is_note_off());
+    REQUIRE(sequence[0].is_note_on());
     REQUIRE(sequence[1].is_cc());
-    REQUIRE(sequence[2].is_note_on());
+    REQUIRE(sequence[2].is_note_off());
 
     auto in_range = sequence.events_in_range(1.0, 1.0);
     REQUIRE(in_range.empty());
@@ -625,6 +625,27 @@ TEST_CASE("MidiMessageSequence stores raw sysex events and masks factories",
     REQUIRE(sequence[2].status == 0xB1);
     REQUIRE(sequence[2].data1 == 0x74);
     REQUIRE(sequence[2].data2 == 0x48);
+}
+
+TEST_CASE("MidiMessageSequence preserves same-timestamp insertion order",
+          "[midi][sequence][codecov]") {
+    MidiMessageSequence sequence;
+    sequence.add_cc(0.0, 0, 7, 100);
+    sequence.add_note_on(0.0, 0, 60, 80);
+    sequence.add_note_off(0.0, 0, 60);
+    sequence.add_cc(-0.5, 0, 1, 64);
+    sequence.add_cc(1.0, 0, 74, 32);
+
+    REQUIRE(sequence.size() == 5);
+    REQUIRE(sequence[0].timestamp == Approx(-0.5));
+    REQUIRE(sequence[1].timestamp == Approx(0.0));
+    REQUIRE(sequence[1].is_cc());
+    REQUIRE(sequence[1].data1 == 7);
+    REQUIRE(sequence[2].is_note_on());
+    REQUIRE(sequence[2].note() == 60);
+    REQUIRE(sequence[3].is_note_off());
+    REQUIRE(sequence[3].note() == 60);
+    REQUIRE(sequence[4].timestamp == Approx(1.0));
 }
 
 TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
