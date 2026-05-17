@@ -430,6 +430,23 @@ TEST_CASE("StateStore serialization", "[state][serialize]") {
     SECTION("Too-short data rejected") {
         REQUIRE_FALSE(store.deserialize(std::span<const uint8_t>{}));
     }
+
+    SECTION("CRC-valid truncated parameter payload rejected") {
+        auto truncated = data;
+        truncated.erase(truncated.begin() + 20, truncated.begin() + 28);
+        const auto payload_size = truncated.size() - 4;
+        write_u32_le(truncated, payload_size, crc32_simple_for_test(truncated, payload_size));
+
+        StateStore store4;
+        store4.add_parameter(p1);
+        store4.add_parameter(p2);
+        store4.set_value(1, 0.25f);
+        store4.set_value(2, 0.25f);
+
+        REQUIRE_FALSE(store4.deserialize(truncated));
+        REQUIRE_THAT(store4.get_value(1), WithinAbs(0.25, 0.001));
+        REQUIRE_THAT(store4.get_value(2), WithinAbs(0.25, 0.001));
+    }
 }
 
 TEST_CASE("StateStore serialization records header fields and rejects future versions",

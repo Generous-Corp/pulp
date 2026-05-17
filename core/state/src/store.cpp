@@ -460,12 +460,18 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
     if (version > state_version_) return false; // reject future versions we can't parse
     uint32_t count = choc::memory::readLittleEndian<uint32_t>(data.data() + 8);
 
+    constexpr std::size_t header_size = 12;
+    constexpr std::size_t param_size = 8;
+    if (count > (payload_size - header_size) / param_size ||
+        payload_size != header_size + static_cast<std::size_t>(count) * param_size)
+        return false;
+
     // Read parameters
-    std::size_t offset = 12;
-    for (uint32_t i = 0; i < count && offset + 8 <= payload_size; ++i) {
+    std::size_t offset = header_size;
+    for (uint32_t i = 0; i < count; ++i) {
         ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
         float value = choc::memory::readLittleEndian<float>(data.data() + offset + 4);
-        offset += 8;
+        offset += param_size;
 
         // Only set if we know this parameter (forward compatibility)
         auto it = id_to_index_.find(id);
