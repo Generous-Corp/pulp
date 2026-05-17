@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/osc/bundle.hpp>
+#include <memory>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -61,6 +62,15 @@ TEST_CASE("OSC TimeTag keeps fractional unix seconds near one-second boundary",
     REQUIRE_FALSE(tt == TimeTag::from_unix(12345.0));
 }
 
+TEST_CASE("OSC TimeTag converts fractional halves without losing the fraction",
+          "[osc][bundle][timetag][codecov]") {
+    auto tt = TimeTag::from_unix(1000.5);
+
+    REQUIRE(tt.seconds == 2208989800u);
+    REQUIRE(tt.fraction == 0x80000000u);
+    REQUIRE_THAT(tt.to_unix(), WithinAbs(1000.5, 0.000001));
+}
+
 // ── Bundle construction ─────────────────────────────────────────────────
 
 TEST_CASE("OSC Bundle add message", "[osc][bundle]") {
@@ -97,6 +107,37 @@ TEST_CASE("OSC default BundleElement is an empty message element",
     REQUIRE_FALSE(elem.is_bundle());
     REQUIRE(elem.message().address.empty());
     REQUIRE(elem.message().args.empty());
+}
+
+TEST_CASE("OSC BundleElement takes ownership of unique_ptr bundles",
+          "[osc][bundle][codecov]") {
+    auto nested = std::make_unique<Bundle>();
+    nested->timetag = TimeTag::from_unix(42.0);
+    Message msg("/owned");
+    msg.add(5);
+    nested->add(std::move(msg));
+
+    BundleElement elem(std::move(nested));
+
+    REQUIRE(elem.is_bundle());
+    REQUIRE_FALSE(elem.is_message());
+    REQUIRE(elem.bundle().timetag == TimeTag::from_unix(42.0));
+    REQUIRE(elem.bundle().elements.size() == 1);
+    REQUIRE(elem.bundle().elements[0].message().address == "/owned");
+}
+
+TEST_CASE("OSC BundleElement value constructor copies nested bundle content",
+          "[osc][bundle][codecov]") {
+    Bundle nested;
+    Message msg("/value-copy");
+    msg.add(std::string("payload"));
+    nested.add(std::move(msg));
+
+    BundleElement elem(std::move(nested));
+
+    REQUIRE(elem.is_bundle());
+    REQUIRE(elem.bundle().elements.size() == 1);
+    REQUIRE(elem.bundle().elements[0].message().get_string(0) == "payload");
 }
 
 // ── Bundle serialization ────────────────────────────────────────────────
@@ -143,6 +184,20 @@ TEST_CASE("OSC Bundle serialize/deserialize round-trip", "[osc][bundle]") {
     REQUIRE(restored->elements.size() == 2);
     REQUIRE(restored->elements[0].is_message());
     REQUIRE(restored->elements[0].message().address == "/volume");
+}
+
+TEST_CASE("OSC Bundle serialize preserves non-immediate timetag bytes",
+          "[osc][bundle][codecov]") {
+    Bundle bundle;
+    bundle.timetag = {0x01020304u, 0xA0B0C0D0u};
+
+    auto data = bundle.serialize();
+    auto restored = Bundle::deserialize(data.data(), data.size());
+
+    REQUIRE(data.size() == 16);
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->timetag.seconds == 0x01020304u);
+    REQUIRE(restored->timetag.fraction == 0xA0B0C0D0u);
 }
 
 // ── Address pattern matching ────────────────────────────────────────────
@@ -268,6 +323,14 @@ TEST_CASE("Bundle::deserialize rejects malformed message element",
     REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
 }
 
+TEST_CASE("Bundle::deserialize rejects zero-sized elements",
+          "[osc][bundle][deserialize-edge][codecov]") {
+    auto buf = make_empty_bundle_bytes();
+    append_u32(buf, 0);
+
+    REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
+}
+
 // ── Bundle round-trip edges ────────────────────────────────────────────
 
 TEST_CASE("Empty Bundle serialize/deserialize round-trip",
@@ -334,6 +397,26 @@ TEST_CASE("Bundle deep nesting (3 levels) round-trips",
     const auto& l3 = l2.elements[0].bundle();
     REQUIRE(l3.elements[0].is_message());
     REQUIRE(l3.elements[0].message().get_int(0) == 42);
+}
+
+TEST_CASE("Bundle round-trip preserves blob and float message arguments",
+          "[osc][bundle][roundtrip][codecov]") {
+    Bundle bundle;
+    Message msg("/mixed");
+    msg.add(std::vector<uint8_t>{0xAA, 0xBB});
+    msg.add(1.25f);
+    bundle.add(std::move(msg));
+
+    auto data = bundle.serialize();
+    auto restored = Bundle::deserialize(data.data(), data.size());
+
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->elements.size() == 1);
+    const auto& restored_msg = restored->elements[0].message();
+    REQUIRE(restored_msg.address == "/mixed");
+    REQUIRE(std::get<std::vector<uint8_t>>(restored_msg.args[0])
+            == std::vector<uint8_t>{0xAA, 0xBB});
+    REQUIRE_THAT(restored_msg.get_float(1), WithinAbs(1.25, 0.001));
 }
 
 // ── Address pattern: character class ───────────────────────────────────

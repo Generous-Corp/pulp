@@ -8,6 +8,9 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 using namespace pulp::osc;
 using Catch::Matchers::WithinAbs;
@@ -17,6 +20,13 @@ namespace {
 constexpr uint16_t kOscHostnameTestPort = 29876;
 constexpr uint16_t kOscInvalidPacketPort = 29877;
 constexpr uint16_t kOscStopIdempotentPort = 29878;
+
+void append_osc_string(std::vector<uint8_t>& data, std::string_view text) {
+    data.insert(data.end(), text.begin(), text.end());
+    data.push_back(0);
+    while (data.size() % 4 != 0)
+        data.push_back(0);
+}
 
 } // namespace
 
@@ -68,6 +78,23 @@ TEST_CASE("OSC Message defaults cover empty and wrong-type accessors",
     REQUIRE(msg.get_int(0, 9) == 9);
     REQUIRE(msg.get_float(1, 3.0f) == 3.0f);
     REQUIRE(msg.get_string(2, "blob") == "blob");
+}
+
+TEST_CASE("OSC Message add overloads preserve fluent chaining and argument types",
+          "[osc][message][codecov]") {
+    Message msg("/chain");
+    auto* returned = &msg.add(7)
+        .add(0.5f)
+        .add(std::string("name"))
+        .add(std::vector<uint8_t>{0x10, 0x20, 0x30});
+
+    REQUIRE(returned == &msg);
+    REQUIRE(msg.args.size() == 4);
+    REQUIRE(std::holds_alternative<int32_t>(msg.args[0]));
+    REQUIRE(std::holds_alternative<float>(msg.args[1]));
+    REQUIRE(std::holds_alternative<std::string>(msg.args[2]));
+    REQUIRE(std::holds_alternative<std::vector<uint8_t>>(msg.args[3]));
+    REQUIRE(std::get<std::vector<uint8_t>>(msg.args[3]).back() == 0x30);
 }
 
 // ── Encoding/Decoding ────────────────────────────────────────────────────────
@@ -145,6 +172,71 @@ TEST_CASE("OSC 4-byte alignment", "[osc][codec]") {
     auto decoded = decode(data.data(), data.size());
     REQUIRE(decoded.address == "/a");
     REQUIRE(decoded.get_int(0) == 42);
+}
+
+TEST_CASE("OSC encode with no arguments emits an empty type-tag section",
+          "[osc][codec][codecov]") {
+    Message msg("/plain");
+
+    auto data = encode(msg);
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(data.size() == 12);
+    REQUIRE(decoded.address == "/plain");
+    REQUIRE(decoded.args.empty());
+    REQUIRE(data[8] == ',');
+    REQUIRE(data[9] == 0);
+}
+
+TEST_CASE("OSC decode accepts explicit comma tag with no arguments",
+          "[osc][codec][codecov]") {
+    std::vector<uint8_t> data;
+    append_osc_string(data, "/empty-tags");
+    append_osc_string(data, ",");
+
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/empty-tags");
+    REQUIRE(decoded.args.empty());
+}
+
+TEST_CASE("OSC decode ignores unknown type tags without adding arguments",
+          "[osc][codec][codecov]") {
+    std::vector<uint8_t> data;
+    append_osc_string(data, "/unknown-tags");
+    append_osc_string(data, ",TFNz");
+
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/unknown-tags");
+    REQUIRE(decoded.args.empty());
+}
+
+TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
+          "[osc][codec][codecov]") {
+    const std::vector<uint8_t> data{'/', 'b', 'a', 'r'};
+
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/bar");
+    REQUIRE(decoded.args.empty());
+}
+
+TEST_CASE("OSC encode/decode preserves blob payloads at padding boundaries",
+          "[osc][codec][codecov]") {
+    Message msg("/blob-padding");
+    msg.add(std::vector<uint8_t>{0x01, 0x02, 0x03});
+    msg.add(std::vector<uint8_t>{0x04, 0x05, 0x06, 0x07});
+
+    auto data = encode(msg);
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/blob-padding");
+    REQUIRE(decoded.args.size() == 2);
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[0])
+            == std::vector<uint8_t>{0x01, 0x02, 0x03});
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[1])
+            == std::vector<uint8_t>{0x04, 0x05, 0x06, 0x07});
 }
 
 // ── UDP sender/receiver ─────────────────────────────────────────────────────
