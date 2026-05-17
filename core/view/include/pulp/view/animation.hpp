@@ -5,8 +5,16 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <utility>
 
+#include <pulp/view/motion.hpp>             // for motion::Provenance + publish_value
 #include <pulp/view/motion_preferences.hpp>
+
+#if defined(__has_include)
+#  if __has_include(<source_location>)
+#    include <source_location>
+#  endif
+#endif
 
 namespace pulp::view {
 
@@ -94,6 +102,52 @@ public:
         apply_motion_policy_at_start();
     }
 
+    // ── Motion provenance (Phase 9) ─────────────────────────────────
+    //
+    // Attach a `motion::Provenance` envelope to this tween. When
+    // `publish(view, metric)` is called, the publish channel stamps
+    // the envelope onto every emitted event so an offline reader can
+    // answer "what code created this tween?". Off by default — pre-
+    // Phase-9 tweens that don't call this method behave identically.
+    //
+    // The convenience `PULP_MOTION_TWEEN(...)` macro auto-fills
+    // `source_file` / `source_line` from `std::source_location` at the
+    // construction site.
+    void set_motion_provenance(std::string source_kind,
+                               std::string source_id,
+                               std::string source_file = {},
+                               int source_line = 0) {
+        provenance_.source_kind = std::move(source_kind);
+        provenance_.source_id = std::move(source_id);
+        provenance_.source_file = std::move(source_file);
+        provenance_.source_line = source_line;
+    }
+
+    /// Set the full envelope. Useful when the provenance is built up
+    /// somewhere else (e.g. a design-import codegen step).
+    void set_motion_provenance(motion::Provenance p) {
+        provenance_ = std::move(p);
+    }
+
+    const motion::Provenance& motion_provenance() const noexcept {
+        return provenance_;
+    }
+
+    /// Publish the tween's current value through the motion publish
+    /// channel under the given (view, metric) name. Stamps the tween's
+    /// provenance envelope (set via `set_motion_provenance` or
+    /// `PULP_MOTION_TWEEN`) onto the emitted event. Cheap no-op when
+    /// motion tracing is off (`Coordinator::tracing_enabled() == false`).
+    void publish(std::string view_name,
+                 std::string metric_name,
+                 motion::PublishOptions opts = {}) const {
+        if (provenance_.is_set() && !opts.provenance.is_set()) {
+            opts.provenance = provenance_;
+        }
+        motion::publish_value(std::move(view_name), std::move(metric_name),
+                              static_cast<double>(current_), opts);
+    }
+
 private:
     /// Read `MotionPreferences::current()` once and apply it to `duration_`
     /// / `elapsed_` / `current_` so the tween starts already honoring the
@@ -119,7 +173,44 @@ private:
     float elapsed_ = 0;
     float current_ = 0;
     EasingFunction ease_ = easing::linear;
+    motion::Provenance provenance_;  ///< Phase 9: opt-in attribution.
 };
+
+// ── PULP_MOTION_TWEEN (Phase 9) ─────────────────────────────────────────
+//
+// Convenience macro: constructs a `Tween` and stamps a `motion::Provenance`
+// envelope with `source_kind = "tween"`, the supplied `source_id`, and
+// `source_file` / `source_line` captured from `std::source_location` at
+// the call site. The resulting tween is returned by value so the call
+// site looks like `auto t = PULP_MOTION_TWEEN("hover-glow", 0.0f, 1.0f, 0.2f);`.
+//
+// `__FILE__` / `__LINE__` fall back if `<source_location>` isn't available
+// (e.g. exotic toolchains); Pulp targets C++20 so the modern path is the
+// default.
+#ifdef __cpp_lib_source_location
+#define PULP_MOTION_TWEEN(source_id, ...)                                       \
+    ([](::pulp::view::Tween&& __pulp_tween_,                                    \
+        const ::std::source_location __pulp_loc_ =                              \
+            ::std::source_location::current())                                  \
+            -> ::pulp::view::Tween {                                            \
+        __pulp_tween_.set_motion_provenance(                                    \
+            ::std::string{"tween"},                                             \
+            ::std::string{(source_id)},                                         \
+            ::std::string{__pulp_loc_.file_name()},                             \
+            static_cast<int>(__pulp_loc_.line()));                              \
+        return __pulp_tween_;                                                   \
+    }(::pulp::view::Tween(__VA_ARGS__)))
+#else
+#define PULP_MOTION_TWEEN(source_id, ...)                                       \
+    ([](::pulp::view::Tween&& __pulp_tween_) -> ::pulp::view::Tween {           \
+        __pulp_tween_.set_motion_provenance(                                    \
+            ::std::string{"tween"},                                             \
+            ::std::string{(source_id)},                                         \
+            ::std::string{__FILE__},                                            \
+            static_cast<int>(__LINE__));                                        \
+        return __pulp_tween_;                                                   \
+    }(::pulp::view::Tween(__VA_ARGS__)))
+#endif
 
 // ── AnimationManager ─────────────────────────────────────────────────────────
 

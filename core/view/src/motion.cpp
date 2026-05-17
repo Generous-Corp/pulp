@@ -463,6 +463,25 @@ void publish_components(std::string view_name,
                                              std::move(components), opts);
 }
 
+// ── Ambient provenance (Phase 9) ─────────────────────────────────────
+//
+// The ambient slot lives on the Coordinator's State (under its mutex)
+// so concurrent publishes from any sink-fed thread see a coherent
+// snapshot. Read by `publish_internal` when a caller's PublishOptions
+// carries an empty provenance envelope.
+
+void set_ambient_provenance(Provenance p) {
+    Coordinator::instance().set_ambient_provenance_internal(std::move(p));
+}
+
+void clear_ambient_provenance() {
+    Coordinator::instance().set_ambient_provenance_internal(Provenance{});
+}
+
+Provenance current_ambient_provenance() {
+    return Coordinator::instance().current_ambient_provenance_internal();
+}
+
 // ── Coordinator internals ─────────────────────────────────────────────
 
 struct PerMetricState {
@@ -520,6 +539,11 @@ struct Coordinator::State {
     // sampler-driven trace map above so publishes and sampled traces
     // don't interfere even on the same view/metric name.
     std::map<PublishKey, PublishState> publish_states;
+    // Phase 9: ambient publish provenance. Set via
+    // `set_ambient_provenance` and stamped onto publishes whose
+    // PublishOptions::provenance is empty. Single global slot — intended
+    // for single-threaded scripted contexts.
+    Provenance ambient_provenance;
 };
 
 // ── Coordinator ───────────────────────────────────────────────────────
@@ -636,6 +660,17 @@ void Coordinator::reset() {
     state_->emitted_count = 0;
     state_->next_sink_id = 1;
     state_->next_trace_id = 1;
+    state_->ambient_provenance = Provenance{};
+}
+
+void Coordinator::set_ambient_provenance_internal(Provenance p) {
+    std::lock_guard<std::mutex> lock(state_->mtx);
+    state_->ambient_provenance = std::move(p);
+}
+
+Provenance Coordinator::current_ambient_provenance_internal() const {
+    std::lock_guard<std::mutex> lock(state_->mtx);
+    return state_->ambient_provenance;
 }
 
 std::size_t Coordinator::active_trace_count() const noexcept {
@@ -839,6 +874,13 @@ void Coordinator::publish_internal(std::string view_name,
             pstate.epsilon = opts.epsilon;
         }
 
+        // Phase 9: resolve effective provenance. Explicit opts.provenance
+        // wins; otherwise fall back to the coordinator's ambient slot.
+        // Empty stays empty so pre-Phase-9 callers see no behavior change.
+        const Provenance effective_prov =
+            opts.provenance.is_set() ? opts.provenance
+                                     : state_->ambient_provenance;
+
         auto enqueue = [&](SampleEvent::Kind kind,
                            std::vector<std::pair<std::string, double>> comps,
                            std::vector<std::pair<std::string, double>> deltas = {}) {
@@ -855,6 +897,7 @@ void Coordinator::publish_internal(std::string view_name,
             e.trace_id = 0;
             e.metric_id = 0;
             e.burst_id = pstate.current_burst_id;
+            e.provenance = effective_prov;  // Phase 9
             e.components = std::move(comps);
             e.deltas = std::move(deltas);
             for (const auto& [sid, sink] : state_->sinks) {

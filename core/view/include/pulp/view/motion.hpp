@@ -140,6 +140,13 @@ std::string format_line(const SampleEvent& e);
 struct PublishOptions {
     int precision = 3;
     double epsilon = 0.0001;
+    /// Phase 9: optional Provenance envelope. When set, the publish
+    /// channel stamps each emitted event (Baseline / Start / Sample / End)
+    /// with this provenance so an offline reader can answer "what
+    /// animation surface drove this value?" Empty by default — pre-Phase-9
+    /// callers that omit this field continue emitting events with the
+    /// envelope unset (backwards compatible).
+    Provenance provenance;
 };
 
 /// Single-component publish.
@@ -154,6 +161,23 @@ void publish_components(std::string view_name,
                         std::string metric_name,
                         std::vector<std::pair<std::string, double>> components,
                         PublishOptions opts = {});
+
+// ── Ambient provenance (Phase 9) ─────────────────────────────────────
+//
+// Some animation surfaces (JS rAF, design-import codegen) don't easily
+// thread a `PublishOptions{ .provenance = ... }` through every call site.
+// For those, the publish channel offers a process-wide "ambient"
+// provenance slot — `set_ambient_provenance(p)` is sticky until cleared
+// (or replaced). When a publish call carries an empty `opts.provenance`,
+// the coordinator stamps the ambient provenance instead. When both are
+// set, the explicit `opts.provenance` wins.
+//
+// Ambient state is intended for single-threaded scripted contexts (one
+// JS engine per bridge). Tests should call `clear_ambient_provenance()`
+// between scenarios so leftover state doesn't bleed across.
+void set_ambient_provenance(Provenance p);
+void clear_ambient_provenance();
+Provenance current_ambient_provenance();
 
 // ── Record / replay fixtures (Phase 5) ───────────────────────────────
 //
@@ -460,6 +484,12 @@ public:
                           std::string metric_name,
                           std::vector<std::pair<std::string, double>> components,
                           PublishOptions opts);
+
+    // ── Phase 9: ambient provenance internals ─────────────────────────
+    /// Called by `set_ambient_provenance` / `clear_ambient_provenance`.
+    /// Callers should prefer the free functions for forward compatibility.
+    void set_ambient_provenance_internal(Provenance p);
+    Provenance current_ambient_provenance_internal() const;
 
 private:
     Coordinator();

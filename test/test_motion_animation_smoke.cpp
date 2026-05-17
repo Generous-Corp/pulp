@@ -92,9 +92,11 @@ TEST_CASE("End-to-end: real Tween → publish_value → fixture → assertion he
 
     for (int i = 0; i < total_ticks; ++i) {
         const float v = tween.advance(dt);
+        PublishOptions po{};
+        po.precision = 3;
+        po.epsilon = 0.001;
         publish_value("Gain Knob", "opacity",
-                      static_cast<double>(v),
-                      /*opts=*/{ /*precision=*/3, /*epsilon=*/0.001 });
+                      static_cast<double>(v), po);
         clock.tick(dt);
     }
 
