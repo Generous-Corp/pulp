@@ -52,6 +52,8 @@ static void print_usage() {
     std::cout << "                          only emitted for --from claude — pulp #1035)\n";
     std::cout << "  --emit classnames       Force-emit classnames.json (default on for --from claude)\n";
     std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
+    std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
+    std::cout << "  --no-import-shortcuts   Skip keyboard shortcut auto-import (default: import)\n";
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
@@ -135,6 +137,11 @@ int main(int argc, char* argv[]) {
     std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
     bool classnames_output_explicit = false;             // pulp friction-fix #4
     bool emit_classnames = true;                          // default on for --from claude
+    // pulp #2116 V2 — keyboard shortcuts auto-imported from source.
+    // Default-on; opt out with --no-import-shortcuts.
+    std::string shortcuts_output = "shortcuts.json";
+    bool shortcuts_output_explicit = false;
+    bool import_shortcuts = true;
     bool output_explicit = false;                         // pulp friction-fix #4
     bool tokens_file_explicit = false;                    // pulp friction-fix #4
     // pulp #1031 — versioned detect surface
@@ -213,6 +220,11 @@ int main(int argc, char* argv[]) {
             if (what == "classnames") emit_classnames = true;
         } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
             emit_classnames = false;
+        } else if (std::strcmp(argv[i], "--shortcuts") == 0 && i + 1 < argc) {
+            shortcuts_output = argv[++i];
+            shortcuts_output_explicit = true;
+        } else if (std::strcmp(argv[i], "--no-import-shortcuts") == 0) {
+            import_shortcuts = false;
         } else if (std::strcmp(argv[i], "--detect-only") == 0) {
             detect_only = true;
         } else if (std::strcmp(argv[i], "--report-new-format") == 0) {
@@ -488,6 +500,19 @@ int main(int argc, char* argv[]) {
     opts.include_tokens = include_tokens;
     opts.include_comments = include_comments;
     opts.preview_mode = preview_mode;
+
+    // pulp #2116 V2 — auto-import keyboard shortcuts from the source.
+    // Default-on. Source-agnostic helper: the extractor takes a raw
+    // TSX/JS/HTML string and regex-scans for `e.key === '…'` patterns,
+    // so all source types (claude, v0, figma code blobs, stitch inline
+    // JS, pencil) can route through the same call without per-source
+    // branching here.
+    std::vector<DetectedShortcut> detected_shortcuts;
+    if (import_shortcuts) {
+        detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
+        opts.shortcuts = detected_shortcuts;
+    }
+
     auto js = generate_pulp_js(ir, opts);
 
     if (dry_run) {
@@ -587,6 +612,20 @@ int main(int argc, char* argv[]) {
                       << " (" << rules.size() << " class rule"
                       << (rules.size() == 1 ? "" : "s")
                       << " — feed to @pulp/css-adapt or dom-adapter)\n";
+        }
+    }
+
+    // pulp #2116 V2 — shortcuts manifest alongside classnames. Mirror
+    // shape so a reviewer can audit what the auto-import will bind. The
+    // generated ui.js already contains the matching registerShortcut(...)
+    // calls; this file is for human/CI audit.
+    if (import_shortcuts && !detected_shortcuts.empty()) {
+        const auto shortcuts_json = serialize_detected_shortcuts(detected_shortcuts);
+        if (write_file(shortcuts_output, shortcuts_json)) {
+            std::cout << "Wrote " << shortcuts_output
+                      << " (" << detected_shortcuts.size() << " shortcut"
+                      << (detected_shortcuts.size() == 1 ? "" : "s")
+                      << " — bound natively via registerShortcut())\n";
         }
     }
 

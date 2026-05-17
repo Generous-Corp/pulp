@@ -10,10 +10,21 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/input_events.hpp>
 #include <algorithm>
 
+using pulp::view::CodeGenMode;
+using pulp::view::CodeGenOptions;
+using pulp::view::DesignIR;
 using pulp::view::DetectedShortcut;
 using pulp::view::extract_keyboard_shortcuts;
+using pulp::view::generate_pulp_js;
+using pulp::view::key_string_to_keycode;
+using pulp::view::modifier_strings_to_mask;
 using pulp::view::serialize_detected_shortcuts;
 
 TEST_CASE("extract_keyboard_shortcuts finds bare e.key === literal", "[design-import][shortcuts]") {
@@ -41,7 +52,13 @@ TEST_CASE("extract_keyboard_shortcuts handles inline onKeyDown JSX", "[design-im
     REQUIRE(out[1].key == "Escape");
 }
 
-TEST_CASE("extract_keyboard_shortcuts captures meta modifier", "[design-import][shortcuts]") {
+TEST_CASE("extract_keyboard_shortcuts captures meta + ctrl separately", "[design-import][shortcuts]") {
+    // Codex P1 review on #2119: the cross-platform `metaKey || ctrlKey`
+    // idiom now yields BOTH "meta" AND "ctrl" modifiers. generate_pulp_js
+    // emits a separate registerShortcut for each physical chord so a user
+    // can hit Cmd+S on macOS or Ctrl+S on Win/Linux and the synthetic
+    // event carries the right modifier flags. Previously the extractor
+    // collapsed to a single "meta", which broke Ctrl-only handlers.
     auto out = extract_keyboard_shortcuts(
         R"JS(
             const onKey = (e) => {
@@ -50,8 +67,37 @@ TEST_CASE("extract_keyboard_shortcuts captures meta modifier", "[design-import][
         )JS", "");
     REQUIRE(out.size() == 1);
     REQUIRE(out[0].key == "s");
-    // metaKey || ctrlKey collapses to a single "meta" entry — that's the
-    // cross-platform shortcut idiom we want native Pulp to bind once.
+    REQUIRE(out[0].modifiers.size() == 2);
+    auto has = [&](const std::string& m) {
+        return std::find(out[0].modifiers.begin(), out[0].modifiers.end(), m)
+            != out[0].modifiers.end();
+    };
+    REQUIRE(has("meta"));
+    REQUIRE(has("ctrl"));
+}
+
+TEST_CASE("extract_keyboard_shortcuts captures Ctrl-only modifier", "[design-import][shortcuts]") {
+    // Codex P1 case from #2119: `e.ctrlKey && e.key === 's'` is a
+    // Win/Linux-only Ctrl+S binding. Pre-fix the extractor renamed it to
+    // "meta" and V2 codegen emitted Cmd-only registerShortcut + a synthetic
+    // event with `ctrlKey: false` — so the source handler never fired.
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            if (e.ctrlKey && e.key === 's') save();
+        )JS", "");
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].key == "s");
+    REQUIRE(out[0].modifiers.size() == 1);
+    REQUIRE(out[0].modifiers[0] == "ctrl");
+}
+
+TEST_CASE("extract_keyboard_shortcuts captures Meta-only modifier", "[design-import][shortcuts]") {
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            if (e.metaKey && e.key === 's') save();
+        )JS", "");
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].key == "s");
     REQUIRE(out[0].modifiers.size() == 1);
     REQUIRE(out[0].modifiers[0] == "meta");
 }
@@ -139,4 +185,368 @@ TEST_CASE("serialize_detected_shortcuts emits stable JSON", "[design-import][sho
     REQUIRE(mods_pos != std::string::npos);
     REQUIRE(json.find("\"meta\"", mods_pos) != std::string::npos);
     REQUIRE(json.find("\"source_location\": \"editor.tsx:42\"") != std::string::npos);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// V2 wire-up tests — helpers + codegen emission
+// ────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("key_string_to_keycode maps DOM key names", "[design-import][shortcuts][v2]") {
+    REQUIRE(key_string_to_keycode("Escape") == 274);     // KeyCode::escape
+    REQUIRE(key_string_to_keycode("escape") == 274);     // case-insensitive
+    REQUIRE(key_string_to_keycode("Enter") == 273);
+    REQUIRE(key_string_to_keycode("Return") == 273);     // alias
+    REQUIRE(key_string_to_keycode("Tab") == 272);
+    REQUIRE(key_string_to_keycode("ArrowLeft") == 256);
+    REQUIRE(key_string_to_keycode("Left") == 256);       // alias
+    REQUIRE(key_string_to_keycode("s") == 's');          // 115
+    REQUIRE(key_string_to_keycode("S") == 's');          // upper→lower
+    REQUIRE(key_string_to_keycode("F12") == 301);
+    REQUIRE(key_string_to_keycode("Space") == ' ');
+}
+
+TEST_CASE("key_string_to_keycode returns 0 for unknown", "[design-import][shortcuts][v2]") {
+    REQUIRE(key_string_to_keycode("") == 0);
+    REQUIRE(key_string_to_keycode("Boop") == 0);
+    REQUIRE(key_string_to_keycode("@") == 0);  // not in alphanumeric range
+}
+
+TEST_CASE("modifier_strings_to_mask combines bits + 'meta' maps to kModCmd", "[design-import][shortcuts][v2]") {
+    REQUIRE(modifier_strings_to_mask({}) == 0);
+    REQUIRE(modifier_strings_to_mask({"shift"}) == 1);              // kModShift
+    REQUIRE(modifier_strings_to_mask({"ctrl"}) == 2);               // kModCtrl
+    REQUIRE(modifier_strings_to_mask({"alt"}) == 4);                // kModAlt
+    // "meta" -> kModCmd (platform-primary) per the extractor's
+    // cross-platform metaKey||ctrlKey collapse. kModCmd is bit 4 = 16.
+    REQUIRE(modifier_strings_to_mask({"meta"}) == 16);
+    REQUIRE(modifier_strings_to_mask({"meta", "shift"}) == 17);
+    REQUIRE(modifier_strings_to_mask({"unknown-mod"}) == 0);        // dropped silently
+}
+
+TEST_CASE("generate_pulp_js emits registerShortcut + handler thunk per shortcut", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut esc;
+    esc.key = "Escape";
+    esc.modifiers = {};
+    opts.shortcuts.push_back(esc);
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"meta"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;  // empty root — we only care about the shortcut block
+
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Each shortcut produces:
+    //   1. globalThis.__pulpShortcutHandler_N = function() { ... }
+    //   2. registerShortcut(keycode, mask, '__pulpShortcutHandler_N')
+    REQUIRE(js.find("globalThis.__pulpShortcutHandler_0") != std::string::npos);
+    REQUIRE(js.find("globalThis.__pulpShortcutHandler_1") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(274, 0, '__pulpShortcutHandler_0')") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 16, '__pulpShortcutHandler_1')") != std::string::npos);
+
+    // Synthetic-keydown re-dispatch: each thunk calls __dispatch__ with
+    // a properly-shaped W3C-ish event object so React handlers fire.
+    REQUIRE(js.find("__dispatch__('__global__', 'keydown'") != std::string::npos);
+    REQUIRE(js.find("key: 'Escape'") != std::string::npos);
+    REQUIRE(js.find("key: 's'") != std::string::npos);
+    REQUIRE(js.find("metaKey: true") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js skips shortcuts whose key doesn't resolve", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut weird;
+    weird.key = "MysteryKey";
+    opts.shortcuts.push_back(weird);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Unmapped key produces no registerShortcut entry. No __pulpShortcutHandler
+    // is emitted either (we don't want orphan handlers).
+    REQUIRE(js.find("registerShortcut") == std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler_0") == std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js with empty shortcuts emits no shortcut block", "[design-import][shortcuts][v2]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    // opts.shortcuts is default-empty.
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("registerShortcut") == std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler") == std::string::npos);
+}
+
+TEST_CASE("collect_modifiers scopes to enclosing if(...) only", "[design-import][shortcuts][v2]") {
+    // Pre-fix this returned ["meta", "alt", "shift"] for every Escape match
+    // because the modifier-detection window saw the modifier checks from
+    // sibling branches. Now it walks back only within the same if condition.
+    auto out = extract_keyboard_shortcuts(
+        R"JS(
+            const onKey = (e) => {
+                if (e.key === 'Escape') closeAll();
+                if ((e.metaKey || e.ctrlKey) && e.key === 's') save();
+                if (e.shiftKey && e.altKey && e.key === 'F') openFlare();
+            };
+        )JS", "");
+    // Sorted by key: Escape, F, s.
+    REQUIRE(out.size() == 3);
+    REQUIRE(out[0].key == "Escape");
+    REQUIRE(out[0].modifiers.empty());  // bare check, no modifiers
+    REQUIRE(out[1].key == "F");
+    REQUIRE(out[2].key == "s");
+    // `metaKey || ctrlKey` now emits BOTH (Codex P1 #2119) so codegen can
+    // bind Cmd+S and Ctrl+S as distinct physical chords.
+    REQUIRE(out[2].modifiers.size() == 2);
+    auto s_has = [&](const std::string& m) {
+        return std::find(out[2].modifiers.begin(), out[2].modifiers.end(), m)
+            != out[2].modifiers.end();
+    };
+    REQUIRE(s_has("meta"));
+    REQUIRE(s_has("ctrl"));
+}
+
+TEST_CASE("key_string_to_keycode maps KeyboardEvent.code letter/digit forms", "[design-import][shortcuts][v2]") {
+    // Codex P2 review on #2119: the extractor pulls both `event.key` and
+    // `event.code` patterns. Without these mappings `event.code === 'KeyS'`
+    // and `event.code === 'Digit1'` fall through to 0 and codegen silently
+    // drops the shortcut.
+    REQUIRE(key_string_to_keycode("KeyS") == 's');
+    REQUIRE(key_string_to_keycode("KeyA") == 'a');
+    REQUIRE(key_string_to_keycode("KeyZ") == 'z');
+    REQUIRE(key_string_to_keycode("keys") == 's');     // case-insensitive prefix
+    REQUIRE(key_string_to_keycode("Digit0") == '0');
+    REQUIRE(key_string_to_keycode("Digit9") == '9');
+    REQUIRE(key_string_to_keycode("digit5") == '5');
+
+    // Non-letter / non-digit suffixes return 0, not garbage.
+    REQUIRE(key_string_to_keycode("Key1") == 0);       // not a letter
+    REQUIRE(key_string_to_keycode("DigitA") == 0);     // not a digit
+    REQUIRE(key_string_to_keycode("KeyAA") == 0);      // wrong length
+}
+
+TEST_CASE("generate_pulp_js emits two bindings for meta+ctrl cross-platform shortcut", "[design-import][shortcuts][v2]") {
+    // Codex P1 review on #2119: when the source author writes
+    // `(e.metaKey || e.ctrlKey) && e.key === 's'`, the codegen must emit
+    // both registerShortcut(kc, kModCmd, ...) and registerShortcut(kc,
+    // kModCtrl, ...) so the user gets Cmd+S on macOS and Ctrl+S on
+    // Win/Linux. Each handler thunk sets only the modifier flag that
+    // matches the physical chord, so the source handler's
+    // `e.metaKey || e.ctrlKey` check sees the right flag.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"meta", "ctrl"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Two distinct handlers + two distinct registerShortcut calls.
+    REQUIRE(js.find("__pulpShortcutHandler_0_cmd")  != std::string::npos);
+    REQUIRE(js.find("__pulpShortcutHandler_0_ctrl") != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 16, '__pulpShortcutHandler_0_cmd')")  != std::string::npos);
+    REQUIRE(js.find("registerShortcut(115, 2, '__pulpShortcutHandler_0_ctrl')")  != std::string::npos);
+
+    // The Cmd-fired thunk sets metaKey:true, ctrlKey:false.
+    auto cmd_pos = js.find("__pulpShortcutHandler_0_cmd = function");
+    REQUIRE(cmd_pos != std::string::npos);
+    auto cmd_end = js.find("};", cmd_pos);
+    auto cmd_body = js.substr(cmd_pos, cmd_end - cmd_pos);
+    REQUIRE(cmd_body.find("metaKey: true")  != std::string::npos);
+    REQUIRE(cmd_body.find("ctrlKey: false") != std::string::npos);
+
+    // The Ctrl-fired thunk sets ctrlKey:true, metaKey:false.
+    auto ctrl_pos = js.find("__pulpShortcutHandler_0_ctrl = function");
+    REQUIRE(ctrl_pos != std::string::npos);
+    auto ctrl_end = js.find("};", ctrl_pos);
+    auto ctrl_body = js.substr(ctrl_pos, ctrl_end - ctrl_pos);
+    REQUIRE(ctrl_body.find("ctrlKey: true")  != std::string::npos);
+    REQUIRE(ctrl_body.find("metaKey: false") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js Ctrl-only emits ctrlKey:true synthetic event", "[design-import][shortcuts][v2]") {
+    // Codex P1 case: a Win/Linux-only `e.ctrlKey && e.key === 's'`
+    // handler must receive `ctrlKey: true` in the synthetic event so the
+    // source check passes.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut save;
+    save.key = "s";
+    save.modifiers = {"ctrl"};
+    opts.shortcuts.push_back(save);
+
+    DesignIR ir;
+    std::string js = generate_pulp_js(ir, opts);
+
+    // Single binding with kModCtrl mask (== 2).
+    REQUIRE(js.find("registerShortcut(115, 2, '__pulpShortcutHandler_0')") != std::string::npos);
+    auto pos = js.find("__pulpShortcutHandler_0 = function");
+    REQUIRE(pos != std::string::npos);
+    auto body = js.substr(pos, js.find("};", pos) - pos);
+    REQUIRE(body.find("ctrlKey: true")  != std::string::npos);
+    REQUIRE(body.find("metaKey: false") != std::string::npos);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// End-to-end roundtrip — the wiring the user actually cares about.
+//
+// Path under test:
+//   React source (TSX)
+//     -> extract_keyboard_shortcuts
+//     -> generate_pulp_js (emits registerShortcut + thunks)
+//     -> WidgetBridge.load_script (JS engine evaluates the emitted code,
+//                                  thunks register, native shortcuts get
+//                                  hooked into shortcuts_)
+//     -> bridge.forward_key_event(keycode, modifiers, down)
+//     -> thunk fires -> __dispatch__('__global__', 'keydown', {...})
+//     -> React-style window.addEventListener('keydown', ...) handler
+//        receives a synthetic event with the right flags.
+//
+// Pre-V2 the React handler never fired because the bundled JS never saw
+// the keypress at all (native intercept owned it).  V2's thunk closes
+// the loop by re-dispatching as a synthetic event.  This test pins
+// that loop end-to-end so a future change to either codegen or
+// dispatch can't silently break it.
+// ────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style handler",
+          "[design-import][shortcuts][v2][e2e]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    // 1. A representative React source — covers the patterns the user
+    //    cares about: bare key (Escape), mode key (F with chord), and
+    //    the cross-platform save chord that motivated the Codex P1 fix.
+    const char* tsx_source = R"JS(
+        const onKey = (e) => {
+            if (e.key === 'Escape') closeAll();
+            if (e.shiftKey && e.altKey && e.key === 'F') openFlare();
+            if ((e.metaKey || e.ctrlKey) && e.key === 's') save();
+            if (e.ctrlKey && e.key === 'n') newFile();
+        };
+    )JS";
+    auto shortcuts = extract_keyboard_shortcuts(tsx_source, "");
+    // Sorted by key: Escape, F, n, s.
+    REQUIRE(shortcuts.size() == 4);
+
+    // 2. Hand the extracted shortcuts to the codegen.  Empty DesignIR is
+    //    fine — we only want the shortcut block.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    opts.shortcuts = shortcuts;
+
+    DesignIR ir;
+    std::string emitted_js = generate_pulp_js(ir, opts);
+
+    // 3. Spin up a WidgetBridge and install a React-style global keydown
+    //    handler BEFORE evaluating the emitted JS, so the handler is
+    //    already wired when registerShortcut runs.  Then load the
+    //    emitted script.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var fired = [];
+        function recordKey(e) {
+            fired.push({
+                key:      e.key,
+                ctrlKey:  !!e.ctrlKey,
+                shiftKey: !!e.shiftKey,
+                altKey:   !!e.altKey,
+                metaKey:  !!e.metaKey
+            });
+        }
+        // Mimic the React-imported handlers — same shapes the developer
+        // wrote in the source above.
+        function escapeHandler(e) { if (e.key === 'Escape') recordKey(e); }
+        function modeFHandler(e)  { if (e.shiftKey && e.altKey && e.key === 'F') recordKey(e); }
+        function saveHandler(e)   { if ((e.metaKey || e.ctrlKey) && e.key === 's') recordKey(e); }
+        function newCtrlOnly(e)   { if (e.ctrlKey && e.key === 'n') recordKey(e); }
+
+        window.addEventListener('keydown', escapeHandler);
+        window.addEventListener('keydown', modeFHandler);
+        window.addEventListener('keydown', saveHandler);
+        window.addEventListener('keydown', newCtrlOnly);
+
+        function fired_count() { return fired.length; }
+        function fired_at(i, field) { return fired[i] ? fired[i][field] : null; }
+    )JS");
+
+    // Now evaluate the codegen output — defines __pulpShortcutHandler_N
+    // and calls registerShortcut() for each chord.
+    bridge.load_script(emitted_js);
+
+    auto fired_count = [&]() {
+        return engine.evaluate("fired_count()").getWithDefault<int>(-1);
+    };
+    auto fired_field = [&](int i, const std::string& field) {
+        return engine.evaluate("fired_at(" + std::to_string(i) + ", '" + field + "')");
+    };
+
+    REQUIRE(fired_count() == 0);
+
+    // 4. Drive the chord through the native intercept path.
+
+    // Escape — bare key, no modifiers.
+    bridge.forward_key_event(static_cast<int>(KeyCode::escape), 0, true);
+    REQUIRE(fired_count() == 1);
+    REQUIRE(fired_field(0, "key").toString()         == "Escape");
+    REQUIRE(fired_field(0, "metaKey").getWithDefault<bool>(true) == false);
+    REQUIRE(fired_field(0, "ctrlKey").getWithDefault<bool>(true) == false);
+
+    // Mode key F with shift+alt.
+    bridge.forward_key_event(static_cast<int>('f'),
+                             static_cast<uint16_t>(kModShift | kModAlt), true);
+    REQUIRE(fired_count() == 2);
+    REQUIRE(fired_field(1, "key").toString()         == "F");
+    REQUIRE(fired_field(1, "shiftKey").getWithDefault<bool>(false) == true);
+    REQUIRE(fired_field(1, "altKey").getWithDefault<bool>(false)   == true);
+
+    // Cmd+S — the macOS branch of the cross-platform `metaKey||ctrlKey`
+    // collapse.  V2 emits TWO bindings; this one matches the Cmd mask.
+    // The handler's `e.metaKey || e.ctrlKey` evaluates true via metaKey.
+    bridge.forward_key_event(static_cast<int>('s'), static_cast<uint16_t>(kModCmd), true);
+    REQUIRE(fired_count() == 3);
+    REQUIRE(fired_field(2, "key").toString()         == "s");
+    REQUIRE(fired_field(2, "metaKey").getWithDefault<bool>(false) == true);
+    REQUIRE(fired_field(2, "ctrlKey").getWithDefault<bool>(true)  == false);
+
+    // Ctrl+S — the Win/Linux branch of the same source `||` check.
+    // Pre-Codex-P1 this would have done nothing because V1 normalized
+    // everything to "meta" and V2 only emitted the Cmd-mask binding.
+    bridge.forward_key_event(static_cast<int>('s'), static_cast<uint16_t>(kModCtrl), true);
+    REQUIRE(fired_count() == 4);
+    REQUIRE(fired_field(3, "key").toString()         == "s");
+    REQUIRE(fired_field(3, "ctrlKey").getWithDefault<bool>(false) == true);
+    REQUIRE(fired_field(3, "metaKey").getWithDefault<bool>(true)  == false);
+
+    // Ctrl+N — true Ctrl-only handler (no `||` collapse).  The synthetic
+    // event must carry ctrlKey:true; otherwise the source check fails.
+    bridge.forward_key_event(static_cast<int>('n'), static_cast<uint16_t>(kModCtrl), true);
+    REQUIRE(fired_count() == 5);
+    REQUIRE(fired_field(4, "key").toString()         == "n");
+    REQUIRE(fired_field(4, "ctrlKey").getWithDefault<bool>(false) == true);
+    REQUIRE(fired_field(4, "metaKey").getWithDefault<bool>(true)  == false);
 }
