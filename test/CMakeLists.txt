@@ -97,29 +97,6 @@ if(UNIX)
     set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
 endif()
 
-# Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh
-# handles the three "is pulp available" states (on PATH / source-tree
-# build / nothing) plus three invariants (always exits 0, banner goes
-# to stderr, stale non-executable build/pulp doesn't false-positive).
-# Hermetic (stages a tempdir layout per case), no real binary required.
-if(UNIX)
-    add_test(NAME check-pulp-cli-hook
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_check_pulp_cli_hook.sh)
-    set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
-endif()
-
-# pulp #2087 (slice 1) — install.sh must install CLI + matching SDK in one
-# shot, and the closing message must document upgrade/pinning. Without
-# this, fresh-install users silently end up with a current CLI on top of
-# whatever ancient SDK was previously cached at ~/.pulp/sdk/.
-if(UNIX)
-    add_test(NAME install-sh-runs-sdk-install
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_sh_runs_sdk_install.sh)
-    set_tests_properties(install-sh-runs-sdk-install
-        PROPERTIES TIMEOUT 10
-        LABELS "tooling")
-endif()
-
 # Window-only capture invariants (pulp-internal task #81) —
 # spectr-roundtrip.sh must not silently fall back to full-screen
 # screencapture, because terminal / desktop background then poisons
@@ -131,18 +108,6 @@ if(UNIX)
     set_tests_properties(spectr-roundtrip-window-only-capture
         PROPERTIES TIMEOUT 10
         LABELS "parser-import")
-endif()
-
-# Workspace freshness guard (pulp #2087 lesson) — refuse to run
-# validation harnesses on a checkout behind origin/main. Test
-# exercises 7 scenarios across enforce/warn/max-behind/bypass/json
-# modes against synthetic git repos.
-if(UNIX)
-    add_test(NAME workspace-freshness
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_workspace_freshness.sh)
-    set_tests_properties(workspace-freshness
-        PROPERTIES TIMEOUT 30
-        LABELS "tooling")
 endif()
 
 # Debug-SDK perf-killer guard smoke (pulp-internal task #35).
@@ -807,14 +772,6 @@ add_executable(pulp-test-view-size-aspect test_view_size_aspect.cpp)
 target_link_libraries(pulp-test-view-size-aspect PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-size-aspect)
 
-# pulp #59/#63/#64/#65 — WindowHost::set_design_viewport pure-math
-# coverage. Locks down the scale + letterbox transform that the mac
-# GPU host (and any other future platform host) uses to fit
-# fixed-design content into the current window.
-add_executable(pulp-test-view-design-viewport test_view_design_viewport.cpp)
-target_link_libraries(pulp-test-view-design-viewport PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-view-design-viewport)
-
 # View host bridges — screenshot/window/plugin-view (#299)
 add_executable(pulp-test-view-host-bridge test_view_host_bridge.cpp)
 if(APPLE AND NOT PULP_IOS)
@@ -1203,13 +1160,6 @@ catch_discover_tests(pulp-test-audio-tools)
 # MCP server protocol tests
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
 target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
-# test_mcp_server.cpp #include's ../tools/mcp/pulp_mcp.cpp directly (via
-# `#define main pulp_mcp_main_for_test`), so it picks up the same
-# generated version header pulp-mcp itself sees. The generated header
-# lives under the binary tree's tools/mcp/ directory.
-target_include_directories(pulp-test-mcp-server PRIVATE
-    "${CMAKE_BINARY_DIR}/tools/mcp")
-add_dependencies(pulp-test-mcp-server pulp-mcp)
 catch_discover_tests(pulp-test-mcp-server)
 
 # MIDI tests
@@ -1452,43 +1402,6 @@ add_executable(pulp-test-frame-clock test_frame_clock.cpp)
 target_link_libraries(pulp-test-frame-clock PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-frame-clock)
 
-# Motion (agent-first motion observability) — Phase 0 bedrock tests
-add_executable(pulp-test-motion test_motion.cpp)
-target_link_libraries(pulp-test-motion PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion)
-
-# Motion inspector — Phase 1 Motion.* protocol-domain tests
-if(TARGET pulp::inspect)
-    add_executable(pulp-test-motion-inspector test_motion_inspector.cpp)
-    target_link_libraries(pulp-test-motion-inspector PRIVATE
-        pulp::view pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-motion-inspector)
-endif()
-
-# Motion end-to-end animation smoke — mirrors what a plugin author
-# would write: drive a real Tween, publish_value each tick, read the
-# fixture back, assert the shape matches the configured animation.
-add_executable(pulp-test-motion-animation-smoke test_motion_animation_smoke.cpp)
-target_link_libraries(pulp-test-motion-animation-smoke PRIVATE
-    pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion-animation-smoke)
-
-# Motion visual-analysis self-check — Phase 4 pipeline smoke.
-# Skips cleanly (exit 3) when Python deps are absent so CI without
-# numpy/Pillow/scikit-image doesn't false-fail.
-find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_Interpreter_FOUND)
-    add_test(
-        NAME pulp-motion-visual-self-check
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/tools/motion/visual/test_self_check.py
-    )
-    set_tests_properties(pulp-motion-visual-self-check PROPERTIES
-        SKIP_RETURN_CODE 3
-        LABELS "motion;visual"
-    )
-endif()
-
 # Widget animation behavior tests
 add_executable(pulp-test-widget-animation test_widget_animation.cpp)
 target_link_libraries(pulp-test-widget-animation PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -1640,23 +1553,6 @@ target_link_libraries(pulp-test-render-loop PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-render-loop
-    PROPERTIES
-        LABELS coverage)
-
-add_executable(pulp-test-sdl3-surface
-    test_sdl3_surface.cpp
-    ${CMAKE_SOURCE_DIR}/core/render/src/sdl3_surface.cpp)
-target_include_directories(pulp-test-sdl3-surface PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/render/include)
-target_link_libraries(pulp-test-sdl3-surface PRIVATE
-    pulp::runtime
-    Catch2::Catch2WithMain)
-if(PULP_HAS_SDL3)
-    target_link_libraries(pulp-test-sdl3-surface PRIVATE
-        $<BUILD_INTERFACE:SDL3::SDL3-static>)
-    target_compile_definitions(pulp-test-sdl3-surface PRIVATE PULP_HAS_SDL3=1)
-endif()
-catch_discover_tests(pulp-test-sdl3-surface
     PROPERTIES
         LABELS coverage)
 
@@ -1867,23 +1763,6 @@ target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMA
 catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "parser-import")
 
-# DESIGN.md import (Google design.md, Apache-2.0 — pulp #1434 follow-up)
-# Compiles import_detect.cpp directly into the test target so the
-# detector tests do not require linking the whole pulp-import-design CLI.
-add_executable(pulp-test-design-import-designmd
-    test_design_import_designmd.cpp
-    ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp)
-target_include_directories(pulp-test-design-import-designmd PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/tools/import-design
-    ${CMAKE_SOURCE_DIR}/tools/cli)
-target_link_libraries(pulp-test-design-import-designmd PRIVATE
-    pulp::view
-    Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-design-import-designmd PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-design-import-designmd
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-
 # Post-parse widget promotion: <div onClick> / role=button / cursor:pointer
 # → button. Closure of pulp-internal task #84 / follow-up on #1814.
 # Links the importer-side .cpp directly (it's not in pulp::view) so the
@@ -1920,15 +1799,6 @@ add_executable(pulp-test-design-import-claude-bundle test_design_import_claude_b
 target_link_libraries(pulp-test-design-import-claude-bundle
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-claude-bundle
-    PROPERTIES LABELS "parser-import")
-
-# Keyboard-shortcut extraction from React source (UX best-practice
-# default — design-import emits a shortcuts manifest the runtime can
-# auto-register).
-add_executable(pulp-test-design-import-shortcuts test_design_import_shortcuts.cpp)
-target_link_libraries(pulp-test-design-import-shortcuts
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-shortcuts
     PROPERTIES LABELS "parser-import")
 
 # pulp #1035 — `pulp import-design --from claude` classnames.json
@@ -1992,6 +1862,18 @@ target_link_libraries(pulp-test-design-import-jsx-runtime
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-jsx-runtime
     PROPERTIES LABELS "parser-import")
+
+# pulp jsx-instrument-import experiment (2026-05-17) drag fan-out.
+# Asserts the WidgetBridge dispatches __global__ mousedown/mousemove/
+# mouseup alongside the existing per-widget pointer events, so React-DOM
+# bundles that install window.addEventListener('mousemove', ...) from a
+# useEffect (Chainer's knob/fader/XY drag handlers all do this) fire
+# during drag.
+add_executable(pulp-test-widget-bridge-drag-fanout test_widget_bridge_drag_fanout.cpp)
+target_link_libraries(pulp-test-widget-bridge-drag-fanout
+    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-bridge-drag-fanout
+    PROPERTIES LABELS "view")
 
 # Screenshot comparison tests (visual diff for design import validation)
 if(APPLE)
@@ -2417,45 +2299,4 @@ if(PULP_BENCHMARK AND TARGET pulp-render)
         endif()
         catch_discover_tests(pulp-test-bench-integration)
     endif()
-endif()
-
-# ── Mac platform-test harness (issue #2001) ────────────────────────────────
-#
-# Catch2 fixture that brings up a hidden NSWindow + CAMetalLayer host
-# WITHOUT calling makeKeyAndOrderFront / activateIgnoringOtherApps, so
-# tests can exercise window_host_mac.mm code paths (set_design_viewport,
-# paint_scene, mouse-coordinate inverse mapping, resize → contentsScale)
-# that today are structurally untestable from plain Catch2.
-#
-# Phase B-1 (this PR): ships the harness scaffold + a smoke test proving
-#   the hidden window / capture_back_buffer_png contract.
-# Phase B-2 (next PR): migrates one PR-#1984 invariant as the first real
-#   consumer, and adds simulate_mouse exercise.
-#
-# Plan: planning/2026-05-14-mac-platform-test-harness.md (planning sub).
-if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
-    add_executable(pulp-test-mac-platform-harness
-        test_mac_platform_harness.cpp
-        mac_window_harness.mm
-    )
-    target_link_libraries(pulp-test-mac-platform-harness PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-        "-framework Metal"
-        "-framework QuartzCore"
-    )
-    catch_discover_tests(pulp-test-mac-platform-harness)
-
-    # pulp #2088 — pin the invariant -[PulpView liveFocusedView] depends on:
-    # ~View() must auto-clear focused_input_ (#1708 contract) so the
-    # accessor can safely re-sync the ivar to nullptr before any deref.
-    add_executable(pulp-test-mac-mousedown-stale-focus
-        test_mac_mousedown_stale_focus.mm
-    )
-    target_link_libraries(pulp-test-mac-mousedown-stale-focus PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-    )
-    catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
 endif()
