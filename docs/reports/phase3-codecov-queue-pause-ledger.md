@@ -6152,3 +6152,32 @@ clean and local-only at rebased commit `1f1ffa876`; it has not been pushed or
 submitted yet. This batch is intentionally sized to the new 24-36-test PR
 policy; combine or submit it only when the active GitHub-hosted queue has enough
 runner capacity.
+
+2026-05-16 22:36 PDT: completed another larger local-only held batch in
+`feature/phase3-codecov-batch-692` without opening a PR. The batch adds 26
+focused runtime edge tests across `test/test_i18n.cpp`,
+`test/test_license.cpp`, and `test/test_analytics.cpp`. Coverage includes i18n
+argument substitution adjacency and sparse-index handling, `.strings` parser
+whitespace/no-semicolon/empty-key behavior, `.po` duplicate and missing
+translation behavior, JSON parser compact/unknown-escape/unclosed-object paths,
+license signature and payload validation errors, optional integer parse
+failures, whitespace-trimmed license files, copied machine IDs, empty-key
+generation failure, empty-server online activation failure, analytics file
+flush threshold behavior, no-duplicate second flush, empty property forwarding,
+disabled widget tracking, and empty widget identifier/value payloads. Local
+validation passed: `git diff --check`; built `pulp-test-i18n`,
+`pulp-test-license`, and `pulp-test-analytics`; ran direct
+`./build/test/pulp-test-i18n "[coverage][phase3-large]"` (27 assertions / 12
+cases), direct `./build/test/pulp-test-license "[coverage][phase3-large]"`
+(17 assertions / 8 cases), and direct `./build/test/pulp-test-analytics
+"[coverage][phase3-large]"` (16 assertions / 6 cases); ran focused `ctest`
+with 64/64 tests passed; and ran
+`PULP_DIFF_COVER_CTEST_REGEX='phase3-large|i18n argument substitution|i18n
+\.strings parser|i18n \.po parser|i18n JSON parser|LicenseValidator|
+LicenseGenerator|OnlineActivation|FileAnalyticsDestination|Analytics forwards
+simple|Analytics disabled widget|WidgetTracker' tools/scripts/local_diff_cover.sh
+pulp-test-i18n pulp-test-license pulp-test-analytics`, which reported no
+uncovered measured diff lines and OK at/above the 75% floor. The worktree is
+clean and local-only at commit `a00ec5277`; it has not been pushed or submitted
+yet. This preserves the current large-batch policy and should be submitted only
+as part of a substantial GitHub-hosted CI batch.
