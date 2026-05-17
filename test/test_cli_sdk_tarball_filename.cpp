@@ -65,3 +65,20 @@ TEST_CASE("sdk_tarball_filename and legacy form disagree on every supported "
         REQUIRE_FALSE(legacy == versioned);
     }
 }
+
+TEST_CASE("sdk_tarball_filename: prerelease versions remain literal in cache keys",
+          "[cli][cache][coverage][phase3-large]") {
+    REQUIRE(sdk_tarball_filename("1.2.3-rc.1", "darwin-arm64") ==
+            "pulp-sdk-v1.2.3-rc.1-darwin-arm64.tar.gz");
+}
+
+TEST_CASE("sdk_tarball_filename: platform strings are not normalized",
+          "[cli][cache][coverage][phase3-large]") {
+    REQUIRE(sdk_tarball_filename("0.92.0", "Darwin-ARM64") ==
+            "pulp-sdk-v0.92.0-Darwin-ARM64.tar.gz");
+}
+
+TEST_CASE("legacy_unversioned_sdk_tarball_filename: empty platform keeps legacy prefix",
+          "[cli][cache][coverage][phase3-large]") {
+    REQUIRE(legacy_unversioned_sdk_tarball_filename("") == "pulp-sdk-.tar.gz");
+}

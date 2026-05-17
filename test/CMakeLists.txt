@@ -334,6 +334,11 @@ target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_
 target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-install)
 
+add_executable(pulp-test-cli-json-parser test_cli_json_parser.cpp)
+target_include_directories(pulp-test-cli-json-parser PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-json-parser PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-json-parser)
+
 # CLI version diagnostics (#499 Slice 1): pure-logic tests for the
 # semver parser, plugin.json scraper, and skew analyzer that sit
 # behind `pulp doctor --versions`. version_diag is deliberately free
