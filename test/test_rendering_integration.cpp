@@ -111,6 +111,28 @@ TEST_CASE("Dimension parse auto", "[view][dimension]") {
     REQUIRE(d.unit == view::DimensionUnit::auto_);
 }
 
+TEST_CASE("Dimension parse trims supported units and rejects unknown suffixes",
+          "[view][dimension][codecov]") {
+    auto px = view::Dimension::parse(" 12px \t");
+    REQUIRE(px.unit == view::DimensionUnit::px);
+    REQUIRE(px.value == Catch::Approx(12.0f));
+
+    auto bare = view::Dimension::parse(" 8 ");
+    REQUIRE(bare.unit == view::DimensionUnit::px);
+    REQUIRE(bare.value == Catch::Approx(8.0f));
+
+    auto aut = view::Dimension::parse(" auto ");
+    REQUIRE(aut.unit == view::DimensionUnit::auto_);
+
+    auto rem = view::Dimension::parse("100rem");
+    REQUIRE(rem.unit == view::DimensionUnit::px);
+    REQUIRE(rem.value == Catch::Approx(0.0f));
+
+    auto junk = view::Dimension::parse("12pxjunk");
+    REQUIRE(junk.unit == view::DimensionUnit::px);
+    REQUIRE(junk.value == Catch::Approx(0.0f));
+}
+
 TEST_CASE("Dimension DPI scaling", "[view][dimension]") {
     auto d = view::Dimension::parse("10px");
     REQUIRE(d.resolve(0, 0, 0, 2.0f) == Catch::Approx(20.0f));
