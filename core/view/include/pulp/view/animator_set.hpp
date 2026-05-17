@@ -1,13 +1,15 @@
 #pragma once
 
 // AnimatorSetBuilder — compose animations in sequence or parallel groups.
-// Inspired by Android's AnimatorSet pattern.
 
 #include <algorithm>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/motion.hpp>
 #include <vector>
 #include <memory>
 #include <functional>
+#include <string>
+#include <utility>
 
 namespace pulp::view {
 
@@ -71,6 +73,18 @@ private:
 /// Builder for composing animation sequences and parallel groups
 class AnimatorSetBuilder {
 public:
+    /// Phase 9: assign a logical name to this animator set. Threaded
+    /// through to the `Runner`, which stamps it as
+    /// `source_kind="animator-set", source_id=<name>` on every emitted
+    /// publish event. Off by default — pre-Phase-9 builders that never
+    /// call `name()` produce events with no provenance.
+    AnimatorSetBuilder& name(std::string n) {
+        name_ = std::move(n);
+        return *this;
+    }
+
+    const std::string& configured_name() const noexcept { return name_; }
+
     /// Add a tween that runs in sequence
     AnimatorSetBuilder& then(float from, float to, float duration,
                              std::function<void(float)> apply,
@@ -120,8 +134,14 @@ public:
     /// Run the built animation. Advances through sequence, returns true when all done.
     class Runner {
     public:
-        explicit Runner(std::vector<std::unique_ptr<AnimationStep>> steps)
-            : steps_(std::move(steps)) {}
+        explicit Runner(std::vector<std::unique_ptr<AnimationStep>> steps,
+                        std::string name = {})
+            : steps_(std::move(steps)) {
+            if (!name.empty()) {
+                provenance_.source_kind = "animator-set";
+                provenance_.source_id = std::move(name);
+            }
+        }
 
         bool advance(float dt) {
             while (current_ < static_cast<int>(steps_.size()) && dt > 0) {
@@ -146,18 +166,38 @@ public:
                 s->reset();
         }
 
+        /// Phase 9: publish the runner's current scalar through the motion
+        /// publish channel, stamping the animator-set name (configured
+        /// via `AnimatorSetBuilder::name()`) as provenance.
+        void publish(std::string view_name,
+                     std::string metric_name,
+                     double value,
+                     motion::PublishOptions opts = {}) const {
+            if (provenance_.is_set() && !opts.provenance.is_set()) {
+                opts.provenance = provenance_;
+            }
+            motion::publish_value(std::move(view_name), std::move(metric_name),
+                                  value, opts);
+        }
+
+        const motion::Provenance& motion_provenance() const noexcept {
+            return provenance_;
+        }
+
     private:
         std::vector<std::unique_ptr<AnimationStep>> steps_;
         int current_ = 0;
+        motion::Provenance provenance_;
     };
 
     Runner build_runner() {
-        return Runner(std::move(steps_));
+        return Runner(std::move(steps_), name_);
     }
 
 private:
     std::vector<std::unique_ptr<AnimationStep>> steps_;
     std::unique_ptr<ParallelStep> parallel_;
+    std::string name_;  ///< Phase 9: motion-provenance source_id.
 };
 
 // ── Additional easing functions ─────────────────────────────────────────
