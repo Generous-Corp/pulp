@@ -5958,6 +5958,26 @@ diff lines and OK at/above the 75% floor. The branch was pushed with
 created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
 Namespace/SSH validation was dispatched.
 
+2026-05-16 21:15 PDT: opened the next large batched coverage PR as #2134,
+`test(view): batch lifecycle widget coverage edges`, branch
+`feature/phase3-codecov-batch-686`, head
+`cc12cf4e0b1caab922ed3ff6cf411e82bde2266a`. This batch adds 12 focused tests
+across `test/test_frame_clock.cpp`, `test/test_window_manager.cpp`,
+`test/test_splash_screen.cpp`, and `test/test_panel.cpp` covering FrameClock
+in-tick subscription, self-unsubscribe, and compaction behavior; WindowManager
+message handler replacement, saved visibility state, and shared theme
+propagation; SplashScreen manual dismiss/restart/repeated-show lifecycle; and
+Panel theme-token colors, fallback colors, and inset border geometry. Local
+validation before PR: `git diff --check`; built `pulp-test-frame-clock
+pulp-test-window-manager pulp-test-splash-screen pulp-test-panel`; ran the four
+focused binaries with `"[coverage][phase3]"` filters; ran the 12-test
+`PULP_DIFF_COVER_CTEST_REGEX=... tools/scripts/local_diff_cover.sh` gate, which
+reported no uncovered measured diff lines and OK at/above the 75% floor. The
+branch was based on current `origin/main` (`cb9ac1784`) and pushed with
+`PULP_SKIP_DIFF_COVER=1` only after the local diff-cover pass. The PR was
+created via REST and labeled `codecov`; GitHub-hosted CI is the merge gate. No
+Namespace/SSH validation was dispatched.
+
 2026-05-16 20:58 PDT: addressed the real Codex review finding on #2130. Pushed
 follow-up `3a77e1f6d` (`test(runtime): join tcp coverage server threads
 safely`) on `feature/phase3-codecov-batch-684`, changing the TCP coverage tests
