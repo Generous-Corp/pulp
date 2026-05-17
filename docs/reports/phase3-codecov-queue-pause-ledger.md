@@ -6981,3 +6981,29 @@ validate_and_parse|LicenseValidator parse_payload handles optional fields and
 bad integers' tools/scripts/local_diff_cover.sh pulp-test-license`, which
 reported 93% diff coverage for `core/runtime/src/license.cpp`. This tranche
 is held locally and should be aggregated rather than submitted individually.
+
+2026-05-17 15:35 PDT: added two more local-only held parser/view coverage
+tranches on the next consolidated coverage batch branch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now has commit
+`7048161a7638` (`fix(parsers): reject partial numeric fields`) and commit
+`dfa527892` (`fix(view): reject unknown dimension suffixes`) based on current
+`origin/main` (`fd4345f498d9`). The parser tranche hardens scan blacklist
+stamp parsing and package registry semver parsing so partial numeric/segment
+values are rejected instead of accepted silently; focused tests were added in
+`test/test_scan_blacklist.cpp` and `test/test_cli_package_registry.cpp`.
+Validation passed locally: `git diff --check`, Debug configure, built
+`pulp-test-scan-blacklist` and `pulp-test-cli-package-registry`, ran direct
+and focused CTest coverage for the new parser cases, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='from_text rejects partially parsed numeric stamp fields|from_text skips malformed lines|from_text tolerates signed stamp values|licenses, semver, and quality scoring|package registry parses descriptors' tools/scripts/local_diff_cover.sh pulp-test-scan-blacklist pulp-test-cli-package-registry`, which reported 100% diff coverage for
+`core/host/src/scan_blacklist.cpp` and `tools/cli/package_registry.cpp`.
+The view geometry tranche hardens `Dimension::parse()` so whitespace is
+trimmed, supported suffixes still parse, and unknown suffixes such as
+`12pxjunk` or `100rem` no longer get treated as px. Focused coverage in
+`test/test_rendering_integration.cpp` exercises trimmed supported values,
+`auto`, bare px, and rejected unknown suffixes. Validation passed locally:
+`git diff --check`, built `pulp-test-rendering-integration`, ran direct
+`[view][dimension]`, ran focused CTest `Dimension parse|Dimension DPI` (9/9),
+and ran `PULP_DIFF_COVER_CTEST_REGEX='Dimension parse|Dimension DPI' tools/scripts/local_diff_cover.sh pulp-test-rendering-integration`, which reported 100% diff coverage for the active branch diff including
+`core/view/include/pulp/view/geometry.hpp`. These tranches are held locally
+and should be aggregated into a larger PR rather than submitted individually.
