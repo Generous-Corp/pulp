@@ -1621,7 +1621,7 @@ add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view)
 
-# DirtyTracker, GpuGraphRenderer, DrawBatcher, and RenderLoop timer-state tests
+# DirtyTracker, GpuGraphRenderer, and RenderLoop timer-state tests
 # are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
 add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
 target_include_directories(pulp-test-dirty-tracker PRIVATE
@@ -1634,14 +1634,6 @@ target_include_directories(pulp-test-gpu-graph PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
 target_link_libraries(pulp-test-gpu-graph PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-gpu-graph)
-
-add_executable(pulp-test-draw-batcher test_draw_batcher.cpp)
-target_include_directories(pulp-test-draw-batcher PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/render/include)
-target_link_libraries(pulp-test-draw-batcher PRIVATE
-    pulp::canvas
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-draw-batcher)
 
 add_executable(pulp-test-render-loop
     test_render_loop.cpp

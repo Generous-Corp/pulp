@@ -66,16 +66,17 @@ else { for (auto& rect : tracker.dirty_rects()) { /* repaint rect */ } }
 tracker.clear();                             // After frame submit
 ```
 
-## DrawBatcher
+## Draw-call batching
 
-Groups compatible draw calls to reduce GPU state changes:
+Pulp does not interpose an extra batcher between Canvas calls and the
+GPU. Skia (raster and Graphite) already coalesces compatible draw calls
+inside the active `SkCanvas` / `Recorder` — adding a Pulp-level batcher
+on top would compete with, not improve on, Skia's own analysis.
 
-```cpp
-DrawBatcher batcher;
-batcher.begin();
-batcher.record(bounds, state_key);  // Record draws
-auto stats = batcher.end();         // stats.draws_before / draws_after
-```
+If you need to *measure* effective batching for a frame, the right place
+to hook in is the Skia recorder / GPU stats once the
+`pulp-inspect` HUD wiring lands (tracked separately); raw
+`SkCanvas` does not expose per-frame batch counts.
 
 ## Atlas Systems
 

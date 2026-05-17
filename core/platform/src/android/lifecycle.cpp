@@ -20,7 +20,8 @@ void on_memory_pressure(int level) {
     case 0:
         // Moderate — app just backgrounded
         // TODO: Purge Skia Graphite shader compilation cache
-        // TODO: DrawBatcher::instance().flush_and_release()
+        // (Skia/Graphite Recorder already coalesces draw calls — no
+        // intermediate batcher to flush.)
         break;
 
     case 1:
