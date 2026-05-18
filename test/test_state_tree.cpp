@@ -461,6 +461,29 @@ TEST_CASE("StateTree JSON round-trip", "[state][tree][json]") {
     REQUIRE_THAT(filter_restored->get_double("cutoff"), WithinAbs(1200.5, 0.1));
 }
 
+TEST_CASE("StateTree JSON round-trip preserves escaped strings",
+          "[state][tree][json][coverage][phase3]") {
+    auto root = StateTree::create(R"(preset "A")");
+    root->set(R"(display\name)", std::string("Line 1\nLine \"2\" \\ tail"));
+
+    auto child = StateTree::create(R"(child\type)");
+    child->set("label", std::string(R"(quoted "child")"));
+    root->add_child(child);
+
+    const auto json = root->to_json();
+    REQUIRE(json.find("\\\"") != std::string::npos);
+    REQUIRE(json.find("\\\\") != std::string::npos);
+    REQUIRE(json.find("\\n") != std::string::npos);
+
+    auto restored = StateTree::from_json(json);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->type_name() == R"(preset "A")");
+    REQUIRE(restored->get_string(R"(display\name)") == "Line 1\nLine \"2\" \\ tail");
+    REQUIRE(restored->child_count() == 1);
+    REQUIRE(restored->child(0)->type_name() == R"(child\type)");
+    REQUIRE(restored->child(0)->get_string("label") == R"(quoted "child")");
+}
+
 TEST_CASE("StateTree from_json with invalid JSON returns nullptr", "[state][tree][json]") {
     auto result = StateTree::from_json("not json at all {{{");
     REQUIRE(result == nullptr);
