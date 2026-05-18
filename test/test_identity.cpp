@@ -115,6 +115,13 @@ TEST_CASE("Uuid parsing rejects malformed dashed layout",
     REQUIRE(parsed.is_nil());
 }
 
+TEST_CASE("Uuid parsing rejects dashed strings with empty groups",
+          "[runtime][identity][coverage][phase3-batch742]") {
+    REQUIRE(Uuid::from_string("-0112233-4455-6677-8899-aabbccddeeff").is_nil());
+    REQUIRE(Uuid::from_string("00112233--455-6677-8899-aabbccddeeff").is_nil());
+    REQUIRE(Uuid::from_string("00112233-4455-6677-8899-aabbccddee-").is_nil());
+}
+
 TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
           "[runtime][identity][issue-641]") {
     Uuid id;
