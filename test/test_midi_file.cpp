@@ -239,7 +239,6 @@ TEST_CASE("write_midi_file rejects missing parent directories",
     track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
     data.tracks.push_back(std::move(track));
 
-<<<<<<< HEAD
     const auto path = tmp.path / "missing" / "out.mid";
     REQUIRE_FALSE(write_midi_file(path.string(), data));
     REQUIRE_FALSE(fs::exists(path));
