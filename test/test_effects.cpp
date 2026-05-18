@@ -90,3 +90,28 @@ TEST_CASE("apply_shadow records generic canvas setup commands",
     canvas.restore();
     REQUIRE(canvas.save_count() == 0);
 }
+
+TEST_CASE("direct blur and color adjustment calls are generic no-ops",
+          "[canvas][effects][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    apply_blur(canvas, BlurEffect{2.0f, 5.0f});
+    apply_color_adjust(canvas, ColorAdjust{0.25f, 1.5f, 0.75f, 0.5f});
+
+    REQUIRE(canvas.command_count() == 0);
+}
+
+TEST_CASE("effect layers can be nested and restore in order",
+          "[canvas][effects][coverage][phase3]") {
+    RecordingCanvas canvas;
+
+    begin_effect_layer(canvas, BlurEffect{1.0f, 2.0f});
+    begin_effect_layer(canvas, ShadowEffect{});
+    canvas.fill_rect(1, 2, 3, 4);
+    end_effect_layer(canvas);
+    end_effect_layer(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+}
