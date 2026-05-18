@@ -1542,6 +1542,19 @@ target_compile_definitions(pulp-test-canvas-fonts PRIVATE
     "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas-fonts)
 
+# CG-degraded gradient + pattern cluster (P5-2 follow-up — extracted from
+# test_canvas.cpp). Apple-only TU: every TEST_CASE drives CoreGraphics
+# directly to prove the CoreGraphicsCanvas fallback honours the canvas2d
+# spec (pulp #1524) — conic / two-circle radial / pattern + gradient-
+# anchored fill/stroke text + line-dash CG paths.
+add_executable(pulp-test-canvas-cg-gradients test_canvas_cg_gradients.cpp)
+target_link_libraries(pulp-test-canvas-cg-gradients PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-cg-gradients PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-cg-gradients PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-canvas-cg-gradients)
+
 # Emoji-parity tests — cover the segmenter + cluster-aware shaping +
 # letter-spacing + cache invalidation paths. Also writes PNGs to
 # `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
