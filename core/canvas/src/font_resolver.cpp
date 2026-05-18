@@ -22,6 +22,7 @@
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkTypeface.h"
+#include "include/core/SkFontArguments.h"
 #endif
 
 namespace pulp::canvas {
@@ -200,9 +201,33 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     resolved.scope = options.scope;
     resolved.generation = merged_generation_for(options.scope);
 
+    // pulp #2163 — font v2 Slice 2.3. After a face resolves, if the
+    // caller requested variation axes (`font-variation-settings`),
+    // clone the typeface with those axes applied so the cache holds
+    // one entry per distinct axis instance (the FontOptions hash
+    // already keys on variation_axes — this just applies them).
+    auto apply_variation_axes = [&](sk_sp<SkTypeface> face) -> sk_sp<SkTypeface> {
+        if (!face || options.variation_axes.empty()) return face;
+        std::vector<SkFontArguments::VariationPosition::Coordinate> coords;
+        coords.reserve(options.variation_axes.size());
+        for (const auto& axis : options.variation_axes) {
+            coords.push_back({static_cast<SkFourByteTag>(axis.tag), axis.value});
+        }
+        SkFontArguments args;
+        SkFontArguments::VariationPosition pos{
+            coords.data(), static_cast<int>(coords.size())
+        };
+        args.setVariationDesignPosition(pos);
+        if (auto clone = face->makeClone(args)) return clone;
+        // Face has no variation axes — return the base typeface;
+        // a SynthesisTrace entry is emitted by the caller below.
+        return face;
+    };
+
     for (const auto& family : options.family_stack) {
         ResolvedFont r = resolve_one_family(family, options, sk_style, mgr, trace);
         if (r.resolved() && r.has_typeface()) {
+            r.typeface = apply_variation_axes(std::move(r.typeface));
             r.trace = std::move(trace);
             resolved = std::move(r);
             std::lock_guard<std::mutex> lock(impl_->mtx);
@@ -216,7 +241,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         if (auto tf = mgr->matchFamilyStyle(nullptr, sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);
-            resolved.typeface = std::move(tf);
+            resolved.typeface = apply_variation_axes(std::move(tf));
             resolved.actual_family = std::string(actual.c_str(), actual.size());
             resolved.origin = FallbackOrigin::Platform;
             trace.push_back({"<default>", FallbackOrigin::Platform, true,
