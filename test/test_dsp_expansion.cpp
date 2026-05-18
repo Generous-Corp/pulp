@@ -110,6 +110,21 @@ TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
     REQUIRE_THAT(fir.process(0.25f), WithinAbs(0.25f, 1e-6f));
 }
 
+TEST_CASE("FirFilter highpass spectral inversion boosts center tap",
+          "[signal][fir][coverage][phase3]") {
+    auto lowpass = FirFilter::lowpass(5, 1000.0f, 48000.0f);
+    auto highpass = FirFilter::highpass(5, 1000.0f, 48000.0f);
+
+    REQUIRE(lowpass.size() == highpass.size());
+    for (std::size_t i = 0; i < highpass.size(); ++i) {
+        if (i == 2) {
+            REQUIRE_THAT(highpass[i], WithinAbs(1.0f - lowpass[i], 1e-6f));
+        } else {
+            REQUIRE_THAT(highpass[i], WithinAbs(-lowpass[i], 1e-6f));
+        }
+    }
+}
+
 // ── BallisticsFilter ─────────────────────────────────────────────────────
 
 TEST_CASE("BallisticsFilter tracks rising signal", "[signal][ballistics]") {
