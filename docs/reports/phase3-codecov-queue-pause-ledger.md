@@ -8113,6 +8113,18 @@ log until the overall workflow completes; keep monitoring and inspect before
 patching or rerunning. #2208 has no failures and remains queued/running on
 GitHub-hosted lanes. No Namespace dispatch.
 
+2026-05-18 06:05 PDT: published `feature/phase3-codecov-batch-731` as
+GitHub PR #2211: https://github.com/danielraffel/pulp/pull/2211. The final
+head is `9c4ff10e0` after amending the tip commit with
+`Version-Bump: sdk=skip reason="test-only code coverage batch"` so the
+pre-push version gate recognizes this as coverage-only work. Branch pre-push
+gates passed cleanly and the PR was created through REST because GraphQL quota
+remains exhausted. Added the `codecov` label through REST. Initial check
+snapshot for #2211 showed no failures (`completed=7`, `in_progress=7`,
+`queued=9`). Auto-merge cannot be enabled while GraphQL is exhausted, so #2211
+will be monitored via REST and merged via REST once all required checks are
+green. No Namespace dispatch.
+
 2026-05-18 05:59 PDT: completed held large GitHub-only coverage batch
 `feature/phase3-codecov-batch-731` at 24 local commits ahead of
 `origin/main`, ready to publish as the next batched PR. New local-only commits
