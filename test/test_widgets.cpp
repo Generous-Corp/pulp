@@ -106,17 +106,11 @@ TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-9
 
 TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (#76)",
           "[view][widget][issue-pulp-internal-76]") {
-    // pulp-internal #76 — Spectr's `<span fontSize=10>SNAPSHOT</span>` in
-    // the bottom toolbar was vertically clipped because Yoga reserved
-    // 10 * 1.4 = 14px for the Label, but Inter's typographic ascent +
-    // descent at 10pt is ~13px and the GPU clip-rect on the View bounds
-    // shaved descender slack off in practice. intrinsic_height now uses
-    // a 1.6 multiplier for small font sizes (< 12pt) to ensure the full
-    // glyph extent fits inside the reserved box.
-    //
-    // Larger sizes keep the historical 1.4 multiplier — they have plenty
-    // of absolute slack and downstream visual tests / golden-files
-    // depend on the exact numbers.
+    // pulp-internal #76 plus font v2: intrinsic height now prefers real
+    // shaper metrics when available, falling back to the historical
+    // multiplier only when the shaper cannot resolve metrics. Keep this
+    // test on the behavior contract rather than hard-coding one backend's
+    // exact metric values.
 
     // Below the threshold — never below the legacy safety reservation.
     Label tiny("snapshot");
@@ -130,14 +124,14 @@ TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (
     // At/above the threshold — real metrics or fallback multiplier.
     Label normal("hello");
     normal.set_font_size(12.0f);
-    REQUIRE(normal.intrinsic_height() >= 12.0f * 1.4f);
+    REQUIRE(normal.intrinsic_height() >= 12.0f);
 
     Label big("HEADING");
     big.set_font_size(24.0f);
-    REQUIRE(big.intrinsic_height() >= 24.0f * 1.4f);
+    REQUIRE(big.intrinsic_height() > normal.intrinsic_height());
 
-    // Explicit line_height ALWAYS wins (multiplier ignored on either side
-    // of the threshold) — preserves the existing escape hatch.
+    // Explicit line_height ALWAYS wins (metrics and multipliers ignored)
+    // — preserves the existing escape hatch.
     Label explicit_tiny("snapshot");
     explicit_tiny.set_font_size(10.0f);
     explicit_tiny.set_line_height(20.0f);
@@ -381,7 +375,7 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     // Bounded narrow width forces wrap to several lines — measured
     // height must reflect 2+ lines, never just one.
     float narrow_h = desc.measured_height(220.0f);
-    REQUIRE(narrow_h >= lh * 2.0f);
+    REQUIRE(narrow_h >= wide_h * 2.0f);
     REQUIRE(narrow_h <= lh * 10.0f);  // sanity: bounded above
 
     // Tighter width → at least as many lines as the wider case.
@@ -391,8 +385,8 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     // available_width <= 0 falls back to intrinsic_height() — measure
     // callback gives 0 when Yoga has no constraint yet, and the caller
     // would otherwise feed garbage to the shaper.
-    REQUIRE_THAT(desc.measured_height(0.0f),  WithinAbs(lh, 0.01f));
-    REQUIRE_THAT(desc.measured_height(-1.0f), WithinAbs(lh, 0.01f));
+    REQUIRE_THAT(desc.measured_height(0.0f),  WithinAbs(desc.intrinsic_height(), 0.01f));
+    REQUIRE_THAT(desc.measured_height(-1.0f), WithinAbs(desc.intrinsic_height(), 0.01f));
 
     // Single-line label: measured_height matches intrinsic_height
     // regardless of width — the multi_line gate keeps the shaper path
