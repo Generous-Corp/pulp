@@ -6,6 +6,7 @@
 #include <pulp/format/host_type.hpp>
 #include <pulp/runtime/primes.hpp>
 #include <pulp/runtime/expression.hpp>
+#include <algorithm>
 
 using Catch::Matchers::WithinAbs;
 
@@ -342,6 +343,20 @@ TEST_CASE("generate_prime rejects unsupported bit widths",
     REQUIRE(pulp::runtime::generate_prime(63) == 0);
 }
 
+TEST_CASE("generate_prime covers smallest supported bit widths",
+          "[runtime][primes][coverage][phase3-large]") {
+    auto two_bit = pulp::runtime::generate_prime(2);
+    REQUIRE(two_bit >= 2);
+    REQUIRE(two_bit <= 3);
+    REQUIRE(pulp::runtime::is_prime(two_bit));
+
+    auto three_bit = pulp::runtime::generate_prime(3);
+    REQUIRE(three_bit >= 4);
+    REQUIRE(three_bit <= 7);
+    REQUIRE((three_bit % 2) == 1);
+    REQUIRE(pulp::runtime::is_prime(three_bit));
+}
+
 TEST_CASE("sieve_primes", "[runtime][primes]") {
     auto primes = pulp::runtime::sieve_primes(100);
     REQUIRE(primes.size() == 25);  // 25 primes below 100
@@ -355,6 +370,16 @@ TEST_CASE("sieve_primes handles small limits",
     REQUIRE(pulp::runtime::sieve_primes(1).empty());
     REQUIRE(pulp::runtime::sieve_primes(2) == std::vector<uint32_t>{2});
     REQUIRE(pulp::runtime::sieve_primes(3) == std::vector<uint32_t>{2, 3});
+}
+
+TEST_CASE("sieve_primes handles composite square boundaries",
+          "[runtime][primes][coverage][phase3-large]") {
+    auto primes = pulp::runtime::sieve_primes(49);
+
+    REQUIRE(primes.size() == 15);
+    REQUIRE(primes.front() == 2);
+    REQUIRE(primes.back() == 47);
+    REQUIRE(std::find(primes.begin(), primes.end(), 49) == primes.end());
 }
 
 // ── Expression evaluator ────────────────────────────────────────────────
