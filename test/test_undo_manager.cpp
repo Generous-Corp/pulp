@@ -256,3 +256,18 @@ TEST_CASE("UndoManager transaction redo preserves action order",
     REQUIRE(um.redo());
     REQUIRE(events == std::vector<int>{1, 2, -2, -1, 1, 2});
 }
+
+TEST_CASE("UndoManager clear notifies even when history is empty",
+          "[state][undo][coverage][phase3-large]") {
+    UndoManager um;
+    int changes = 0;
+    um.on_state_changed = [&] { ++changes; };
+
+    um.clear();
+
+    REQUIRE(changes == 1);
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.undo_name().empty());
+    REQUIRE(um.redo_name().empty());
+}
