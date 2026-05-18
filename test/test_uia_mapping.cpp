@@ -19,6 +19,13 @@ TEST_CASE("role_to_control_type returns stable UIA IDs", "[a11y][uia]") {
     REQUIRE(role_to_control_type(View::AccessRole::none)   == kControlTypeCustom);
 }
 
+TEST_CASE("UIA mapping falls back for unknown role values",
+          "[a11y][uia][coverage][phase3]") {
+    auto unknown = static_cast<View::AccessRole>(999);
+    REQUIRE(role_to_control_type(unknown) == kControlTypeCustom);
+    REQUIRE(patterns_for_role(unknown).count == 0);
+}
+
 TEST_CASE("UIA control-type IDs match documented values",
           "[a11y][uia]") {
     // Documented in UIAutomationCore.h. Locking them here prevents a
