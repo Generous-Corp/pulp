@@ -27,6 +27,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <string>
 
 #ifdef PULP_HAS_SKIA
@@ -110,6 +111,24 @@ enum class FontState : std::uint8_t {
 /// Validate font bytes before handing them to Skia (Slice 2.8). Skeleton
 /// confirms Skia can parse the bytes; full sanitizer is the impl slice.
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size);
+
+/// Slice 2.1 — async font lifecycle. Schedule a font registration from a
+/// URL or filesystem path and return a future that resolves to the
+/// final `FontState`. Supported URL forms:
+///   * `file:///abs/path/to/font.ttf` — decoded to an absolute path and
+///     dispatched to `register_font_file` via `std::async`.
+///   * `/abs/path/to/font.ttf` — treated as a local path, same dispatch.
+///   * `http://…` / `https://…` — resolved immediately to `Failed`
+///     until the in-tree HTTP fetcher is wired through Slice 2.1.b.
+///     Callers that need network fetches today should pre-download
+///     and call this entry point with a `file://` URL.
+///
+/// The returned future never blocks the caller. Resolves to `Loaded` on
+/// success, `Failed` on any error (unreadable file, Skia rejection, or
+/// unsupported scheme). The async font cache lives at process scope so
+/// the future is safe to detach.
+std::future<FontState> register_font_url(const std::string& url,
+                                         const std::string& family_override = "");
 
 // ── Phase 3 skeletons — color fonts, WOFF2, TextEditor cluster APIs ────
 // pulp #2163 — font v2 Slices 3.1, 3.5, 3.6 surface declarations. The

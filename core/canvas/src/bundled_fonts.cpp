@@ -18,6 +18,8 @@
 
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <future>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -320,6 +322,78 @@ bool register_font_file(const std::string& path,
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) return false;
     return register_font(bytes.data(), bytes.size(), family_override);
+}
+
+namespace {
+
+// pulp #2163 — font v2 Slice 2.1. Case-insensitive prefix match used
+// for scheme detection. The URL grammar (RFC 3986 §3.1) is
+// case-insensitive for the scheme, so "FILE://" must match "file://".
+bool starts_with_ci(std::string_view value, std::string_view prefix) {
+    if (value.size() < prefix.size()) return false;
+    for (std::size_t i = 0; i < prefix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(value[i])) !=
+            std::tolower(static_cast<unsigned char>(prefix[i]))) return false;
+    }
+    return true;
+}
+
+// Strip a `file://` (or `file:`) scheme prefix and return the host-less
+// absolute path. Empty result means the URL didn't carry a usable path.
+std::string extract_file_path(const std::string& url) {
+    constexpr std::string_view kFileScheme = "file://";
+    constexpr std::string_view kFileBare   = "file:";
+    if (starts_with_ci(url, kFileScheme)) {
+        std::string rest = url.substr(kFileScheme.size());
+        // file:// optionally carries a host: file://localhost/path or
+        // file:///path. Drop everything up to the first slash that
+        // begins the absolute path.
+        if (!rest.empty() && rest.front() != '/') {
+            auto slash = rest.find('/');
+            if (slash == std::string::npos) return {};
+            rest = rest.substr(slash);
+        }
+        return rest;
+    }
+    if (starts_with_ci(url, kFileBare)) {
+        return url.substr(kFileBare.size());
+    }
+    return {};
+}
+
+} // namespace
+
+std::future<FontState> register_font_url(const std::string& url,
+                                         const std::string& family_override) {
+    // HTTP(S): real fetch lands in Slice 2.1.b. Today, surface the
+    // unsupported scheme as Failed so callers can branch on it
+    // without blocking the main thread.
+    if (starts_with_ci(url, "http://") || starts_with_ci(url, "https://")) {
+        std::promise<FontState> p;
+        p.set_value(FontState::Failed);
+        return p.get_future();
+    }
+
+    // file:// or bare absolute path → schedule a real file read on a
+    // background thread so plugin startup never blocks on disk I/O.
+    std::string path = extract_file_path(url);
+    if (path.empty()) {
+        // Treat anything else with no scheme as a plain filesystem
+        // path. Empty URL → Failed.
+        if (url.empty()) {
+            std::promise<FontState> p;
+            p.set_value(FontState::Failed);
+            return p.get_future();
+        }
+        path = url;
+    }
+
+    return std::async(std::launch::async,
+        [path = std::move(path), family_override]() -> FontState {
+            return register_font_file(path, family_override)
+                ? FontState::Loaded
+                : FontState::Failed;
+        });
 }
 
 FontProbe probe_font_glyph(const std::string& family,
