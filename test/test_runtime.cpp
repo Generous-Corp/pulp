@@ -519,3 +519,12 @@ TEST_CASE("HighResolutionTimer restart replaces callback",
     timer.stop();
     REQUIRE_FALSE(timer.is_running());
 }
+
+TEST_CASE("runtime logging wrappers accept formatted payloads",
+          "[runtime][log][coverage][phase3]") {
+    REQUIRE_NOTHROW(log_info("info {} {}", "message", 1));
+    REQUIRE_NOTHROW(log_warn("warn {}", 2));
+    REQUIRE_NOTHROW(log_error("error {}", 3));
+    REQUIRE_NOTHROW(log(LogLevel::Debug, "debug {}", 4));
+    REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
+}
