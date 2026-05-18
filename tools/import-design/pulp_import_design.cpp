@@ -464,6 +464,20 @@ int main(int argc, char* argv[]) {
                 }
                 break;
             }
+            case DesignSource::jsx:
+                // The `jsx` source is reachable via the C++ API
+                // (`parse_jsx_react(bundle_js, component_name)` +
+                // `synthesize_runtime_envelope(bundle)`) but the CLI
+                // dispatch lane is intentionally deferred to a follow-up
+                // PR — the smoke harness at
+                // `tools/import-validation/jsx-roundtrip.sh` shells out
+                // to `jsx-transform.mjs` + `pulp-screenshot` directly.
+                // Surface a clear error here rather than silently
+                // producing an empty DesignIR. Codex P1 on PR #2163.
+                std::cerr << "Error: --from jsx is not yet wired into the CLI.\n"
+                             "       Use tools/import-validation/jsx-roundtrip.sh for the\n"
+                             "       smoke harness, or wait for the CLI-dispatch follow-up PR.\n";
+                return 2;
         }
     } catch (const std::exception& e) {
         std::cerr << "Error parsing " << design_source_name(*source) << " input: " << e.what() << "\n";
