@@ -97,6 +97,20 @@ TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
     REQUIRE(meets_contrast(*result, Color::rgba8(255, 255, 255), ContrastLevel::aa_normal));
 }
 
+TEST_CASE("Adjust for contrast preserves already compliant colors",
+          "[view][contrast][coverage][phase3]") {
+    auto foreground = Color::rgba8(255, 255, 255, 128);
+    auto background = Color::rgba8(0, 0, 0);
+
+    auto result = adjust_for_contrast(foreground, background, ContrastLevel::aaa_normal);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->r8() == foreground.r8());
+    REQUIRE(result->g8() == foreground.g8());
+    REQUIRE(result->b8() == foreground.b8());
+    REQUIRE(result->a8() == foreground.a8());
+}
+
 // ── HSL Conversion ──────────────────────────────────────────────────────────
 
 TEST_CASE("HSL round-trip for pure red", "[view][contrast][hsl]") {
