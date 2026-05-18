@@ -127,6 +127,33 @@ TEST_CASE("clear invokes releaser for every entry",
     REQUIRE(c.stats().total_bytes == 0);
 }
 
+TEST_CASE("clear preserves cache counters while removing entries",
+          "[view][image-cache][coverage][phase3]") {
+    ImageCache c;
+    std::atomic<int> calls{0};
+    c.set_decoder(make_fake_decoder(calls));
+
+    const auto* first = c.get("a");
+    REQUIRE(first != nullptr);
+    REQUIRE(c.get("a") == first);
+
+    c.clear();
+
+    auto s = c.stats();
+    REQUIRE(s.entry_count == 0);
+    REQUIRE(s.total_bytes == 0);
+    REQUIRE(s.misses == 1);
+    REQUIRE(s.hits == 1);
+    REQUIRE(calls.load() == 1);
+
+    REQUIRE(c.get("a") != nullptr);
+    s = c.stats();
+    REQUIRE(s.entry_count == 1);
+    REQUIRE(s.misses == 2);
+    REQUIRE(s.hits == 1);
+    REQUIRE(calls.load() == 2);
+}
+
 TEST_CASE("zero budget disables trimming", "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> calls{0};
