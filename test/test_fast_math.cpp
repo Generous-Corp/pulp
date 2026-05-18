@@ -18,6 +18,14 @@ TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0, 0.001));
 }
 
+TEST_CASE("FastMath tanh clamps exactly beyond approximation range",
+          "[signal][fast_math][coverage][phase3]") {
+    REQUIRE(FastMath::tanh(-100.0f) == -1.0f);
+    REQUIRE(FastMath::tanh(-4.0001f) == -1.0f);
+    REQUIRE(FastMath::tanh(4.0001f) == 1.0f);
+    REQUIRE(FastMath::tanh(100.0f) == 1.0f);
+}
+
 TEST_CASE("FastMath sin approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::sin(0.0f), WithinAbs(0.0, 0.01));
     REQUIRE_THAT(FastMath::sin(1.5707963f), WithinAbs(1.0, 0.01)); // pi/2
