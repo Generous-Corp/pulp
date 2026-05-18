@@ -25,6 +25,7 @@ bool MemoryMessageChannel::peer_alive() const {
 
 bool MemoryMessageChannel::send(const std::uint8_t* data, std::size_t size) {
     if (!open_.load()) return false;
+    if (data == nullptr && size > 0) return false;
     auto p = peer_.lock();
     if (!p || *p == nullptr) return false;
     Message m{MessageKind::Binary, std::vector<std::uint8_t>(data, data + size)};

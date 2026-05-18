@@ -125,6 +125,21 @@ TEST_CASE("MemoryMessageChannel delivers zero-length binary and text payloads",
     REQUIRE(received[1].as_text().empty());
 }
 
+TEST_CASE("MemoryMessageChannel rejects nonempty null binary sends",
+          "[runtime][message_channel][codecov]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    int deliveries = 0;
+    right->on_message([&](const Message&) {
+        ++deliveries;
+    });
+
+    REQUIRE_FALSE(left->send(nullptr, 1));
+    REQUIRE(deliveries == 0);
+    REQUIRE(left->is_open());
+    REQUIRE(right->is_open());
+}
+
 TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
           "[runtime][message_channel][coverage][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
