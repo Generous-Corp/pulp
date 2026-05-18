@@ -1061,6 +1061,18 @@ TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff][issue-641]") {
     REQUIRE(format_diff(diff).empty());
 }
 
+TEST_CASE("text_diff formats unchanged lines with equal prefixes",
+          "[runtime][text-diff][coverage][phase3]") {
+    auto diff = text_diff("alpha\nbeta", "alpha\nbeta");
+
+    REQUIRE(diff.size() == 2);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[1].op == DiffOp::Equal);
+    REQUIRE(format_diff(diff) ==
+            "  alpha\n"
+            "  beta\n");
+}
+
 TEST_CASE("text_diff reports pure inserts and deletes",
           "[runtime][text-diff][issue-641]") {
     auto inserted = text_diff("", "one\ntwo");
