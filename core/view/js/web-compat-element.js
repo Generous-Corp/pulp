@@ -20,6 +20,16 @@ function __genId__() { return "__el_" + (__nextId__++) + "__"; }
 // Element class
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Map from native _id → Element instance. Populated by every Element
+// constructor below. Used by __dispatch__ (in the kJSPreamble installed
+// by widget_bridge.cpp) to look up the JS Element for a native pointer
+// event and call dispatchEvent on it — bypassing the single-slot
+// __callbacks__[id:event] table that React-DOM's _registerNativeEvent
+// clobbers. Per Codex consult 2026-05-17.
+var __nativeElements__ = (typeof globalThis !== "undefined" && globalThis.__nativeElements__)
+    ? globalThis.__nativeElements__ : {};
+if (typeof globalThis !== "undefined") globalThis.__nativeElements__ = __nativeElements__;
+
 function Element(tagName, nativeId) {
     this.tagName = (tagName || "div").toUpperCase();
     this._id = nativeId || __genId__();
@@ -41,6 +51,9 @@ function Element(tagName, nativeId) {
     this._attributes = {};
     this._dataset = {};
     this.style = new CSSStyleDeclaration(this);
+    // Register in the native-id map so __dispatch__ can look us up
+    // when a native pointer/click event fires.
+    __nativeElements__[this._id] = this;
 }
 
 // Create the native widget based on tag + type
@@ -1336,43 +1349,93 @@ Element.prototype.releasePointerCapture = function(pointerId) {
 
 function _makeEvent(type, target, data) {
     var d = data || {};
-    return {
-        type: type,
-        target: target,
-        currentTarget: null,
-        // Position (P1)
-        clientX: d.clientX || 0,
-        clientY: d.clientY || 0,
-        offsetX: d.offsetX || 0,
-        offsetY: d.offsetY || 0,
-        button: d.button || 0,
-        // Keyboard
-        key: d.key || "", code: d.code || "",
-        ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey,
-        altKey: !!d.altKey, metaKey: !!d.metaKey,
-        // Pointer (P2)
-        pointerId: d.pointerId || 0,
-        pointerType: d.pointerType || "mouse",
-        isPrimary: d.isPrimary !== undefined ? d.isPrimary : true,
-        // Stylus (P3)
-        pressure: d.pressure !== undefined ? d.pressure : 0.5,
-        altitudeAngle: d.altitudeAngle || 0,
-        azimuthAngle: d.azimuthAngle || 0,
-        // Gesture (P4)
-        scale: d.scale !== undefined ? d.scale : 1,
-        rotation: d.rotation || 0,
-        // Coalesced/predicted (P5)
-        _coalesced: d._coalesced || null,
-        _predicted: d._predicted || null,
-        getCoalescedEvents: function() { return this._coalesced || [this]; },
-        getPredictedEvents: function() { return this._predicted || []; },
-        // Propagation control
-        _stopped: false,
-        _defaultPrevented: false,
-        _noBubble: false,
-        stopPropagation: function() { this._stopped = true; },
-        preventDefault: function() { this._defaultPrevented = true; }
+    var ev = new Event(type, {
+        // Native bridge events previously bubbled through Pulp's manual
+        // parent walk. Keep that default while exposing the standard flag
+        // React DOM and DOM-like userland expect to exist.
+        bubbles: d.bubbles !== undefined ? !!d.bubbles : true,
+        cancelable: d.cancelable !== undefined ? !!d.cancelable : true,
+        composed: d.composed !== undefined ? !!d.composed : true
+    });
+    ev.target = target;
+    ev.currentTarget = null;
+    ev.eventPhase = 0;  // NONE; _dispatchEvent sets during traversal
+    ev.timeStamp = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    // Self-reference for code that treats the bridged object as both the
+    // DOM event and the native event payload.
+    ev.nativeEvent = ev;
+
+    // Position fields (P1)
+    ev.clientX = d.clientX || 0;
+    ev.clientY = d.clientY || 0;
+    ev.offsetX = d.offsetX || 0;
+    ev.offsetY = d.offsetY || 0;
+    ev.pageX = d.clientX || 0;
+    ev.pageY = d.clientY || 0;
+    ev.screenX = d.clientX || 0;
+    ev.screenY = d.clientY || 0;
+    ev.movementX = d.movementX || 0;
+    ev.movementY = d.movementY || 0;
+    ev.button = d.button || 0;
+    ev.buttons = d.buttons !== undefined ? d.buttons :
+        (type === "pointerdown" || type === "mousedown" ||
+         type === "pointermove" || type === "mousemove") ? 1 : 0;
+
+    // Keyboard
+    ev.key = d.key || "";
+    ev.code = d.code || "";
+    ev.ctrlKey = !!d.ctrlKey;
+    ev.shiftKey = !!d.shiftKey;
+    ev.altKey = !!d.altKey;
+    ev.metaKey = !!d.metaKey;
+    ev.getModifierState = function (k) {
+        return !!{ Control: this.ctrlKey, Shift: this.shiftKey, Alt: this.altKey, Meta: this.metaKey }[k];
     };
+
+    // Pointer (P2)
+    ev.pointerId = d.pointerId || 0;
+    ev.pointerType = d.pointerType || "mouse";
+    ev.isPrimary = d.isPrimary !== undefined ? d.isPrimary : true;
+    ev.width = d.width || 1;
+    ev.height = d.height || 1;
+    ev.tangentialPressure = d.tangentialPressure || 0;
+    ev.tiltX = d.tiltX || 0;
+    ev.tiltY = d.tiltY || 0;
+    ev.twist = d.twist || 0;
+
+    // Stylus (P3)
+    ev.pressure = d.pressure !== undefined ? d.pressure : 0.5;
+    ev.altitudeAngle = d.altitudeAngle || 0;
+    ev.azimuthAngle = d.azimuthAngle || 0;
+
+    // Gesture (P4)
+    ev.scale = d.scale !== undefined ? d.scale : 1;
+    ev.rotation = d.rotation || 0;
+    ev.detail = d.detail !== undefined ? d.detail : null;
+    ev.deltaX = d.deltaX || 0;
+    ev.deltaY = d.deltaY || 0;
+    ev.deltaZ = d.deltaZ || 0;
+    ev.deltaMode = d.deltaMode || 0;
+
+    // Coalesced/predicted (P5)
+    ev._coalesced = d._coalesced || null;
+    ev._predicted = d._predicted || null;
+    ev.getCoalescedEvents = function () { return this._coalesced || [this]; };
+    ev.getPredictedEvents = function () { return this._predicted || []; };
+
+    // composedPath(): walks the _parentElement chain starting at target.
+    // happy-dom returns [target, target.parent, ..., document, window];
+    // pulp's tree is simpler — target up through parent chain.
+    ev.composedPath = function () {
+        if (!this.target) return [];
+        var path = [this.target];
+        var p = this.target._parentElement;
+        while (p) { path.push(p); p = p._parentElement; }
+        return path;
+    };
+
+    ev._noBubble = !ev.bubbles;
+    return ev;
 }
 
 // pulp DIVERGE→PASS sweep — `new Event(name, init)` constructor surface.
@@ -1397,10 +1460,25 @@ function Event(type, eventInitDict) {
     this._defaultPrevented = false;
     this._noBubble = !this.bubbles;
 }
+Event.NONE = 0;
+Event.CAPTURING_PHASE = 1;
+Event.AT_TARGET = 2;
+Event.BUBBLING_PHASE = 3;
+Event.prototype.NONE = Event.NONE;
+Event.prototype.CAPTURING_PHASE = Event.CAPTURING_PHASE;
+Event.prototype.AT_TARGET = Event.AT_TARGET;
+Event.prototype.BUBBLING_PHASE = Event.BUBBLING_PHASE;
 Event.prototype.stopPropagation = function() { this._stopped = true; };
 Event.prototype.stopImmediatePropagation = function() { this._stopped = true; };
 Event.prototype.preventDefault = function() {
     if (this.cancelable) this._defaultPrevented = true;
+};
+Event.prototype.composedPath = function() {
+    if (!this.target) return [];
+    var path = [this.target];
+    var p = this.target._parentElement;
+    while (p) { path.push(p); p = p._parentElement; }
+    return path;
 };
 Object.defineProperty(Event.prototype, "defaultPrevented", {
     get: function() { return this._defaultPrevented; }
@@ -1434,7 +1512,28 @@ function _dispatchEvent(target, event) {
     var el = target._parentElement;
     while (el) { path.unshift(el); el = el._parentElement; }
 
+    // pulp jsx-instrument-import diag 2026-05-17 — log every dispatch
+    // path for pointer/click/mouse events so we can see if the bubble
+    // chain reaches __root__ where React-DOM delegate is registered.
+    // Gated by globalThis.__pulpDebugDispatch__ to keep silent in
+    // normal runs.
+    if (globalThis.__pulpDebugDispatch__ && /^(click|mousedown|mouseup|pointerdown|pointerup)$/.test(event.type)) {
+        var pathIds = path.map(function (e) { return e._id; }).join(">");
+        var rootListeners = (__eventListeners__["__root__"]
+            && __eventListeners__["__root__"][event.type]) || [];
+        if (typeof __spectrLog === "function") {
+            __spectrLog("[disp] " + event.type + " target=" + target._id
+                + " path=" + pathIds + " rootHas=" + rootListeners.length);
+        } else if (typeof console !== "undefined" && console.log) {
+            console.log("[disp] " + event.type + " target=" + target._id
+                + " path=" + pathIds + " rootHas=" + rootListeners.length);
+        }
+    }
+
+    var Event_CAPTURING = 1, Event_AT_TARGET = 2, Event_BUBBLING = 3;
+
     // Capture phase (top-down)
+    event.eventPhase = Event_CAPTURING;
     for (var i = 0; i < path.length && !event._stopped; i++) {
         var listeners = __eventListeners__[path[i]._id] && __eventListeners__[path[i]._id][event.type];
         if (listeners) {
@@ -1442,17 +1541,28 @@ function _dispatchEvent(target, event) {
             for (var j = 0; j < listeners.length; j++) {
                 if (listeners[j].capture) {
                     listeners[j].fn.call(path[i], event);
-                    if (event._stopped) return;
+                    if (event._stopped) {
+                        event.eventPhase = 0;
+                        event.currentTarget = null;
+                        return;
+                    }
                 }
             }
         }
     }
 
     // Target phase
+    event.eventPhase = Event_AT_TARGET;
+    event.currentTarget = target;
     _fireListeners(target, event);
-    if (event._stopped || event._noBubble) return;
+    if (event._stopped || event._noBubble) {
+        event.eventPhase = 0;
+        event.currentTarget = null;
+        return;
+    }
 
     // Bubble phase (bottom-up)
+    event.eventPhase = Event_BUBBLING;
     for (var k = path.length - 1; k >= 0 && !event._stopped; k--) {
         var listeners2 = __eventListeners__[path[k]._id] && __eventListeners__[path[k]._id][event.type];
         if (listeners2) {
@@ -1460,11 +1570,13 @@ function _dispatchEvent(target, event) {
             for (var l = 0; l < listeners2.length; l++) {
                 if (!listeners2[l].capture) {
                     listeners2[l].fn.call(path[k], event);
-                    if (event._stopped) return;
+                    if (event._stopped) break;
                 }
             }
         }
     }
+    event.eventPhase = 0;
+    event.currentTarget = null;
 }
 
 // ── Stylesheet re-application ────────────────────────────────────────────────

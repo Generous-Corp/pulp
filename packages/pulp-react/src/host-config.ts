@@ -103,9 +103,71 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'SvgRect':     call('createSvgRect', id, parentId); return;
         case 'SvgLine':     call('createSvgLine', id, parentId); return;
         default: {
-            // Should be unreachable thanks to the typed intrinsics in types.ts.
-            const _exhaustive: never = type;
-            throw new Error('@pulp/react: unknown intrinsic type: ' + String(_exhaustive));
+            // pulp jsx-instrument-import 2026-05-17 — lowercase HTML/SVG
+            // intrinsic aliases. Lets the reconciler handle Chainer-style
+            // raw JSX (<div>, <svg>, <path>, …) directly through the
+            // existing bridge widgets, mirroring the web-compat shim's
+            // _ensureNative tag → createX map. Per ChatGPT/Codex consult:
+            // the right architecture is react-konva/r3f-style direct
+            // reconciler wiring, not ReactDOM event delegation.
+            const lower = String(type).toLowerCase();
+            switch (lower) {
+                case 'div': case 'section': case 'article': case 'aside':
+                case 'header': case 'footer': case 'nav': case 'main':
+                case 'figure': case 'figcaption': case 'form': case 'ul':
+                case 'ol': case 'li': case 'dl': case 'dt': case 'dd':
+                    call('createCol', id, parentId); return;
+                case 'span': case 'p': case 'label':
+                case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
+                case 'b': case 'i': case 'em': case 'strong': case 'small': case 'code':
+                case 'pre': case 'a': case 'td': case 'th': case 'title':
+                case 'text': case 'tspan': case 'desc':
+                    call('createLabel', id, asText(props.children) ?? '', parentId); return;
+                case 'button': {
+                    const text = asText(props.children) ?? (props.text as string ?? '');
+                    if (typeof g.createButton === 'function') {
+                        call('createButton', id, text, parentId);
+                    } else {
+                        call('createPanel', id, parentId);
+                        call('createLabel', id + '_l', text, id);
+                    }
+                    return;
+                }
+                case 'input': {
+                    const inputType = String(props.type ?? 'text').toLowerCase();
+                    if (inputType === 'range') {
+                        const orient = (props['aria-orientation'] === 'vertical')
+                            ? 'vertical' : 'horizontal';
+                        call('createFader', id, orient, parentId);
+                    } else if (inputType === 'checkbox') {
+                        call('createCheckbox', id, parentId);
+                    } else {
+                        // text / search / email / url / tel / password / (default)
+                        call('createTextEditor', id, parentId);
+                    }
+                    return;
+                }
+                case 'textarea': call('createTextEditor', id, parentId); return;
+                case 'select':   call('createCombo', id, parentId); return;
+                case 'progress': call('createProgress', id, parentId); return;
+                case 'img':      call('createImage', id, parentId); return;
+                case 'canvas':   call('createCanvas', id, parentId); return;
+                case 'svg':      call('createCol', id, parentId); return;  // SVG = container; children paint
+                case 'path':     call('createSvgPath', id, parentId); return;
+                case 'circle':   call('createSvgPath', id, parentId); return; // synthesized 'd' from cx/cy/r
+                case 'rect':     call('createSvgRect', id, parentId); return;
+                case 'line':     call('createSvgLine', id, parentId); return;
+                case 'g':        call('createCol', id, parentId); return; // <svg><g> group
+                default: {
+                    // Last-resort fallback: treat any unknown intrinsic as a
+                    // container so child mounts can still attach. Surfaces a
+                    // diagnostic line in dev/test paths via __spectrLog.
+                    const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
+                    if (typeof lg === 'function') lg('[host-config] unknown intrinsic ' + lower + ' — falling back to createCol');
+                    call('createCol', id, parentId);
+                    return;
+                }
+            }
         }
     }
 }

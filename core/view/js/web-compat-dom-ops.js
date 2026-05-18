@@ -50,6 +50,19 @@ if (!Element.prototype.appendChild ||
                         : "horizontal");
             } else if (child._type === "checkbox") {
                 __domAppendHint = "checkbox";
+            } else {
+                // pulp jsx-instrument-import (2026-05-17) — plain
+                // `<input>` (the default `_type` is "text") and the
+                // text-input subtypes (text/search/email/url/tel/password)
+                // route to a TextEditor on the C++ side. Pre-fix, all
+                // non-range/non-checkbox inputs fell through to a plain
+                // View, leaving Chainer's preset-name field (and any
+                // generic React `<input>`) non-editable.
+                var t = child._type || "text";
+                if (t === "text" || t === "search" || t === "email" ||
+                    t === "url"  || t === "tel"    || t === "password") {
+                    __domAppendHint = "text";
+                }
             }
         }
         __domAppend(this._id, child._id, child.tagName.toLowerCase(), __domAppendHint);
@@ -96,6 +109,79 @@ if (!Element.prototype.appendChild ||
         }
         child.style._flushAll();
         child._reapplyStylesheets();
+
+        // pulp jsx-instrument-import (2026-05-17) — auto-register
+        // native click + pointer events on EVERY appended element so
+        // React 17+'s root-delegated event system actually receives
+        // events. React attaches a single delegate listener to the
+        // root container; individual JSX elements never call
+        // addEventListener('click', fn), so pre-fix registerClick(id)
+        // / registerPointer(id) was never invoked and native NSEvents
+        // never reached the JS bubble chain. The shim's _dispatchEvent
+        // implements proper capture/bubble through _parentElement,
+        // so once native click/pointer fires `on(id, 'click')` we
+        // synthesize a DOM Event, dispatch on the target child Element,
+        // and the existing bubble walk delivers to React's root.
+        //
+        // Idempotent via _autoEventsRegistered flag.
+        if (!child._autoEventsRegistered) {
+            child._autoEventsRegistered = true;
+            if (typeof on === "function") {
+                on(child._id, "click", function (d) {
+                    var ev = _makeEvent
+                        ? _makeEvent("click", child, d)
+                        : { type: "click", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.x) || 0, clientY: (d && d.y) || 0,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(ev);
+                });
+                on(child._id, "pointerdown", function (d) {
+                    var ev = _makeEvent
+                        ? _makeEvent("pointerdown", child, d)
+                        : { type: "pointerdown", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                            button: (d && d.button) || 0, buttons: 1,
+                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(ev);
+                    // Also synthesize 'mousedown' which is what React's
+                    // mousedown delegate listens for in legacy mode.
+                    var me = _makeEvent
+                        ? _makeEvent("mousedown", child, d)
+                        : { type: "mousedown", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                            button: (d && d.button) || 0, buttons: 1,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(me);
+                });
+                on(child._id, "pointermove", function (d) {
+                    var ev = _makeEvent
+                        ? _makeEvent("pointermove", child, d)
+                        : { type: "pointermove", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(ev);
+                });
+                on(child._id, "pointerup", function (d) {
+                    var ev = _makeEvent
+                        ? _makeEvent("pointerup", child, d)
+                        : { type: "pointerup", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                            button: (d && d.button) || 0, buttons: 0,
+                            pointerId: (d && d.pointerId) || 0, pointerType: "mouse", isPrimary: true,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(ev);
+                    var me = _makeEvent
+                        ? _makeEvent("mouseup", child, d)
+                        : { type: "mouseup", target: child, bubbles: true, currentTarget: child,
+                            clientX: (d && d.clientX) || 0, clientY: (d && d.clientY) || 0,
+                            button: (d && d.button) || 0, buttons: 0,
+                            preventDefault: function () {}, stopPropagation: function () { this._stopped = true; } };
+                    if (child.dispatchEvent) child.dispatchEvent(me);
+                });
+            }
+        }
         // pulp #1323 — `<style>` elements receive CSS via either direct
         // textContent assignment or child Text nodes (React's reconciler
         // takes the second path). When a Text-bearing child lands under a

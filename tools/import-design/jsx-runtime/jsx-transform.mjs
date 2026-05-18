@@ -265,7 +265,29 @@ async function main() {
             // Node-resolution paths: prefer the runtime's own node_modules so we
             // get a consistent React/ReactDOM regardless of the user's package
             // tree.
-            nodePaths: [resolve(__dirname, 'node_modules')],
+            nodePaths: [
+                resolve(__dirname, 'node_modules'),
+                // pulp jsx-instrument-import 2026-05-17 — @pulp/react
+                // externalizes react/react-reconciler/scheduler at its
+                // own build time. When we re-bundle @pulp/react into the
+                // user's JSX import, esbuild needs to resolve those —
+                // they live in @pulp/react's node_modules.
+                resolve(__dirname, '..', '..', '..', 'packages', 'pulp-react', 'node_modules'),
+            ],
+            // pulp jsx-instrument-import 2026-05-17 — temporarily reverted
+            // the react-dom → @pulp/react alias. Re-bundling @pulp/react
+            // duplicated React (esbuild emitted `useState2` for Chainer's
+            // imports, distinct from @pulp/react's React) — the bundled
+            // user component crashed with "Cannot read properties of null
+            // (reading 'useState')" inside renderWithHooks. The dedup
+            // requires a proper externalization strategy (@pulp/react's
+            // build externalizes react; our re-bundle needs to externalize
+            // it too, then resolve to the SAME react instance the user
+            // imports). Follow-up PR scope.
+            //
+            // For now: use the working bundled-ReactDOM path. Static render
+            // is perfect; interactivity is the next-PR scope per Codex's
+            // 2-week-trap warning.
             // Banner emits BEFORE esbuild's IIFE wrapper — that's
             // where the sandbox shims must live so they run before any
             // ESM import (esp. react-dom/client's DevTools UA sniff).

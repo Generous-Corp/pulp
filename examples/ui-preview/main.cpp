@@ -8,18 +8,16 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
-#include <pulp/view/motion.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
-#include <pulp/inspect/inspector_server.hpp>
 #include <pulp/inspect/inspector_window.hpp>
-#include <pulp/inspect/domain_handler.hpp>
-#include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/state/store.hpp>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -515,12 +513,27 @@ int main(int argc, char* argv[]) {
     root.set_theme(Theme::dark());
     root.set_frame_clock(&clock);
     root.flex().direction = FlexDirection::column;
-    root.flex().padding = 16;
-    root.flex().gap = 12;
+    // Demo defaults applied ONLY when no --script. Imported scripts
+    // (pulp import-design --from jsx output, etc.) manage their own
+    // layout — bleeding `padding: 16; gap: 12` into a script's root
+    // pushes content inward and offsets every absolute-positioned child.
+    // Per user UX feedback 2026-05-17: "no default views end up loaded
+    // when a person is simply trying to import their own stuff."
+    if (script_path.empty()) {
+        root.flex().padding = 16;
+        root.flex().gap = 12;
+    }
 
     // Set up scripting engine
     ScriptEngine engine;
     WidgetBridge bridge(engine, root, store);
+
+    // Install runtime-import handlers so imported React/JSX bundles
+    // (pulp import-design --from jsx output, etc.) can register +
+    // drain useEffect / requestAnimationFrame / setTimeout callbacks.
+    // Matches pulp-screenshot's setup — pulp #1899. Without this the
+    // bundle's React mount never finishes and the window stays empty.
+    bridge.install_runtime_import_handlers();
 
     // Build UI — from script file or built-in demo
     if (!script_path.empty()) {
@@ -532,7 +545,218 @@ int main(int argc, char* argv[]) {
         std::ostringstream ss;
         ss << sf.rdbuf();
         bridge.load_script(ss.str());
+        // After the script load, drain React commit microtasks +
+        // useEffect callbacks + initial requestAnimationFrame ticks
+        // before the window's first paint. Without this the React tree
+        // mounts asynchronously and the first frame shows an empty
+        // window. Pumping settle rounds gives React commit + every
+        // queued effect a chance to land. Mirrors pulp-screenshot's
+        // post-load settle pump (tools/screenshot/pulp_screenshot.cpp).
+        bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(64);");
         std::cout << "Loaded script: " << script_path << "\n";
+
+        // ── Phase 1 instrumentation (pulp jsx-instrument-import / interactivity
+        // diagnosis 2026-05-17) — dump React-DOM root delegate state after
+        // settle. Per Codex/RepoPrompt: most-likely break is React-DOM never
+        // attaching its delegated listeners on document.body (= __root__).
+        // Empty result here means the issue is pre-dispatch (Phase 7); non-
+        // empty means the bridge between native dispatch and DOM event
+        // bubbling is the gap.
+        try {
+            std::ostringstream js;
+            js << "(function(){"
+               << "  try {"
+               << "    var keys = ['click','mousedown','mouseup','pointerdown',"
+               << "                'pointermove','pointerup','wheel','keydown'];"
+               << "    var report = {};"
+               << "    var targets = {"
+               << "      '__root__ (document.body)': (typeof __eventListeners__ !== 'undefined') ? __eventListeners__['__root__'] : null,"
+               << "      window_listeners: (typeof window !== 'undefined' && window._listeners) ? window._listeners : null,"
+               << "      document_present: typeof document !== 'undefined',"
+               << "      document_addEL: typeof document !== 'undefined' && typeof document.addEventListener === 'function',"
+               << "      document_dispatch: typeof document !== 'undefined' && typeof document.dispatchEvent === 'function',"
+               << "      body_present: typeof document !== 'undefined' && !!document.body,"
+               << "      body_id: typeof document !== 'undefined' && document.body ? document.body._id : null,"
+               << "    };"
+               << "    for (var k in targets) {"
+               << "      var v = targets[k];"
+               << "      if (v && typeof v === 'object') {"
+               << "        var counts = {};"
+               << "        for (var i = 0; i < keys.length; i++) {"
+               << "          var lst = v[keys[i]];"
+               << "          if (lst && lst.length) counts[keys[i]] = lst.length;"
+               << "        }"
+               << "        report[k] = counts;"
+               << "      } else {"
+               << "        report[k] = v;"
+               << "      }"
+               << "    }"
+               << "    globalThis.__pulpDiagReport__ = JSON.stringify(report);"
+               << "  } catch (e) { globalThis.__pulpDiagReport__ = 'diag error: ' + (e && e.message || e); }"
+               << "})();void 0";
+            bridge.load_script(js.str());
+            bridge.load_script("globalThis.__pulpDiagReport__ || 'no report'");
+            // Pull the result back. Hacky — re-evaluate then capture via
+            // engine.evaluate to get a string value (load_script discards).
+            auto result = engine.evaluate("globalThis.__pulpDiagReport__ || 'no report'");
+            std::cout << "[diag] post-settle event-listener state:\n[diag] "
+                      << result.getWithDefault(std::string("(empty)")) << "\n";
+            std::cout.flush();
+
+            // (Probe 2 removed: had a JS syntax error that crashed the
+            // run after settle. Replaced by C++-side native-event
+            // instrumentation in window_host_mac.mm + widget_bridge.cpp,
+            // gated on PULP_DEBUG_POINTER=1.)
+
+            // Programmatic click probe (PULP_JSX_CLICKPROBE=1). Fires a
+            // simulate_drag on the root view at a knob coordinate after
+            // settle, dumps React state snapshots before + after, so we
+            // can see definitively whether native clicks propagate
+            // through to React handlers without depending on the user
+            // clicking.
+            // Definitive before/after PNG probe (PULP_JSX_PIXEL_PROBE=1).
+            // Renders, fires simulate_drag, renders again, compares byte
+            // sizes. Same size = no change, different = React state changed.
+            if (const char* p2 = std::getenv("PULP_JSX_PIXEL_PROBE"); p2 && *p2) {
+                root.set_bounds({0, 0, static_cast<float>(render_w), static_cast<float>(render_h)});
+                root.layout_children();
+                auto png0 = pulp::view::render_to_png(root, render_w, render_h, 1.0f, pulp::view::ScreenshotBackend::skia);
+                std::cout << "[pixel-probe] before drag: png " << png0.size() << " bytes\n";
+                std::cout.flush();
+
+                // Try clicking at multiple known-knob coordinates from earlier diagnostic
+                // hit-test data: (629,169), (645,162), (647,156), (661,144), (112,61) — all
+                // had has_pointer=yes. Use (112, 60) which is the OSC freq knob area.
+                root.simulate_drag({112, 60}, {112, 20}, 8);
+                bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(8);");
+                root.layout_children();
+                auto png1 = pulp::view::render_to_png(root, render_w, render_h, 1.0f, pulp::view::ScreenshotBackend::skia);
+                std::cout << "[pixel-probe] after drag:  png " << png1.size() << " bytes  "
+                          << "(delta=" << (static_cast<long>(png1.size()) - static_cast<long>(png0.size())) << ")\n";
+                std::cout.flush();
+
+                // Also try a click on a button area at the bottom of Chainer
+                root.simulate_click({120, 480});  // bottom-bar "save preset" button
+                bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(8);");
+                root.layout_children();
+                auto png2 = pulp::view::render_to_png(root, render_w, render_h, 1.0f, pulp::view::ScreenshotBackend::skia);
+                std::cout << "[pixel-probe] after click: png " << png2.size() << " bytes  "
+                          << "(delta=" << (static_cast<long>(png2.size()) - static_cast<long>(png0.size())) << ")\n";
+                std::cout.flush();
+            }
+
+            // (Periodic stats dump removed — required std::thread / std::this_thread
+            // which weren't in scope. Replaced by an explicit JS-side log inside
+            // the __dispatch__ bypass using __spectrLog when available, so each
+            // bypass fires a line to stderr directly.)
+
+            // Surface shim log + error
+            try {
+                auto shimLog = engine.evaluate("globalThis.__pulpShimLog__ || '(no shim log)'").getWithDefault(std::string(""));
+                std::cout << "--- shim log ---\n" << shimLog;
+                auto shimErr = engine.evaluate("globalThis.__pulpShimError__ || ''").getWithDefault(std::string(""));
+                if (!shimErr.empty()) std::cout << "[shim-error] " << shimErr << "\n";
+                std::cout.flush();
+            } catch (...) {}
+
+            // DOM structure probe — find where React actually mounted.
+            if (const char* p3 = std::getenv("PULP_JSX_DOM_PROBE"); p3 && *p3) {
+                auto info = engine.evaluate(
+                    "(function(){"
+                    "  var report = {};"
+                    "  report.bodyExists = !!(document && document.body);"
+                    "  report.bodyId = document && document.body && document.body._id;"
+                    "  report.bodyChildren = document && document.body && document.body._children ? document.body._children.length : -1;"
+                    "  report.documentElement = document && document.documentElement ? document.documentElement._id : null;"
+                    "  report.nativeElementCount = (typeof __nativeElements__ !== 'undefined') ? Object.keys(__nativeElements__).length : -1;"
+                    "  report.firstTenIds = (typeof __nativeElements__ !== 'undefined') ? Object.keys(__nativeElements__).slice(0,10) : [];"
+                    "  // walk EVERY native element looking for SVG primitives"
+                    "  var svgKinds = {svg:0, path:0, circle:0, line:0, rect:0, button:0, div:0, span:0, input:0};"
+                    "  if (typeof __nativeElements__ !== 'undefined') {"
+                    "    for (var k in __nativeElements__) {"
+                    "      var el = __nativeElements__[k];"
+                    "      var t = el && el.tagName ? el.tagName.toLowerCase() : '?';"
+                    "      if (svgKinds[t] !== undefined) svgKinds[t]++;"
+                    "    }"
+                    "  }"
+                    "  report.tagCounts = svgKinds;"
+                    "  // Check if any element has a parentElement chain leading back to body"
+                    "  var leafSample = null, leafChain = [];"
+                    "  if (typeof __nativeElements__ !== 'undefined') {"
+                    "    for (var k in __nativeElements__) {"
+                    "      var el = __nativeElements__[k];"
+                    "      if (el && el.tagName && el.tagName.toLowerCase() === 'path') { leafSample = el; break; }"
+                    "    }"
+                    "    if (leafSample) {"
+                    "      var p = leafSample;"
+                    "      while (p && leafChain.length < 12) { leafChain.push(p._id + '(' + p.tagName + ')'); p = p._parentElement; }"
+                    "    }"
+                    "  }"
+                    "  report.leafChain = leafChain;"
+                    "  report.leafChainConnectsToBody = leafChain.length > 0 && leafChain[leafChain.length-1].indexOf('__root__') >= 0;"
+                    "  return JSON.stringify(report);"
+                    "})()"
+                ).getWithDefault(std::string("(empty)"));
+                std::cout << "[dom-probe] " << info << "\n";
+                std::cout.flush();
+            }
+
+            if (const char* probe = std::getenv("PULP_JSX_CLICKPROBE"); probe && *probe) {
+                root.set_bounds({0, 0, static_cast<float>(render_w), static_cast<float>(render_h)});
+                root.layout_children();
+
+                // Walk the React tree and find the deepest path/circle/svg element
+                // we can hit. Dump its rect + id.
+                std::ostringstream find_js;
+                find_js << "(function(){"
+                        << "  var visit = [];"
+                        << "  function walk(el, depth) {"
+                        << "    if (!el || depth > 32) return;"
+                        << "    var tag = (el.tagName || '').toLowerCase();"
+                        << "    if (tag === 'path' || tag === 'circle' || tag === 'line' || tag === 'button') {"
+                        << "      var rect = (typeof getLayoutRect === 'function') ? getLayoutRect(el._id) : null;"
+                        << "      visit.push({ id: el._id, tag: tag, rect: rect });"
+                        << "    }"
+                        << "    if (el._children) for (var i = 0; i < el._children.length; i++) walk(el._children[i], depth + 1);"
+                        << "  }"
+                        << "  if (document && document.body) walk(document.body, 0);"
+                        << "  return JSON.stringify(visit.slice(0, 10));"
+                        << "})()";
+                auto find = engine.evaluate(find_js.str()).getWithDefault(std::string("(empty)"));
+                std::cout << "[probe] first 10 leaf hits: " << find << "\n";
+
+                // Fire simulate_drag at a hard-coded knob coordinate
+                // (OSC freq knob, roughly y=70 in Chainer based on
+                // earlier diagnostic — fits 1280x800 viewport).
+                std::cout << "[probe] firing simulate_drag at (150, 220) → (150, 180)\n";
+                root.simulate_drag({150, 220}, {150, 180}, 6);
+
+                // Pump a few settle rounds for React state updates to commit.
+                bridge.load_script("if (typeof __pulpRuntimeSettle__ === 'function') __pulpRuntimeSettle__(8);");
+
+                // Try to read Chainer's React state. Chainer stores params via
+                // useState inside ChainerInstrument(). We can't reach React's
+                // internal state, but if React re-rendered then the DOM has
+                // new attribute values. Try reading the freq display value.
+                auto dom = engine.evaluate(
+                    "(function(){"
+                    "  var found = null;"
+                    "  function walk(el, d){"
+                    "    if (!el || d > 24) return;"
+                    "    var txt = el._textContent || '';"
+                    "    if (/\\bhz\\b/.test(txt) && txt.length < 20) { found = txt; return; }"
+                    "    if (el._children) for (var i = 0; i < el._children.length && !found; i++) walk(el._children[i], d+1);"
+                    "  }"
+                    "  if (document && document.body) walk(document.body, 0);"
+                    "  return found || '(no hz display found)';"
+                    "})()"
+                ).getWithDefault(std::string("(empty)"));
+                std::cout << "[probe] hz display text after drag: " << dom << "\n";
+                std::cout.flush();
+            }
+        } catch (const std::exception& e) {
+            std::cout << "[diag] failed: " << e.what() << "\n";
+        }
     } else {
         auto title = std::make_unique<Label>("Pulp Animation Preview");
         title->set_font_size(16.0f);
@@ -615,76 +839,79 @@ int main(int argc, char* argv[]) {
         return ok ? 0 : 1;
     }
 
-    // ── Motion observability wiring ─────────────────────────────────
-    //
-    // Bind the motion coordinator to the FrameClock so traces sample
-    // each tick. The InspectorServer + MotionInspector pair come up
-    // only when PULP_MOTION_SERVER=1 (defaults to off so the example
-    // doesn't open a TCP port unexpectedly). Logs always go through
-    // the default log sink when PULP_MOTION_LOG=1. A scope guard
-    // unbinds the coordinator before the local FrameClock dies, so
-    // the singleton's destructor never touches a dangling pointer.
-    pulp::view::motion::Coordinator::instance().bind(clock);
-    int motion_log_sink_id = 0;
-    std::unique_ptr<pulp::inspect::InspectorServer> motion_server;
-    std::unique_ptr<pulp::inspect::MotionInspector> motion_inspector;
-    std::unique_ptr<pulp::inspect::DomainHandler> motion_dispatch;
-    struct MotionGuard {
-        int& log_sink_id;
-        std::unique_ptr<pulp::inspect::MotionInspector>& inspector_ref;
-        ~MotionGuard() {
-            inspector_ref.reset();
-            auto& c = pulp::view::motion::Coordinator::instance();
-            if (log_sink_id) c.remove_sink(log_sink_id);
-            c.unbind();
-        }
-    } motion_guard{motion_log_sink_id, motion_inspector};
-
-    if (pulp::runtime::get_env("PULP_MOTION_LOG")) {
-        motion_log_sink_id =
-            pulp::view::motion::Coordinator::instance().install_default_log_sink();
-        pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
-    }
-    if (pulp::runtime::get_env("PULP_MOTION_FIREHOSE")) {
-        pulp::view::motion::Coordinator::instance().set_firehose(true);
-        pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
-        if (!motion_log_sink_id) {
-            motion_log_sink_id =
-                pulp::view::motion::Coordinator::instance().install_default_log_sink();
-        }
-    }
-    if (pulp::runtime::get_env("PULP_MOTION_SERVER")) {
-        motion_server = std::make_unique<pulp::inspect::InspectorServer>();
-        if (motion_server->start()) {
-            motion_inspector = std::make_unique<pulp::inspect::MotionInspector>(
-                root, motion_server.get());
-            motion_dispatch = std::make_unique<pulp::inspect::DomainHandler>();
-            motion_dispatch->set_root_view(&root);
-            motion_dispatch->set_motion_inspector(motion_inspector.get());
-            auto* dispatch = motion_dispatch.get();
-            motion_server->set_request_handler(
-                [dispatch](const pulp::inspect::InspectorMessage& req) {
-                    return dispatch->handle(req);
-                });
-            motion_server->advertise_port();
-            std::cout << "Motion inspector listening on port "
-                      << motion_server->port() << "\n";
-            pulp::view::motion::Coordinator::instance().set_tracing_enabled(true);
-        } else {
-            std::cerr << "Motion inspector server failed to start; "
-                         "PULP_MOTION_SERVER ignored.\n";
-            motion_server.reset();
-        }
-    }
-
     std::cout << "Hover over knobs to see glow animation\n";
     std::cout << "Click the toggle to see animated thumb slide\n";
     std::cout << "Hover over fader to see thumb scale\n";
 
     WindowOptions opts;
-    opts.title = "Pulp Animation Preview";
-    opts.width = 360;
-    opts.height = 480;
+    // Title from the imported script's filename when --script is given,
+    // otherwise the demo default. Imported JSX/TSX files like
+    // ChainerInstrument.jsx → "ChainerInstrument" (drop directory +
+    // extension). Per user UX feedback 2026-05-17.
+    if (!script_path.empty()) {
+        std::filesystem::path p(script_path);
+        opts.title = p.stem().string();
+        if (opts.title.empty()) opts.title = "Pulp Imported";
+    } else {
+        opts.title = "Pulp Animation Preview";
+    }
+    // Wire the parsed --size through to the live window. Pre-fix this
+    // was hardcoded 360x480, ignoring --size entirely — imported JSX
+    // (pulp import-design --from jsx) ended up materialising at the
+    // requested viewport for headless paint but the live window stayed
+    // at the demo size. Codex consult 2026-05-17 flagged this as the
+    // first preview bug to fix.
+    opts.width = render_w;
+    opts.height = render_h;
+    // pulp jsx-instrument-import — use GPU rendering by default for the
+    // live preview path. Imported JSX bundles ship SVG (knob rings,
+    // waveform paths, chain-viz arrows) that benefit from Skia GPU;
+    // CPU rasterization is fine for static screenshots but the live
+    // path should match production plugin hosting which is GPU. Per
+    // user 2026-05-17.
+    opts.use_gpu = true;
+
+    // For imported JSX bundles, auto-size the window height to the
+    // measured content after the React settle pass so we don't ship
+    // 200px of dead background below the bottombar. Width stays at
+    // the requested --size; only height shrinks (never grows past the
+    // requested cap). Pre-resize-measure path: read root_'s laid-out
+    // children's bottom edge after `__pulpRuntimeSettle__(64)` has
+    // pumped React commit + initial useEffects, then clamp the window
+    // height to max(measured + small bottombar inset, 240).
+    if (!script_path.empty()) {
+        // Pre-size root_ to the requested viewport BEFORE host attach
+        // so the imported tree measures against the right width and
+        // its flex/wrap behavior is computed correctly. Mirrors the
+        // pulp-screenshot pre-bounds setup at
+        // tools/screenshot/pulp_screenshot.cpp:190.
+        root.set_bounds({0, 0, static_cast<float>(render_w), static_cast<float>(render_h)});
+        root.layout_children();
+
+        // Walk root's direct children to find the bottommost paint
+        // edge. The imported React tree typically mounts as a single
+        // <div id="root"> wrapper containing the user's component.
+        float content_bottom = 0.0f;
+        for (size_t i = 0; i < root.child_count(); ++i) {
+            auto* child = root.child_at(i);
+            if (!child) continue;
+            const auto b = child->bounds();
+            content_bottom = std::max(content_bottom, b.y + b.height);
+        }
+        std::cout << "[ui-preview] measured content_bottom=" << content_bottom
+                  << " child_count=" << root.child_count()
+                  << " render_h=" << render_h << "\n";
+        std::cout.flush();
+        if (content_bottom > 32.0f && content_bottom < static_cast<float>(render_h)) {
+            // Tighten the window height to fit content. Floor of 240
+            // prevents pathological collapses on tiny fixtures.
+            opts.height = std::max(240, static_cast<int>(std::ceil(content_bottom)));
+            std::cout << "[ui-preview] auto-sized height to content: "
+                      << opts.height << " (measured " << content_bottom
+                      << ", requested " << render_h << ")\n";
+            std::cout.flush();
+        }
+    }
 
     if (!emit_view_tree(opts.width, opts.height)) return 1;
 

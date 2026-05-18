@@ -31,10 +31,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
-#include <mutex>
 #include <unordered_map>
-#include <unordered_set>
-#include <vector>
 
 #ifdef PULP_HAS_SKIA
 #include "webgpu/webgpu_cpp.h"
@@ -550,6 +547,78 @@ function __dispatch__(id, eventName) {
             document.dispatchEvent(devt);
         }
     }
+    // pulp jsx-instrument-import 2026-05-17 — for pointer/mouse/click
+    // events, ALSO call dispatchEvent on the JS Element for `id`. This
+    // bypasses the single-slot __callbacks__[id:event] table that
+    // _registerNativeEvent clobbers when React-DOM calls
+    // element.addEventListener(...). Without this, native NSEvent →
+    // bridge dispatch fires the on() callback (which may be overwritten)
+    // but never re-enters the DOM bubble walk where React-DOM's
+    // delegated root listener actually lives. Per Codex high-reasoning
+    // consult: "separate native DOM event dispatch from the low-level
+    // on() callback table."
+    if (typeof __nativeElements__ !== 'undefined') {
+        var el = __nativeElements__[id];
+        if (typeof globalThis.__pulpDispatchHits__ === 'undefined') globalThis.__pulpDispatchHits__ = { byType: {}, missingElement: 0, dispatched: 0, rootListenersFired: 0, lastErr: null, total: 0 };
+        var stats = globalThis.__pulpDispatchHits__;
+        stats.total = (stats.total || 0) + 1;
+        if (el && el.dispatchEvent &&
+            /^(pointerdown|pointermove|pointerup|pointercancel|click|mousedown|mousemove|mouseup|wheel)$/.test(eventName)) {
+            stats.byType[eventName] = (stats.byType[eventName] || 0) + 1;
+            try {
+                var data = args && args.length ? args[0] : {};
+                var ev = (typeof _makeEvent === 'function')
+                    ? _makeEvent(eventName, el, data || {})
+                    : {
+                        type: eventName, target: el, currentTarget: el,
+                        bubbles: true, cancelable: true,
+                        clientX: (data && data.clientX) || 0,
+                        clientY: (data && data.clientY) || 0,
+                        button: (data && data.button) || 0,
+                        buttons: (eventName === 'pointerup' || eventName === 'mouseup') ? 0 : 1,
+                        pointerId: (data && data.pointerId) || 0,
+                        pointerType: (data && data.pointerType) || 'mouse',
+                        isPrimary: true,
+                        preventDefault: function () { this.defaultPrevented = true; },
+                        stopPropagation: function () { this._stopped = true; }
+                    };
+                // Pre-dispatch instrumentation: confirm event reaches root.
+                var pathLen = 0;
+                var rootInPath = false;
+                var p = el;
+                while (p) { pathLen++; if (p._id === '__root__') rootInPath = true; p = p._parentElement; }
+                var rootListeners = (typeof __eventListeners__ !== 'undefined' && __eventListeners__['__root__'] && __eventListeners__['__root__'][eventName]) ? __eventListeners__['__root__'][eventName].length : 0;
+                stats.lastPathLen = pathLen;
+                stats.lastRootInPath = rootInPath;
+                stats.lastRootListeners = rootListeners;
+                // Verbose log gated on PULP_DEBUG_DISP — eats stderr fast on heavy drags
+                if (eventName === 'pointerdown' || eventName === 'mousedown' || eventName === 'click') {
+                    if (typeof __spectrLog === 'function') {
+                        __spectrLog('[disp] ' + eventName + ' id=' + id + ' pathLen=' + pathLen + ' rootInPath=' + rootInPath + ' rootListeners=' + rootListeners);
+                    }
+                }
+                el.dispatchEvent(ev);
+                stats.dispatched = (stats.dispatched || 0) + 1;
+                // For pointerdown/up, ALSO synthesize the mouse equivalent —
+                // many React components attach to onMouseDown rather than
+                // onPointerDown (Chainer is one). Skip if eventName is
+                // already a mouse-* type to avoid double-fire.
+                if (eventName === 'pointerdown' || eventName === 'pointerup' || eventName === 'pointermove') {
+                    var mouseType = (eventName === 'pointerdown') ? 'mousedown'
+                                  : (eventName === 'pointerup')   ? 'mouseup'
+                                  :                                  'mousemove';
+                    var mev = (typeof _makeEvent === 'function')
+                        ? _makeEvent(mouseType, el, data || {}) : { type: mouseType, target: el, currentTarget: el, bubbles: true };
+                    el.dispatchEvent(mev);
+                }
+            } catch (e) {
+                stats.lastErr = String(e && e.stack ? e.stack.slice(0, 200) : e);
+                if (typeof __dispatchError__ === 'function') __dispatchError__(id, eventName, String(e && e.stack ? e.stack : e));
+            }
+        } else if (!el) {
+            stats.missingElement = (stats.missingElement || 0) + 1;
+        }
+    }
 }
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
@@ -750,10 +819,6 @@ std::unordered_set<WidgetBridge*>& all_bridges_set() {
 WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& store,
                            render::GpuSurface* gpu_surface)
     : engine_(engine), root_(root), store_(store), gpu_surface_(gpu_surface) {
-    {
-        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-        all_bridges_set().insert(this);
-    }
     if (widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
@@ -801,10 +866,6 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
 }
 
 WidgetBridge::~WidgetBridge() {
-    {
-        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-        all_bridges_set().erase(this);
-    }
     if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
     root_.on_global_click = {};
 }
@@ -1224,28 +1285,6 @@ void WidgetBridge::install_runtime_import_handlers() {
                         set_err("__pulpRuntimeImport__: unsupported Stitch React export (got '"
                                 + src_label + "')");
                         return choc::value::Value();
-                    }
-                } else if (source_lc == "rn" || source_lc == "react-native" ||
-                           source_lc == "reactnative") {
-                    bundle = parse_react_native_export(html);
-                    if (!bundle) {
-                        set_err("__pulpRuntimeImport__: unsupported React Native export (got '"
-                                + src_label + "')");
-                        return choc::value::Value();
-                    }
-                } else if (source_lc == "pencil" || source_lc == "openpencil" ||
-                           source_lc == "open-pencil") {
-                    bundle = parse_pencil_react(html);
-                    if (!bundle) {
-                        set_err("__pulpRuntimeImport__: unsupported Pencil React export (got '"
-                                + src_label + "')");
-                        return choc::value::Value();
-                    }
-                } else if ((source_lc == "auto" || source_lc.empty()) &&
-                           html.find("react-native") != std::string::npos) {
-                    bundle = parse_react_native_export(html);
-                    if (!bundle) {
-                        bundle = parse_claude_bundle(html);
                     }
                 } else {
                     bundle = parse_claude_bundle(html);
@@ -2055,6 +2094,9 @@ void WidgetBridge::register_api() {
         if (!pointer_registered_.insert(id).second) {
             return choc::value::Value();
         }
+        if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+            std::cerr << "[bridge] registerPointer id=" << id << " widgets_.has=" << (widgets_.count(id) ? "yes" : "NO") << "\n";
+        }
         auto it = widgets_.find(id);
         if (it != widgets_.end()) {
             auto* w = it->second;
@@ -2103,7 +2145,29 @@ void WidgetBridge::register_api() {
                     "metaKey:" + (me.isCmdDown() ? "true" : "false") +
                     "}";
 
+                // Per-widget pointer dispatch (existing behavior).
+                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+                    std::cerr << "[bridge] pointer " << type << " id=" << id << "\n";
+                }
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', '" + type + "', " + data + ")", "pointer");
+
+                // pulp jsx-instrument-import (2026-05-17) — also fan out to
+                // window-level mouse listeners for the React-DOM idiom of
+                // installing window.addEventListener('mousemove'/'mouseup',
+                // ...) from a useEffect after onMouseDown. Chainer's knob/
+                // fader/XY drag handlers depend on this. Map pointerdown→
+                // mousedown, pointerup→mouseup, pointercancel→mouseup
+                // (cancel is "drag aborted" — treating it as mouseup runs
+                // the cleanup the same way a normal release would).
+                std::string mouse_type;
+                if (type == "pointerdown") mouse_type = "mousedown";
+                else if (type == "pointerup") mouse_type = "mouseup";
+                else if (type == "pointercancel") mouse_type = "mouseup";
+                if (!mouse_type.empty()) {
+                    safe_dispatch_eval(alive, engine,
+                        "__dispatch__('__global__', '" + mouse_type + "', " + data + ")",
+                        "global mouse");
+                }
             };
             // W3C PointerEvents: forward drag as pointermove.
             // Include clientX/clientY (window-relative) so JSX drag
@@ -2124,8 +2188,21 @@ void WidgetBridge::register_api() {
                     "clientY:" + std::to_string(wy) + ","
                     "offsetX:" + std::to_string(pos.x) + ","
                     "offsetY:" + std::to_string(pos.y) + ","
-                    "pointerId:0,pointerType:'mouse',isPrimary:true}";
+                    "pointerId:0,pointerType:'mouse',isPrimary:true,"
+                    "button:0,buttons:1}";
+                if (const char* dbg = std::getenv("PULP_DEBUG_POINTER"); dbg && *dbg) {
+                    std::cerr << "[bridge] drag id=" << id << " @(" << pos.x << "," << pos.y << ")\n";
+                }
                 safe_dispatch_eval(alive, engine, "__dispatch__('" + id + "', 'pointermove', " + data + ")", "pointermove");
+                // pulp jsx-instrument-import — also fan out as mousemove
+                // on window so Chainer-style window.addEventListener('mousemove')
+                // listeners fire during drag, regardless of cursor position
+                // (the native View tracks drag state, so on_drag fires for
+                // every native pointer move during a drag — including off
+                // the originating widget).
+                safe_dispatch_eval(alive, engine,
+                    "__dispatch__('__global__', 'mousemove', " + data + ")",
+                    "global mousemove");
             };
         }
         return choc::value::Value();
@@ -2895,10 +2972,10 @@ void WidgetBridge::register_api() {
         } else if (tag == "input") {
             // pulp #1899 — `<input>` needs the JS-side `_type` to pick a
             // widget. JS callers pass it through the optional 4th `hint`
-            // arg ("range:horizontal", "range:vertical", "checkbox").
-            // Without the hint, fall back to a plain View so the element
-            // still receives child/style ops (text inputs are not yet
-            // first-class on the bridge).
+            // arg ("range:horizontal", "range:vertical", "checkbox", "text").
+            // Without a hint, fall back to a plain View so the element
+            // still receives child/style ops (matches pre-2026-05-17
+            // behavior for unhinted inputs).
             auto hint = args.get<std::string>(3, "");
             if (hint == "range:horizontal" || hint == "range:vertical") {
                 auto fader = std::make_unique<Fader>();
@@ -2911,6 +2988,15 @@ void WidgetBridge::register_api() {
                 auto cb = std::make_unique<Checkbox>();
                 cb->set_id(childId);
                 child = std::move(cb);
+            } else if (hint == "text") {
+                // pulp jsx-instrument-import (2026-05-17) — plain text
+                // `<input>` (and text-like subtypes: search / email / url
+                // / tel / password) materialize as a TextEditor so they
+                // accept keyboard input. Pre-fix, Chainer's preset-name
+                // field landed as a non-editable View; per Codex review.
+                auto te = std::make_unique<TextEditor>();
+                te->set_id(childId);
+                child = std::move(te);
             } else {
                 auto v = std::make_unique<View>();
                 v->set_id(childId);
@@ -9574,6 +9660,83 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         ));
         return result;
     });
+}
+
+// Map a KeyCode enum value to its W3C UIEvent.key string. JSX handlers
+// in @pulp/react consumers read `e.key === 'Escape'` / `'ArrowLeft'` /
+// etc. — the previous implementation sent the raw int, so every such
+// comparison failed silently (e.g. Spectr's `e.key === 'Escape'` modal
+// close, history undo arrows, etc. were dead).
+static std::string keycode_to_w3c_key(int key_code, bool shift_held) {
+    using K = KeyCode;
+    auto kc = static_cast<K>(key_code);
+    switch (kc) {
+        case K::escape:    return "Escape";
+        case K::enter:     return "Enter";
+        case K::tab:       return "Tab";
+        case K::backspace: return "Backspace";
+        case K::delete_:   return "Delete";
+        case K::left:      return "ArrowLeft";
+        case K::right:     return "ArrowRight";
+        case K::up:        return "ArrowUp";
+        case K::down:      return "ArrowDown";
+        case K::home:      return "Home";
+        case K::end_:      return "End";
+        case K::page_up:   return "PageUp";
+        case K::page_down: return "PageDown";
+        case K::space:     return " ";
+        case K::f1:  return "F1";  case K::f2:  return "F2";
+        case K::f3:  return "F3";  case K::f4:  return "F4";
+        case K::f5:  return "F5";  case K::f6:  return "F6";
+        case K::f7:  return "F7";  case K::f8:  return "F8";
+        case K::f9:  return "F9";  case K::f10: return "F10";
+        case K::f11: return "F11"; case K::f12: return "F12";
+        default: break;
+    }
+    // Printable chars: letters lower-case unless shift, digits as-is.
+    if (key_code >= 'a' && key_code <= 'z') {
+        char c = shift_held ? static_cast<char>(key_code - 32) : static_cast<char>(key_code);
+        return std::string(1, c);
+    }
+    if (key_code >= '0' && key_code <= '9') {
+        return std::string(1, static_cast<char>(key_code));
+    }
+    return "Unidentified";
+}
+
+void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
+    if (!is_down) return;
+
+    // Check registered shortcuts first
+    auto kc = static_cast<KeyCode>(key_code);
+    for (auto& s : shortcuts_) {
+        if (s.key == kc && s.modifiers == modifiers) {
+            engine_.evaluate(s.callback + "()");
+            return;
+        }
+    }
+
+    // W3C UIEvent.key string; modifier booleans match KeyboardEvent
+    // (ctrlKey/shiftKey/altKey/metaKey). `keyCode` retained for legacy.
+    bool shift_held = (modifiers & kModShift) != 0;
+    std::string key_str = keycode_to_w3c_key(key_code, shift_held);
+    // JSON-escape backslash + quote (single-char ascii here is safe but
+    // keep the guard for safety against future printable additions).
+    std::string key_json;
+    key_json.reserve(key_str.size() + 2);
+    for (char c : key_str) {
+        if (c == '\\' || c == '\'') key_json += '\\';
+        key_json += c;
+    }
+
+    engine_.evaluate("__dispatch__('__global__', 'keydown', {"
+        "key:'" + key_json + "',"
+        "keyCode:" + std::to_string(key_code) + ","
+        "ctrlKey:" + ((modifiers & kModCtrl) ? "true" : "false") + ","
+        "shiftKey:" + ((modifiers & kModShift) ? "true" : "false") + ","
+        "altKey:" + ((modifiers & kModAlt) ? "true" : "false") + ","
+        "metaKey:" + (((modifiers & kModMeta) || (modifiers & kModCmd)) ? "true" : "false") + ","
+        "mods:" + std::to_string(modifiers) + "})");
 }
 
 } // namespace pulp::view
