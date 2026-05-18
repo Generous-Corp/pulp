@@ -768,12 +768,34 @@ not provide the same Shipyard state discipline as `shipyard pr`.
 **Module layout (post-2026-05-17 R2-1 split):**
 `tools/local-ci/local_ci.py` is the orchestrator; reusable seams have
 been moved into sibling modules so newer code can import them without
-pulling in the entire 11k-line file. `state_paths.py` owns
-`state_dir()`, `queue_path()`, `results_dir()`, `logs_dir()`,
-`ensure_state_dirs()`, and the lock-path helpers. The original symbols
-are still re-exported from `local_ci.py`, so any old `mod.state_dir()`
-test patch keeps working — but new code should import directly from
-`state_paths` to avoid the god-module dependency.
+pulling in the entire 11k-line file.
+
+- `state_paths.py` — owns `state_dir()`, `queue_path()`, `results_dir()`,
+  `logs_dir()`, `ensure_state_dirs()`, and the lock-path helpers.
+- `normalize.py` — owns priority/validation/desktop normalization
+  helpers (`normalize_priority`, `priority_value`,
+  `normalize_validation_mode`, `normalize_desktop_*`, `default_desktop_*`,
+  `parse_config_bool`, `infer_desktop_adapter`, `normalize_desktop_config`)
+  plus the `PRIORITY_VALUES` constant.
+- `git_helpers.py` — owns the git + time helpers used by the queue and
+  evidence subsystems (`now_iso`, `current_branch`, `current_sha`,
+  `git_root_for`, `resolve_git_ref_sha`, `short_sha`) plus the shared
+  `ROOT` constant.
+- `io_utils.py` — owns the I/O + locking utilities (`tail_lines`,
+  `trim_line`, `atomic_write_text`, `image_change_summary`, `file_lock`)
+  plus the `LockBusyError` exception. `image_change_summary` falls back
+  to a SHA-256 file comparison when Pillow is missing so the test suite
+  keeps running on stripped images.
+- `footprint.py` — owns disk-footprint accounting helpers
+  (`format_size_bytes`, `path_size_bytes`, `local_ci_state_footprint`,
+  `describe_path_for_cleanup`). Used by `pulp ci-local status` and the
+  cleanup paths to report how much disk the local CI state is using.
+
+All original symbols are re-exported from `local_ci.py`, so any old
+`mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
+`mod.file_lock(...)` test patch keeps working — but new code should
+import directly from `state_paths`, `normalize`, `git_helpers`, or
+`io_utils` to avoid the god-module dependency.
 
 ```bash
 # Legacy fallback only

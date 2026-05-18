@@ -67,7 +67,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # importlib.util.spec_from_file_location (the path the unit tests take).
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-PRIORITY_VALUES = {"low": 10, "normal": 50, "high": 100}
 WAIT_POLL_SECS = 3
 KEEP_COMPLETED_JOBS = 25
 HEARTBEAT_INTERVAL_SECS = 15.0
@@ -144,10 +143,6 @@ LINUX_OPTIONAL_REMOTE_TOOLS = {
 WINDOWS_DEFAULT_REMOTE_REPO_DIRNAME = "pulp-validate"
 
 
-class LockBusyError(RuntimeError):
-    """Raised when a non-blocking lock cannot be acquired."""
-
-
 def is_transient_ssh_failure_detail(detail: str) -> bool:
     text = detail or ""
     return any(pattern in text for pattern in _SSH_TRANSIENT_PATTERNS)
@@ -202,66 +197,12 @@ from state_paths import (  # noqa: E402  -- re-exported for in-file consumers
 )
 
 
-def format_size_bytes(value: int | float | None) -> str:
-    if value in (None, ""):
-        return ""
-    amount = float(value)
-    units = ["B", "KB", "MB", "GB", "TB"]
-    for unit in units:
-        if amount < 1024.0 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
-        amount /= 1024.0
-    return f"{amount:.1f} TB"
-
-
-def path_size_bytes(path: Path) -> int:
-    try:
-        if not path.exists():
-            return 0
-        if path.is_file():
-            return int(path.stat().st_size)
-    except OSError:
-        return 0
-
-    total = 0
-    for root, _dirs, files in os.walk(path):
-        for filename in files:
-            try:
-                total += int((Path(root) / filename).stat().st_size)
-            except OSError:
-                continue
-    return total
-
-
-def local_ci_state_footprint() -> dict:
-    entries = {}
-    total = 0
-    for label, path in (
-        ("bundles", bundles_dir()),
-        ("prepared", prepared_dir()),
-        ("logs", logs_dir()),
-        ("results", results_dir()),
-        ("cloud-runs", cloud_runs_dir()),
-    ):
-        size_bytes = path_size_bytes(path)
-        entries[label] = {
-            "path": path,
-            "size_bytes": size_bytes,
-        }
-        total += size_bytes
-    return {
-        "entries": entries,
-        "total_bytes": total,
-    }
-
-
-def describe_path_for_cleanup(path: Path) -> str:
-    try:
-        return str(path.relative_to(state_dir()))
-    except ValueError:
-        return str(path)
+from footprint import (  # noqa: E402  -- re-exported for in-file consumers
+    format_size_bytes,
+    path_size_bytes,
+    local_ci_state_footprint,
+    describe_path_for_cleanup,
+)
 
 
 def bundle_ref_name(job_id: str) -> str:
@@ -407,277 +348,41 @@ def probe_uploaded_bundle_size(host: str, remote_name: str, *, config: dict) -> 
         return None
 
 
-def tail_lines(path: Path, limit: int = 80) -> list[str]:
-    if not path.exists():
-        return []
-    with path.open("r", errors="replace") as handle:
-        return list(deque(handle, maxlen=limit))
+from io_utils import (  # noqa: E402  -- re-exported for in-file consumers
+    LockBusyError,
+    tail_lines,
+    trim_line,
+    atomic_write_text,
+    image_change_summary,
+    file_lock,
+)
 
 
-def trim_line(value: str, max_len: int = 160) -> str:
-    value = value.strip()
-    if len(value) <= max_len:
-        return value
-    return "…" + value[-(max_len - 1):]
+from git_helpers import (  # noqa: E402  -- re-exported for in-file consumers
+    now_iso,
+    current_branch,
+    current_sha,
+    git_root_for,
+    resolve_git_ref_sha,
+    short_sha,
+)
 
 
-def atomic_write_text(path: Path, text: str) -> None:
-    ensure_state_dirs()
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(text)
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
-def image_change_summary(before_path: Path, after_path: Path, *, diff_output_path: Path | None = None) -> dict:
-    before_bytes = before_path.read_bytes()
-    after_bytes = after_path.read_bytes()
-    summary = {
-        "changed": hashlib.sha256(before_bytes).hexdigest() != hashlib.sha256(after_bytes).hexdigest(),
-        "method": "file-hash",
-    }
-
-    try:
-        from PIL import Image, ImageChops
-
-        before = Image.open(before_path).convert("RGB")
-        after = Image.open(after_path).convert("RGB")
-        diff = ImageChops.difference(before, after)
-        if diff_output_path is not None:
-            diff_output_path.parent.mkdir(parents=True, exist_ok=True)
-            diff.save(diff_output_path)
-        bbox = diff.getbbox()
-        summary["changed"] = bbox is not None
-        summary["method"] = "pixel-bbox"
-        if bbox is not None:
-            summary["bbox"] = {
-                "left": bbox[0],
-                "top": bbox[1],
-                "right": bbox[2],
-                "bottom": bbox[3],
-            }
-    except Exception:
-        pass
-
-    return summary
-
-
-@contextmanager
-def file_lock(path: Path, *, blocking: bool):
-    ensure_state_dirs()
-    handle = path.open("a+")
-    mode = fcntl.LOCK_EX
-    if not blocking:
-        mode |= fcntl.LOCK_NB
-
-    try:
-        fcntl.flock(handle.fileno(), mode)
-    except BlockingIOError as exc:
-        handle.close()
-        raise LockBusyError(str(path)) from exc
-
-    try:
-        yield handle
-    finally:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def current_branch() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
-
-
-def current_sha() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
-
-
-def git_root_for(path: Path) -> Path | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=path,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    return Path(result.stdout.strip()).resolve()
-
-
-def resolve_git_ref_sha(ref: str) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise ValueError(f"Could not resolve git ref '{ref}': {detail or 'unknown ref'}")
-    return result.stdout.strip()
-
-
-def short_sha(sha: str) -> str:
-    return sha[:12] if sha else "?"
-
-
-def normalize_priority(priority: str | None) -> str:
-    value = (priority or "normal").strip().lower()
-    if value not in PRIORITY_VALUES:
-        raise ValueError(f"Invalid priority '{priority}'. Use one of: low, normal, high.")
-    return value
-
-
-def priority_value(priority: str | None) -> int:
-    return PRIORITY_VALUES[normalize_priority(priority)]
-
-
-def normalize_validation_mode(mode: str | None) -> str:
-    value = (mode or "full").strip().lower()
-    if value not in {"full", "smoke"}:
-        raise ValueError(f"Invalid validation mode '{mode}'. Use one of: full, smoke.")
-    return value
-
-
-def normalize_desktop_source_mode(mode: str | None) -> str:
-    value = (mode or "live").strip().lower().replace("_", "-")
-    if value not in {"live", "exact-sha"}:
-        raise ValueError(f"Invalid desktop source mode '{mode}'. Use one of: live, exact-sha.")
-    return value
-
-
-def default_desktop_artifact_root() -> Path:
-    override = os.environ.get("PULP_DESKTOP_ARTIFACT_ROOT")
-    if override:
-        return Path(override).expanduser()
-
-    home = Path.home()
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Pulp" / "desktop-automation" / "runs"
-    if sys.platform == "win32":
-        local_appdata = os.environ.get("LOCALAPPDATA")
-        if local_appdata:
-            return Path(local_appdata) / "Pulp" / "desktop-automation" / "runs"
-    xdg_state = os.environ.get("XDG_STATE_HOME")
-    if xdg_state:
-        return Path(xdg_state).expanduser() / "pulp" / "desktop-automation" / "runs"
-    return home / ".local" / "state" / "pulp" / "desktop-automation" / "runs"
-
-
-def normalize_publish_mode(mode: str | None) -> str:
-    value = (mode or "none").strip().lower()
-    if value not in {"none", "branch", "pr-comment", "issue-comment"}:
-        raise ValueError(
-            f"Invalid desktop publish mode '{mode}'. Use one of: none, branch, pr-comment, issue-comment."
-        )
-    return value
-
-
-def parse_config_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value or "").strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off", ""}:
-        return False
-    raise ValueError(f"Invalid boolean value '{value}'. Use true/false, yes/no, or 1/0.")
-
-
-def normalize_desktop_optional_config(optional_cfg: dict | None) -> dict:
-    optional = dict(optional_cfg or {})
-    return {
-        "webview_driver": parse_config_bool(optional.get("webview_driver", False)),
-        "webdriver_url": str(optional.get("webdriver_url") or "").strip(),
-        "debug_attach": parse_config_bool(optional.get("debug_attach", False)),
-        "debugger_command": str(optional.get("debugger_command") or "").strip(),
-        "video_capture": parse_config_bool(optional.get("video_capture", False)),
-        "frame_stats": parse_config_bool(optional.get("frame_stats", False)),
-    }
-def infer_desktop_adapter(name: str, target_cfg: dict) -> str:
-    target_type = target_cfg.get("type")
-    if name == "mac" and target_type == "local":
-        return "macos-local"
-    if name == "ubuntu":
-        return "linux-xvfb"
-    if name == "windows":
-        return "windows-session-agent"
-    if target_type == "local":
-        return "local-window"
-    if target_type == "ssh":
-        return "remote-session-agent"
-    return "unknown"
-
-
-def default_desktop_bootstrap(adapter: str) -> str:
-    return {
-        "macos-local": "launchagent",
-        "linux-xvfb": "xvfb-run",
-        "windows-session-agent": "scheduled-task",
-        "local-window": "local-process",
-        "remote-session-agent": "ssh-bootstrap",
-    }.get(adapter, "manual")
-
-
-def default_desktop_capability_tier(adapter: str) -> str:
-    return {
-        "macos-local": "v2",
-        "linux-xvfb": "v2",
-        "windows-session-agent": "v2",
-    }.get(adapter, "v1")
-
-
-def normalize_desktop_config(config: dict) -> dict:
-    normalized = dict(config)
-    desktop = dict(normalized.get("desktop_automation", {}))
-    desktop["artifact_root"] = str(
-        Path(desktop.get("artifact_root") or default_desktop_artifact_root()).expanduser()
-    )
-    desktop["publish_mode"] = normalize_publish_mode(desktop.get("publish_mode", "none"))
-    desktop["publish_branch"] = desktop.get("publish_branch", "dev-artifacts")
-    desktop["retention_days"] = int(desktop.get("retention_days", 14))
-
-    target_overrides = desktop.get("targets", {})
-    normalized_targets = {}
-    for name, target_cfg in normalized.get("targets", {}).items():
-        override = dict(target_overrides.get(name, {}))
-        adapter = override.get("adapter") or infer_desktop_adapter(name, target_cfg)
-        normalized_targets[name] = {
-            "enabled": bool(override.get("enabled", target_cfg.get("enabled", True))),
-            "adapter": adapter,
-            "bootstrap": override.get("bootstrap", default_desktop_bootstrap(adapter)),
-            "capability_tier": override.get("capability_tier", default_desktop_capability_tier(adapter)),
-            "host": override.get("host", target_cfg.get("host")),
-            "repo_path": override.get("repo_path", target_cfg.get("repo_path")),
-            "target_type": target_cfg.get("type", "unknown"),
-            "task_name": override.get("task_name"),
-            "remote_root": override.get("remote_root"),
-            "optional": normalize_desktop_optional_config(override.get("optional")),
-        }
-    desktop["targets"] = normalized_targets
-    normalized["desktop_automation"] = desktop
-    return normalized
+from normalize import (  # noqa: E402  -- re-exported for in-file consumers
+    PRIORITY_VALUES,
+    normalize_priority,
+    priority_value,
+    normalize_validation_mode,
+    normalize_desktop_source_mode,
+    default_desktop_artifact_root,
+    normalize_publish_mode,
+    parse_config_bool,
+    normalize_desktop_optional_config,
+    infer_desktop_adapter,
+    default_desktop_bootstrap,
+    default_desktop_capability_tier,
+    normalize_desktop_config,
+)
 
 
 def load_config() -> dict:
