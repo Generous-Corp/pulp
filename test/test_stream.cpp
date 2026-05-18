@@ -140,6 +140,21 @@ TEST_CASE("MemoryStream zero-size, rewind, and clear edge paths", "[stream]") {
     REQUIRE(eof.closed());
 }
 
+TEST_CASE("MemoryStream clear does not reopen a closed stream",
+          "[stream][coverage][phase3-large]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    stream.close();
+    stream.clear();
+
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+}
+
 TEST_CASE("StreamResult helpers classify non-ok states", "[stream][coverage][issue-656]") {
     auto ok = StreamResult::make(3);
     REQUIRE(ok.ok());
