@@ -235,6 +235,30 @@ TEST_CASE("Typed identity wrappers compare and hash deterministic values",
     REQUIRE(objects[second] == "two");
 }
 
+TEST_CASE("Transient identity wrappers hash deterministic values",
+          "[runtime][identity][coverage][phase3]") {
+    const Uuid first_uuid{0x1000, 0x2000};
+    const Uuid second_uuid{0x1000, 0x2001};
+    const RunId first_run{first_uuid};
+    const RunId second_run{second_uuid};
+    const CorrelationId first_correlation{first_uuid};
+    const CorrelationId second_correlation{second_uuid};
+
+    std::unordered_set<RunId> runs;
+    runs.insert(first_run);
+    runs.insert(first_run);
+    runs.insert(second_run);
+    REQUIRE(runs.size() == 2);
+    REQUIRE(first_run != second_run);
+
+    std::unordered_set<CorrelationId> correlations;
+    correlations.insert(first_correlation);
+    correlations.insert(second_correlation);
+    correlations.insert(first_correlation);
+    REQUIRE(correlations.size() == 2);
+    REQUIRE(first_correlation != second_correlation);
+}
+
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",
           "[runtime][identity][coverage][phase3]") {
     EventEnvelope env;
