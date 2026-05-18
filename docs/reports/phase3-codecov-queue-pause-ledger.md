@@ -8529,3 +8529,20 @@ propagate instead of terminating. Local validation passed in the #2222 worktree:
 and `git diff --check`. Commit `144250f04` was pushed with
 `PULP_SKIP_PREPUSH=1` to avoid local clean-coverage dispatch; GitHub-hosted CI
 restarted for #2222. No Namespace dispatch.
+
+2026-05-18 10:33 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-github-batch-740` as #2233
+(`test: batch phase3 coverage for signal math edges`). The branch is 25 commits
+ahead of current `origin/main` and covers deterministic signal utility seams:
+filter-design endpoint behavior and odd Butterworth orders, interpolation
+constant/linear/quadratic/cubic/sinc stability paths, polynomial and Mat2/Mat3
+helper edges, and FastMath tanh/exp/log/gain/soft-clip behavior. Focused local
+validation passed after confirming the branch was current with `origin/main`:
+`cmake --build build --target pulp-test-filter-design pulp-test-fast-math
+pulp-test-interpolator pulp-test-poly-math`, `pulp-test-filter-design`,
+`pulp-test-fast-math`, `pulp-test-interpolator`, `pulp-test-poly-math`, and
+`git diff --check origin/main...HEAD`. One too-strict FastMath gain round-trip
+assertion was caught locally and adjusted to match the approximate math contract
+before push. The branch was pushed with `PULP_SKIP_PREPUSH=1`; GitHub-hosted CI
+is the intended validation source. #2233 was opened and labeled `codecov`
+through the GitHub REST API. No Namespace dispatch.
