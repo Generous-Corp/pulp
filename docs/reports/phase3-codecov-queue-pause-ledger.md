@@ -7824,3 +7824,21 @@ zero-exponent modular exponentiation. Local validation passed:
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
 and `git diff --check`. Batch #728 is now 21 local commits ahead and remains
 held for the larger 24-36 commit PR.
+
+2026-05-18 02:23 PDT: added three more local-only runtime tranches to held
+batch `feature/phase3-codecov-batch-728`, bringing it to the lower bound for a
+large PR:
+`6438ee2a4` (`test(runtime): cover text diff replacement edges`) extends
+`pulp-test-runtime-utils` over replacement-only text diffs and empty-line
+formatting; validation passed with `pulp-test-runtime-utils
+"[runtime][text-diff]"` (5 cases / 49 assertions). `217cfb63d`
+(`test(runtime): cover range type aliases`) extends `SizeRange` and
+`FloatRange` containment/intersection/expansion coverage; validation passed
+with `pulp-test-runtime-utils "[runtime][range]"` (14 cases / 58 assertions).
+`ac79f01b4` (`test(runtime): cover memory stream reset writes`) extends
+`pulp-test-stream` over `MemoryStream::clear()` followed by fresh writes from
+the reset cursor; validation passed with `pulp-test-stream "[stream][memory]"`
+(3 cases / 27 assertions). Each tranche also passed skill-sync,
+version-bump report, and `git diff --check`. Batch #728 is now 24 local
+commits ahead; next action is broad local validation across touched targets,
+then push/open the batched GitHub-hosted PR if clean.
