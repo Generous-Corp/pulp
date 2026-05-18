@@ -306,6 +306,24 @@ TEST_CASE("StateStore serialization records header fields and rejects future ver
     REQUIRE_THAT(target.get_value(10), WithinAbs(0.1, 0.001));
 }
 
+TEST_CASE("StateStore serialization honors explicit current schema version",
+          "[state][serialize][coverage][phase3]") {
+    StateStore source;
+    auto p = make_param_info(7, "Shape", "", {0.0f, 1.0f, 0.25f});
+    source.add_parameter(p);
+    source.set_state_version(4);
+    source.set_value(7, 0.75f);
+
+    auto data = source.serialize();
+    REQUIRE(read_u32_le(data, 4) == 4);
+
+    StateStore target;
+    target.add_parameter(p);
+    target.set_state_version(4);
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(7), WithinAbs(0.75, 0.001));
+}
+
 TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
           "[state][store][coverage][issue-646]") {
     StateStore store;
