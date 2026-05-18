@@ -7737,3 +7737,17 @@ and drain side effects. Local validation passed:
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
 and `git diff --check`. Batch #728 is now 15 local commits ahead and remains
 held for the larger 24-36 commit PR.
+
+2026-05-18 01:20 PDT: added a sixteenth local-only SDF helper tranche to held
+batch `feature/phase3-codecov-batch-728`: commit `857073561`
+(`test(canvas): cover path sdf invalid input`). It adds a deterministic
+`path_to_sdf(nullptr, positive dimensions, spread)` regression test and fixes
+the helper to return the already-sized zero field instead of dereferencing a
+null mask; this matches the existing graceful handling for zero dimensions and
+non-positive spread. Local validation passed:
+`cmake --build build --target pulp-test-path-to-sdf -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-path-to-sdf` (8 cases / 543 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
+(patch bump suggested because this tranche includes a source fix), and
+`git diff --check`. Batch #728 is now 16 local commits ahead and remains held.
