@@ -680,38 +680,11 @@ def save_config(config: dict) -> None:
     atomic_write_text(config_path(), json.dumps(config, indent=2) + "\n")
 
 
-def normalize_job(job: dict) -> dict:
-    normalized = dict(job)
-    if "id" not in normalized:
-        legacy_raw = "|".join(
-            [normalized.get("branch", ""), normalized.get("sha", ""), normalized.get("queued_at", "")]
-        )
-        normalized["id"] = hashlib.sha1(legacy_raw.encode("utf-8")).hexdigest()[:12]
-    normalized["priority"] = normalize_priority(normalized.get("priority", "normal"))
-    normalized["targets"] = sorted(dict.fromkeys(normalized.get("targets") or []))
-    normalized["status"] = normalized.get("status", "pending")
-    normalized["validation"] = normalize_validation_mode(normalized.get("validation", "full"))
-    submission = dict(normalized.get("submission") or {})
-    submission["provenance"] = normalize_provenance(submission.get("provenance"))
-    normalized["submission"] = submission
-    normalized["provenance"] = normalize_provenance(
-        normalized.get("provenance") or submission.get("provenance")
-    )
-    return normalized
-
-
-def load_queue_unlocked() -> list[dict]:
-    path = queue_path()
-    if not path.exists():
-        return []
-
-    raw = json.loads(path.read_text())
-    jobs = raw.get("jobs", raw) if isinstance(raw, dict) else raw
-    return [normalize_job(job) for job in jobs]
-
-
-def save_queue_unlocked(queue: list[dict]) -> None:
-    atomic_write_text(queue_path(), json.dumps(queue, indent=2) + "\n")
+from job_queue import (  # noqa: E402  -- re-exported for in-file consumers
+    normalize_job,
+    load_queue_unlocked,
+    save_queue_unlocked,
+)
 
 
 def load_queue() -> list[dict]:
