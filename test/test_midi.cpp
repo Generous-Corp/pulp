@@ -820,6 +820,23 @@ TEST_CASE("MidiFileData summarizes tracks", "[midi][file]") {
     REQUIRE(data.duration_seconds() == Approx(1.50).margin(1e-6));
 }
 
+TEST_CASE("MidiFileData duration ignores empty and negative-only tracks",
+          "[midi][file][coverage]") {
+    MidiFileData data;
+    data.tracks.push_back(MidiTrack{});
+
+    MidiTrack negative_only;
+    negative_only.events.push_back({-0.25, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(negative_only));
+
+    REQUIRE(data.total_events() == 1);
+    REQUIRE(data.duration_seconds() == Approx(0.0).margin(1e-9));
+
+    data.tracks[1].events.push_back({0.125, MidiEvent::note_off(0, 60)});
+    REQUIRE(data.total_events() == 2);
+    REQUIRE(data.duration_seconds() == Approx(0.125).margin(1e-9));
+}
+
 TEST_CASE("MidiFileData handles empty tracks and empty file round-trips",
           "[midi][file][issue-645]") {
     TempDir tmp;
