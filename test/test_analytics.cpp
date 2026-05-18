@@ -421,6 +421,24 @@ TEST_CASE("Analytics forwards simple log with empty property map",
     REQUIRE(events->back().properties.empty());
 }
 
+TEST_CASE("Analytics ignores null destinations",
+          "[runtime][analytics][coverage][phase3]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.set_enabled(true);
+    a.add_destination(nullptr);
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    a.log("after_null_destination");
+    a.flush();
+
+    REQUIRE(events->size() == 1);
+    REQUIRE(events->back().name == "after_null_destination");
+    REQUIRE(*flushes == 1);
+}
+
 TEST_CASE("Analytics disabled widget tracker calls skip destinations",
           "[runtime][analytics][coverage][phase3-large]") {
     auto events = std::make_shared<std::vector<AnalyticsEvent>>();
