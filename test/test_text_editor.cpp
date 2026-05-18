@@ -92,6 +92,25 @@ TEST_CASE("TextEditor text input inserts characters", "[view][text_editor]") {
     REQUIRE(editor.text() == "abc");
 }
 
+TEST_CASE("TextEditor text input replaces the active selection",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha beta");
+    editor.select_all();
+
+    TextInputEvent e;
+    e.text = "omega";
+    editor.on_text_input(e);
+
+    REQUIRE(editor.text() == "omega");
+    REQUIRE(editor.caret_pos() == 5);
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "alpha beta");
+}
+
 TEST_CASE("TextEditor numeric mode rejects non-digits", "[view][text_editor]") {
     TextEditor editor;
     editor.numeric_only = true;
@@ -109,6 +128,24 @@ TEST_CASE("TextEditor numeric mode rejects non-digits", "[view][text_editor]") {
     e.text = ".";
     editor.on_text_input(e);
     REQUIRE(editor.text() == "5.");
+}
+
+TEST_CASE("TextEditor numeric mode rejects mixed text atomically",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.numeric_only = true;
+    editor.on_focus_changed(true);
+    editor.set_text("12");
+
+    TextInputEvent e;
+    e.text = "3x";
+    editor.on_text_input(e);
+    REQUIRE(editor.text() == "12");
+    REQUIRE(editor.caret_pos() == 2);
+
+    e.text = "-4.5";
+    editor.on_text_input(e);
+    REQUIRE(editor.text() == "12-4.5");
 }
 
 TEST_CASE("TextEditor key event: Enter triggers on_return", "[view][text_editor]") {
