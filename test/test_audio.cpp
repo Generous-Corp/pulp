@@ -336,6 +336,36 @@ TEST_CASE("Buffer resize handles type changes and preserves new shape",
     REQUIRE(view.channel(0)[4] == 0.5);
 }
 
+TEST_CASE("Buffer resize through empty shapes rebuilds channel pointers",
+          "[audio][buffer][coverage]") {
+    Buffer<float> buf(2, 3);
+    buf.channel(0)[0] = 1.0f;
+    buf.channel(1)[2] = -1.0f;
+
+    buf.resize(0, 0);
+    REQUIRE(buf.num_channels() == 0);
+    REQUIRE(buf.num_samples() == 0);
+    REQUIRE(buf.view().empty());
+
+    buf.resize(2, 2);
+    REQUIRE(buf.num_channels() == 2);
+    REQUIRE(buf.num_samples() == 2);
+    REQUIRE_FALSE(buf.view().empty());
+    REQUIRE(buf.channel(0).data() != nullptr);
+    REQUIRE(buf.channel(1).data() != nullptr);
+
+    for (std::size_t ch = 0; ch < buf.num_channels(); ++ch) {
+        for (auto sample : buf.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+
+    buf.channel(0)[1] = 0.25f;
+    const Buffer<float>& const_buf = buf;
+    REQUIRE(const_buf.channel(0)[1] == 0.25f);
+    REQUIRE(const_buf.channel(1).size() == 2);
+}
+
 TEST_CASE("BufferView supports zero-sample clears without touching channel pointers",
           "[audio][buffer][coverage][phase3]") {
     float left = 1.0f;
