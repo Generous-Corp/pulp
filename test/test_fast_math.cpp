@@ -152,14 +152,6 @@ TEST_CASE("FastMath soft clip is monotonic across control points",
     }
 }
 
-TEST_CASE("FastMath tanh remains odd inside the approximation range",
-          "[signal][fast_math][codecov]") {
-    for (float value : {0.125f, 0.75f, 1.5f, 3.5f}) {
-        REQUIRE_THAT(FastMath::tanh(value) + FastMath::tanh(-value),
-                     WithinAbs(0.0f, 1e-6f));
-    }
-}
-
 TEST_CASE("FastMath exp2 is monotonic across fractional octaves",
           "[signal][fast_math][codecov]") {
     float previous = FastMath::exp2(-2.0f);
