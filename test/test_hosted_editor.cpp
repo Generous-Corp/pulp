@@ -53,6 +53,19 @@ public:
     void destroy_editor_view() override { destroyed_legacy = true; }
 };
 
+class BrokenLegacySlot : public NoEditorSlot {
+public:
+    bool has_editor() const override { return true; }
+    void* create_editor_view() override {
+        ++create_calls;
+        return nullptr;
+    }
+    void destroy_editor_view() override { ++destroy_calls; }
+
+    int create_calls = 0;
+    int destroy_calls = 0;
+};
+
 // Slot that implements the new typed API directly.
 class TypedSlot : public NoEditorSlot {
 public:
@@ -90,6 +103,19 @@ TEST_CASE("legacy slot is wrapped through the compat path",
     REQUIRE(s.created_legacy);
     s.destroy_hosted_editor(std::move(ed));
     REQUIRE(s.destroyed_legacy);
+}
+
+TEST_CASE("legacy compat path handles null editor handles and null destroys",
+          "[host][hosted-editor][coverage][phase3]") {
+    BrokenLegacySlot broken;
+    auto ed = broken.create_hosted_editor(nullptr);
+    REQUIRE(ed == nullptr);
+    REQUIRE(broken.create_calls == 1);
+    REQUIRE(broken.destroy_calls == 0);
+
+    LegacySlot legacy;
+    legacy.destroy_hosted_editor(nullptr);
+    REQUIRE_FALSE(legacy.destroyed_legacy);
 }
 
 TEST_CASE("typed slot populates size + resizable",
