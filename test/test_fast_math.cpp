@@ -126,6 +126,14 @@ TEST_CASE("FastMath tanh is odd within unclamped range",
     }
 }
 
+TEST_CASE("FastMath exp2 and log2 round trip powers",
+          "[signal][fast_math][codecov]") {
+    for (float exponent : {-3.0f, -1.0f, 0.0f, 2.0f, 5.0f}) {
+        const float value = FastMath::exp2(exponent);
+        REQUIRE_THAT(FastMath::log2(value), WithinAbs(exponent, 0.02f));
+    }
+}
+
 TEST_CASE("FastMath tanh remains odd inside the approximation range",
           "[signal][fast_math][codecov]") {
     for (float value : {0.125f, 0.75f, 1.5f, 3.5f}) {
