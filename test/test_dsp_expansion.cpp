@@ -698,6 +698,21 @@ TEST_CASE("AlignedBuffer resizes moves clears and copies bounded input",
     REQUIRE(assigned.empty());
 }
 
+TEST_CASE("AlignedBuffer partial copy preserves untouched suffix",
+          "[signal][simd][coverage][phase3]") {
+    AlignedBuffer buffer(4);
+    float initial[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    buffer.copy_from(initial, 4);
+
+    float prefix[] = {-1.0f, -2.0f};
+    buffer.copy_from(prefix, 2);
+
+    REQUIRE_THAT(buffer[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-2.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(buffer[3], WithinAbs(4.0f, 1e-6f));
+}
+
 TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
           "[signal][interp][codecov]") {
     REQUIRE_THAT(Interpolator::linear(0.0f, 2.0f, 6.0f), WithinAbs(2.0f, 1e-6f));
