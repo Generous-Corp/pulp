@@ -159,3 +159,13 @@ TEST_CASE("FilterDesign lowpass and highpass have complementary Nyquist behavior
     REQUIRE_THAT(nyquist_gain(low), WithinAbs(0.0f, 0.01f));
     REQUIRE_THAT(nyquist_gain(high), WithinAbs(1.0f, 0.01f));
 }
+
+TEST_CASE("FilterDesign allpass keeps unity gain at DC and Nyquist",
+          "[signal][filter_design][codecov]") {
+    for (float q : {0.5f, 0.707f, 2.0f}) {
+        auto c = FilterDesign::allpass(3200.0f, q, 48000.0f);
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
+        REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));
+    }
+}
