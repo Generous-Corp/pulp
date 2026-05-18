@@ -7999,3 +7999,28 @@ failed while fetching `mbedtls` tag `v3.6.2`, so only that pre-push
 diff-coverage failure was demoted for push; GitHub-hosted CI restarted with no
 failures at this ledger update. #2173 and #2208 remain open with no failing
 checks, waiting on queued/running GitHub-hosted lanes. No Namespace dispatch.
+
+2026-05-18 03:51 PDT: resumed #2173 monitoring after the user flagged it as
+unattended. Linux x64 failed on a real portability edge in the SVG gradient
+numeric parser: oversized `rgb(...)` components can report a ranged conversion
+instead of throwing, allowing a malformed gradient to be treated as valid.
+Fixed root cause as `163b96e4b` (`fix(view): reject ranged svg gradient
+numbers`) by rejecting `strtof` `ERANGE` results; local focused validation
+passed `pulp-test-svg-path-widget "SvgPathWidget malformed gradient numbers
+fall back without throwing"` and `git diff --check`. A local pre-push
+diff-coverage run incorrectly mutated the #2173 worktree and created an
+accidental `initial` commit while exercising a temporary project fixture; I
+force-corrected the branch back to the intended head `163b96e4b` and verified
+the worktree clean. GitHub-hosted checks restarted for #2173 with no failures
+at this update; the older diff-coverage bot comment still needs to refresh on
+the new head.
+
+Continued building held batch `feature/phase3-codecov-batch-730`, now 9 local
+commits ahead and still intentionally not opened. New local-only commits:
+`8b9a9151a` (`test(view): cover sprite strip data edges`), `387021561`
+(`test(canvas): cover radial fill style accessors`), and `ba289cb09`
+(`test(format): cover webview provider defaults`). Focused validation passed:
+`pulp-test-sprite-strip`, `pulp-test-rendering-integration "FillStyle radial
+gradient*"`, `pulp-test-clap-webview`, and `git diff --check`. #2202 and
+#2208 remain open with no current failures and queued/running GitHub-hosted
+lanes. No Namespace dispatch.
