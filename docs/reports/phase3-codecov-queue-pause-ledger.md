@@ -8113,6 +8113,24 @@ log until the overall workflow completes; keep monitoring and inspect before
 patching or rerunning. #2208 has no failures and remains queued/running on
 GitHub-hosted lanes. No Namespace dispatch.
 
+2026-05-18 06:25 PDT: started the next held large GitHub-only coverage batch
+`feature/phase3-codecov-batch-732` from current `origin/main`. The branch is
+currently 4 local commits ahead and intentionally held for the next 24-36
+commit PR rather than pushing a small CI batch. Local-only commits so far:
+`e5c237c99` (`test(runtime): cover range helper edges`), `d491189b2`
+(`test(platform): cover progress parser edge payloads`), `fc42c6c85`
+(`test(midi): cover sysex buffer move semantics`), and `da838de44`
+(`test(state): cover undo transaction registration`). Local validation passed
+`pulp-test-runtime` `[runtime][range]`, `pulp-test-platform`
+`[platform][progress]`, `pulp-test-midi-buffer-sysex` focused move-semantics
+case, `pulp-test-undo-manager` focused transaction-registration case, and
+`git diff --check` after each tranche. The worktree
+`/private/tmp/pulp-phase3-codecov-batch-732` has a freshly configured local
+`build/` and will stay local until the batch reaches the requested size.
+REST-only PR monitoring showed #2173, #2208, #2210, and #2211 still open with
+no failing checks; all are blocked only on queued/running GitHub-hosted lanes.
+No Namespace dispatch.
+
 2026-05-18 06:05 PDT: published `feature/phase3-codecov-batch-731` as
 GitHub PR #2211: https://github.com/danielraffel/pulp/pull/2211. The final
 head is `9c4ff10e0` after amending the tip commit with
