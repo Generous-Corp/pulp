@@ -222,6 +222,14 @@ TEST_CASE("Typed identity nil and hashing are stable", "[runtime][identity][issu
     REQUIRE(objects.size() == 1);
 }
 
+TEST_CASE("Typed identity nil strings use canonical uuid format",
+          "[runtime][identity][coverage][phase3-batch742]") {
+    REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(ObjectId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(CorrelationId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+}
+
 TEST_CASE("Typed identity wrappers compare and hash deterministic values",
           "[runtime][identity][coverage][phase3]") {
     auto first = ObjectId::from_string("00000000-0000-0000-0000-000000000001");
