@@ -12,6 +12,16 @@ TEST_CASE("SdfAtlasCache initializes with a seed glyph set", "[canvas][cache]") 
     REQUIRE(cache.touch(U'Z') == nullptr);
 }
 
+TEST_CASE("SdfAtlasCache duplicate seed glyphs produce one resident entry",
+          "[canvas][cache]") {
+    SdfAtlasCache cache;
+    REQUIRE(cache.initialize("", {U'A', U'A', U'B', U'A'}, 24, 4, 512));
+
+    REQUIRE(cache.size() == 2);
+    REQUIRE(cache.touch(U'A') != nullptr);
+    REQUIRE(cache.touch(U'B') != nullptr);
+}
+
 TEST_CASE("SdfAtlasCache can initialize an empty resident set",
           "[canvas][cache][coverage][issue-650]") {
     SdfAtlasCache cache;
@@ -171,4 +181,21 @@ TEST_CASE("SdfAtlasCache ensure rebuild preserves glyph recency",
     const auto* x = cache.touch(U'X');
     REQUIRE(x != nullptr);
     REQUIRE(x->frame_last_used == 5);
+}
+
+TEST_CASE("SdfAtlasCache can re-ensure a glyph after eviction",
+          "[canvas][cache]") {
+    SdfAtlasCache cache;
+    REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
+
+    for (int i = 0; i < 3; ++i) cache.next_frame();
+    REQUIRE(cache.evict_older_than(1) == 2);
+    REQUIRE(cache.size() == 0);
+
+    REQUIRE(cache.ensure(U'A'));
+    REQUIRE(cache.size() == 1);
+    const auto* a = cache.touch(U'A');
+    REQUIRE(a != nullptr);
+    REQUIRE(a->frame_last_used == cache.current_frame());
+    REQUIRE(a->dirty);
 }
