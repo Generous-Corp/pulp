@@ -148,6 +148,19 @@ TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
     REQUIRE(value.mod_pow(BigInteger(0), BigInteger(17)).to_string() == "1");
 }
 
+TEST_CASE("BigInteger ordering covers equal and greater comparisons",
+          "[crypto][bigint][coverage][phase3-large]") {
+    BigInteger low(99);
+    BigInteger same_low(99);
+    BigInteger high(100);
+
+    REQUIRE_FALSE(low < same_low);
+    REQUIRE_FALSE(high < low);
+    REQUIRE(low < high);
+    REQUIRE(low == same_low);
+    REQUIRE(high != low);
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
