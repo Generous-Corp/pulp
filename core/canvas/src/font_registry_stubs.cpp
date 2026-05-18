@@ -1,26 +1,215 @@
 // font_registry_stubs.cpp — non-Skia fallback for the public font-registration
-// API declared in `pulp/canvas/bundled_fonts.hpp` (pulp #1150).
+// API + Skia-independent helpers in `pulp/canvas/bundled_fonts.hpp` (pulp #1150).
 //
-// `bundled_fonts.cpp` is only compiled when `PULP_HAS_SKIA` is on, because it
-// pulls in the generated `pulp-bundled-fonts_data.hpp`, the platform font
-// manager headers, and `SkTypeface`. Plugin authors should still be able to
-// call `pulp::canvas::register_font(...)` from startup code without guarding
-// every call site, so this TU compiles unconditionally and provides
-// always-fail stubs that the linker picks when Skia is not linked in.
-//
-// Why a separate file?
-//   * Adding `bundled_fonts.cpp` to the always-compiled source list would
-//     drag the bundled-fonts header (and thus the pulp_add_binary_data
-//     pipeline) into non-GPU builds that have no need for it.
-//   * Defining the stubs inside `bundled_fonts.cpp` outside the Skia guard
-//     would still leave them un-compiled on non-Skia builds because the
-//     CMakeLists only adds bundled_fonts.cpp to `pulp-canvas` when
-//     `PULP_HAS_SKIA` is true.
-//
-// When Skia is on, `bundled_fonts.cpp` provides the real implementations and
-// this file is a no-op (the `#ifndef PULP_HAS_SKIA` guard skips the body).
+// pulp #2163 — font v2 Slice 3.6. `cluster_step` is a UAX #29-lite
+// walker over UTF-8 input, byte-encoding-only (no Skia / no platform
+// dependency). It compiles in BOTH Skia and non-Skia builds; the rest
+// of this TU (`register_font` family, `validate_font_bytes`,
+// `register_font_woff2`) stays under the `#ifndef PULP_HAS_SKIA` guard
+// since those are stubs replaced by the real impls in
+// `bundled_fonts.cpp` when Skia is linked.
 
 #include <pulp/canvas/bundled_fonts.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace pulp::canvas {
+
+namespace {
+
+// Read one UTF-8 scalar at `p` (returns codepoint + byte length).
+// Returns {0,1} on malformed input so the walker advances by 1 byte
+// rather than getting stuck — matches the leniency of the legacy
+// naive walker this replaces.
+struct Utf8Decoded { std::uint32_t cp; std::size_t bytes; };
+
+inline Utf8Decoded utf8_decode_at(const std::string& s, std::size_t i) noexcept {
+    if (i >= s.size()) return {0, 0};
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c < 0x80) return {c, 1};
+    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+        return {static_cast<std::uint32_t>(((c & 0x1Fu) << 6)
+                                         | (static_cast<unsigned char>(s[i + 1]) & 0x3Fu)), 2};
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
+        return {static_cast<std::uint32_t>(((c & 0x0Fu) << 12)
+                                         | ((static_cast<unsigned char>(s[i + 1]) & 0x3Fu) << 6)
+                                         | (static_cast<unsigned char>(s[i + 2]) & 0x3Fu)), 3};
+    }
+    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
+        return {static_cast<std::uint32_t>(((c & 0x07u) << 18)
+                                         | ((static_cast<unsigned char>(s[i + 1]) & 0x3Fu) << 12)
+                                         | ((static_cast<unsigned char>(s[i + 2]) & 0x3Fu) << 6)
+                                         | (static_cast<unsigned char>(s[i + 3]) & 0x3Fu)), 4};
+    }
+    return {0, 1};
+}
+
+// UAX #29-lite cluster joiners. A cluster_step starting on a base
+// codepoint absorbs any of these "extend" codepoints that follow:
+//   * Combining marks (U+0300..U+036F, U+1AB0..U+1AFF, U+1DC0..U+1DFF,
+//     U+20D0..U+20FF, U+FE20..U+FE2F) — Latin / IPA / generic
+//   * Variation selectors (U+FE00..U+FE0F, U+E0100..U+E01EF) — emoji
+//     presentation switches
+//   * Devanagari/Indic virama signs (U+094D, U+09CD, U+0A4D, U+0ACD,
+//     U+0B4D, U+0BCD, U+0C4D, U+0CCD, U+0D4D, U+0DCA) — explicit
+//     conjunct formers
+//   * Zero-Width Joiner (U+200D) — emoji ZWJ sequences
+//   * Emoji modifiers / skin-tone (U+1F3FB..U+1F3FF)
+//   * Hangul T (trailing) jamo (U+11A8..U+11FF, U+D7CB..U+D7FB)
+inline bool is_cluster_extend(std::uint32_t cp) noexcept {
+    if (cp >= 0x0300 && cp <= 0x036F) return true;
+    if (cp >= 0x1AB0 && cp <= 0x1AFF) return true;
+    if (cp >= 0x1DC0 && cp <= 0x1DFF) return true;
+    if (cp >= 0x20D0 && cp <= 0x20FF) return true;
+    if (cp >= 0xFE00 && cp <= 0xFE0F) return true;
+    if (cp >= 0xFE20 && cp <= 0xFE2F) return true;
+    if (cp == 0x200D)                  return true;  // ZWJ
+    if (cp == 0x094D || cp == 0x09CD || cp == 0x0A4D || cp == 0x0ACD ||
+        cp == 0x0B4D || cp == 0x0BCD || cp == 0x0C4D || cp == 0x0CCD ||
+        cp == 0x0D4D || cp == 0x0DCA) return true;
+    if (cp >= 0x1F3FB && cp <= 0x1F3FF) return true;  // skin tone
+    if (cp >= 0xE0100 && cp <= 0xE01EF) return true;  // variation selectors
+    if (cp >= 0x11A8  && cp <= 0x11FF)  return true;  // Hangul T jamo
+    if (cp >= 0xD7CB  && cp <= 0xD7FB)  return true;  // Hangul T jamo extended
+    return false;
+}
+
+// Regional indicator symbols (RI), used to form flag clusters as
+// PAIRS. Two consecutive RIs collapse to one cluster; a third RI
+// starts a new pair.
+inline bool is_regional_indicator(std::uint32_t cp) noexcept {
+    return cp >= 0x1F1E6 && cp <= 0x1F1FF;
+}
+
+// Pre-ZWJ extension: when the current codepoint follows a ZWJ, the
+// pair joins regardless of category. This lets ZWJ-joined emoji
+// sequences collapse into one cluster even when the post-ZWJ glyph
+// isn't itself an extender.
+inline bool joins_after_zwj(std::uint32_t cp) noexcept {
+    // Pictographic-ish ranges that are commonly ZWJ targets. Not a
+    // full Unicode `Extended_Pictographic` table; covers BMP symbols
+    // + emoji-block codepoints which is the practical 95% case for
+    // the corpus this slice targets.
+    if (cp >= 0x261D  && cp <= 0x270D)  return true;  // misc dingbats
+    if (cp >= 0x2600  && cp <= 0x26FF)  return true;  // misc symbols
+    if (cp >= 0x2700  && cp <= 0x27BF)  return true;  // dingbats
+    if (cp >= 0x1F300 && cp <= 0x1F9FF) return true;  // emoji blocks
+    if (cp >= 0x1FA70 && cp <= 0x1FAFF) return true;  // symbols + pictographs extended
+    return false;
+}
+
+inline std::size_t skip_utf8_back_to_lead(const std::string& s, std::size_t i) noexcept {
+    while (i > 0 && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) --i;
+    return i;
+}
+
+} // namespace
+
+// Indic virama codepoints — explicit conjunct formers. A virama
+// chains the NEXT consonant into the same cluster (different from
+// ordinary extenders which only attach themselves).
+inline bool is_virama(std::uint32_t cp) noexcept {
+    return cp == 0x094D || cp == 0x09CD || cp == 0x0A4D || cp == 0x0ACD
+        || cp == 0x0B4D || cp == 0x0BCD || cp == 0x0C4D || cp == 0x0CCD
+        || cp == 0x0D4D || cp == 0x0DCA;
+}
+
+// Forward cluster boundary from `i` (which must be at a codepoint
+// start). Returns the byte offset of the next cluster boundary, or
+// `text.size()` if no further boundary exists.
+inline std::size_t cluster_boundary_after(const std::string& text, std::size_t i) noexcept {
+    if (i >= text.size()) return text.size();
+    Utf8Decoded base = utf8_decode_at(text, i);
+    if (base.bytes == 0) return text.size();
+    std::size_t cursor = i + base.bytes;
+
+    // Regional indicator pair: absorb exactly one partner if next is
+    // also RI; do not extend further (per UAX #29).
+    if (is_regional_indicator(base.cp)) {
+        if (cursor < text.size()) {
+            Utf8Decoded nxt = utf8_decode_at(text, cursor);
+            if (nxt.bytes && is_regional_indicator(nxt.cp)) {
+                cursor += nxt.bytes;
+            }
+        }
+        return cursor;
+    }
+
+    // General extension + ZWJ-joined + post-virama absorbing loop.
+    bool prev_was_zwj = false;
+    bool prev_was_virama = is_virama(base.cp);
+    while (cursor < text.size()) {
+        Utf8Decoded nxt = utf8_decode_at(text, cursor);
+        if (nxt.bytes == 0) break;
+        // Post-virama: absorb the next consonant regardless of class.
+        if (prev_was_virama) {
+            prev_was_virama = is_virama(nxt.cp);
+            cursor += nxt.bytes;
+            continue;
+        }
+        if (is_cluster_extend(nxt.cp)) {
+            prev_was_zwj    = (nxt.cp == 0x200D);
+            prev_was_virama = is_virama(nxt.cp);
+            cursor += nxt.bytes;
+            continue;
+        }
+        if (prev_was_zwj && joins_after_zwj(nxt.cp)) {
+            prev_was_zwj = false;
+            cursor += nxt.bytes;
+            continue;
+        }
+        break;
+    }
+    return cursor;
+}
+
+// pulp #2163 — font v2 Slice 3.6. UAX #29-lite cluster boundaries.
+// Always defined regardless of PULP_HAS_SKIA — pure UTF-8 walker.
+//
+// Backward direction implements the standard "scan from start" trick:
+// cluster boundaries are not purely locally-decidable (a backward
+// codepoint by itself doesn't tell you if it's inside a ZWJ chain or
+// post-virama sequence), so we walk forward from byte 0 collecting
+// boundaries until we cross `byte_offset`, then return the most
+// recent boundary strictly before it. O(n) per call but inputs are
+// label-sized; cursor APIs that need O(1) backward step can cache
+// boundaries via the Phase 1 UnicodeIndexMap.
+std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
+                         bool forward) {
+    if (forward) {
+        if (byte_offset >= text.size()) return text.size();
+        // Walk to the start of the codepoint at byte_offset.
+        std::size_t i = byte_offset;
+        if (i > 0 && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) {
+            i = skip_utf8_back_to_lead(text, i);
+        }
+        return cluster_boundary_after(text, i);
+    } else {
+        if (byte_offset == 0) return 0;
+        // Forward scan collecting boundaries until we cross
+        // byte_offset; return the last boundary strictly before it.
+        std::size_t prev = 0;
+        std::size_t cursor = 0;
+        while (cursor < text.size() && cursor < byte_offset) {
+            std::size_t next = cluster_boundary_after(text, cursor);
+            if (next <= cursor) break; // safety: never advance backward
+            if (next < byte_offset) {
+                prev = next;
+                cursor = next;
+            } else {
+                // `next` is at or past byte_offset: the cluster we're
+                // inside started at `cursor`; that's the answer.
+                return cursor;
+            }
+        }
+        return prev;
+    }
+}
+
+} // namespace pulp::canvas
 
 #ifndef PULP_HAS_SKIA
 
@@ -51,23 +240,6 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
 // pulp #2163 — font v2 Phase 3 skeletons.
 bool register_font_woff2(const std::uint8_t*, std::size_t, const std::string&) {
     return false;  // Phase 3 impl wires Brotli decompression + sanitizer.
-}
-
-std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
-                         bool forward) {
-    // Skeleton: naive single-byte step. Phase 3 impl consults the
-    // Phase 1 UnicodeIndexMap for proper UAX #29 cluster boundaries.
-    if (forward) {
-        if (byte_offset >= text.size()) return text.size();
-        std::size_t i = byte_offset + 1;
-        while (i < text.size() && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) ++i;
-        return i;
-    } else {
-        if (byte_offset == 0) return 0;
-        std::size_t i = byte_offset - 1;
-        while (i > 0 && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) --i;
-        return i;
-    }
 }
 
 } // namespace pulp::canvas
