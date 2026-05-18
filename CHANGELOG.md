@@ -11,7 +11,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v01131"></a>
 ## [0.113.1] - 2026-05-18
 
-- refactor(local-ci): Phase 4 R2-1 finish — extracted provenance.py, job_queue.py, targets.py, github_workflows.py from local_ci.py (-771 lines, 11,285 → 10,514)
+- refactor(phase-4): R2-1 cluster finish — provenance + job_queue + targets + github_workflows ([#2179](https://github.com/danielraffel/pulp/pull/2179))
+- feat(canvas): structural TTF/OTF sanitizer in validate_font_bytes (font v2 Slice 2.8) ([#2177](https://github.com/danielraffel/pulp/pull/2177))
+- feat(canvas): wire FontScope::set_memory_budget to resolver eviction (font v2 Slice 2.7) ([#2175](https://github.com/danielraffel/pulp/pull/2175))
+- feat: font subsystem v2 hardening — Phase 1 complete (CHAIN INFO canary flipped), Phase 2/3 skeletons ([#2169](https://github.com/danielraffel/pulp/pull/2169))
 
 <a id="v01130"></a>
 ## [0.113.0] - 2026-05-17
