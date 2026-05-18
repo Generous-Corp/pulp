@@ -1,11 +1,14 @@
 #pragma once
 
+#include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
 #include <vector>
 #include <unordered_map>
-#include <mutex>
 #include <cstdint>
+#include <memory>
 #include <span>
+
+namespace pulp::events { class EventLoop; }
 
 namespace pulp::state {
 
@@ -38,6 +41,12 @@ struct ParamGroup {
 ///       call from the audio thread.
 class StateStore {
 public:
+    StateStore();
+    ~StateStore();
+
+    StateStore(const StateStore&) = delete;
+    StateStore& operator=(const StateStore&) = delete;
+
     /// Register a parameter. Call during initialization only.
     /// @param info  Immutable metadata for this parameter.
     void add_parameter(const ParamInfo& info);
@@ -102,9 +111,48 @@ public:
     /// Signal the host that a gesture has ended.
     void end_gesture(ParamID id);
 
-    /// Register a callback that fires when any parameter value changes.
-    /// @note The listener_mutex_ is held during registration. Callbacks
-    ///       themselves are invoked without the mutex.
+    /// Install an @c EventLoop used to marshal @c ListenerThread::Main
+    /// listeners onto the main thread. If unset, Main listeners run
+    /// inline on whichever thread fired @c set_value().
+    ///
+    /// Format adapters and standalone hosts install this during plugin
+    /// initialization; tests usually leave it unset.
+    void set_main_loop(pulp::events::EventLoop* loop);
+
+    /// Subscribe to parameter-value changes.
+    ///
+    /// The returned @c ListenerToken owns the subscription. Destroy it
+    /// (or call @c ListenerToken::reset()) to remove the listener. The
+    /// token MUST outlive the listener's expected firing window — discarding
+    /// it removes the subscription immediately.
+    ///
+    /// @param callback  Invoked for every change. Pass an empty
+    ///                  @c ParamChangeCallback to register a no-op slot.
+    /// @param thread    @c ListenerThread::Main (default) marshals the
+    ///                  callback through the installed @c EventLoop;
+    ///                  @c ListenerThread::Audio runs it inline on the
+    ///                  firing thread and asserts caller RT-safety.
+    [[nodiscard]]
+    ListenerToken add_listener(ParamChangeCallback callback,
+                               ListenerThread thread);
+
+    /// Convenience for opting into real-time-safe inline invocation.
+    /// Equivalent to @c add_listener(cb, ListenerThread::Audio).
+    [[nodiscard]]
+    ListenerToken add_audio_listener(ParamChangeCallback callback);
+
+    /// Remove a listener explicitly. Equivalent to letting the token
+    /// fall out of scope.
+    void remove_listener(ListenerToken& token);
+
+    /// Legacy permanent-listener registration. Prefer the
+    /// @c ListenerToken-returning overload above for new code.
+    ///
+    /// The callback is invoked inline on whichever thread fires
+    /// @c set_value() and cannot be removed for the lifetime of the
+    /// @c StateStore. Pulp's own subsystems are migrating to the token
+    /// API; this overload remains for one release as a compatibility
+    /// shim.
     void add_listener(ParamChangeCallback callback);
 
     /// Serialize all parameter values to a binary blob for preset/state save.
@@ -133,8 +181,8 @@ private:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
-    std::vector<ParamChangeCallback> listeners_;
-    mutable std::mutex listener_mutex_;
+    std::shared_ptr<detail::ListenerRegistry> registry_;
+    std::vector<ListenerToken> permanent_listener_tokens_;
     uint32_t state_version_ = 1;
 
     std::function<void(ParamID)> on_begin_gesture_;
