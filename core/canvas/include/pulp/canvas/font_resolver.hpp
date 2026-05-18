@@ -165,6 +165,11 @@ struct ResolvedFont {
     AntiAliasMode aa_mode      = AntiAliasMode::Default;
     HintingMode   hinting_mode = HintingMode::PlatformDefault;
 
+    /// Color-font mode carried from `FontOptions`. Determines whether
+    /// the painter should render color glyphs (COLR/CPAL, SVG-in-OT,
+    /// bitmap emoji) when the typeface supports them. (Slice 3.1)
+    ColorFontMode color_font_mode = ColorFontMode::Auto;
+
     bool has_typeface() const noexcept {
 #ifdef PULP_HAS_SKIA
         return static_cast<bool>(typeface);
@@ -193,6 +198,28 @@ struct ResolvedFont {
         return sk_hinting_for(hinting_mode);
     }
 #endif
+
+    /// pulp #2163 / font v2 Slice 3.1 — does the resolved typeface
+    /// carry color-glyph tables? Checks for any of:
+    ///   `COLR` — v0/v1 vector color (Microsoft / OpenType)
+    ///   `CPAL` — color palette companion to COLR
+    ///   `CBDT` / `CBLC` — bitmap color emoji (Google / Apple)
+    ///   `sbix` — Apple bitmap strikes (Apple Color Emoji)
+    ///   `SVG`  — SVG-in-OT (Adobe / Mozilla)
+    /// Returns false when there's no typeface or no color tables.
+    /// Independent of `color_font_mode` — that says what the *caller*
+    /// wants; this says what the *font* actually has. Always available
+    /// (returns false on non-Skia builds where no typeface is loaded).
+    bool supports_color_font() const noexcept;
+
+    /// Composite of `color_font_mode` + `supports_color_font()`. Tells
+    /// the painter whether to render color glyphs from this face.
+    ///   Auto            → true iff supports_color_font()
+    ///   Bitmap/COLR/SVG → true iff supports_color_font() (mode hint
+    ///                     selects the table; Skia auto-prefers when
+    ///                     multiple are present)
+    ///   ForceMonochrome → false (always render mono)
+    bool color_font_active() const noexcept;
 };
 
 // ── FontResolver ─────────────────────────────────────────────────────────

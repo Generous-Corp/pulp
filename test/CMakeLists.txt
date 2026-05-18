@@ -887,6 +887,15 @@ add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_paralle
 target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-run-planner-parallel)
 
+# pulp #2163 / font v2 Slice 3.1 — color-font predicate on ResolvedFont.
+# Gated on PULP_HAS_SKIA — the predicate returns false without a real
+# typeface so the resolver-bound assertions can't fire on non-Skia.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-font-color-mode test_font_color_mode.cpp)
+    target_link_libraries(pulp-test-font-color-mode PRIVATE pulp::canvas Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-font-color-mode)
+endif()
+
 # Font subsystem typed options and scope generation tests
 add_executable(pulp-test-font-options test_font_options.cpp)
 target_link_libraries(pulp-test-font-options PRIVATE pulp::canvas Catch2::Catch2WithMain)

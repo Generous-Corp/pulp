@@ -145,6 +145,8 @@ ResolvedFont resolve_one_family(const std::string& family,
     // Slice 3.2: AA / hinting policy travels alongside the resolved face.
     r.aa_mode = opts.aa_mode;
     r.hinting_mode = opts.hinting_mode;
+    // Slice 3.1: color-font policy travels alongside the resolved face.
+    r.color_font_mode = opts.color_font_mode;
 
     // 1) Registered (scoped). Phase 1.1.a only consults the global
     //    registered map; per-scope storage arrives in 1.1.b.
@@ -290,6 +292,9 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     // in font_resolver.hpp for the enum translation.
     resolved.aa_mode = options.aa_mode;
     resolved.hinting_mode = options.hinting_mode;
+    // pulp #2163 / Slice 3.1 — color-font policy travels onto the
+    // ResolvedFont so paint paths can branch on color_font_active().
+    resolved.color_font_mode = options.color_font_mode;
 
     // pulp #2163 — font v2 Slice 2.3. After a face resolves, if the
     // caller requested variation axes (`font-variation-settings`),
@@ -360,6 +365,8 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     // as the primary so paint paths stay consistent across the run.
     r.aa_mode = options.aa_mode;
     r.hinting_mode = options.hinting_mode;
+    // Slice 3.1: char-fallback also inherits color-font policy.
+    r.color_font_mode = options.color_font_mode;
 
     sk_sp<SkFontMgr> mgr = platform_font_manager();
     if (!mgr) {
@@ -414,6 +421,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     r.generation = merged_generation_for(options.scope);
     r.aa_mode = options.aa_mode;
     r.hinting_mode = options.hinting_mode;
+    r.color_font_mode = options.color_font_mode;
     r.origin = FallbackOrigin::NotFound;
     return r;
 }
@@ -426,10 +434,50 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     r.generation = merged_generation_for(options.scope);
     r.aa_mode = options.aa_mode;
     r.hinting_mode = options.hinting_mode;
+    r.color_font_mode = options.color_font_mode;
     r.origin = FallbackOrigin::NotFound;
     return r;
 }
 
 #endif // PULP_HAS_SKIA
+
+// Color-font predicates — Skia-conditional method bodies that compile
+// in both Skia and non-Skia builds. (Slice 3.1)
+bool ResolvedFont::supports_color_font() const noexcept {
+#ifdef PULP_HAS_SKIA
+    if (!typeface) return false;
+    const int count = typeface->countTables();
+    if (count <= 0) return false;
+    std::vector<SkFontTableTag> tags(static_cast<std::size_t>(count));
+    // `readTableTags` is the canonical span-based API in this Skia
+    // version; `getTableTags(tags[])` is gated behind a legacy macro.
+    typeface->readTableTags({tags.data(), tags.size()});
+    // Tags packed big-endian: 'COLR' = 0x434F4C52, etc.
+    constexpr SkFontTableTag kCOLR = 0x434F4C52u;
+    constexpr SkFontTableTag kCPAL = 0x4350414Cu;
+    constexpr SkFontTableTag kCBDT = 0x43424454u;
+    constexpr SkFontTableTag kCBLC = 0x43424C43u;
+    constexpr SkFontTableTag kSBIX = 0x73626978u;
+    constexpr SkFontTableTag kSVG  = 0x53564720u;  // 'SVG '
+    for (SkFontTableTag t : tags) {
+        if (t == kCOLR || t == kCPAL || t == kCBDT || t == kCBLC
+            || t == kSBIX || t == kSVG) {
+            return true;
+        }
+    }
+    return false;
+#else
+    return false;
+#endif
+}
+
+bool ResolvedFont::color_font_active() const noexcept {
+#ifdef PULP_HAS_SKIA
+    if (color_font_mode == ColorFontMode::ForceMonochrome) return false;
+    return supports_color_font();
+#else
+    return false;
+#endif
+}
 
 } // namespace pulp::canvas
