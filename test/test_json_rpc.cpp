@@ -527,3 +527,36 @@ TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without r
     std::this_thread::sleep_for(10ms);
     REQUIRE(replies.empty());
 }
+
+TEST_CASE("JsonRpcPeer destructor releases the channel callback",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string reply;
+    pair.first->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    {
+        JsonRpcPeer server(*pair.second);
+        server.register_method("echo", [](std::string_view params) {
+            return JsonRpcResult::ok(std::string(params));
+        });
+
+        REQUIRE(pair.first->send_text(
+            R"json({"jsonrpc":"2.0","id":1,"method":"echo","params":{"first":true}})json"));
+        REQUIRE(reply.find(R"("first")") != std::string::npos);
+    }
+
+    reply.clear();
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":2,"method":"echo","params":{"stale":true}})json"));
+    REQUIRE(reply.empty());
+
+    std::string raw_message;
+    pair.second->on_message([&](const Message& message) {
+        raw_message.assign(message.as_text());
+    });
+    REQUIRE(pair.first->send_text("raw after peer"));
+    REQUIRE(raw_message == "raw after peer");
+}
