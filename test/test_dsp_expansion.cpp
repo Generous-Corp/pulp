@@ -97,6 +97,18 @@ TEST_CASE("FirFilter empty coefficients pass samples through and reset safely",
     REQUIRE_THAT(fir.process(0.5f), WithinAbs(0.5f, 1e-6f));
 }
 
+TEST_CASE("FirFilter coefficient replacement clears stale delay samples",
+          "[signal][fir][coverage][phase3]") {
+    FirFilter fir;
+    fir.set_coefficients({0.5f, 0.5f});
+    REQUIRE_THAT(fir.process(1.0f), WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(fir.process(1.0f), WithinAbs(1.0f, 1e-6f));
+
+    fir.set_coefficients({1.0f});
+    REQUIRE(fir.order() == 1);
+    REQUIRE_THAT(fir.process(0.25f), WithinAbs(0.25f, 1e-6f));
+}
+
 // ── BallisticsFilter ─────────────────────────────────────────────────────
 
 TEST_CASE("BallisticsFilter tracks rising signal", "[signal][ballistics]") {
