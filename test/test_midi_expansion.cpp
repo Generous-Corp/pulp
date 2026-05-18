@@ -199,6 +199,30 @@ TEST_CASE("RpnParser reports maximum 14-bit RPN parameter and value",
     REQUIRE(received_value == 0x3fff);
 }
 
+TEST_CASE("RpnParser suppresses increment while parameter is being reselected",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    std::vector<uint16_t> params;
+
+    rpn.on_increment = [&](uint8_t ch, uint16_t param, bool is_rpn) {
+        REQUIRE(ch == 4);
+        REQUIRE(is_rpn);
+        params.push_back(param);
+    };
+
+    rpn.process(MidiEvent::cc(4, 101, 1));
+    rpn.process(MidiEvent::cc(4, 100, 2));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+
+    rpn.process(MidiEvent::cc(4, 101, 3));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+    rpn.process(MidiEvent::cc(4, 100, 5));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+
+    REQUIRE(params == std::vector<uint16_t>{static_cast<uint16_t>((1 << 7) | 2),
+                                            static_cast<uint16_t>((3 << 7) | 5)});
+}
+
 // ── MidiKeyboardState ────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboardState tracks note on/off", "[midi][keyboard]") {
