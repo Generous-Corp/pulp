@@ -318,6 +318,32 @@ TEST_CASE("FileAnalyticsDestination second flush does not duplicate events",
     REQUIRE(lines == 1);
 }
 
+TEST_CASE("FileAnalyticsDestination retains buffered events after open failure",
+          "[runtime][analytics][coverage][phase3-large]") {
+    auto dir = std::filesystem::temp_directory_path() / "pulp_analytics_dir_dest";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directory(dir);
+
+    FileAnalyticsDestination dest(dir.string());
+    AnalyticsEvent event;
+    event.name = "queued";
+    event.timestamp = 4.0;
+    dest.log_event(event);
+    dest.flush();
+
+    REQUIRE(std::filesystem::is_directory(dir));
+
+    std::filesystem::remove_all(dir);
+    dest.flush();
+
+    std::ifstream f(dir);
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"queued\"") != std::string::npos);
+
+    std::filesystem::remove(dir);
+}
+
 TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][issue-641]") {
     TemporaryFile tmp(".jsonl");
     auto path = tmp.path();
