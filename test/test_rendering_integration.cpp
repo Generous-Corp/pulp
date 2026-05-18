@@ -169,6 +169,52 @@ TEST_CASE("RenderPassManager detects over budget", "[render][pass]") {
     REQUIRE(pm.over_budget());
 }
 
+TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
+          "[render][pass][coverage][phase3]") {
+    render::RenderPassManager pm;
+
+    REQUIRE(pm.frame_count() == 0);
+    REQUIRE(pm.current_pass() == render::RenderPassType::background);
+
+    pm.begin_frame();
+    REQUIRE(pm.frame_count() == 1);
+    pm.begin_pass(render::RenderPassType::overlay);
+    REQUIRE(pm.current_pass() == render::RenderPassType::overlay);
+    pm.end_pass(1.5f, 3);
+    pm.end_frame();
+
+    REQUIRE(pm.passes().size() == 1);
+    REQUIRE(pm.passes().front().type == render::RenderPassType::overlay);
+    REQUIRE(pm.passes().front().draw_calls == 3);
+
+    pm.begin_frame();
+    REQUIRE(pm.frame_count() == 2);
+    REQUIRE(pm.passes().empty());
+    REQUIRE(pm.total_time_ms() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("RenderPassManager handles empty passes and disabled budget",
+          "[render][pass][coverage][phase3]") {
+    render::RenderPassManager pm;
+
+    pm.begin_frame();
+    pm.end_pass(99.0f, 100);
+    pm.end_frame();
+    REQUIRE(pm.passes().empty());
+    REQUIRE(pm.total_time_ms() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(pm.over_budget());
+
+    pm.set_budget(0.0f);
+    REQUIRE(pm.budget() == Catch::Approx(0.0f));
+    pm.begin_frame();
+    pm.begin_pass(render::RenderPassType::post_effects);
+    pm.end_pass(250.0f, 1);
+    pm.end_frame();
+
+    REQUIRE(pm.total_time_ms() == Catch::Approx(250.0f));
+    REQUIRE_FALSE(pm.over_budget());
+}
+
 // ── SpriteStrip on Knob ─────────────────────────────────────────────────
 
 TEST_CASE("Knob with sprite strip set", "[view][widget]") {
