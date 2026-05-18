@@ -10,6 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 
@@ -168,6 +169,78 @@ class SurfaceExtraTests(unittest.TestCase):
 
         self.assertIn("source =\n    tools/scripts", text)
         self.assertIn("omit =\n    tools/scripts/test_*.py", text)
+
+
+class CoberturaPathExtraTests(unittest.TestCase):
+    def test_repo_relative_xml_filename_normalizes_backslashes_and_dot_source(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            source = root / "tools" / "scripts" / "run_python_coverage.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("print('source')\n", encoding="utf-8")
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename(
+                        r"tools\scripts\run_python_coverage.py",
+                        [],
+                    ),
+                    "tools/scripts/run_python_coverage.py",
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename(
+                        "tools/scripts/run_python_coverage.py",
+                        ["."],
+                    ),
+                    "tools/scripts/run_python_coverage.py",
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename(
+                        "scripts/run_python_coverage.py",
+                        ["tools"],
+                    ),
+                    "tools/scripts/run_python_coverage.py",
+                )
+
+    def test_rewrite_cobertura_filenames_clears_existing_sources_to_dot(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            source = root / "tools" / "scripts" / "run_python_coverage.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("print('source')\n", encoding="utf-8")
+
+            xml = root / "coverage.xml"
+            xml.write_text(
+                """<?xml version="1.0" ?>
+<coverage>
+  <sources>
+    <source></source>
+    <source>tools</source>
+  </sources>
+  <packages>
+    <package name="">
+      <classes>
+        <class name="scripts/run_python_coverage.py" filename="scripts/run_python_coverage.py" />
+      </classes>
+    </package>
+  </packages>
+</coverage>
+""",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                rpc._rewrite_cobertura_filenames(xml)
+
+            tree = ET.parse(xml)
+            self.assertEqual(
+                [source.text for source in tree.findall("./sources/source")],
+                ["."],
+            )
+            self.assertEqual(
+                tree.find(".//class").get("filename"),
+                "tools/scripts/run_python_coverage.py",
+            )
 
 
 if __name__ == "__main__":
