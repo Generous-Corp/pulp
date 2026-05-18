@@ -41,6 +41,14 @@ TEST_CASE("Interpolator hermite impulse response spans adjacent samples", "[sign
     REQUIRE_THAT(Interpolator::hermite(0.5f, 0.0f, 0.0f, 0.0f, 1.0f), WithinAbs(-0.0625, 0.001));
 }
 
+TEST_CASE("Interpolator hermite preserves affine sample ramps",
+          "[signal][interp][coverage][phase3]") {
+    REQUIRE_THAT(Interpolator::hermite(0.25f, -1.0f, 1.0f, 3.0f, 5.0f),
+                 WithinAbs(1.5f, 0.001f));
+    REQUIRE_THAT(Interpolator::hermite(0.75f, -1.0f, 1.0f, 3.0f, 5.0f),
+                 WithinAbs(2.5f, 0.001f));
+}
+
 TEST_CASE("Interpolator lagrange at frac=0 returns y0", "[signal][interp]") {
     float result = Interpolator::lagrange(0.0f, 0.0f, 5.0f, 10.0f, 15.0f);
     REQUIRE_THAT(result, WithinAbs(5.0, 0.01));
