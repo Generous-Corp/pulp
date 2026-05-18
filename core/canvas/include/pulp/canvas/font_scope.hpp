@@ -73,14 +73,18 @@ public:
     /// scopes; that's the resolver's job.
     bool is_registered(const std::string& family) const;
 
-    /// pulp #2163 — Phase 2 / Slice 2.7 skeleton. Memory budget (in
-    /// bytes) for caches owned by this scope: Skia strike cache,
-    /// TextShaper segment cache, glyph atlas pressure. `0` (default)
-    /// disables the budget. The skeleton accepts + stores the value;
-    /// the Phase 2 implementation slice wires LRU eviction so AUv3 /
-    /// mobile plugins don't OOM under stress.
+    /// pulp #2163 — Phase 2 / Slice 2.7 implementation. Memory budget
+    /// (in bytes) for caches owned by this scope: FontResolver
+    /// typeface cache, TextShaper segment cache, Skia strike cache
+    /// pressure. `0` (default) disables the budget. Setting a non-zero
+    /// budget triggers an immediate `prune_to_budget()`.
     void set_memory_budget(std::size_t bytes);
     std::size_t memory_budget() const noexcept;
+
+    /// Explicit prune-to-budget trigger. Called automatically by
+    /// `set_memory_budget`; exposed so memory-pressure handlers can
+    /// request a manual prune.
+    void prune_to_budget();
 
 private:
     FontScopeId id_;
