@@ -76,6 +76,23 @@ TEST_CASE("DelayLine handles empty, wraparound, and reset edges",
     REQUIRE_THAT(dl.process(4.0f, 0.0f), WithinAbs(4.0f, 1e-6f));
 }
 
+TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
+          "[signal][delay][coverage][phase3-github]") {
+    DelayLine dl;
+    dl.prepare(0);
+
+    REQUIRE(dl.max_delay() == 0);
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(4), WithinAbs(0.0f, 1e-6f));
+
+    dl.push(0.25f);
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(dl.read(99), WithinAbs(0.25f, 1e-6f));
+
+    dl.reset();
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+}
+
 // ── Gain ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Gain dB conversion", "[signal][gain]") {
