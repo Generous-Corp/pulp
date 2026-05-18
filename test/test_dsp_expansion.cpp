@@ -8,10 +8,12 @@
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/gain.hpp>
 #include <pulp/signal/interpolator.hpp>
+#include <pulp/signal/oscillator.hpp>
 #include <pulp/signal/simd_buffer.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/stft.hpp>
 #include <pulp/signal/waveshaper.hpp>
+#include <pulp/signal/windowing.hpp>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -19,6 +21,138 @@
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+
+// ── Gain and simple mixing ───────────────────────────────────────────────
+
+TEST_CASE("Gain converts dB and processes scalar and buffers",
+          "[signal][gain][codecov]") {
+    REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(db_to_linear(6.0f), WithinRel(1.99526f, 1e-4f));
+    REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(linear_to_db(0.0f), WithinAbs(-200.0f, 1e-5f));
+
+    Gain gain;
+    gain.set_gain_db(6.0f);
+    REQUIRE_THAT(gain.gain_db(), WithinAbs(6.0f, 1e-4f));
+    REQUIRE_THAT(gain.process(0.5f), WithinRel(0.99763f, 1e-4f));
+
+    gain.set_gain_linear(0.25f);
+    float buffer[] = {4.0f, -2.0f, 0.0f};
+    gain.process(buffer, 3);
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("SimpleMixer clamps mix and processes arrays",
+          "[signal][gain][mixer][codecov]") {
+    SimpleMixer mixer;
+    mixer.set_mix(-1.0f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(mixer.process(2.0f, 10.0f), WithinAbs(2.0f, 1e-6f));
+
+    mixer.set_mix(2.0f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(mixer.process(2.0f, 10.0f), WithinAbs(10.0f, 1e-6f));
+
+    mixer.set_mix(0.25f);
+    const float dry[] = {0.0f, 4.0f, -4.0f};
+    const float wet[] = {8.0f, 8.0f, 8.0f};
+    float output[] = {0.0f, 0.0f, 0.0f};
+    mixer.process(dry, wet, output, 3);
+    REQUIRE_THAT(output[0], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(-1.0f, 1e-6f));
+}
+
+// ── WindowFunction ──────────────────────────────────────────────────────
+
+TEST_CASE("WindowFunction generates all supported window families",
+          "[signal][window][codecov]") {
+    const auto rectangular = WindowFunction::generate(8, WindowFunction::Type::rectangular);
+    REQUIRE(rectangular.size() == 8);
+    for (float value : rectangular)
+        REQUIRE_THAT(value, WithinAbs(1.0f, 1e-6f));
+
+    const auto hann = WindowFunction::generate(8, WindowFunction::Type::hann);
+    REQUIRE_THAT(hann.front(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(hann.back(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE(hann[3] > hann[1]);
+
+    const auto hamming = WindowFunction::generate(8, WindowFunction::Type::hamming);
+    REQUIRE_THAT(hamming.front(), WithinAbs(0.08f, 1e-5f));
+    REQUIRE_THAT(hamming.back(), WithinAbs(0.08f, 1e-5f));
+
+    const auto blackman = WindowFunction::generate(8, WindowFunction::Type::blackman);
+    REQUIRE(blackman[3] > blackman[1]);
+
+    const auto flat_top = WindowFunction::generate(8, WindowFunction::Type::flat_top);
+    REQUIRE(flat_top[3] > flat_top[0]);
+
+    const auto kaiser_default = WindowFunction::generate(8, WindowFunction::Type::kaiser);
+    const auto kaiser_custom = WindowFunction::generate(8, WindowFunction::Type::kaiser, 8.0f);
+    REQUIRE_THAT(kaiser_default[3], WithinAbs(kaiser_default[4], 1e-6f));
+    REQUIRE(kaiser_custom[0] < kaiser_default[0]);
+}
+
+TEST_CASE("WindowFunction applies bounded windows in place",
+          "[signal][window][codecov]") {
+    float buffer[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const std::vector<float> window = {1.0f, 0.5f, 0.25f};
+
+    WindowFunction::apply(buffer, window);
+
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(buffer[3], WithinAbs(4.0f, 1e-6f));
+}
+
+// ── Oscillator ──────────────────────────────────────────────────────────
+
+TEST_CASE("Oscillator sine phase advances wraps and reset restores phase",
+          "[signal][oscillator][codecov]") {
+    Oscillator osc;
+    osc.set_sample_rate(4.0f);
+    osc.set_frequency(1.0f);
+    osc.set_waveform(Oscillator::Waveform::sine);
+
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(osc.next(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(osc.next(), WithinAbs(1.0f, 1e-6f));
+
+    osc.next();
+    osc.next();
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(osc.frequency(), WithinAbs(1.0f, 1e-6f));
+
+    osc.next();
+    osc.reset();
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("Oscillator waveforms produce finite bounded startup samples",
+          "[signal][oscillator][codecov]") {
+    Oscillator osc;
+    osc.set_sample_rate(16.0f);
+    osc.set_frequency(1.0f);
+
+    for (auto waveform : {
+             Oscillator::Waveform::saw,
+             Oscillator::Waveform::square,
+             Oscillator::Waveform::triangle,
+         }) {
+        osc.reset();
+        osc.set_waveform(waveform);
+        for (int i = 0; i < 32; ++i) {
+            const float sample = osc.next();
+            REQUIRE(std::isfinite(sample));
+            REQUIRE(sample >= -1.5f);
+            REQUIRE(sample <= 1.5f);
+        }
+    }
+}
 
 // ── FirFilter ────────────────────────────────────────────────────────────
 
