@@ -727,6 +727,37 @@ TEST_CASE("base64 decodes mixed full quartets and unpadded tails",
     REQUIRE(std::string(two_tail->begin(), two_tail->end()) == "Manab");
 }
 
+TEST_CASE("base64 covers full alphabet and padded binary tails",
+          "[runtime][base64][coverage][phase3-large]") {
+    const uint8_t alphabet_bytes[] = {
+        0x00, 0x10, 0x83, 0x10, 0x51, 0x87, 0x20, 0x92,
+        0x8b, 0x30, 0xd3, 0x8f, 0x41, 0x14, 0x93, 0x51,
+        0x55, 0x97, 0x61, 0x96, 0x9b, 0x71, 0xd7, 0x9f,
+        0x82, 0x18, 0xa3, 0x92, 0x59, 0xa7, 0xa2, 0x9a,
+        0xab, 0xb2, 0xdb, 0xaf, 0xc3, 0x1c, 0xb3, 0xd3,
+        0x5d, 0xb7, 0xe3, 0x9e, 0xbb, 0xf3, 0xdf, 0xbf,
+    };
+
+    auto encoded = base64_encode(alphabet_bytes, sizeof(alphabet_bytes));
+    REQUIRE(encoded == "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+
+    auto decoded = base64_decode(encoded);
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::equal(decoded->begin(), decoded->end(), std::begin(alphabet_bytes)));
+
+    const uint8_t one_tail[] = {0xfb};
+    const uint8_t two_tail[] = {0xfb, 0xff};
+    REQUIRE(base64_encode(one_tail, sizeof(one_tail)) == "+w==");
+    REQUIRE(base64_encode(two_tail, sizeof(two_tail)) == "+/8=");
+}
+
+TEST_CASE("base64 decode tolerates whitespace inside unpadded input",
+          "[runtime][base64][coverage][phase3-large]") {
+    auto decoded = base64_decode("\n Y W J \t j Z A \r");
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::string(decoded->begin(), decoded->end()) == "abcd");
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
