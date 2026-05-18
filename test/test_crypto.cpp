@@ -236,6 +236,21 @@ TEST_CASE("AES decrypt rejects empty ciphertext",
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("AES decrypt rejects explicit zero padding byte",
+          "[crypto][aes][coverage][phase3-batch742]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+
+    auto encrypted = aes_encrypt(nullptr, 0, key, iv);
+    REQUIRE(encrypted.has_value());
+
+    uint8_t tampered_iv[16] = {};
+    tampered_iv[15] = 0x10;
+
+    auto result = aes_decrypt(encrypted->data(), encrypted->size(), key, tampered_iv);
+    REQUIRE_FALSE(result.has_value());
+}
+
 TEST_CASE("AES decrypt rejects invalid PKCS7 padding bytes",
           "[crypto][aes][coverage][issue-641]") {
     uint8_t key[32] = {};
