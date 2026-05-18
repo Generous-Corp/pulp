@@ -86,18 +86,12 @@ TEST_CASE("IPC connect to nonexistent fails", "[events][ipc]") {
     REQUIRE(conn.state() == IpcState::Error);
 }
 
-TEST_CASE("IPC socket connect rejects malformed endpoints", "[events][ipc]") {
-    InterprocessConnection conn;
-    REQUIRE_FALSE(conn.connect("127.0.0.1", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-
-    REQUIRE_FALSE(conn.connect("127.0.0.1:not-a-port", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-
-    REQUIRE_FALSE(conn.connect("127.0.0.1:70000", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-    REQUIRE_FALSE(conn.is_connected());
-}
+// "IPC socket connect rejects malformed endpoints" lived here before
+// companion-track U-8. Its coverage (host-only, non-numeric port,
+// out-of-range port) is fully subsumed by the more thorough table
+// in test_ipc_endpoints.cpp ("IPC socket client rejects malformed
+// port strings without connecting"). Kept here as a pointer so a
+// future test author doesn't recreate the duplicate.
 
 TEST_CASE("IPC send while disconnected returns false", "[events][ipc]") {
     InterprocessConnection conn;
@@ -153,31 +147,12 @@ TEST_CASE("ChildProcessManager empty lifecycle operations are no-ops",
     REQUIRE(exit_callbacks == 0);
 }
 
-TEST_CASE("IPC socket server rejects malformed listen endpoints",
-          "[events][ipc][socket]") {
-    InterprocessConnectionServer server;
-    REQUIRE_FALSE(server.start("", IpcTransport::Socket));
-    REQUIRE_FALSE(server.is_running());
-
-    REQUIRE_FALSE(server.start("127.0.0.1:", IpcTransport::Socket));
-    REQUIRE_FALSE(server.is_running());
-
-    REQUIRE_FALSE(server.start("127.0.0.1:not-a-port", IpcTransport::Socket));
-    REQUIRE_FALSE(server.is_running());
-
-    REQUIRE_FALSE(server.start("70000", IpcTransport::Socket));
-    REQUIRE_FALSE(server.is_running());
-
-    InterprocessConnection conn;
-    REQUIRE_FALSE(conn.connect("127.0.0.1:", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-
-    REQUIRE_FALSE(conn.create_server("127.0.0.1:not-a-port", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-
-    REQUIRE_FALSE(conn.create_server("", IpcTransport::Socket));
-    REQUIRE(conn.state() == IpcState::Error);
-}
+// "IPC socket server rejects malformed listen endpoints" lived here
+// before companion-track U-8. Its coverage is subsumed by the more
+// thorough tables in test_ipc_endpoints.cpp ("IPC socket listener
+// rejects empty endpoint strings" + "...rejects malformed port
+// strings without staying running"). Kept here as a pointer so a
+// future test author doesn't recreate the duplicate.
 
 TEST_CASE("IPC socket server stops while waiting for a client",
           "[events][ipc][socket]") {
