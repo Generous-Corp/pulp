@@ -781,3 +781,13 @@ TEST_CASE("Special functions convert gain and MIDI reference points",
     REQUIRE_THAT(midi_to_freq(69.0f), WithinAbs(440.0f, 1e-6f));
     REQUIRE_THAT(midi_to_freq(81.0f), WithinAbs(880.0f, 1e-5f));
 }
+
+TEST_CASE("Special functions wrap standard gamma and error functions",
+          "[signal][math][coverage][phase3]") {
+    REQUIRE_THAT(bessel_i0(0.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE(bessel_i0(2.0f) > 2.0f);
+
+    REQUIRE_THAT(gamma_fn(5.0f), WithinAbs(24.0f, 1e-5f));
+    REQUIRE_THAT(erf_fn(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(erfc_fn(0.0f), WithinAbs(1.0f, 1e-6f));
+}
