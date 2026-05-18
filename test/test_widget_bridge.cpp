@@ -5828,6 +5828,51 @@ TEST_CASE("CSSStyleDeclaration forwards 'direction: rtl'",
     REQUIRE(bridge.widget("a")->direction() == View::WritingDirection::rtl);
 }
 
+TEST_CASE("HTML dir attribute forwards to View writing direction",
+          "[view][bridge][html][direction][issue-2163]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var rtl = document.createElement('div');
+        rtl.id = 'dir-rtl';
+        document.body.appendChild(rtl);
+        rtl.setAttribute('dir', 'RTL');
+
+        var ltr = document.createElement('div');
+        ltr.id = 'dir-ltr';
+        document.body.appendChild(ltr);
+        ltr.setAttribute('dir', 'ltr');
+
+        var autoDir = document.createElement('div');
+        autoDir.id = 'dir-auto';
+        document.body.appendChild(autoDir);
+        autoDir.setAttribute('dir', 'auto');
+
+        var invalid = document.createElement('div');
+        invalid.id = 'dir-invalid';
+        document.body.appendChild(invalid);
+        invalid.setAttribute('dir', 'rtl');
+        invalid.setAttribute('dir', 'sideways');
+    )");
+
+    auto id_for = [&](const char* id) {
+        auto val = engine.evaluate(std::string("document.getElementById('") + id + "')._id");
+        return std::string(val.getWithDefault<std::string_view>(""));
+    };
+
+    using D = View::WritingDirection;
+    REQUIRE(bridge.widget(id_for("dir-rtl"))->direction() == D::rtl);
+    REQUIRE(bridge.widget(id_for("dir-ltr"))->direction() == D::ltr);
+    REQUIRE(bridge.widget(id_for("dir-auto"))->direction() == D::auto_);
+    REQUIRE(bridge.widget(id_for("dir-invalid"))->direction() == D::rtl);
+
+    auto attr = engine.evaluate("document.getElementById('dir-invalid').getAttribute('dir')");
+    REQUIRE(std::string(attr.getWithDefault<std::string_view>("")) == "sideways");
+}
+
 // pulp #1434 Phase A2-3 — Codex P1 (PR #1506, comment 3196031661):
 // `auto_` on a non-root view must map to YGDirectionInherit so an
 // RTL ancestor actually flows into descendants. Previously,

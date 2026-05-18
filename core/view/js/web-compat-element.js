@@ -971,6 +971,16 @@ Element.prototype.setAttribute = function(name, value) {
             this.style._reevaluateOverlay();
         }
     }
+    // pulp #2163 — font v2 Slice 2.5. The split element prelude is the
+    // runtime path for document.createElement(); keep it in lock-step
+    // with the legacy web-compat.js bundle so HTML `dir` attributes
+    // reach the same View::WritingDirection slot as CSS `direction`.
+    else if (name === "dir" && typeof setDirection !== "undefined") {
+        var dv = String(value).toLowerCase();
+        if (dv === "rtl" || dv === "ltr" || dv === "auto") {
+            setDirection(this._id, dv);
+        }
+    }
     // pulp #1147 — HTML `width`/`height` attributes on layout-leaf
     // elements (<svg>, <img>, <canvas>, <video>) are presentational
     // dimensions per the HTML spec. JSX/React encodes inline SVG sizes
