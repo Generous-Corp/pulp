@@ -556,12 +556,28 @@ struct TextShaper::Impl {
         if (font.getTypeface()) {
             SkFontMetrics m;
             font.getMetrics(&m);
-            // Skia convention: fAscent is negative (above baseline),
-            // fDescent positive (below baseline), fLeading the extra
-            // inter-line gap. Browsers' "normal" line-height collapses
-            // to ascent + descent + leading.
-            box.ascent  = -m.fAscent;          // flip to positive
-            box.descent =  m.fDescent;
+            // pulp #2163 — use fTop / fBottom (the WORST-CASE glyph
+            // bbox extents) rather than fAscent / fDescent (the
+            // RECOMMENDED ascent/descent for Latin-only layout).
+            //
+            // The difference matters at small font sizes: fAscent is
+            // the line above which TYPICAL glyphs fit, but caps and
+            // accents on some fonts (IBM Plex Mono among them) extend
+            // above fAscent. Boxes sized to fAscent + fDescent clip
+            // the cap-tops on those glyphs. fTop / fBottom guarantee
+            // every glyph fits — the cost is slightly taller line
+            // boxes for fonts where the worst-case glyph sits well
+            // above the typical ascent (display fonts with
+            // exaggerated accents), but that's still the right
+            // tradeoff for "imported design renders correctly".
+            //
+            // Skia convention: fAscent / fTop are NEGATIVE (above
+            // baseline), fDescent / fBottom POSITIVE (below baseline),
+            // fLeading the extra inter-line gap.
+            const float top    = m.fTop    < m.fAscent  ? m.fTop    : m.fAscent;
+            const float bottom = m.fBottom > m.fDescent ? m.fBottom : m.fDescent;
+            box.ascent  = -top;           // worst-case distance above baseline (positive)
+            box.descent =  bottom;        // worst-case distance below baseline (positive)
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
             box.line_height = box.ascent + box.descent + box.leading;
             box.real = true;

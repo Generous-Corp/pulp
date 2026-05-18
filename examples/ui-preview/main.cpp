@@ -17,8 +17,11 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/text_shaper.hpp>
+#include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -448,6 +451,8 @@ int main(int argc, char* argv[]) {
     std::string view_tree_path;
     std::string script_path;
     int render_w = 360, render_h = 480;
+    bool label_audit_enabled = false;
+    std::string label_audit_path;
 
 #ifdef PULP_BENCHMARK
     BenchmarkConfig bench_cfg;
@@ -475,6 +480,21 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--view-tree-out") == 0 && i + 1 < argc) {
             view_tree_path = argv[++i];
+        } else if (starts_with(argv[i], "--label-audit")) {
+            // pulp #2163 — programmatic label-fit audit. After layout,
+            // walk the view tree and for every Label compute the
+            // expected glyph extent (real ascent + descent from
+            // SkFontMetrics) and compare against the Yoga-assigned
+            // box height. Emits one JSON object per Label to stdout.
+            // Exits non-zero if any label has glyphs that would clip
+            // (glyph_top < 0 or glyph_bottom > box_height).
+            //
+            // Spec:
+            //   --label-audit             prints to stdout
+            //   --label-audit=path.json   writes to path.json
+            const char* eq = std::strchr(argv[i], '=');
+            label_audit_enabled = true;
+            if (eq && eq[1] != '\0') label_audit_path = eq + 1;
         } else if (std::strcmp(argv[i], "--font") == 0 && i + 1 < argc) {
             // pulp #2163 — `--font "Family Name=/path/to/font.ttf"` registers
             // a TTF/OTF before the JS bridge starts, so imported designs
@@ -1017,6 +1037,72 @@ int main(int argc, char* argv[]) {
         inspector.set_active(true);
     }
 
+    // pulp #2163 — run label-fit audit BEFORE screenshot_only short-
+    // circuits so headless audit runs work without launching a window.
+    // Layout is already done; the audit is a tree walk + arithmetic.
+    auto run_label_audit = [&](int width, int height) -> int {
+        root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
+        root.layout_children();
+        std::ostream* audit_out = &std::cout;
+        std::ofstream audit_file;
+        if (!label_audit_path.empty()) {
+            audit_file.open(label_audit_path);
+            if (audit_file.is_open()) audit_out = &audit_file;
+        }
+        int total = 0, clipping = 0;
+        std::function<void(pulp::view::View*)> walk;
+        walk = [&](pulp::view::View* v) {
+            if (!v) return;
+            if (auto* l = dynamic_cast<pulp::view::Label*>(v)) {
+                const auto& b = l->bounds();
+                float font_size = l->font_size();
+                std::string family = l->font_family();
+                std::string family_for_metrics = family.empty() ? std::string("Inter") : family;
+                auto& shaper = pulp::canvas::global_text_shaper();
+                auto prepared = shaper.prepare(
+                    l->text().empty() ? std::string(" ") : l->text(),
+                    family_for_metrics, font_size);
+                float ascent = prepared.ascent();
+                float descent = prepared.descent();
+                float line_height = prepared.line_height();
+                bool real_metrics = prepared.metrics_are_real();
+                float baseline_y_top = ascent > 0 ? ascent : font_size * 0.85f;
+                float glyph_top = baseline_y_top - ascent;
+                float glyph_bottom = baseline_y_top + descent;
+                bool fits = (glyph_top >= -0.5f) && (glyph_bottom <= b.height + 0.5f)
+                            && (b.height >= ascent + descent - 0.5f);
+                total++;
+                if (!fits) clipping++;
+                *audit_out << "{"
+                    << "\"text\":\"" << l->text() << "\","
+                    << "\"family\":\"" << family << "\","
+                    << "\"font_size\":" << font_size << ","
+                    << "\"box\":{\"x\":" << b.x << ",\"y\":" << b.y
+                                << ",\"width\":" << b.width
+                                << ",\"height\":" << b.height << "},"
+                    << "\"metrics\":{\"ascent\":" << ascent
+                                    << ",\"descent\":" << descent
+                                    << ",\"line_height\":" << line_height
+                                    << ",\"real\":" << (real_metrics ? "true" : "false") << "},"
+                    << "\"baseline_y_top_align\":" << baseline_y_top << ","
+                    << "\"glyph_top\":" << glyph_top << ","
+                    << "\"glyph_bottom\":" << glyph_bottom << ","
+                    << "\"fits\":" << (fits ? "true" : "false")
+                    << "}\n";
+            }
+            for (size_t i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+        };
+        walk(&root);
+        std::cerr << "[label-audit] " << total << " labels checked, "
+                  << clipping << " would clip\n";
+        return clipping;
+    };
+
+    if (label_audit_enabled && screenshot_only) {
+        run_label_audit(render_w, render_h);
+        // continue to screenshot anyway
+    }
+
     if (screenshot_only) {
         if (!emit_view_tree(render_w, render_h)) return 1;
         bool ok = render_to_file(
@@ -1101,6 +1187,71 @@ int main(int argc, char* argv[]) {
                       << ", requested " << render_h << ")\n";
             std::cout.flush();
         }
+    }
+
+    // pulp #2163 — label-fit audit. Walks the laid-out tree, computes
+    // expected glyph extent per Label, flags labels whose glyphs would
+    // clip given Yoga-assigned box height. JSON output for tooling.
+    if (label_audit_enabled) {
+        std::ostream* audit_out = &std::cout;
+        std::ofstream audit_file;
+        if (!label_audit_path.empty()) {
+            audit_file.open(label_audit_path);
+            if (audit_file.is_open()) audit_out = &audit_file;
+        }
+        int total = 0;
+        int clipping = 0;
+        std::function<void(pulp::view::View*)> walk;
+        walk = [&](pulp::view::View* v) {
+            if (!v) return;
+            if (auto* l = dynamic_cast<pulp::view::Label*>(v)) {
+                const auto& b = l->bounds();
+                float font_size = l->font_size();
+                std::string family = l->font_family();
+                std::string family_for_metrics = family.empty() ? std::string("Inter") : family;
+                auto& shaper = pulp::canvas::global_text_shaper();
+                auto prepared = shaper.prepare(
+                    l->text().empty() ? std::string(" ") : l->text(),
+                    family_for_metrics, font_size);
+                float ascent = prepared.ascent();
+                float descent = prepared.descent();
+                float line_height = prepared.line_height();
+                bool real_metrics = prepared.metrics_are_real();
+                // Compute baseline_y exactly the way paint() does for
+                // the default vertical_align (top). center variants
+                // differ but for this audit we report the top-align
+                // case — it's the worst case for "first line of new
+                // section" clipping which is the symptom we're after.
+                float baseline_y_top = ascent > 0 ? ascent : font_size * 0.85f;
+                float glyph_top = baseline_y_top - ascent;
+                float glyph_bottom = baseline_y_top + descent;
+                bool fits = (glyph_top >= -0.5f) && (glyph_bottom <= b.height + 0.5f)
+                            && (b.height >= ascent + descent - 0.5f);
+                total++;
+                if (!fits) clipping++;
+                *audit_out << "{"
+                    << "\"text\":\"" << l->text() << "\","
+                    << "\"family\":\"" << family << "\","
+                    << "\"font_size\":" << font_size << ","
+                    << "\"box\":{\"x\":" << b.x << ",\"y\":" << b.y
+                                << ",\"width\":" << b.width
+                                << ",\"height\":" << b.height << "},"
+                    << "\"metrics\":{\"ascent\":" << ascent
+                                    << ",\"descent\":" << descent
+                                    << ",\"line_height\":" << line_height
+                                    << ",\"real\":" << (real_metrics ? "true" : "false") << "},"
+                    << "\"baseline_y_top_align\":" << baseline_y_top << ","
+                    << "\"glyph_top\":" << glyph_top << ","
+                    << "\"glyph_bottom\":" << glyph_bottom << ","
+                    << "\"fits\":" << (fits ? "true" : "false")
+                    << "}\n";
+            }
+            for (size_t i = 0; i < v->child_count(); ++i) walk(v->child_at(i));
+        };
+        walk(&root);
+        std::cerr << "[label-audit] " << total << " labels checked, "
+                  << clipping << " would clip\n";
+        if (label_audit_path.empty()) return clipping == 0 ? 0 : 2;
     }
 
     if (!emit_view_tree(opts.width, opts.height)) return 1;
