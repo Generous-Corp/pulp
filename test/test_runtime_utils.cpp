@@ -42,6 +42,49 @@ const char* system_library_symbol() {
 
 }  // namespace
 
+// ── ScopeGuard ─────────────────────────────────────────────────────────
+
+TEST_CASE("ScopeGuard runs once on scope exit unless dismissed",
+          "[runtime][scope_guard][coverage]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        REQUIRE(calls == 0);
+    }
+    REQUIRE(calls == 1);
+
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        guard.dismiss();
+    }
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("ScopeGuard move transfers ownership and disables source",
+          "[runtime][scope_guard][coverage]") {
+    int calls = 0;
+    {
+        auto first = make_scope_guard([&] { ++calls; });
+        {
+            auto second = std::move(first);
+            REQUIRE(calls == 0);
+        }
+        REQUIRE(calls == 1);
+    }
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("PULP_ON_SCOPE_EXIT macro creates independent guards",
+          "[runtime][scope_guard][coverage]") {
+    int calls = 0;
+    {
+        PULP_ON_SCOPE_EXIT(++calls;);
+        PULP_ON_SCOPE_EXIT(calls += 10;);
+        REQUIRE(calls == 0);
+    }
+    REQUIRE(calls == 11);
+}
+
 // ── TemporaryFile ───────────────────────────────────────────────────────
 
 TEST_CASE("TemporaryFile creates and deletes", "[runtime][temp_file]") {
