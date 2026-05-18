@@ -149,6 +149,53 @@ TEST_CASE("theme_from_preset applies variant-specific overrides",
     REQUIRE(dark.string_token("font.family").value() == "DarkFace");
 }
 
+TEST_CASE("derive_theme maps semantic colors to audio-specific tokens",
+          "[view][presets][derive][coverage][phase3-batch]") {
+    SemanticColors colors{
+        color_from_hex(0x101112),
+        color_from_hex(0xE0E1E2),
+        color_from_hex(0x202122),
+        color_from_hex(0x304050),
+        color_from_hex(0x405060),
+        color_from_hex(0x506070),
+        color_from_hex(0x607080),
+        color_from_hex(0xC01020),
+        color_from_hex(0x708090),
+        color_from_hex(0x8090A0),
+        color_from_hex(0x90A0B0),
+        color_from_hex(0x111111),
+        color_from_hex(0x222222),
+        color_from_hex(0x333333),
+        color_from_hex(0x444444),
+        color_from_hex(0x555555),
+    };
+
+    auto theme = derive_theme(colors);
+
+    REQUIRE(theme.color("bg.primary").value() == colors.background);
+    REQUIRE(theme.color("bg.secondary").value() == colors.secondary);
+    REQUIRE(theme.color("bg.surface").value() == colors.input);
+    REQUIRE(theme.color("bg.elevated").value() == colors.card);
+
+    REQUIRE(theme.color("control.track").value() == colors.muted);
+    REQUIRE(theme.color("control.fill").value() == colors.primary);
+    REQUIRE(theme.color("control.thumb").value() == colors.foreground);
+    REQUIRE(theme.color("control.border").value() == colors.border);
+
+    REQUIRE(theme.color("knob.arc").value() == colors.primary);
+    REQUIRE(theme.color("slider.fill").value() == colors.primary);
+    REQUIRE(theme.color("progress.fill").value() == colors.primary);
+    REQUIRE(theme.color("spinner").value() == colors.primary);
+    REQUIRE(theme.color("tab.active").value() == colors.primary);
+
+    REQUIRE(theme.color("meter.red").value() == colors.destructive);
+    REQUIRE(theme.color("card.empty").value() == colors.card);
+    REQUIRE(theme.color("card.ready").value() == colors.card);
+    REQUIRE(theme.color("modal.border").value() == colors.border);
+    REQUIRE(theme.color("gradient.start").value() == colors.primary);
+    REQUIRE(theme.color("gradient.end").value() == colors.secondary);
+}
+
 // ── Specific Presets ────────────────────────────────────────────────────────
 
 TEST_CASE("Known presets exist", "[view][presets]") {
