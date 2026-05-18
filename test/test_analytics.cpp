@@ -392,6 +392,22 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("FileAnalyticsDestination failed flush leaves no file at directory path",
+          "[runtime][analytics][coverage]") {
+    auto dir = std::filesystem::temp_directory_path() / "pulp-analytics-dir-dest";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    FileAnalyticsDestination dest(dir.string());
+    AnalyticsEvent event;
+    event.name = "cannot-open-directory";
+    dest.log_event(event);
+    dest.flush();
+
+    REQUIRE(std::filesystem::is_directory(dir));
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("FileAnalyticsDestination writes property map in key order", "[runtime][analytics][issue-641]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
