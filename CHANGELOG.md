@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01131"></a>
+## [0.113.1] - 2026-05-18
+
+- refactor(local-ci): Phase 4 R2-1 finish — extracted provenance.py, job_queue.py, targets.py, github_workflows.py from local_ci.py (-771 lines, 11,285 → 10,514)
+
 <a id="v01130"></a>
 ## [0.113.0] - 2026-05-17
 
@@ -1913,6 +1918,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.113.1]: https://github.com/danielraffel/pulp/releases/tag/v0.113.1
 [0.113.0]: https://github.com/danielraffel/pulp/releases/tag/v0.113.0
 [0.112.0]: https://github.com/danielraffel/pulp/releases/tag/v0.112.0
 [0.111.0]: https://github.com/danielraffel/pulp/releases/tag/v0.111.0

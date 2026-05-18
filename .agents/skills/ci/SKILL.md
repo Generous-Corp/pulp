@@ -790,12 +790,32 @@ pulling in the entire 11k-line file.
   (`format_size_bytes`, `path_size_bytes`, `local_ci_state_footprint`,
   `describe_path_for_cleanup`). Used by `pulp ci-local status` and the
   cleanup paths to report how much disk the local CI state is using.
+- `provenance.py` — owns provenance dict helpers (`normalize_provenance`,
+  `provenance_summary`, `normalize_result`) carried on every job + result
+  record. Pure functions, no I/O.
+- `job_queue.py` — owns the queue persistence layer (`normalize_job`,
+  `load_queue_unlocked`, `save_queue_unlocked`). Named `job_queue` (not
+  `queue`) to avoid collision with the stdlib `queue` module. The
+  lock-acquiring `load_queue` stays in `local_ci.py` because it pulls
+  in the running-job reconcile state machine.
+- `targets.py` — owns target enable/parse/resolve helpers
+  (`enabled_targets`, `parse_targets_arg`, `resolve_targets`). Pure.
+- `github_workflows.py` — owns the GitHub Actions workflow dispatch
+  cluster: `GITHUB_ACTIONS_DEFAULTS`, `BUILTIN_GITHUB_WORKFLOWS`,
+  `REPO_VARIABLE_FALLBACKS` constants + 11 resolver functions
+  (`github_actions_settings_for_display`, `resolve_github_actions_settings`,
+  `normalize_runs_on_json`, `resolve_workflow_runner_selector_json`,
+  `resolve_workflow_dispatch_field_values`, `repo_variable_name_for_workflow_field`,
+  `resolve_default_provider_for_workflow`, `resolve_workflow_field_value_and_source`,
+  `resolve_workflow_dispatch_defaults`, `summarize_workflow_provider_defaults`,
+  `resolve_cli_dispatch_field_values`). Pure resolution — the actual
+  subprocess `gh-api` dispatch still lives in `local_ci.py`.
 
 All original symbols are re-exported from `local_ci.py`, so any old
 `mod.state_dir()` / `mod.normalize_priority()` / `mod.current_sha()` /
-`mod.file_lock(...)` test patch keeps working — but new code should
-import directly from `state_paths`, `normalize`, `git_helpers`, or
-`io_utils` to avoid the god-module dependency.
+`mod.file_lock(...)` / `mod.BUILTIN_GITHUB_WORKFLOWS` test patch keeps
+working — but new code should import directly from the sibling module
+to avoid the god-module dependency.
 
 ```bash
 # Legacy fallback only
