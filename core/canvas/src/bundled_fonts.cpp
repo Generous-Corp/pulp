@@ -430,6 +430,13 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
     constexpr std::uint32_t kName = 0x6E616D65u; // 'name'
     constexpr std::uint32_t kCmap = 0x636D6170u; // 'cmap'
     constexpr std::uint32_t kMaxp = 0x6D617870u; // 'maxp'
+    // Codex #2177 P1 review: presence is not enough — a malformed
+    // font can list required tables with length=0 and still pass.
+    // Enforce minimum lengths derived from the OpenType spec.
+    //   head: 54 (full table)
+    //   name: 6  (numNameRecords + storageOffset + format)
+    //   cmap: 4  (version + numTables)
+    //   maxp: 6  (version + numGlyphs)
     bool has_head = false, has_name = false, has_cmap = false, has_maxp = false;
     std::uint32_t head_offset = 0, head_length = 0;
 
@@ -441,10 +448,19 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
         // Out-of-bounds or overflow.
         if (offset > size) return false;
         if (length > size - offset) return false;
-        if (tag == kHead) { has_head = true; head_offset = offset; head_length = length; }
-        else if (tag == kName) has_name = true;
-        else if (tag == kCmap) has_cmap = true;
-        else if (tag == kMaxp) has_maxp = true;
+        if (tag == kHead) {
+            if (length < 54) return false;
+            has_head = true; head_offset = offset; head_length = length;
+        } else if (tag == kName) {
+            if (length < 6) return false;
+            has_name = true;
+        } else if (tag == kCmap) {
+            if (length < 4) return false;
+            has_cmap = true;
+        } else if (tag == kMaxp) {
+            if (length < 6) return false;
+            has_maxp = true;
+        }
     }
     if (!has_head || !has_name || !has_cmap || !has_maxp) return false;
 

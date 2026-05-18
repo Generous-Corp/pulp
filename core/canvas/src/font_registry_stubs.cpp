@@ -26,24 +26,41 @@ namespace {
 // naive walker this replaces.
 struct Utf8Decoded { std::uint32_t cp; std::size_t bytes; };
 
+// Codex review on PR #2185 (P2): validate every trailing byte is a
+// proper UTF-8 continuation (top two bits == 0b10) before accepting
+// a multi-byte scalar. Malformed inputs like `0xC2 0x41` must fall
+// back to {0,1} so cluster_step doesn't skip bytes on invalid UTF-8.
+inline bool is_utf8_cont(unsigned char b) noexcept {
+    return (b & 0xC0u) == 0x80u;
+}
+
 inline Utf8Decoded utf8_decode_at(const std::string& s, std::size_t i) noexcept {
     if (i >= s.size()) return {0, 0};
     unsigned char c = static_cast<unsigned char>(s[i]);
     if (c < 0x80) return {c, 1};
     if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+        unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
+        if (!is_utf8_cont(b1)) return {0, 1};
         return {static_cast<std::uint32_t>(((c & 0x1Fu) << 6)
-                                         | (static_cast<unsigned char>(s[i + 1]) & 0x3Fu)), 2};
+                                         | (b1 & 0x3Fu)), 2};
     }
     if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
+        unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
+        unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
+        if (!is_utf8_cont(b1) || !is_utf8_cont(b2)) return {0, 1};
         return {static_cast<std::uint32_t>(((c & 0x0Fu) << 12)
-                                         | ((static_cast<unsigned char>(s[i + 1]) & 0x3Fu) << 6)
-                                         | (static_cast<unsigned char>(s[i + 2]) & 0x3Fu)), 3};
+                                         | ((b1 & 0x3Fu) << 6)
+                                         | (b2 & 0x3Fu)), 3};
     }
     if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
+        unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
+        unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
+        unsigned char b3 = static_cast<unsigned char>(s[i + 3]);
+        if (!is_utf8_cont(b1) || !is_utf8_cont(b2) || !is_utf8_cont(b3)) return {0, 1};
         return {static_cast<std::uint32_t>(((c & 0x07u) << 18)
-                                         | ((static_cast<unsigned char>(s[i + 1]) & 0x3Fu) << 12)
-                                         | ((static_cast<unsigned char>(s[i + 2]) & 0x3Fu) << 6)
-                                         | (static_cast<unsigned char>(s[i + 3]) & 0x3Fu)), 4};
+                                         | ((b1 & 0x3Fu) << 12)
+                                         | ((b2 & 0x3Fu) << 6)
+                                         | (b3 & 0x3Fu)), 4};
     }
     return {0, 1};
 }
@@ -127,10 +144,26 @@ inline std::size_t cluster_boundary_after(const std::string& text, std::size_t i
     if (base.bytes == 0) return text.size();
     std::size_t cursor = i + base.bytes;
 
-    // Regional indicator pair: absorb exactly one partner if next is
-    // also RI; do not extend further (per UAX #29).
+    // Regional indicator pair: UAX #29 GB12/GB13 — do not break
+    // between RI symbols if there is an ODD number of RIs before
+    // the break point. Equivalently: pair forward only when the
+    // run of preceding RIs is even (`i` is at the start of a fresh
+    // pair). Without the parity check, `cluster_step` called mid-
+    // sequence (e.g. inside `🇺🇸🇯🇵` at offset 4) would greedily
+    // absorb the next RI and skip the boundary that exists between
+    // the two flags. (Codex review on PR #2185, P2.)
     if (is_regional_indicator(base.cp)) {
-        if (cursor < text.size()) {
+        std::size_t preceding_ri_count = 0;
+        std::size_t cursor_back = i;
+        while (cursor_back > 0) {
+            std::size_t lead = skip_utf8_back_to_lead(text, cursor_back - 1);
+            Utf8Decoded prev = utf8_decode_at(text, lead);
+            if (prev.bytes == 0 || !is_regional_indicator(prev.cp)) break;
+            ++preceding_ri_count;
+            cursor_back = lead;
+        }
+        const bool pair_forward = (preceding_ri_count % 2 == 0);
+        if (pair_forward && cursor < text.size()) {
             Utf8Decoded nxt = utf8_decode_at(text, cursor);
             if (nxt.bytes && is_regional_indicator(nxt.cp)) {
                 cursor += nxt.bytes;

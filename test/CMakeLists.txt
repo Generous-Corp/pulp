@@ -846,10 +846,20 @@ pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)
 pulp_add_test_suite(pulp-test-font-scope-budget LIBRARIES pulp::canvas)
 
 # pulp #2163 / font v2 Slice 2.8 — TTF/OTF structural sanitizer.
-pulp_add_test_suite(pulp-test-font-security LIBRARIES pulp::canvas)
+# Gated on PULP_HAS_SKIA: the non-Skia stub in font_registry_stubs.cpp
+# accepts any non-empty buffer, so the rejection cases false-negative.
+# (Codex review on PR #2177, P2.)
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-font-security LIBRARIES pulp::canvas)
+endif()
 
 # pulp #2163 / font v2 Slice 2.3 — variable axis wiring.
-pulp_add_test_suite(pulp-test-font-variable-axes LIBRARIES pulp::canvas)
+# Gated on PULP_HAS_SKIA: FontResolver::resolve_family_list returns
+# NotFound when Skia is absent, so the has_typeface() assertions
+# false-negative. (Codex review on PR #2180, P1.)
+if(PULP_HAS_SKIA)
+    pulp_add_test_suite(pulp-test-font-variable-axes LIBRARIES pulp::canvas)
+endif()
 
 # pulp #2163 / font v2 Slice 3.6 — UAX #29-lite cluster_step.
 pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
