@@ -471,6 +471,16 @@ TEST_CASE("LookupTable indexed access clamps and zero-length buffers are no-ops"
     REQUIRE_THAT(samples[2], WithinAbs(11.0f, 1e-6f));
 }
 
+TEST_CASE("LookupTable interpolates between adjacent entries",
+          "[signal][lookup][coverage][phase3]") {
+    LookupTable table(3, 0.0f, 2.0f, [](float x) { return x * 10.0f; });
+
+    REQUIRE(table.size() == 3);
+    REQUIRE_THAT(table.process(0.25f), WithinAbs(2.5f, 1e-6f));
+    REQUIRE_THAT(table.process(0.5f), WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(table.process(1.5f), WithinAbs(15.0f, 1e-6f));
+}
+
 // ── TptFilter ────────────────────────────────────────────────────────────
 
 TEST_CASE("TptFilter lowpass passes DC", "[signal][tpt]") {
