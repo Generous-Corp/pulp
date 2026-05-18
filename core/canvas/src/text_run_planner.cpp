@@ -13,6 +13,10 @@
 #include "pulp/canvas/font_resolver.hpp"
 #include "pulp/canvas/font_scope.hpp"
 
+#include <algorithm>
+#include <future>
+#include <thread>
+
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkTypeface.h"
 #endif
@@ -156,6 +160,49 @@ ShapedText TextRunPlanner::shape(std::string_view text,
         impl_->cache[key] = out;
     }
     return out;
+}
+
+// pulp #2163 / font v2 Slice 3.7 — parallel shaping.
+// Fans shape() calls out via std::async(launch::async). Resolver,
+// FontFlightRecorder, and the per-planner cache are all thread-safe
+// (internal mutexes); ShapedText is owned-by-value so moving it out
+// of a future is safe. Concurrency is bounded by hardware_concurrency
+// to avoid kernel-thread oversubscription on big batches across many
+// UI surfaces.
+std::vector<ShapedText> TextRunPlanner::shape_batch(
+    const std::vector<std::pair<std::string, FontOptions>>& inputs) {
+    if (inputs.empty()) return {};
+    if (inputs.size() == 1) {
+        std::vector<ShapedText> out;
+        out.reserve(1);
+        out.push_back(shape(inputs.front().first, inputs.front().second));
+        return out;
+    }
+
+    const unsigned hint = std::thread::hardware_concurrency();
+    const std::size_t conc = std::min<std::size_t>(
+        inputs.size(), hint == 0 ? 4u : static_cast<std::size_t>(hint));
+
+    std::vector<ShapedText> results(inputs.size());
+
+    std::size_t i = 0;
+    while (i < inputs.size()) {
+        const std::size_t batch = std::min(conc, inputs.size() - i);
+        std::vector<std::future<ShapedText>> pending;
+        pending.reserve(batch);
+        for (std::size_t j = 0; j < batch; ++j) {
+            const auto& in = inputs[i + j];
+            pending.push_back(std::async(std::launch::async,
+                [this, &in]() {
+                    return shape(in.first, in.second);
+                }));
+        }
+        for (std::size_t j = 0; j < batch; ++j) {
+            results[i + j] = pending[j].get();
+        }
+        i += batch;
+    }
+    return results;
 }
 
 } // namespace pulp::canvas

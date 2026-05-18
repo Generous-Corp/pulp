@@ -882,6 +882,11 @@ add_executable(pulp-test-font-axis-animation test_font_axis_animation.cpp)
 target_link_libraries(pulp-test-font-axis-animation PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-axis-animation)
 
+# pulp #2163 / font v2 Slice 3.7 — parallel shaping via TextRunPlanner::shape_batch.
+add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_parallel.cpp)
+target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-text-run-planner-parallel)
+
 # Font subsystem typed options and scope generation tests
 add_executable(pulp-test-font-options test_font_options.cpp)
 target_link_libraries(pulp-test-font-options PRIVATE pulp::canvas Catch2::Catch2WithMain)

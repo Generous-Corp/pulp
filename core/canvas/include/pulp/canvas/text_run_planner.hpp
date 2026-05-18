@@ -21,7 +21,10 @@
 #include "pulp/canvas/shaped_text.hpp"
 
 #include <memory>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace pulp::canvas {
 
@@ -44,6 +47,24 @@ public:
     /// `FontScope::generation()` advances on any consulted scope,
     /// because `options.registry_generation` is part of the key.
     ShapedText shape(std::string_view text, const FontOptions& options);
+
+    /// pulp #2163 / font v2 Slice 3.7 — parallel shaping (opportunistic).
+    /// Shape N independent inputs in parallel and return the artifacts
+    /// in input order. Same output as N sequential `shape()` calls.
+    /// Uses `std::async(launch::async, ...)` to fan out work; the
+    /// resolver, FontShapedTextResult, and FontFlightRecorder are all
+    /// thread-safe (internal mutexes). The cache lookup happens once
+    /// per future, so duplicate inputs across the batch coalesce as
+    /// expected.
+    ///
+    /// The serial `shape()` API is preferred for one-off labels; this
+    /// batch entry point is intended for design-tool panels, docs
+    /// views, or any other surface that needs to lay out many
+    /// independent paragraphs at startup. Inputs are owned by the
+    /// caller via `std::string` for thread safety; small allocations
+    /// are cheap relative to the shaping cost we parallelise.
+    std::vector<ShapedText> shape_batch(
+        const std::vector<std::pair<std::string, FontOptions>>& inputs);
 
     /// Test-only: discard the internal cache. Production code never
     /// calls this — invalidation flows through the scope generation
