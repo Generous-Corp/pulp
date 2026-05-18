@@ -738,3 +738,11 @@ TEST_CASE("ValidationStatus to_string covers all values", "[harness][phase2]") {
     REQUIRE(std::string(to_string(ValidationStatus::skip)) == "skip");
     REQUIRE(std::string(to_string(ValidationStatus::error)) == "error");
 }
+
+TEST_CASE("ValidationStatus to_string falls back to error for unknown values",
+          "[harness][coverage][phase3]") {
+    using pulp::format::ValidationStatus;
+    using pulp::format::to_string;
+
+    REQUIRE(std::string(to_string(static_cast<ValidationStatus>(99))) == "error");
+}
