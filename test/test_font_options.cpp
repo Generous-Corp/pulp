@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_options.hpp"
 #include "pulp/canvas/font_resolver.hpp"
 #include "pulp/canvas/font_scope.hpp"
@@ -179,6 +180,43 @@ TEST_CASE("FontResolver non-Skia path returns scoped NotFound results",
     REQUIRE(fallback.origin == FallbackOrigin::NotFound);
     REQUIRE(fallback.scope == opts.scope);
     REQUIRE(fallback.generation == merged_generation_for(opts.scope));
+}
+
+TEST_CASE("Font registry non-Skia stubs reject registrations but validate bytes",
+          "[canvas][font][registry][coverage]") {
+    const std::uint8_t bytes[] = {0x00, 0x01, 0x02, 0x03};
+
+    REQUIRE_FALSE(register_font(bytes, sizeof(bytes), "StubFont"));
+    REQUIRE_FALSE(register_font_file("/tmp/definitely-missing-font.ttf", "StubFont"));
+    REQUIRE_FALSE(register_font_woff2(bytes, sizeof(bytes), "StubFont"));
+    REQUIRE_FALSE(is_font_registered("StubFont"));
+    REQUIRE_FALSE(is_font_registered(""));
+
+    REQUIRE_FALSE(validate_font_bytes(nullptr, 4));
+    REQUIRE_FALSE(validate_font_bytes(bytes, 0));
+    REQUIRE(validate_font_bytes(bytes, sizeof(bytes)));
+
+    REQUIRE(font_registration_generation() == 0);
+    bump_font_registration_generation();
+    REQUIRE(font_registration_generation() == 0);
+}
+
+TEST_CASE("Font cluster_step non-Skia skeleton skips UTF-8 continuation bytes",
+          "[canvas][font][registry][coverage]") {
+    const std::string text = std::string("A") + "\xC3\xA9"
+                           + "\xF0\x9F\x99\x82" + "Z";
+
+    REQUIRE(cluster_step(text, 0, true) == 1);
+    REQUIRE(cluster_step(text, 1, true) == 3);
+    REQUIRE(cluster_step(text, 3, true) == 7);
+    REQUIRE(cluster_step(text, 7, true) == 8);
+    REQUIRE(cluster_step(text, text.size(), true) == text.size());
+
+    REQUIRE(cluster_step(text, 8, false) == 7);
+    REQUIRE(cluster_step(text, 7, false) == 3);
+    REQUIRE(cluster_step(text, 3, false) == 1);
+    REQUIRE(cluster_step(text, 1, false) == 0);
+    REQUIRE(cluster_step(text, 0, false) == 0);
 }
 #endif
 
