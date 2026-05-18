@@ -77,6 +77,38 @@ class VerifyCoberturaXmlTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("py-lane.xml", r.stderr)
 
+    def test_non_numeric_lines_valid_is_structurally_empty(self) -> None:
+        path = self._write('<coverage lines-valid="many"></coverage>')
+        try:
+            r = run(str(path), "--label", "native.xml", "--hint", "rerun coverage")
+        finally:
+            path.unlink()
+
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("native.xml is structurally empty", r.stderr)
+        self.assertIn("rerun coverage", r.stderr)
+
+    def test_missing_lines_valid_defaults_to_structurally_empty(self) -> None:
+        path = self._write("<coverage></coverage>")
+        try:
+            r = run(str(path), "--label", "python.xml")
+        finally:
+            path.unlink()
+
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("python.xml is structurally empty", r.stderr)
+
+    def test_success_uses_custom_label_for_size_and_lines(self) -> None:
+        path = self._write('<coverage lines-valid="7"></coverage>')
+        try:
+            r = run(str(path), "--label", "python.xml")
+        finally:
+            path.unlink()
+
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("python.xml size:", r.stdout)
+        self.assertIn("python.xml has lines-valid=7", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
