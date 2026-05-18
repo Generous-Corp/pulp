@@ -394,6 +394,19 @@ TEST_CASE("int24 to float preserves sign-extension boundaries",
     REQUIRE_THAT(dst[3], WithinAbs(-0.5f, 0.0000001f));
 }
 
+TEST_CASE("float to int32 scales fractional values symmetrically",
+          "[audio][convert][coverage][phase3]") {
+    const float src[] = {-0.75f, -0.25f, 0.25f, 0.75f};
+    int32_t dst[4] = {};
+
+    float_to_int32(src, dst, 4);
+
+    REQUIRE(std::abs(dst[0] - static_cast<int32_t>(-0.75 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[1] - static_cast<int32_t>(-0.25 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[2] - static_cast<int32_t>(0.25 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[3] - static_cast<int32_t>(0.75 * 2147483647.0)) <= 1);
+}
+
 // ── WAV file I/O ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Write and read WAV file", "[audio][file]") {
