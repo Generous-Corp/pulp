@@ -465,6 +465,26 @@ TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state
     REQUIRE(ended == std::vector<ParamID>{2});
 }
 
+TEST_CASE("StateStore preserves parameter display conversion callbacks",
+          "[state][store][coverage][phase3]") {
+    StateStore store;
+    ParamInfo info = make_param_info(7, "Frequency", "Hz", {20.0f, 20000.0f, 440.0f});
+    info.to_string = [](float value) {
+        return std::to_string(static_cast<int>(value)) + " Hz";
+    };
+    info.from_string = [](const std::string& value) {
+        return value == "concert" ? 440.0f : 20.0f;
+    };
+
+    store.add_parameter(info);
+    const auto* stored = store.info(7);
+    REQUIRE(stored != nullptr);
+    REQUIRE(stored->to_string);
+    REQUIRE(stored->from_string);
+    REQUIRE(stored->to_string(880.0f) == "880 Hz");
+    REQUIRE_THAT(stored->from_string("concert"), WithinAbs(440.0f, 0.001f));
+}
+
 TEST_CASE("ParamRange ignores negative step and still clamps output",
           "[state][range][coverage][phase3-large]") {
     ParamRange range{0.0f, 10.0f, 5.0f, -2.0f};
