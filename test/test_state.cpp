@@ -224,6 +224,22 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
     }
 }
 
+TEST_CASE("StateStore duplicate parameter ids resolve to latest registration",
+          "[state][store][coverage][phase3-github]") {
+    StateStore store;
+    store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f}));
+    store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f}));
+
+    REQUIRE(store.param_count() == 2);
+    REQUIRE(store.all_params()[0].name == "First");
+    REQUIRE(store.all_params()[1].name == "Second");
+    REQUIRE(store.info(7)->name == "Second");
+    REQUIRE_THAT(store.get_value(7), WithinAbs(25.0f, 1e-6f));
+
+    store.set_value(7, 150.0f);
+    REQUIRE_THAT(store.get_value(7), WithinAbs(100.0f, 1e-6f));
+}
+
 TEST_CASE("StateStore serialization", "[state][serialize]") {
     StateStore store;
 
