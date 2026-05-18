@@ -741,3 +741,30 @@ TEST_CASE("JsonRpcPeer notification handlers replace and clear cleanly",
     std::this_thread::sleep_for(10ms);
     REQUIRE(second_calls == 1);
 }
+
+TEST_CASE("JsonRpcPeer destructor clears the channel message handler",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    {
+        JsonRpcPeer server(*pair.second);
+        server.register_method("echo", [](std::string_view params) {
+            return JsonRpcResult::ok(std::string(params));
+        });
+
+        REQUIRE(pair.first->send_text(
+            R"json({"jsonrpc":"2.0","id":1,"method":"echo","params":{"before":true}})json"));
+        REQUIRE(replies.size() == 1);
+    }
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":2,"method":"echo","params":{"after":true}})json"));
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(replies.size() == 1);
+    REQUIRE(replies.front().find("before") != std::string::npos);
+}
