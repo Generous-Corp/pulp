@@ -183,10 +183,10 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     // when local_bounds is 0×0. Pin children to fill
                     // their parent svg via position:absolute + inset:0.
                     call('setPosition', id, 'absolute');
-                    call('setFlex', id, 'top', 0);
-                    call('setFlex', id, 'left', 0);
-                    call('setFlex', id, 'right', 0);
-                    call('setFlex', id, 'bottom', 0);
+                    call('setTop', id, 0);
+                    call('setLeft', id, 0);
+                    call('setRight', id, 0);
+                    call('setBottom', id, 0);
                     return;
                 }
                 case 'circle': {
@@ -219,28 +219,28 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     }
                     // Same fill-parent sizing as <path> (see comment above).
                     call('setPosition', id, 'absolute');
-                    call('setFlex', id, 'top', 0);
-                    call('setFlex', id, 'left', 0);
-                    call('setFlex', id, 'right', 0);
-                    call('setFlex', id, 'bottom', 0);
+                    call('setTop', id, 0);
+                    call('setLeft', id, 0);
+                    call('setRight', id, 0);
+                    call('setBottom', id, 0);
                     return;
                 }
                 case 'rect': {
                     call('createSvgRect', id, parentId);
                     call('setPosition', id, 'absolute');
-                    call('setFlex', id, 'top', 0);
-                    call('setFlex', id, 'left', 0);
-                    call('setFlex', id, 'right', 0);
-                    call('setFlex', id, 'bottom', 0);
+                    call('setTop', id, 0);
+                    call('setLeft', id, 0);
+                    call('setRight', id, 0);
+                    call('setBottom', id, 0);
                     return;
                 }
                 case 'line': {
                     call('createSvgLine', id, parentId);
                     call('setPosition', id, 'absolute');
-                    call('setFlex', id, 'top', 0);
-                    call('setFlex', id, 'left', 0);
-                    call('setFlex', id, 'right', 0);
-                    call('setFlex', id, 'bottom', 0);
+                    call('setTop', id, 0);
+                    call('setLeft', id, 0);
+                    call('setRight', id, 0);
+                    call('setBottom', id, 0);
                     return;
                 }
                 case 'g':        call('createCol', id, parentId); return; // <svg><g> group
