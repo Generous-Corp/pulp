@@ -111,6 +111,27 @@ enum class FontState : std::uint8_t {
 /// confirms Skia can parse the bytes; full sanitizer is the impl slice.
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size);
 
+// ── Phase 3 skeletons — color fonts, WOFF2, TextEditor cluster APIs ────
+// pulp #2163 — font v2 Slices 3.1, 3.5, 3.6 surface declarations. The
+// bodies arrive in the Phase 3 implementation slices; declarations live
+// here so Phase 3 callers can target a stable API now.
+
+/// Slice 3.5 — register a WOFF2-compressed font at runtime. Gated on
+/// the Phase 2 sanitizer (validate_font_bytes); rejects malformed
+/// payloads cleanly. Skeleton returns false; the implementation slice
+/// wires Brotli decompression behind the budget + consent path.
+bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
+                         const std::string& family_override = "");
+
+/// Slice 3.6 — grapheme-aware cursor step for TextEditor. Returns the
+/// UTF-8 byte offset of the cluster boundary one step forward (or
+/// backward, when forward=false) from `byte_offset`. Skeleton uses a
+/// naive single-codepoint step; the implementation slice consults the
+/// Phase 1 UnicodeIndexMap for proper UAX #29 cluster boundaries (so
+/// 👨‍👩‍👧‍👦 moves in one step, not 7).
+std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
+                         bool forward = true);
+
 #ifdef PULP_HAS_SKIA
 
 /// Process-wide platform font manager. Returns the CoreText / DirectWrite /

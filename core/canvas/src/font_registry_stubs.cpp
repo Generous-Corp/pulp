@@ -48,6 +48,28 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
     return data != nullptr && size > 0;
 }
 
+// pulp #2163 — font v2 Phase 3 skeletons.
+bool register_font_woff2(const std::uint8_t*, std::size_t, const std::string&) {
+    return false;  // Phase 3 impl wires Brotli decompression + sanitizer.
+}
+
+std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
+                         bool forward) {
+    // Skeleton: naive single-byte step. Phase 3 impl consults the
+    // Phase 1 UnicodeIndexMap for proper UAX #29 cluster boundaries.
+    if (forward) {
+        if (byte_offset >= text.size()) return text.size();
+        std::size_t i = byte_offset + 1;
+        while (i < text.size() && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) ++i;
+        return i;
+    } else {
+        if (byte_offset == 0) return 0;
+        std::size_t i = byte_offset - 1;
+        while (i > 0 && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) --i;
+        return i;
+    }
+}
+
 } // namespace pulp::canvas
 
 #endif // !PULP_HAS_SKIA
