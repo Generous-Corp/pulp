@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01135"></a>
+## [0.113.5] - 2026-05-18
+
+- refactor(view): Phase 4 R2-5 first cut — extract PNG capture helpers from window_host_mac.mm ([#2194](https://github.com/danielraffel/pulp/pull/2194))
+- refactor(test): Phase 3 R2-7 — pulp_add_test_suite() helper + 200 test migrations ([#2192](https://github.com/danielraffel/pulp/pull/2192))
+- feat(canvas): FontFlightRecorder — diagnostics CLI foundation (font v2 Slice 2.2) ([#2191](https://github.com/danielraffel/pulp/pull/2191))
+- fix(canvas): repair PR #2183 split-build regression — shared internal helpers + stub broken Dawn path ([#2189](https://github.com/danielraffel/pulp/pull/2189))
+
 <a id="v01133"></a>
 ## [0.113.3] - 2026-05-18
 
@@ -1935,6 +1943,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.113.5]: https://github.com/danielraffel/pulp/releases/tag/v0.113.5
 [0.113.3]: https://github.com/danielraffel/pulp/releases/tag/v0.113.3
 [0.113.2]: https://github.com/danielraffel/pulp/releases/tag/v0.113.2
 [0.113.1]: https://github.com/danielraffel/pulp/releases/tag/v0.113.1
