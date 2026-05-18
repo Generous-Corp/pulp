@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-18 15:05 PDT
+Last updated: 2026-05-18 15:07 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -51,6 +51,21 @@ without hyphens. Local validation passed:
 test cases), and `git diff --check`. PR state: not pushed; keep
 accumulating related coverage commits toward the larger batch. No
 Namespace dispatch.
+
+2026-05-18 15:07 PDT: added eleventh committed tranche to
+`feature/phase3-codecov-batch-747`:
+`1d78136a7 fix(cli): escape pending upgrade marker strings`, touching
+`tools/cli/update_mode.cpp` and `test/test_cli_update_mode.cpp`.
+Scope: coverage exposed a real marker-serialization edge where pending
+upgrade `version` and staged-binary path strings were emitted without
+JSON escaping; the fix now escapes/decodes quotes, backslashes, and
+common control escapes, with a round-trip test for quoted/backslash
+paths. Local validation passed:
+`cmake --build build --target pulp-test-cli-update-mode`,
+`build/test/pulp-test-cli-update-mode` (86 assertions in 29 test cases),
+and `git diff --check`. PR state: not pushed; this is a small CLI
+source fix with tests and should remain in the CLI-focused batch after
+final revalidation. No Namespace dispatch.
 
 2026-05-18 15:05 PDT: added tenth committed tranche to
 `feature/phase3-codecov-batch-747`:
