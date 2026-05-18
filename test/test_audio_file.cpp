@@ -1016,6 +1016,44 @@ TEST_CASE("FormatRegistry rejects malformed compressed files through built-in re
     std::filesystem::remove(mp3_path);
 }
 
+TEST_CASE("FormatRegistry rejects paths without dispatchable extensions",
+          "[audio][file][registry][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    REQUIRE(registry.find_reader("") == nullptr);
+    REQUIRE(registry.find_writer("") == nullptr);
+    REQUIRE(registry.find_reader(".") == nullptr);
+    REQUIRE(registry.find_writer(".") == nullptr);
+
+    auto no_extension = unique_temp_audio_path("");
+    {
+        std::ofstream file(no_extension, std::ios::binary);
+        file << "RIFF";
+        REQUIRE(file.good());
+    }
+
+    REQUIRE_FALSE(registry.read_info(no_extension.string()).has_value());
+    REQUIRE_FALSE(registry.read(no_extension.string()).has_value());
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.0f, 0.25f}};
+    REQUIRE_FALSE(registry.write(no_extension.string(), data));
+
+    auto hidden_name = std::filesystem::temp_directory_path() / ".pulp_audio_hidden";
+    {
+        std::ofstream file(hidden_name, std::ios::binary);
+        file << "not audio";
+        REQUIRE(file.good());
+    }
+
+    REQUIRE_FALSE(registry.read_info(hidden_name.string()).has_value());
+    REQUIRE_FALSE(registry.read(hidden_name.string()).has_value());
+
+    std::filesystem::remove(no_extension);
+    std::filesystem::remove(hidden_name);
+}
+
 #ifdef __APPLE__
 TEST_CASE("FormatRegistry routes CoreAudio compressed containers on Apple",
           "[audio][file][registry][coreaudio][issue-640]") {
