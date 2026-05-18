@@ -307,6 +307,22 @@ TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("KeyMapping save_bindings fails when parent is missing",
+          "[view][keys][coverage]") {
+    KeyMapping km;
+    km.add_command({1, "Save", "File",
+                    KeyShortcut::from_string("Cmd+S"), [] {}, {}, false});
+
+    auto root = make_temp_root("pulp-keymapping-missing-parent");
+    auto path = root / "missing" / "bindings.json";
+    REQUIRE_FALSE(std::filesystem::exists(path.parent_path()));
+
+    REQUIRE_FALSE(km.save_bindings(path));
+    REQUIRE_FALSE(std::filesystem::exists(path));
+
+    std::filesystem::remove_all(root);
+}
+
 // ── MenuBar ──────────────────────────────────────────────────────────────
 
 TEST_CASE("MenuBar add menu", "[view][menu]") {
