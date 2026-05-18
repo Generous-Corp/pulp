@@ -3,6 +3,7 @@
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_options.hpp"
 #include "pulp/canvas/font_resolver.hpp"
+#include "pulp/canvas/shaped_text.hpp"
 #include "pulp/canvas/font_scope.hpp"
 #include "pulp/canvas/text_run_planner.hpp"
 
@@ -319,4 +320,52 @@ TEST_CASE("TextRunPlanner handles empty text, cache hits, and ASCII breaks",
     REQUIRE(after_clear.text == first.text);
     REQUIRE(after_clear.index_map.scalar_offsets == first.index_map.scalar_offsets);
     REQUIRE(after_clear.line_breaks.size() == first.line_breaks.size());
+}
+
+TEST_CASE("ShapedText value types report default metrics and emptiness",
+          "[canvas][font][shaped-text][coverage]") {
+    RunMetrics metrics;
+    REQUIRE(metrics.line_height() == 0.0f);
+    metrics.ascent = 9.0f;
+    metrics.descent = 3.0f;
+    metrics.leading = 2.0f;
+    REQUIRE(metrics.line_height() == 14.0f);
+
+    UnicodeIndexMap empty_map;
+    REQUIRE(empty_map.scalar_count() == 0);
+    empty_map.scalar_offsets = {0, 2, 6};
+    REQUIRE(empty_map.scalar_count() == 2);
+
+    ShapedText shaped;
+    REQUIRE(shaped.empty());
+    REQUIRE(shaped.text.empty());
+    REQUIRE(shaped.total_width == 0.0f);
+    REQUIRE(shaped.clusters.empty());
+    REQUIRE(shaped.line_breaks.empty());
+
+    ShapedRun run;
+    run.logical_start = 2;
+    run.logical_end = 6;
+    run.advance_total = 42.0f;
+    run.metrics = metrics;
+    run.glyph_ids = {1, 2};
+    run.advances = {20.0f, 22.0f};
+    run.offsets_x = {0.0f, 0.5f};
+    run.offsets_y = {0.0f, 1.0f};
+    run.cluster_indices = {2, 4};
+
+    shaped.text = "abcdef";
+    shaped.total_width = run.advance_total;
+    shaped.overall_metrics = run.metrics;
+    shaped.runs.push_back(run);
+    shaped.clusters.push_back({2, 6, 0, 0, 2});
+    shaped.line_breaks.push_back({6, LineBreakOpportunity::Kind::Soft});
+
+    REQUIRE_FALSE(shaped.empty());
+    REQUIRE(shaped.total_width == 42.0f);
+    REQUIRE(shaped.overall_metrics.line_height() == 14.0f);
+    REQUIRE(shaped.runs[0].logical_start == 2);
+    REQUIRE(shaped.runs[0].logical_end == 6);
+    REQUIRE(shaped.clusters[0].glyph_count == 2);
+    REQUIRE(shaped.line_breaks[0].kind == LineBreakOpportunity::Kind::Soft);
 }
