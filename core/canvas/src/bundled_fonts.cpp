@@ -11,6 +11,8 @@
 // are gated on the same macro.
 
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/font_options.hpp>
 
 #ifdef PULP_HAS_SKIA
 
@@ -329,28 +331,24 @@ FontProbe probe_font_glyph(const std::string& family,
 
     if (family.empty()) return out;
 
-    SkFontStyle style{weight, SkFontStyle::kNormal_Width,
-                      slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant};
+    // pulp #2163 / font v2 Slice 1.1.a — was a hand-rolled cascade that
+    // mirrored get_cached_typeface_single. Now routes through
+    // FontResolver so the probe sees exactly what fill_text would
+    // resolve to. The resolver's cache is keyed on the full
+    // FontOptions blob so a probe call doesn't "pollute" — it
+    // pre-populates a key a subsequent real call would have hit
+    // anyway.
+    FontOptions opts;
+    opts.family_stack.push_back(family);
+    opts.weight = static_cast<float>(weight);
+    opts.slant  = slant ? FontSlant::Italic : FontSlant::Normal;
+    auto resolved = FontResolver::instance().resolve_family_list(opts);
+    if (!resolved.typeface) return out;
 
-    // Mirror the cascade order in get_cached_typeface_single
-    // (skia_canvas.cpp): registered → bundled → platform manager. Doing
-    // it here rather than reusing the static-cached path keeps this
-    // probe side-effect-free (no cache pollution from a probe call).
-    sk_sp<SkTypeface> face = match_registered_typeface(family, style);
-    if (!face) {
-        sk_sp<SkFontMgr> mgr = platform_font_manager();
-        if (mgr) {
-            face = match_bundled_typeface(mgr.get(), family, style);
-            if (!face) face = mgr->matchFamilyStyle(family.c_str(), style);
-        }
-    }
-
-    if (!face) return out;
     out.family_resolved = true;
-    SkString name;
-    face->getFamilyName(&name);
-    out.resolved_family.assign(name.c_str(), name.size());
-    out.glyph_present = (face->unicharToGlyph(static_cast<SkUnichar>(codepoint)) != 0);
+    out.resolved_family = resolved.actual_family;
+    out.glyph_present = (resolved.typeface->unicharToGlyph(
+        static_cast<SkUnichar>(codepoint)) != 0);
     return out;
 }
 
