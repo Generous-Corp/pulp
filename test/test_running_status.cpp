@@ -270,6 +270,27 @@ TEST_CASE("empty feed and reset drop partial running-status messages",
     REQUIRE(shorts[0].d2 == 0x64);
 }
 
+TEST_CASE("reset drops partial sysex before the next complete sysex",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser parser;
+    std::vector<std::vector<uint8_t>> sysex;
+    parser.on_sysex([&](const uint8_t* data, std::size_t size) {
+        sysex.emplace_back(data, data + size);
+    });
+
+    std::vector<uint8_t> partial = {0xF0, 0x7D, 0x01};
+    parser.feed(partial.data(), partial.size());
+    parser.reset();
+
+    std::vector<uint8_t> stray_end = {0xF7};
+    parser.feed(stray_end.data(), stray_end.size());
+    REQUIRE(sysex.empty());
+
+    std::vector<uint8_t> complete = {0xF0, 0x7E, 0x02, 0xF7};
+    parser.feed(complete.data(), complete.size());
+    REQUIRE(sysex == std::vector<std::vector<uint8_t>>{{0x7E, 0x02}});
+}
+
 TEST_CASE("system common interruption inside sysex is reprocessed",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;
