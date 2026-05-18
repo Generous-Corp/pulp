@@ -5,6 +5,7 @@
 #include <pulp/runtime/temporary_file.hpp>
 
 #include <fstream>
+#include <limits>
 #include <utility>
 
 using namespace pulp::runtime;
@@ -146,6 +147,16 @@ TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
     REQUIRE((value * BigInteger(1)).to_string() == "144");
     REQUIRE((BigInteger(3) % BigInteger(10)).to_string() == "3");
     REQUIRE(value.mod_pow(BigInteger(0), BigInteger(17)).to_string() == "1");
+}
+
+TEST_CASE("BigInteger uint64 constructor preserves unsigned high values",
+          "[crypto][bigint][coverage][phase3]") {
+    BigInteger max_value(std::numeric_limits<std::uint64_t>::max());
+
+    REQUIRE(max_value.to_string() == "18446744073709551615");
+    REQUIRE(max_value.to_hex() == "FFFFFFFFFFFFFFFF");
+    REQUIRE(max_value.bit_count() == 64);
+    REQUIRE_FALSE(max_value.is_zero());
 }
 
 // ── License ─────────────────────────────────────────────────────────────
