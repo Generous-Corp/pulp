@@ -34,6 +34,23 @@ TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
     REQUIRE(result.time_sig_den == 8);
 }
 
+TEST_CASE("SeqLock explicit initial value is readable before first write",
+          "[runtime][seqlock][coverage][phase3]") {
+    TransportState init;
+    init.tempo = 96.0;
+    init.beat_position = 12.25;
+    init.time_sig_num = 7;
+    init.time_sig_den = 8;
+
+    SeqLock<TransportState> lock(init);
+    auto result = lock.read();
+
+    REQUIRE(result.tempo == 96.0);
+    REQUIRE(result.beat_position == 12.25);
+    REQUIRE(result.time_sig_num == 7);
+    REQUIRE(result.time_sig_den == 8);
+}
+
 TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
     TransportState init;
     init.beat_position = init.tempo * 0.5;
@@ -82,6 +99,35 @@ TEST_CASE("TripleBuffer basic read/write", "[runtime][triple_buffer]") {
 
     buf.write(100);
     REQUIRE(buf.read() == 100);
+}
+
+TEST_CASE("TripleBuffer default and initial reads are stable without dirty swaps",
+          "[runtime][triple_buffer][coverage][phase3]") {
+    TripleBuffer<int> default_buf;
+    REQUIRE(default_buf.read() == 0);
+    REQUIRE(default_buf.read() == 0);
+
+    struct Snapshot {
+        float peak_l = 0.0f;
+        float peak_r = 0.0f;
+        int block_count = 0;
+    };
+
+    Snapshot initial;
+    initial.peak_l = 0.75f;
+    initial.peak_r = 0.5f;
+    initial.block_count = 12;
+
+    TripleBuffer<Snapshot> initialized(initial);
+    const auto& first = initialized.read();
+    REQUIRE(first.peak_l == 0.75f);
+    REQUIRE(first.peak_r == 0.5f);
+    REQUIRE(first.block_count == 12);
+
+    const auto& second = initialized.read();
+    REQUIRE(second.peak_l == 0.75f);
+    REQUIRE(second.peak_r == 0.5f);
+    REQUIRE(second.block_count == 12);
 }
 
 TEST_CASE("TripleBuffer reader gets latest value", "[runtime][triple_buffer]") {
