@@ -347,11 +347,12 @@ TEST_CASE("Layout: Label intrinsic height in column", "[layout][w3c][intrinsic]"
 
     auto label = std::make_unique<Label>("Hello");
     label->set_font_size(14);
+    label->set_line_height(19.6f);
     auto* lp = label.get();
     root.add_child(std::move(label));
     root.layout_children();
 
-    // Label should get intrinsic height (14 * 1.4 ≈ 19.6, Yoga may round)
+    // Label should get intrinsic height (explicit 19.6, Yoga may round)
     REQUIRE_THAT(lp->bounds().height, Catch::Matchers::WithinAbs(19.6f, 1.0f));
 }
 

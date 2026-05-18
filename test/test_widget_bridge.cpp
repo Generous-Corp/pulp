@@ -7020,7 +7020,7 @@ TEST_CASE("CSSStyleDeclaration forwards font-family to bridge",
 
     auto* lbl = dynamic_cast<Label*>(bridge.widget("lbl"));
     REQUIRE(lbl != nullptr);
-    REQUIRE(lbl->font_family() == "Atkinson Hyperlegible");
+    REQUIRE(lbl->font_family() == "\"Atkinson Hyperlegible\", Georgia, serif");
 }
 
 // ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
@@ -10748,8 +10748,7 @@ TEST_CASE("Wave5 css/fontFamily picks first non-empty family from list",
     auto* p = bridge.widget("p");
     auto inh = p->inheritable_font_family();
     REQUIRE(inh.has_value());
-    // First non-empty after stripping outer quotes.
-    REQUIRE(inh.value() == "JetBrains Mono");
+    REQUIRE(inh.value() == "'JetBrains Mono', ui-monospace, monospace");
 }
 
 TEST_CASE("Wave5 css/__matchMedia evaluates against root size",

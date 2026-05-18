@@ -24,7 +24,13 @@ TEST_CASE("Variable axes: empty axis list resolves cleanly", "[font][axes][issue
     REQUIRE(opts.variation_axes.empty());
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
+#ifdef PULP_HAS_SKIA
     REQUIRE(resolved.has_typeface());
+#else
+    REQUIRE_FALSE(resolved.has_typeface());
+    REQUIRE_FALSE(resolved.resolved());
+    REQUIRE(resolved.origin == FallbackOrigin::NotFound);
+#endif
 }
 
 TEST_CASE("Variable axes: axis on non-variable face still resolves", "[font][axes]") {
@@ -39,7 +45,13 @@ TEST_CASE("Variable axes: axis on non-variable face still resolves", "[font][axe
     opts.variation_axes.push_back({make_variation_axis_tag('w','g','h','t'), 450.0f});
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
+#ifdef PULP_HAS_SKIA
     REQUIRE(resolved.has_typeface());
+#else
+    REQUIRE_FALSE(resolved.has_typeface());
+    REQUIRE_FALSE(resolved.resolved());
+    REQUIRE(resolved.origin == FallbackOrigin::NotFound);
+#endif
 }
 
 TEST_CASE("Variable axes: distinct axis values cache distinctly", "[font][axes]") {

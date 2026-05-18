@@ -863,9 +863,18 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // `var window = {...}` reassignment performed by the preludes above
     // (notably web-compat-document.js). See kWindowListenerShim comment.
     eval_or_throw(engine_, "kWindowListenerShim", kWindowListenerShim);
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+        all_bridges_set().insert(this);
+    }
 }
 
 WidgetBridge::~WidgetBridge() {
+    {
+        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
+        all_bridges_set().erase(this);
+    }
     if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
     root_.on_global_click = {};
 }
@@ -1286,8 +1295,24 @@ void WidgetBridge::install_runtime_import_handlers() {
                                 + src_label + "')");
                         return choc::value::Value();
                     }
+                } else if (source_lc == "rn" || source_lc == "react-native") {
+                    bundle = parse_react_native_export(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported React Native export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
+                } else if (source_lc == "pencil" || source_lc == "open-pencil") {
+                    bundle = parse_pencil_react(html);
+                    if (!bundle) {
+                        set_err("__pulpRuntimeImport__: unsupported Pencil React export (got '"
+                                + src_label + "')");
+                        return choc::value::Value();
+                    }
                 } else {
                     bundle = parse_claude_bundle(html);
+                    if (!bundle) bundle = parse_react_native_export(html);
+                    if (!bundle) bundle = parse_pencil_react(html);
                 }
                 if (!bundle) {
                     set_err("__pulpRuntimeImport__: no claude bundle envelope (got '"
