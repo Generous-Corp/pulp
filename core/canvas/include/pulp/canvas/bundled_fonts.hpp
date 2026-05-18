@@ -109,6 +109,17 @@ void bump_font_registration_generation() noexcept;
 
 #ifdef PULP_HAS_SKIA
 
+/// Process-wide platform font manager. Returns the CoreText / DirectWrite /
+/// Android / FontConfig manager appropriate for the current OS, or nullptr
+/// on platforms where no manager is available. Lazily constructed; the
+/// same instance is returned for every call.
+///
+/// pulp #2163 / font v2 Slice 1.1.a — consolidates the five identical
+/// `SkFontMgr_New_*` switch blocks that previously lived inside
+/// `skia_canvas.cpp`, `text_shaper.cpp`, `sdf_atlas.cpp`,
+/// `bundled_fonts.cpp` (×2), and the seed copy in `font_resolver.cpp`.
+sk_sp<SkFontMgr> platform_font_manager();
+
 /// Look up a bundled typeface by family name (e.g. "Inter",
 /// "JetBrains Mono"). The first call for a given process eagerly materialises
 /// every embedded .ttf into an `SkTypeface` via the supplied font manager and

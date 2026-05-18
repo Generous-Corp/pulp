@@ -78,27 +78,12 @@
 
 namespace pulp::canvas {
 
-// Lazily create a platform-appropriate font manager
-// macOS: CoreText, Windows: DirectWrite, Linux: fontconfig
+// pulp #2163 / font v2 Slice 1.1.a — `platform_font_manager()` lives in
+// bundled_fonts.cpp (exported via bundled_fonts.hpp); this TU-local shim
+// stays as `get_font_manager()` for the dozens of internal call sites
+// until the broader caller-migration pass moves them onto the resolver.
 static sk_sp<SkFontMgr> get_font_manager() {
-    static sk_sp<SkFontMgr> mgr;
-    static bool tried = false;
-    if (!tried) {
-        tried = true;
-#ifdef __APPLE__
-        mgr = SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-        mgr = SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-        // Android font manager needs a FreeType scanner to rasterize glyphs.
-        // Passing nullptr for the scanner causes SIGSEGV in drawSimpleText.
-        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#endif
-        // Don't fall back to RefEmpty — callers check for null
-    }
-    return mgr;
+    return platform_font_manager();
 }
 
 static SkColor to_sk_color(Color c) {

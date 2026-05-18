@@ -15,6 +15,7 @@
 //      packer.
 
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -164,20 +165,12 @@ std::vector<std::uint8_t> rasterize_placeholder(char32_t codepoint, int w, int h
 }
 
 #if PULP_HAS_SKIA
-// Resolve a typeface the same way rasterize_skia() does so metrics and
-// rasterization agree on which font is in use.
+// pulp #2163 / font v2 Slice 1.1.a — platform font manager comes from
+// the single canonical helper in bundled_fonts.cpp; this TU-local shim
+// preserves the existing call sites until the broader caller-migration
+// pass routes them through the resolver.
 sk_sp<SkFontMgr> make_font_mgr() {
-#ifdef __APPLE__
-    return SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-    return SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-    return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-    return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#else
-    return nullptr;
-#endif
+    return platform_font_manager();
 }
 
 sk_sp<SkTypeface> resolve_typeface(const std::string& font_family) {

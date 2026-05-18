@@ -400,26 +400,14 @@ struct TextShaper::Impl {
     sk_sp<SkFontMgr> font_mgr;
     sk_sp<skia::textlayout::FontCollection> font_collection;
 
-    // Lazily create a platform-appropriate font manager — mirrors the
-    // helper in skia_canvas.cpp. Without this, SkFontMgr::RefEmpty()
+    // pulp #2163 / font v2 Slice 1.1.a — platform font manager comes from
+    // the single canonical helper in bundled_fonts.cpp (exported via
+    // bundled_fonts.hpp). Without a manager, SkFontMgr::RefEmpty()
     // returns no typefaces and `font.measureText()` reports near-zero
     // advance, collapsing Label::intrinsic_width() (pulp #945).
-    static sk_sp<SkFontMgr> make_platform_font_mgr() {
-#if defined(__APPLE__)
-        return SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-        return SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-        return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-        return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#else
-        return nullptr;
-#endif
-    }
 
     Impl() {
-        font_mgr = make_platform_font_mgr();
+        font_mgr = platform_font_manager();
         if (!font_mgr) {
             font_mgr = SkFontMgr::RefEmpty();
         }

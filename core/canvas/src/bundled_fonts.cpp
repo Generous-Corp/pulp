@@ -192,11 +192,14 @@ void bump_generation() noexcept {
     registration_generation().fetch_add(1, std::memory_order_acq_rel);
 }
 
-// Lazy, process-wide platform font manager. Parallels skia_canvas.cpp's
-// `get_font_manager()`. Duplicated here because `bundled_fonts.cpp` is
-// linked privately from pulp-canvas and must not call back into
-// skia_canvas.cpp's TU-local helpers.
-sk_sp<SkFontMgr> registration_font_manager() {
+} // namespace
+
+// pulp #2163 / font v2 Slice 1.1.a — single canonical platform-font-manager
+// helper, exported from `bundled_fonts.hpp`. Replaces the five inline
+// SkFontMgr_New_* switch blocks that previously lived in skia_canvas.cpp,
+// text_shaper.cpp, sdf_atlas.cpp, bundled_fonts.cpp (×2), and the seed
+// copy in font_resolver.cpp.
+sk_sp<SkFontMgr> platform_font_manager() {
     static sk_sp<SkFontMgr> mgr;
     static bool tried = false;
     if (!tried) {
@@ -213,8 +216,6 @@ sk_sp<SkFontMgr> registration_font_manager() {
     }
     return mgr;
 }
-
-} // namespace
 
 sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
                                             SkFontStyle style) {
@@ -261,7 +262,7 @@ bool register_font(const std::uint8_t* data, std::size_t size,
                    const std::string& family_override) {
     if (!data || size == 0) return false;
 
-    SkFontMgr* mgr = registration_font_manager().get();
+    SkFontMgr* mgr = platform_font_manager().get();
     if (!mgr) {
         // No platform font manager → no way to materialise an SkTypeface
         // from raw bytes (the prebuilt Skia we ship doesn't link FreeType
@@ -337,19 +338,7 @@ FontProbe probe_font_glyph(const std::string& family,
     // probe side-effect-free (no cache pollution from a probe call).
     sk_sp<SkTypeface> face = match_registered_typeface(family, style);
     if (!face) {
-        // Bundled fonts need an SkFontMgr handle. Use the same
-        // platform-appropriate factories as skia_canvas.cpp so the
-        // probe reflects the real resolution that fill_text would do.
-        sk_sp<SkFontMgr> mgr;
-#ifdef __APPLE__
-        mgr = SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-        mgr = SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#endif
+        sk_sp<SkFontMgr> mgr = platform_font_manager();
         if (mgr) {
             face = match_bundled_typeface(mgr.get(), family, style);
             if (!face) face = mgr->matchFamilyStyle(family.c_str(), style);
