@@ -137,13 +137,13 @@ TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independent
 }
 
 TEST_CASE("PluginDescriptor preserves optional vendor contact metadata",
-          "[format][processor-defaults][coverage][phase3]") {
+          "[format][processor-defaults][metadata][coverage][phase3]") {
     PluginDescriptor d;
-    d.vendor_url = "https://example.com/pulp";
-    d.vendor_email = "support@example.com";
+    d.vendor_url = "https://example.test/pulp";
+    d.vendor_email = "support@example.test";
 
-    REQUIRE(d.vendor_url == "https://example.com/pulp");
-    REQUIRE(d.vendor_email == "support@example.com");
+    REQUIRE(d.vendor_url == "https://example.test/pulp");
+    REQUIRE(d.vendor_email == "support@example.test");
     REQUIRE(d.default_input_channels() == 2);
     REQUIRE(d.default_output_channels() == 2);
 }
