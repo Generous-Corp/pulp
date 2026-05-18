@@ -36,6 +36,11 @@ set(PULP_JS_PRELUDES
     # Element are in scope when underscore-prefixed selector helpers
     # are dispatched from document.querySelector / .querySelectorAll.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
+    # P5-7 follow-up — WebGPU mock factories extracted from
+    # web-compat-document.js. Loaded AFTER the parent so GPU* usage
+    # constants installed by document.js (GPUTextureUsage etc.) are in
+    # scope when the factory bodies resolve them at call time.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-gpu-mock.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
@@ -76,6 +81,7 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-gpu-mock.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js

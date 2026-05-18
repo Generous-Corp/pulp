@@ -872,6 +872,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // resolvable when document.querySelector / .querySelectorAll
     // dispatch into them.
     eval_or_throw(engine_, "web_compat_document_selectors", preludes::web_compat_document_selectors);
+    // P5-7 follow-up — WebGPU mock factories. Must eval AFTER
+    // document so GPU* usage constants (GPUTextureUsage etc.) are in
+    // scope when the factory bodies resolve them lazily at call time.
+    eval_or_throw(engine_, "web_compat_document_gpu_mock", preludes::web_compat_document_gpu_mock);
     eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
     // pulp #745 — DOM mutation methods (appendChild / removeChild / etc.).
     // Single source of truth lives in core/view/js/web-compat-dom-ops.js.
