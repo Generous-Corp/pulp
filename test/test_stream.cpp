@@ -88,6 +88,19 @@ TEST_CASE("MemoryStream round-trip", "[stream]") {
     REQUIRE(eof.closed());
 }
 
+TEST_CASE("MemoryStream default starts open and empty",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream;
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    auto result = stream.read(&byte, 1);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.closed());
+}
+
 TEST_CASE("MemoryStream partial read", "[stream]") {
     MemoryStream s(std::vector<std::uint8_t>{10, 20, 30, 40});
     std::uint8_t out[2]{};
