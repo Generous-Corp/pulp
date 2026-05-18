@@ -373,6 +373,16 @@ TEST_CASE("i18n .po parser accepts empty msgid continuations",
     REQUIRE(strings.translate("prefix_suffix") == "value");
 }
 
+TEST_CASE("i18n .po load failure leaves translations intact",
+          "[runtime][i18n][coverage][phase3-batch742]") {
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE_FALSE(strings.load_po_file("/tmp/pulp_missing_po_742.po"));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
+}
+
 // ── JSON file format ────────────────────────────────────────────────────
 
 TEST_CASE("i18n load JSON file", "[runtime][i18n]") {
