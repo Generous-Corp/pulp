@@ -7779,3 +7779,19 @@ with the existing `sdf-text` skip trailer for the earlier SDF helper guard,
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
 (patch bump suggested because this batch includes source fixes), and
 `git diff --check`. Batch #728 is now 18 local commits ahead and remains held.
+
+2026-05-18 01:43 PDT: rebased held batch
+`feature/phase3-codecov-batch-728` cleanly onto current `origin/main` after
+main advanced twice; no conflicts. Added a nineteenth local-only MIDI raw
+parser tranche: commit `5a9a547f1` (`test(midi): cover raw parser status
+recovery`). It extends `pulp-test-raw-midi-parser` over malformed short
+messages where a new status byte arrives where a data byte was expected,
+verifying the malformed candidate is dropped and the following valid status
+still emits. Local validation passed:
+`cmake --build build --target pulp-test-raw-midi-parser -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-raw-midi-parser "[midi][raw_midi_parser]" -r compact`
+(10 cases / 61 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
+and `git diff --check`. Batch #728 is now 19 local commits ahead and remains
+held for the larger 24-36 commit PR.
