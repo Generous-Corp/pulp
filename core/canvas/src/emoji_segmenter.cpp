@@ -359,20 +359,8 @@ bool contains_emoji(std::string_view utf8_text) {
     }
     if (!has_high_byte) return false;
 
-    const auto decoded = decode_utf8(utf8_text);
-    for (const auto& dc : decoded) {
-        switch (dc.kind) {
-            case CodepointKind::EmojiDefault:
-            case CodepointKind::RegionalIndicator:
-            case CodepointKind::SkinToneModifier:
-            case CodepointKind::KeycapMark:
-            case CodepointKind::TagBase:
-            case CodepointKind::TagSpec:
-            case CodepointKind::VariationEmoji:
-                return true;
-            default:
-                break;
-        }
+    for (const auto& run : segment_emoji_runs(utf8_text)) {
+        if (run.role == FontRunRole::Emoji) return true;
     }
     return false;
 }

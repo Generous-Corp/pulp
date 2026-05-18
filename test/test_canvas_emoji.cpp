@@ -245,6 +245,43 @@ TEST_CASE("emoji_segmenter: mixed text + ZWJ family + text emits 3 runs",
     REQUIRE(runs[1].byte_end == 20);  // "A " (2) + 18 emoji bytes
 }
 
+TEST_CASE("emoji_segmenter: odd regional indicators pair left to right",
+          "[canvas][emoji][segmenter]") {
+    // 🇺🇸🇨 — first two RIs form one flag cluster; the odd third RI is
+    // still emoji and coalesces into the same font run.
+    auto runs = segment_emoji_runs(
+        "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xA8");
+    REQUIRE(runs.size() == 1);
+    REQUIRE(runs[0].role == FontRunRole::Emoji);
+    REQUIRE(runs[0].byte_start == 0);
+    REQUIRE(runs[0].byte_end == 12);
+}
+
+TEST_CASE("emoji_segmenter: tag sequence stays in one emoji run",
+          "[canvas][emoji][segmenter]") {
+    // 🏴 + tag letters "gbeng" + cancel.
+    auto runs = segment_emoji_runs(
+        "\xF0\x9F\x8F\xB4"
+        "\xF3\xA0\x81\xA7\xF3\xA0\x81\xA2\xF3\xA0\x81\xA5"
+        "\xF3\xA0\x81\xAE\xF3\xA0\x81\xA7\xF3\xA0\x81\xBF");
+    REQUIRE(runs.size() == 1);
+    REQUIRE(runs[0].role == FontRunRole::Emoji);
+    REQUIRE(runs[0].byte_start == 0);
+    REQUIRE(runs[0].byte_end == 28);
+}
+
+TEST_CASE("emoji_segmenter: malformed UTF-8 remains covered as default",
+          "[canvas][emoji][segmenter]") {
+    const std::string bad = std::string("A", 1)
+        + std::string("\xF0\x9F", 2)
+        + std::string("B", 1);
+    auto runs = segment_emoji_runs(bad);
+    REQUIRE(runs.size() == 1);
+    REQUIRE(runs[0].role == FontRunRole::Default);
+    REQUIRE(runs[0].byte_start == 0);
+    REQUIRE(runs[0].byte_end == bad.size());
+}
+
 TEST_CASE("contains_emoji: cheap probe agrees with full segmenter",
           "[canvas][emoji][segmenter]") {
     REQUIRE_FALSE(contains_emoji("hello"));
@@ -252,6 +289,8 @@ TEST_CASE("contains_emoji: cheap probe agrees with full segmenter",
     REQUIRE(contains_emoji("\xF0\x9F\x98\x80"));            // 😀
     REQUIRE(contains_emoji("\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8")); // 🇺🇸
     REQUIRE(contains_emoji("1\xEF\xB8\x8F\xE2\x83\xA3"));   // 1️⃣
+    REQUIRE(contains_emoji("\xE2\x84\xA2\xEF\xB8\x8F"));    // ™️
+    REQUIRE_FALSE(contains_emoji("\xE2\x98\x94\xEF\xB8\x8E")); // ☔︎
 }
 
 // ── Cache invalidation (Skia-free, but uses generation counter) ──────────
