@@ -574,8 +574,11 @@ TEST_CASE("cli common parses numeric arguments and normalizes strings",
     REQUIRE(size == 42);
     REQUIRE(parse_size_arg("0", "--top", size));
     REQUIRE(size == 0);
+    REQUIRE(parse_size_arg("+7", "--top", size));
+    REQUIRE(size == 7);
     REQUIRE_FALSE(parse_size_arg("", "--top", size));
     REQUIRE_FALSE(parse_size_arg("12x", "--top", size));
+    REQUIRE_FALSE(parse_size_arg("-1", "--top", size));
     REQUIRE_FALSE(parse_size_arg("184467440737095516160", "--top", size));
 
     double value = 0.0;
@@ -583,6 +586,10 @@ TEST_CASE("cli common parses numeric arguments and normalizes strings",
     REQUIRE(value == 0.125);
     REQUIRE(parse_double_arg("-12.5", "--min-score", value));
     REQUIRE(value == -12.5);
+    REQUIRE(parse_double_arg("+12.5", "--min-score", value));
+    REQUIRE(value == 12.5);
+    REQUIRE(parse_double_arg("1e-3", "--min-score", value));
+    REQUIRE(value == 0.001);
     REQUIRE_FALSE(parse_double_arg("", "--min-score", value));
     REQUIRE_FALSE(parse_double_arg("nan", "--min-score", value));
     REQUIRE_FALSE(parse_double_arg("inf", "--min-score", value));
@@ -604,11 +611,13 @@ TEST_CASE("cli common parses numeric arguments and normalizes strings",
     REQUIRE(icontains("Signalsmith DSP", ""));
     REQUIRE_FALSE(icontains("Signalsmith DSP", "delay"));
     REQUIRE(yaml_value("  target: plugin  # comment", "target") == "plugin  # comment");
+    REQUIRE(yaml_value("prefix_target: wrong", "target").empty());
     REQUIRE(yaml_value("target:", "target").empty());
     REQUIRE(yaml_value("kind: guide", "target").empty());
-    REQUIRE(sanitize_process_output(std::string("a\0b", 3)) == "ab");
+    REQUIRE(sanitize_process_output(std::string("a\0b\0", 4)) == "ab");
     REQUIRE(truncate_message("abcdef", 4) == "abcd...");
     REQUIRE(truncate_message("abcdef", 0) == "...");
+    REQUIRE(truncate_message("abcdef", 6) == "abcdef");
     REQUIRE(truncate_message("abc", 4) == "abc");
 }
 
@@ -772,13 +781,16 @@ TEST_CASE("cli common project metadata and compatibility helpers cover edge path
 
     write_file(project / "pulp.toml",
                "[pulp]\n"
+               "# sdk_version = \"0.1.0\"\n"
                "sdk_version = \"0.2.0\"\n"
                "sdk_path = \"/opt/pulp-sdk\"\n"
-               "sdk_checkout = \"/src/pulp\"\n");
+               "sdk_checkout = \"/src/pulp\"\n"
+               "legacy_sdk_version_note = \"0.0.1\"\n");
     REQUIRE(read_pulp_toml_value(project, "sdk_version") == "0.2.0");
     REQUIRE(read_sdk_version(project) == "0.2.0");
     REQUIRE(read_sdk_path_hint(project) == fs::path("/opt/pulp-sdk"));
     REQUIRE(read_sdk_checkout_hint(project) == fs::path("/src/pulp"));
+    REQUIRE(read_pulp_toml_value(project, "missing").empty());
 
     write_file(project / "CMakeLists.txt",
                "cmake_minimum_required(VERSION 3.20)\n"

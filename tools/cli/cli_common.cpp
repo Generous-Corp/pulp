@@ -182,7 +182,7 @@ fs::path platform_executable(fs::path p) {
 }
 
 static bool parse_uint64_arg(const std::string& text, const char* flag, uint64_t& out) {
-    if (text.empty()) {
+    if (text.empty() || text.front() == '-') {
         std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
         return false;
     }
@@ -213,7 +213,7 @@ bool parse_size_arg(const std::string& text, const char* flag, std::size_t& out)
 }
 
 bool parse_double_arg(const std::string& text, const char* flag, double& out) {
-    if (text.empty()) {
+    if (text.empty() || text.front() == '-') {
         std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
         return false;
     }
