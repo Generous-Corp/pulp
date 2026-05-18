@@ -453,6 +453,19 @@ TEST_CASE("search, list, suggest, and audit commands cover empty and error modes
     REQUIRE(search_help.exit_code == 0);
     REQUIRE(search_help.stdout_text.find("Usage: pulp search") != std::string::npos);
 
+    auto search_missing_format_value = run_in_project(tmp.path, [&] {
+        return cmd_search({"filter", "--format"});
+    });
+    REQUIRE(search_missing_format_value.exit_code == 2);
+    REQUIRE(search_missing_format_value.stderr_text.find("--format requires a value") !=
+            std::string::npos);
+
+    auto search_unknown_flag = run_in_project(tmp.path, [&] {
+        return cmd_search({"filter", "--verbose"});
+    });
+    REQUIRE(search_unknown_flag.exit_code == 2);
+    REQUIRE(search_unknown_flag.stderr_text.find("Unknown search option") != std::string::npos);
+
     auto suggest_help = run_in_project(tmp.path, [&] { return cmd_suggest({}); });
     REQUIRE(suggest_help.exit_code == 0);
     REQUIRE(suggest_help.stdout_text.find("Usage: pulp suggest") != std::string::npos);
@@ -491,6 +504,26 @@ TEST_CASE("search, list, suggest, and audit commands cover empty and error modes
     auto suggest_no_mode = run_in_project(tmp.path, [&] { return cmd_suggest({"--format", "json"}); });
     REQUIRE(suggest_no_mode.exit_code == 1);
     REQUIRE(suggest_no_mode.stderr_text.find("Specify --description") != std::string::npos);
+
+    auto suggest_missing_description = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "--format", "json"});
+    });
+    REQUIRE(suggest_missing_description.exit_code == 2);
+    REQUIRE(suggest_missing_description.stderr_text.find("--description requires a value") !=
+            std::string::npos);
+
+    auto suggest_bad_format = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "filter", "--format", "text"});
+    });
+    REQUIRE(suggest_bad_format.exit_code == 2);
+    REQUIRE(suggest_bad_format.stderr_text.find("--format must be json") != std::string::npos);
+
+    auto suggest_unexpected_arg = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"filter"});
+    });
+    REQUIRE(suggest_unexpected_arg.exit_code == 2);
+    REQUIRE(suggest_unexpected_arg.stderr_text.find("Unexpected suggest argument") !=
+            std::string::npos);
 
     fs::remove(tmp.path / "packages.lock.json");
     auto audit_no_packages = run_in_project(tmp.path, [&] { return audit_packages(tmp.path); });
@@ -675,6 +708,26 @@ TEST_CASE("cmd_add covers guarded installs and installed-version guards",
     auto missing_id = run_in_project(tmp.path, [&] { return cmd_add({"--no-cmake"}); });
     REQUIRE(missing_id.exit_code == 1);
     REQUIRE(missing_id.stderr_text.find("No package specified") != std::string::npos);
+
+    auto missing_license_value = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--accept-license", "--no-cmake"});
+    });
+    REQUIRE(missing_license_value.exit_code == 2);
+    REQUIRE(missing_license_value.stderr_text.find("--accept-license requires a value") !=
+            std::string::npos);
+
+    auto bad_license_override = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--license-override", "internal"});
+    });
+    REQUIRE(bad_license_override.exit_code == 2);
+    REQUIRE(bad_license_override.stderr_text.find("--license-override must be commercial") !=
+            std::string::npos);
+
+    auto unknown_add_flag = run_in_project(tmp.path, [&] {
+        return cmd_add({"signalsmith-dsp", "--verbose"});
+    });
+    REQUIRE(unknown_add_flag.exit_code == 2);
+    REQUIRE(unknown_add_flag.stderr_text.find("Unknown add option") != std::string::npos);
 
     auto license_mismatch = run_in_project(tmp.path, [&] {
         return cmd_add({"gpl-filter", "--accept-license", "MIT"});

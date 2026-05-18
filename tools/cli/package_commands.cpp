@@ -39,6 +39,14 @@ static void print_warn(const std::string& msg) {
     std::cout << yellow("⚠") << " " << msg << "\n";
 }
 
+static bool looks_like_option(const std::string& arg) {
+    return arg.starts_with("-");
+}
+
+static bool missing_option_value(const std::vector<std::string>& args, size_t i) {
+    return i + 1 >= args.size() || looks_like_option(args[i + 1]);
+}
+
 static fs::path find_project_root() {
     auto dir = fs::current_path();
     while (true) {
@@ -384,8 +392,35 @@ int cmd_search(const std::vector<std::string>& args) {
     }
 
     bool refresh = false;
-    for (auto& a : args)
-        if (a == "--refresh") refresh = true;
+    std::string query;
+    bool json_output = false;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--refresh") {
+            refresh = true;
+        } else if (args[i] == "--format") {
+            if (missing_option_value(args, i)) {
+                print_fail("--format requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "json") {
+                print_fail("--format must be json");
+                return 2;
+            }
+            json_output = true;
+            ++i;
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown search option: " + args[i]);
+            return 2;
+        } else {
+            if (!query.empty()) query += " ";
+            query += args[i];
+        }
+    }
+
+    if (query.empty()) {
+        print_fail("Search query required");
+        return 2;
+    }
 
     // Try local registry first, fall back to remote
     auto root = find_project_root();
@@ -412,18 +447,6 @@ int cmd_search(const std::vector<std::string>& args) {
     }
 
     auto& reg = result.registry;
-
-    std::string query;
-    bool json_output = false;
-    for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
-            json_output = true;
-            ++i;
-        } else {
-            if (!query.empty()) query += " ";
-            query += args[i];
-        }
-    }
 
     auto results = search(reg, query);
     if (results.empty()) {
@@ -532,9 +555,21 @@ int cmd_add(const std::vector<std::string>& args) {
     bool no_cmake = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--accept-license" && i + 1 < args.size()) {
+        if (args[i] == "--accept-license") {
+            if (missing_option_value(args, i)) {
+                print_fail("--accept-license requires a value");
+                return 2;
+            }
             accepted_license = args[++i]; license_override = true;
-        } else if (args[i] == "--license-override" && i + 1 < args.size() && args[i + 1] == "commercial") {
+        } else if (args[i] == "--license-override") {
+            if (missing_option_value(args, i)) {
+                print_fail("--license-override requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "commercial") {
+                print_fail("--license-override must be commercial");
+                return 2;
+            }
             license_override = true; ++i;
         } else if (args[i] == "--platform-guard") {
             platform_guard = true;
@@ -542,6 +577,12 @@ int cmd_add(const std::vector<std::string>& args) {
             no_cmake = true;
         } else if (package_id.empty() && !args[i].starts_with("-")) {
             package_id = args[i];
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown add option: " + args[i]);
+            return 2;
+        } else {
+            print_fail("Unexpected add argument: " + args[i]);
+            return 2;
         }
     }
 
@@ -902,14 +943,40 @@ int cmd_suggest(const std::vector<std::string>& args) {
     std::string mode, value;
     bool json_output = false;
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--description" && i + 1 < args.size()) {
+        if (args[i] == "--description") {
+            if (missing_option_value(args, i)) {
+                print_fail("--description requires a value");
+                return 2;
+            }
             mode = "description"; value = args[++i];
-        } else if (args[i] == "--analyze" && i + 1 < args.size()) {
+        } else if (args[i] == "--analyze") {
+            if (missing_option_value(args, i)) {
+                print_fail("--analyze requires a value");
+                return 2;
+            }
             mode = "analyze"; value = args[++i];
-        } else if (args[i] == "--alternative" && i + 1 < args.size()) {
+        } else if (args[i] == "--alternative") {
+            if (missing_option_value(args, i)) {
+                print_fail("--alternative requires a value");
+                return 2;
+            }
             mode = "alternative"; value = args[++i];
-        } else if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
+        } else if (args[i] == "--format") {
+            if (missing_option_value(args, i)) {
+                print_fail("--format requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "json") {
+                print_fail("--format must be json");
+                return 2;
+            }
             json_output = true; ++i;
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown suggest option: " + args[i]);
+            return 2;
+        } else {
+            print_fail("Unexpected suggest argument: " + args[i]);
+            return 2;
         }
     }
 
