@@ -402,6 +402,16 @@ TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
     REQUIRE_FALSE(named == ChannelSet::lrc());
 }
 
+TEST_CASE("ChannelSet speaker names cover top and discrete positions",
+          "[audio][channel-set][coverage][phase3-github]") {
+    REQUIRE(speaker_name(Speaker::TopFrontLeft) == "Top Front Left");
+    REQUIRE(speaker_name(Speaker::TopFrontRight) == "Top Front Right");
+    REQUIRE(speaker_name(Speaker::TopBackLeft) == "Top Back Left");
+    REQUIRE(speaker_name(Speaker::TopBackRight) == "Top Back Right");
+    REQUIRE(speaker_name(Speaker::TopCenter) == "Top Center");
+    REQUIRE(speaker_name(Speaker::Discrete) == "Discrete");
+}
+
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 TEST_CASE("CoreAudio system enumerates devices", "[audio][coreaudio]") {
     auto system = create_audio_system();
