@@ -8965,7 +8965,7 @@ ahead of `origin/main`; still held locally to build toward a larger
 GitHub-hosted PR. No Namespace dispatch.
 
 2026-05-18 15:40 PDT: completed the 24th commit in the held local-only GitHub
-batch `feature/phase3-codecov-batch-747` with commit `783dbc484`
+batch `feature/phase3-codecov-batch-747` with commit `7f25a9b15`
 (`fix(cli): bound json parser recovery`). This tranche adds shared CLI JSON
 parser coverage for short unicode escape tails and missing object/array
 delimiters. Local validation exposed an infinite loop when malformed arrays
@@ -8976,3 +8976,20 @@ points and stops at EOF instead of spinning. Focused local validation passed:
 `git diff --check`. Branch is clean and 24 commits ahead of `origin/main`;
 ready for a broader local validation pass before opening the batched
 GitHub-hosted PR. No Namespace dispatch.
+
+2026-05-18 15:42 PDT: broader pre-PR validation for
+`feature/phase3-codecov-batch-747` passed locally on the full touched target
+set: `pulp-test-cli-update-check`, `pulp-test-cli-fetchcontent-cache`,
+`pulp-test-cli-package-registry`, `pulp-test-cli-migration-index` with
+`PULP_SOURCE_DIR=$PWD`, `pulp-test-cli-validator-discovery`,
+`pulp-test-cli-projects-registry`, `pulp-test-cli-design-binding`,
+`pulp-test-cli-import-detect`, `pulp-test-cli-run-options`,
+`pulp-test-cli-version-diag`, `pulp-test-cli-json-parser`,
+`pulp-test-cli-upgrade-install`, `pulp-test-cli-sdk-tarball-filename`,
+`pulp-test-cli-project-bump`, `pulp-test-cli-upgrade-url`,
+`pulp-test-cli-project-command`, `pulp-test-cli-package-commands`, and
+`pulp-test-cli-update-mode`, followed by `git diff --check`. `origin/main`
+was fetched and is an ancestor of the branch, so no rebase is needed. Branch
+is clean and 24 commits ahead of `origin/main`; next action is to open the
+batched PR through the current Shipyard/GitHub-hosted workflow and monitor it
+to green.
