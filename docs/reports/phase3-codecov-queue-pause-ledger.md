@@ -8819,3 +8819,16 @@ number fallback behavior. Focused local validation passed:
 `git diff --check`. Branch is clean and 13 commits ahead of `origin/main`;
 still held locally to build toward a larger GitHub-hosted PR. No Namespace
 dispatch.
+
+2026-05-18 15:13 PDT: continued the held local-only GitHub batch
+`feature/phase3-codecov-batch-747` with commit `159cb4edd`
+(`test(cli): cover upgrade install helper edges`). This tranche adds
+deterministic `pulp upgrade` install-helper coverage for sibling payload
+filtering, directory/archive/primary-binary skips, exact C++ delegate
+detection, lexical path equivalence fallback, and executable-permission policy
+for known binary names plus source executable bits. Focused local validation
+passed: `cmake --build build --target pulp-test-cli-upgrade-install`,
+`build/test/pulp-test-cli-upgrade-install` (25 assertions in 6 test cases), and
+`git diff --check`. Branch is clean and 14 commits ahead of `origin/main`;
+still held locally to build toward a larger GitHub-hosted PR. No Namespace
+dispatch.
