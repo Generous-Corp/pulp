@@ -432,6 +432,41 @@ TEST_CASE("ScanCache duplicate JSON entries keep the last valid record",
     REQUIRE(entry.info.num_outputs == 2);
 }
 
+TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
+          "[scan_cache][codecov][phase3]") {
+    HostScanCache written;
+
+    const std::vector<std::pair<PluginFormat, std::string>> formats = {
+        {PluginFormat::VST3, "/tmp/cache-format.vst3"},
+        {PluginFormat::AudioUnit, "/tmp/cache-format.component"},
+        {PluginFormat::AudioUnitV3, "/tmp/cache-format-auv3.component"},
+        {PluginFormat::CLAP, "/tmp/cache-format.clap"},
+        {PluginFormat::LV2, "/tmp/cache-format.lv2"},
+    };
+
+    for (std::size_t i = 0; i < formats.size(); ++i) {
+        auto info = sample_info();
+        info.name = "Format" + std::to_string(i);
+        info.path = formats[i].second;
+        info.unique_id = "format-" + std::to_string(i);
+        info.format = formats[i].first;
+        written.put(formats[i].second, info);
+    }
+
+    HostScanCache read;
+    REQUIRE(read.from_json(written.to_json()));
+    REQUIRE(read.size() == formats.size());
+
+    for (std::size_t i = 0; i < formats.size(); ++i) {
+        const auto& entry = read.entries().at(formats[i].second);
+        CAPTURE(formats[i].second);
+        REQUIRE(entry.info.name == "Format" + std::to_string(i));
+        REQUIRE(entry.info.path == formats[i].second);
+        REQUIRE(entry.info.unique_id == "format-" + std::to_string(i));
+        REQUIRE(entry.info.format == formats[i].first);
+    }
+}
+
 TEST_CASE("ScanCache save_to creates nested parent directories",
           "[scan_cache][codecov]") {
     TempFile f;
