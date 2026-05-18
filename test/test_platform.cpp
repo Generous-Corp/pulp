@@ -116,19 +116,19 @@ TEST_CASE("ProgressParser ignores non-progress lines and tolerates empty callbac
     SUCCEED("empty callbacks are inert");
 }
 
-TEST_CASE("ProgressParser preserves colon payloads and empty event types",
+TEST_CASE("ProgressParser preserves payload colons and empty event types",
           "[platform][progress][coverage][phase3]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) {
         events.push_back(e);
     });
 
-    parser.feed_line("PROGRESS:ERROR:https://example.test/a:b:c");
+    parser.feed_line("PROGRESS:URL:https://example.test/a:b:c");
     parser.feed_line("PROGRESS::payload-with-empty-type");
     parser.feed_line("PROGRESS:");
 
     REQUIRE(events.size() == 3);
-    REQUIRE(events[0].type == "ERROR");
+    REQUIRE(events[0].type == "URL");
     REQUIRE(events[0].payload == "https://example.test/a:b:c");
     REQUIRE(events[1].type.empty());
     REQUIRE(events[1].payload == "payload-with-empty-type");
