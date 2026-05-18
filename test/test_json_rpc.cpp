@@ -332,6 +332,22 @@ TEST_CASE("JsonRpcPeer rejects sends after direct channel close",
     REQUIRE_FALSE(callback_called);
 }
 
+TEST_CASE("JsonRpcPeer destructor detaches its message callback",
+          "[json_rpc][coverage][phase3-batch742]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    std::string reply;
+    pair.second->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    {
+        JsonRpcPeer client(*pair.first);
+    }
+
+    REQUIRE(pair.second->send_text("{not-json"));
+    REQUIRE(reply.empty());
+}
+
 TEST_CASE("JsonRpcPeer omits params for empty request payloads",
           "[json_rpc][coverage][issue-641]") {
     auto pair = MemoryMessageChannel::make_pair();
