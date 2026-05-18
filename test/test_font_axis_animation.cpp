@@ -34,7 +34,17 @@ TEST_CASE("FontResolver: set_cache_capacity round-trip", "[font][axes]") {
     r.set_cache_capacity(original);
 }
 
-TEST_CASE("FontResolver: animation respects LRU cache cap", "[font][axes]") {
+// These four cases assert the LRU contract on the resolver's own
+// cache, which is only populated by the Skia-backed `resolve_family_list`
+// path (see core/canvas/src/font_resolver.cpp:#ifdef PULP_HAS_SKIA).
+// On builds where Skia isn't linked (e.g. the Namespace macOS image
+// without external/skia-build present), `resolve_family_list` is a
+// non-caching stub that returns NotFound without touching `impl_->cache`,
+// so the assertions below have nothing to observe. Gate them on
+// `PULP_HAS_SKIA` so they only run where the contract applies.
+#ifdef PULP_HAS_SKIA
+
+TEST_CASE("FontResolver: animation respects LRU cache cap", "[font][axes][skia]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(16);
@@ -58,7 +68,7 @@ TEST_CASE("FontResolver: animation respects LRU cache cap", "[font][axes]") {
     r.clear_cache();
 }
 
-TEST_CASE("FontResolver: capacity=0 disables cap (legacy unbounded)", "[font][axes]") {
+TEST_CASE("FontResolver: capacity=0 disables cap (legacy unbounded)", "[font][axes][skia]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(0);
@@ -77,7 +87,7 @@ TEST_CASE("FontResolver: capacity=0 disables cap (legacy unbounded)", "[font][ax
 }
 
 TEST_CASE("FontResolver: shrinking the cap evicts oldest immediately",
-          "[font][axes]") {
+          "[font][axes][skia]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(64);
@@ -98,7 +108,7 @@ TEST_CASE("FontResolver: shrinking the cap evicts oldest immediately",
 }
 
 TEST_CASE("FontResolver: LRU hit promotes entry past eviction line",
-          "[font][axes]") {
+          "[font][axes][skia]") {
     auto& r = FontResolver::instance();
     r.clear_cache();
     r.set_cache_capacity(4);
@@ -130,3 +140,5 @@ TEST_CASE("FontResolver: LRU hit promotes entry past eviction line",
     r.set_cache_capacity(256);
     r.clear_cache();
 }
+
+#endif // PULP_HAS_SKIA
