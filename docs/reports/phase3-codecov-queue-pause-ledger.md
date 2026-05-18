@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-15 01:21 PDT
+Last updated: 2026-05-18 14:48 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -10,6 +10,32 @@ GitHub Actions hosted PR workflows, with macOS validated locally before
 push when useful and Linux/Windows left to hosted Actions. The old
 Namespace-specific notes below are retained as history for older PRs and
 should not be read as current dispatch guidance.
+
+2026-05-18 update: GitHub-hosted CI is the active lane for this phase;
+Namespace and SSH targets remain intentionally out of scope. The open
+small Codecov queue was consolidated into #2268
+(`feature/phase3-codecov-rollup-746`, head `1c9edac46`) to avoid
+spending separate macOS CI cycles on each prior batch. #2268 supersedes
+#2173, #2210, #2211, #2219, #2221, #2222, #2226, #2227, #2228, #2231,
+#2232, #2233, #2234, #2237, #2252, #2256, and #2262. Local macOS
+validation for the rollup passed the focused build/test set documented
+in the PR body, plus source-contract and diff checks. Current action:
+monitor #2268 to green/merge and keep preparing new large local
+coverage batches while it runs.
+
+2026-05-18 14:48 PDT: started the next local-only batch
+`feature/phase3-codecov-batch-747` from current `origin/main`
+`3693aa839`. First committed tranche is
+`9e910a2cf test(cli): cover update check parser boundaries`, touching
+`test/test_cli_update_check.cpp`. Scope: deterministic CLI
+`update_check` coverage for cache JSON malformed-int/default-schema
+handling, JSON string escaping, short semver triples, direct semver
+comparison, TOML append/read boundaries, and empty-cache-path latest
+resolution. Local validation passed: `cmake -S . -B build`,
+`cmake --build build --target pulp-test-cli-update-check`,
+`build/test/pulp-test-cli-update-check` (146 assertions in 29 test
+cases), and `git diff --check`. PR state: not pushed; keep accumulating
+additional related coverage commits toward a larger 24-36 commit batch.
 
 Batch size guidance after reopening GitHub-hosted CI: prefer larger
 coherent test-only batches over one-tranche PRs. A good batch is one
