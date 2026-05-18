@@ -273,6 +273,20 @@ TEST_CASE("KeyMapping no-op branches leave commands intact", "[view][keys]") {
     REQUIRE(km.handle_key(e));
 }
 
+TEST_CASE("KeyMapping matched command without action still consumes key",
+          "[view][keys][coverage][phase3]") {
+    KeyMapping km;
+    km.add_command({1, "Placeholder", "Edit",
+                    KeyShortcut::from_string("Cmd+P"), {}, {}, false});
+
+    KeyEvent e;
+    e.key = KeyCode::p;
+    e.modifiers = kModCmd;
+    e.is_down = true;
+
+    REQUIRE(km.handle_key(e));
+}
+
 TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
     KeyMapping km;
     km.add_command({1, "Save", "File",
@@ -293,6 +307,7 @@ TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
 
     REQUIRE(km.load_bindings(path));
     REQUIRE_FALSE(km.load_bindings(root / "missing.json"));
+    REQUIRE_FALSE(km.save_bindings(root));
 
     std::filesystem::remove_all(root);
 }
@@ -455,6 +470,38 @@ TEST_CASE("AppSettings saves and loads from platform settings root",
     REQUIRE(window->y == 2);
     REQUIRE(window->width == 300);
     REQUIRE(window->height == 400);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load clears stale values before partial parse",
+          "[view][settings][coverage][phase3]") {
+    auto root = make_temp_root("pulp-app-settings-partial");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("PulpSettingsPartial");
+    settings.set_string("stale", "value");
+    settings.set_string("keep", "old");
+
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream out(settings.settings_path());
+        out << "{\n"
+            << "  \"keep\": \"new\",\n"
+            << "  \"dangling\": \n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE_FALSE(settings.get_string("stale").has_value());
+    REQUIRE(settings.get_string("keep") == std::optional<std::string>{"new"});
+    REQUIRE_FALSE(settings.get_string("dangling").has_value());
 
     std::filesystem::remove_all(root);
 }
