@@ -309,6 +309,27 @@ TEST_CASE("Typed identity generated strings parse back where supported",
     REQUIRE(ObjectId::from_string(object.to_string()) == object);
 }
 
+TEST_CASE("Typed transient identities hash and stringify nil values",
+          "[runtime][identity][coverage]") {
+    std::unordered_set<SessionId> sessions;
+    std::unordered_set<RunId> runs;
+    std::unordered_set<CorrelationId> correlations;
+
+    sessions.insert(SessionId::nil());
+    sessions.insert(SessionId::nil());
+    runs.insert(RunId::nil());
+    runs.insert(RunId::nil());
+    correlations.insert(CorrelationId::nil());
+    correlations.insert(CorrelationId::nil());
+
+    REQUIRE(sessions.size() == 1);
+    REQUIRE(runs.size() == 1);
+    REQUIRE(correlations.size() == 1);
+    REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(CorrelationId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+}
+
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",
           "[runtime][identity][coverage][phase3]") {
     EventEnvelope env;
