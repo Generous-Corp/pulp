@@ -157,6 +157,31 @@ TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
     REQUIRE(count_c == 1);
 }
 
+TEST_CASE("AudioFocusRegistry: subscribers added during publish wait for next signal",
+          "[audio][focus][coverage][phase3]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    int first_count = 0;
+    int second_count = 0;
+    AudioFocusRegistry::Token second;
+
+    auto first = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) {
+            ++first_count;
+            if (second.id() == 0) {
+                second = AudioFocusRegistry::instance().subscribe(
+                    [&](AudioFocusState) { ++second_count; });
+            }
+        });
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(first_count == 1);
+    REQUIRE(second_count == 0);
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::gained);
+    REQUIRE(first_count == 2);
+    REQUIRE(second_count == 1);
+}
+
 TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();
