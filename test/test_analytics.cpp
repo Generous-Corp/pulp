@@ -50,6 +50,17 @@ TEST_CASE("Analytics disabled doesn't log", "[runtime][analytics]") {
     a.set_enabled(true);
 }
 
+TEST_CASE("Analytics exposes enabled state toggles",
+          "[runtime][analytics][coverage][phase3-batch742]") {
+    auto& a = Analytics::instance();
+
+    a.set_enabled(false);
+    REQUIRE_FALSE(a.is_enabled());
+
+    a.set_enabled(true);
+    REQUIRE(a.is_enabled());
+}
+
 TEST_CASE("Analytics log with properties", "[runtime][analytics]") {
     auto& a = Analytics::instance();
     uint64_t before = a.event_count();
