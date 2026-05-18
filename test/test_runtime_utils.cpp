@@ -737,6 +737,30 @@ TEST_CASE("text_diff keeps repeated-line matches stable",
     REQUIRE(diff[5].text == "same");
 }
 
+TEST_CASE("text_diff handles replacement ties and empty line formatting",
+          "[runtime][text-diff][coverage][phase3]") {
+    auto diff = text_diff("old-a\n\nold-b", "new-a\nnew-b");
+
+    REQUIRE(diff.size() == 5);
+    REQUIRE(diff[0].op == DiffOp::Delete);
+    REQUIRE(diff[0].text == "old-a");
+    REQUIRE(diff[1].op == DiffOp::Delete);
+    REQUIRE(diff[1].text.empty());
+    REQUIRE(diff[2].op == DiffOp::Delete);
+    REQUIRE(diff[2].text == "old-b");
+    REQUIRE(diff[3].op == DiffOp::Insert);
+    REQUIRE(diff[3].text == "new-a");
+    REQUIRE(diff[4].op == DiffOp::Insert);
+    REQUIRE(diff[4].text == "new-b");
+
+    REQUIRE(format_diff(diff) ==
+            "- old-a\n"
+            "- \n"
+            "- old-b\n"
+            "+ new-a\n"
+            "+ new-b\n");
+}
+
 // ── Range ───────────────────────────────────────────────────────────────
 
 TEST_CASE("Range basic operations", "[runtime][range]") {
