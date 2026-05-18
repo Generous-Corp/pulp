@@ -34,17 +34,46 @@ float Label::intrinsic_height() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-    // pulp-internal #76 — small font sizes need a larger line-height
-    // multiplier than the standard 1.4. At fs=10 (Spectr's
-    // `<span fontSize=10>SNAPSHOT</span>` in the bottom toolbar), Inter's
-    // typographic ascent + descent is ~13px, leaving only ~1px of slack
-    // in a 14px box (10 * 1.4); the GPU clip-rect on the View bounds
-    // then shaved the descender-side slack off in practice and the label
-    // visibly clipped from the bottom. Bumping to 1.6 for sizes below
-    // ~12pt buys 16px of box room for fs=10, fully containing the glyph
-    // extent. Larger sizes keep 1.4 — they have plenty of absolute slack.
+
+    // pulp #2163 / font v2 Slice 1.2.b — prefer the shaper's real
+    // metrics (worst-case ascent + descent from SkFontMetrics fTop/
+    // fBottom + empirical safety margin gated by
+    // PULP_FONT_NO_SAFETY_MARGIN) over the legacy `font_size * 1.6` /
+    // `font_size * 1.4` multiplier from pulp-internal #76. Real
+    // metrics make `intrinsic_height` track what paint() actually
+    // draws (the same shaper cache feeds Label::paint baseline math
+    // and the Yoga measure callback), and let the env-var-gated
+    // empirical margin actually affect intrinsic box sizes — which is
+    // the prerequisite for the Slice 1.3 parity harness retiring it
+    // entirely. Falls back to the legacy multiplier only when the
+    // shaper hasn't resolved real metrics (no Skia / family
+    // unresolvable).
+    //
+    // pulp-internal #76 history: small fonts (< 12px) had
+    // `font_size * 1.6` instead of `font_size * 1.4` because Inter's
+    // typographic ascent+descent was ~13px at fs=10 and the painter's
+    // GPU clip-rect shaved descenders. Real fTop/fBottom metrics
+    // already cover that case (they include caps + descenders by
+    // construction) plus the empirical safety margin.
+    std::string effective_family = font_family_;
+    if (effective_family.empty()) {
+        if (auto inh = inheritable_font_family(); inh.has_value())
+            effective_family = inh.value();
+    }
+    if (effective_family.empty()) effective_family = "Inter";
+
+    auto& shaper = canvas::global_text_shaper();
+    auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
+                                   effective_family, effective_font_size);
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
-    const float lh = line_height_ > 0 ? line_height_ : effective_font_size * lh_mult;
+    float lh;
+    if (line_height_ > 0) {
+        lh = line_height_;
+    } else if (prepared.line_height() > 0) {
+        lh = prepared.line_height();
+    } else {
+        lh = effective_font_size * lh_mult;
+    }
 
     // pulp-internal #74 — when the Label is multi_line, the reserved
     // height must reflect the number of lines paint() will emit, not a

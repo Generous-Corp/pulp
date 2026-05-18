@@ -552,15 +552,20 @@ struct TextShaper::Impl {
             // metrics but visually clips the glyph caps and
             // descenders of imported designs (CROSSOVER /
             // MID / SIDE WIDTH section titles, XY pad axis labels at
-            // fontSize 7). The 0.5 * font_size safety is empirical:
-            // a multiplier of 0 reproduced the clipping; PULP_LH_DOUBLE
-            // (200%) over-corrected; 50% looks correct for IBM Plex
-            // Mono and Inter at sizes 7-14. Will be replaced with
-            // a structured anchor + parity-tested measurement in the
-            // FontResolver / ShapedText work (planning doc:
-            // 2026-05-17-font-subsystem-hardening-v2.md slice 1.3).
-            box.line_height = box.ascent + box.descent + box.leading
-                            + font_size * 0.5f;
+            // fontSize 7).
+            //
+            // font v2 Slice 1.3 / Phase 1 exit (in flight) — the margin
+            // is the canary the parity harness validates against. Set
+            // `PULP_FONT_NO_SAFETY_MARGIN=1` to disable the margin
+            // and render with raw fTop/fBottom; A/B against the
+            // margin-on output to judge whether the v2 anchor work
+            // has obviated the empirical fudge. When the harness is
+            // green corpus-wide and Chainer renders correctly without
+            // the margin, the env-var gate retires and the margin
+            // goes away (Phase 1 exit).
+            const bool margin_off = std::getenv("PULP_FONT_NO_SAFETY_MARGIN") != nullptr;
+            const float safety = margin_off ? 0.0f : font_size * 0.5f;
+            box.line_height = box.ascent + box.descent + box.leading + safety;
             box.real = true;
         }
 #endif
