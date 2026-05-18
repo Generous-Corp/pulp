@@ -25,6 +25,7 @@
 #include <cctype>
 #include <map>
 #include <regex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -208,13 +209,15 @@ std::string serialize_detected_shortcuts(const std::vector<DetectedShortcut>& sh
 int key_string_to_keycode(const std::string& key) {
     if (key.empty()) return 0;
 
-    // Single ASCII printable — KeyCode for letters/digits is the ASCII
-    // code itself (per input_events.hpp). Lowercase for letters; digits
-    // map to KeyCode::num0..num9 which are also their ASCII codes.
+    // Single ASCII printable — KeyCode for letters/digits/punctuation
+    // is the ASCII code itself (per input_events.hpp). Lowercase for
+    // letters; everything else passes through as-is so `,`, `.`, `/`,
+    // `?` etc. map correctly. Outside ASCII printable range → 0 (the
+    // codegen layer treats 0 as unmapped and skips emission).
     if (key.size() == 1) {
-        char c = key[0];
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ' ') {
+        unsigned char c = static_cast<unsigned char>(key[0]);
+        if (c >= 'A' && c <= 'Z') c = static_cast<unsigned char>(c - 'A' + 'a');
+        if (c >= 0x20 && c <= 0x7E) {  // printable ASCII (space..tilde)
             return static_cast<int>(c);
         }
     }
@@ -289,5 +292,380 @@ int modifier_strings_to_mask(const std::vector<std::string>& mods) {
     }
     return mask;
 }
+
+// ── Default shortcuts (Phase A: source-matched) ─────────────────────────
+
+namespace {
+
+const char* pattern_name(DefaultShortcutPattern p) {
+    switch (p) {
+        case DefaultShortcutPattern::settings:   return "settings";
+        case DefaultShortcutPattern::help:       return "help";
+        case DefaultShortcutPattern::cheatsheet: return "cheatsheet";
+        case DefaultShortcutPattern::new_file:   return "new";
+        case DefaultShortcutPattern::open_file:  return "open";
+        case DefaultShortcutPattern::save_file:  return "save";
+        case DefaultShortcutPattern::find:       return "find";
+    }
+    return "unknown";
+}
+
+bool icontains(const std::string& haystack, const std::string& needle) {
+    if (needle.empty() || haystack.size() < needle.size()) return false;
+    auto it = std::search(
+        haystack.begin(), haystack.end(),
+        needle.begin(), needle.end(),
+        [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a))
+                == std::tolower(static_cast<unsigned char>(b));
+        });
+    return it != haystack.end();
+}
+
+// Find all top-level JSX/identifier names that look like component
+// declarations or usages — a lexical pass over the source, no parser.
+// Captures `function FooBar(`, `const FooBar =`, `class FooBar`,
+// and JSX opening tags `<FooBar`. Lowercased dedupe.
+std::vector<std::string> collect_component_names(const std::string& source) {
+    std::vector<std::string> names;
+    auto seen = std::set<std::string>{};
+
+    auto add = [&](const std::string& n) {
+        if (n.empty() || !std::isupper(static_cast<unsigned char>(n[0]))) return;
+        auto lower = n;
+        for (auto& c : lower) c = std::tolower(static_cast<unsigned char>(c));
+        if (seen.insert(lower).second) names.push_back(n);
+    };
+
+    // function FooBar( ... )
+    {
+        std::regex re(R"(\bfunction\s+([A-Z][A-Za-z0-9_]*)\s*\()");
+        auto begin = std::sregex_iterator(source.begin(), source.end(), re);
+        auto end   = std::sregex_iterator();
+        for (auto it = begin; it != end; ++it) add((*it)[1].str());
+    }
+    // const FooBar = ... / let FooBar = ...
+    {
+        std::regex re(R"(\b(?:const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*=)");
+        auto begin = std::sregex_iterator(source.begin(), source.end(), re);
+        auto end   = std::sregex_iterator();
+        for (auto it = begin; it != end; ++it) add((*it)[1].str());
+    }
+    // class FooBar ...
+    {
+        std::regex re(R"(\bclass\s+([A-Z][A-Za-z0-9_]*)\b)");
+        auto begin = std::sregex_iterator(source.begin(), source.end(), re);
+        auto end   = std::sregex_iterator();
+        for (auto it = begin; it != end; ++it) add((*it)[1].str());
+    }
+    // <FooBar  (JSX opening tag) — captures usages even if component is imported
+    {
+        std::regex re(R"(<([A-Z][A-Za-z0-9_]*))");
+        auto begin = std::sregex_iterator(source.begin(), source.end(), re);
+        auto end   = std::sregex_iterator();
+        for (auto it = begin; it != end; ++it) add((*it)[1].str());
+    }
+    return names;
+}
+
+// Map a pattern to the keyword set the component name + ARIA + heading
+// signals should match.  Order matters for cheatsheet vs help disambig:
+// cheatsheet is checked first; if it matches AND <kbd> appears nearby,
+// it's a cheatsheet; otherwise help/about/docs wins on prose modals.
+const std::vector<std::string>& pattern_keywords(DefaultShortcutPattern p) {
+    static const std::vector<std::string> kw_settings    = {"settings", "preferences", "preference", "options"};
+    static const std::vector<std::string> kw_help        = {"help", "about", "documentation", "docs"};
+    static const std::vector<std::string> kw_cheatsheet  = {"cheatsheet", "shortcuts", "shortcutshelp", "keyboardshortcuts", "keymap"};
+    static const std::vector<std::string> kw_new         = {"newproject", "newfile", "newdocument", "newbutton"};
+    static const std::vector<std::string> kw_open        = {"openfile", "openproject", "opendocument", "openbutton"};
+    static const std::vector<std::string> kw_save        = {"savefile", "savebutton", "savedocument", "saveproject"};
+    static const std::vector<std::string> kw_find        = {"searchinput", "searchbox", "findbox", "findinput"};
+    switch (p) {
+        case DefaultShortcutPattern::settings:   return kw_settings;
+        case DefaultShortcutPattern::help:       return kw_help;
+        case DefaultShortcutPattern::cheatsheet: return kw_cheatsheet;
+        case DefaultShortcutPattern::new_file:   return kw_new;
+        case DefaultShortcutPattern::open_file:  return kw_open;
+        case DefaultShortcutPattern::save_file:  return kw_save;
+        case DefaultShortcutPattern::find:       return kw_find;
+    }
+    return kw_settings;
+}
+
+// Score one candidate component against one default pattern. Returns the
+// set of signals that fired; an empty result means "no match".
+std::vector<std::string> score_signals(
+    const std::string& source,
+    const std::string& component,
+    DefaultShortcutPattern pattern) {
+    std::vector<std::string> signals;
+
+    // Signal 1: component name contains a pattern keyword.
+    const auto& kws = pattern_keywords(pattern);
+    bool name_hit = false;
+    for (const auto& kw : kws) {
+        if (icontains(component, kw)) { name_hit = true; break; }
+    }
+    if (name_hit) signals.push_back("component-name:" + component);
+
+    // Signal 1b (canonical-name bonus): exact matches against the canonical
+    // shape `XYZ{Modal,Dialog,Panel,Popover,Sheet,Window,Drawer}` for the
+    // pattern carry enough specificity to be a second signal on their own.
+    // Real-world apps (Spectr's `SettingsModal`, `HelpPopover`) use
+    // inline-styled divs without `role="dialog"`, so the strict ≥2 ARIA-
+    // shape gate would skip every one of them. We only add this for
+    // structurally-unambiguous names — not generic "Settings*" with
+    // suffixes that could mean anything.
+    auto canonical_name_hit = [&](const std::string& comp) -> bool {
+        // Single-word root part (Settings, Preferences, Help, About,
+        // Shortcuts, ...) followed by exactly one of the canonical kind
+        // suffixes. Reject anything beyond that.
+        std::vector<std::string> kinds = {
+            "Modal", "Dialog", "Panel", "Popover", "Sheet", "Window", "Drawer"
+        };
+        for (const auto& kw : kws) {
+            // Title-case the keyword for prefix matching: settings → Settings
+            std::string root = kw;
+            if (!root.empty()) root[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(root[0])));
+            for (const auto& kind : kinds) {
+                if (comp == root + kind) return true;
+            }
+            // Also accept the canonical name itself with no suffix
+            // (HelpPopover is a kind already; same root). Reject single-
+            // word "Settings" alone — too generic.
+        }
+        return false;
+    };
+    if (name_hit && canonical_name_hit(component)) {
+        signals.push_back("canonical-name");
+    }
+
+    // The remaining signals look at the body of the component declaration.
+    // Locate the definition, then truncate at the NEXT same-shape
+    // declaration so we don't bleed sibling components into this one's
+    // body (which would let `<kbd>` from a cheatsheet component count as
+    // a signal for an unrelated settings modal that happens to live in
+    // the same file).
+    std::string body;
+    {
+        std::regex decl_re(R"((?:function\s+|const\s+|let\s+|var\s+|class\s+))" + component + R"(\b)");
+        std::smatch m;
+        if (std::regex_search(source, m, decl_re)) {
+            size_t start = static_cast<size_t>(m.position(0));
+            size_t end = std::min(source.size(), start + 4000);
+
+            // Walk forward from start+1 (skip our own decl) and clamp `end`
+            // at the next top-level component declaration.
+            std::regex next_decl(
+                R"((?:function|const|let|var|class)\s+[A-Z][A-Za-z0-9_]*\b)");
+            auto search_from = source.begin() + start + 1;
+            auto search_to = source.begin() + end;
+            std::smatch next_m;
+            if (std::regex_search(search_from, search_to, next_m, next_decl)) {
+                end = static_cast<size_t>(start + 1 + next_m.position(0));
+            }
+            body = source.substr(start, end - start);
+        }
+    }
+
+    if (!body.empty()) {
+        // Signal 2: role="dialog" / role="alertdialog" / role="menu" in body.
+        if (std::regex_search(body,
+                std::regex(R"(role\s*=\s*['"](?:dialog|alertdialog|menu|listbox)['"])"))) {
+            signals.push_back("aria-role:dialog");
+        }
+
+        // Signal 3: aria-label or aria-labelledby referencing a pattern keyword.
+        for (const auto& kw : kws) {
+            std::regex aria_re(R"(aria-label\s*=\s*['"][^'"]*)" + kw + R"([^'"]*['"])",
+                               std::regex::icase);
+            if (std::regex_search(body, aria_re)) {
+                signals.push_back("aria-label:" + kw);
+                break;
+            }
+        }
+
+        // Signal 4: an <h1>/<h2>/<h3>/title text in body contains a pattern keyword.
+        for (const auto& kw : kws) {
+            std::regex h_re(R"(<h[1-3][^>]*>\s*[^<]*)" + kw + R"([^<]*</h[1-3]>)",
+                            std::regex::icase);
+            if (std::regex_search(body, h_re)) {
+                signals.push_back("heading:" + kw);
+                break;
+            }
+        }
+
+        // Signal 5 (cheatsheet disambiguator): <kbd> tag presence in body.
+        if (pattern == DefaultShortcutPattern::cheatsheet) {
+            if (body.find("<kbd") != std::string::npos) {
+                signals.push_back("kbd-tag-present");
+            }
+        }
+    }
+
+    return signals;
+}
+
+}  // namespace
+
+DefaultShortcutScan detect_default_shortcuts(
+    const std::string& source,
+    const std::vector<DetectedShortcut>& existing_extracted) {
+    DefaultShortcutScan scan;
+    if (source.empty()) return scan;
+
+    auto components = collect_component_names(source);
+
+    auto patterns = std::vector<DefaultShortcutPattern>{
+        DefaultShortcutPattern::settings,
+        DefaultShortcutPattern::help,
+        DefaultShortcutPattern::cheatsheet,
+        DefaultShortcutPattern::new_file,
+        DefaultShortcutPattern::open_file,
+        DefaultShortcutPattern::save_file,
+        DefaultShortcutPattern::find,
+    };
+
+    // Track which (key, mods) chords are already claimed by an extracted
+    // shortcut.  Extracted always wins — we suppress same-chord defaults.
+    auto extracted_claims = std::set<std::string>{};
+    for (const auto& s : existing_extracted) {
+        std::string sig = s.key;
+        for (const auto& m : s.modifiers) sig += "|" + m;
+        extracted_claims.insert(sig);
+    }
+    auto chord_for = [](DefaultShortcutPattern p) -> std::string {
+        // Used only for the extracted-shortcut collision check, so always
+        // use the macOS chord (extracted shortcuts in the source already
+        // collapse cross-platform via the meta||ctrl idiom).
+        switch (p) {
+            case DefaultShortcutPattern::settings:   return ",|meta";
+            case DefaultShortcutPattern::help:       return "?|meta";
+            case DefaultShortcutPattern::cheatsheet: return "?";  // bare
+            case DefaultShortcutPattern::new_file:   return "n|meta";
+            case DefaultShortcutPattern::open_file:  return "o|meta";
+            case DefaultShortcutPattern::save_file:  return "s|meta";
+            case DefaultShortcutPattern::find:       return "f|meta";
+        }
+        return "";
+    };
+
+    for (auto p : patterns) {
+        // Suppress this default if a same-chord extracted shortcut exists.
+        if (extracted_claims.count(chord_for(p))) continue;
+
+        struct Match { std::string component; std::vector<std::string> signals; };
+        std::vector<Match> matches;
+
+        for (const auto& comp : components) {
+            auto signals = score_signals(source, comp, p);
+            if (signals.size() >= 2) matches.push_back({comp, std::move(signals)});
+        }
+
+        // Cheatsheet vs help disambiguation: if a component matched as
+        // cheatsheet BUT had no <kbd> signal, demote it (a "ShortcutsModal"
+        // with prose only is really a help dialog).
+        if (p == DefaultShortcutPattern::cheatsheet) {
+            matches.erase(
+                std::remove_if(matches.begin(), matches.end(), [](const Match& m) {
+                    return std::find(m.signals.begin(), m.signals.end(),
+                                     std::string("kbd-tag-present")) == m.signals.end();
+                }),
+                matches.end());
+        }
+
+        if (matches.empty()) continue;
+
+        if (matches.size() == 1) {
+            scan.accepted.push_back(DefaultShortcutCandidate{
+                p, matches[0].component,
+                matches[0].signals.size() >= 3 ? "high" : "medium",
+                std::move(matches[0].signals)});
+        } else {
+            std::vector<std::string> candidate_names;
+            for (auto& m : matches) candidate_names.push_back(m.component);
+            scan.collisions.push_back(DefaultShortcutCollision{
+                p, std::move(candidate_names),
+                "multiple components match — no default bound"});
+        }
+    }
+
+    return scan;
+}
+
+std::vector<DetectedShortcut> apply_default_shortcuts(
+    const std::vector<DefaultShortcutCandidate>& accepted,
+    TargetPlatform platform) {
+    std::vector<DetectedShortcut> out;
+    out.reserve(accepted.size());
+    const bool mac = (platform == TargetPlatform::macos);
+
+    for (const auto& c : accepted) {
+        DetectedShortcut s;
+        s.pattern = std::string("default:") + pattern_name(c.pattern) + " (" + c.target + ")";
+        s.handler_excerpt = "auto-bound default: " + c.confidence;
+
+        switch (c.pattern) {
+            case DefaultShortcutPattern::settings:
+                s.key = ",";  s.modifiers = mac ? std::vector<std::string>{"meta"} : std::vector<std::string>{"ctrl"};
+                break;
+            case DefaultShortcutPattern::help:
+                if (mac) { s.key = "?"; s.modifiers = {"meta"}; }
+                else     { s.key = "F1"; s.modifiers = {}; }
+                break;
+            case DefaultShortcutPattern::cheatsheet:
+                // Bare `?` cross-platform. Focus-guard (#2120) suppresses
+                // it while a TextEditor has focus, so it's safe.
+                s.key = "?";  s.modifiers = {};
+                break;
+            case DefaultShortcutPattern::new_file:
+                s.key = "n";  s.modifiers = mac ? std::vector<std::string>{"meta"} : std::vector<std::string>{"ctrl"};
+                break;
+            case DefaultShortcutPattern::open_file:
+                s.key = "o";  s.modifiers = mac ? std::vector<std::string>{"meta"} : std::vector<std::string>{"ctrl"};
+                break;
+            case DefaultShortcutPattern::save_file:
+                s.key = "s";  s.modifiers = mac ? std::vector<std::string>{"meta"} : std::vector<std::string>{"ctrl"};
+                break;
+            case DefaultShortcutPattern::find:
+                s.key = "f";  s.modifiers = mac ? std::vector<std::string>{"meta"} : std::vector<std::string>{"ctrl"};
+                break;
+        }
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+std::string serialize_default_shortcut_scan(const DefaultShortcutScan& scan) {
+    auto root = choc::value::createObject("");
+
+    auto defaults = choc::value::createEmptyArray();
+    for (const auto& c : scan.accepted) {
+        auto obj = choc::value::createObject("");
+        obj.addMember("pattern", std::string(pattern_name(c.pattern)));
+        obj.addMember("target", c.target);
+        obj.addMember("confidence", c.confidence);
+        auto sigs = choc::value::createEmptyArray();
+        for (const auto& s : c.signals) sigs.addArrayElement(s);
+        obj.addMember("signals", sigs);
+        defaults.addArrayElement(obj);
+    }
+    root.addMember("defaults", defaults);
+
+    auto collisions = choc::value::createEmptyArray();
+    for (const auto& col : scan.collisions) {
+        auto obj = choc::value::createObject("");
+        obj.addMember("pattern", std::string(pattern_name(col.pattern)));
+        auto cands = choc::value::createEmptyArray();
+        for (const auto& c : col.candidates) cands.addArrayElement(c);
+        obj.addMember("candidates", cands);
+        obj.addMember("reason", col.reason);
+        collisions.addArrayElement(obj);
+    }
+    root.addMember("collisions", collisions);
+
+    return choc::json::toString(root, /*useLineBreaks=*/true);
+}
+
 
 } // namespace pulp::view

@@ -208,7 +208,10 @@ TEST_CASE("key_string_to_keycode maps DOM key names", "[design-import][shortcuts
 TEST_CASE("key_string_to_keycode returns 0 for unknown", "[design-import][shortcuts][v2]") {
     REQUIRE(key_string_to_keycode("") == 0);
     REQUIRE(key_string_to_keycode("Boop") == 0);
-    REQUIRE(key_string_to_keycode("@") == 0);  // not in alphanumeric range
+    // Printable ASCII (incl. punctuation) is accepted now; "@" maps to 0x40.
+    REQUIRE(key_string_to_keycode("@") == 0x40);
+    // Non-printable / non-ASCII still returns 0.
+    REQUIRE(key_string_to_keycode(std::string(1, '\x01')) == 0);
 }
 
 TEST_CASE("modifier_strings_to_mask combines bits + 'meta' maps to kModCmd", "[design-import][shortcuts][v2]") {
@@ -549,4 +552,266 @@ TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style hand
     REQUIRE(fired_field(4, "key").toString()         == "n");
     REQUIRE(fired_field(4, "ctrlKey").getWithDefault<bool>(false) == true);
     REQUIRE(fired_field(4, "metaKey").getWithDefault<bool>(true)  == false);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase A — default shortcuts (source-matched). Heuristic detector +
+// apply step + collision behavior. Spec: planning/2026-05-16-default-
+// keyboard-shortcuts.md.
+// ────────────────────────────────────────────────────────────────────────
+
+using pulp::view::DefaultShortcutPattern;
+using pulp::view::detect_default_shortcuts;
+using pulp::view::apply_default_shortcuts;
+using pulp::view::serialize_default_shortcut_scan;
+using pulp::view::TargetPlatform;
+
+TEST_CASE("default shortcuts: high-confidence Settings modal fires",
+          "[design-import][shortcuts][defaults]") {
+    auto scan = detect_default_shortcuts(R"JS(
+        function SettingsModal({ onClose }) {
+            return (
+                <div role="dialog" aria-label="Settings">
+                    <h1>Settings</h1>
+                    <button onClick={onClose}>Close</button>
+                </div>
+            );
+        }
+    )JS", /*existing=*/{});
+
+    REQUIRE(scan.accepted.size() == 1);
+    REQUIRE(scan.accepted[0].pattern == DefaultShortcutPattern::settings);
+    REQUIRE(scan.accepted[0].target == "SettingsModal");
+    REQUIRE(scan.accepted[0].confidence == "high");
+    REQUIRE(scan.collisions.empty());
+}
+
+TEST_CASE("default shortcuts: canonical name fires with no body signals",
+          "[design-import][shortcuts][defaults]") {
+    // Real-world apps (Spectr's `SettingsModal`, `HelpPopover`) use inline-
+    // styled divs without role="dialog" or aria-label. The canonical-name
+    // bonus catches `<Pattern>Modal/Dialog/Panel/Popover/Sheet/Window/Drawer`
+    // exact shapes so those don't slip through. Single-signal + canonical
+    // suffix = 2 signals → fires at medium confidence.
+    auto scan = detect_default_shortcuts(R"JS(
+        function SettingsModal() { return <div />; }
+    )JS", {});
+    REQUIRE(scan.accepted.size() == 1);
+    REQUIRE(scan.accepted[0].pattern == DefaultShortcutPattern::settings);
+    REQUIRE(scan.accepted[0].confidence == "medium");
+}
+
+TEST_CASE("default shortcuts: non-canonical name + heading fires at medium",
+          "[design-import][shortcuts][defaults]") {
+    // `HelpFooter` is NOT a canonical kind suffix, so we need a second
+    // real signal — the heading provides it. Two signals → medium.
+    auto scan = detect_default_shortcuts(R"JS(
+        function HelpFooter() { return <div><h2>Help</h2><p>...</p></div>; }
+    )JS", {});
+    REQUIRE(scan.accepted.size() == 1);
+    REQUIRE(scan.accepted[0].confidence == "medium");
+    REQUIRE(scan.accepted[0].pattern == DefaultShortcutPattern::help);
+}
+
+TEST_CASE("default shortcuts: non-canonical single-signal still does NOT fire",
+          "[design-import][shortcuts][defaults]") {
+    // `SettingsList` is name-only AND non-canonical (List isn't in the
+    // modal-kind suffix set). Should NOT fire — `<SettingsList>` is the
+    // grouping widget, not the modal itself.
+    auto scan = detect_default_shortcuts(R"JS(
+        function SettingsList() { return <ul />; }
+    )JS", {});
+    REQUIRE(scan.accepted.empty());
+    REQUIRE(scan.collisions.empty());
+}
+
+TEST_CASE("default shortcuts: multiple Settings candidates → COLLISION, no bind",
+          "[design-import][shortcuts][defaults]") {
+    auto scan = detect_default_shortcuts(R"JS(
+        function AppSettingsModal() {
+            return <div role="dialog" aria-label="Settings"><h1>Settings</h1></div>;
+        }
+        function TrackSettingsModal() {
+            return <div role="dialog" aria-label="Settings"><h1>Settings</h1></div>;
+        }
+    )JS", {});
+    REQUIRE(scan.accepted.empty());
+    REQUIRE(scan.collisions.size() == 1);
+    REQUIRE(scan.collisions[0].pattern == DefaultShortcutPattern::settings);
+    REQUIRE(scan.collisions[0].candidates.size() == 2);
+}
+
+TEST_CASE("default shortcuts: cheatsheet vs help disambiguation via <kbd>",
+          "[design-import][shortcuts][defaults]") {
+    auto scan = detect_default_shortcuts(R"JS(
+        function ShortcutsModal() {
+            return (
+                <div role="dialog" aria-label="Keyboard shortcuts">
+                    <h1>Shortcuts</h1>
+                    <kbd>Cmd+S</kbd> — save
+                    <kbd>Cmd+,</kbd> — settings
+                </div>
+            );
+        }
+    )JS", {});
+    REQUIRE(scan.accepted.size() == 1);
+    REQUIRE(scan.accepted[0].pattern == DefaultShortcutPattern::cheatsheet);
+    bool has_kbd_sig = false;
+    for (const auto& s : scan.accepted[0].signals) {
+        if (s == "kbd-tag-present") { has_kbd_sig = true; break; }
+    }
+    REQUIRE(has_kbd_sig);
+}
+
+TEST_CASE("default shortcuts: extracted shortcut suppresses same-chord default",
+          "[design-import][shortcuts][defaults]") {
+    // Developer already wrote Cmd+, manually. Don't double-bind.
+    pulp::view::DetectedShortcut hand_written;
+    hand_written.key = ",";
+    hand_written.modifiers = {"meta"};
+    auto scan = detect_default_shortcuts(R"JS(
+        function SettingsModal() {
+            return <div role="dialog" aria-label="Settings"><h1>Settings</h1></div>;
+        }
+    )JS", {hand_written});
+    REQUIRE(scan.accepted.empty());
+}
+
+TEST_CASE("default shortcuts: apply_default_shortcuts maps per-platform chords",
+          "[design-import][shortcuts][defaults]") {
+    pulp::view::DefaultShortcutCandidate settings;
+    settings.pattern = DefaultShortcutPattern::settings;
+    settings.target = "SettingsModal";
+    settings.confidence = "high";
+
+    auto mac = apply_default_shortcuts({settings}, TargetPlatform::macos);
+    REQUIRE(mac.size() == 1);
+    REQUIRE(mac[0].key == ",");
+    REQUIRE(mac[0].modifiers == std::vector<std::string>{"meta"});
+
+    auto win = apply_default_shortcuts({settings}, TargetPlatform::win_linux);
+    REQUIRE(win.size() == 1);
+    REQUIRE(win[0].key == ",");
+    REQUIRE(win[0].modifiers == std::vector<std::string>{"ctrl"});
+
+    // Help: bare F1 on Win/Linux, Cmd+? on mac.
+    pulp::view::DefaultShortcutCandidate help;
+    help.pattern = DefaultShortcutPattern::help;
+    help.target = "HelpPanel";
+    help.confidence = "medium";
+    auto help_mac = apply_default_shortcuts({help}, TargetPlatform::macos);
+    REQUIRE(help_mac[0].key == "?");
+    REQUIRE(help_mac[0].modifiers == std::vector<std::string>{"meta"});
+    auto help_win = apply_default_shortcuts({help}, TargetPlatform::win_linux);
+    REQUIRE(help_win[0].key == "F1");
+    REQUIRE(help_win[0].modifiers.empty());
+}
+
+TEST_CASE("default shortcuts: serialize_default_shortcut_scan emits stable JSON",
+          "[design-import][shortcuts][defaults]") {
+    pulp::view::DefaultShortcutScan scan;
+    pulp::view::DefaultShortcutCandidate c;
+    c.pattern = DefaultShortcutPattern::settings;
+    c.target = "SettingsModal";
+    c.confidence = "high";
+    c.signals = {"component-name:SettingsModal", "aria-role:dialog"};
+    scan.accepted.push_back(c);
+
+    pulp::view::DefaultShortcutCollision col;
+    col.pattern = DefaultShortcutPattern::help;
+    col.candidates = {"AppHelp", "TrackHelp"};
+    col.reason = "multiple components match — no default bound";
+    scan.collisions.push_back(col);
+
+    auto json = serialize_default_shortcut_scan(scan);
+    REQUIRE(json.find("\"defaults\"") != std::string::npos);
+    REQUIRE(json.find("\"settings\"") != std::string::npos);
+    REQUIRE(json.find("\"high\"") != std::string::npos);
+    REQUIRE(json.find("\"collisions\"") != std::string::npos);
+    REQUIRE(json.find("\"help\"") != std::string::npos);
+    REQUIRE(json.find("\"AppHelp\"") != std::string::npos);
+}
+
+TEST_CASE("default shortcuts: E2E — codegen emits default thunks too",
+          "[design-import][shortcuts][defaults][e2e]") {
+    // The defaults ride V2's existing codegen path (no fork). Verify the
+    // bound default produces registerShortcut + thunk just like an
+    // extracted entry.
+    auto scan = detect_default_shortcuts(R"JS(
+        function SettingsModal({ onClose }) {
+            return (
+                <div role="dialog" aria-label="Settings">
+                    <h1>Settings</h1>
+                </div>
+            );
+        }
+    )JS", {});
+    REQUIRE(scan.accepted.size() == 1);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    opts.shortcuts = apply_default_shortcuts(scan.accepted, TargetPlatform::macos);
+
+    DesignIR ir;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Cmd+, → keycode 44 (comma) + mask 16 (kModCmd) + a synthetic event
+    // with metaKey:true.
+    REQUIRE(js.find("registerShortcut(44, 16, '__pulpShortcutHandler_0')") != std::string::npos);
+    REQUIRE(js.find("metaKey: true") != std::string::npos);
+    REQUIRE(js.find("key: ','") != std::string::npos);
+}
+
+TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash (Codex P1 #2128)",
+          "[design-import][shortcuts][defaults][v2]") {
+    // Widening key_string_to_keycode to accept all printable ASCII lets
+    // `'` and `\` pass validation. Without escaping at emission time
+    // the generated `key: '...'` literal becomes syntactically invalid
+    // JS and the whole script fails to load. Pin the escape.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+
+    DetectedShortcut quote;  quote.key = "'";  // single-quote literal
+    DetectedShortcut backslash; backslash.key = "\\";  // single backslash
+    opts.shortcuts = {quote, backslash};
+
+    DesignIR ir;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Both literals appear escaped — `key: '\''` and `key: '\\'`.
+    REQUIRE(js.find("key: '\\''")  != std::string::npos);
+    REQUIRE(js.find("key: '\\\\'") != std::string::npos);
+    // No unescaped raw `key: '''` would tokenize as empty-string + stray
+    // quote — assert that doesn't appear.
+    REQUIRE(js.find("key: '''") == std::string::npos);
+}
+
+TEST_CASE("default shortcuts: apply_default_shortcuts win_linux maps File-menu chords correctly",
+          "[design-import][shortcuts][defaults]") {
+    // P2 follow-up — every Cmd-on-mac default has a Ctrl-on-win/linux
+    // counterpart. Pin all four so a future re-map doesn't silently
+    // drop one platform.
+    auto chord_for = [&](DefaultShortcutPattern p) {
+        pulp::view::DefaultShortcutCandidate c;
+        c.pattern = p; c.target = "x"; c.confidence = "medium";
+        auto mac = apply_default_shortcuts({c}, TargetPlatform::macos)[0];
+        auto win = apply_default_shortcuts({c}, TargetPlatform::win_linux)[0];
+        return std::make_pair(mac, win);
+    };
+    for (auto p : {DefaultShortcutPattern::new_file,
+                   DefaultShortcutPattern::open_file,
+                   DefaultShortcutPattern::save_file,
+                   DefaultShortcutPattern::find}) {
+        auto [mac, win] = chord_for(p);
+        REQUIRE(mac.key == win.key);
+        REQUIRE(mac.modifiers == std::vector<std::string>{"meta"});
+        REQUIRE(win.modifiers == std::vector<std::string>{"ctrl"});
+    }
+
+    // Cheatsheet bare `?` is platform-agnostic (same chord both sides).
+    auto [csm, csw] = chord_for(DefaultShortcutPattern::cheatsheet);
+    REQUIRE(csm.key == "?");          REQUIRE(csw.key == "?");
+    REQUIRE(csm.modifiers.empty());   REQUIRE(csw.modifiers.empty());
 }

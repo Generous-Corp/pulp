@@ -613,8 +613,28 @@ If you add a new shortcut shape detector to the extractor, mirror it in:
 
 Test coverage lives in `test/test_design_import.cpp` (E2E roundtrip — codegen → WidgetBridge → React-style handler). The roundtrip exercises both the registerShortcut emission and the synthetic-keydown re-dispatch; failing either half is a hard test failure.
 
-## Keyboard-shortcut extraction lives in its own TU (A3 first cut, 2026-05)
+## Default shortcuts (Phase A — source-matched, #2128)
 
-`extract_keyboard_shortcuts` / `serialize_detected_shortcuts` / `key_string_to_keycode` / `modifier_strings_to_mask` plus the file-local helpers (`line_for_offset`, `collect_modifiers`, `extract_handler_excerpt`) now live in `core/view/src/design_import_shortcuts.cpp` — a focused ~270-line TU separated from the 4670-line `design_import.cpp` monolith. Public API declarations stay in `core/view/include/pulp/view/design_import.hpp` so no caller touches.
+On top of the V2 extractor, the import pass auto-binds platform-convention chords (`Cmd+,` Settings, `Cmd+?` Help, bare `?` cheatsheet, `Cmd+N/O/S/F`, plus Win/Linux `Ctrl`/`F1` variants) when the dev's React source has a recognizable component. Lives in `core/view/src/design_import.cpp::detect_default_shortcuts(...)` + `apply_default_shortcuts(...)`. Accepted defaults are lowered into `DetectedShortcut` form and ride the V2 codegen path with no fork.
 
-Future shortcut work — regex tweaks, new modifier-string mappings, new `KeyboardEvent.code` patterns, JSON shape changes — should land in `design_import_shortcuts.cpp`. The remaining `design_import.cpp` content (Claude bundle envelope, parsers for v0/figma/stitch/rn/pencil, runtime-import wiring, codegen) is queued for its own splits (`claude_bundle.cpp` / `design_codegen.cpp` / `design_tokens.cpp`) as the A3 follow-up.
+Hard rule (encoded): **a wrong auto-binding is worse than no binding**. Detector requires ≥2 signals to fire and emits a `collision` entry (no bind) when multiple candidates compete.
+
+Signals scored per (component, pattern):
+1. Component name keyword match (`SettingsModal`, `HelpPanel`, etc.)
+2. `role="dialog"` / `role="alertdialog"` / `role="menu"` / `role="listbox"` in body
+3. `aria-label="..."` text in body containing pattern keyword
+4. `<h1>`/`<h2>`/`<h3>` heading text matching pattern keyword
+5. `<kbd>` tag presence (cheatsheet disambiguator — required for cheatsheet match)
+6. **Canonical-name bonus**: exact `<Pattern>{Modal,Dialog,Panel,Popover,Sheet,Window,Drawer}` shape counts as a second signal on its own. Real apps (Spectr's `SettingsModal`, `HelpPopover`) use inline-styled divs without ARIA, so the strict ≥2 ARIA-shape gate would skip every one of them. Generic non-canonical names (`SettingsList`) still require a real second signal.
+
+Body-window extraction stops at the next top-level component declaration — otherwise sibling components bleed into each other (a cheatsheet `<kbd>` in `ShortcutsModal` would wrongly count as a signal for an adjacent `SettingsModal` defined right above it).
+
+Cross-platform emission: the CLI runs at import time, but the generated `ui.js` ships to multiple platforms. The import driver emits BOTH macOS and Win/Linux variants for any default with a platform delta (Help: `Cmd+?` + `F1`; Settings: `Cmd+,` + `Ctrl+,`). At runtime only the chord matching the physical key fires its `registerShortcut` entry (exact-mask match on the bridge side).
+
+JS-literal escape: any key string interpolated into `key: '...'` MUST be backslash- and quote-escaped — `key_string_to_keycode` accepts all printable ASCII (incl. `'` and `\`), so a source with `e.key === "'"` would otherwise produce syntactically-invalid JS. The `emit_binding` lambda escapes at emission time.
+
+CLI surface:
+- `--no-default-shortcuts` opts out (default ON)
+- `<name>.defaults.json` diagnostic written alongside `shortcuts.json` showing accepted candidates + collisions
+
+What's NOT in Phase A: Pulp-framework defaults for the built-in `SettingsPanel` Audio/MIDI sub-tabs (`Cmd+Opt+A` / `Cmd+Opt+M`). Phase B follow-up — needs `TabPanel` select-tab JS API + standalone-only emission gate. Spec: `planning/2026-05-16-default-keyboard-shortcuts.md`.

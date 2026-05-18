@@ -54,6 +54,7 @@ static void print_usage() {
     std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
     std::cout << "  --shortcuts <path>      Output keyboard-shortcut manifest (default: shortcuts.json)\n";
     std::cout << "  --no-import-shortcuts   Skip keyboard shortcut auto-import (default: import)\n";
+    std::cout << "  --no-default-shortcuts  Skip platform-convention defaults (Settings=Cmd+,, etc.) (default: enabled)\n";
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
@@ -142,6 +143,11 @@ int main(int argc, char* argv[]) {
     std::string shortcuts_output = "shortcuts.json";
     bool shortcuts_output_explicit = false;
     bool import_shortcuts = true;
+    // Phase A defaults — auto-bind platform conventions (Cmd+, → Settings,
+    // etc.) when the source has a high-confidence component match. Default-on;
+    // `--no-default-shortcuts` opts out without affecting the source-extracted
+    // path above.
+    bool default_shortcuts = true;
     bool output_explicit = false;                         // pulp friction-fix #4
     bool tokens_file_explicit = false;                    // pulp friction-fix #4
     // pulp #1031 — versioned detect surface
@@ -225,6 +231,8 @@ int main(int argc, char* argv[]) {
             shortcuts_output_explicit = true;
         } else if (std::strcmp(argv[i], "--no-import-shortcuts") == 0) {
             import_shortcuts = false;
+        } else if (std::strcmp(argv[i], "--no-default-shortcuts") == 0) {
+            default_shortcuts = false;
         } else if (std::strcmp(argv[i], "--detect-only") == 0) {
             detect_only = true;
         } else if (std::strcmp(argv[i], "--report-new-format") == 0) {
@@ -508,8 +516,49 @@ int main(int argc, char* argv[]) {
     // JS, pencil) can route through the same call without per-source
     // branching here.
     std::vector<DetectedShortcut> detected_shortcuts;
+    DefaultShortcutScan default_scan;
     if (import_shortcuts) {
         detected_shortcuts = extract_keyboard_shortcuts(content, input_file);
+
+        // Phase A defaults — only fire when the developer's React source
+        // has a high-confidence match. `apply_default_shortcuts` lowers
+        // accepted DefaultShortcutCandidates into the same DetectedShortcut
+        // form so they ride V2's codegen path with no fork. Suppressed
+        // chord-by-chord against `detected_shortcuts` so an extracted
+        // binding always wins.
+        //
+        // Codex P2 on #2128: the import CLI runs at build time, but the
+        // generated ui.js ships to many platforms (mac standalone, win
+        // standalone, plugin hosts on either). Emit BOTH macOS and
+        // Win/Linux variants — at runtime only the chord matching the
+        // physical key press fires its registerShortcut entry, so the
+        // user gets the right native binding on each platform without
+        // platform detection at codegen time. Mirrors the V2 dual emit
+        // for `metaKey||ctrlKey` (per-platform handlers, exact-mask
+        // match on the bridge side).
+        if (default_shortcuts) {
+            default_scan = detect_default_shortcuts(content, detected_shortcuts);
+            auto mac_defaults = apply_default_shortcuts(
+                default_scan.accepted, TargetPlatform::macos);
+            auto win_defaults = apply_default_shortcuts(
+                default_scan.accepted, TargetPlatform::win_linux);
+            for (auto& d : mac_defaults) detected_shortcuts.push_back(std::move(d));
+            // Skip Win/Linux variants whose chord (key + mask) already
+            // came in via the mac pass — happens for keys without a
+            // platform delta (e.g. bare `?` for cheatsheet emits the
+            // same binding under both platforms).
+            for (auto& d : win_defaults) {
+                bool dup = false;
+                for (const auto& existing : detected_shortcuts) {
+                    if (existing.key == d.key && existing.modifiers == d.modifiers) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) detected_shortcuts.push_back(std::move(d));
+            }
+        }
+
         opts.shortcuts = detected_shortcuts;
     }
 
@@ -622,10 +671,41 @@ int main(int argc, char* argv[]) {
     if (import_shortcuts && !detected_shortcuts.empty()) {
         const auto shortcuts_json = serialize_detected_shortcuts(detected_shortcuts);
         if (write_file(shortcuts_output, shortcuts_json)) {
+            // `default_scan.accepted` is the count of UI surfaces matched
+            // (one per Settings/Help/Cheatsheet/…). Each accepted surface
+            // emits up to TWO actual bindings (mac chord + win/linux
+            // variant) so the count of default-tagged DetectedShortcuts
+            // can be up to 2× the accepted-surfaces count.
+            size_t default_count = 0;
+            for (const auto& s : detected_shortcuts) {
+                if (s.pattern.rfind("default:", 0) == 0) ++default_count;
+            }
+            const size_t extracted_count = detected_shortcuts.size() - default_count;
             std::cout << "Wrote " << shortcuts_output
                       << " (" << detected_shortcuts.size() << " shortcut"
                       << (detected_shortcuts.size() == 1 ? "" : "s")
+                      << " — " << extracted_count << " extracted, "
+                      << default_count << " platform-default"
                       << " — bound natively via registerShortcut())\n";
+        }
+    }
+
+    // Phase A — diagnostic dump of the defaults scan alongside the bound
+    // manifest. Writes even when no defaults fired, so a reviewer can see
+    // *why* (collisions, low confidence). Mirror naming convention.
+    if (import_shortcuts && default_shortcuts &&
+        (!default_scan.accepted.empty() || !default_scan.collisions.empty())) {
+        std::string defaults_path = shortcuts_output;
+        const auto dot = defaults_path.rfind('.');
+        defaults_path = (dot == std::string::npos)
+            ? defaults_path + ".defaults.json"
+            : defaults_path.substr(0, dot) + ".defaults.json";
+        const auto defaults_json = serialize_default_shortcut_scan(default_scan);
+        if (write_file(defaults_path, defaults_json)) {
+            std::cout << "Wrote " << defaults_path
+                      << " (" << default_scan.accepted.size() << " accepted, "
+                      << default_scan.collisions.size() << " collisions"
+                      << " — Phase A source-matched defaults)\n";
         }
     }
 

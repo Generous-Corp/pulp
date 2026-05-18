@@ -3830,12 +3830,30 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // physical chord we're intercepting — so the bundled React
         // handler's `e.ctrlKey`, `e.metaKey`, `e.metaKey || e.ctrlKey`
         // checks all see the right state.
+        // Escape a key string for a single-quoted JS literal. Codex P1 on
+        // #2128: widening `key_string_to_keycode` to accept all printable
+        // ASCII let characters like `'` and `\` pass validation, but the
+        // generator interpolates them raw into `key: '...'`. A source
+        // with `e.key === "'"` produces syntactically-invalid JS and the
+        // whole script fails to load. Escape backslash + single-quote at
+        // emission time so any future printable-key default is safe too.
+        auto js_escape_single_quoted = [](const std::string& in) {
+            std::string out;
+            out.reserve(in.size() + 2);
+            for (char c : in) {
+                if (c == '\\' || c == '\'') out += '\\';
+                out += c;
+            }
+            return out;
+        };
+
         auto emit_binding = [&](int kc, int mask, const std::string& key_str,
                                 const std::string& handler) {
+            const std::string key_esc = js_escape_single_quoted(key_str);
             ss << "globalThis." << handler << " = function() {\n";
             ss << "    if (typeof __dispatch__ !== 'function') return;\n";
             ss << "    __dispatch__('__global__', 'keydown', {\n";
-            ss << "        key: '" << key_str << "',\n";
+            ss << "        key: '" << key_esc << "',\n";
             ss << "        keyCode: " << kc << ",\n";
             ss << "        ctrlKey: " << ((mask & kModCtrl) ? "true" : "false") << ",\n";
             ss << "        shiftKey: " << ((mask & kModShift) ? "true" : "false") << ",\n";
