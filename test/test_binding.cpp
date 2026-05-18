@@ -427,3 +427,29 @@ TEST_CASE("Binding poll updates baseline after the first notification",
     REQUIRE_FALSE(b.poll());
     REQUIRE(call_count == 1);
 }
+
+TEST_CASE("Binding copies retain store identity and callback state",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding original(*store, 1);
+    std::vector<float> original_values;
+    original.on_change([&](float value) {
+        original_values.push_back(value);
+    });
+
+    Binding copied = original;
+    std::vector<float> copied_values;
+    copied.on_change([&](float value) {
+        copied_values.push_back(value);
+    });
+
+    original.set(-3.0f);
+    copied.set(-6.0f);
+
+    REQUIRE(original.id() == copied.id());
+    REQUIRE(original.info() == copied.info());
+    REQUIRE_THAT(original.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE_THAT(copied.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE(original_values == std::vector<float>{-3.0f, -6.0f});
+    REQUIRE(copied_values == std::vector<float>{-6.0f});
+}
