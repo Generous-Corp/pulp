@@ -1192,7 +1192,10 @@ TEST_CASE("token parsers cover border composites inference and alternate sources
         "misc": {
             "implicitColor": { "$value": "#00ff00" },
             "implicitNumber": { "$value": "42" },
+            "implicitUnitNumber": { "$value": "3.5rem" },
             "implicitString": { "$value": "not-a-number" },
+            "partialNumber": { "$value": "12pxjunk" },
+            "badTypedNumber": { "$type": "number", "$value": "1e999" },
             "unknownComposite": { "$type": "custom", "$value": { "x": 1 } }
         }
     })";
@@ -1203,15 +1206,21 @@ TEST_CASE("token parsers cover border composites inference and alternate sources
     REQUIRE(theme.strings["border.focus.style"] == "dashed");
     REQUIRE(theme.colors["misc.implicitColor"].g8() == 0xff);
     REQUIRE(theme.dimensions["misc.implicitNumber"] == 42.0f);
+    REQUIRE(theme.dimensions["misc.implicitUnitNumber"] == 3.5f);
     REQUIRE(theme.strings["misc.implicitString"] == "not-a-number");
+    REQUIRE(theme.strings["misc.partialNumber"] == "12pxjunk");
+    REQUIRE(theme.dimensions.count("misc.badTypedNumber") == 0);
     REQUIRE(theme.strings.count("misc.unknownComposite") == 1);
 
     auto figma = R"([
         { "name": "color/alpha", "type": "color", "value": "#11223344" },
         { "name": "size/ratio", "type": "number", "value": "1.25" },
+        { "name": "size/unit", "type": "number", "value": "2px" },
+        { "name": "size/bad", "type": "number", "value": "4remjunk" },
         { "name": "copy/title", "type": "string", "value": "Hello" },
         { "name": "inferred/color", "resolvedValue": "#abcdef" },
         { "name": "inferred/number", "resolvedValue": "3.5" },
+        { "name": "inferred/bad-number", "resolvedValue": "3.5junk" },
         { "name": "inferred/string", "resolvedValue": "wide" },
         { "type": "STRING", "resolvedValue": "missing name" }
     ])";
@@ -1219,9 +1228,12 @@ TEST_CASE("token parsers cover border composites inference and alternate sources
     auto figma_theme = parse_figma_variables(figma);
     REQUIRE(figma_theme.colors["color.alpha"].a8() == 0x44);
     REQUIRE(figma_theme.dimensions["size.ratio"] == 1.25f);
+    REQUIRE(figma_theme.dimensions["size.unit"] == 2.0f);
+    REQUIRE(figma_theme.dimensions.count("size.bad") == 0);
     REQUIRE(figma_theme.strings["copy.title"] == "Hello");
     REQUIRE(figma_theme.colors["inferred.color"].r8() == 0xab);
     REQUIRE(figma_theme.dimensions["inferred.number"] == 3.5f);
+    REQUIRE(figma_theme.strings["inferred.bad-number"] == "3.5junk");
     REQUIRE(figma_theme.strings["inferred.string"] == "wide");
 
     auto stitch = R"({
