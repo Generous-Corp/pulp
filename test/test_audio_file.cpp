@@ -925,6 +925,22 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(contains_extension(write_extensions, ".aif"));
 }
 
+TEST_CASE("FormatRegistry rejects missing and extension-only paths",
+          "[audio][file][registry][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    REQUIRE(registry.find_reader("") == nullptr);
+    REQUIRE(registry.find_writer("") == nullptr);
+    REQUIRE_FALSE(registry.read_info("pulp_audio_without_extension").has_value());
+    REQUIRE_FALSE(registry.read("pulp_audio_without_extension").has_value());
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.0f, 0.25f}};
+    REQUIRE_FALSE(registry.write("pulp_audio_without_extension", data));
+    REQUIRE_FALSE(registry.write(".wav", data));
+}
+
 TEST_CASE("FormatRegistry rejects malformed compressed files through built-in readers",
           "[audio][file][registry][issue-640]") {
     auto flac_path = unique_temp_audio_path("_invalid.FLAC");
