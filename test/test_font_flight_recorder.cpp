@@ -55,6 +55,34 @@ TEST_CASE("FlightRecorder: capacity overflow drops oldest", "[font][diagnostics]
     r.clear();
 }
 
+TEST_CASE("FlightRecorder: snapshot is non-destructive and ordered",
+          "[font][diagnostics][coverage]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(4);
+
+    r.record_fallback({"first", "selected-first", 1u, 11u, 0u});
+    r.record_fallback({"second", "selected-second", 2u, 12u, 0u});
+
+    auto first_snapshot = r.snapshot();
+    REQUIRE(first_snapshot.size() == 2u);
+    REQUIRE(first_snapshot[0].requested_family == "first");
+    REQUIRE(first_snapshot[1].requested_family == "second");
+    REQUIRE(first_snapshot[0].sequence < first_snapshot[1].sequence);
+    REQUIRE(r.size() == 2u);
+
+    auto second_snapshot = r.snapshot();
+    REQUIRE(second_snapshot.size() == 2u);
+    REQUIRE(second_snapshot[0].sequence == first_snapshot[0].sequence);
+    REQUIRE(second_snapshot[1].sequence == first_snapshot[1].sequence);
+
+    auto drained = r.drain();
+    REQUIRE(drained.size() == 2u);
+    REQUIRE(r.size() == 0u);
+
+    r.set_capacity(1024);
+}
+
 TEST_CASE("FlightRecorder: shrinking capacity trims oldest records",
           "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
@@ -76,6 +104,24 @@ TEST_CASE("FlightRecorder: shrinking capacity trims oldest records",
     r.clear();
 }
 
+TEST_CASE("FlightRecorder: capacity=0 trims existing records immediately",
+          "[font][diagnostics][coverage]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(3);
+
+    r.record_fallback({"a", "a", 0u, 0u, 0u});
+    r.record_fallback({"b", "b", 0u, 0u, 0u});
+    REQUIRE(r.size() == 2u);
+
+    r.set_capacity(0);
+    REQUIRE(r.capacity() == 0u);
+    REQUIRE(r.size() == 0u);
+    REQUIRE(r.snapshot().empty());
+
+    r.set_capacity(1024);
+}
+
 TEST_CASE("FlightRecorder: capacity=0 disables recording", "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
@@ -83,6 +129,28 @@ TEST_CASE("FlightRecorder: capacity=0 disables recording", "[font][diagnostics]"
 
     r.record_fallback({"x", "x", 0u, 0u, 0u});
     REQUIRE(r.size() == 0u);
+
+    r.set_capacity(1024);
+}
+
+TEST_CASE("FlightRecorder: disabled recording still advances sequence",
+          "[font][diagnostics][coverage]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(1);
+
+    r.record_fallback({"before", "before", 0u, 0u, 0u});
+    const auto before = r.drain().front().sequence;
+
+    r.set_capacity(0);
+    r.record_fallback({"suppressed", "suppressed", 0u, 0u, 0u});
+    REQUIRE(r.size() == 0u);
+
+    r.set_capacity(1);
+    r.record_fallback({"after", "after", 0u, 0u, 0u});
+    const auto after = r.drain().front().sequence;
+
+    REQUIRE(after > before + 1u);
 
     r.set_capacity(1024);
 }
@@ -113,6 +181,29 @@ TEST_CASE("FlightRecorder: JSON drain is well-formed", "[font][diagnostics]") {
     REQUIRE(json.find("\"selected_family\":\"Inter\"") != std::string::npos);
     REQUIRE(json.find("\"origin\":2") != std::string::npos);
     REQUIRE(json.find("\"generation\":7") != std::string::npos);
+}
+
+TEST_CASE("FlightRecorder: JSON drain preserves order and sequence fields",
+          "[font][diagnostics][coverage]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(4);
+
+    r.record_fallback({"alpha", "A", 1u, 21u, 0u});
+    r.record_fallback({"beta", "B", 2u, 22u, 0u});
+    const auto expected = r.snapshot();
+    const std::string json = flight_recorder_drain_json();
+
+    const auto alpha_pos = json.find("\"requested_family\":\"alpha\"");
+    const auto beta_pos = json.find("\"requested_family\":\"beta\"");
+    REQUIRE(alpha_pos != std::string::npos);
+    REQUIRE(beta_pos != std::string::npos);
+    REQUIRE(alpha_pos < beta_pos);
+    REQUIRE(json.find("\"sequence\":" + std::to_string(expected[0].sequence)) != std::string::npos);
+    REQUIRE(json.find("\"sequence\":" + std::to_string(expected[1].sequence)) != std::string::npos);
+    REQUIRE(r.size() == 0u);
+
+    r.set_capacity(1024);
 }
 
 TEST_CASE("FlightRecorder: JSON drain escapes strings and handles empty records",
