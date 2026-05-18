@@ -478,3 +478,52 @@ TEST_CASE("JsonRpcPeer ignores malformed response payloads without firing callba
     pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"result":true})json");
     REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
 }
+
+TEST_CASE("JsonRpcPeer forwards scalar and object params unchanged",
+          "[json_rpc][coverage][phase3-large]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    std::vector<std::string> params_seen;
+    server.register_method("capture", [&](std::string_view params) {
+        params_seen.emplace_back(params);
+        return JsonRpcResult::ok(R"({"ok":true})");
+    });
+
+    std::atomic<int> callbacks{0};
+    REQUIRE(client.send_request("capture", R"({"nested":{"value":7}})",
+        [&](const JsonRpcResult& response) {
+            REQUIRE_FALSE(response.error.has_value());
+            callbacks.fetch_add(1);
+        }));
+    REQUIRE(client.send_request("capture", R"("scalar")",
+        [&](const JsonRpcResult& response) {
+            REQUIRE_FALSE(response.error.has_value());
+            callbacks.fetch_add(1);
+        }));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 2; }));
+    REQUIRE(params_seen.size() == 2);
+    REQUIRE(params_seen[0].find(R"("nested")") != std::string::npos);
+    REQUIRE(params_seen[0].find("7") != std::string::npos);
+    REQUIRE(params_seen[1] == R"("scalar")");
+}
+
+TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without replies",
+          "[json_rpc][coverage][phase3-large]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer peer(*pair.second);
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","id":4})json"));
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","params":[1,2,3]})json"));
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","method":"unhandled"})json"));
+
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(replies.empty());
+}
