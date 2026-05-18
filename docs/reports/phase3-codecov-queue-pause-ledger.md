@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-18 14:56 PDT
+Last updated: 2026-05-18 14:58 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -80,6 +80,19 @@ cases), and `git diff --check`. Direct execution without
 `PULP_SOURCE_DIR` still fails the pre-existing codegen shellout fixture;
 the rerun used the environment CMake supplies. PR state: not pushed;
 keep accumulating related coverage commits toward the larger batch. No
+Namespace dispatch.
+
+2026-05-18 14:58 PDT: added fifth committed tranche to
+`feature/phase3-codecov-batch-747`:
+`d012689ed test(cli): cover validator discovery edge paths`, touching
+`test/test_cli_validator_discovery.cpp`. Scope: deterministic validator
+discovery coverage for PATH-resolved validator fallback, unknown-owner
+broken validator classification/remediation, mixed `apply_fixes`
+counters, and ANSI color rendering. Local validation passed:
+`cmake --build build --target pulp-test-cli-validator-discovery`,
+`build/test/pulp-test-cli-validator-discovery` (83 assertions in 13
+test cases), and `git diff --check`. PR state: not pushed; keep
+accumulating related coverage commits toward the larger batch. No
 Namespace dispatch.
 
 Batch size guidance after reopening GitHub-hosted CI: prefer larger
