@@ -157,6 +157,36 @@ TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
     REQUIRE(count_c == 1);
 }
 
+TEST_CASE("AudioFocusRegistry: publish snapshots subscribers before dispatch",
+          "[audio][focus][coverage][phase3-large]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    std::vector<AudioFocusState> first_seen;
+    std::vector<AudioFocusState> late_seen;
+    AudioFocusRegistry::Token late_token;
+
+    auto first = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState state) {
+            first_seen.push_back(state);
+            if (!late_token.id()) {
+                late_token = AudioFocusRegistry::instance().subscribe(
+                    [&](AudioFocusState late_state) {
+                        late_seen.push_back(late_state);
+                    });
+            }
+        });
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(first_seen == std::vector<AudioFocusState>{AudioFocusState::duck});
+    REQUIRE(late_seen.empty());
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::lost);
+    REQUIRE(first_seen == std::vector<AudioFocusState>{
+        AudioFocusState::duck,
+        AudioFocusState::lost,
+    });
+    REQUIRE(late_seen == std::vector<AudioFocusState>{AudioFocusState::lost});
+}
+
 TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();
