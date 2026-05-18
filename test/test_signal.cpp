@@ -523,6 +523,26 @@ TEST_CASE("ADSR retrigger continues from current level",
     REQUIRE(env.stage() == Adsr::Stage::attack);
 }
 
+TEST_CASE("ADSR retrigger restarts attack from a partial level",
+          "[signal][adsr][coverage]") {
+    Adsr env;
+    env.set_sample_rate(1000.0f);
+    env.set_params({0.1f, 0.1f, 0.25f, 0.1f});
+
+    env.note_on();
+    const float before = env.next();
+    REQUIRE(before > 0.0f);
+    REQUIRE(before < 1.0f);
+
+    env.note_on();
+    const float after = env.next();
+
+    REQUIRE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::attack);
+    REQUIRE(after > before);
+    REQUIRE(after < 1.0f);
+}
+
 // ── Biquad ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Biquad lowpass attenuates high frequencies", "[signal][biquad]") {
