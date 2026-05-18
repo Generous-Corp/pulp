@@ -15,6 +15,7 @@ using pulp::runtime::FileStream;
 using pulp::runtime::HttpStream;
 using pulp::runtime::MemoryStream;
 using pulp::runtime::NamedPipe;
+using pulp::runtime::PipeStream;
 using pulp::runtime::Stream;
 using pulp::runtime::StreamError;
 using pulp::runtime::StreamResult;
@@ -434,6 +435,32 @@ TEST_CASE("FileStream reopen closes the previous handle",
     std::filesystem::remove(second);
 }
 
+TEST_CASE("FileStream move assignment handles self and closed sources",
+          "[stream][file][coverage][phase3]") {
+    auto path = make_temp_path("pulp_stream_self_move");
+    const std::uint8_t payload[] = {'s', 'e', 'l', 'f'};
+
+    FileStream stream(path.string(), FileStream::Mode::Write);
+    REQUIRE(stream.is_open());
+    auto& same = stream;
+    stream = std::move(same);
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.write(payload, sizeof(payload)).bytes == sizeof(payload));
+    REQUIRE(stream.flush());
+
+    FileStream closed;
+    stream = std::move(closed);
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE_FALSE(closed.is_open());
+
+    FileStream reader(path.string(), FileStream::Mode::Read);
+    std::uint8_t out[sizeof(payload)]{};
+    REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
+    REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("TcpStream closed state rejects I/O and survives move assignment",
           "[stream][tcp][coverage][issue-641]") {
     TcpStream first;
@@ -508,6 +535,29 @@ TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_
     REQUIRE_FALSE(pipe.connect_client(missing.string()));
     REQUIRE_FALSE(pipe.is_open());
     REQUIRE(pipe.read(buf, sizeof(buf)) == -1);
+}
+
+TEST_CASE("PipeStream default and moved-empty streams fail closed",
+          "[stream][pipe][coverage][phase3]") {
+    PipeStream stream;
+    REQUIRE_FALSE(stream.is_open());
+
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+    REQUIRE(stream.read(&byte, 0).closed());
+    REQUIRE(stream.write(&byte, 0).closed());
+
+    PipeStream moved(std::move(stream));
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE_FALSE(moved.is_open());
+    REQUIRE(moved.read(&byte, 1).closed());
+
+    PipeStream assigned;
+    assigned = std::move(moved);
+    REQUIRE_FALSE(assigned.is_open());
+    assigned.close();
+    REQUIRE_FALSE(assigned.is_open());
 }
 
 #ifndef _WIN32
