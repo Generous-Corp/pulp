@@ -954,6 +954,18 @@ add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-shaper)
 
+# pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
+# Asserts TextShaper predictions match Skia's measured advance within
+# 0.5px for a hand-picked sample set representative of CHAIN INFO /
+# CROSSOVER bugs. Full multilingual torture corpus (test/text_corpus/
+# corpus.json) loader + per-TextAnchor bbox assertions land alongside
+# the JSON parser link in a follow-up.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-parity test_parity.cpp)
+    target_link_libraries(pulp-test-parity PRIVATE pulp::canvas Catch2::Catch2WithMain skia::skia)
+    catch_discover_tests(pulp-test-parity)
+endif()
+
 # Analytics tests
 add_executable(pulp-test-analytics test_analytics.cpp)
 target_link_libraries(pulp-test-analytics PRIVATE pulp::runtime Catch2::Catch2WithMain)
