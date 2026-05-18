@@ -235,6 +235,33 @@ TEST_CASE("Typed identity wrappers compare and hash deterministic values",
     REQUIRE(objects[second] == "two");
 }
 
+TEST_CASE("Typed transient identity wrappers hash deterministic values",
+          "[runtime][identity][codecov]") {
+    SessionId session{Uuid::from_string("10000000-0000-0000-0000-000000000001")};
+    RunId run{Uuid::from_string("20000000-0000-0000-0000-000000000002")};
+    CorrelationId correlation{Uuid::from_string("30000000-0000-0000-0000-000000000003")};
+
+    REQUIRE(session.to_string() == "10000000-0000-0000-0000-000000000001");
+    REQUIRE(run.to_string() == "20000000-0000-0000-0000-000000000002");
+    REQUIRE(correlation.to_string() == "30000000-0000-0000-0000-000000000003");
+
+    std::unordered_map<SessionId, std::string> sessions;
+    sessions[session] = "session";
+    sessions[SessionId{session.value}] = "updated";
+    REQUIRE(sessions.size() == 1);
+    REQUIRE(sessions[session] == "updated");
+
+    std::unordered_set<RunId> runs;
+    runs.insert(run);
+    runs.insert(RunId{run.value});
+    REQUIRE(runs.size() == 1);
+
+    std::unordered_set<CorrelationId> correlations;
+    correlations.insert(correlation);
+    correlations.insert(CorrelationId{Uuid::from_string(correlation.to_string())});
+    REQUIRE(correlations.size() == 1);
+}
+
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",
           "[runtime][identity][coverage][phase3]") {
     EventEnvelope env;
