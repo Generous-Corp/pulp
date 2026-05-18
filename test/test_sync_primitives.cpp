@@ -17,6 +17,17 @@ struct TransportState {
     int time_sig_den = 4;
 };
 
+TEST_CASE("SeqLock default constructor publishes value-initialized snapshots",
+          "[runtime][seqlock][coverage][phase3]") {
+    SeqLock<TransportState> lock;
+
+    auto result = lock.read();
+    REQUIRE(result.tempo == 120.0);
+    REQUIRE(result.beat_position == 0.0);
+    REQUIRE(result.time_sig_num == 4);
+    REQUIRE(result.time_sig_den == 4);
+}
+
 TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
     SeqLock<TransportState> lock;
 
