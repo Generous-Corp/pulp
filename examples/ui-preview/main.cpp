@@ -555,6 +555,7 @@ int main(int argc, char* argv[]) {
                     std::cerr << "[ui-preview] --font-probe: bad codepoint '" << token << "'\n";
                     all_ok = false; continue;
                 }
+#if PULP_HAS_SKIA
                 auto pr = pulp::canvas::probe_font_glyph(family, 400, 0, cp);
                 std::cout << "{\"family\":\"" << family << "\","
                           << "\"codepoint\":\"U+" << std::hex << std::uppercase
@@ -565,6 +566,12 @@ int main(int argc, char* argv[]) {
                           << "\"ok\":" << (pr.family_resolved && pr.glyph_present ? "true" : "false")
                           << "}\n";
                 if (!pr.family_resolved || !pr.glyph_present) all_ok = false;
+#else
+                std::cerr << "[ui-preview] --font-probe for U+" << std::hex << std::uppercase
+                          << cp << std::dec << std::nouppercase
+                          << " requires Skia text shaping support\n";
+                all_ok = false;
+#endif
             }
             return all_ok ? 0 : 1;
         } else if (starts_with(argv[i], "--font-dir=")) {
