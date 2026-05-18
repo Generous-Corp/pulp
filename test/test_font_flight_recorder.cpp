@@ -55,6 +55,27 @@ TEST_CASE("FlightRecorder: capacity overflow drops oldest", "[font][diagnostics]
     r.clear();
 }
 
+TEST_CASE("FlightRecorder: shrinking capacity trims oldest records",
+          "[font][diagnostics]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(4);
+
+    r.record_fallback({"a", "a", 0u, 0u, 0u});
+    r.record_fallback({"b", "b", 0u, 0u, 0u});
+    r.record_fallback({"c", "c", 0u, 0u, 0u});
+    r.record_fallback({"d", "d", 0u, 0u, 0u});
+
+    r.set_capacity(2);
+    auto out = r.snapshot();
+    REQUIRE(out.size() == 2u);
+    REQUIRE(out[0].requested_family == "c");
+    REQUIRE(out[1].requested_family == "d");
+
+    r.set_capacity(1024);
+    r.clear();
+}
+
 TEST_CASE("FlightRecorder: capacity=0 disables recording", "[font][diagnostics]") {
     auto& r = FontFlightRecorder::instance();
     r.clear();
@@ -64,6 +85,21 @@ TEST_CASE("FlightRecorder: capacity=0 disables recording", "[font][diagnostics]"
     REQUIRE(r.size() == 0u);
 
     r.set_capacity(1024);
+}
+
+TEST_CASE("FlightRecorder: clear preserves monotonic sequence",
+          "[font][diagnostics]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    r.set_capacity(1024);
+
+    r.record_fallback({"first", "first", 0u, 0u, 0u});
+    const auto before = r.drain().front().sequence;
+    r.clear();
+    r.record_fallback({"second", "second", 0u, 0u, 0u});
+    const auto after = r.drain().front().sequence;
+
+    REQUIRE(after > before);
 }
 
 TEST_CASE("FlightRecorder: JSON drain is well-formed", "[font][diagnostics]") {
@@ -77,6 +113,24 @@ TEST_CASE("FlightRecorder: JSON drain is well-formed", "[font][diagnostics]") {
     REQUIRE(json.find("\"selected_family\":\"Inter\"") != std::string::npos);
     REQUIRE(json.find("\"origin\":2") != std::string::npos);
     REQUIRE(json.find("\"generation\":7") != std::string::npos);
+}
+
+TEST_CASE("FlightRecorder: JSON drain escapes strings and handles empty records",
+          "[font][diagnostics]") {
+    auto& r = FontFlightRecorder::instance();
+    r.clear();
+    REQUIRE(flight_recorder_drain_json() == "{\"records\":[]}");
+
+    r.record_fallback({"Quote\"Slash\\Tab\tLine\nReturn\r",
+                       "Selected",
+                       1u,
+                       9u,
+                       0u});
+    const std::string json = flight_recorder_drain_json();
+
+    REQUIRE(json.find("Quote\\\"Slash\\\\Tab\\tLine\\nReturn\\r") != std::string::npos);
+    REQUIRE(json.find("\"selected_family\":\"Selected\"") != std::string::npos);
+    REQUIRE(r.size() == 0u);
 }
 
 TEST_CASE("FlightRecorder: FontResolver pushes events on resolve",
