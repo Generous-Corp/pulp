@@ -185,4 +185,16 @@ bool Socket::is_open() const {
     return fd_ != kInvalidSocketHandle;
 }
 
+uint16_t Socket::local_port() const {
+    if (fd_ == kInvalidSocketHandle) return 0;
+
+    struct sockaddr_in addr{};
+    socklen_t addr_len = sizeof(addr);
+    if (::getsockname(NATIVE_SOCKET(fd_), reinterpret_cast<struct sockaddr*>(&addr),
+                      &addr_len) != 0) {
+        return 0;
+    }
+    return ntohs(addr.sin_port);
+}
+
 }  // namespace pulp::runtime

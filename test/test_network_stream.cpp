@@ -38,6 +38,22 @@ std::optional<std::uint16_t> try_bind_loopback(Socket& server, std::uint16_t por
     return port;
 }
 
+std::optional<std::uint16_t> try_bind_loopback_ephemeral(Socket& server) {
+    if (!server.bind("127.0.0.1", 0)) return std::nullopt;
+    if (!server.listen(1)) return std::nullopt;
+    const auto port = server.local_port();
+    if (port == 0) return std::nullopt;
+    return port;
+}
+
+std::optional<std::uint16_t> try_bind_udp_ephemeral(Socket& socket,
+                                                    std::string_view address = "127.0.0.1") {
+    if (!socket.bind(address, 0)) return std::nullopt;
+    const auto port = socket.local_port();
+    if (port == 0) return std::nullopt;
+    return port;
+}
+
 std::optional<std::uint16_t> try_bind_udp(Socket& socket,
                                           std::uint16_t start,
                                           std::string_view address = "127.0.0.1") {
@@ -581,11 +597,8 @@ TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
           "[network_stream][socket][coverage][phase3]") {
     Socket receiver;
     REQUIRE(receiver.create(SocketType::UDP));
-    auto port = try_bind_udp(receiver, 46411);
-    if (!port) {
-        SUCCEED("could not bind UDP loopback port; skipping");
-        return;
-    }
+    auto port = try_bind_udp_ephemeral(receiver);
+    REQUIRE(port);
 
     Socket sender;
     REQUIRE(sender.create(SocketType::UDP));
@@ -617,22 +630,24 @@ TEST_CASE("Socket UDP send_to and receive_from fail before create",
     REQUIRE(from_port == 7777);
 }
 
+TEST_CASE("Socket local_port reports bound UDP ephemeral port",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket socket;
+    REQUIRE(socket.local_port() == 0);
+    REQUIRE(socket.create(SocketType::UDP));
+    REQUIRE(socket.local_port() == 0);
+    REQUIRE(socket.bind("127.0.0.1", 0));
+    REQUIRE(socket.local_port() != 0);
+}
+
 TEST_CASE("Socket TCP loopback send receive and close",
           "[network_stream][socket][coverage][phase3]") {
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
 
-    std::uint16_t port = 0;
-    for (std::uint16_t candidate = 46601; candidate < 46680; ++candidate) {
-        if (auto bound = try_bind_loopback(listener, candidate)) {
-            port = *bound;
-            break;
-        }
-    }
-    if (port == 0) {
-        SUCCEED("could not bind TCP loopback port; skipping");
-        return;
-    }
+    auto bound_port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(bound_port);
+    const auto port = *bound_port;
 
     std::atomic<bool> server_ready{false};
     std::atomic<bool> server_done{false};

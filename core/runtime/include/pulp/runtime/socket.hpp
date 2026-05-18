@@ -53,6 +53,9 @@ public:
     /// Whether the socket is open.
     bool is_open() const;
 
+    /// Bound local port, or 0 when unavailable/unbound.
+    uint16_t local_port() const;
+
     // No copy, move OK
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
