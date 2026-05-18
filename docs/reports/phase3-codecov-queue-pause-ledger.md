@@ -7894,3 +7894,20 @@ pulp-test-memory-message-channel -j$(sysctl -n hw.ncpu)`,
 -r compact` (16 cases / 73 assertions), skill-sync, version-bump report, and
 `git diff --check`. Batch #729 is 3 local commits ahead and remains held for
 the next large PR.
+
+2026-05-18 02:17 PDT: added three runtime tranches to held batch
+`feature/phase3-codecov-batch-729`: commit `24f1d0e4d` (`test(runtime):
+cover expression builtin edges`) extends `pulp-test-runtime-utils` across the
+remaining built-in math functions, two-argument function nesting, and malformed
+function/operator inputs; commit `ffdd128a4` (`test(runtime): cover transient
+identity hashing`) extends `pulp-test-identity` over deterministic hashing and
+string formatting for `SessionId`, `RunId`, and `CorrelationId`; commit
+`a33a24aa9` (`test(runtime): cover http stream factory states`) extends
+`pulp-test-network-stream` over `HttpStream::get`, `HttpStream::post`, and
+`fetch()` reset behavior on invalid URLs without real network dependency.
+Local validation passed: `pulp-test-runtime-utils "[runtime][expression]"`
+(6 cases / 39 assertions), `pulp-test-identity "[runtime][identity]"`
+(14 cases / 83 assertions), `pulp-test-network-stream
+"[network_stream][http]"` (5 cases / 28 assertions), skill-sync,
+version-bump report, and `git diff --check`. Batch #729 is 6 local commits
+ahead and remains held for the next large PR.
