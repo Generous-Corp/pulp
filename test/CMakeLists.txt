@@ -745,6 +745,8 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 
 # Accessibility tree snapshot (workstream 04 slice 4.4)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
+# Text-accessibility scaffold (font v2 Slice 2.6)
+pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
 # A/B compare (workstream 07 slice 7.2)
 pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field (workstream 07 slice 7.5b)

@@ -184,6 +184,7 @@ endif()
 target_sources(pulp-view PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
     src/accessibility.cpp
+    src/text_accessibility.cpp
     src/table_model.cpp
     src/modulation_matrix.cpp
     src/modulation_matrix_widget.cpp
