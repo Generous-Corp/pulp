@@ -18,6 +18,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 - feat(motion): Phase 11 — native bridges, visual+ enhancements, scroll/outlier, CLI/MCP ([#2168](https://github.com/danielraffel/pulp/pull/2168))
 
+<a id="v011312"></a>
+## [0.113.12] - 2026-05-18
+
+- refactor(view-js): P5-7 first cut — extracted CSS selector engine from web-compat-document.js (-381 lines, 1,961 → 1,580)
+
 <a id="v011311"></a>
 ## [0.113.11] - 2026-05-18
 
@@ -1980,6 +1985,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 [0.115.0]: https://github.com/danielraffel/pulp/releases/tag/v0.115.0
 [0.114.0]: https://github.com/danielraffel/pulp/releases/tag/v0.114.0
+[0.113.12]: https://github.com/danielraffel/pulp/releases/tag/v0.113.12
 [0.113.11]: https://github.com/danielraffel/pulp/releases/tag/v0.113.11
 [0.113.10]: https://github.com/danielraffel/pulp/releases/tag/v0.113.10
 [0.113.9]: https://github.com/danielraffel/pulp/releases/tag/v0.113.9

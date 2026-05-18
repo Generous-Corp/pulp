@@ -858,6 +858,13 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // installs the per-property reflection.
     eval_or_throw(engine_, "web_compat_style_decl_helpers", preludes::web_compat_style_decl_helpers);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
+    // P5-7 first cut — CSS selector engine extracted from
+    // web-compat-document.js. Must eval AFTER document + Element so
+    // the underscore-prefixed selector helpers (_parseSelector,
+    // _matchesSelector, _querySelector, _findMatch, etc.) are
+    // resolvable when document.querySelector / .querySelectorAll
+    // dispatch into them.
+    eval_or_throw(engine_, "web_compat_document_selectors", preludes::web_compat_document_selectors);
     eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
     // pulp #745 — DOM mutation methods (appendChild / removeChild / etc.).
     // Single source of truth lives in core/view/js/web-compat-dom-ops.js.

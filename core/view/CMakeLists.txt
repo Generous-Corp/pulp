@@ -22,6 +22,11 @@ set(PULP_JS_PRELUDES
     # walks the property list and installs reflection.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
+    # P5-7 first cut — CSS selector engine extracted from
+    # web-compat-document.js. Loaded AFTER the parent so document +
+    # Element are in scope when underscore-prefixed selector helpers
+    # are dispatched from document.querySelector / .querySelectorAll.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
@@ -59,6 +64,7 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
