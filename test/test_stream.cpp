@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 using pulp::runtime::FileStream;
@@ -712,6 +713,27 @@ TEST_CASE("HttpStream fetch resets a closed stream before reporting new failure"
     REQUIRE(read.error == StreamError::IoError);
 }
 
+TEST_CASE("PipeStream closed and null pipe states fail closed",
+          "[stream][pipe][coverage][phase3]") {
+    PipeStream stream;
+    std::uint8_t byte = 0;
+
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.pipe() == nullptr);
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+
+    stream.close();
+    REQUIRE_FALSE(stream.is_open());
+
+    auto pipe = std::make_unique<NamedPipe>();
+    PipeStream wrapped(std::move(pipe));
+    REQUIRE_FALSE(wrapped.is_open());
+    REQUIRE(wrapped.pipe() != nullptr);
+    REQUIRE(wrapped.read(&byte, 1).closed());
+    REQUIRE(wrapped.write(&byte, 1).closed());
+}
+
 TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_pipe][issue-641]") {
     NamedPipe pipe;
     REQUIRE_FALSE(pipe.is_open());
@@ -755,6 +777,39 @@ TEST_CASE("PipeStream default and moved-empty streams fail closed",
 }
 
 #ifndef _WIN32
+TEST_CASE("PipeStream POSIX FIFO round-trips bytes",
+          "[stream][pipe][coverage][phase3]") {
+    auto path = make_temp_path("pulp_pipe_stream_roundtrip");
+    std::filesystem::remove(path);
+
+    auto server_pipe = std::make_unique<NamedPipe>();
+    REQUIRE(server_pipe->create_server(path.string()));
+    auto client_pipe = std::make_unique<NamedPipe>();
+    REQUIRE(client_pipe->connect_client(path.string()));
+
+    PipeStream server(std::move(server_pipe));
+    PipeStream client(std::move(client_pipe));
+    REQUIRE(server.is_open());
+    REQUIRE(client.is_open());
+
+    const std::uint8_t payload[] = {'p', 'i', 'p', 'e'};
+    auto wrote = server.write(payload, sizeof(payload));
+    REQUIRE(wrote.ok());
+    REQUIRE(wrote.bytes == sizeof(payload));
+
+    std::uint8_t received[sizeof(payload)]{};
+    auto read = client.read(received, sizeof(received));
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == sizeof(payload));
+    REQUIRE(std::memcmp(received, payload, sizeof(payload)) == 0);
+
+    client.close();
+    server.close();
+    REQUIRE_FALSE(client.is_open());
+    REQUIRE_FALSE(server.is_open());
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("NamedPipe POSIX FIFO round-trips bytes and unlinks on close",
           "[stream][named_pipe][issue-641]") {
     auto path = make_temp_path("pulp_named_pipe_roundtrip");
