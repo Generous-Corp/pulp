@@ -583,6 +583,17 @@ TEST_CASE("Expression evaluator covers built-in math function variants",
     REQUIRE(*logs == Catch::Approx(4.0));
 }
 
+TEST_CASE("Expression evaluator treats division by zero as silent zero",
+          "[runtime][expression][coverage][phase3]") {
+    auto direct = evaluate("12 / 0");
+    REQUIRE(direct.has_value());
+    REQUIRE(*direct == Catch::Approx(0.0));
+
+    auto nested = evaluate("5 + 12 / (3 - 3)");
+    REQUIRE(nested.has_value());
+    REQUIRE(*nested == Catch::Approx(5.0));
+}
+
 TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs",
           "[runtime][expression][coverage][issue-641]") {
     auto variable = evaluate("gain * 2 + offset", {{"gain", 0.75}, {"offset", 0.25}});
