@@ -393,6 +393,15 @@ TEST_CASE("DynamicLibrary closed lookup is null and close is idempotent",
     REQUIRE_FALSE(lib.is_open());
 }
 
+TEST_CASE("DynamicLibrary missing symbol lookup records an error",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE(lib.open(system_library_path()));
+
+    REQUIRE(lib.find_symbol("pulp_definitely_missing_symbol_12345") == nullptr);
+    REQUIRE_FALSE(lib.error().empty());
+}
+
 TEST_CASE("DynamicLibrary move construction transfers the handle",
           "[runtime][dynlib][coverage][phase3]") {
     DynamicLibrary lib;
