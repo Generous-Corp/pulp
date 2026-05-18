@@ -169,6 +169,25 @@ TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
     default_view.clear();
 }
 
+TEST_CASE("Buffer resize to smaller shape remaps channel spans",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> buffer(3, 5);
+    buffer.channel(0)[4] = 0.25f;
+    buffer.channel(2)[4] = -0.5f;
+
+    buffer.resize(2, 3);
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+
+    auto view = buffer.view();
+    REQUIRE(view.num_channels() == 2);
+    REQUIRE(view.num_samples() == 3);
+    REQUIRE(view.channel_ptr(0) == buffer.channel(0).data());
+    REQUIRE(view.channel_ptr(1) == buffer.channel(1).data());
+    REQUIRE(buffer.channel(0).size() == 3);
+    REQUIRE(buffer.channel(1).size() == 3);
+}
+
 TEST_CASE("AudioFileData reports shape from first channel",
           "[audio][file][codecov]") {
     AudioFileData empty;
