@@ -1366,9 +1366,9 @@ void WidgetBridge::install_runtime_import_handlers() {
                     if (!bundle) bundle = parse_claude_bundle(html);
                     if (!bundle) bundle = parse_pencil_react(html);
                 } else {
-                    bundle = parse_claude_bundle(html);
-                    if (!bundle) bundle = parse_react_native_export(html);
+                    bundle = parse_react_native_export(html);
                     if (!bundle) bundle = parse_pencil_react(html);
+                    if (!bundle) bundle = parse_claude_bundle(html);
                 }
                 if (!bundle) {
                     set_err("__pulpRuntimeImport__: no claude bundle envelope (got '"
