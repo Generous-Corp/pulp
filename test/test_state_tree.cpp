@@ -738,6 +738,19 @@ TEST_CASE("CachedProperty bool ignores mismatched refresh values",
     REQUIRE(enabled.get());
 }
 
+TEST_CASE("CachedProperty int64 move tracks later tree updates",
+          "[state][cached][coverage][phase3-large]") {
+    auto tree = StateTree::create("params");
+    tree->set("voices", int64_t(8));
+    CachedProperty<int64_t> voices(tree, "voices", 1);
+    CachedProperty<int64_t> moved(std::move(voices));
+
+    tree->set("voices", int64_t(16));
+
+    REQUIRE(moved.is_bound());
+    REQUIRE(moved.get() == 16);
+}
+
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
 
 TEST_CASE("StateTreeSynchroniser records property and child deltas", "[state][sync]") {
