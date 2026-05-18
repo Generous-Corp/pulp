@@ -460,3 +460,29 @@ TEST_CASE("Binding move assignment replaces destination binding",
     REQUIRE_THAT(store->get_value(1), WithinAbs(-12.0f, 1e-6f));
     REQUIRE_THAT(store->get_value(2), WithinAbs(50.0f, 1e-6f));
 }
+
+TEST_CASE("Binding copies retain store identity and callback state",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding original(*store, 1);
+    std::vector<float> original_values;
+    original.on_change([&](float value) {
+        original_values.push_back(value);
+    });
+
+    Binding copied = original;
+    std::vector<float> copied_values;
+    copied.on_change([&](float value) {
+        copied_values.push_back(value);
+    });
+
+    original.set(-3.0f);
+    copied.set(-6.0f);
+
+    REQUIRE(original.id() == copied.id());
+    REQUIRE(original.info() == copied.info());
+    REQUIRE_THAT(original.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE_THAT(copied.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE(original_values == std::vector<float>{-3.0f, -6.0f});
+    REQUIRE(copied_values == std::vector<float>{-6.0f});
+}
