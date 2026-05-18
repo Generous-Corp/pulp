@@ -29,6 +29,14 @@ TEST_CASE("FastMath soft clip covers linear and saturated regions",
     REQUIRE_THAT(FastMath::soft_clip(-0.75f), WithinAbs(-0.6875f, 1e-6f));
 }
 
+TEST_CASE("FastMath dB conversion covers silent and unity cases",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::db_to_gain(0.0f), WithinAbs(1.0f, 1e-5f));
+    REQUIRE(FastMath::gain_to_db(0.0f) == -200.0f);
+    REQUIRE(FastMath::gain_to_db(-1.0f) == -200.0f);
+    REQUIRE_THAT(FastMath::gain_to_db(1.0f), WithinAbs(0.0f, 1e-4f));
+}
+
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
 TEST_CASE("DryWetMixer fully wet", "[dsp][dry_wet]") {
