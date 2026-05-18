@@ -230,3 +230,12 @@ TEST_CASE("Mat3 determinant handles singular and scaled matrices",
     Mat3 scaled{{{2.0f, 0.0f, 0.0f}, {0.0f, -3.0f, 0.0f}, {0.0f, 0.0f, 4.0f}}};
     REQUIRE_THAT(scaled.determinant(), WithinAbs(-24.0f, 0.001f));
 }
+
+TEST_CASE("Polynomial roots handle negative leading coefficient",
+          "[signal][poly][codecov]") {
+    auto [r1, r2] = Polynomial::roots_quadratic(-1.0f, 0.0f, 4.0f);
+    REQUIRE_THAT(std::abs(r1.real()), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(std::abs(r2.real()), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(r1.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(r2.imag(), WithinAbs(0.0f, 0.001f));
+}
