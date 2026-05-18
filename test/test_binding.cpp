@@ -427,3 +427,20 @@ TEST_CASE("Binding poll updates baseline after the first notification",
     REQUIRE_FALSE(b.poll());
     REQUIRE(call_count == 1);
 }
+
+TEST_CASE("Binding move construction preserves store and callbacks",
+          "[binding][coverage][phase3-github]") {
+    auto store = make_store();
+    Binding original(*store, 1);
+    std::vector<float> values;
+    original.on_change([&](float value) { values.push_back(value); });
+
+    Binding moved(std::move(original));
+    moved.set(-3.0f);
+
+    REQUIRE(moved.is_bound());
+    REQUIRE(moved.id() == 1);
+    REQUIRE(moved.info()->name == "Gain");
+    REQUIRE_THAT(store->get_value(1), WithinAbs(-3.0f, 1e-6f));
+    REQUIRE(values == std::vector<float>{-3.0f});
+}
