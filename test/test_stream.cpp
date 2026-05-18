@@ -402,6 +402,28 @@ TEST_CASE("MemoryStream appends without rewinding the read cursor",
     REQUIRE(out[2] == 5);
 }
 
+TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{9, 8, 7});
+    std::uint8_t discarded[2]{};
+    REQUIRE(stream.read(discarded, sizeof(discarded)).bytes == sizeof(discarded));
+    REQUIRE(stream.read_position() == 2);
+
+    stream.clear();
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    const std::uint8_t fresh[] = {1, 3, 5, 7};
+    REQUIRE(stream.write(fresh, sizeof(fresh)).bytes == sizeof(fresh));
+    REQUIRE(stream.size() == sizeof(fresh));
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t out[sizeof(fresh)]{};
+    REQUIRE(stream.read(out, sizeof(out)).bytes == sizeof(out));
+    REQUIRE(std::memcmp(out, fresh, sizeof(fresh)) == 0);
+}
+
 TEST_CASE("FileStream reopen closes the previous handle",
           "[stream][file][coverage][phase3]") {
     auto first = make_temp_path("pulp_stream_reopen_first");
