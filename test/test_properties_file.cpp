@@ -507,6 +507,22 @@ TEST_CASE("PropertiesFile contains tracks string-view keys across mutation",
 
 // ── ApplicationProperties ───────────────────────────────────────────────
 
+TEST_CASE("ApplicationProperties exposes independent user and common stores",
+          "[state][properties][coverage][phase3]") {
+    ApplicationProperties app("PulpUnit");
+    REQUIRE(app.app_name() == "PulpUnit");
+
+    app.user_settings().set_string("scope", "user");
+    app.common_settings().set_string("scope", "common");
+
+    REQUIRE(app.user_settings().get_string("scope").value_or("") == "user");
+    REQUIRE(app.common_settings().get_string("scope").value_or("") == "common");
+
+    const auto& const_app = app;
+    REQUIRE(const_app.user_settings().contains("scope"));
+    REQUIRE(const_app.common_settings().contains("scope"));
+}
+
 TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][properties]") {
     auto user_dir = ApplicationProperties::user_settings_dir("PulpTest");
     auto common_dir = ApplicationProperties::common_settings_dir("PulpTest");
