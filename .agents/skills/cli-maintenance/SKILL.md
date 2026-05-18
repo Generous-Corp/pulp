@@ -145,6 +145,14 @@ that was tried and gives the exact `cmake --build` line to remediate;
 do not regress to "Run `pulp build` first" — that's misleading if the
 top-level target doesn't depend on the missing helper.
 
+### Numeric CLI flags
+
+For count-like flags such as `pulp run --frames`, parsers should accept only
+plain non-negative decimal digits and reject a leading `+`. C++ `from_chars`
+acceptance varies by implementation for signed prefixes, and the Rust-facing
+CLI surface should stay deterministic across platforms. Add regression tests
+for boundary spelling when changing these parsers.
+
 **Sidecar output anchoring:** when a CLI command takes `--output
 <path>/main.ext` and also emits sidecar artifacts (e.g.
 `pulp import-design` writes `bridge_handlers.cpp`, `classnames.json`,
