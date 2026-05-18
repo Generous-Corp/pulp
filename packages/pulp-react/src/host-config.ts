@@ -121,8 +121,28 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
                 case 'b': case 'i': case 'em': case 'strong': case 'small': case 'code':
                 case 'pre': case 'a': case 'td': case 'th': case 'title':
-                case 'text': case 'tspan': case 'desc':
-                    call('createLabel', id, asText(props.children) ?? '', parentId); return;
+                case 'text': case 'tspan': case 'desc': {
+                    // pulp jsx-instrument-import 2026-05-17 — text-bearing
+                    // tags need to be containers when they have ReactElement
+                    // children (e.g. Chainer's `<span>CHAINER /
+                    // <span>polywave ms-split</span></span>`). Pure-text
+                    // children → createLabel (leaf). Mixed/element children
+                    // → createCol so the reconciler can appendChild the
+                    // inner spans as siblings. The string portions get
+                    // their own synthetic Label instances via
+                    // createTextInstance.
+                    const txt = asText(props.children);
+                    if (txt !== undefined) {
+                        call('createLabel', id, txt, parentId);
+                    } else {
+                        // Mixed or element children — use a row container
+                        // so child labels flow horizontally like inline
+                        // text. Span/p/label semantics expect inline; div
+                        // would default to column layout.
+                        call('createRow', id, parentId);
+                    }
+                    return;
+                }
                 case 'button': {
                     const text = asText(props.children) ?? (props.text as string ?? '');
                     if (typeof g.createButton === 'function') {
@@ -210,6 +230,15 @@ function asText(children: unknown): string | undefined {
         }
         return parts.join('');
     }
+    // pulp jsx-instrument-import 2026-05-17 — ReactElement children
+    // (`<span>CHAINER / <span>polywave ms-split</span></span>` from
+    // Chainer's titlebar): return undefined HERE so shouldSetTextContent
+    // returns false and the reconciler instead walks the children as
+    // child node instances. The outer `<span>` then renders as a
+    // container (NOT a label that swallows the children), and the
+    // inner `<span>polywave ms-split</span>` gets its own createLabel.
+    // Pre-fix the outer span swallowed children as text → empty string,
+    // dropping the inner span's content entirely.
     return undefined;
 }
 
