@@ -444,6 +444,32 @@ TEST_CASE("MidiMessageSequence inserts equal timestamps before existing events",
     REQUIRE(in_range.empty());
 }
 
+TEST_CASE("MidiMessageSequence stores raw sysex events and masks factories",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    TimestampedMidiEvent sysex;
+    sysex.timestamp = 0.25;
+    sysex.status = 0xF0;
+    sysex.sysex = {0x7D, 0x01, 0x02};
+    sequence.add_event(sysex);
+
+    sequence.add_note_on(0.50, 0x2F, 0xFF, 0x81);
+    sequence.add_cc(0.75, 0x31, 0xF4, 0xC8);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_sysex());
+    REQUIRE(sequence[0].sysex == std::vector<uint8_t>{0x7D, 0x01, 0x02});
+
+    REQUIRE(sequence[1].status == 0x9F);
+    REQUIRE(sequence[1].note() == 0x7F);
+    REQUIRE(sequence[1].velocity() == 0x01);
+
+    REQUIRE(sequence[2].status == 0xB1);
+    REQUIRE(sequence[2].data1 == 0x74);
+    REQUIRE(sequence[2].data2 == 0x48);
+}
+
 TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
     auto note = UmpPacket::note_on_2(0x1F, 0x2F, 0xC0, 0xABCD, 0xEE, 0x1234);
     REQUIRE(note.word_count == 2);
