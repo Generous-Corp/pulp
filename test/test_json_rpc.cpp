@@ -104,6 +104,20 @@ TEST_CASE("JsonRpcError factories expose spec codes and messages",
     REQUIRE(internal.data_json.empty());
 }
 
+TEST_CASE("JsonRpcResult factories separate success payloads from failures",
+          "[json_rpc][coverage][phase3]") {
+    const auto ok = JsonRpcResult::ok(R"({"ready":true})");
+    REQUIRE(ok.result_json == R"({"ready":true})");
+    REQUIRE_FALSE(ok.error.has_value());
+
+    const auto failed = JsonRpcResult::fail({-32001, "server busy", R"({"retry":true})"});
+    REQUIRE(failed.result_json.empty());
+    REQUIRE(failed.error.has_value());
+    REQUIRE(failed.error->code == -32001);
+    REQUIRE(failed.error->message == "server busy");
+    REQUIRE(failed.error->data_json == R"({"retry":true})");
+}
+
 TEST_CASE("JsonRpcPeer returns method_not_found for unknown methods", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
