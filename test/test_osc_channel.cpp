@@ -123,6 +123,30 @@ TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
     REQUIRE(closed_count.load() == 1);
 }
 
+TEST_CASE("OscChannel routes close callbacks through custom executor",
+          "[osc_channel][lifecycle][coverage][phase3]") {
+    std::vector<std::function<void()>> queued;
+    OscChannelOptions options;
+    options.executor = [&](std::function<void()> fn) {
+        queued.push_back(std::move(fn));
+    };
+
+    auto a = OscChannel::open("127.0.0.1", 49919, 49920, options);
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+
+    int closed_count = 0;
+    a->on_closed([&] { ++closed_count; });
+    a->close();
+
+    REQUIRE(closed_count == 0);
+    REQUIRE(queued.size() == 1);
+    queued.front()();
+    REQUIRE(closed_count == 1);
+}
+
 TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
           "[osc_channel][raw]") {
     auto a = OscChannel::open("127.0.0.1", 49917, 49918);
