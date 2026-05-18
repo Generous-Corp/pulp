@@ -209,3 +209,16 @@ TEST_CASE("write_midi_file emits a readable SMF header",
     REQUIRE(read->total_events() == 2);
     REQUIRE(read->duration_seconds() == Approx(0.5).margin(0.05));
 }
+
+TEST_CASE("write_midi_file rejects missing parent directories",
+          "[midi][file][coverage][phase3]") {
+    TempDir tmp;
+    MidiFileData data;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(track));
+
+    const auto path = tmp.path / "missing" / "out.mid";
+    REQUIRE_FALSE(write_midi_file(path.string(), data));
+    REQUIRE_FALSE(fs::exists(path));
+}
