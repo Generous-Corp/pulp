@@ -48,6 +48,16 @@ TEST_CASE("FastMath tanh covers clamps and odd symmetry",
     REQUIRE_THAT(negative, WithinAbs(-positive, 1e-6f));
 }
 
+TEST_CASE("FastMath pow and reciprocal helpers cover scalar edges",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::pow(0.0f, 2.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::pow(-2.0f, 3.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::pow(4.0f, 0.5f), WithinAbs(2.0f, 0.02f));
+
+    REQUIRE_THAT(FastMath::rcp(4.0f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::rsqrt(4.0f), WithinAbs(0.5f, 0.001f));
+}
+
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
 TEST_CASE("DryWetMixer fully wet", "[dsp][dry_wet]") {
