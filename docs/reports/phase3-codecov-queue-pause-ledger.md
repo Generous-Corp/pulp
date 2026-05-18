@@ -7257,3 +7257,17 @@ Validation passed locally: `git diff --check`, built
 `./build/test/pulp-test-gui-components "[gui][buttons]"`, which passed 6
 test cases / 28 assertions. This tranche is held locally and should be
 aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 23:14 PDT: rebased the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` onto current `origin/main` after
+`#2126` merged, then added another local-only held concertina-panel coverage
+tranche in `/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now
+includes commit `225512149` (`test(view): cover concertina panel edge
+paths`). The tranche extends `test/test_gui_components.cpp` over null-content
+sections, default expanded-content height offsets, explicit header-height
+accessors, layout of default/fixed-height content, and exclusive expansion
+collapsing visible content. Validation passed locally: `git diff --check`,
+built `pulp-test-gui-components`, and ran
+`./build/test/pulp-test-gui-components "[gui][concertina]"`, which passed 7
+test cases / 57 assertions. This tranche is held locally and should be
+aggregated into the larger PR rather than submitted individually.
