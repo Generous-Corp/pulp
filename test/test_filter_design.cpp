@@ -148,3 +148,14 @@ TEST_CASE("FilterDesign butterworth edge orders are bounded and finite",
         REQUIRE_THAT(dc_gain(c), WithinAbs(0.0f, 0.01f));
     }
 }
+
+TEST_CASE("FilterDesign lowpass and highpass have complementary Nyquist behavior",
+          "[signal][filter_design][codecov]") {
+    auto low = FilterDesign::lowpass(1800.0f, 0.707f, 48000.0f);
+    auto high = FilterDesign::highpass(1800.0f, 0.707f, 48000.0f);
+
+    require_finite(low);
+    require_finite(high);
+    REQUIRE_THAT(nyquist_gain(low), WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(nyquist_gain(high), WithinAbs(1.0f, 0.01f));
+}
