@@ -104,7 +104,9 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
 
 TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
           "[format][editor_ui][codecov]") {
-    REQUIRE_FALSE(pulp::format::configured_ui_script_path().has_value());
+    if (pulp::format::configured_ui_script_path().has_value()) {
+        SKIP("AutoUi fallback requires a build without PULP_UI_SCRIPT_PATH");
+    }
 
     pulp::format::HeadlessHost host(create_test_gain);
     std::string error = "preexisting";
