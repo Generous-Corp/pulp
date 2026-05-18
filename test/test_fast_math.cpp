@@ -118,3 +118,11 @@ TEST_CASE("FastMath clamp_unit", "[signal][fast_math]") {
     REQUIRE(FastMath::clamp_unit(2.0f) == 1.0f);
     REQUIRE(FastMath::clamp_unit(-2.0f) == -1.0f);
 }
+
+TEST_CASE("FastMath tanh remains odd inside the approximation range",
+          "[signal][fast_math][codecov]") {
+    for (float value : {0.125f, 0.75f, 1.5f, 3.5f}) {
+        REQUIRE_THAT(FastMath::tanh(value) + FastMath::tanh(-value),
+                     WithinAbs(0.0f, 1e-6f));
+    }
+}
