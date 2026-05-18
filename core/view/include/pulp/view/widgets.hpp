@@ -151,6 +151,16 @@ public:
     /// containers keep the legacy one-line metric.
     float measured_height(float available_width) const;
 
+    /// pulp #2163 / font-v2 Slice 1.1.b — baseline offset from the top
+    /// of the Label's measured box, used by Yoga's
+    /// `YGNodeSetBaselineFunc` to honor `align-items: baseline` on
+    /// flex containers (CHAIN INFO baseline-alignment canary). Returns
+    /// `ascent + (leading / 2)` from `TextShaper::measure_metrics` so
+    /// the value tracks the same per-(family, size) cache the painter
+    /// uses; mixed-size text in a row therefore aligns on its true
+    /// typographic baselines rather than top-of-box.
+    float baseline_y() const;
+
 private:
     std::string text_;
     std::string font_family_;     ///< Empty == widget default ("Inter")

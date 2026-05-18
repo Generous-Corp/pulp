@@ -414,6 +414,31 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     return {w, h};
 }
 
+// pulp #2163 / font-v2 Slice 1.1.b — baseline callback for text-bearing
+// nodes. Yoga's `align-items: baseline` walks each child and asks for
+// its baseline offset; the parent then aligns children so their
+// baselines sit on a common line. Without this callback, Yoga falls
+// back to "baseline == node height", which is the bottom of the box —
+// effectively top-align of unequal-height children, which is exactly
+// the CHAIN INFO bug in Chainer (#2163): bold labels and description
+// text in the same flex row render top-aligned because the measure
+// callback today only reports width+height. Wiring this closes that
+// gap. See Label::baseline_y() for the ascent computation.
+static float yoga_baseline(YGNodeConstRef node, float width, float height) {
+    (void) width;
+    (void) height;
+    auto* view = const_cast<View*>(static_cast<const View*>(YGNodeGetContext(node)));
+    if (auto* label = dynamic_cast<Label*>(view)) {
+        return label->baseline_y();
+    }
+    // Non-text nodes: fall through to Yoga's default (height = bottom).
+    // For non-text widgets that contain text (Button, Toggle label
+    // strip, etc.) the painter's vertical-centering math takes care of
+    // alignment internally; Phase 2 may revisit those if they enter a
+    // baseline-aligned row in real designs.
+    return height;
+}
+
 static std::vector<View*> ordered_visible_children(View& parent) {
     struct ChildEntry { View* view; int order; };
     std::vector<ChildEntry> ordered;
@@ -538,6 +563,14 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
 
     if (!has_managed_children && (view.intrinsic_width() > 0 || view.intrinsic_height() > 0)) {
         YGNodeSetMeasureFunc(node, yoga_measure);
+        // pulp #2163 / font-v2 Slice 1.1.b — wire Yoga's baseline channel
+        // for text-bearing leaves so flex containers can honor
+        // `align-items: baseline`. Today only Labels report a real
+        // baseline; non-Label leaves fall through to Yoga's default in
+        // yoga_baseline().
+        if (dynamic_cast<const Label*>(&view)) {
+            YGNodeSetBaselineFunc(node, yoga_baseline);
+        }
     }
 
     if (!has_managed_children)
