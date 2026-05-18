@@ -41,6 +41,13 @@ bool is_font_registered(const std::string&) {
 std::uint64_t font_registration_generation() noexcept { return 0; }
 void bump_font_registration_generation() noexcept {}
 
+// pulp #2163 — font v2 Slice 2.8 skeleton. See bundled_fonts.hpp.
+bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
+    // Non-Skia builds: accept any non-empty buffer. Real
+    // sanitizer arrives with the Phase 2 implementation slice.
+    return data != nullptr && size > 0;
+}
+
 } // namespace pulp::canvas
 
 #endif // !PULP_HAS_SKIA

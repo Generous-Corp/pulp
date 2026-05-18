@@ -79,6 +79,17 @@ bool FontScope::is_registered(const std::string& family) const {
     return impl_->registered_families.find(family) != impl_->registered_families.end();
 }
 
+// pulp #2163 — font v2 Slice 2.7 skeleton.
+void FontScope::set_memory_budget(std::size_t bytes) {
+    memory_budget_.store(bytes, std::memory_order_release);
+    // Phase 2 implementation slice wires this to LRU eviction on the
+    // owned caches (Skia strike, TextShaper segments, glyph atlas).
+    // Skeleton just records the value so callers can target the API.
+}
+std::size_t FontScope::memory_budget() const noexcept {
+    return memory_budget_.load(std::memory_order_acquire);
+}
+
 // ── Built-in scope registry ──────────────────────────────────────────────
 
 namespace {

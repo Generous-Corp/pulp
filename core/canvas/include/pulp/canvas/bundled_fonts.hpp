@@ -88,24 +88,28 @@ bool register_font_file(const std::string& path,
 bool is_font_registered(const std::string& family);
 
 /// Monotonic counter that bumps every time a typeface registration mutates
-/// process-global font state (`register_font`, `register_font_file`,
-/// `register_emoji_fallback`). Downstream caches that key on typeface
-/// identity (the static `SkTypeface` cache in `skia_canvas.cpp`, the
-/// `(family,size)->text->width` cache in `text_shaper.cpp`) sample this
-/// before every lookup and flush themselves when it has advanced.
-///
-/// Without this, re-registering "MyBrand" with a different .ttf — or
-/// swapping the emoji fallback mid-process — would still resolve to the
-/// previously-cached `SkTypeface`, contradicting `register_font`'s
-/// documented "idempotent, invalidates the cache" contract.
+/// process-global font state. Downstream caches sample this and flush.
 std::uint64_t font_registration_generation() noexcept;
 
 /// Force-bump the registration generation. Called from
-/// `register_emoji_fallback(...)` (defined in `text_font_context.cpp`)
-/// and other entry points that mutate process-global font state outside
-/// `register_font(...)`. Avoid calling from regular code — the standard
-/// registration entry points handle it for you.
+/// `register_emoji_fallback(...)` and other entry points that mutate
+/// process-global font state outside `register_font(...)`.
 void bump_font_registration_generation() noexcept;
+
+// ── Phase 2 skeleton — async lifecycle + font security ──────────────────
+// pulp #2163 — font v2 Slices 2.1 / 2.8 surface declarations.
+
+/// Async font lifecycle state (Slice 2.1).
+enum class FontState : std::uint8_t {
+    Pending,
+    Loaded,
+    Failed,
+    Substituted,
+};
+
+/// Validate font bytes before handing them to Skia (Slice 2.8). Skeleton
+/// confirms Skia can parse the bytes; full sanitizer is the impl slice.
+bool validate_font_bytes(const std::uint8_t* data, std::size_t size);
 
 #ifdef PULP_HAS_SKIA
 

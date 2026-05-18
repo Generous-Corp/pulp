@@ -367,6 +367,22 @@ void bump_font_registration_generation() noexcept {
     bump_generation();
 }
 
+// pulp #2163 — font v2 Slice 2.8 skeleton. The Phase 2 implementation
+// slice replaces this with a Chromium-`ots`-style sanitizer that
+// verifies the TTF/OTF table directory + critical-table checksums and
+// rejects malformed inputs. For now we just confirm Skia can parse the
+// bytes into an SkTypeface — that gates the most catastrophic crashes
+// (truncated streams, garbage data) without the full per-table audit.
+bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
+    if (!data || size == 0) return false;
+    auto sk_data = SkData::MakeWithCopy(data, size);
+    if (!sk_data) return false;
+    auto mgr = platform_font_manager();
+    if (!mgr) return true; // can't validate without a mgr; accept conservatively
+    auto face = mgr->makeFromData(std::move(sk_data));
+    return static_cast<bool>(face);
+}
+
 } // namespace pulp::canvas
 
 #endif // PULP_HAS_SKIA
