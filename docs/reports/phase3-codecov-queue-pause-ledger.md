@@ -7795,3 +7795,17 @@ still emits. Local validation passed:
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
 and `git diff --check`. Batch #728 is now 19 local commits ahead and remains
 held for the larger 24-36 commit PR.
+
+2026-05-18 01:54 PDT: added a twentieth local-only runtime stream tranche to
+held batch `feature/phase3-codecov-batch-728`: commit `b8a608f58`
+(`test(runtime): cover stream ownership edges`). It extends
+`pulp-test-stream` over `FileStream` self-move assignment, move-assignment from
+a closed source, and default/moved-empty `PipeStream` closed read/write/close
+semantics. Local validation passed:
+`cmake --build build --target pulp-test-stream -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-stream "[stream][file],[stream][pipe]" -r compact`
+(4 cases / 38 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
+and `git diff --check`. Batch #728 is now 20 local commits ahead and remains
+held for the larger 24-36 commit PR.
