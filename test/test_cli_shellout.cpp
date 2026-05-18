@@ -893,6 +893,16 @@ TEST_CASE("pulp inspect rejects invalid arguments before networking",
             != std::string::npos);
     REQUIRE(invalid_port.stdout_output.find("Connecting to") == std::string::npos);
 
+    for (const char* port : {"0", "65536", "123abc"}) {
+        INFO("port=" << port);
+        auto rejected_port = run_pulp({"inspect", "--port", port}, 10000);
+        REQUIRE_FALSE(rejected_port.timed_out);
+        REQUIRE(rejected_port.exit_code == 2);
+        REQUIRE(rejected_port.stderr_output.find(std::string("invalid --port value: ") + port)
+                != std::string::npos);
+        REQUIRE(rejected_port.stdout_output.find("Connecting to") == std::string::npos);
+    }
+
     auto output_without_command = run_pulp({"inspect", "--output", "out.json"}, 10000);
     REQUIRE_FALSE(output_without_command.timed_out);
     REQUIRE(output_without_command.exit_code == 2);
