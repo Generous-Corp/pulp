@@ -22,6 +22,17 @@
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkTypeface.h"
+#if defined(__APPLE__)
+#  include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(_WIN32)
+#  include "include/ports/SkFontMgr_directwrite.h"
+#elif defined(__ANDROID__)
+#  include "include/ports/SkFontMgr_android.h"
+#  include "include/ports/SkFontScanner_FreeType.h"
+#elif defined(__linux__)
+#  include "include/ports/SkFontMgr_fontconfig.h"
+#  include "include/ports/SkFontScanner_FreeType.h"
+#endif
 #endif
 
 namespace pulp::canvas {
@@ -65,6 +76,27 @@ void FontResolver::clear_cache() {
 #ifdef PULP_HAS_SKIA
 
 namespace {
+
+// Lazy, process-wide platform font manager. Parallels the identical
+// TU-local helpers in `bundled_fonts.cpp` and `skia_canvas.cpp`; the
+// caller-migration sub-slice of 1.1.a consolidates the three copies.
+sk_sp<SkFontMgr> platform_font_manager() {
+    static sk_sp<SkFontMgr> mgr;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+#if defined(__APPLE__)
+        mgr = SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+        mgr = SkFontMgr_New_DirectWrite();
+#elif defined(__ANDROID__)
+        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__linux__)
+        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#endif
+    }
+    return mgr;
+}
 
 SkFontStyle to_sk_style(const FontOptions& opts) {
     int sk_weight = static_cast<int>(opts.weight);
@@ -190,7 +222,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     }
 
     SkFontStyle sk_style = to_sk_style(options);
-    sk_sp<SkFontMgr> mgr = SkFontMgr::RefDefault();
+    sk_sp<SkFontMgr> mgr = platform_font_manager();
 
     std::vector<FallbackTraceStep> trace;
     ResolvedFont resolved;
@@ -237,7 +269,7 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     r.scope = options.scope;
     r.generation = merged_generation_for(options.scope);
 
-    sk_sp<SkFontMgr> mgr = SkFontMgr::RefDefault();
+    sk_sp<SkFontMgr> mgr = platform_font_manager();
     if (!mgr) {
         r.origin = FallbackOrigin::NotFound;
         return r;
