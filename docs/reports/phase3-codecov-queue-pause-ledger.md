@@ -7184,3 +7184,21 @@ reject invalid stored strings`, and ran
 which reported 100% diff coverage for `core/state/src/properties_file.cpp`
 and 96% overall for the held branch diff. This tranche is held locally and
 should be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 18:01 PDT: added another local-only held runtime license parser
+tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`c89d99272` (`fix(runtime): reject malformed license timestamps`). The
+tranche hardens the minimal license payload timestamp parser so optional
+`issued`/`expiry` values with trailing junk no longer get partially accepted,
+while preserving comma/brace delimiters and whitespace after valid integers.
+Focused coverage in `test/test_license.cpp` extends license payload parsing
+over malformed optional integers, valid whitespace after integers, delimiter
+handling, and the existing optional machine/expiry payload paths. Validation
+passed locally: `git diff --check`, built `pulp-test-license`, ran direct
+focused license tests, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='LicenseValidator validate_and_parse ignores malformed optional integers|LicenseValidator validate_and_parse accepts whitespace after optional integers|LicenseValidator parse_payload handles optional fields and bad integers|LicenseValidator validate_and_parse includes optional machine and expiry fields' tools/scripts/local_diff_cover.sh pulp-test-license`,
+which reported 100% diff coverage for `core/runtime/src/license.cpp` and
+97% overall for the held branch diff. This tranche is held locally and
+should be aggregated into the larger PR rather than submitted individually.
