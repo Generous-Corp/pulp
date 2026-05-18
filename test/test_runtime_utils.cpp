@@ -774,6 +774,13 @@ TEST_CASE("ExpressionEvaluator variables can be overwritten",
     REQUIRE(*evaluator.evaluate("amount * amount") == Catch::Approx(4.0));
 }
 
+TEST_CASE("Expression evaluator rejects trailing operators",
+          "[runtime][expression][coverage][phase3]") {
+    REQUIRE_FALSE(evaluate("1 +").has_value());
+    REQUIRE_FALSE(evaluate("2 *").has_value());
+    REQUIRE_FALSE(evaluate("pow(2,)").has_value());
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
