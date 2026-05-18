@@ -43,3 +43,61 @@ TEST_CASE("Timer one-shot deactivates after firing and can be restarted",
     REQUIRE(wait_until([&] { return calls.load() == 2; }, 500ms));
     REQUIRE_FALSE(timer.is_active());
 }
+
+TEST_CASE("Timer start is idempotent while active",
+          "[events][timer][coverage]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+    Timer timer(loop, 10ms, [&] { calls.fetch_add(1); }, false);
+
+    timer.start();
+    timer.start();
+    timer.start();
+    REQUIRE(timer.is_active());
+
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 500ms));
+    REQUIRE_FALSE(timer.is_active());
+
+    std::this_thread::sleep_for(35ms);
+    REQUIRE(calls.load() == 1);
+}
+
+TEST_CASE("Timer stop cancels queued one-shot callback",
+          "[events][timer][coverage]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+    Timer timer(loop, 25ms, [&] { calls.fetch_add(1); }, false);
+
+    timer.start();
+    REQUIRE(timer.is_active());
+    timer.stop();
+    REQUIRE_FALSE(timer.is_active());
+
+    std::this_thread::sleep_for(75ms);
+    REQUIRE(calls.load() == 0);
+}
+
+TEST_CASE("Timer interval can be changed before restart",
+          "[events][timer][coverage]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+    Timer timer(loop, 100ms, [&] { calls.fetch_add(1); }, false);
+
+    REQUIRE(timer.interval() == 100ms);
+    timer.set_interval(5ms);
+    REQUIRE(timer.interval() == 5ms);
+
+    timer.start();
+    REQUIRE(wait_until([&] { return calls.load() == 1; }, 500ms));
+    REQUIRE_FALSE(timer.is_active());
+}
+
+TEST_CASE("Timer with empty callback still tracks one-shot lifecycle",
+          "[events][timer][coverage]") {
+    EventLoop loop;
+    Timer timer(loop, 5ms, {}, false);
+
+    timer.start();
+    REQUIRE(timer.is_active());
+    REQUIRE(wait_until([&] { return !timer.is_active(); }, 500ms));
+}
