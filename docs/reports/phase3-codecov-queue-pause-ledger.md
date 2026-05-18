@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-18 15:00 PDT
+Last updated: 2026-05-18 15:01 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -48,6 +48,20 @@ without hyphens. Local validation passed:
 `cmake --build build --target pulp-test-cli-fetchcontent-cache`,
 `build/test/pulp-test-cli-fetchcontent-cache` (164 assertions in 31
 test cases), and `git diff --check`. PR state: not pushed; keep
+accumulating related coverage commits toward the larger batch. No
+Namespace dispatch.
+
+2026-05-18 15:01 PDT: added eighth committed tranche to
+`feature/phase3-codecov-batch-747`:
+`14d24019d test(cli): cover import detect parser edges`, touching
+`test/test_cli_import_detect.cpp`. Scope: deterministic import-design
+detection coverage for optional format metadata, malformed source/format
+skip behavior, unknown fingerprint clause parsing, directory snapshot
+preference for `index.html` when `code.html` is absent, and unquoted
+script attribute scraping. Local validation passed:
+`cmake --build build --target pulp-test-cli-import-detect`,
+`build/test/pulp-test-cli-import-detect` (151 assertions in 18 test
+cases), and `git diff --check`. PR state: not pushed; keep
 accumulating related coverage commits toward the larger batch. No
 Namespace dispatch.
 
