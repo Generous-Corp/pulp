@@ -7271,3 +7271,17 @@ built `pulp-test-gui-components`, and ran
 `./build/test/pulp-test-gui-components "[gui][concertina]"`, which passed 7
 test cases / 57 assertions. This tranche is held locally and should be
 aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 23:15 PDT: added another local-only held audio registry coverage
+tranche to the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now includes
+commit `4759a311f` (`test(audio): cover registry extension dispatch misses`).
+The tranche extends `test/test_audio_file.cpp` over registry lookup and
+read/write dispatch misses for empty, dot-only, no-extension, and hidden-file
+paths while preserving a valid non-empty `AudioFileData` write attempt.
+Validation passed locally: `git diff --check`, built `pulp-test-audio-file`,
+and ran
+`./build/test/pulp-test-audio-file "FormatRegistry rejects paths without dispatchable extensions"`,
+which passed 1 test case / 11 assertions. This tranche is held locally and
+should be aggregated into the larger PR rather than submitted individually.
