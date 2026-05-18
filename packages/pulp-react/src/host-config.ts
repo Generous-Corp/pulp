@@ -115,8 +115,24 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                 case 'div': case 'section': case 'article': case 'aside':
                 case 'header': case 'footer': case 'nav': case 'main':
                 case 'figure': case 'figcaption': case 'form': case 'ul':
-                case 'ol': case 'li': case 'dl': case 'dt': case 'dd':
-                    call('createCol', id, parentId); return;
+                case 'ol': case 'li': case 'dl': case 'dt': case 'dd': {
+                    // pulp jsx-instrument-import 2026-05-17 — when a div
+                    // contains ONLY string/number children (no nested
+                    // ReactElements), treat it as a text-bearing leaf
+                    // (createLabel with concatenated text). Matches browser
+                    // inline-text behavior: `<div>+{val} ct</div>` renders
+                    // text on one line, not as three stacked column siblings.
+                    // Chainer's detune display `{detuneC > 0 ? "+" : ""}{detuneC} ct`
+                    // depends on this — three text expressions were creating
+                    // three Labels in a column that wrapped vertically.
+                    const txt = asText(props.children);
+                    if (txt !== undefined && txt.length > 0) {
+                        call('createLabel', id, txt, parentId);
+                    } else {
+                        call('createCol', id, parentId);
+                    }
+                    return;
+                }
                 case 'span': case 'p': case 'label':
                 case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
                 case 'b': case 'i': case 'em': case 'strong': case 'small': case 'code':
