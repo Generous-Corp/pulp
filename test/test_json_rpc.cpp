@@ -86,6 +86,24 @@ TEST_CASE("JsonRpcPeer request/response over an in-memory channel", "[json_rpc]"
     REQUIRE(response_payload == "5");
 }
 
+TEST_CASE("JsonRpcError factories expose spec codes and messages",
+          "[json_rpc][coverage][phase3]") {
+    const auto parse = JsonRpcError::parse_error();
+    const auto invalid = JsonRpcError::invalid_request();
+    const auto params = JsonRpcError::invalid_params();
+    const auto internal = JsonRpcError::internal_error();
+
+    REQUIRE(parse.code == -32700);
+    REQUIRE(parse.message == "Parse error");
+    REQUIRE(invalid.code == -32600);
+    REQUIRE(invalid.message == "Invalid Request");
+    REQUIRE(params.code == -32602);
+    REQUIRE(params.message == "Invalid params");
+    REQUIRE(internal.code == -32603);
+    REQUIRE(internal.message == "Internal error");
+    REQUIRE(internal.data_json.empty());
+}
+
 TEST_CASE("JsonRpcPeer returns method_not_found for unknown methods", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
