@@ -131,3 +131,13 @@ TEST_CASE("Interpolator hermite preserves linear ramps",
     REQUIRE_THAT(Interpolator::hermite(0.75f, 2.0f, 4.0f, 6.0f, 8.0f),
                  WithinAbs(5.5f, 1e-6f));
 }
+
+TEST_CASE("Interpolator sinc6 alternating samples stay finite",
+          "[signal][interp][codecov]") {
+    for (float frac : {0.125f, 0.375f, 0.625f, 0.875f}) {
+        const float result = Interpolator::sinc6(frac, -1.0f, 1.0f, -1.0f,
+                                                 1.0f, -1.0f, 1.0f);
+        REQUIRE(std::isfinite(result));
+        REQUIRE(std::abs(result) < 2.0f);
+    }
+}
