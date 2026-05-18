@@ -611,3 +611,21 @@ TEST_CASE("StateStore reset all defaults notifies each registered parameter",
     REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.001));
     REQUIRE_THAT(store.get_value(2), WithinAbs(0.0, 0.001));
 }
+
+TEST_CASE("StateStore custom state version is serialized and accepted",
+          "[state][serialize][coverage][phase3-large]") {
+    StateStore source;
+    source.set_state_version(3);
+    source.add_parameter(make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f}));
+    source.set_value(10, 0.75f);
+
+    auto data = source.serialize();
+    REQUIRE(read_u32_le(data, 4) == 3);
+
+    StateStore target;
+    target.set_state_version(3);
+    target.add_parameter(make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f}));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(10), WithinAbs(0.75f, 0.001f));
+}
