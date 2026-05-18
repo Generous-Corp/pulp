@@ -14,6 +14,8 @@
 #include "pulp/canvas/bundled_fonts.hpp"
 #include "pulp/canvas/font_flight_recorder.hpp"
 
+#include <iterator>
+#include <list>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -44,11 +46,23 @@ const char* to_string(FallbackOrigin o) noexcept {
 
 // ── FontResolver::Impl ───────────────────────────────────────────────────
 
+// pulp #2163 — font v2 Slice 3.3. The resolver cache is LRU-with-cap
+// so variable-font animations (60fps `wght` interpolation produces 60
+// distinct keys/sec) don't grow unbounded. Default cap is 256 entries
+// — a small static UI has ~10-30 cached faces, animations spike then
+// settle, and the LRU eviction keeps the working set in cache.
 struct FontResolver::Impl {
     mutable std::mutex mtx;
-    // Cache keyed on the full FontOptions hash; the value carries its
-    // own generation so a stale entry can be detected on lookup.
-    std::unordered_map<std::size_t, ResolvedFont> cache;
+    // hash → cache entry. The list iterator points at this entry's
+    // position in the LRU order list; hit -> move-to-back, evict ->
+    // pop-front. `value.first` mirrors the map key for fast eviction.
+    struct Entry {
+        ResolvedFont                                                resolved;
+        std::list<std::size_t>::iterator                            lru_pos;
+    };
+    std::unordered_map<std::size_t, Entry> cache;
+    std::list<std::size_t>                 lru_order;  // oldest at front
+    std::size_t                            capacity = 256;
 };
 
 FontResolver::FontResolver() : impl_(std::make_unique<Impl>()) {}
@@ -62,6 +76,28 @@ FontResolver& FontResolver::instance() {
 void FontResolver::clear_cache() {
     std::lock_guard<std::mutex> lock(impl_->mtx);
     impl_->cache.clear();
+    impl_->lru_order.clear();
+}
+
+void FontResolver::set_cache_capacity(std::size_t entries) {
+    std::lock_guard<std::mutex> lock(impl_->mtx);
+    impl_->capacity = entries;
+    if (impl_->capacity == 0) return;  // 0 disables cap (legacy mode)
+    while (impl_->cache.size() > impl_->capacity) {
+        std::size_t oldest = impl_->lru_order.front();
+        impl_->lru_order.pop_front();
+        impl_->cache.erase(oldest);
+    }
+}
+
+std::size_t FontResolver::cache_capacity() const noexcept {
+    std::lock_guard<std::mutex> lock(impl_->mtx);
+    return impl_->capacity;
+}
+
+std::size_t FontResolver::cache_size() const noexcept {
+    std::lock_guard<std::mutex> lock(impl_->mtx);
+    return impl_->cache.size();
 }
 
 #ifdef PULP_HAS_SKIA
@@ -184,6 +220,30 @@ ResolvedFont resolve_one_family(const std::string& family,
 
 } // namespace
 
+// pulp #2163 — Slice 3.3 helper. Insert `resolved` into the LRU
+// cache under `key`. Promotes existing entries to the back. Evicts
+// the oldest entry when the cap is exceeded. Caller must hold
+// `impl.mtx`.
+static void cache_put_locked(FontResolver::Impl& impl,
+                             std::size_t key,
+                             const ResolvedFont& resolved) {
+    auto it = impl.cache.find(key);
+    if (it != impl.cache.end()) {
+        impl.lru_order.splice(impl.lru_order.end(), impl.lru_order,
+                              it->second.lru_pos);
+        it->second.resolved = resolved;
+        return;
+    }
+    impl.lru_order.push_back(key);
+    auto pos = std::prev(impl.lru_order.end());
+    impl.cache.emplace(key, FontResolver::Impl::Entry{resolved, pos});
+    if (impl.capacity > 0 && impl.cache.size() > impl.capacity) {
+        std::size_t oldest = impl.lru_order.front();
+        impl.lru_order.pop_front();
+        impl.cache.erase(oldest);
+    }
+}
+
 ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     // Cache lookup. Generation check happens at use site (callers compare
     // `resolved.generation` against `merged_generation_for(scope)`).
@@ -192,8 +252,12 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         std::lock_guard<std::mutex> lock(impl_->mtx);
         auto it = impl_->cache.find(key);
         if (it != impl_->cache.end()
-            && it->second.generation == merged_generation_for(options.scope)) {
-            return it->second;
+            && it->second.resolved.generation == merged_generation_for(options.scope)) {
+            // LRU hit — promote to back.
+            impl_->lru_order.splice(impl_->lru_order.end(),
+                                     impl_->lru_order,
+                                     it->second.lru_pos);
+            return it->second.resolved;
         }
     }
 
@@ -249,7 +313,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
                 /*sequence*/ 0,
             });
             std::lock_guard<std::mutex> lock(impl_->mtx);
-            impl_->cache[key] = resolved;
+            cache_put_locked(*impl_, key, resolved);
             return resolved;
         }
     }
@@ -269,7 +333,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
 
     resolved.trace = std::move(trace);
     std::lock_guard<std::mutex> lock(impl_->mtx);
-    impl_->cache[key] = resolved;
+    cache_put_locked(*impl_, key, resolved);
     return resolved;
 }
 
