@@ -213,6 +213,21 @@ TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state"
     REQUIRE(env.process(1.0f) > 0.0f);
 }
 
+TEST_CASE("BallisticsFilter mode switch reports current envelope consistently",
+          "[signal][ballistics][coverage][phase3]") {
+    BallisticsFilter env;
+    env.prepare(1000.0f);
+    env.set_attack_ms(0.01f);
+    env.set_release_ms(100.0f);
+
+    REQUIRE_THAT(env.process(0.25f), WithinAbs(0.25f, 1e-6f));
+    env.set_mode(BallisticsFilter::Mode::rms);
+    REQUIRE_THAT(env.current(), WithinAbs(0.5f, 1e-6f));
+
+    env.reset();
+    REQUIRE_THAT(env.current(), WithinAbs(0.0f, 1e-6f));
+}
+
 // ── LogRampedValue ───────────────────────────────────────────────────────
 
 TEST_CASE("LogRampedValue reaches target", "[signal][log_ramp]") {
