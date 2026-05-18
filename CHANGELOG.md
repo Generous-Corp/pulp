@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01134"></a>
+## [0.113.4] - 2026-05-18
+
+- refactor(test): R2-7 — added pulp_add_test_suite() helper, migrated 200 single-library tests (test/CMakeLists.txt -398 lines, 2,648 → 2,250)
+
 <a id="v01133"></a>
 ## [0.113.3] - 2026-05-18
 
@@ -1931,6 +1936,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.113.4]: https://github.com/danielraffel/pulp/releases/tag/v0.113.4
 [0.113.3]: https://github.com/danielraffel/pulp/releases/tag/v0.113.3
 [0.113.2]: https://github.com/danielraffel/pulp/releases/tag/v0.113.2
 [0.113.1]: https://github.com/danielraffel/pulp/releases/tag/v0.113.1
