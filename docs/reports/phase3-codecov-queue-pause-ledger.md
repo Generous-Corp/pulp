@@ -7084,3 +7084,23 @@ ran direct `[mcp][json]` (1 test case / 24 assertions), and ran
 which reported 100% diff coverage for `tools/mcp/pulp_mcp.cpp` and 96%
 overall for the held branch diff. This tranche is held locally and should be
 aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 17:23 PDT: added another local-only held design import token
+parser tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`51f5134d6` (`fix(import): reject malformed token numbers`). The tranche
+adds strict design-token numeric parsing shared by W3C/DTCG and Figma
+variable import: known units (`px`, `rem`, `em`, `%`) still parse, but
+partial strings such as `12pxjunk`, unsupported malformed values such as
+`4remjunk`, and non-finite values such as `1e999` no longer become silent
+dimensions or zero values. Focused coverage in `test/test_design_import.cpp`
+extends the existing token parser coverage to valid unit numbers, malformed
+typed numbers, malformed inferred values, and Figma variable equivalents.
+Validation passed locally: `git diff --check`, built
+`pulp-test-design-import`, ran direct `token parsers cover border composites
+inference and alternate sources`, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='token parsers cover border composites inference and alternate sources|parse_w3c_tokens evaluates math expressions|parse_w3c_tokens resolves alias then evaluates math|parse_w3c_tokens reads W3C format|parse_figma_variables reads Figma variable format' tools/scripts/local_diff_cover.sh pulp-test-design-import`,
+which reported 89.1% diff coverage for `core/view/src/design_import.cpp`
+and 94% overall for the held branch diff. This tranche is held locally and
+should be aggregated into the larger PR rather than submitted individually.
