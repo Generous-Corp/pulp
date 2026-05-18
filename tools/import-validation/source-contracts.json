@@ -688,6 +688,78 @@
           "path": "planning/screenshots/REFERENCE-rn-gain-stage.png"
         }
       }
+    },
+    {
+      "source": "jsx",
+      "display_name": "JSX runtime-import (instrument)",
+      "kind": "screen-export",
+      "trust": "observed",
+      "last_verified": "2026-05-18",
+      "recheck_interval_days": 180,
+      "compat": {
+        "mode": "not-applicable",
+        "source": null,
+        "parser_version_owner": "runtime-import"
+      },
+      "dispatch": {
+        "kind": "explicit-runtime-parser",
+        "parser": "parse_jsx_react"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "runtime-import-parser",
+        "notes": "JSX runtime-import is the experimental 2026-05-17 instrument lane (Node + esbuild transform → self-contained bundle); not a design-provider MCP lane."
+      },
+      "upstream": [
+        {
+          "url": "planning/2026-05-17-jsx-instrument-import.md",
+          "kind": "spec",
+          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) — defines fixture shape, transform pipeline, and round-trip contract.",
+          "last_verified": "2026-05-18",
+          "recheck_interval_days": null
+        }
+      ],
+      "detected_artifact_shape": "Single-file JSX/TSX React component bundled via Node + esbuild into a self-contained runtime bundle.",
+      "runtime_export_shape": "Self-contained JS bundle (React + ReactDOM + user JSX + Pulp host shim) consumed by WidgetBridge runtime-import dispatch.",
+      "runtime_requirements": {
+        "sdk_min": "v0.113.0",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:react",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_jsx_react",
+        "static": null
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/jsx/chainer-instrument.jsx"
+        ],
+        "roundtrip_script": "tools/import-validation/jsx-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import",
+          "pulp-test-widget-bridge-runtime-import"
+        ],
+        "test_files": [
+          "test/test_design_import.cpp",
+          "test/test_widget_bridge_runtime_import.cpp"
+        ],
+        "test_tags": [
+          "[view][import][parser][jsx][instrument]",
+          "[view][bridge][runtime-import-dispatch][jsx][instrument]"
+        ],
+        "pulp_render_reference": {
+          "status": "pending",
+          "path": null
+        }
+      }
     }
   ]
 }
