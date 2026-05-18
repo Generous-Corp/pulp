@@ -33,3 +33,20 @@ TEST_CASE("copy preserves url + email", "[format][vendor-url]") {
     REQUIRE(b.vendor_email == "hello@pulp.audio");
     REQUIRE(b.manufacturer == "PulpCo");
 }
+
+TEST_CASE("PluginDescriptor bus helpers follow first bus and empty bus lists",
+          "[format][descriptor][coverage][phase3]") {
+    PluginDescriptor d;
+    REQUIRE(d.default_input_channels() == 2);
+    REQUIRE(d.default_output_channels() == 2);
+
+    d.input_buses = {{"Sidechain", 1, true}, {"Ignored", 6, false}};
+    d.output_buses = {{"Mono", 1, false}, {"Surround", 8, true}};
+    REQUIRE(d.default_input_channels() == 1);
+    REQUIRE(d.default_output_channels() == 1);
+
+    d.input_buses.clear();
+    d.output_buses.clear();
+    REQUIRE(d.default_input_channels() == 0);
+    REQUIRE(d.default_output_channels() == 0);
+}
