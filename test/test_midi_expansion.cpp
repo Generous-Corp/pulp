@@ -245,6 +245,22 @@ TEST_CASE("RpnParser reset clears selected parameters on every channel",
     REQUIRE(calls == 0);
 }
 
+TEST_CASE("RpnParser combines data LSB with default zero MSB",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    uint16_t received_value = 0xffff;
+
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t value) {
+        received_value = value;
+    };
+
+    rpn.process(MidiEvent::cc(0, 101, 0));
+    rpn.process(MidiEvent::cc(0, 100, 7));
+    rpn.process(MidiEvent::cc(0, 38, 64));
+
+    REQUIRE(received_value == 64);
+}
+
 // ── MidiKeyboardState ────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboardState tracks note on/off", "[midi][keyboard]") {
