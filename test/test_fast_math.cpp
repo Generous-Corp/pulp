@@ -50,11 +50,25 @@ TEST_CASE("FastMath exp2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::exp2(0.5f), WithinAbs(std::sqrt(2.0f), 0.01));
 }
 
+TEST_CASE("FastMath exp2 covers fractional octaves across zero",
+          "[signal][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::exp2(-0.5f), WithinAbs(std::exp2(-0.5f), 0.01f));
+    REQUIRE_THAT(FastMath::exp2(1.25f), WithinRel(std::exp2(1.25f), 0.01f));
+    REQUIRE_THAT(FastMath::exp2(7.75f), WithinRel(std::exp2(7.75f), 0.01f));
+}
+
 TEST_CASE("FastMath log2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::log2(1.0f), WithinAbs(0.0, 0.01));
     REQUIRE_THAT(FastMath::log2(2.0f), WithinAbs(1.0, 0.01));
     REQUIRE_THAT(FastMath::log2(8.0f), WithinAbs(3.0, 0.02));
     REQUIRE_THAT(FastMath::log2(0.5f), WithinAbs(-1.0, 0.02));
+}
+
+TEST_CASE("FastMath log2 tracks mantissa-heavy values",
+          "[signal][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::log2(1.5f), WithinAbs(std::log2(1.5f), 0.02f));
+    REQUIRE_THAT(FastMath::log2(3.25f), WithinAbs(std::log2(3.25f), 0.04f));
+    REQUIRE_THAT(FastMath::log2(96.0f), WithinAbs(std::log2(96.0f), 0.03f));
 }
 
 TEST_CASE("FastMath pow approximation", "[signal][fast_math]") {
@@ -71,6 +85,13 @@ TEST_CASE("FastMath pow and reciprocal guard edge inputs",
 
     REQUIRE_THAT(FastMath::rcp(4.0f), WithinAbs(0.25f, 0.001f));
     REQUIRE_THAT(FastMath::rcp(-2.0f), WithinAbs(-0.5f, 0.001f));
+}
+
+TEST_CASE("FastMath pow handles fractional and identity exponents",
+          "[signal][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::pow(9.0f, 0.5f), WithinAbs(3.0f, 0.08f));
+    REQUIRE_THAT(FastMath::pow(7.0f, 0.0f), WithinAbs(1.0f, 0.02f));
+    REQUIRE_THAT(FastMath::pow(1.0f, 32.0f), WithinAbs(1.0f, 0.02f));
 }
 
 TEST_CASE("FastMath db_to_gain", "[signal][fast_math]") {
