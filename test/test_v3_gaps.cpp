@@ -67,6 +67,18 @@ TEST_CASE("Bias zero and negative length buffers are no-ops",
     REQUIRE_THAT(output[1], WithinAbs(-2.0f, 1e-6f));
 }
 
+TEST_CASE("Bias handles zero-length in-place buffers",
+          "[signal][bias][coverage][phase3-large]") {
+    pulp::signal::Bias bias;
+    bias.set_bias(2.0f);
+
+    float sample = 5.0f;
+    bias.process(&sample, 0);
+
+    REQUIRE_THAT(sample, WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(bias.bias(), WithinAbs(2.0f, 1e-6f));
+}
+
 // ── MidiMessageSequence ─────────────────────────────────────────────────
 
 TEST_CASE("MidiMessageSequence maintains order", "[midi][sequence]") {
