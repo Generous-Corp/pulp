@@ -8067,3 +8067,19 @@ cover midi file error paths`). Focused validation passed
 `pulp-test-app-framework` app-framework/keymapping cases,
 `pulp-test-midi-file "midi file helpers report missing and unwritable paths"`,
 and `git diff --check`.
+
+2026-05-18 04:18 PDT: continued held batch
+`feature/phase3-codecov-batch-730`, now 17 local commits ahead and still held
+for the next large GitHub-hosted PR. New local-only commits since the previous
+ledger entry: `74917ffbd` (`test(view): cover image cache empty clear`),
+`421e46bb9` (`test(render): cover render pass manager state edges`),
+`649cf64ed` (`test(view): cover lasso selection edges`), `27a2a14d0`
+(`test(view): cover ab compare edge states`), and `28029b67e`
+(`test(canvas): cover effect application helpers`). Focused local validation
+passed: `pulp-test-image-cache "clear on an empty cache is a no-op and
+preserves counters"`, `pulp-test-rendering-integration "RenderPassManager*"`,
+`pulp-test-gui-components "[gui][lasso]"`, `pulp-test-ab-compare
+"[ui][ab-compare]"`, `pulp-test-effects "[canvas][effects]"`, and
+`git diff --check`. PR #2173, #2202, and #2208 have direct squash auto-merge
+enabled and remain on GitHub-hosted CI only with no failures at this update;
+no Namespace dispatch.
