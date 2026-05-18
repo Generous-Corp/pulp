@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <vector>
 
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkFontStyle.h"
@@ -178,6 +179,26 @@ bool woff2_decoder_available() noexcept;
 /// 👨‍👩‍👧‍👦 moves in one step, not 7).
 std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
                          bool forward = true);
+
+/// Slice 2.4 — locale-aware word break iterator. Returns the UTF-8
+/// byte offset of the next word boundary forward from `byte_offset`
+/// (or backward when forward=false). `locale` is a BCP-47 tag
+/// ("en-US", "ja-JP", ...). Empty locale falls back to ICU's root
+/// locale. When ICU is not linked the implementation returns the
+/// fallback `cluster_step()` result so callers can rely on the
+/// surface universally.
+std::size_t word_break_step(const std::string& text,
+                            std::size_t byte_offset,
+                            const std::string& locale = "",
+                            bool forward = true);
+
+/// Slice 2.4 — find all line-break opportunities (UAX #14) in `text`.
+/// Returns UTF-8 byte offsets of every position where the renderer
+/// may legitimately wrap. Always includes the trailing offset == text.size().
+/// When ICU is not linked, this returns offsets at every ASCII space
+/// + the trailing offset, so the API still functions degraded.
+std::vector<std::size_t> line_break_opportunities(const std::string& text,
+                                                  const std::string& locale = "");
 
 #ifdef PULP_HAS_SKIA
 
