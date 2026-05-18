@@ -1462,39 +1462,30 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (typeof setPointerEvents === "function") setPointerEvents(id, resolved);
             break;
 
-        // font-family — pulp #1151
+        // font-family — pulp #1151, font v2 Slice 1.1.a
         // CSS font-family is a comma-separated fallback list, e.g.
         //   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-        // Splitting must respect quoted multi-word names ('JetBrains Mono'
-        // contains a space but is one family). Real CSS doesn't put commas
-        // inside font names, so a plain split is sufficient. We trim each
-        // token, strip matching outer single/double quotes, and hand the
-        // first non-empty parsed family to setFontFamily — Pulp's bundled
-        // fonts (#932) plus the public registration API (#1150) decide if
-        // it resolves; generic fallbacks like "monospace" / "ui-monospace"
-        // never resolved before either, so picking the first author-named
-        // family is the right behavior.
         //
-        // Before this fix, the entire raw list (commas + spaces) was passed
-        // verbatim to SkFontMgr::matchFamilyStyle which never matched
-        // anything → silent fallback to platform default.
+        // Pre-Slice 1.1.a: the bridge split the list and passed only
+        // the FIRST family to setFontFamily. The remaining fallback
+        // names never reached the C++ side, so an author who wrote
+        // `'IBM Plex Mono', monospace` lost the `monospace` safety net
+        // and saw silent tofu when IBM Plex Mono wasn't installed.
+        //
+        // Post-Slice 1.1.a: pass the entire raw comma-list to
+        // setFontFamily verbatim. The C++ side (skia_canvas /
+        // text_shaper / sdf_atlas, now all routed through
+        // FontResolver) splits the list once and walks it cascade-style
+        // — registered → bundled → platform per family in order,
+        // emitting a FallbackTrace for every step. The full intent of
+        // the author's CSS font-family stack reaches the resolver.
+        //
+        // No JS-side trimming or quote-stripping is necessary anymore;
+        // the resolver handles both. Passing the raw string preserves
+        // exact CSS author intent for the trace records.
         case "fontFamily":
             if (typeof setFontFamily === "function") {
-                var ffParts = String(resolved).split(",");
-                for (var ffi = 0; ffi < ffParts.length; ffi++) {
-                    var ffName = ffParts[ffi].replace(/^\s+|\s+$/g, "");
-                    if (ffName.length >= 2) {
-                        var first = ffName.charAt(0);
-                        var last = ffName.charAt(ffName.length - 1);
-                        if ((first === "'" && last === "'") || (first === '"' && last === '"')) {
-                            ffName = ffName.substring(1, ffName.length - 1);
-                        }
-                    }
-                    if (ffName.length > 0) {
-                        setFontFamily(id, ffName);
-                        break;
-                    }
-                }
+                setFontFamily(id, String(resolved));
             }
             break;
 
