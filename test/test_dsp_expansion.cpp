@@ -527,6 +527,23 @@ TEST_CASE("TptFilter cutoff clamping", "[signal][tpt]") {
     REQUIRE(f.cutoff() < 44100.0f * 0.5f);
 }
 
+TEST_CASE("TptFilter combined output resets to initial impulse response",
+          "[signal][tpt][coverage][phase3]") {
+    TptFilter filter;
+    filter.prepare(48000.0f);
+    filter.set_cutoff(1200.0f);
+
+    const auto first = filter.process(1.0f);
+    filter.process(0.5f);
+    filter.process(-0.25f);
+    filter.reset();
+    const auto after_reset = filter.process(1.0f);
+
+    REQUIRE_THAT(first.lowpass, WithinAbs(after_reset.lowpass, 1e-6f));
+    REQUIRE_THAT(first.highpass, WithinAbs(after_reset.highpass, 1e-6f));
+    REQUIRE_THAT(first.allpass, WithinAbs(after_reset.allpass, 1e-6f));
+}
+
 // ── Visualization helpers ───────────────────────────────────────────────
 
 TEST_CASE("ColorMapper clamps values and switches color ramps",
