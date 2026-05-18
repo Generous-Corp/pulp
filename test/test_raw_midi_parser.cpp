@@ -107,6 +107,28 @@ TEST_CASE("raw_midi_parser recovers when short-message data is another status",
     REQUIRE(c.sysex.empty());
 }
 
+TEST_CASE("raw_midi_parser recovers after status interrupts short data",
+          "[midi][raw_midi_parser][coverage][phase3-large]") {
+    auto c = parse({
+        0x90, 0x40, 0xF8,  // realtime byte interrupts incomplete Note On
+        0x41, 0x7F,        // stray data bytes must not finish stale 0x90
+        0x80, 0x40, 0x00,  // fresh Note Off still parses normally
+        0xF2, 0x10, 0xF6,  // Tune Request interrupts incomplete Song Position
+        0x20,              // stray data must not finish stale 0xF2
+        0xF3, 0x05,        // Song Select still parses normally
+    });
+
+    REQUIRE(c.shorts.size() == 4);
+    REQUIRE(c.shorts[0].status == 0xF8);
+    REQUIRE(c.shorts[1].status == 0x80);
+    REQUIRE(c.shorts[1].d1 == 0x40);
+    REQUIRE(c.shorts[1].d2 == 0x00);
+    REQUIRE(c.shorts[2].status == 0xF6);
+    REQUIRE(c.shorts[3].status == 0xF3);
+    REQUIRE(c.shorts[3].d1 == 0x05);
+    REQUIRE(c.sysex.empty());
+}
+
 TEST_CASE("raw_midi_parser accumulates sysex across calls",
           "[midi][raw_midi_parser][issue-406]") {
     RawMidiParserState state;
