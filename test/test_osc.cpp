@@ -226,6 +226,23 @@ TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes"
     REQUIRE(decoded.get_int(0) == 42);
 }
 
+TEST_CASE("OSC decode truncated typed payloads return safe defaults",
+          "[osc][codec][coverage]") {
+    std::vector<uint8_t> data;
+    append_osc_string(data, "/truncated");
+    append_osc_string(data, ",ifsb");
+    data.insert(data.end(), {0x00, 0x00});  // partial int, then no remaining payload
+
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/truncated");
+    REQUIRE(decoded.args.size() == 4);
+    REQUIRE(decoded.get_int(0, -1) == 0);
+    REQUIRE_THAT(decoded.get_float(1, -1.0f), WithinAbs(0.0, 0.001));
+    REQUIRE(decoded.get_string(2, "fallback").empty());
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[3]).empty());
+}
+
 TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
           "[osc][codec][codecov]") {
     const std::vector<uint8_t> data{'/', 'b', 'a', 'r'};
