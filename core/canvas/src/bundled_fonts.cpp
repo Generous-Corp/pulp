@@ -154,8 +154,18 @@ std::size_t bundled_font_count() {
 
 namespace {
 
+// pulp #2163 — register_font is called per-typeface, often N times for
+// the same family (one per weight/slant variant) when a developer drops
+// a folder full of TTFs. Before #2163 this map kept exactly one face
+// per family name, so a later "IBM Plex Mono" registration silently
+// overwrote a previous one — the Italic could end up keyed under the
+// family while a Regular request landed on the Italic and was
+// rejected by match_registered_typeface's style filter, returning
+// nullptr. Now we keep every registered face per family and let
+// match_registered_typeface pick the best style match (exact first,
+// then closest).
 struct RegisteredEntry {
-    sk_sp<SkTypeface> typeface;
+    std::vector<sk_sp<SkTypeface>> faces;
 };
 
 std::mutex& registered_mutex() {
@@ -212,17 +222,39 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
     std::lock_guard<std::mutex> guard(registered_mutex());
     auto& map = registered_fonts();
     auto it = map.find(family);
-    if (it == map.end() || !it->second.typeface) return nullptr;
+    if (it == map.end() || it->second.faces.empty()) return nullptr;
 
-    // Mirror match_bundled_typeface: a plugin that registered only the
-    // Regular face must not satisfy a Bold/Italic request, so the
-    // skia_canvas cascade keeps walking to matchFamilyStyle (which can
-    // synthesize a faux-bold or pick a system Bold).
-    SkFontStyle have = it->second.typeface->fontStyle();
-    if (have.weight() != style.weight() || have.slant() != style.slant()) {
-        return nullptr;
+    // pulp #2163 — pass 1: exact match on weight + slant. This is the
+    // ideal path: caller asked for Regular/Upright, a Regular/Upright
+    // is registered, hand it back unchanged.
+    for (const auto& f : it->second.faces) {
+        if (!f) continue;
+        SkFontStyle have = f->fontStyle();
+        if (have.weight() == style.weight() && have.slant() == style.slant()) {
+            return f;
+        }
     }
-    return it->second.typeface;
+
+    // pulp #2163 — pass 2: best-effort closest match. The pre-#2163
+    // contract returned nullptr here so skia_canvas's cascade could
+    // walk on to matchFamilyStyle (which synthesizes faux bold). That
+    // contract was fine when the registry held one face per family,
+    // but with multi-face registration we now have e.g. Light + Bold +
+    // SemiBold for the same family and refusing to return any of them
+    // for a Regular request would force a system-default fallback that
+    // breaks Unicode coverage (the original tofu symptom). Closest-by-
+    // weight, prefer-matching-slant heuristic — same rule CSS engines
+    // apply in `font-style: italic` selection.
+    sk_sp<SkTypeface> best;
+    int best_score = std::numeric_limits<int>::min();
+    for (const auto& f : it->second.faces) {
+        if (!f) continue;
+        SkFontStyle have = f->fontStyle();
+        int score = -std::abs(have.weight() - style.weight())
+                    - (have.slant() == style.slant() ? 0 : 50);
+        if (score > best_score) { best_score = score; best = f; }
+    }
+    return best;
 }
 
 bool register_font(const std::uint8_t* data, std::size_t size,
@@ -257,7 +289,18 @@ bool register_font(const std::uint8_t* data, std::size_t size,
 
     {
         std::lock_guard<std::mutex> guard(registered_mutex());
-        registered_fonts()[family] = RegisteredEntry{std::move(face)};
+        // pulp #2163 — append rather than overwrite. The lookup side
+        // picks the best style match across all registered faces for
+        // this family. Idempotency: skip if this exact typeface ptr is
+        // already present (same Skia identity), but allow multiple
+        // physically-distinct faces (a Regular + Italic + Bold trio is
+        // the normal case for "drop the font family folder in").
+        auto& entry = registered_fonts()[family];
+        bool dup = false;
+        for (const auto& existing : entry.faces) {
+            if (existing.get() == face.get()) { dup = true; break; }
+        }
+        if (!dup) entry.faces.push_back(std::move(face));
     }
     bump_generation();
     return true;
@@ -274,6 +317,52 @@ bool register_font_file(const std::string& path,
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) return false;
     return register_font(bytes.data(), bytes.size(), family_override);
+}
+
+FontProbe probe_font_glyph(const std::string& family,
+                           int weight, int slant,
+                           std::uint32_t codepoint) {
+    FontProbe out;
+    out.family = family;
+    out.codepoint = codepoint;
+
+    if (family.empty()) return out;
+
+    SkFontStyle style{weight, SkFontStyle::kNormal_Width,
+                      slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant};
+
+    // Mirror the cascade order in get_cached_typeface_single
+    // (skia_canvas.cpp): registered → bundled → platform manager. Doing
+    // it here rather than reusing the static-cached path keeps this
+    // probe side-effect-free (no cache pollution from a probe call).
+    sk_sp<SkTypeface> face = match_registered_typeface(family, style);
+    if (!face) {
+        // Bundled fonts need an SkFontMgr handle. Use the same
+        // platform-appropriate factories as skia_canvas.cpp so the
+        // probe reflects the real resolution that fill_text would do.
+        sk_sp<SkFontMgr> mgr;
+#ifdef __APPLE__
+        mgr = SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+        mgr = SkFontMgr_New_DirectWrite();
+#elif defined(__ANDROID__)
+        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__linux__)
+        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#endif
+        if (mgr) {
+            face = match_bundled_typeface(mgr.get(), family, style);
+            if (!face) face = mgr->matchFamilyStyle(family.c_str(), style);
+        }
+    }
+
+    if (!face) return out;
+    out.family_resolved = true;
+    SkString name;
+    face->getFamilyName(&name);
+    out.resolved_family.assign(name.c_str(), name.size());
+    out.glyph_present = (face->unicharToGlyph(static_cast<SkUnichar>(codepoint)) != 0);
+    return out;
 }
 
 bool is_font_registered(const std::string& family) {

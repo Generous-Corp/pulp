@@ -144,6 +144,30 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
 /// called.
 std::size_t bundled_font_count();
 
+/// pulp #2163 — programmatic glyph-coverage probe.
+///
+/// Resolves `family`+`weight`+`slant` through the registered → bundled →
+/// platform-font-manager cascade exactly as a real fill_text call would,
+/// then reports whether the resulting typeface contains a glyph for the
+/// given codepoint. Returns the actual family name the cascade landed
+/// on so the caller can detect silent fallbacks (e.g. "asked for IBM
+/// Plex Mono, got Helvetica").
+///
+/// All output fields are plain types — no Skia headers required at the
+/// call site — so tools and `examples/ui-preview` can use this for
+/// non-visual import validation.
+struct FontProbe {
+    std::string family;            ///< the family that was requested
+    std::uint32_t codepoint = 0;   ///< the codepoint that was probed
+    bool family_resolved = false;  ///< true iff a typeface was returned at all
+    bool glyph_present = false;    ///< true iff the typeface has a glyph for `codepoint`
+    std::string resolved_family;   ///< actual family name of the resolved typeface (empty if not resolved)
+};
+
+FontProbe probe_font_glyph(const std::string& family,
+                           int weight, int slant,
+                           std::uint32_t codepoint);
+
 #endif // PULP_HAS_SKIA
 
 } // namespace pulp::canvas

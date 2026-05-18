@@ -498,6 +498,55 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[ui-preview] --font expects FAMILY=PATH (got: "
                           << spec << ")\n";
             }
+        } else if (starts_with(argv[i], "--font-probe=")) {
+            // pulp #2163 — programmatic verification that a font is
+            // resolvable AND has a given glyph. Spec is `FAMILY:HEX[,HEX...]`
+            // where HEX is a Unicode codepoint (with or without 0x prefix).
+            // Example:
+            //   --font-probe="IBM Plex Mono:2192,2191"
+            // Prints one JSON line per (family, codepoint) and exits with
+            // status 0 iff every probe was OK (family resolved AND glyph
+            // present). Used by import-design validation, not human eyes.
+            std::string spec = argv[i] + 13;
+            auto colon = spec.find(':');
+            if (colon == std::string::npos || colon == 0 || colon + 1 == spec.size()) {
+                std::cerr << "[ui-preview] --font-probe expects FAMILY:HEX[,HEX...] (got: "
+                          << spec << ")\n";
+                return 2;
+            }
+            std::string family = spec.substr(0, colon);
+            std::string cps_str = spec.substr(colon + 1);
+            // Honor any --font / --font-dir flags that already ran before
+            // this in the argv loop, and any auto-fonts walk later won't
+            // matter because we exit here. So the contract is: pass
+            // --font / --font-dir BEFORE --font-probe.
+            bool all_ok = true;
+            size_t p = 0;
+            while (p < cps_str.size()) {
+                size_t comma = cps_str.find(',', p);
+                std::string token = cps_str.substr(p, (comma == std::string::npos ? cps_str.size() : comma) - p);
+                p = (comma == std::string::npos) ? cps_str.size() : comma + 1;
+                // Strip 0x / U+ prefix if present
+                if (token.rfind("0x", 0) == 0 || token.rfind("0X", 0) == 0) token = token.substr(2);
+                else if (token.rfind("U+", 0) == 0 || token.rfind("u+", 0) == 0) token = token.substr(2);
+                std::uint32_t cp = 0;
+                try { cp = static_cast<std::uint32_t>(std::stoul(token, nullptr, 16)); }
+                catch (...) {
+                    std::cerr << "[ui-preview] --font-probe: bad codepoint '" << token << "'\n";
+                    all_ok = false; continue;
+                }
+                auto pr = pulp::canvas::probe_font_glyph(family, 400, 0, cp);
+                std::cout << "{\"family\":\"" << family << "\","
+                          << "\"codepoint\":\"U+" << std::hex << std::uppercase
+                          << cp << std::dec << std::nouppercase << "\","
+                          << "\"family_resolved\":" << (pr.family_resolved ? "true" : "false") << ","
+                          << "\"resolved_family\":\"" << pr.resolved_family << "\","
+                          << "\"glyph_present\":" << (pr.glyph_present ? "true" : "false") << ","
+                          << "\"ok\":" << (pr.family_resolved && pr.glyph_present ? "true" : "false")
+                          << "}\n";
+                if (!pr.family_resolved || !pr.glyph_present) all_ok = false;
+            }
+            return all_ok ? 0 : 1;
         } else if (starts_with(argv[i], "--font-dir=")) {
             // pulp #2163 — `--font-dir=/path/to/fonts` walks a directory and
             // registers every .ttf / .otf under it. The font family name
@@ -547,6 +596,39 @@ int main(int argc, char* argv[]) {
 
     if (view_tree_path.empty()) {
         if (const char* env_path = std::getenv("PULP_VIEW_TREE_OUT")) view_tree_path = env_path;
+    }
+
+    // pulp #2163 — co-located-fonts convention. When the imported script
+    // lives in a directory, recursively register every .ttf / .otf in
+    // that directory and its descendants. Lets a developer drop their
+    // JSX + a folder of TTFs side by side (e.g.
+    // `~/Desktop/Chainer/ChainerInstrument.jsx` + `~/Desktop/Chainer/IBM_Plex_Mono/...`)
+    // and get the requested fonts loaded automatically without any
+    // explicit `--font` flag. Family names are read from the OpenType
+    // `name` table so common naming variants (`IBMPlexMono-Regular.ttf`
+    // resolving to family "IBM Plex Mono") just work.
+    //
+    // Set PULP_PREVIEW_NO_AUTO_FONTS=1 to opt out.
+    if (!script_path.empty() && !std::getenv("PULP_PREVIEW_NO_AUTO_FONTS")) {
+        std::error_code ec;
+        std::filesystem::path scriptp{script_path};
+        std::filesystem::path parent = scriptp.parent_path();
+        if (parent.empty()) parent = std::filesystem::current_path(ec);
+        if (!ec && std::filesystem::is_directory(parent, ec)) {
+            int n = 0;
+            for (auto& entry : std::filesystem::recursive_directory_iterator(parent, ec)) {
+                if (!entry.is_regular_file()) continue;
+                auto ext = entry.path().extension().string();
+                for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (ext != ".ttf" && ext != ".otf") continue;
+                if (pulp::canvas::register_font_file(entry.path().string(), "")) ++n;
+            }
+            if (n > 0) {
+                std::cerr << "[ui-preview] auto-fonts: registered " << n
+                          << " font(s) from " << parent
+                          << " (set PULP_PREVIEW_NO_AUTO_FONTS=1 to disable)\n";
+            }
+        }
     }
 
     const auto automation = load_automation_config();
