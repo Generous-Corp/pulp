@@ -8409,3 +8409,24 @@ rate-limited, so #2222 was opened through the GitHub REST API and labeled
 `codecov` through REST. Monitoring remains GitHub-hosted only; #2219 now has a
 Linux hosted failure pending log availability after the still-running workflow
 finishes. No Namespace dispatch.
+
+2026-05-18 08:27 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-batch-735` as #2226
+(`test: batch phase3 coverage signal runtime audio edges`). The branch is 24
+commits ahead of current `origin/main` after a clean rebase and covers signal
+fast-math/interpolation/filter edges, MIDI file metadata/write failure paths,
+audio focus token/subscriber behavior, typed iOS audio session callbacks,
+runtime JSON-RPC factories/notification paths, sync primitive default
+snapshots, OSC executor dispatch, audio buffer shrink remapping, and
+`AudioProcessLoadMeasurer` invalid-budget/smoothing/reset paths. Focused local
+validation passed after rebase for all touched suites:
+`pulp-test-json-rpc`, `pulp-test-sync`, `pulp-test-audio`
+`"[audio][buffer]","[audio][load]"`, `pulp-test-fast-math`,
+`pulp-test-interpolator`, `pulp-test-biquad`, `pulp-test-filter-design`,
+`pulp-test-midi-file`, `pulp-test-audio-focus`,
+`pulp-test-ios-audio-session`, `pulp-test-osc-channel`, and
+`git diff --check`. Local pre-push source/version/contract gates passed and the
+branch was labeled `codecov`. Monitoring remains GitHub-hosted only; #2210,
+#2219, and #2221 still have hosted failures whose detailed logs are pending
+workflow completion while macOS lanes remain queued/running. No Namespace
+dispatch.
