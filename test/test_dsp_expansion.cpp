@@ -183,6 +183,20 @@ TEST_CASE("BallisticsFilter clamps time constants and processes buffers",
     REQUIRE_THAT(env.current(), WithinAbs(0.75f, 1e-6f));
 }
 
+TEST_CASE("BallisticsFilter ignores invalid sample rates without unstable state",
+          "[signal][ballistics][coverage][phase3]") {
+    BallisticsFilter env;
+    env.prepare(0.0f);
+    env.set_attack_ms(10.0f);
+    env.set_release_ms(10.0f);
+
+    REQUIRE_THAT(env.process(1.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(env.current(), WithinAbs(0.0f, 1e-6f));
+
+    env.prepare(1000.0f);
+    REQUIRE(env.process(1.0f) > 0.0f);
+}
+
 // ── LogRampedValue ───────────────────────────────────────────────────────
 
 TEST_CASE("LogRampedValue reaches target", "[signal][log_ramp]") {
