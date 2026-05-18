@@ -240,6 +240,47 @@ TEST_CASE("PopupMenu stores item metadata without showing native UI",
     REQUIRE(menu.items()[2].is_separator);
 }
 
+TEST_CASE("PopupMenu preserves insertion order and separator defaults",
+          "[platform][popup-menu][issue-640]") {
+    PopupMenu menu;
+    menu.add_separator();
+    menu.add_item(1, "");
+    menu.add_item(42, "Muted", true, true);
+    menu.add_separator();
+    menu.add_item(-7, "Disabled", false, false);
+
+    const auto& items = menu.items();
+    REQUIRE(items.size() == 5);
+
+    REQUIRE(items[0].is_separator);
+    REQUIRE(items[0].id == 0);
+    REQUIRE(items[0].label.empty());
+    REQUIRE(items[0].enabled);
+    REQUIRE_FALSE(items[0].checked);
+
+    REQUIRE_FALSE(items[1].is_separator);
+    REQUIRE(items[1].id == 1);
+    REQUIRE(items[1].label.empty());
+    REQUIRE(items[1].enabled);
+    REQUIRE_FALSE(items[1].checked);
+
+    REQUIRE_FALSE(items[2].is_separator);
+    REQUIRE(items[2].id == 42);
+    REQUIRE(items[2].label == "Muted");
+    REQUIRE(items[2].enabled);
+    REQUIRE(items[2].checked);
+
+    REQUIRE(items[3].is_separator);
+    REQUIRE(items[3].id == 0);
+    REQUIRE(items[3].label.empty());
+
+    REQUIRE_FALSE(items[4].is_separator);
+    REQUIRE(items[4].id == -7);
+    REQUIRE(items[4].label == "Disabled");
+    REQUIRE_FALSE(items[4].enabled);
+    REQUIRE_FALSE(items[4].checked);
+}
+
 #if !defined(__APPLE__)
 TEST_CASE("PopupMenu non-Apple stub returns no selection",
           "[platform][popup-menu][issue-640]") {
