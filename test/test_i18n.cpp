@@ -554,6 +554,23 @@ TEST_CASE("i18n JSON parser tolerates missing closing brace after entries",
     REQUIRE(strings.translate("partial") == "kept");
 }
 
+TEST_CASE("i18n JSON parser accepts whitespace separated key value pairs",
+          "[runtime][i18n][coverage]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  \"missing_colon\"   \"accepted\",\n";
+        f << "  \"normal\": \"kept\"\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.translate("missing_colon") == "accepted");
+    REQUIRE(strings.translate("normal") == "kept");
+}
+
 // ── File load failures ──────────────────────────────────────────────────
 
 TEST_CASE("i18n load nonexistent file returns false", "[runtime][i18n]") {
