@@ -150,6 +150,17 @@ TEST_CASE("read_plugin_version accepts tag-style version strings",
     REQUIRE(v.patch == 3);
 }
 
+TEST_CASE("read_plugin_version returns non-comparable for tagged dev manifests",
+          "[version-diag][coverage][issue-643]") {
+    TempDir tmp;
+    auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
+    write_file(plugin_json, R"({"version": "0.8.0-dev"})");
+
+    auto v = read_plugin_version(plugin_json);
+    REQUIRE_FALSE(v.comparable);
+    REQUIRE(v.raw == "0.8.0-dev");
+}
+
 TEST_CASE("locate_plugin_json prefers an explicit override",
           "[version-diag][issue-499]") {
     TempDir tmp;
@@ -168,6 +179,23 @@ TEST_CASE("locate_plugin_json falls back to the repo .claude-plugin dir",
 
     auto found = locate_plugin_json(tmp.path, {});
     REQUIRE(found == repo_plugin);
+}
+
+TEST_CASE("locate_plugin_json ignores a missing override and falls back",
+          "[version-diag][coverage][issue-643]") {
+    TempDir tmp;
+    auto repo_plugin = tmp.path / ".claude-plugin" / "plugin.json";
+    write_file(repo_plugin, R"({"version": "0.6.0"})");
+
+    auto found = locate_plugin_json(tmp.path, tmp.path / "missing.json");
+    REQUIRE(found == repo_plugin);
+}
+
+TEST_CASE("locate_plugin_json returns empty without repo or override matches",
+          "[version-diag][coverage][issue-643]") {
+    TempDir tmp;
+    auto found = locate_plugin_json(tmp.path / "not-a-repo", {});
+    REQUIRE(found.empty());
 }
 
 TEST_CASE("analyze warns when cli_min_version exceeds installed CLI",
@@ -249,6 +277,21 @@ TEST_CASE("execution preflight ignores satisfied and non-comparable requirements
                                                      parse_semver("0.39.0"));
     REQUIRE(noncomparable.supported);
     REQUIRE(noncomparable.blockers.empty());
+}
+
+TEST_CASE("execution preflight records the highest required CLI version",
+          "[version-diag][coverage][issue-643]") {
+    auto sdk_required = analyze_execution_preflight(parse_semver("0.33.0"),
+                                                   parse_semver("0.40.0"),
+                                                   parse_semver("0.36.0"));
+    REQUIRE_FALSE(sdk_required.supported);
+    REQUIRE(sdk_required.required_cli.raw == "0.40.0");
+
+    auto cli_min_required = analyze_execution_preflight(parse_semver("0.33.0"),
+                                                       parse_semver("0.34.0"),
+                                                       parse_semver("0.41.0"));
+    REQUIRE_FALSE(cli_min_required.supported);
+    REQUIRE(cli_min_required.required_cli.raw == "0.41.0");
 }
 
 TEST_CASE("analyze emits a compatible Info line when CLI >= project SDK",
@@ -357,6 +400,19 @@ TEST_CASE("read_project_cli_min_version still reads through comments",
     REQUIRE(v.patch == 0);
 }
 
+TEST_CASE("read_project_cli_min_version ignores unquoted and malformed values",
+          "[version-diag][coverage][issue-643]") {
+    TempDir tmp;
+    write_file(tmp.path / "pulp.toml",
+               "[pulp]\n"
+               "cli_min_version = 0.23.0\n"
+               "cli_min_version_extra = \"0.24.0\"\n");
+
+    auto v = read_project_cli_min_version(tmp.path);
+    REQUIRE_FALSE(v.comparable);
+    REQUIRE(v.raw.empty());
+}
+
 // ── Slice 1b (#552) — per-project skew via VersionReport.projects ──
 
 TEST_CASE("analyze warns per-project when project[].cli_min exceeds CLI",
@@ -444,6 +500,26 @@ TEST_CASE("analyze is silent when a per-project SDK matches the CLI",
     }
 }
 
+TEST_CASE("analyze uses the path basename when project name is empty",
+          "[version-diag][coverage][issue-643]") {
+    VersionReport r;
+    r.cli = parse_semver("0.20.0");
+    ProjectEntry p;
+    p.path = "/tmp/nameless-project";
+    p.cli_min = parse_semver("0.24.0");
+    r.projects.push_back(p);
+
+    auto findings = r.analyze();
+    bool saw_basename = false;
+    for (auto& f : findings) {
+        if (f.message.find("Project 'nameless-project' requires CLI") !=
+            std::string::npos) {
+            saw_basename = true;
+        }
+    }
+    REQUIRE(saw_basename);
+}
+
 // ── Slice 6 (#551) — plugin ↔ CLI skew detection ─────────────────────
 
 TEST_CASE("read_plugin_min_cli_version scrapes min_cli_version field",
@@ -476,6 +552,13 @@ TEST_CASE("read_plugin_min_cli_version is empty when the field is absent",
         "version": "0.7.0"
     })");
     auto v = read_plugin_min_cli_version(plugin_json);
+    REQUIRE_FALSE(v.comparable);
+    REQUIRE(v.raw.empty());
+}
+
+TEST_CASE("read_plugin_min_cli_version returns empty on missing file",
+          "[version-diag][coverage][issue-643]") {
+    auto v = read_plugin_min_cli_version("/nonexistent/path/plugin.json");
     REQUIRE_FALSE(v.comparable);
     REQUIRE(v.raw.empty());
 }
@@ -599,6 +682,37 @@ TEST_CASE("render_report returns zero for an empty comparable report",
     REQUIRE(out.find("WARN") == std::string::npos);
 }
 
+TEST_CASE("render_report prints scanned and missing project markers",
+          "[version-diag][coverage][issue-643]") {
+    VersionReport r;
+    r.cli = parse_semver("0.31.0");
+
+    ProjectEntry scanned;
+    scanned.path = "/tmp/scanned";
+    scanned.name = "Scanned";
+    scanned.sdk = parse_semver("0.31.0");
+    scanned.scanned = true;
+    r.projects.push_back(scanned);
+
+    ProjectEntry missing;
+    missing.path = "/tmp/missing";
+    missing.name = "Missing";
+    missing.missing_on_disk = true;
+    r.projects.push_back(missing);
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 1);
+    auto out = capture.str();
+    REQUIRE(out.find("Projects:") != std::string::npos);
+    REQUIRE(out.find("Scanned (scanned)") != std::string::npos);
+    REQUIRE(out.find("Missing (missing)") != std::string::npos);
+    REQUIRE(out.find("(sdk ?)") != std::string::npos);
+}
+
 TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
           "[version-diag][issue-552]") {
     // Capture std::cout via a redirected rdbuf so we can test without
@@ -625,15 +739,17 @@ TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
     REQUIRE(out.find("\"severity\": \"warn\"") != std::string::npos);
 }
 
-TEST_CASE("render_report_json escapes project fields",
-          "[version-diag][coverage][phase3]") {
+TEST_CASE("render_report_json escapes strings and control characters",
+          "[version-diag][coverage][issue-643]") {
     VersionReport r;
-    r.cli = parse_semver("0.31.0");
+    r.cli = parse_semver("0.20.0");
+    r.plugin_json_path = "/tmp/plugin\"quoted\".json";
+    r.project_root = "/tmp/project\\root";
 
     ProjectEntry p;
-    p.path = fs::path("project\"with_chars");
+    p.path = "/tmp/project\"with_chars\nwith-tab\t";
     p.name = "Quoted \"Project\"\\Name\nTail";
-    p.sdk = parse_semver("0.31.0");
+    p.cli_min = parse_semver("0.24.0");
     r.projects.push_back(p);
 
     std::stringstream capture;
@@ -643,6 +759,8 @@ TEST_CASE("render_report_json escapes project fields",
 
     REQUIRE(rc == 0);
     auto out = capture.str();
-    REQUIRE(out.find("\"path\": \"project\\\"with_chars\"") != std::string::npos);
-    REQUIRE(out.find("\"name\": \"Quoted \\\"Project\\\"\\\\Name\\nTail\"") != std::string::npos);
+    REQUIRE(out.find("/tmp/plugin\\\"quoted\\\".json") != std::string::npos);
+    REQUIRE(out.find("/tmp/project\\\\root") != std::string::npos);
+    REQUIRE(out.find("/tmp/project\\\"with_chars\\nwith-tab\\t") != std::string::npos);
+    REQUIRE(out.find("Quoted \\\"Project\\\"\\\\Name\\nTail") != std::string::npos);
 }
