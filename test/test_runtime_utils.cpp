@@ -763,6 +763,17 @@ TEST_CASE("ExpressionEvaluator replaces registered unary functions",
     REQUIRE(*evaluator.evaluate("shape(4)") == Catch::Approx(8.0));
 }
 
+TEST_CASE("ExpressionEvaluator variables can be overwritten",
+          "[runtime][expression][coverage][phase3]") {
+    ExpressionEvaluator evaluator;
+    evaluator.set("amount", 1.5);
+    REQUIRE(*evaluator.evaluate("amount + 1") == Catch::Approx(2.5));
+
+    evaluator.set("amount", -2.0);
+    REQUIRE(*evaluator.get("amount") == Catch::Approx(-2.0));
+    REQUIRE(*evaluator.evaluate("amount * amount") == Catch::Approx(4.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
