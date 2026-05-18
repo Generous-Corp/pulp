@@ -156,6 +156,21 @@ TEST_CASE("read_midi_file rejects truncated track chunks",
     REQUIRE_FALSE(read_midi_file(path.string()).has_value());
 }
 
+TEST_CASE("midi file helpers report missing and unwritable paths",
+          "[midi][file][coverage][phase3]") {
+    TempDir tmp;
+
+    REQUIRE_FALSE(read_midi_file((tmp.path / "missing.mid").string()).has_value());
+
+    MidiFileData data;
+    data.ticks_per_quarter = 480;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE_FALSE(write_midi_file(tmp.path.string(), data));
+}
+
 TEST_CASE("write_midi_file emits a readable SMF header",
           "[midi][file][issue-645]") {
     TempDir tmp;
