@@ -7066,3 +7066,21 @@ existing stub canvas geometry harness. Validation passed locally:
 which reported 96% overall branch diff coverage and 90.3% for
 `core/view/src/widgets/visualizers.cpp`. This tranche is held locally and
 should be aggregated into a larger PR rather than submitted individually.
+
+2026-05-17 17:19 PDT: rebased the consolidated coverage batch onto latest
+`origin/main` and added another local-only held MCP parser tranche.
+Next-batch branch `feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`f7bead7bd` (`fix(mcp): reject partial numeric tool args`) after a clean
+rebase. The tranche hardens MCP JSON numeric extraction so partial tool
+arguments such as `12junk` and `3.14oops` fall back instead of being
+silently accepted by `std::stoi`/`std::stod`, while preserving trailing
+whitespace tolerance. Focused coverage in `test/test_mcp_server.cpp`
+exercises valid integers/doubles, trailing-space and trailing-tab values,
+partial malformed values, missing fields, nulls, and invalid strings.
+Validation passed locally: `git diff --check`, built `pulp-test-mcp-server`,
+ran direct `[mcp][json]` (1 test case / 24 assertions), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='MCP JSON helpers escape and parse primitive fields' tools/scripts/local_diff_cover.sh pulp-test-mcp-server`,
+which reported 100% diff coverage for `tools/mcp/pulp_mcp.cpp` and 96%
+overall for the held branch diff. This tranche is held locally and should be
+aggregated into the larger PR rather than submitted individually.
