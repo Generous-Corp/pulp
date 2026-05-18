@@ -118,6 +118,20 @@ TEST_CASE("MemoryStream partial read", "[stream]") {
     REQUIRE(out[1] == 40);
 }
 
+TEST_CASE("MemoryStream read cursor remains at end after EOF",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{11, 22});
+    std::uint8_t out[4]{};
+
+    REQUIRE(stream.read(out, sizeof(out)).bytes == 2);
+    REQUIRE(stream.read_position() == 2);
+
+    auto eof = stream.read(out, 1);
+    REQUIRE_FALSE(eof.ok());
+    REQUIRE(eof.closed());
+    REQUIRE(stream.read_position() == 2);
+}
+
 TEST_CASE("MemoryStream close rejects further I/O", "[stream]") {
     MemoryStream s;
     s.close();
