@@ -96,6 +96,18 @@ TEST_CASE("BackgroundScanner: idle cancel and join are no-ops",
     REQUIRE_FALSE(bs.is_running());
 }
 
+TEST_CASE("CancelToken request and reset toggle the shared flag",
+          "[host][bg-scan][coverage]") {
+    CancelToken token;
+    REQUIRE_FALSE(token.requested());
+
+    token.request();
+    REQUIRE(token.requested());
+
+    token.reset();
+    REQUIRE_FALSE(token.requested());
+}
+
 TEST_CASE("BackgroundScanner: second start while running returns false",
           "[host][bg-scan]") {
     BackgroundScanner bs;
