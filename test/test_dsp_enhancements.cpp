@@ -5,11 +5,20 @@
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <vector>
 #include <cmath>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("FastMath clamps saturation helper boundaries",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::clamp_unit(-2.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(-0.25f), WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(0.25f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(2.0f), WithinAbs(1.0f, 1e-6f));
+}
 
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
