@@ -182,6 +182,65 @@ TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
     REQUIRE(bad_reads.load() == 0);
 }
 
+// ── SpscQueue tests ───────────────────────────────────────────────────────
+
+TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
+          "[runtime][spsc_queue][coverage]") {
+    SpscQueue<int, 4> queue;
+
+    REQUIRE(queue.capacity() == 4);
+    REQUIRE(queue.empty());
+    REQUIRE(queue.size_approx() == 0);
+    REQUIRE_FALSE(queue.try_pop().has_value());
+
+    REQUIRE(queue.try_push(10));
+    REQUIRE(queue.try_push(20));
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE(queue.size_approx() == 2);
+
+    auto first = queue.try_pop();
+    auto second = queue.try_pop();
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(*first == 10);
+    REQUIRE(*second == 20);
+    REQUIRE(queue.empty());
+}
+
+TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
+          "[runtime][spsc_queue][coverage]") {
+    SpscQueue<int, 2> queue;
+
+    REQUIRE(queue.try_push(1));
+    REQUIRE(queue.try_push(2));
+    REQUIRE_FALSE(queue.try_push(3));
+    REQUIRE(queue.size_approx() == 2);
+
+    auto popped = queue.try_pop();
+    REQUIRE(popped.has_value());
+    REQUIRE(*popped == 1);
+
+    REQUIRE(queue.try_push(3));
+    REQUIRE(*queue.try_pop() == 2);
+    REQUIRE(*queue.try_pop() == 3);
+    REQUIRE_FALSE(queue.try_pop().has_value());
+}
+
+TEST_CASE("SpscQueue supports rvalue item pushes",
+          "[runtime][spsc_queue][coverage]") {
+    struct MoveTracked {
+        int value = 0;
+    };
+
+    SpscQueue<MoveTracked, 2> queue;
+    REQUIRE(queue.try_push(MoveTracked{42}));
+
+    auto item = queue.try_pop();
+    REQUIRE(item.has_value());
+    REQUIRE(item->value == 42);
+    REQUIRE(queue.empty());
+}
+
 // ── Composed integration test ────────────────────────────────────────────
 // Simulates the real audio→UI pipeline: audio thread writes to both
 // TripleBuffer (meter data) and SpscQueue (events) while UI thread reads both.
