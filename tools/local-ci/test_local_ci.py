@@ -485,6 +485,82 @@ class LocalCiTests(unittest.TestCase):
                 {"provider": "github-hosted"}, "missing"
             )
 
+    def test_extracted_github_workflow_settings_validate_selectors_and_providers(self):
+        config = {
+            "github_actions": {
+                "repository": "  danielraffel/pulp  ",
+                "defaults": {
+                    "workflow": "  docs-check  ",
+                    "provider": "  namespace  ",
+                    "wait_poll_secs": "11",
+                    "match_timeout_secs": 22,
+                },
+                "workflows": {
+                    "docs-check": {
+                        "providers": {
+                            "namespace": {
+                                "runner_selector_json": '["namespace-profile-docs"]',
+                            }
+                        }
+                    }
+                },
+            }
+        }
+
+        display = self.mod.github_actions_settings_for_display(config)
+        self.assertEqual(display["repository"], "danielraffel/pulp")
+        self.assertEqual(display["workflow"], "docs-check")
+        self.assertEqual(display["provider"], "namespace")
+
+        settings = self.mod.resolve_github_actions_settings(config)
+        self.assertEqual(settings["wait_poll_secs"], 11)
+        self.assertEqual(settings["match_timeout_secs"], 22)
+
+        selector = self.mod.resolve_workflow_runner_selector_json(
+            config, "docs-check", "namespace"
+        )
+        self.assertEqual(selector, '["namespace-profile-docs"]')
+        self.assertEqual(
+            self.mod.resolve_workflow_runner_selector_json(
+                {"github_actions": {"workflows": []}}, "docs-check", "namespace"
+            ),
+            "",
+        )
+
+        self.assertEqual(
+            self.mod.normalize_runs_on_json('"macos-15"', setting_name="selector"),
+            '"macos-15"',
+        )
+        self.assertEqual(
+            self.mod.normalize_runs_on_json('["ubuntu-24.04"]', setting_name="selector"),
+            '["ubuntu-24.04"]',
+        )
+        with self.assertRaisesRegex(ValueError, "must be valid JSON"):
+            self.mod.normalize_runs_on_json("not json", setting_name="selector")
+        with self.assertRaisesRegex(ValueError, "must decode to a string or array"):
+            self.mod.normalize_runs_on_json("42", setting_name="selector")
+
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            self.mod.resolve_github_actions_settings(
+                {"github_actions": {"defaults": {"wait_poll_secs": 0}}}
+            )
+
+        provider, source = self.mod.resolve_default_provider_for_workflow(
+            {"provider": "namespace"}, "validate"
+        )
+        self.assertEqual(provider, "github-hosted")
+        self.assertIn("workflow fallback", source)
+
+        provider, source = self.mod.resolve_default_provider_for_workflow(
+            {"provider": "github-hosted"}, "build", explicit_provider="namespace"
+        )
+        self.assertEqual((provider, source), ("namespace", "cli"))
+
+        with self.assertRaisesRegex(ValueError, "does not support provider"):
+            self.mod.resolve_default_provider_for_workflow(
+                {"provider": "github-hosted"}, "validate", explicit_provider="namespace"
+            )
+
     def test_windows_checkout_path_helpers_join_and_detect_unsafe_roots(self):
         self.assertEqual(
             self.mod.windows_path_join(r"C:\Users\daniel\\", r"\Code\\", "pulp"),
