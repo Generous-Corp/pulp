@@ -1146,3 +1146,11 @@ TEST_CASE("FloatRange constrain clamps fractional values",
     REQUIRE_THAT(range.constrain(0.25f), Catch::Matchers::WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(range.constrain(2.5f), Catch::Matchers::WithinAbs(1.0f, 1e-6f));
 }
+
+TEST_CASE("DoubleRange empty constrain returns start",
+          "[runtime][range][coverage][phase3]") {
+    DoubleRange empty(4.5, 4.5);
+    REQUIRE(empty.empty());
+    REQUIRE_THAT(empty.constrain(-100.0), Catch::Matchers::WithinAbs(4.5, 1e-12));
+    REQUIRE_THAT(empty.constrain(100.0), Catch::Matchers::WithinAbs(4.5, 1e-12));
+}
