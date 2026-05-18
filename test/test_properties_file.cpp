@@ -82,6 +82,18 @@ TEST_CASE("PropertiesFile set and get bool", "[state][properties]") {
     REQUIRE(*val == false);
 }
 
+TEST_CASE("PropertiesFile typed setters store retrievable string values",
+          "[state][properties][coverage][phase3]") {
+    PropertiesFile props;
+    props.set_int("voices", 16);
+    props.set_double("gain", -3.25);
+    props.set_bool("enabled", true);
+
+    REQUIRE(props.get_string("voices").value_or("") == "16");
+    REQUIRE(props.get_string("gain").value_or("").find("-3.25") == 0);
+    REQUIRE(props.get_string("enabled").value_or("") == "true");
+}
+
 TEST_CASE("PropertiesFile bool getter accepts true and numeric-one strings",
           "[state][properties][codecov]") {
     PropertiesFile props;
