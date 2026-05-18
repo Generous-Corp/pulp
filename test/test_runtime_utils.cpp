@@ -472,6 +472,28 @@ TEST_CASE("run_process captures stderr separately",
     REQUIRE(result->stderr_output.find("bad-news") != std::string::npos);
 }
 
+TEST_CASE("run_process honors an explicit working directory",
+          "[runtime][child_process][coverage][phase3]") {
+    TemporaryFile unique(".wd");
+    auto dir = unique.path();
+    unique.release();
+    std::filesystem::remove(dir);
+    std::filesystem::create_directories(dir);
+
+#ifdef _WIN32
+    auto result = run_process("powershell", {"-NoProfile", "-Command", "Get-Location"},
+                              dir.string());
+#else
+    auto result = run_process("/bin/pwd", {}, dir.string());
+#endif
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->exit_code == 0);
+    REQUIRE(result->stdout_output.find(dir.string()) != std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
 #ifdef _WIN32
     auto result = run_process("C:\\nonexistent_binary_12345.exe");
