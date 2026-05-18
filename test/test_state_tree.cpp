@@ -811,6 +811,18 @@ TEST_CASE("ObservableValue skips empty listeners", "[state][observable][codecov]
     REQUIRE(count == 1);
 }
 
+TEST_CASE("ObservableValue removing an unknown listener is a no-op",
+          "[state][observable][coverage][phase3]") {
+    ObservableValue<int> val(1);
+    int count = 0;
+    val.add_listener([&](const int&, const int&) { ++count; });
+
+    val.remove_listener(999);
+    val.set(2);
+
+    REQUIRE(count == 1);
+}
+
 // ── CachedProperty ──────────────────────────────────────────────────────
 
 TEST_CASE("CachedProperty binds default and follows tree updates", "[state][cached]") {
@@ -865,6 +877,17 @@ TEST_CASE("CachedProperty unbound set only updates local cache", "[state][cached
 
     size.set(512);
     REQUIRE(size.get() == 512);
+}
+
+TEST_CASE("CachedProperty move of unbound property preserves cached value",
+          "[state][cached][coverage][phase3]") {
+    CachedProperty<int64_t> size;
+    size.set(256);
+
+    CachedProperty<int64_t> moved(std::move(size));
+
+    REQUIRE_FALSE(moved.is_bound());
+    REQUIRE(moved.get() == 256);
 }
 
 TEST_CASE("CachedProperty ignores mismatched external updates",
