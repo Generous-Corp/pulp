@@ -152,15 +152,20 @@ build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE 
 # Per-host details live in .shipyard.local/config.toml.
 
 [targets.mac]
-backend  = "local"
+# 2026-05-18: backend flipped local → cloud per
+# planning/2026-05-18-shipyard-namespace-cutover.md. Mac validation
+# now dispatches to the GHA `build` workflow, which routes the macOS
+# leg to Namespace via PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON +
+# PULP_LOCAL_MAC_OVERFLOW_THRESHOLD=0 (Phase A). The local
+# self-hosted Mac (Daniels-MacBook-Pro) stays registered as a
+# manual fallback the operator can invoke via workflow_dispatch
+# or by raising the threshold back to 1.
+backend  = "cloud"
 platform = "macos-arm64"
-# Phase 8 brings the Rust CLI crate into the build graph (Dawn,
-# Skia, mbedtls, plus a fresh `cargo build` of pulp-rs). On a cold
-# FetchContent cache the configure+build runs ~35–45 min on this
-# host, well past Shipyard's default 30 min budget. Two parallel
-# ships (#790, #791) both timed out at 30:02 / 30:10 in the same
-# CMake configure stage on the Phase 8 prep branch; bump matches
-# the windows lane that already exempts itself for the same reason.
+workflow = "build"
+# Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
+# git history for context. Kept at 1h because Namespace cold-start
+# + cache-miss cases still run long.
 timeout_secs = 3600
 
 [targets.ubuntu]
