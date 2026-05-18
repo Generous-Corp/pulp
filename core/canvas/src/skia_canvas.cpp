@@ -44,6 +44,8 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/font_options.hpp>
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/text_font_context.hpp>
 #include "modules/skparagraph/include/Paragraph.h"
@@ -205,105 +207,33 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
 // before this fix (Codex review on emoji-parity branch).
 static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
                                              int weight, int slant) {
-    struct Key { std::string family; int weight; int slant; };
-    struct KeyHash {
-        size_t operator()(const Key& k) const noexcept {
-            return std::hash<std::string>{}(k.family)
-                ^ (static_cast<size_t>(k.weight) * 31u)
-                ^ (static_cast<size_t>(k.slant) * 1297u);
-        }
-    };
-    struct KeyEq {
-        bool operator()(const Key& a, const Key& b) const noexcept {
-            return a.weight == b.weight && a.slant == b.slant && a.family == b.family;
-        }
-    };
-    static std::unordered_map<Key, sk_sp<SkTypeface>, KeyHash, KeyEq> cache;
-    static std::uint64_t cached_generation = 0;
-    static std::mutex cache_mutex;
-
-    std::uint64_t current_gen = pulp::canvas::font_registration_generation();
-
-    {
-        std::lock_guard<std::mutex> guard(cache_mutex);
-        if (current_gen != cached_generation) {
-            cache.clear();
-            cached_generation = current_gen;
-        }
-        Key key{family, weight, slant};
-        auto it = cache.find(key);
-        if (it != cache.end()) return it->second;
-    }
-
-    Key key{family, weight, slant};
-
-    SkFontStyle sk_style{
-        weight,
-        SkFontStyle::kNormal_Width,
-        slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant
-    };
-
-    sk_sp<SkTypeface> typeface;
-
+    // pulp #2163 / font v2 Slice 1.1.a (caller migration) — routes through
+    // FontResolver so registered / bundled / platform cascade and the
+    // typeface cache live in one place. FontResolver keys on the full
+    // FontOptions hash including registry_generation, so registration
+    // changes invalidate automatically — replaces the
+    // font_registration_generation()-watching cache that lived here.
+    // The Android Roboto direct-file load is preserved as a pre-resolver
+    // fast path (the resolver doesn't yet honor platform-specific file
+    // overrides; restored in Slice 1.1.a finish).
 #if defined(__ANDROID__)
-    // Load Roboto directly from filesystem for deterministic rendering.
-    // This avoids the font manager's family matching which can return
-    // different fonts depending on the device/API level. Only the
-    // Regular/Upright path has a baked-in file; bold/italic still go
-    // through the family matcher below.
     if (weight == 400 && slant == 0 &&
         (family == "sans-serif" || family == "Roboto" || family.empty())) {
-        auto mgr = get_font_manager();
-        if (mgr) {
-            typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
+        if (auto mgr = get_font_manager()) {
+            if (auto tf = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf")) {
+                return tf;
+            }
         }
     }
 #endif
 
-    // Plugin-registered fonts win over both bundled and platform fonts
-    // (pulp #1150). A plugin author who explicitly registered "MyBrand
-    // Display" expects that name to resolve to their own .ttf, even if the
-    // host machine happens to have an unrelated family with the same name.
-    if (!typeface && !family.empty()) {
-        typeface = match_registered_typeface(family, sk_style);
-    }
+    FontOptions opts;
+    if (!family.empty()) opts.family_stack.push_back(family);
+    opts.weight = static_cast<float>(weight);
+    opts.slant  = slant ? FontSlant::Italic : FontSlant::Normal;
 
-    // Bundled fonts take precedence over the system font manager so plugin
-    // UIs render the same on a stock machine as on a developer's machine
-    // with the same families installed (#932). Without this, calling
-    // canvas.set_font("JetBrains Mono", ...) on macOS-without-JetBrainsMono
-    // resolves to a null typeface and crashes the first time a non-ASCII
-    // glyph triggers SkFontMgr-driven fallback.
-    if (!typeface && !family.empty()) {
-        auto mgr = get_font_manager();
-        if (mgr) {
-            typeface = match_bundled_typeface(mgr.get(), family, sk_style);
-        }
-    }
-
-    // Fall back to family name matching
-    if (!typeface) {
-        auto mgr = get_font_manager();
-        if (mgr && mgr->countFamilies() > 0) {
-            typeface = mgr->matchFamilyStyle(family.c_str(), sk_style);
-            if (!typeface)
-                typeface = mgr->matchFamilyStyle(nullptr, sk_style);
-        }
-    }
-
-    {
-        std::lock_guard<std::mutex> guard(cache_mutex);
-        // Re-check generation: a concurrent register_font() between our
-        // earlier check and this insert would otherwise leave us caching a
-        // typeface that pre-dates the new registration.
-        std::uint64_t now_gen = pulp::canvas::font_registration_generation();
-        if (now_gen != cached_generation) {
-            cache.clear();
-            cached_generation = now_gen;
-        }
-        cache[key] = typeface;
-    }
-    return typeface;
+    auto resolved = FontResolver::instance().resolve_family_list(opts);
+    return resolved.typeface;
 }
 
 // Legacy single-arg overload — preserves the old "Normal" behaviour for

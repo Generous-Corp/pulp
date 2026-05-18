@@ -47,7 +47,7 @@ enum class FontSlant : std::uint8_t {
 /// Logical text direction. `Auto` defers to bidi analysis in the
 /// `TextRunPlanner` (Slice 1.2); `LTR`/`RTL` force a paragraph-level
 /// base direction.
-enum class TextDirection : std::uint8_t {
+enum class BaseDirection : std::uint8_t {
     LTR,
     RTL,
     Auto,
@@ -229,7 +229,8 @@ struct FontOptions {
     /// BCP-47 language tag (`""`, `"en"`, `"ja-JP"`, `"zh-Hans"`).
     /// Drives ICU locale-aware shaping and line-break (Phase 2 / 2.4).
     std::string locale;
-    TextDirection direction = TextDirection::Auto;
+    BaseDirection direction = BaseDirection::Auto;
+
 
     // ── Spacing ─────────────────────────────────────────────────────────
     /// Extra letter spacing in px (post-shaping, between clusters).
