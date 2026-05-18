@@ -66,6 +66,15 @@ TEST_CASE("Interpolator lagrange for linear data", "[signal][interp]") {
     REQUIRE_THAT(result, WithinAbs(1.5, 0.01));
 }
 
+TEST_CASE("Interpolator lagrange preserves quadratic curves",
+          "[signal][interp][coverage][phase3]") {
+    // Samples from f(x) = x^2 at x=-1,0,1,2.
+    REQUIRE_THAT(Interpolator::lagrange(0.25f, 1.0f, 0.0f, 1.0f, 4.0f),
+                 WithinAbs(0.0625f, 0.001f));
+    REQUIRE_THAT(Interpolator::lagrange(0.75f, 1.0f, 0.0f, 1.0f, 4.0f),
+                 WithinAbs(0.5625f, 0.001f));
+}
+
 TEST_CASE("Interpolator lagrange impulse response spans four samples", "[signal][interp]") {
     REQUIRE_THAT(Interpolator::lagrange(0.5f, 1.0f, 0.0f, 0.0f, 0.0f), WithinAbs(-0.0625, 0.001));
     REQUIRE_THAT(Interpolator::lagrange(0.5f, 0.0f, 1.0f, 0.0f, 0.0f), WithinAbs(0.5625, 0.001));
