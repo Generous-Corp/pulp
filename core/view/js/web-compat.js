@@ -428,6 +428,18 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name.indexOf("data-") === 0) {
         this._dataset[_camelCase(name.slice(5))] = value;
     }
+    // pulp #2163 — font v2 Slice 2.5. The HTML `dir` attribute
+    // (`<div dir="rtl">…</div>`) parallels the CSS `direction: rtl`
+    // path (web-compat-style-decl.js → setDirection). Both routes
+    // land on View::WritingDirection which Yoga consumes for
+    // container child-order flip + the shaper consumes for bidi
+    // base direction. Values: "ltr" | "rtl" | "auto" (CSS spec).
+    else if (name === "dir" && typeof setDirection !== "undefined") {
+        var dv = String(value).toLowerCase();
+        if (dv === "rtl" || dv === "ltr" || dv === "auto") {
+            setDirection(this._id, dv);
+        }
+    }
 };
 
 Element.prototype.getAttribute = function(name) {
