@@ -1528,10 +1528,19 @@ private:
 /// Shared file handle owned by the sink lambda. Lazily opens on first
 /// event so empty traces don't create stale files. Header is written
 /// once; subsequent events are appended.
+///
+/// `mtx` serializes the open / header-write / body-write sequence.
+/// Coordinator::fire_sinks does not hold a lock across sink calls, and
+/// the same `make_fixture_sink(path)` lambda is sometimes registered
+/// on both `Coordinator::add_sink` AND `MotionScrubber::add_sink` (see
+/// docstring on `make_fixture_sink` callers); two sink-fire threads
+/// could otherwise interleave writes mid-line. The mutex is cheap and
+/// uncontended in the single-registration case (issue #2151).
 struct FixtureFileSink {
     std::string path;
     std::shared_ptr<std::ofstream> stream;
     bool header_written = false;
+    std::mutex mtx;
 
     void ensure_open() {
         if (!stream) {
@@ -1547,6 +1556,7 @@ Sink make_fixture_sink(std::string path) {
     auto state = std::make_shared<FixtureFileSink>();
     state->path = std::move(path);
     return [state](const SampleEvent& e) {
+        std::lock_guard<std::mutex> lock(state->mtx);
         state->ensure_open();
         if (!state->stream || !state->stream->is_open()) return;
         if (!state->header_written) {

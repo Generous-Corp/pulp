@@ -157,6 +157,11 @@ public struct PulpMotionBackend {
 /// Process-wide accessor — the host wires its backend in at launch.
 public enum PulpMotionRuntime {
     private static let lock = NSLock()
+    /// Separate ambient-provenance lock so SwiftUI `PulpMotionProbe`
+    /// attaches that briefly set + clear the C-side ambient slot can
+    /// serialize without contending with backend installation. See
+    /// `withAmbientProvenance(...)` below — issue #2150.
+    private static let ambientLock = NSLock()
     private static var _backend = PulpMotionBackend()
 
     /// Install a backend (host app calls this at launch). Pass `nil`
@@ -174,6 +179,27 @@ public enum PulpMotionRuntime {
     static var backend: PulpMotionBackend {
         lock.lock(); defer { lock.unlock() }
         return _backend
+    }
+
+    /// Run `body` with the process-wide ambient provenance set to
+    /// (`kind`, `id`, `file`, `line`) and unconditionally cleared on
+    /// exit. The set / body / clear triple runs under a dedicated lock
+    /// so two SwiftUI view bodies in the same runloop tick can't
+    /// interleave ambient slot mutations (issue #2150). The body should
+    /// be short — typically just the publish calls that need the
+    /// ambient stamp. The C ABI ambient slot is itself unsynchronized
+    /// across runtimes, so this guard only protects Swift-side
+    /// callers; it does not synchronize against arbitrary C++ writers.
+    public static func withAmbientProvenance(
+        kind: String, id: String,
+        file: String = #fileID, line: Int = #line,
+        _ body: () -> Void
+    ) {
+        ambientLock.lock(); defer { ambientLock.unlock() }
+        let b = backend
+        b.setAmbientProvenance(kind, id, file, line)
+        body()
+        b.clearAmbientProvenance()
     }
 }
 

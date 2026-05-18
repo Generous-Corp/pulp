@@ -20,12 +20,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #if defined(_WIN32)
 #include <process.h>
 #define pulp_test_getpid() static_cast<long>(::_getpid())
@@ -396,4 +398,96 @@ TEST_CASE("Non-scrubber Motion.* methods still route to MotionInspector",
                                        R"({"view_name":"X","fps":60,"metrics":[]})"));
     REQUIRE(resp.is_error);
     REQUIRE(resp.params_json.find("motion inspector") != std::string::npos);
+}
+
+// ── FixtureFileSink double-registration regression (bug #2151) ───────
+//
+// `make_fixture_sink(path)` returns a Sink that owns a shared
+// `FixtureFileSink` state (file handle + header_written flag). If the
+// SAME sink is registered on both `Coordinator::add_sink` AND
+// `MotionScrubber::add_sink`, two sink-fire threads can interleave
+// writes to the underlying `std::ofstream` — header gets emitted
+// twice, or a body line gets cut in half by another thread's line.
+//
+// Pre-#2151 the sink had no internal synchronization. Post-fix, the
+// sink takes a `std::mutex` around the open + header-write + body-
+// write sequence. This test drives N threads invoking the SAME sink
+// in parallel and asserts the resulting file parses cleanly: exactly
+// one header line, every body line a valid JSON event.
+
+TEST_CASE("FixtureFileSink shared by N threads writes intact lines",
+          "[motion-fixture-sink][bug-sweep][thread-safety][issue-2151]") {
+    const auto path = tmp_fixture_path("shared-2151");
+    std::remove(path.c_str());
+
+    auto sink = pulp::view::motion::make_fixture_sink(path);
+
+    // Construct a SampleEvent template. We use the same shape on
+    // every thread but tag `frame` with the worker id so we can
+    // verify after the fact that every published event made it
+    // through (no dropped or truncated lines).
+    const int workers = 8;
+    const int iters = 250;
+    std::atomic<bool> go{false};
+
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (int w = 0; w < workers; ++w) {
+        threads.emplace_back([&, w] {
+            while (!go.load(std::memory_order_acquire)) {}
+            for (int i = 0; i < iters; ++i) {
+                SampleEvent e;
+                e.kind = SampleEvent::Kind::Sample;
+                e.view_name = "View";
+                e.metric_name = "value";
+                e.t_seconds = static_cast<double>(w) + 0.001 * i;
+                e.frame = static_cast<std::uint64_t>(w * iters + i);
+                e.precision = 3;
+                e.components.emplace_back("value", static_cast<double>(i));
+                sink(e);
+            }
+        });
+    }
+    go.store(true, std::memory_order_release);
+    for (auto& t : threads) t.join();
+
+    // 1. The fixture loader must succeed (any torn header or truncated
+    //    event line would surface as an empty vector — load_fixture
+    //    bails on parse failure).
+    auto events = pulp::view::motion::load_fixture(path);
+    REQUIRE(events.size() == static_cast<std::size_t>(workers * iters));
+
+    // 2. The header must have parsed: schema version present.
+    auto hdr = pulp::view::motion::load_fixture_header(path);
+    REQUIRE(hdr.version == pulp::view::motion::kFixtureSchemaVersion);
+
+    // 3. Re-read the raw file: must have exactly one header line, and
+    //    every subsequent line must start with `{"kind":` (i.e. is a
+    //    full event line, not a torn fragment).
+    std::ifstream in(path);
+    REQUIRE(in.is_open());
+    std::string line;
+    REQUIRE(std::getline(in, line));   // header
+    REQUIRE(line.find("motion_fixture_version") != std::string::npos);
+    int header_dupes = 0;
+    int body_lines = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        if (line.find("motion_fixture_version") != std::string::npos) {
+            ++header_dupes;
+        } else {
+            // Must look like a JSON object literal. A torn write
+            // would either leave a non-`{` opener or omit the
+            // closing `}`. Both conditions would also have made
+            // load_fixture return empty, but check the raw bytes
+            // too so a regression surfaces with a clear locator.
+            REQUIRE(line.front() == '{');
+            REQUIRE(line.back()  == '}');
+            ++body_lines;
+        }
+    }
+    REQUIRE(header_dupes == 0);
+    REQUIRE(body_lines == workers * iters);
+
+    std::remove(path.c_str());
 }

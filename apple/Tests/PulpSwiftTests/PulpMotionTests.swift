@@ -180,4 +180,71 @@ final class PulpMotionTests: XCTestCase {
         probe.update(minX: 0, minY: 0, width: 10, height: 10)
         XCTAssertTrue(rec.updateCalls.isEmpty)
     }
+
+    // MARK: - withAmbientProvenance race-guard (#2150)
+    //
+    // Pre-#2150, two SwiftUI view bodies in the same runloop tick that
+    // both invoked `attachIfNeeded()` would race the process-wide
+    // ambient slot — view A's `setAmbientProvenance` could be
+    // immediately clobbered by view B's, then A's publishes would be
+    // stamped with B's provenance. `PulpMotionRuntime.withAmbientProvenance`
+    // serializes the set / body / clear triple so each attach observes
+    // its own stamp.
+
+    func testWithAmbientProvenanceSerializesSetClearAcrossThreads() async {
+        rec.tracingEnabled = true
+
+        // Record the sequence of ambient mutations (set / clear) the
+        // backend observes. After two concurrent attaches, the
+        // sequence must contain pairs of set→clear with no interleaved
+        // sets — i.e. between every `set` and its matching `clear`,
+        // no second `set` appears.
+        let mutationLock = NSLock()
+        var mutations: [String] = []
+        var backend = PulpMotionRuntime.backend
+        backend.setAmbientProvenance = { kind, id, _, _ in
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            mutations.append("set:\(kind)/\(id)")
+        }
+        backend.clearAmbientProvenance = {
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            mutations.append("clear")
+        }
+        PulpMotionRuntime.installTestBackend(backend)
+
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0..<8 {
+                group.addTask {
+                    let viewName = "View\(i)"
+                    PulpMotionRuntime.withAmbientProvenance(
+                        kind: "swiftui", id: viewName
+                    ) {
+                        // Brief artificial work inside the critical
+                        // section to widen the race window if the
+                        // guard is removed.
+                        for _ in 0..<200 { _ = viewName.uppercased() }
+                    }
+                }
+            }
+        }
+
+        // Validate: every `set` is followed by exactly one `clear`
+        // before the next `set`. Reject any nested `set:..`/`set:..`
+        // pair — that would be the racing bug #2150 was filed for.
+        var depth = 0
+        for m in mutations {
+            if m.hasPrefix("set:") {
+                XCTAssertEqual(depth, 0,
+                    "nested set with no intervening clear at \(m)")
+                depth += 1
+            } else if m == "clear" {
+                XCTAssertEqual(depth, 1,
+                    "clear without matching set")
+                depth -= 1
+            }
+        }
+        XCTAssertEqual(depth, 0, "trailing unmatched set")
+        // 8 tasks → 16 mutations (8 set + 8 clear).
+        XCTAssertEqual(mutations.count, 16)
+    }
 }

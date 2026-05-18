@@ -52,19 +52,26 @@ public struct PulpMotionTraceModifier: ViewModifier {
         // Walk the metric set; geometry / scrollGeometry metrics are
         // fed by the GeometryReader probe, scalar `value` metrics ride
         // the publish channel synchronously.
-        PulpMotion.setAmbientProvenance(kind: "swiftui", id: name)
-        for metric in metrics {
-            switch metric.kind {
-            case .value(let v):
-                PulpMotion.publishValue(view: name, metric: metric.name,
-                                        value: v,
-                                        epsilon: metric.epsilon,
-                                        precision: metric.precision)
-            case .geometry, .scrollGeometry:
-                break  // fed by handleFrame / preference change
+        //
+        // SwiftUI may invoke `body` / `onAppear` from multiple view
+        // bodies in the same runloop tick — two concurrent
+        // `pulpMotionTrace` attaches would otherwise race the global
+        // ambient provenance slot. Serialize the set / publish / clear
+        // triple under `PulpMotionRuntime.withAmbientProvenance` so
+        // each attach sees its own provenance stamp (issue #2150).
+        PulpMotionRuntime.withAmbientProvenance(kind: "swiftui", id: name) {
+            for metric in metrics {
+                switch metric.kind {
+                case .value(let v):
+                    PulpMotion.publishValue(view: name, metric: metric.name,
+                                            value: v,
+                                            epsilon: metric.epsilon,
+                                            precision: metric.precision)
+                case .geometry, .scrollGeometry:
+                    break  // fed by handleFrame / preference change
+                }
             }
         }
-        PulpMotion.clearAmbientProvenance()
     }
 
     private func detach() {
@@ -132,9 +139,14 @@ public final class PulpMotionGeometryProbe {
         self.name = name
         self.metricName = metric
         if PulpMotion.isTracingEnabled {
-            PulpMotion.setAmbientProvenance(kind: "swiftui", id: name)
-            traceId = PulpMotion.registerGeometryTrace(view: name, fps: fps)
-            PulpMotion.clearAmbientProvenance()
+            // Same race surface as `PulpMotionTraceModifier.attachIfNeeded`
+            // (issue #2150): serialize the set / register / clear under
+            // the runtime's ambient lock so concurrent UIKit / AppKit
+            // probe constructions can't interleave ambient slot
+            // mutations.
+            PulpMotionRuntime.withAmbientProvenance(kind: "swiftui", id: name) {
+                traceId = PulpMotion.registerGeometryTrace(view: name, fps: fps)
+            }
         }
     }
 
