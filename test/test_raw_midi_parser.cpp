@@ -90,6 +90,23 @@ TEST_CASE("raw_midi_parser drops stray data and incomplete short messages",
     REQUIRE(c.sysex.empty());
 }
 
+TEST_CASE("raw_midi_parser recovers when short-message data is another status",
+          "[midi][raw_midi_parser][codecov]") {
+    auto c = parse({0x90, 0x40,       // malformed Note On: next byte is status
+                    0x91, 0x41, 0x7F,
+                    0xC2,             // malformed Program Change: next byte is status
+                    0xF6});
+
+    REQUIRE(c.shorts.size() == 2);
+    REQUIRE(c.shorts[0].status == 0x91);
+    REQUIRE(c.shorts[0].d1 == 0x41);
+    REQUIRE(c.shorts[0].d2 == 0x7F);
+    REQUIRE(c.shorts[1].status == 0xF6);
+    REQUIRE(c.shorts[1].d1 == 0x00);
+    REQUIRE(c.shorts[1].d2 == 0x00);
+    REQUIRE(c.sysex.empty());
+}
+
 TEST_CASE("raw_midi_parser accumulates sysex across calls",
           "[midi][raw_midi_parser][issue-406]") {
     RawMidiParserState state;
