@@ -148,3 +148,23 @@ TEST_CASE("FilterDesign butterworth edge orders are bounded and finite",
         REQUIRE_THAT(dc_gain(c), WithinAbs(0.0f, 0.01f));
     }
 }
+
+TEST_CASE("FilterDesign near-Nyquist biquads remain finite",
+          "[signal][filter_design][coverage][phase3-large]") {
+    const float sample_rate = 48000.0f;
+    const float near_nyquist = 0.49f * sample_rate;
+
+    auto low = FilterDesign::lowpass(near_nyquist, 0.707f, sample_rate);
+    auto high = FilterDesign::highpass(near_nyquist, 0.707f, sample_rate);
+    auto notch = FilterDesign::notch(near_nyquist, 1.0f, sample_rate);
+    auto allpass = FilterDesign::allpass(near_nyquist, 0.707f, sample_rate);
+
+    for (const auto& c : {low, high, notch, allpass}) {
+        require_finite(c);
+    }
+
+    REQUIRE(std::abs(nyquist_gain(low)) < 0.01f);
+    REQUIRE(nyquist_gain(high) > 0.9f);
+    REQUIRE_THAT(nyquist_gain(notch), WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(nyquist_gain(allpass), WithinAbs(1.0f, 0.01f));
+}
