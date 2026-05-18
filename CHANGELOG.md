@@ -18,6 +18,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 - feat(motion): Phase 11 — native bridges, visual+ enhancements, scroll/outlier, CLI/MCP ([#2168](https://github.com/danielraffel/pulp/pull/2168))
 
+<a id="v011310"></a>
+## [0.113.10] - 2026-05-18
+
+- refactor(view): R2-2 header-diet first cut — added <pulp/view/view_fwd.hpp> + moved View::~View() body to view.cpp (no ABI change)
+
 <a id="v01139"></a>
 ## [0.113.9] - 2026-05-18
 
@@ -1970,6 +1975,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
 [0.115.0]: https://github.com/danielraffel/pulp/releases/tag/v0.115.0
 [0.114.0]: https://github.com/danielraffel/pulp/releases/tag/v0.114.0
+[0.113.10]: https://github.com/danielraffel/pulp/releases/tag/v0.113.10
 [0.113.9]: https://github.com/danielraffel/pulp/releases/tag/v0.113.9
 [0.113.8]: https://github.com/danielraffel/pulp/releases/tag/v0.113.8
 [0.113.5]: https://github.com/danielraffel/pulp/releases/tag/v0.113.5
