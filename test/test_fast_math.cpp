@@ -134,6 +134,14 @@ TEST_CASE("FastMath exp2 and log2 round trip powers",
     }
 }
 
+TEST_CASE("FastMath gain conversion round trips common levels",
+          "[signal][fast_math][codecov]") {
+    for (float db : {-24.0f, -12.0f, 0.0f, 12.0f}) {
+        REQUIRE_THAT(FastMath::gain_to_db(FastMath::db_to_gain(db)),
+                     WithinAbs(db, 0.2f));
+    }
+}
+
 TEST_CASE("FastMath tanh remains odd inside the approximation range",
           "[signal][fast_math][codecov]") {
     for (float value : {0.125f, 0.75f, 1.5f, 3.5f}) {
