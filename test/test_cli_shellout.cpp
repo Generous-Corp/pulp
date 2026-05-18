@@ -1427,6 +1427,31 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
     REQUIRE(combined.find("--allow-unsupported-sdk") != std::string::npos);
 }
 
+TEST_CASE("pulp design validates owned option values before autobind",
+          "[cli][shellout][design][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"design", "--build-dir"}, "--build-dir requires a value"},
+        {{"design", "--build-dir", "--script", "tool.js"}, "--build-dir requires a value"},
+        {{"design", "--script"}, "--script requires a value"},
+        {{"design", "--script", "--watch"}, "--script requires a value"},
+    };
+
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stderr_output.find("Cannot infer design binding") == std::string::npos);
+    }
+}
+
 // Issue #499 Slice 1: `pulp doctor --versions` is the foundation of
 // the release-discovery UX. Verify the subcommand is wired, always
 // exits 0 (skew findings are advisory), and surfaces the diagnostic
