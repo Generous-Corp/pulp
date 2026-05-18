@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
 #include <cmath>
 
@@ -99,6 +100,20 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     REQUIRE(host.descriptor().name == "TestGain");
     REQUIRE(host.state().param_count() == 1);
+}
+
+TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
+          "[format][editor_ui][codecov]") {
+    REQUIRE_FALSE(pulp::format::configured_ui_script_path().has_value());
+
+    pulp::format::HeadlessHost host(create_test_gain);
+    std::string error = "preexisting";
+    auto ui = pulp::format::build_editor_ui(host.state(), false, &error);
+
+    REQUIRE(ui.root != nullptr);
+    REQUIRE(ui.scripted_ui == nullptr);
+    REQUIRE_FALSE(ui.uses_script_ui);
+    REQUIRE(error == "preexisting");
 }
 
 TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
