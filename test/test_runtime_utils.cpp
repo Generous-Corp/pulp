@@ -978,3 +978,11 @@ TEST_CASE("Range boundary touch points remain non-intersections",
     REQUIRE(IntRange(5, 4).empty());
     REQUIRE(IntRange(5, 5).constrain(100) == 5);
 }
+
+TEST_CASE("Range intersection is commutative for overlapping integer ranges",
+          "[runtime][range][coverage][phase3]") {
+    IntRange a(-4, 8);
+    IntRange b(3, 12);
+    REQUIRE(a.intersection(b) == IntRange(3, 8));
+    REQUIRE(b.intersection(a) == IntRange(3, 8));
+}
