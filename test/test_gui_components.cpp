@@ -863,3 +863,37 @@ TEST_CASE("LassoComponent callback fires", "[gui][lasso]") {
     REQUIRE(last_rect.width == 100.0f);
     REQUIRE(last_rect.height == 100.0f);
 }
+
+TEST_CASE("LassoComponent completes selection and only paints while active",
+          "[gui][lasso][coverage][phase3]") {
+    LassoComponent lasso;
+    SelectionRect completed;
+    int complete_calls = 0;
+    lasso.on_selection_complete = [&](const SelectionRect& r) {
+        completed = r;
+        ++complete_calls;
+    };
+
+    RecordingCanvas inactive;
+    lasso.paint(inactive);
+    REQUIRE(inactive.commands().empty());
+
+    lasso.on_mouse_down({40.0f, 30.0f});
+    lasso.on_mouse_drag({10.0f, 70.0f});
+
+    RecordingCanvas active;
+    lasso.paint(active);
+    REQUIRE(active.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(active.count(DrawCommand::Type::stroke_rect) == 1);
+
+    lasso.on_mouse_up({10.0f, 70.0f});
+    REQUIRE_FALSE(lasso.is_active());
+    REQUIRE(complete_calls == 1);
+    REQUIRE(completed.x == 10.0f);
+    REQUIRE(completed.y == 30.0f);
+    REQUIRE(completed.width == 30.0f);
+    REQUIRE(completed.height == 40.0f);
+
+    lasso.end_selection();
+    REQUIRE(complete_calls == 1);
+}
