@@ -8,10 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01210"></a>
-## [0.121.0] - 2026-05-18
+<a id="v01230"></a>
+## [0.123.0] - 2026-05-18
 
-- refactor(test): P5-1 follow-up — extracted canvas2d Wave 2 cluster from test_widget_bridge.cpp (-555 lines, 12,443 → 11,888)
+- refactor(view-js): P5-6 follow-up — extracted canvas matrix + image API from web-compat-canvas.js (-358 lines, 1,581 → 1,223)
 
 <a id="v01150"></a>
 ## [0.115.0] - 2026-05-18

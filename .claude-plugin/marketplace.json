@@ -14,7 +14,7 @@
       "source": "./",
       "description": "Claude Code plugin for the Pulp audio framework \u2014 build, test, design, and ship audio plugins and apps",
 <<<<<<< HEAD
-      "version": "0.52.0",
+      "version": "0.54.0",
 =======
       "version": "0.48.0",
 >>>>>>> bb13a5a6b (chore: bump versions)
@@ -40,7 +40,7 @@
     }
   ],
 <<<<<<< HEAD
-  "version": "0.52.0"
+  "version": "0.54.0"
 =======
   "version": "0.48.0"
 >>>>>>> bb13a5a6b (chore: bump versions)

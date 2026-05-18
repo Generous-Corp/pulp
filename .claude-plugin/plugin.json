@@ -1,7 +1,7 @@
 {
   "name": "pulp",
 <<<<<<< HEAD
-  "version": "0.52.0",
+  "version": "0.54.0",
 =======
   "version": "0.48.0",
 >>>>>>> bb13a5a6b (chore: bump versions)
