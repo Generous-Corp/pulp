@@ -169,6 +169,18 @@ TEST_CASE("raw_midi_parser emits realtime inside sysex without terminating",
     REQUIRE(c.shorts[0].status == 0xF8); // MIDI Clock
 }
 
+TEST_CASE("raw_midi_parser restarts sysex when a new F0 arrives mid-stream",
+          "[midi][raw_midi_parser][coverage][phase3]") {
+    auto c = parse({
+        0xF0, 0x7D, 0x01,  // abandoned vendor sysex
+        0xF0, 0x7E, 0x02, 0xF7,
+    });
+
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7E, 0x02, 0xF7});
+}
+
 TEST_CASE("raw_midi_parser tolerates omitted callbacks",
           "[midi][raw_midi_parser][issue-645]") {
     RawMidiParserState state;
