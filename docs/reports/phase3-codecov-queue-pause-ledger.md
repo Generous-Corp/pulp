@@ -7366,3 +7366,16 @@ modern hosts. Validation passed locally: `git diff --check`, built
 `./build/test/pulp-test-diagnostic "[format][host-type]"`, which passed 3
 test cases / 49 assertions. This tranche is held locally and should be
 aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 23:27 PDT: added another local-only held file-browser coverage
+tranche to the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now includes
+commit `811ec78d6` (`test(view): cover file browser filter edge paths`). The
+tranche extends `test/test_file_browser.cpp` over non-wildcard filter patterns
+that reject files while retaining directories and navigation to a regular file
+path as a safe empty listing. Validation passed locally: `git diff --check`,
+built `pulp-test-file-browser`, and ran
+`./build/test/pulp-test-file-browser "[view][file-browser]"`, which passed 5
+test cases / 30 assertions. This tranche is held locally and should be
+aggregated into the larger PR rather than submitted individually.
