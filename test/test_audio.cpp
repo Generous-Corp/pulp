@@ -145,6 +145,23 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
     REQUIRE(buf.view().empty());
 }
 
+TEST_CASE("Buffer supports non-float sample storage",
+          "[audio][buffer][coverage][phase3-github]") {
+    Buffer<int16_t> buffer(2, 3);
+    buffer.channel(0)[0] = 12;
+    buffer.channel(1)[2] = -34;
+
+    auto view = buffer.view();
+    REQUIRE(view.num_channels() == 2);
+    REQUIRE(view.num_samples() == 3);
+    REQUIRE(view.channel(0)[0] == 12);
+    REQUIRE(view.channel(1)[2] == -34);
+
+    view.clear();
+    REQUIRE(buffer.channel(0)[0] == 0);
+    REQUIRE(buffer.channel(1)[2] == 0);
+}
+
 TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
           "[audio][buffer][codecov]") {
     Buffer<float> zero_channels(0, 8);
