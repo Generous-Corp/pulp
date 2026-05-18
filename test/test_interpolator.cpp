@@ -113,3 +113,13 @@ TEST_CASE("Interpolator lagrange reproduces cubic samples",
     REQUIRE_THAT(Interpolator::lagrange(0.75f, -8.0f, -1.0f, 0.0f, 1.0f),
                  WithinAbs(-0.015625f, 1e-6f));
 }
+
+TEST_CASE("Interpolator sinc6 zero input remains silent",
+          "[signal][interp][codecov]") {
+    for (float frac : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        const float result = Interpolator::sinc6(frac, 0.0f, 0.0f, 0.0f,
+                                                 0.0f, 0.0f, 0.0f);
+        REQUIRE(std::isfinite(result));
+        REQUIRE_THAT(result, WithinAbs(0.0f, 1e-6f));
+    }
+}
