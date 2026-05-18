@@ -76,6 +76,26 @@ TEST_CASE("PropertyList intrinsic height accounts for category display", "[view]
     REQUIRE(list.intrinsic_height() == 40.0f);
 }
 
+TEST_CASE("PropertyList empty model still paints background only",
+          "[view][property_list][coverage][phase3-large]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 160, 80});
+    list.set_row_height(18.0f);
+    list.set_label_width_fraction(0.65f);
+
+    REQUIRE(list.row_height() == 18.0f);
+    REQUIRE(list.label_width_fraction() == 0.65f);
+    REQUIRE(list.show_categories());
+    REQUIRE(list.intrinsic_height() == 0.0f);
+    REQUIRE(list.find_property("missing") == nullptr);
+
+    RecordingCanvas canvas;
+    list.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 0);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
+}
+
 TEST_CASE("PropertyList mouse toggles editable bools and skips read-only values",
           "[view][property_list]") {
     PropertyList list;
@@ -123,6 +143,31 @@ TEST_CASE("PropertyList set_value only mutates existing keys", "[view][property_
     auto* gain = list.find_property("gain");
     REQUIRE(gain != nullptr);
     REQUIRE(std::get<float>(gain->value) == 0.75f);
+}
+
+TEST_CASE("PropertyList set_value preserves variant-specific value types",
+          "[view][property_list][coverage][phase3-large]") {
+    PropertyList list;
+    list.set_properties({
+        {"name", "Name", std::string("Old"), false, ""},
+        {"count", "Count", 1, false, ""},
+        {"enabled", "Enabled", false, false, ""},
+        {"color", "Color", Color::rgba8(0, 0, 0), false, ""},
+    });
+
+    list.set_value("name", std::string("New"));
+    list.set_value("count", 42);
+    list.set_value("enabled", true);
+    list.set_value("color", Color::rgba8(255, 128, 0));
+
+    REQUIRE(std::get<std::string>(list.find_property("name")->value) == "New");
+    REQUIRE(std::get<int>(list.find_property("count")->value) == 42);
+    REQUIRE(std::get<bool>(list.find_property("enabled")->value));
+    const auto color = std::get<Color>(list.find_property("color")->value);
+    REQUIRE(color.r == 1.0f);
+    REQUIRE(color.g > 0.49f);
+    REQUIRE(color.g < 0.51f);
+    REQUIRE(color.b == 0.0f);
 }
 
 TEST_CASE("PropertyList category visibility and label fallback paint paths",
