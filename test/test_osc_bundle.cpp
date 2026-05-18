@@ -483,6 +483,13 @@ TEST_CASE("Malformed address patterns fail closed",
     REQUIRE_FALSE(address_matches("/{foo,bar/gain", "/foo/gain"));
 }
 
+TEST_CASE("Address pattern alternatives can include an empty branch",
+          "[osc][bundle][pattern][coverage][phase3-github]") {
+    REQUIRE(address_matches("/prefix{,Suffix}", "/prefix"));
+    REQUIRE(address_matches("/prefix{,Suffix}", "/prefixSuffix"));
+    REQUIRE_FALSE(address_matches("/prefix{,Suffix}", "/prefixOther"));
+}
+
 TEST_CASE("Address pattern alternatives support first and later branches",
           "[osc][bundle][pattern][issue-644]") {
     REQUIRE(address_matches("/{foo,bar,baz}/gain", "/foo/gain"));
