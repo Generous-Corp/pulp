@@ -701,6 +701,21 @@ TEST_CASE("Expression evaluator covers remaining built-in math functions",
     REQUIRE(*powered == Catch::Approx(32.0));
 }
 
+TEST_CASE("Expression evaluator covers built-in math function variants",
+          "[runtime][expression][coverage][phase3]") {
+    auto value = evaluate("abs(-3) + floor(1.9) + ceil(2.1) + round(2.6)");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == Catch::Approx(10.0));
+
+    auto extrema = evaluate("min(7, 2) + max(7, 2) + pow(2, 3)");
+    REQUIRE(extrema.has_value());
+    REQUIRE(*extrema == Catch::Approx(17.0));
+
+    auto logs = evaluate("log(e) + log10(100) + exp(0)");
+    REQUIRE(logs.has_value());
+    REQUIRE(*logs == Catch::Approx(4.0));
+}
+
 TEST_CASE("Expression evaluator resolves variables and rejects malformed inputs",
           "[runtime][expression][coverage][issue-641]") {
     auto variable = evaluate("gain * 2 + offset", {{"gain", 0.75}, {"offset", 0.25}});
