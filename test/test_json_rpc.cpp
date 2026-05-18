@@ -667,3 +667,20 @@ TEST_CASE("JsonRpcPeer consumes pending callbacks after the first response",
     REQUIRE(callbacks.load() == 1);
     REQUIRE(last_result == R"("first")");
 }
+
+TEST_CASE("JsonRpcPeer destructor clears the channel message callback",
+          "[json_rpc][coverage]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    {
+        JsonRpcPeer peer(*pair.first);
+    }
+
+    std::string reply;
+    pair.second->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    REQUIRE(pair.second->send_text("{not-json"));
+    REQUIRE(reply.empty());
+}
