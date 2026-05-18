@@ -7164,3 +7164,23 @@ return null or false`, and ran
 which reported 100% diff coverage for `core/view/src/app_framework.cpp` and
 96% overall for the held branch diff. This tranche is held locally and
 should be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 17:52 PDT: added another local-only held state properties parser
+tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`66ca463e6` (`fix(state): reject malformed property numbers`). The tranche
+hardens `PropertiesFile::get_int()` and `get_double()` so persisted values
+with trailing junk or non-finite doubles return `std::nullopt` instead of
+being partially accepted by numeric conversion, while preserving
+trailing-whitespace tolerance for serialized values. Focused coverage in
+`test/test_properties_file.cpp` extends numeric getter coverage across
+malformed int/double strings, partial int/double strings, non-finite doubles,
+valid whitespace-trailing int/double strings, and the JSON load/save paths
+that feed those getters. Validation passed locally: `git diff --check`,
+built `pulp-test-properties`, ran direct `PropertiesFile numeric getters
+reject invalid stored strings`, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='PropertiesFile numeric getters reject invalid stored strings|PropertiesFile set and get int|PropertiesFile set and get double|PropertiesFile save and load round-trip|PropertiesFile load coerces scalar JSON members' tools/scripts/local_diff_cover.sh pulp-test-properties`,
+which reported 100% diff coverage for `core/state/src/properties_file.cpp`
+and 96% overall for the held branch diff. This tranche is held locally and
+should be aggregated into the larger PR rather than submitted individually.
