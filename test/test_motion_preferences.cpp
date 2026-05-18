@@ -115,18 +115,21 @@ TEST_CASE("MotionPreferences on_policy_changed fires on override transition",
           "[motion-preferences]") {
     PrefsScope scope;
     auto& prefs = MotionPreferences::instance();
-    // Snapshot the OS value first — macOS GitHub-hosted runners
-    // typically report Reduced, not Full, so the final transition
-    // lands at whatever the OS actually says.
-    const auto os_value = prefs.policy();
+    // Force a known starting policy so the Reduced override is always
+    // a real transition (some CI runners — macOS GitHub-hosted, Windows
+    // headless — report Reduced as their OS value, which would
+    // otherwise no-op the first set_override below).
+    prefs.set_override(MotionPolicy::Full);
     std::vector<MotionPolicy> seen;
     prefs.on_policy_changed([&](MotionPolicy p) { seen.push_back(p); });
     prefs.set_override(MotionPolicy::Reduced);
     prefs.set_override(MotionPolicy::Off);
-    prefs.set_override(std::nullopt);
-    REQUIRE(seen.size() >= 2);   // OS→Reduced, Reduced→Off, Off→OS
+    prefs.set_override(std::nullopt);   // back to OS value
+    REQUIRE(seen.size() >= 2);   // Full→Reduced, Reduced→Off, Off→OS
     REQUIRE(seen.front() == MotionPolicy::Reduced);
-    REQUIRE(seen.back() == os_value);
+    // Final transition lands at the OS value, whatever that is on
+    // this runner.
+    REQUIRE(seen.back() == prefs.policy());
 }
 
 TEST_CASE("MotionPreferences poll is a no-op while override is set",

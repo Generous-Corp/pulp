@@ -19,6 +19,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -312,9 +313,13 @@ TEST_CASE("DomainHandler routes Motion.loadFixture + scrubTo to MotionScrubber",
     std::vector<SampleEvent> wire_events;
     scrub.add_sink(make_buffer_sink(&wire_events));
 
-    // Motion.loadFixture
+    // Motion.loadFixture — on Windows the path uses backslashes which
+    // are invalid JSON unless escaped; the host's path functions accept
+    // forward slashes too, so substitute for the wire payload.
+    std::string wire_path = path;
+    std::replace(wire_path.begin(), wire_path.end(), '\\', '/');
     std::ostringstream load_params;
-    load_params << "{\"path\":\"" << path << "\"}";
+    load_params << "{\"path\":\"" << wire_path << "\"}";
     auto load_resp = dh.handle(make_request(1, "Motion.loadFixture",
                                             load_params.str()));
     REQUIRE_FALSE(load_resp.is_error);
