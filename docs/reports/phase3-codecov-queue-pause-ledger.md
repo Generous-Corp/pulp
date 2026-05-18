@@ -8806,3 +8806,16 @@ passed: `cmake --build build --target pulp-test-cli-version-diag`,
 `git diff --check`. Branch is clean and 12 commits ahead of `origin/main`;
 still held locally to build toward a larger GitHub-hosted PR. No Namespace
 dispatch.
+
+2026-05-18 15:12 PDT: continued the held local-only GitHub batch
+`feature/phase3-codecov-batch-747` with commit `319a70a9f`
+(`test(cli): cover json parser edge paths`). This tranche adds deterministic
+header-only JSON parser coverage for unknown escapes, unterminated strings,
+const empty accessors, signed exponent and leading-plus numbers,
+non-array string-array defaults, duplicate-key lookup ordering, and empty-input
+number fallback behavior. Focused local validation passed:
+`cmake --build build --target pulp-test-cli-json-parser`,
+`build/test/pulp-test-cli-json-parser` (69 assertions in 19 test cases), and
+`git diff --check`. Branch is clean and 13 commits ahead of `origin/main`;
+still held locally to build toward a larger GitHub-hosted PR. No Namespace
+dispatch.
