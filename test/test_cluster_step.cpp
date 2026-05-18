@@ -156,3 +156,46 @@ TEST_CASE("cluster_step: extended combining ranges attach to base",
     std::string variation_selector = "z\xF3\xA0\x84\x80";
     REQUIRE(cluster_step(variation_selector, 0, true) == variation_selector.size());
 }
+
+TEST_CASE("cluster_step: regional indicator run preserves pair boundaries",
+          "[font][cluster][emoji][coverage]") {
+    // 🇺🇸🇯 — the third regional indicator starts the next flag pair.
+    std::string s = "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"
+                    "\xF0\x9F\x87\xAF";
+    REQUIRE(s.size() == 12u);
+
+    REQUIRE(cluster_step(s, 0, true) == 8u);
+    REQUIRE(cluster_step(s, 4, true) == 8u);
+    REQUIRE(cluster_step(s, 8, true) == 12u);
+
+    REQUIRE(cluster_step(s, 12, false) == 8u);
+    REQUIRE(cluster_step(s, 8, false) == 0u);
+}
+
+TEST_CASE("cluster_step: ZWJ only joins pictographic targets",
+          "[font][cluster][coverage]") {
+    std::string joined = "\xE2\x98\x80\xE2\x80\x8D"
+                         "\xF0\x9F\x94\xA5"; // sun + ZWJ + fire
+    REQUIRE(cluster_step(joined, 0, true) == joined.size());
+
+    std::string not_joined = "a\xE2\x80\x8D"
+                             "b";
+    REQUIRE(cluster_step(not_joined, 0, true) == 4u);
+    REQUIRE(cluster_step(not_joined, 4, true) == 5u);
+}
+
+TEST_CASE("cluster_step: malformed multi-byte prefixes fall back to one byte",
+          "[font][cluster][utf8][coverage]") {
+    std::string bad_two = "\xC2"
+                          "A";
+    REQUIRE(cluster_step(bad_two, 0, true) == 1u);
+    REQUIRE(cluster_step(bad_two, 1, true) == 2u);
+
+    std::string bad_three = "\xE2"
+                            "AB";
+    REQUIRE(cluster_step(bad_three, 0, true) == 1u);
+
+    std::string bad_four = "\xF0\x9F"
+                           "AB";
+    REQUIRE(cluster_step(bad_four, 0, true) == 1u);
+}
