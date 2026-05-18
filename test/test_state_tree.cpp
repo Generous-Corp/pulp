@@ -740,6 +740,21 @@ TEST_CASE("CachedProperty bool ignores non-bool external updates",
     REQUIRE_FALSE(tree->get_bool("enabled", true));
 }
 
+TEST_CASE("CachedProperty int refresh preserves cache on incompatible values",
+          "[state][cached][coverage][phase3]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<int64_t> count(tree, "count", 4);
+
+    REQUIRE(count.get() == 4);
+
+    tree->set("count", std::string("7"));
+    count.refresh();
+    REQUIRE(count.get() == 4);
+
+    tree->set("count", int64_t(7));
+    REQUIRE(count.get() == 7);
+}
+
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
 
 TEST_CASE("StateTreeSynchroniser records property and child deltas", "[state][sync]") {
