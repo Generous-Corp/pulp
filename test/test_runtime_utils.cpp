@@ -731,6 +731,21 @@ TEST_CASE("ExpressionEvaluator dispatches registered unary functions",
     REQUIRE_FALSE(evaluator.evaluate("missing_fn(1)").has_value());
 }
 
+TEST_CASE("Expression evaluator handles binary math functions",
+          "[runtime][expression][coverage][phase3]") {
+    auto minimum = evaluate("min(9, 4)");
+    REQUIRE(minimum.has_value());
+    REQUIRE(*minimum == Catch::Approx(4.0));
+
+    auto maximum = evaluate("max(-2, 3)");
+    REQUIRE(maximum.has_value());
+    REQUIRE(*maximum == Catch::Approx(3.0));
+
+    auto power = evaluate("pow(3, 3)");
+    REQUIRE(power.has_value());
+    REQUIRE(*power == Catch::Approx(27.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
