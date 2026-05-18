@@ -359,6 +359,26 @@ TEST_CASE("ValidationHarness report omits payload for unknown entry types",
     REQUIRE(report.find("should_not_appear") == std::string::npos);
 }
 
+TEST_CASE("ValidationHarness report includes sanitizer payloads",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    pulp::format::ReportEntry entry;
+    entry.type = "sanitizer";
+    entry.status = pulp::format::ValidationStatus::fail;
+    entry.target = "asan";
+    entry.error_message = "heap-use-after-free";
+    entry.payload_json = "{\"kind\":\"address\",\"reports\":1}";
+    harness.add_entry(entry);
+
+    const auto report = harness.generate_report();
+    REQUIRE_THAT(report, ContainsSubstring("\"type\": \"sanitizer\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"status\": \"fail\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"error_message\": \"heap-use-after-free\""));
+    REQUIRE_THAT(report, ContainsSubstring("\"sanitizer\": {\"kind\":\"address\",\"reports\":1}"));
+}
+
 TEST_CASE("ValidationHarness report escapes JSON metadata and entry strings",
           "[harness][phase2][coverage][issue-646]") {
     pulp::format::ValidationHarness harness(create_test_gain);
