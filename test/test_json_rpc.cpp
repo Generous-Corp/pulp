@@ -317,6 +317,21 @@ TEST_CASE("JsonRpcPeer reports closed and failed sends", "[json_rpc]") {
     REQUIRE_FALSE(callback_called);
 }
 
+TEST_CASE("JsonRpcPeer rejects sends after direct channel close",
+          "[json_rpc][coverage][phase3-batch742]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+
+    pair.first->close();
+
+    bool callback_called = false;
+    REQUIRE_FALSE(client.send_request("closed", "[]", [&](const JsonRpcResult&) {
+        callback_called = true;
+    }));
+    REQUIRE_FALSE(client.notify("closed", "[]"));
+    REQUIRE_FALSE(callback_called);
+}
+
 TEST_CASE("JsonRpcPeer omits params for empty request payloads",
           "[json_rpc][coverage][issue-641]") {
     auto pair = MemoryMessageChannel::make_pair();
