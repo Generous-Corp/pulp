@@ -120,12 +120,20 @@ jobs:
                   return None
               return tuple(int(g) for g in m.groups())
 
-          # Find the newest semver tag we know about (any draft state).
-          newest = None
+          # 2026-05-18 fix (pulp #2226): "superseded" must be relative
+          # to the latest PUBLISHED release, not any newer tag. The old
+          # criterion ("a strictly-newer semver tag exists in the set")
+          # silently suppressed legitimate stuck-draft alerts whenever
+          # *any* newer tag (even another stuck draft) existed. Combined
+          # with the auto-release.yml supersede bug, this hid the
+          # v0.111..v0.115 starvation completely.
+          newest_published = None
           for r in rels:
+              if r.get('draft'):
+                  continue
               v = parse(r.get('tag_name', ''))
-              if v and (newest is None or v > newest):
-                  newest = v
+              if v and (newest_published is None or v > newest_published):
+                  newest_published = v
 
           for r in rels:
               tag = r.get('tag_name') or ''
@@ -133,10 +141,15 @@ jobs:
               created = r.get('created_at') or ''
               if not tag:
                   continue
-              # Mark as superseded if a strictly-newer semver tag exists
-              # in the releases set. Downstream awk reads the fourth col.
+              # Mark as superseded only if a strictly-newer PUBLISHED tag
+              # exists. A newer draft does NOT supersede — it might be
+              # stuck too. Downstream awk reads the fourth col.
               v = parse(tag)
-              superseded = (v is not None and newest is not None and v < newest)
+              superseded = (
+                  v is not None
+                  and newest_published is not None
+                  and v < newest_published
+              )
               print('\t'.join([tag, str(draft).lower(), created, str(superseded).lower()]))
           PY
           )

@@ -432,6 +432,41 @@ jobs:
                   return None
               return r.stdout
 
+          # The 2026-05-18 starvation incident (pulp #2226 / this fix):
+          # the original supersede policy "cancel any tag strictly older
+          # than NEW_TAG" cascaded when main moved faster than
+          # release-cli.yml could finish. Every new tag cancelled the
+          # previous tag's release-cli, and itself got cancelled by the
+          # NEXT tag, leaving 10 SDK versions (v0.111.0 → v0.115.0)
+          # tagged-but-never-published. No watchdog caught it because
+          # release-cli was `cancelled` (not `failure`), draft was
+          # deleted (so draft-stuck didn't fire), and tag existed (so
+          # cadence-check was happy).
+          #
+          # New policy: never cancel any tag ≥ the LATEST PUBLISHED
+          # release. We only supersede builds that we already know are
+          # obsolete (the published `latest` link has moved past them).
+          # Until a newer release actually publishes, every in-flight
+          # build is a candidate to be the next published release —
+          # cancelling them is what creates the starvation.
+          raw = gh([
+              f"/repos/{REPO}/releases?per_page=100",
+              "--jq", ".[] | select(.draft == false) | .tag_name",
+          ])
+          latest_published = None
+          if raw:
+              for line in raw.strip().splitlines():
+                  v = parse(line.strip())
+                  if v and (latest_published is None or v > latest_published):
+                      latest_published = v
+
+          if latest_published is None:
+              print("No published release yet; skipping supersede entirely (cannot establish threshold).")
+              sys.exit(0)
+
+          print(f"Supersede threshold = latest published {latest_published} "
+                f"(new tag {new_ver} > threshold; will cancel runs < threshold only)")
+
           # Workflow IDs to scan. release-cli.yml + sign-and-release.yml.
           workflows = [
               ("release-cli.yml", "release-cli"),
@@ -462,15 +497,21 @@ jobs:
                   old_ver = parse(tag)
                   if not old_ver:
                       continue
-                  if old_ver >= new_ver:
+                  # Never cancel anything ≥ latest published. That tag
+                  # might be the next release; cancelling it is what
+                  # caused the v0.111..v0.115 starvation.
+                  if old_ver >= latest_published:
                       continue
-                  print(f"  superseding {wf_label} run {run['id']} (tag {tag} < {NEW_TAG}, status={run.get('status')})")
+                  print(f"  superseding {wf_label} run {run['id']} (tag {tag} < latest published {latest_published}, status={run.get('status')})")
                   subprocess.run([
                       "gh", "api", "-X", "POST",
                       f"/repos/{REPO}/actions/runs/{run['id']}/cancel",
                   ], capture_output=True)
 
-          # Delete strictly-older draft releases. Never touch published.
+          # Delete drafts strictly older than the latest PUBLISHED release.
+          # Never touch published. Never delete drafts ≥ latest published
+          # (those drafts might still publish — deleting them recreates
+          # the 2026-05-18 starvation).
           raw = gh([
               f"/repos/{REPO}/releases?per_page=50",
               "--jq", ".[] | select(.draft) | {id, tag: .tag_name}",
@@ -479,9 +520,9 @@ jobs:
               for line in raw.strip().splitlines():
                   rel = json.loads(line)
                   old_ver = parse(rel["tag"])
-                  if not old_ver or old_ver >= new_ver:
+                  if not old_ver or old_ver >= latest_published:
                       continue
-                  print(f"  deleting draft release {rel['tag']} (id {rel['id']})")
+                  print(f"  deleting draft release {rel['tag']} (id {rel['id']}; < latest published {latest_published})")
                   subprocess.run([
                       "gh", "api", "-X", "DELETE",
                       f"/repos/{REPO}/releases/{rel['id']}",
