@@ -149,6 +149,59 @@ TEST_CASE("theme_from_preset applies variant-specific overrides",
     REQUIRE(dark.string_token("font.family").value() == "DarkFace");
 }
 
+TEST_CASE("derive_theme maps semantic colors to alpha and blend tokens",
+          "[view][presets][derive][coverage][phase3]") {
+    SemanticColors colors{
+        color_from_hex(0x102030),
+        color_from_hex(0xE0D0C0),
+        color_from_hex(0x203040),
+        color_from_hex(0x336699),
+        color_from_hex(0x112233),
+        color_from_hex(0x405060),
+        color_from_hex(0x708090),
+        color_from_hex(0xCC3300),
+        color_from_hex(0x010203),
+        color_from_hex(0x0A0B0C),
+        color_from_hex(0xAABBCC),
+        color_from_hex(0x111111),
+        color_from_hex(0x222222),
+        color_from_hex(0x333333),
+        color_from_hex(0x444444),
+        color_from_hex(0x555555),
+    };
+
+    auto theme = derive_theme(colors);
+
+    REQUIRE(theme.color("bg.primary").value() == colors.background);
+    REQUIRE(theme.color("bg.secondary").value() == colors.secondary);
+    REQUIRE(theme.color("bg.surface").value() == colors.input);
+    REQUIRE(theme.color("bg.elevated").value() == colors.card);
+    REQUIRE(theme.color("accent.primary").value() == colors.primary);
+    REQUIRE(theme.color("accent.secondary").value() == colors.accent);
+    REQUIRE(theme.color("accent.error").value() == colors.destructive);
+    REQUIRE(theme.color("gradient.start").value() == colors.primary);
+    REQUIRE(theme.color("gradient.end").value() == colors.secondary);
+
+    REQUIRE(theme.color("waveform.fill").value().a8() == 80);
+    REQUIRE(theme.color("card.error").value().a8() == 40);
+    REQUIRE(theme.color("overlay.bg").value().a8() == 180);
+
+    REQUIRE(theme.color("text.secondary").value() ==
+            blend_colors(colors.foreground, colors.muted, 0.4f));
+    REQUIRE(theme.color("text.disabled").value() ==
+            blend_colors(colors.foreground, colors.muted, 0.7f));
+    REQUIRE(theme.color("waveform.grid").value() ==
+            blend_colors(colors.muted, colors.background, 0.5f));
+    REQUIRE(theme.color("tab.inactive").value() ==
+            blend_colors(colors.foreground, colors.muted, 0.6f));
+
+    REQUIRE_THAT(theme.dimension("motion.duration.fast").value(),
+                 Catch::Matchers::WithinAbs(0.08f, 0.0001f));
+    REQUIRE_THAT(theme.dimension("control.knob_size").value(),
+                 Catch::Matchers::WithinAbs(48.0f, 0.0001f));
+    REQUIRE(theme.string_token("font.family").value() == "Inter");
+}
+
 // ── Specific Presets ────────────────────────────────────────────────────────
 
 TEST_CASE("Known presets exist", "[view][presets]") {

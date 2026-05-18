@@ -54,17 +54,17 @@ Theme derive_theme(const SemanticColors& sc) {
 
     // Waveform tokens
     t.colors["waveform.line"] = sc.primary;
-    t.colors["waveform.fill"] = with_alpha(sc.primary, 80);
+    t.colors["waveform.fill"] = with_alpha(sc.primary, 80.0f / 255.0f);
     t.colors["waveform.grid"] = blend_colors(sc.muted, sc.background, 0.5f);
 
     // Card tokens
     t.colors["card.empty"]   = sc.card;
     t.colors["card.loading"] = blend_colors(sc.card, sc.muted, 0.3f);
     t.colors["card.ready"]   = sc.card;
-    t.colors["card.error"]   = with_alpha(sc.destructive, 40);
+    t.colors["card.error"]   = with_alpha(sc.destructive, 40.0f / 255.0f);
 
     // Overlay tokens
-    t.colors["overlay.bg"]    = with_alpha(sc.background, 180);
+    t.colors["overlay.bg"]    = with_alpha(sc.background, 180.0f / 255.0f);
     t.colors["modal.bg"]      = sc.card;
     t.colors["modal.border"]  = sc.border;
     t.colors["tooltip.bg"]    = sc.foreground;
