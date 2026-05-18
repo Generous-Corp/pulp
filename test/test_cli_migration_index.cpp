@@ -154,6 +154,21 @@ TEST_CASE("render_notes_text - includes version, summary, body, breaking tag",
     REQUIRE(out.find("v27 body") != std::string::npos);
 }
 
+TEST_CASE("render_notes_text - body without trailing newline is terminated",
+          "[cli][migration][coverage]") {
+    mig::MigrationEntry entry{
+        "1.2.3",
+        false,
+        "",
+        "Trailing newline fixture.",
+        "body without newline",
+    };
+    std::vector<const mig::MigrationEntry*> entries{&entry};
+
+    auto out = mig::render_notes_text(entries, "1.2.2", "1.2.3");
+    REQUIRE(out.find("body without newline\n") != std::string::npos);
+}
+
 TEST_CASE("render_notes_json - stable-shape keys present for agent consumers",
           "[cli][migration][issue-548]") {
     auto fixture = make_fixture();
@@ -186,6 +201,24 @@ TEST_CASE("render_notes_json - empty entries emits valid JSON with empty array",
     REQUIRE(out.find("\"entries\": []") != std::string::npos);
     REQUIRE(out.find("\"from\": \"0.29.0\"") != std::string::npos);
     REQUIRE(out.find("\"to\": \"0.29.0\"")   != std::string::npos);
+}
+
+TEST_CASE("render_notes_json - escapes strings and control characters",
+          "[cli][migration][coverage]") {
+    std::string summary = "quote \" slash \\ tab\t";
+    std::string body = std::string("line\ncarriage\rcontrol ") + char(0x01);
+    mig::MigrationEntry entry{
+        "1.2.3",
+        true,
+        "cli_version_to == 1.2.3",
+        summary,
+        body,
+    };
+    std::vector<const mig::MigrationEntry*> entries{&entry};
+
+    auto out = mig::render_notes_json(entries, "1.0.0", "1.2.3");
+    REQUIRE(out.find("quote \\\" slash \\\\ tab\\t") != std::string::npos);
+    REQUIRE(out.find("line\\ncarriage\\rcontrol \\u0001") != std::string::npos);
 }
 
 // ── Generated-code round-trip via the Python script ────────────────────────
