@@ -192,6 +192,27 @@ TEST_CASE("DiagnosticReporter JSON reflects instrument/effect type and parameter
     REQUIRE(json.find("\"value\": 25.0000") != std::string::npos);
 }
 
+TEST_CASE("DiagnosticReporter JSON escapes string fields",
+          "[format][diagnostic][coverage][phase3]") {
+    DiagnosticReporter diag;
+    PluginDescriptor desc;
+    desc.name = R"(Quote "Synth")";
+    desc.manufacturer = R"(Back\Slash)";
+    desc.version = "1.0\nbeta";
+    desc.bundle_id = "com.test.escaped";
+
+    StateStore store;
+    store.add_parameter({.id = 5, .name = R"(Cutoff "Hz")", .unit = "Hz", .range = {20, 20000, 440}});
+    store.set_value(5, 880.0f);
+    diag.set_plugin_info(desc, store);
+
+    auto json = diag.generate_json();
+    REQUIRE(json.find(R"("name": "Quote \"Synth\"")") != std::string::npos);
+    REQUIRE(json.find(R"("manufacturer": "Back\\Slash")") != std::string::npos);
+    REQUIRE(json.find(R"("version": "1.0\nbeta")") != std::string::npos);
+    REQUIRE(json.find(R"("name": "Cutoff \"Hz\"")") != std::string::npos);
+}
+
 TEST_CASE("DiagnosticReporter replacing plugin info clears stale parameter snapshot",
           "[format][diagnostic][coverage][phase3]") {
     DiagnosticReporter diag;

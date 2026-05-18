@@ -147,13 +147,13 @@ public:
         ss << std::fixed << std::setprecision(4);
 
         ss << "{\n";
-        ss << "  \"timestamp\": \"" << timestamp() << "\",\n";
-        ss << "  \"platform\": \"" << os_name() << "\",\n";
-        ss << "  \"arch\": \"" << arch() << "\",\n";
+        ss << "  \"timestamp\": \"" << json_escape(timestamp()) << "\",\n";
+        ss << "  \"platform\": \"" << json_escape(os_name()) << "\",\n";
+        ss << "  \"arch\": \"" << json_escape(arch()) << "\",\n";
         ss << "  \"plugin\": {\n";
-        ss << "    \"name\": \"" << plugin_name_ << "\",\n";
-        ss << "    \"manufacturer\": \"" << plugin_manufacturer_ << "\",\n";
-        ss << "    \"version\": \"" << plugin_version_ << "\",\n";
+        ss << "    \"name\": \"" << json_escape(plugin_name_) << "\",\n";
+        ss << "    \"manufacturer\": \"" << json_escape(plugin_manufacturer_) << "\",\n";
+        ss << "    \"version\": \"" << json_escape(plugin_version_) << "\",\n";
         ss << "    \"type\": \"" << (is_instrument_ ? "instrument" : "effect") << "\"\n";
         ss << "  },\n";
         ss << "  \"audio\": {\n";
@@ -166,7 +166,7 @@ public:
         for (size_t i = 0; i < param_snapshot_.size(); ++i) {
             const auto& p = param_snapshot_[i];
             ss << "    {\"id\": " << p.id
-               << ", \"name\": \"" << p.name
+               << ", \"name\": \"" << json_escape(p.name)
                << "\", \"value\": " << p.value
                << ", \"normalized\": " << p.normalized << "}";
             if (i + 1 < param_snapshot_.size()) ss << ",";
@@ -211,6 +211,33 @@ private:
         const auto local = runtime::localtime_local(now);
         std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &local);
         return buf;
+    }
+
+    static std::string json_escape(const std::string& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (unsigned char c : text) {
+            switch (c) {
+                case '\"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    if (c < 0x20) {
+                        static constexpr char hex[] = "0123456789abcdef";
+                        out += "\\u00";
+                        out += hex[(c >> 4) & 0x0f];
+                        out += hex[c & 0x0f];
+                    } else {
+                        out.push_back(static_cast<char>(c));
+                    }
+                    break;
+            }
+        }
+        return out;
     }
 
     static std::string os_name() {
