@@ -684,3 +684,60 @@ TEST_CASE("JsonRpcPeer destructor clears the channel message callback",
     REQUIRE(pair.second->send_text("{not-json"));
     REQUIRE(reply.empty());
 }
+
+TEST_CASE("JsonRpcPeer tolerates sparse error responses",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string outbound_request;
+    pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer client(*pair.first);
+    std::atomic<bool> done{false};
+    std::optional<JsonRpcError> error;
+
+    REQUIRE(client.send_request("manual_error", "[]", [&](const JsonRpcResult& response) {
+        error = response.error;
+        done.store(true);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"error":{}})json");
+
+    REQUIRE(wait_until([&] { return done.load(); }));
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == 0);
+    REQUIRE(error->message.empty());
+    REQUIRE(error->data_json.empty());
+}
+
+TEST_CASE("JsonRpcPeer notification handlers replace and clear cleanly",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    int first_calls = 0;
+    int second_calls = 0;
+    std::string params = "unset";
+
+    server.on_notification("changed", [&](std::string_view) {
+        ++first_calls;
+    });
+    server.on_notification("changed", [&](std::string_view payload) {
+        ++second_calls;
+        params = std::string(payload);
+    });
+
+    REQUIRE(client.notify("changed", ""));
+    REQUIRE(second_calls == 1);
+    REQUIRE(first_calls == 0);
+    REQUIRE(params.empty());
+
+    server.on_notification("changed", nullptr);
+    REQUIRE(client.notify("changed", R"({"ignored":true})"));
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(second_calls == 1);
+}
