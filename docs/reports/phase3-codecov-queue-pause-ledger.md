@@ -7124,3 +7124,23 @@ which reported 100% diff coverage for
 `core/view/include/pulp/view/css_animation.hpp` and 95% overall for the held
 branch diff. This tranche is held locally and should be aggregated into the
 larger PR rather than submitted individually.
+
+2026-05-17 17:38 PDT: added another local-only held widget schema parser
+tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`1c5664135` (`fix(view): reject malformed widget schema dimensions`). The
+tranche hardens declarative audio widget schema dimension parsing so empty,
+partial, malformed, and non-finite dimension tokens fall back per element
+instead of throwing the whole schema into the invalid-JSON error path or
+partially accepting malformed numbers. Focused coverage in
+`test/test_widgets.cpp` exercises the actual Knob schema paint path across
+valid whitespace-tolerant percent values, malformed percent values, empty
+values, malformed absolute values, and fallback rectangle painting.
+Validation passed locally: `git diff --check`, built `pulp-test-widgets`,
+ran direct `Audio widget schemas reject malformed dimension tokens without
+error fallback`, and ran
+`PULP_DIFF_COVER_CTEST_REGEX='Audio widget schemas reject malformed dimension tokens without error fallback|Audio widgets render declarative schemas' tools/scripts/local_diff_cover.sh pulp-test-widgets`,
+which reported 100% diff coverage for `core/view/src/widgets.cpp` and 96%
+overall for the held branch diff. This tranche is held locally and should be
+aggregated into the larger PR rather than submitted individually.
