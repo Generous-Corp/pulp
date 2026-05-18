@@ -7464,3 +7464,14 @@ registry-generation preservation. Validation passed locally: rebuilt
 `./build/test/pulp-test-font-options "[canvas][font]"` (6 cases / 58
 assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
+
+2026-05-17 23:55 PDT: added a third local-only font/canvas tranche to
+`feature/phase3-codecov-batch-728`: commit `0021239cd`
+(`test(canvas): cover font resolver fallbacks`). It extends
+`pulp-test-font-options` over `ResolvedFont` default unresolved state and the
+non-Skia `FontResolver` family/character fallback paths, including scoped
+generation propagation and `NotFound` behavior. Validation passed locally:
+rebuilt `pulp-test-font-options`, ran
+`./build/test/pulp-test-font-options "[canvas][font]"` (8 cases / 78
+assertions), and `git diff --check` passed. Still held locally for the next
+large batch PR.
