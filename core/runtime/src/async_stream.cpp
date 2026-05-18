@@ -77,6 +77,10 @@ bool AsyncStream::write_async(const std::uint8_t* data, std::size_t size,
         if (callback) dispatch([cb = std::move(callback)] { cb(0, StreamError::Ok); });
         return true;
     }
+    if (data == nullptr) {
+        if (callback) dispatch([cb = std::move(callback)] { cb(0, StreamError::Invalid); });
+        return true;
+    }
 
     PendingWrite pw;
     pw.data.assign(data, data + size);
