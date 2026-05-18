@@ -579,6 +579,18 @@ TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
     REQUIRE(*quartet == std::vector<uint8_t>{0xff, 0xff, 0xff});
 }
 
+TEST_CASE("base64 rejects URL-safe alphabet and misplaced padding across whitespace",
+          "[runtime][base64][coverage][phase3-large]") {
+    REQUIRE_FALSE(base64_decode("SGVsbG8-").has_value());
+    REQUIRE_FALSE(base64_decode("SGVsbG8_").has_value());
+    REQUIRE_FALSE(base64_decode("YQ=\n=Z").has_value());
+    REQUIRE_FALSE(base64_decode("Y Q= =Z").has_value());
+
+    auto spaced = base64_decode("\tA B A g M P 8 =\r\n");
+    REQUIRE(spaced.has_value());
+    REQUIRE(*spaced == std::vector<uint8_t>{0x00, 0x10, 0x20, 0x30, 0xff});
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
