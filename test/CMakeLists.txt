@@ -964,6 +964,11 @@ add_executable(pulp-test-font-security test_font_security.cpp)
 target_link_libraries(pulp-test-font-security PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-security)
 
+# pulp #2163 / font v2 Slice 2.3 — variable axis wiring.
+add_executable(pulp-test-font-variable-axes test_font_variable_axes.cpp)
+target_link_libraries(pulp-test-font-variable-axes PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-font-variable-axes)
+
 # pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
 # 0.5px for a hand-picked sample set representative of CHAIN INFO /
