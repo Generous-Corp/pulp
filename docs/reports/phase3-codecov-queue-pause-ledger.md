@@ -7215,3 +7215,16 @@ Validation passed locally: rebuilt `pulp-test-runtime-utils` and ran
 `./build/test/pulp-test-runtime-utils "[runtime][ip],[runtime][primes],[runtime][text-diff]"`,
 which passed 10 test cases / 76 assertions. This tranche is held locally and
 should be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 22:04 PDT: added another local-only held MIDI running-status
+coverage tranche to the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now includes
+commit `34a7b21ef` (`test(midi): cover running status stream edges`). The
+tranche extends `test/test_running_status.cpp` over split `feed()` calls,
+new channel-status interruption of partial running-status data, and reset of
+unterminated sysex payloads before later short-message parsing. Validation
+passed locally: `git diff --check`, built `pulp-test-running-status`, and
+ran `./build/test/pulp-test-running-status "[midi][running-status]"`, which
+passed 20 test cases / 87 assertions. This tranche is held locally and should
+be aggregated into the larger PR rather than submitted individually.
