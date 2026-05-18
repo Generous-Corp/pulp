@@ -150,6 +150,35 @@ TEST_CASE("FileBrowser paint clips rows and keeps directories through filters",
     REQUIRE_FALSE(contains_text(texts, "gamma.wav"));
 }
 
+TEST_CASE("FileBrowser navigate refreshes entries for the new directory",
+          "[view][file-browser][coverage]") {
+    TempDir tmp("navigate");
+    std::filesystem::create_directory(tmp.path / "samples");
+    write_file(tmp.path / "root.wav");
+    write_file(tmp.path / "samples" / "nested.wav");
+
+    FileBrowser browser;
+    browser.set_bounds({0, 0, 320, 120});
+    browser.set_filters({"*.wav"});
+    browser.set_root(tmp.path);
+
+    RecordingCanvas root_canvas;
+    browser.paint(root_canvas);
+    auto root_texts = fill_texts(root_canvas);
+    REQUIRE(contains_text(root_texts, "samples"));
+    REQUIRE(contains_text(root_texts, "root.wav"));
+    REQUIRE_FALSE(contains_text(root_texts, "nested.wav"));
+
+    browser.navigate(tmp.path / "samples");
+    REQUIRE(browser.current_directory() == tmp.path / "samples");
+
+    RecordingCanvas nested_canvas;
+    browser.paint(nested_canvas);
+    auto nested_texts = fill_texts(nested_canvas);
+    REQUIRE(contains_text(nested_texts, "nested.wav"));
+    REQUIRE_FALSE(contains_text(nested_texts, "root.wav"));
+}
+
 TEST_CASE("FileTree skips hidden nodes and paints one expanded directory level",
           "[view][file-tree][coverage][issue-493][issue-641]") {
     TempDir tmp("tree");
@@ -187,6 +216,28 @@ TEST_CASE("FileTree skips hidden nodes and paints one expanded directory level",
     REQUIRE(x_for_exact_text(canvas, "root.txt") == 16.0f);
     REQUIRE(x_for_exact_text(canvas, "deeper") == 32.0f);
     REQUIRE(x_for_exact_text(canvas, "nested.txt") == 32.0f);
+}
+
+TEST_CASE("FileTree missing roots clear previously painted nodes",
+          "[view][file-tree][coverage]") {
+    TempDir tmp("tree-missing-root");
+    write_file(tmp.path / "visible.txt");
+
+    FileTree tree;
+    tree.set_bounds({0, 0, 240, 120});
+    tree.set_root(tmp.path);
+
+    RecordingCanvas before;
+    tree.paint(before);
+    REQUIRE(contains_text(fill_texts(before), "visible.txt"));
+
+    const auto missing = tmp.path / "missing";
+    tree.set_root(missing);
+    REQUIRE(tree.root() == missing);
+
+    RecordingCanvas after;
+    tree.paint(after);
+    REQUIRE(after.count(DrawCommand::Type::fill_text) == 0);
 }
 
 TEST_CASE("MultiDocumentPanel remove_document preserves active document callbacks",
