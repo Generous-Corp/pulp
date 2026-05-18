@@ -92,6 +92,16 @@ TEST_CASE("MD5 known value", "[crypto][md5]") {
     REQUIRE(hex == "5d41402abc4b2a76b9719d911017c592");
 }
 
+TEST_CASE("MD5 pointer overload handles empty input",
+          "[crypto][md5][coverage][phase3-batch742]") {
+    const std::vector<uint8_t> expected = {
+        0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
+        0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e,
+    };
+
+    REQUIRE(md5(nullptr, 0) == expected);
+}
+
 TEST_CASE("MD5 binary data returns raw digest bytes",
           "[crypto][md5][coverage][issue-641]") {
     const std::vector<uint8_t> data = {0x00, 0xff, 0x10, 0x20, 0x00};
