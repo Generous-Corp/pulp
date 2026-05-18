@@ -618,6 +618,14 @@ TEST_CASE("IPv4 validation rejects out-of-range and signed octets",
     REQUIRE_FALSE(is_valid_ipv4("1.2.3.999"));
 }
 
+TEST_CASE("IPv4 validation rejects whitespace-padded addresses",
+          "[runtime][ip][coverage][phase3-batch742]") {
+    REQUIRE_FALSE(is_valid_ipv4(" 127.0.0.1"));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1 "));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1\n"));
+    REQUIRE_FALSE(is_valid_ipv4("\t127.0.0.1"));
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
