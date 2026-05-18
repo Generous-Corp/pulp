@@ -326,6 +326,14 @@ TEST_CASE("LicenseValidator file not found", "[crypto][license]") {
     REQUIRE(validator.validate_file("/tmp/nonexistent_license_12345.key") == LicenseStatus::NotFound);
 }
 
+TEST_CASE("LicenseValidator empty license file is invalid format",
+          "[crypto][license][coverage][phase3]") {
+    TemporaryFile tmp(".license");
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidFormat);
+}
+
 TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license]") {
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
