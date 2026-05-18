@@ -91,6 +91,45 @@ TEST_CASE("switching sort column resets to ascending",
     REQUIRE(m.sort_order() == TableSortOrder::Ascending);
 }
 
+TEST_CASE("sort_by none records state without reordering rows",
+          "[ui][table-model][coverage][phase3]") {
+    auto m = make_preset_table();
+
+    m.sort_by(0, TableSortOrder::None);
+
+    REQUIRE(m.sort_column() == 0);
+    REQUIRE(m.sort_order() == TableSortOrder::None);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(2, 0).text == "Lush");
+
+    m.toggle_sort(0);
+    REQUIRE(m.sort_order() == TableSortOrder::Ascending);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Lush");
+    REQUIRE(m.cell(2, 0).text == "Stab");
+}
+
+TEST_CASE("sort_by keeps equal keys stable across sort directions",
+          "[ui][table-model][coverage][phase3]") {
+    TableModel m;
+    m.add_column({"Name"});
+    m.add_column({"Score"});
+    m.add_row({{"first"}, {"same", 1.0}});
+    m.add_row({{"second"}, {"same", 1.0}});
+    m.add_row({{"third"}, {"same", 1.0}});
+
+    m.sort_by(1, TableSortOrder::Ascending);
+    REQUIRE(m.cell(0, 0).text == "first");
+    REQUIRE(m.cell(1, 0).text == "second");
+    REQUIRE(m.cell(2, 0).text == "third");
+
+    m.sort_by(1, TableSortOrder::Descending);
+    REQUIRE(m.cell(0, 0).text == "first");
+    REQUIRE(m.cell(1, 0).text == "second");
+    REQUIRE(m.cell(2, 0).text == "third");
+}
+
 TEST_CASE("non-sortable columns are ignored by toggle_sort",
           "[ui][table-model]") {
     TableModel m;
