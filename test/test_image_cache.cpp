@@ -162,7 +162,6 @@ TEST_CASE("clear preserves cache counters while removing entries",
     REQUIRE(before.hits == 1);
 
     c.clear();
-
     auto s = c.stats();
     REQUIRE(s.entry_count == 0);
     REQUIRE(s.total_bytes == 0);
@@ -177,6 +176,24 @@ TEST_CASE("clear preserves cache counters while removing entries",
     REQUIRE(s.misses == 2);
     REQUIRE(s.hits == 1);
     REQUIRE(calls.load() == 2);
+}
+
+TEST_CASE("clear on an empty cache is a no-op and preserves counters",
+          "[view][image-cache][coverage][phase3]") {
+    ImageCache c;
+    REQUIRE(c.stats().entry_count == 0);
+    REQUIRE(c.stats().hits == 0);
+    REQUIRE(c.stats().misses == 0);
+
+    c.clear();
+    c.clear();
+
+    auto s = c.stats();
+    REQUIRE(s.entry_count == 0);
+    REQUIRE(s.total_bytes == 0);
+    REQUIRE(s.hits == 0);
+    REQUIRE(s.misses == 0);
+    REQUIRE(s.evictions == 0);
 }
 
 TEST_CASE("zero budget disables trimming", "[view][image-cache]") {
