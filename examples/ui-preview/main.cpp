@@ -16,6 +16,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -474,6 +475,55 @@ int main(int argc, char* argv[]) {
             }
         } else if (std::strcmp(argv[i], "--view-tree-out") == 0 && i + 1 < argc) {
             view_tree_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--font") == 0 && i + 1 < argc) {
+            // pulp #2163 — `--font "Family Name=/path/to/font.ttf"` registers
+            // a TTF/OTF before the JS bridge starts, so imported designs
+            // that reference a host-uninstalled family render with the
+            // requested face instead of falling back to the system default
+            // (which often lacks Unicode arrows/dashes → tofu boxes).
+            // Repeatable: pass --font once per family/variant.
+            std::string spec = argv[++i];
+            auto eq = spec.find('=');
+            if (eq != std::string::npos && eq > 0 && eq + 1 < spec.size()) {
+                std::string family = spec.substr(0, eq);
+                std::string path = spec.substr(eq + 1);
+                if (!pulp::canvas::register_font_file(path, family)) {
+                    std::cerr << "[ui-preview] --font: failed to register '"
+                              << family << "' from " << path << "\n";
+                } else {
+                    std::cerr << "[ui-preview] --font: registered '"
+                              << family << "' from " << path << "\n";
+                }
+            } else {
+                std::cerr << "[ui-preview] --font expects FAMILY=PATH (got: "
+                          << spec << ")\n";
+            }
+        } else if (starts_with(argv[i], "--font-dir=")) {
+            // pulp #2163 — `--font-dir=/path/to/fonts` walks a directory and
+            // registers every .ttf / .otf under it. The font family name
+            // is parsed from the file's name table (via Skia) rather than
+            // from the filename, so `IBMPlexMono-Regular.ttf` resolves
+            // under its declared family "IBM Plex Mono" without any
+            // mapping work from the caller.
+            std::filesystem::path dir{argv[i] + 11};
+            std::error_code ec;
+            if (!std::filesystem::is_directory(dir, ec)) {
+                std::cerr << "[ui-preview] --font-dir: not a directory: "
+                          << dir << "\n";
+            } else {
+                int n = 0;
+                for (auto& entry : std::filesystem::recursive_directory_iterator(dir, ec)) {
+                    if (!entry.is_regular_file()) continue;
+                    auto ext = entry.path().extension().string();
+                    for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (ext != ".ttf" && ext != ".otf") continue;
+                    // Empty family → register_font_file reads the family
+                    // out of the OpenType `name` table.
+                    if (pulp::canvas::register_font_file(entry.path().string(), "")) ++n;
+                }
+                std::cerr << "[ui-preview] --font-dir: registered " << n
+                          << " font(s) from " << dir << "\n";
+            }
         }
 #ifdef PULP_BENCHMARK
         else if (starts_with(argv[i], "--benchmark-seconds=")) {
