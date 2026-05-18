@@ -14,6 +14,15 @@ set(PULP_JS_PRELUDES
     # CanvasRenderingContext2D constructor + window.pulp.gpu surface
     # are in scope when GPU consumers call getContext("webgpu").
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
+    # P5-6 follow-up — _PulpCanvasMatrix DOMMatrix-compat helper.
+    # CanvasRenderingContext2D.getTransform() instantiates this lazily
+    # at call time so embed order relative to canvas.js is flexible.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
+    # P5-6 follow-up — Canvas2D API gap-closure methods (issue-916):
+    # measureText / drawImage / setLineDash / getLineDash /
+    # getImageData / putImageData. Loaded AFTER the parent so the
+    # CanvasRenderingContext2D constructor is in scope.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
     # P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
     # setProperty/getPropertyValue/removeProperty. Loaded AFTER
@@ -61,6 +70,8 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js

@@ -849,6 +849,13 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // CanvasRenderingContext2D + window.pulp.gpu are in scope when
     // __ensurePulpGpuHelpers / getContext("webgpu") run.
     eval_or_throw(engine_, "web_compat_canvas_gpu", preludes::web_compat_canvas_gpu);
+    // P5-6 follow-up — _PulpCanvasMatrix DOMMatrix-compat helper +
+    // Canvas2D API gap closures (measureText / drawImage /
+    // setLineDash / getLineDash / getImageData / putImageData).
+    // Must eval AFTER web_compat_canvas so the
+    // CanvasRenderingContext2D constructor + prototype are in scope.
+    eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
+    eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
     // P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
     // setProperty/getPropertyValue/removeProperty extracted out of
