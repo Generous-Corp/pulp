@@ -547,6 +547,16 @@ TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("launch_process reports failed starts and missing pids",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    REQUIRE(launch_process("C:\\nonexistent_binary_12345.exe") == -1);
+#else
+    REQUIRE(launch_process("/tmp/nonexistent_binary_12345") == -1);
+#endif
+    REQUIRE_FALSE(is_process_running(99999999));
+}
+
 // ── Base64 ──────────────────────────────────────────────────────────────
 
 TEST_CASE("base64 encode/decode round-trip", "[runtime][base64]") {
