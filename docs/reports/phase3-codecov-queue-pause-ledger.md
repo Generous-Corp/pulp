@@ -8927,3 +8927,15 @@ remote fetch or CMake side effects. Focused local validation passed:
 and `git diff --check`. Branch is clean and 20 commits ahead of `origin/main`;
 still held locally to build toward a larger GitHub-hosted PR. No Namespace
 dispatch.
+
+2026-05-18 15:34 PDT: continued the held local-only GitHub batch
+`feature/phase3-codecov-batch-747` with commit `adcebc64b`
+(`test(cli): cover update mode marker edges`). This tranche adds pure
+update-mode coverage for snooze parent-directory creation, optional and
+malformed pending-upgrade marker fields, overflowed staged timestamps, and the
+explicit prompt-decision snooze flag contract. Focused local validation passed:
+`cmake --build build --target pulp-test-cli-update-mode`,
+`build/test/pulp-test-cli-update-mode` (99 assertions in 31 test cases), and
+`git diff --check`. Branch is clean and 21 commits ahead of `origin/main`;
+still held locally to build toward a larger GitHub-hosted PR. No Namespace
+dispatch.
