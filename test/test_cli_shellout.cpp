@@ -2768,6 +2768,58 @@ TEST_CASE("pulp scan --help exits 0 with usage on stdout",
     REQUIRE(r.stdout_output.find("--no-load") != std::string::npos);
 }
 
+TEST_CASE("pulp scan validates parser errors before filesystem enumeration",
+          "[cli][shellout][scan][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const struct {
+        std::vector<std::string> args;
+        const char* message;
+    } cases[] = {
+        {{"scan", "--format"}, "--format requires a value"},
+        {{"scan", "-f"}, "-f requires a value"},
+        {{"scan", "--format", "--no-load"}, "--format requires a value"},
+        {{"scan", "--definitely-not-a-scan-flag"}, "unknown flag"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("scan args under test");
+        auto r = run_pulp(c.args, /*timeout_ms=*/10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.message) != std::string::npos);
+        REQUIRE(r.stdout_output.find("[CLAP]") == std::string::npos);
+        REQUIRE(r.stdout_output.find("No plugins found") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp host validates parser errors before plugin loading",
+          "[cli][shellout][host][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const struct {
+        std::vector<std::string> args;
+        const char* message;
+    } cases[] = {
+        {{"host", "--format"}, "--format requires a value"},
+        {{"host", "-f"}, "-f requires a value"},
+        {{"host", "--format", "--id"}, "--format requires a value"},
+        {{"host", "--id"}, "--id requires a value"},
+        {{"host", "--id", "--format"}, "--id requires a value"},
+        {{"host", "--definitely-not-a-host-flag"}, "unknown flag"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("host args under test");
+        auto r = run_pulp(c.args, /*timeout_ms=*/10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.message) != std::string::npos);
+        REQUIRE(r.stderr_output.find("failed to load") == std::string::npos);
+        REQUIRE(r.stdout_output.find("Loaded:") == std::string::npos);
+    }
+}
+
 TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
           "[cli][shellout][scan][issue-812]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

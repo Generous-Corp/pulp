@@ -129,12 +129,19 @@ int cmd_scan(const std::vector<std::string>& args) {
     bool all_formats = true;
     bool no_load = false;
     for (std::size_t i = 0; i < args.size(); ++i) {
-        if ((args[i] == "--format" || args[i] == "-f") && i + 1 < args.size()) {
+        if (args[i] == "--format" || args[i] == "-f") {
+            if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-') {
+                std::fprintf(stderr, "pulp scan: %s requires a value\n", args[i].c_str());
+                return 2;
+            }
             requested = parse_format(args[i + 1], PluginFormat::CLAP);
             all_formats = false;
             ++i;
         } else if (args[i] == "--no-load") {
             no_load = true;
+        } else if (!args[i].empty() && args[i][0] == '-') {
+            std::fprintf(stderr, "pulp scan: unknown flag: %s\n", args[i].c_str());
+            return 2;
         }
     }
 
@@ -246,14 +253,25 @@ int cmd_host(const std::vector<std::string>& args) {
     PluginFormat format = PluginFormat::CLAP;
     for (std::size_t i = 0; i < args.size(); ++i) {
         const auto& a = args[i];
-        if ((a == "--format" || a == "-f") && i + 1 < args.size()) {
+        if (a == "--format" || a == "-f") {
+            if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-') {
+                std::fprintf(stderr, "pulp host: %s requires a value\n", a.c_str());
+                return 2;
+            }
             format = parse_format(args[i + 1], format);
             ++i;
-        } else if (a == "--id" && i + 1 < args.size()) {
+        } else if (a == "--id") {
+            if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1][0] == '-') {
+                std::fprintf(stderr, "pulp host: --id requires a value\n");
+                return 2;
+            }
             unique_id = args[i + 1];
             ++i;
         } else if (path.empty() && a.size() > 0 && a[0] != '-') {
             path = a;
+        } else if (!a.empty() && a[0] == '-') {
+            std::fprintf(stderr, "pulp host: unknown flag: %s\n", a.c_str());
+            return 2;
         }
     }
 
