@@ -185,7 +185,9 @@ void SettingsPanel::bind_systems(audio::AudioSystem* audio_sys, midi::MidiSystem
     }
 
     rebuild_device_lists();
+    rebuild_rate_and_buffer_lists();
     rebuild_midi_list();
+    update_latency_label();
 }
 
 void SettingsPanel::set_current_config(const StandaloneConfig& cfg) {
