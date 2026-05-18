@@ -117,6 +117,33 @@ TEST_CASE("C ABI ignores null events and prefers C++ listeners over raw callback
     pulp_ios_audio_session_set_callback(nullptr, nullptr);
 }
 
+TEST_CASE("C ABI callback replacement uses latest user data",
+          "[ios][audio-session][c-abi][coverage][phase3]") {
+    set_ios_audio_session_listener({});
+    int first_calls = 0;
+    int second_calls = 0;
+
+    pulp_ios_audio_session_set_callback(
+        [](const PulpIosAudioSessionEvent*, void* ud) {
+            ++(*static_cast<int*>(ud));
+        },
+        &first_calls);
+    pulp_ios_audio_session_set_callback(
+        [](const PulpIosAudioSessionEvent*, void* ud) {
+            ++(*static_cast<int*>(ud));
+        },
+        &second_calls);
+
+    PulpIosAudioSessionEvent e{};
+    e.event = PULP_IOS_AUDIO_EVENT_INTERRUPTION_BEGAN;
+    pulp_ios_audio_session_emit(&e);
+
+    REQUIRE(first_calls == 0);
+    REQUIRE(second_calls == 1);
+
+    pulp_ios_audio_session_set_callback(nullptr, nullptr);
+}
+
 TEST_CASE("audio session listener replacement detaches the previous sink",
           "[ios][audio-session][coverage][issue-648]") {
     int first_calls = 0;
