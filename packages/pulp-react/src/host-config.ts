@@ -365,6 +365,17 @@ const TEXT_BEARING: Set<Type> = new Set([
     'b', 'button', 'code', 'desc', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'i', 'label', 'li', 'p', 'pre', 'span', 'strong', 'td', 'text', 'th',
     'title', 'tspan',
+    // pulp jsx-instrument-import 2026-05-17 — container tags that
+    // host-config conditionally treats as text-leaves when their
+    // children are pure string/number. Without this, shouldSetTextContent
+    // returns false → React mounts the text children as separate
+    // synthetic Label widgets → duplicate text rendered on top of the
+    // createLabel we already made. The shouldSetTextContent check below
+    // still gates on children-are-pure-text (so divs with element
+    // children correctly route to createCol via createWidget's else
+    // branch).
+    'div', 'section', 'article', 'aside', 'header', 'footer', 'nav', 'main',
+    'figure', 'figcaption', 'form', 'ul', 'ol', 'dl', 'dt', 'dd',
 ] as Type[]);
 
 // ── HostConfig ──────────────────────────────────────────────────────
