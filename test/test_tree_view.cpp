@@ -117,6 +117,26 @@ TEST_CASE("TreeView ignores mouse up and misses", "[view][tree]") {
     REQUIRE(tree.selected_node() == nullptr);
 }
 
+TEST_CASE("TreeView skips selection callback for non-selectable rows",
+          "[view][tree][coverage][phase3]") {
+    TreeView tree;
+    auto& header = tree.root().add_child("Header");
+    header.selectable = false;
+    auto& selectable = tree.root().add_child("Selectable");
+    tree.set_bounds({0, 0, 300, 400});
+
+    int selected_count = 0;
+    tree.on_select = [&](TreeNode&) { ++selected_count; };
+
+    tree.on_mouse_event(mouse_down(50, 5));
+    REQUIRE(selected_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
+
+    tree.on_mouse_event(mouse_down(50, 28));
+    REQUIRE(selected_count == 1);
+    REQUIRE(tree.selected_node() == &selectable);
+}
+
 TEST_CASE("TreeView triangle click toggles without selecting", "[view][tree]") {
     TreeView tree;
     auto& synths = tree.root().add_child("Synths");
