@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01340"></a>
+## [0.134.0] - 2026-05-18
+
+- feat(state): ListenerToken + thread routing for StateStore listeners ([#2270](https://github.com/danielraffel/pulp/pull/2270))
+- docs(ci): pre-push rebase hygiene for Namespace cutover ([#2283](https://github.com/danielraffel/pulp/pull/2283))
+- chore(ci): re-commission Namespace for macOS PR work ([#2271](https://github.com/danielraffel/pulp/pull/2271))
+- ci(shipyard): route mac validation through Namespace cloud ([#2269](https://github.com/danielraffel/pulp/pull/2269))
+
 <a id="v01330"></a>
 ## [0.133.0] - 2026-05-18
 
@@ -2019,6 +2027,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.134.0]: https://github.com/danielraffel/pulp/releases/tag/v0.134.0
 [0.133.0]: https://github.com/danielraffel/pulp/releases/tag/v0.133.0
 [0.132.0]: https://github.com/danielraffel/pulp/releases/tag/v0.132.0
 [0.128.0]: https://github.com/danielraffel/pulp/releases/tag/v0.128.0
