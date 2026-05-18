@@ -209,3 +209,23 @@ TEST_CASE("add_column pads existing rows", "[ui][table-model][issue-493]") {
     REQUIRE(m.cell(0, 1).text.empty());
     REQUIRE(m.cell(1, 1).text.empty());
 }
+
+TEST_CASE("adding a column after short rows preserves padded cells",
+          "[ui][table-model][coverage][phase3]") {
+    TableModel m;
+    m.add_column({"Name"});
+    m.add_column({"Author"});
+    m.add_row({{"Dreamy Pad"}});
+    m.add_row({{"Stab"}, {"Bob"}});
+
+    m.add_column({"Rating"});
+
+    REQUIRE(m.column_count() == 3);
+    REQUIRE(m.row_count() == 2);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(0, 1).text.empty());
+    REQUIRE(m.cell(0, 2).text.empty());
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(1, 1).text == "Bob");
+    REQUIRE(m.cell(1, 2).text.empty());
+}
