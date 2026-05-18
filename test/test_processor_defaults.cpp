@@ -136,6 +136,16 @@ TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independent
     REQUIRE(d.tail_samples == -1);
 }
 
+TEST_CASE("PluginDescriptor preserves optional vendor contact metadata",
+          "[format][processor-defaults][metadata][coverage][phase3]") {
+    PluginDescriptor d;
+    d.vendor_url = "https://example.test/pulp";
+    d.vendor_email = "support@example.test";
+
+    REQUIRE(d.vendor_url == "https://example.test/pulp");
+    REQUIRE(d.vendor_email == "support@example.test");
+}
+
 TEST_CASE("PrepareContext defaults match the headless stereo render path",
           "[format][processor-defaults][context]") {
     PrepareContext c;
