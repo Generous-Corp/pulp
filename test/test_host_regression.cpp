@@ -682,6 +682,30 @@ TEST_CASE("ParameterEventQueue clear makes the queue reusable",
     REQUIRE_THAT(queue.begin()->value, WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("ParameterEventQueue accepts rvalue pushes and exposes const iteration",
+          "[host][automation][coverage][phase3]") {
+    pulp::host::ParameterEventQueue queue;
+    queue.push(pulp::host::ParameterEvent{0x10, 5, 0.5f});
+    queue.push(pulp::host::ParameterEvent{0x11, 5, 0.6f});
+    queue.push(pulp::host::ParameterEvent{0x12, 1, 0.2f});
+
+    queue.sort();
+
+    const auto& const_queue = queue;
+    auto it = const_queue.begin();
+    REQUIRE(it != const_queue.end());
+    REQUIRE(it->param_id == 0x12);
+    REQUIRE(it->sample_offset == 1);
+
+    ++it;
+    REQUIRE(it->sample_offset == 5);
+    REQUIRE(it->param_id == 0x10);
+
+    ++it;
+    REQUIRE(it->sample_offset == 5);
+    REQUIRE(it->param_id == 0x11);
+}
+
 TEST_CASE("SignalGraph delivers set_parameter via ParameterEventQueue",
           "[host][graph][automation][regression][issue-52]") {
     SignalGraph graph;
