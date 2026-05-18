@@ -258,9 +258,19 @@ TEST_CASE("contains_emoji: cheap probe agrees with full segmenter",
 
 TEST_CASE("font_registration_generation: bump_font_registration_generation advances",
           "[canvas][emoji][cache]") {
+    // The non-Skia stubs in font_registry_stubs.cpp deliberately make
+    // both `font_registration_generation()` and the bump a no-op
+    // returning 0 — there are no downstream typeface caches to
+    // invalidate without Skia. Skip the contract assertion on those
+    // builds; the rest of the suite covers the Skia path that actually
+    // uses the counter.
+#ifdef PULP_HAS_SKIA
     auto before = pulp::canvas::font_registration_generation();
     pulp::canvas::bump_font_registration_generation();
     REQUIRE(pulp::canvas::font_registration_generation() > before);
+#else
+    SUCCEED("Skipped: no-Skia build — generation counter is a no-op stub.");
+#endif
 }
 
 // ── Skia-backed paint + measurement ────────────────────────────────────
