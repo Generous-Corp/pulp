@@ -409,12 +409,44 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
 // non-rendering paths.
 
 ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
+    const std::size_t key = options.hash();
+    const auto generation = merged_generation_for(options.scope);
+    {
+        std::lock_guard<std::mutex> lock(impl_->mtx);
+        auto it = impl_->cache.find(key);
+        if (it != impl_->cache.end()
+            && it->second.resolved.generation == generation) {
+            impl_->lru_order.splice(impl_->lru_order.end(),
+                                    impl_->lru_order,
+                                    it->second.lru_pos);
+            return it->second.resolved;
+        }
+    }
+
     ResolvedFont r;
     r.scope = options.scope;
-    r.generation = merged_generation_for(options.scope);
+    r.generation = generation;
     r.aa_mode = options.aa_mode;
     r.hinting_mode = options.hinting_mode;
     r.origin = FallbackOrigin::NotFound;
+
+    std::lock_guard<std::mutex> lock(impl_->mtx);
+    auto it = impl_->cache.find(key);
+    if (it != impl_->cache.end()) {
+        impl_->lru_order.splice(impl_->lru_order.end(), impl_->lru_order,
+                                it->second.lru_pos);
+        it->second.resolved = r;
+        return r;
+    }
+
+    impl_->lru_order.push_back(key);
+    auto pos = std::prev(impl_->lru_order.end());
+    impl_->cache.emplace(key, FontResolver::Impl::Entry{r, pos});
+    if (impl_->capacity > 0 && impl_->cache.size() > impl_->capacity) {
+        std::size_t oldest = impl_->lru_order.front();
+        impl_->lru_order.pop_front();
+        impl_->cache.erase(oldest);
+    }
     return r;
 }
 
