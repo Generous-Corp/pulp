@@ -64,3 +64,22 @@ TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits
     REQUIRE(buf.ump() == &second);
     REQUIRE((*buf.ump())[0].packet.channel() == 2);
 }
+
+TEST_CASE("MidiBuffer move assignment preserves attached UMP sidecar pointer",
+          "[midi][buffer][ump][coverage][phase3]") {
+    UmpBuffer sidecar;
+    sidecar.add(UmpPacket::cc_2(0, 3, 74, 0x80000000u), 24);
+
+    MidiBuffer source;
+    source.add(MidiEvent::cc(3, 74, 64));
+    source.attach_ump(&sidecar);
+
+    MidiBuffer target;
+    target = std::move(source);
+
+    REQUIRE(target.size() == 1);
+    REQUIRE(target.ump() == &sidecar);
+    REQUIRE(target.ump()->size() == 1);
+    REQUIRE((*target.ump())[0].sample_offset == 24);
+    REQUIRE((*target.ump())[0].packet.channel() == 3);
+}
