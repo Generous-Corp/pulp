@@ -226,3 +226,41 @@ TEST_CASE("PropertyList selection highlight covers non-bool rows and misses",
     REQUIRE(bypass != nullptr);
     REQUIRE(std::get<bool>(bypass->value));
 }
+
+TEST_CASE("PropertyList clamps color text and ignores category header clicks",
+          "[view][property_list][coverage][phase3]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 200, 96});
+    list.set_row_height(24.0f);
+    list.set_properties({
+        {"wild", "Wild", Color{1.5f, -0.25f, 0.5f, 1.0f}, false, "Visual"},
+        {"enabled", "Enabled", false, false, "Visual"},
+    });
+
+    int changes = 0;
+    list.on_change = [&](const std::string&, PropertyList::PropertyValue) {
+        ++changes;
+    };
+
+    RecordingCanvas initial;
+    list.paint(initial);
+    REQUIRE(has_text(initial, "#ff0080"));
+
+    list.on_mouse_down({5.0f, 5.0f});
+    REQUIRE(changes == 0);
+    RecordingCanvas after_header_click;
+    list.paint(after_header_click);
+    REQUIRE(after_header_click.count(DrawCommand::Type::fill_rect) == 1);
+
+    list.on_mouse_down({5.0f, 32.0f});
+    RecordingCanvas after_color_select;
+    list.paint(after_color_select);
+    REQUIRE(after_color_select.count(DrawCommand::Type::fill_rect) == 2);
+    REQUIRE(changes == 0);
+
+    list.on_mouse_down({5.0f, 56.0f});
+    REQUIRE(changes == 1);
+    const auto* enabled = list.find_property("enabled");
+    REQUIRE(enabled != nullptr);
+    REQUIRE(std::get<bool>(enabled->value));
+}
