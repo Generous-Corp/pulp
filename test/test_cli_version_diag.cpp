@@ -624,3 +624,25 @@ TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
     REQUIRE(out.find("\"name\": \"A\"") != std::string::npos);
     REQUIRE(out.find("\"severity\": \"warn\"") != std::string::npos);
 }
+
+TEST_CASE("render_report_json escapes project fields",
+          "[version-diag][coverage][phase3]") {
+    VersionReport r;
+    r.cli = parse_semver("0.31.0");
+
+    ProjectEntry p;
+    p.path = "/tmp/project\"with\\chars";
+    p.name = "Quoted \"Project\"\nName";
+    p.sdk = parse_semver("0.31.0");
+    r.projects.push_back(p);
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report_json(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 0);
+    auto out = capture.str();
+    REQUIRE(out.find(R"("path": "/tmp/project\"with\\chars")") != std::string::npos);
+    REQUIRE(out.find(R"("name": "Quoted \"Project\"\nName")") != std::string::npos);
+}
