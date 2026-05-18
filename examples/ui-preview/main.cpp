@@ -659,6 +659,28 @@ int main(int argc, char* argv[]) {
                 std::cout.flush();
             } catch (...) {}
 
+            // Patch __dispatch__ to count __global__ events. Helps verify
+            // the drag fan-out path firing into window listeners.
+            try {
+                engine.evaluate(
+                    "(function(){"
+                    "  if (typeof __dispatch__ !== 'function') return;"
+                    "  if (__dispatch__.__pulpInstrumented__) return;"
+                    "  var orig = __dispatch__;"
+                    "  globalThis.__pulpGlobalCounts__ = {};"
+                    "  globalThis.__pulpGlobalLastListenerCounts__ = {};"
+                    "  __dispatch__ = function(id, eventName){"
+                    "    if (id === '__global__') {"
+                    "      globalThis.__pulpGlobalCounts__[eventName] = (globalThis.__pulpGlobalCounts__[eventName] || 0) + 1;"
+                    "      var wl = (typeof window !== 'undefined' && window._listeners && window._listeners[eventName]) ? window._listeners[eventName].length : 0;"
+                    "      globalThis.__pulpGlobalLastListenerCounts__[eventName] = wl;"
+                    "    }"
+                    "    return orig.apply(this, arguments);"
+                    "  };"
+                    "  __dispatch__.__pulpInstrumented__ = true;"
+                    "})();void 0");
+            } catch (...) {}
+
             // DOM structure probe — find where React actually mounted.
             if (const char* p3 = std::getenv("PULP_JSX_DOM_PROBE"); p3 && *p3) {
                 auto info = engine.evaluate(
