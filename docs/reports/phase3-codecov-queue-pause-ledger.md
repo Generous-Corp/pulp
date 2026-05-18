@@ -7228,3 +7228,17 @@ passed locally: `git diff --check`, built `pulp-test-running-status`, and
 ran `./build/test/pulp-test-running-status "[midi][running-status]"`, which
 passed 20 test cases / 87 assertions. This tranche is held locally and should
 be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 22:07 PDT: added another local-only held view table coverage
+tranche to the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now includes
+commit `e8f6551a9` (`test(view): cover table list sparse row edges`). The
+tranche extends `test/test_table_list_box.cpp` over `SimpleTableModel`
+`set_data()` replacement, descending sparse-column sorting, out-of-range
+cell reads, and ignored header clicks past the concrete column span before a
+valid header sort. Validation passed locally: `git diff --check`, built
+`pulp-test-table-list-box`, and ran
+`./build/test/pulp-test-table-list-box "[gui][table]"`, which passed 9 test
+cases / 57 assertions. This tranche is held locally and should be aggregated
+into the larger PR rather than submitted individually.
