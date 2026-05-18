@@ -33,3 +33,37 @@ TEST_CASE("copy preserves url + email", "[format][vendor-url]") {
     REQUIRE(b.vendor_email == "hello@pulp.audio");
     REQUIRE(b.manufacturer == "PulpCo");
 }
+
+TEST_CASE("PluginDescriptor bus helpers handle empty and populated layouts",
+          "[format][vendor-url][coverage][phase3-large]") {
+    PluginDescriptor d;
+    REQUIRE(d.default_input_channels() == 2);
+    REQUIRE(d.default_output_channels() == 2);
+
+    d.input_buses.clear();
+    d.output_buses.clear();
+    REQUIRE(d.default_input_channels() == 0);
+    REQUIRE(d.default_output_channels() == 0);
+
+    d.input_buses.push_back({"Sidechain", 1, true});
+    d.input_buses.push_back({"Main In", 2, false});
+    d.output_buses.push_back({"Main Out", 4, false});
+
+    REQUIRE(d.default_input_channels() == 1);
+    REQUIRE(d.default_output_channels() == 4);
+}
+
+TEST_CASE("PluginDescriptor modern capability flags default off",
+          "[format][vendor-url][coverage][phase3-large]") {
+    PluginDescriptor d;
+    REQUIRE_FALSE(d.supports_mpe);
+    REQUIRE_FALSE(d.supports_ump);
+    REQUIRE_FALSE(d.ios_requires_background_audio);
+
+    d.supports_mpe = true;
+    d.supports_ump = true;
+    d.ios_requires_background_audio = true;
+    REQUIRE(d.supports_mpe);
+    REQUIRE(d.supports_ump);
+    REQUIRE(d.ios_requires_background_audio);
+}
