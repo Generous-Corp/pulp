@@ -35,6 +35,7 @@ void AsyncStream::on_drain(AsyncCloseCallback cb) { on_drain_ = std::move(cb); }
 void AsyncStream::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) return;
+    if (token_.is_cancelled()) token_ = CancellationToken();
     running_ = true;
     close_fired_ = false;
     writer_thread_ = std::thread([this] { write_loop(); });
