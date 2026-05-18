@@ -927,6 +927,25 @@ if(PULP_HAS_SKIA)
     catch_discover_tests(pulp-test-parity)
 endif()
 
+# Font v2 Slice 3.4 — cross-backend rendering goldens.
+# Catches font-cascade / hinting / AA regressions in the Skia
+# raster path before they land. Uses a structural digest (width,
+# height, opaque-pixel count, darkness sum) with ±5% tolerance
+# rather than byte-exact pixel hashes — see the test header for
+# the rationale. Skia-only; the bare TU still builds without
+# Skia (single soft-skip case) so this stays portable.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-font-rendering-goldens
+        test_font_rendering_goldens.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens PRIVATE
+        pulp::canvas Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-font-rendering-goldens PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-font-rendering-goldens)
+endif()
+
 # Analytics tests
 pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
 
