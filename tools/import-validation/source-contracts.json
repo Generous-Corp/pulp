@@ -726,6 +726,13 @@
           "proves": "Documents the supported local JSX transform and runtime import path.",
           "last_verified": "2026-05-18",
           "recheck_interval_days": 90
+        },
+        {
+          "url": "tools/import-design/jsx-runtime/jsx-transform.mjs",
+          "kind": "tooling",
+          "proves": "Local Node/esbuild transform turns JSX/TSX input into the runtime bundle consumed by parse_jsx_react.",
+          "last_verified": "2026-05-18",
+          "recheck_interval_days": 90
         }
       ],
       "detected_artifact_shape": "Single-file JSX or TSX React component transformed through the local esbuild runtime bridge.",
