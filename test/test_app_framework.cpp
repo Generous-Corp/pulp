@@ -127,6 +127,19 @@ TEST_CASE("KeyShortcut to_string round-trips", "[view][keys]") {
     REQUIRE(ks.to_string() == "Cmd+S");
 }
 
+TEST_CASE("KeyShortcut parser accepts out-of-order modifiers once",
+          "[view][keys][coverage]") {
+    auto ks = KeyShortcut::from_string("Shift+Cmd+A");
+    REQUIRE(ks.key == KeyCode::a);
+    REQUIRE((ks.modifiers & kModCmd) != 0);
+    REQUIRE((ks.modifiers & kModShift) != 0);
+    REQUIRE(ks.to_string() == "Cmd+Shift+A");
+
+    auto lower = KeyShortcut::from_string("Ctrl+x");
+    REQUIRE(lower.key == KeyCode::x);
+    REQUIRE(lower.to_string() == "Ctrl+X");
+}
+
 TEST_CASE("KeyShortcut matches key event", "[view][keys]") {
     auto ks = KeyShortcut::from_string("Cmd+S");
 
@@ -273,6 +286,20 @@ TEST_CASE("KeyMapping no-op branches leave commands intact", "[view][keys]") {
     REQUIRE(km.handle_key(e));
 }
 
+TEST_CASE("KeyMapping handles commands without actions",
+          "[view][keys][coverage]") {
+    KeyMapping km;
+    km.add_command({1, "No Action", "File",
+                    KeyShortcut::from_string("Cmd+N"), {}, {}, false});
+
+    KeyEvent e;
+    e.key = KeyCode::n;
+    e.modifiers = kModCmd;
+    e.is_down = true;
+
+    REQUIRE(km.handle_key(e));
+}
+
 TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
     KeyMapping km;
     km.add_command({1, "Save", "File",
@@ -347,6 +374,27 @@ TEST_CASE("MenuBar set_key_mapping preserves command metadata",
     REQUIRE(fired);
 }
 
+TEST_CASE("MenuBar add_menu preserves submenu and disabled item metadata",
+          "[view][menu][coverage]") {
+    MenuBar menu;
+    menu.add_menu("View", {
+        {"Zoom", {}, {}, true, false, {
+            {"Zoom In", [] {}, KeyShortcut::from_string("Cmd+="), false, false, {}},
+            {"Zoom Out", [] {}, KeyShortcut::from_string("Cmd+-"), true, false, {}},
+        }},
+        {"", {}, {}, true, true, {}},
+    });
+
+    REQUIRE(menu.menus().size() == 1);
+    const auto& view = menu.menus()[0];
+    REQUIRE(view.title == "View");
+    REQUIRE(view.items.size() == 2);
+    REQUIRE(view.items[0].submenu.size() == 2);
+    REQUIRE(view.items[0].submenu[0].title == "Zoom In");
+    REQUIRE_FALSE(view.items[0].submenu[0].enabled);
+    REQUIRE(view.items[1].is_separator);
+}
+
 // ── NativeToolbar ────────────────────────────────────────────────────────
 
 TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
@@ -358,6 +406,19 @@ TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
     REQUIRE(tb.items().size() == 3);
     REQUIRE(tb.items()[1].is_separator);
     tb.install_native(nullptr);
+}
+
+TEST_CASE("NativeToolbar stores callable item actions",
+          "[view][toolbar][coverage]") {
+    NativeToolbar tb;
+    int calls = 0;
+    tb.add_item({"render", "Render", "play", [&] { ++calls; }});
+
+    REQUIRE(tb.items().size() == 1);
+    REQUIRE(tb.items()[0].id == "render");
+    REQUIRE_FALSE(tb.items()[0].is_separator);
+    tb.items()[0].action();
+    REQUIRE(calls == 1);
 }
 
 // ── AppSettings ──────────────────────────────────────────────────────────
@@ -455,6 +516,35 @@ TEST_CASE("AppSettings saves and loads from platform settings root",
     REQUIRE(window->y == 2);
     REQUIRE(window->width == 300);
     REQUIRE(window->height == 400);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
+          "[view][settings][coverage]") {
+    auto root = make_temp_root("pulp-app-settings-malformed");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("MalformedSettingsCoverage");
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream f(settings.settings_path());
+        f << "{\n"
+          << "  \"first\": \"kept\",\n"
+          << "  \"broken\": \n"
+          << "}\n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE(settings.get_string("first").value() == "kept");
+    REQUIRE_FALSE(settings.get_string("broken").has_value());
 
     std::filesystem::remove_all(root);
 }
