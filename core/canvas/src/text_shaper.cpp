@@ -542,29 +542,27 @@ struct TextShaper::Impl {
             box.ascent  = -top;           // worst-case distance above baseline (positive)
             box.descent =  bottom;        // worst-case distance below baseline (positive)
             box.leading =  m.fLeading > 0 ? m.fLeading : 0;
-            // pulp #2163 — empirical safety margin. Sk{Font,Shaper}'s
-            // declared metrics (fTop / fBottom) under-report the
-            // y-extent the rasterizer actually paints at small font
-            // sizes, presumably because of subpixel positioning and
-            // anti-aliased pixel coverage that bleeds 1–2px past the
-            // declared bbox. Without this margin, intrinsic_height
-            // returns a box that just barely fits the declared
-            // metrics but visually clips the glyph caps and
-            // descenders of imported designs (CROSSOVER /
-            // MID / SIDE WIDTH section titles, XY pad axis labels at
-            // fontSize 7).
+            // pulp #2163 — Phase 1 exit (font v2 roadmap). Historical
+            // context: commit 2371479c3 added an empirical
+            // `0.5 * font_size` line-height margin on top of fTop/fBottom
+            // to fix small-font clipping in Chainer (CROSSOVER /
+            // MID / SIDE WIDTH titles at fontSize 7). The margin was a
+            // stopgap — the real cause was the y-semantics drift
+            // documented in v2 tar pit #9.
             //
-            // font v2 Slice 1.3 / Phase 1 exit (in flight) — the margin
-            // is the canary the parity harness validates against. Set
-            // `PULP_FONT_NO_SAFETY_MARGIN=1` to disable the margin
-            // and render with raw fTop/fBottom; A/B against the
-            // margin-on output to judge whether the v2 anchor work
-            // has obviated the empirical fudge. When the harness is
-            // green corpus-wide and Chainer renders correctly without
-            // the margin, the env-var gate retires and the margin
-            // goes away (Phase 1 exit).
-            const bool margin_off = std::getenv("PULP_FONT_NO_SAFETY_MARGIN") != nullptr;
-            const float safety = margin_off ? 0.0f : font_size * 0.5f;
+            // After Slices 1.1.a (FontResolver) + 1.1.b (Yoga baseline
+            // channel) + 1.2.b (TextAnchor + paint_at) + 1.3 (parity
+            // harness asserting TextShaper ≡ SkFont::measureText within
+            // 0.5 px), the structural cause is fixed and the margin is
+            // unnecessary. Default behavior is now NO margin (raw
+            // fTop/fBottom). Opt back in to the legacy margin with
+            // `PULP_FONT_LEGACY_SAFETY_MARGIN=1` for bisection or A/B
+            // regression triage; the opt-in goes away once the full
+            // multilingual torture-corpus harness ships in a follow-up
+            // and proves we've never needed it.
+            const bool legacy_margin =
+                std::getenv("PULP_FONT_LEGACY_SAFETY_MARGIN") != nullptr;
+            const float safety = legacy_margin ? font_size * 0.5f : 0.0f;
             box.line_height = box.ascent + box.descent + box.leading + safety;
             box.real = true;
         }
