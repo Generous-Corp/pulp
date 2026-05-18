@@ -120,7 +120,7 @@ public:
                 if (hit->has_children() && event.position.x < triangle_end) {
                     hit->toggle();
                     if (on_toggle) on_toggle(*hit, hit->expanded);
-                } else {
+                } else if (hit->selectable) {
                     selected_ = hit;
                     if (on_select) on_select(*hit);
                 }
