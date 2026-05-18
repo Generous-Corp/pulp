@@ -58,6 +58,17 @@ TEST_CASE("FastMath exp2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::exp2(0.5f), WithinAbs(std::sqrt(2.0f), 0.01));
 }
 
+TEST_CASE("FastMath exp2 preserves ordering across integer boundaries",
+          "[signal][fast_math][coverage][phase3]") {
+    const float below = FastMath::exp2(1.999f);
+    const float exact = FastMath::exp2(2.0f);
+    const float above = FastMath::exp2(2.001f);
+
+    REQUIRE(below < exact);
+    REQUIRE(exact < above);
+    REQUIRE_THAT(exact, WithinAbs(4.0f, 0.01f));
+}
+
 TEST_CASE("FastMath log2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::log2(1.0f), WithinAbs(0.0, 0.01));
     REQUIRE_THAT(FastMath::log2(2.0f), WithinAbs(1.0, 0.01));
