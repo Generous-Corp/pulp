@@ -231,3 +231,28 @@ TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     um.undo(); REQUIRE(v == 0);
     REQUIRE_FALSE(um.can_undo());
 }
+
+TEST_CASE("UndoManager transaction redo preserves action order",
+          "[state][undo][coverage][phase3-large]") {
+    UndoManager um;
+    std::vector<int> events;
+
+    um.begin_transaction("Ordered");
+    um.perform(UndoAction::create("A",
+        [&] { events.push_back(-1); },
+        [&] { events.push_back(1); }));
+    um.perform(UndoAction::create("B",
+        [&] { events.push_back(-2); },
+        [&] { events.push_back(2); }));
+    um.end_transaction();
+
+    REQUIRE(events == std::vector<int>{1, 2});
+    REQUIRE(um.undo_name() == "Ordered");
+
+    REQUIRE(um.undo());
+    REQUIRE(events == std::vector<int>{1, 2, -2, -1});
+    REQUIRE(um.redo_name() == "Ordered");
+
+    REQUIRE(um.redo());
+    REQUIRE(events == std::vector<int>{1, 2, -2, -1, 1, 2});
+}
