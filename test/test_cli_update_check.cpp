@@ -298,6 +298,39 @@ TEST_CASE("read_toml_key_in_section ignores commented examples",
     REQUIRE(uc::read_toml_key_in_section(src, "update", "mode") == "prompt");
 }
 
+TEST_CASE("read_toml_key_in_section trims quoted values before inline comments",
+          "[cli][update-check][coverage][phase3]") {
+    std::string src =
+        "[update]\n"
+        "mode =   \"manual\"   # selected by user\n"
+        "channel = beta\n";
+
+    REQUIRE(uc::read_toml_key_in_section(src, "update", "mode") == "manual");
+    REQUIRE(uc::read_toml_key_in_section(src, "update", "channel") == "beta");
+}
+
+TEST_CASE("write_toml_key_in_section appends into empty section before the next section",
+          "[cli][update-check][coverage][phase3]") {
+    std::string src =
+        "[update]\n"
+        "\n"
+        "[pr]\n"
+        "workflow = \"github\"\n";
+
+    auto out = uc::write_toml_key_in_section(src, "update", "mode", "manual");
+    REQUIRE(uc::read_toml_key_in_section(out, "update", "mode") == "manual");
+    REQUIRE(uc::read_toml_key_in_section(out, "pr", "workflow") == "github");
+
+    auto update_pos = out.find("[update]");
+    auto mode_pos = out.find("mode = \"manual\"");
+    auto pr_pos = out.find("[pr]");
+    REQUIRE(update_pos != std::string::npos);
+    REQUIRE(mode_pos != std::string::npos);
+    REQUIRE(pr_pos != std::string::npos);
+    REQUIRE(update_pos < mode_pos);
+    REQUIRE(mode_pos < pr_pos);
+}
+
 // ── Fetcher injection ───────────────────────────────────────────────────────
 
 TEST_CASE("refresh_cache consumes fake fetcher, no network",
