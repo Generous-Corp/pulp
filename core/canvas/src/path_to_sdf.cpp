@@ -38,7 +38,7 @@ std::vector<std::uint8_t> path_to_sdf(const std::uint8_t* mask,
                                       int width, int height,
                                       int spread) {
     std::vector<std::uint8_t> out(static_cast<std::size_t>(width * height), 0);
-    if (width <= 0 || height <= 0 || spread <= 0) return out;
+    if (width <= 0 || height <= 0 || spread <= 0 || mask == nullptr) return out;
 
     // Degenerate cases.
     bool any_inside = false;

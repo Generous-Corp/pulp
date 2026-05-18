@@ -67,6 +67,14 @@ TEST_CASE("path_to_sdf: non-positive spread preserves output shape as zeroes",
     for (auto v : negative_spread) REQUIRE(v == 0);
 }
 
+TEST_CASE("path_to_sdf: null mask returns a zero field without dereferencing",
+          "[canvas][sdf][path]") {
+    auto sdf = path_to_sdf(nullptr, 3, 2, 4);
+
+    REQUIRE(sdf.size() == 6);
+    for (auto v : sdf) REQUIRE(v == 0);
+}
+
 TEST_CASE("path_to_sdf: mask threshold treats 127 outside and 128 inside",
           "[canvas][sdf][path][issue-641]") {
     std::uint8_t mask[2] = {127, 128};
