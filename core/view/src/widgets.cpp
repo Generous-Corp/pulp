@@ -10,11 +10,25 @@
 #include <choc/text/choc_JSON.h>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 namespace pulp::view {
 
 // ── Schema renderer — interprets declarative JSON widget definitions ─────────
+
+static bool parse_schema_float_token(const std::string& token, float& out) {
+    if (token.empty()) return false;
+    char* end = nullptr;
+    float value = std::strtof(token.c_str(), &end);
+    if (end == token.c_str() || !std::isfinite(value)) return false;
+    while (*end != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(*end))) return false;
+        ++end;
+    }
+    out = value;
+    return true;
+}
 
 static void render_schema(canvas::Canvas& canvas, const std::string& json,
                           float w, float h, float value, View& view) {
@@ -41,8 +55,20 @@ static void render_schema(canvas::Canvas& canvas, const std::string& json,
             auto resolveDim = [&](const std::string& key, float fallback) -> float {
                 if (!el.hasObjectMember(key)) return fallback;
                 auto s = el[key].getWithDefault(std::string(""));
-                if (s.back() == '%') return std::stof(s) / 100.0f * std::min(w, h) * 0.5f;
-                return std::stof(s);
+                if (s.empty()) return fallback;
+
+                while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(0, 1);
+                while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+                if (s.empty()) return fallback;
+
+                float parsed = 0.0f;
+                if (s.back() == '%') {
+                    auto pct = s.substr(0, s.size() - 1);
+                    return parse_schema_float_token(pct, parsed)
+                        ? parsed / 100.0f * std::min(w, h) * 0.5f
+                        : fallback;
+                }
+                return parse_schema_float_token(s, parsed) ? parsed : fallback;
             };
 
             // Resolve angle with optional value binding
