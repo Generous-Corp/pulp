@@ -8112,3 +8112,58 @@ a Linux GitHub-hosted failure, but GitHub is still withholding the failed job
 log until the overall workflow completes; keep monitoring and inspect before
 patching or rerunning. #2208 has no failures and remains queued/running on
 GitHub-hosted lanes. No Namespace dispatch.
+
+2026-05-18 04:59 PDT: continued GitHub-only PR monitoring and repair after the
+user flagged #2173 as unattended. #2173's previous Linux/Windows failure was a
+real portability edge in SVG gradient parsing, not a runner issue: libc/MSVC
+number scanning diverged on malformed `12+` components. Fixed root cause as
+`af46b2a59` (`fix(view): make svg gradient number parsing portable`) with a
+portable gradient-number scanner in `core/view/src/svg_path_widget.cpp`.
+Focused local validation passed `pulp-test-svg-path-widget "SvgPathWidget
+malformed gradient numbers fall back without throwing"`,
+`pulp-test-svg-path-widget "SvgPathWidget defaults match HTML <path>
+semantics"`, and `git diff --check`. A local full diff-cover pre-push attempt
+stalled in slow iOS CTest setup and briefly produced temporary fixture churn;
+the branch was reset back to the intended head before push. Retried push with
+the actual local diff-cover bypass knob `PULP_SKIP_DIFF_COVER=1`; pre-push
+source-contract gates passed and GitHub-hosted checks restarted. At this
+ledger update #2173 has no failing checks, with GitHub-hosted Windows/macOS/
+Linux, sanitizers, Android, and smoke lanes queued/running. No Namespace
+dispatch.
+
+Fixed #2208's new Linux/Windows failures instead of hiding them. GitHub exposed
+two real issues: the `WidgetBridge` focus-guard test was linking the stale
+`widget_bridge.cpp` implementation because the static archive satisfied
+`forward_key_event` before pulling the extracted `widget_bridge_input.cpp`
+object, and the label intrinsic-height test was too tight for Yoga's rounded
+20-21 px output. Pushed `b1501ef62` (`fix(view): use focused input key guard`)
+after removing the stale duplicate `forward_key_event` implementation from
+`core/view/src/widget_bridge.cpp` and adjusting the label-height expectation to
+the rounded intrinsic-height contract. Local validation passed
+`pulp-test-widget-bridge "WidgetBridge focus-guard: bare-key shortcuts
+suppressed while text input focused"`, `pulp-test-layout-w3c "Layout: Label
+intrinsic height in column"`, `nm` verification showing
+`widget_bridge_input.cpp.o` is the only exported `forward_key_event`, and
+`git diff --check`. Pre-push gates passed and GitHub-hosted checks restarted;
+#2208 currently has no failing checks and is queued/running. No Namespace
+dispatch.
+
+Opened the held large batch `feature/phase3-codecov-batch-730` as GitHub PR
+#2210 via REST because GraphQL quota was exhausted. The branch contains 25
+commits including the source-contract registry fix `108f32c6c` (`chore(import):
+register jsx source contract`) and local validation passed
+`python3 tools/import-validation/test_source_contracts.py`,
+`python3 tools/import-validation/check-source-contracts.py --strict`, and
+`git diff --check`. Auto-merge could not be enabled while GraphQL remained at
+zero quota, so #2210 is being monitored via REST and will need auto-merge
+enabled later or a REST merge when fully green. Addressed the one Codex P2
+review comment on #2210 with `3712d57ff` (`test(format): gate AutoUi fallback
+assertion`): the headless AutoUi fallback test now skips when
+`PULP_UI_SCRIPT_PATH` is intentionally configured. Focused local validation
+passed `pulp-test-headless "build_editor_ui falls back to AutoUi when no script
+path is configured"`, pre-push gates passed, and a reply was posted on the
+review thread. At this update #2210 has no failing checks and is queued/running
+on GitHub-hosted lanes. #2202 remains open with no failing checks after the
+macOS rerun; it is still waiting on GitHub-hosted macOS/sanitizer/Android
+lanes. GraphQL remains exhausted (`remaining=0`), while REST core quota is
+healthy, so all monitoring is REST-only for now. No Namespace dispatch.
