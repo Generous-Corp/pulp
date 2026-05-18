@@ -176,6 +176,13 @@ TEST_CASE("LicenseValidator rejects undecodable payload", "[crypto][license]") {
     REQUIRE(validator.validate("###.sig") == LicenseStatus::InvalidFormat);
 }
 
+TEST_CASE("LicenseValidator rejects impossible base64 payload lengths",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    REQUIRE(validator.validate("A.sig") == LicenseStatus::InvalidFormat);
+    REQUIRE_FALSE(validator.validate_and_parse("A.sig"));
+}
+
 TEST_CASE("LicenseValidator parse payload", "[crypto][license]") {
     LicenseValidator validator;
 
