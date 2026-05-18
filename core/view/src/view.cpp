@@ -137,6 +137,23 @@ void build_continuous_corner_rounded_rect_path(
 
 } // namespace
 
+// View destructor, moved out of <pulp/view/view.hpp> in the Phase 4 R2-2
+// header-diet first cut. Stays virtual + public so vtable layout + SDK
+// contract are unchanged.
+View::~View() {
+    // pulp #1148 — clear the overlay slot if this dying View holds it.
+    // Without this, an unmounted React popover leaves a dangling
+    // pointer that the platform window host would dereference on
+    // the next click.
+    if (active_overlay_ == this) active_overlay_ = nullptr;
+    // pulp #1708 — clear the input-focus slot if this dying View holds
+    // it. Without this, a React unmount of the focused widget (e.g.,
+    // closing a Settings modal) leaves the platform host's focused-
+    // view pointer dangling; the next keypress crashes via
+    // dynamic_cast on freed memory in -[PulpView focusedTextEditor].
+    if (focused_input_ == this) focused_input_ = nullptr;
+}
+
 void View::paint_all(canvas::Canvas& canvas) {
     if (!visible_) return;
 

@@ -24,19 +24,12 @@ class FrameClock;
 class View {
 public:
     View() = default;
-    virtual ~View() {
-        // pulp #1148 — clear the overlay slot if this dying View holds it.
-        // Without this, an unmounted React popover leaves a dangling
-        // pointer that the platform window host would dereference on
-        // the next click.
-        if (active_overlay_ == this) active_overlay_ = nullptr;
-        // pulp #1708 — clear the input-focus slot if this dying View holds
-        // it. Without this, a React unmount of the focused widget (e.g.,
-        // closing a Settings modal) leaves the platform host's focused-
-        // view pointer dangling; the next keypress crashes via
-        // dynamic_cast on freed memory in -[PulpView focusedTextEditor].
-        if (focused_input_ == this) focused_input_ = nullptr;
-    }
+    // Defined out-of-line in view.cpp to slim the preprocessed-byte size
+    // of <pulp/view/view.hpp> (Phase 4 R2-2 header-diet first cut).
+    // Stays virtual + public — the vtable slot, calling convention, and
+    // SDK contract are unchanged. Body reaches the active_overlay_ /
+    // focused_input_ statics (clear-on-destroy for pulp #1148 / #1708).
+    virtual ~View();
 
     View(const View&) = delete;
     View& operator=(const View&) = delete;
