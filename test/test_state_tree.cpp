@@ -892,6 +892,9 @@ TEST_CASE("CachedProperty bool ignores mismatched refresh values",
     enabled.refresh();
 
     REQUIRE(enabled.get());
+    enabled = false;
+    REQUIRE_FALSE(enabled.get());
+    REQUIRE_FALSE(tree->get_bool("enabled", true));
 }
 
 TEST_CASE("CachedProperty int64 move tracks later tree updates",
