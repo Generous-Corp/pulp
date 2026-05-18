@@ -159,6 +159,21 @@ TEST_CASE("JsonRpcPeer fires notification handler and expects no response", "[js
     REQUIRE(last_params == "[\"again\"]");
 }
 
+TEST_CASE("JsonRpcPeer delivers empty notification params when omitted",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer server(*pair.second);
+
+    std::string captured = "unset";
+    server.on_notification("bare", [&](std::string_view params) {
+        captured = std::string(params);
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","method":"bare"})json"));
+    REQUIRE(captured.empty());
+}
+
 TEST_CASE("JsonRpcPeer reports scalar parse errors and ignores batches", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
 
