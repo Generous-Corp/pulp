@@ -475,10 +475,12 @@ TEST_CASE("FileStream move assignment handles self and closed sources",
     REQUIRE_FALSE(stream.is_open());
     REQUIRE_FALSE(closed.is_open());
 
-    FileStream reader(path.string(), FileStream::Mode::Read);
-    std::uint8_t out[sizeof(payload)]{};
-    REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
-    REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+    {
+        FileStream reader(path.string(), FileStream::Mode::Read);
+        std::uint8_t out[sizeof(payload)]{};
+        REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
+        REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+    }
 
     std::filesystem::remove(path);
 }
