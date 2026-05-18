@@ -768,3 +768,50 @@ TEST_CASE("JsonRpcPeer destructor clears the channel message handler",
     REQUIRE(replies.size() == 1);
     REQUIRE(replies.front().find("before") != std::string::npos);
 }
+
+TEST_CASE("JsonRpcPeer accepts binary JSON and default error envelopes",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    server.register_method("echo", [](std::string_view params) {
+        return JsonRpcResult::ok(std::string(params));
+    });
+
+    std::atomic<int> callbacks{0};
+    std::string result;
+    REQUIRE(client.send_request("echo", R"({"value":3})", [&](const JsonRpcResult& response) {
+        result = response.result_json;
+        callbacks.fetch_add(1);
+    }));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(result.find(R"("value")") != std::string::npos);
+    REQUIRE(result.find("3") != std::string::npos);
+
+    auto error_pair = MemoryMessageChannel::make_pair();
+    std::string outbound_request;
+    error_pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer error_client(*error_pair.first);
+    std::optional<JsonRpcError> default_error;
+    REQUIRE(error_client.send_request("manual", "", [&](const JsonRpcResult& response) {
+        default_error = response.error;
+        callbacks.fetch_add(1);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    const std::string error_payload = R"json({"jsonrpc":"2.0","id":1,"error":{}})json";
+    REQUIRE(error_pair.second->send(
+        reinterpret_cast<const std::uint8_t*>(error_payload.data()),
+        error_payload.size()));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 2; }));
+    REQUIRE(default_error.has_value());
+    REQUIRE(default_error->code == 0);
+    REQUIRE(default_error->message.empty());
+    REQUIRE(default_error->data_json.empty());
+}
