@@ -174,6 +174,24 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
     REQUIRE(model.cell_text(1, 1) == "two");
 }
 
+TEST_CASE("SimpleTableModel set_data replaces rows and sorts descending",
+          "[gui][table][coverage]") {
+    SimpleTableModel model;
+    model.add_row({"stale"});
+    model.set_data({{"A", "2"}, {"C", "1"}, {"B", "3"}});
+
+    REQUIRE(model.row_count() == 3);
+    REQUIRE(model.cell_text(0, 0) == "A");
+    REQUIRE(model.sort(0, false));
+    REQUIRE(model.cell_text(0, 0) == "C");
+    REQUIRE(model.cell_text(1, 0) == "B");
+    REQUIRE(model.cell_text(2, 0) == "A");
+
+    REQUIRE(model.sort(1, true));
+    REQUIRE(model.cell_text(0, 1) == "1");
+    REQUIRE(model.cell_text(2, 1) == "3");
+}
+
 TEST_CASE("TableListBox clear columns and model-less clicks are stable",
           "[gui][table][coverage][issue-653]") {
     TableListBox table;
