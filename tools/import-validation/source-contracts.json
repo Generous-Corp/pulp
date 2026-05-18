@@ -688,6 +688,75 @@
           "path": "planning/screenshots/REFERENCE-rn-gain-stage.png"
         }
       }
+    },
+    {
+      "source": "jsx",
+      "display_name": "JSX instrument",
+      "kind": "screen-export",
+      "trust": "observed",
+      "last_verified": "2026-05-17",
+      "recheck_interval_days": 90,
+      "compat": {
+        "mode": "not-applicable",
+        "source": null,
+        "parser_version_owner": "runtime-import"
+      },
+      "dispatch": {
+        "kind": "design-source-label",
+        "label": "jsx"
+      },
+      "mcp": {
+        "provider_server": null,
+        "available": false,
+        "runtime_parser_accepts_raw_mcp": false,
+        "lane_owner": "jsx-runtime-transform",
+        "notes": "JSX instrument import is a single-file React JSX/TSX lane compiled by the local esbuild transform before runtime import."
+      },
+      "upstream": [
+        {
+          "url": "tools/import-design/jsx-runtime/jsx-transform.mjs",
+          "kind": "tooling",
+          "proves": "Local Node/esbuild transform turns JSX/TSX input into the runtime bundle consumed by parse_jsx_react.",
+          "last_verified": "2026-05-17",
+          "recheck_interval_days": 90
+        }
+      ],
+      "detected_artifact_shape": "Single-file React JSX or TSX instrument component.",
+      "runtime_export_shape": "Bundled React runtime script plus synthetic root container passed through the Claude runtime harness.",
+      "runtime_requirements": {
+        "sdk_min": "v0.74.1",
+        "surface_refs": [
+          "compat.json:html",
+          "compat.json:css",
+          "compat.json:canvas2d",
+          "core/view"
+        ]
+      },
+      "parser": {
+        "file": "core/view/src/design_import.cpp",
+        "runtime": "parse_jsx_react",
+        "static": null
+      },
+      "format_versions": [],
+      "validation": {
+        "fixtures": [
+          "planning/fixtures/jsx/chainer-instrument.jsx"
+        ],
+        "roundtrip_script": "tools/import-validation/jsx-roundtrip.sh",
+        "test_targets": [
+          "pulp-test-design-import-jsx-runtime"
+        ],
+        "test_files": [
+          "test/test_design_import_jsx_runtime.cpp"
+        ],
+        "test_tags": [
+          "[view][import][jsx]"
+        ],
+        "pulp_render_reference": {
+          "status": "not-applicable",
+          "path": null
+        }
+      }
     }
   ]
 }
