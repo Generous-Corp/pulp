@@ -131,6 +131,23 @@ TEST_CASE("BigInteger move construction and move assignment leave values usable"
     REQUIRE(moved.is_zero());
 }
 
+TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
+          "[crypto][bigint][coverage][phase3]") {
+    BigInteger value(144);
+    auto& same = value;
+
+    value = same;
+    REQUIRE(value.to_string() == "144");
+
+    value = std::move(same);
+    REQUIRE(value.to_string() == "144");
+
+    REQUIRE((value + BigInteger(0)).to_string() == "144");
+    REQUIRE((value * BigInteger(1)).to_string() == "144");
+    REQUIRE((BigInteger(3) % BigInteger(10)).to_string() == "3");
+    REQUIRE(value.mod_pow(BigInteger(0), BigInteger(17)).to_string() == "1");
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
