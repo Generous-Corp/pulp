@@ -187,6 +187,16 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
+                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
+                    // makes the SVG primitive the topmost hit-test target,
+                    // shadowing the parent <svg>'s onMouseDown handler.
+                    // Set pointer-events: none so clicks fall through to
+                    // the parent <svg> which holds the JSX handler.
+                    // Matches browser SVG behavior where presentational
+                    // children of <svg> don't intercept events by default
+                    // (they need explicit pointer-events="visible" or
+                    // similar).
+                    call('setPointerEvents', id, 'none');
                     return;
                 }
                 case 'circle': {
@@ -223,6 +233,16 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
+                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
+                    // makes the SVG primitive the topmost hit-test target,
+                    // shadowing the parent <svg>'s onMouseDown handler.
+                    // Set pointer-events: none so clicks fall through to
+                    // the parent <svg> which holds the JSX handler.
+                    // Matches browser SVG behavior where presentational
+                    // children of <svg> don't intercept events by default
+                    // (they need explicit pointer-events="visible" or
+                    // similar).
+                    call('setPointerEvents', id, 'none');
                     return;
                 }
                 case 'rect': {
@@ -232,6 +252,16 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
+                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
+                    // makes the SVG primitive the topmost hit-test target,
+                    // shadowing the parent <svg>'s onMouseDown handler.
+                    // Set pointer-events: none so clicks fall through to
+                    // the parent <svg> which holds the JSX handler.
+                    // Matches browser SVG behavior where presentational
+                    // children of <svg> don't intercept events by default
+                    // (they need explicit pointer-events="visible" or
+                    // similar).
+                    call('setPointerEvents', id, 'none');
                     return;
                 }
                 case 'line': {
@@ -241,6 +271,16 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
                     call('setLeft', id, 0);
                     call('setRight', id, 0);
                     call('setBottom', id, 0);
+                    // pulp jsx-instrument-import 2026-05-17 — fill-parent
+                    // makes the SVG primitive the topmost hit-test target,
+                    // shadowing the parent <svg>'s onMouseDown handler.
+                    // Set pointer-events: none so clicks fall through to
+                    // the parent <svg> which holds the JSX handler.
+                    // Matches browser SVG behavior where presentational
+                    // children of <svg> don't intercept events by default
+                    // (they need explicit pointer-events="visible" or
+                    // similar).
+                    call('setPointerEvents', id, 'none');
                     return;
                 }
                 case 'g':        call('createCol', id, parentId); return; // <svg><g> group
