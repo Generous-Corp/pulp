@@ -167,6 +167,14 @@ TEST_CASE("CiDiscovery ignores malformed and unhandled messages",
     REQUIRE(ci.process_message(unknown.data(), unknown.size()).empty());
 }
 
+TEST_CASE("CiDiscovery ignores null message buffers",
+          "[midi][ci][codecov]") {
+    CiDiscovery ci;
+
+    REQUIRE(ci.process_message(nullptr, 0).empty());
+    REQUIRE(ci.process_message(nullptr, 31).empty());
+}
+
 TEST_CASE("CiDiscovery rejects wrong universal sysex headers",
           "[midi][ci][codecov]") {
     CiDiscovery ci;

@@ -100,6 +100,7 @@ std::vector<uint8_t> CiDiscovery::create_profile_inquiry(MUID destination) const
 
 std::vector<uint8_t> CiDiscovery::process_message(const uint8_t* data, size_t size) {
     // Minimum CI message: F0 7E device 0D sub-id version source(4) dest(4) ... F7
+    if (data == nullptr) return {};
     if (size < 14) return {};
     if (data[0] != 0xF0 || data[1] != 0x7E || data[3] != 0x0D) return {};
 
