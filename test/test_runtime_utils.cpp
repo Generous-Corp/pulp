@@ -536,6 +536,17 @@ TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
     REQUIRE(*quartet == std::vector<uint8_t>{0xff, 0xff, 0xff});
 }
 
+TEST_CASE("base64 decodes final quantum without padding",
+          "[runtime][base64][coverage][phase3-github]") {
+    auto one = base64_decode("TQ");
+    REQUIRE(one.has_value());
+    REQUIRE(*one == std::vector<uint8_t>{'M'});
+
+    auto two = base64_decode("TWE");
+    REQUIRE(two.has_value());
+    REQUIRE(*two == std::vector<uint8_t>{'M', 'a'});
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
