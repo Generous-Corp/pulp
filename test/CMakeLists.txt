@@ -866,6 +866,14 @@ endif()
 # pulp #2163 / font v2 Slice 3.6 — UAX #29-lite cluster_step.
 pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
 
+# pulp #2163 / font v2 Slice 2.4 — locale-aware word + line breaking.
+# The surface always links: when ICU's <unicode/brkiter.h> is on the
+# include path the assertions exercise the real UAX #14 path against
+# the SkUnicode_icu symbols bundled in libskia.a; otherwise the
+# degraded ASCII-space fallback keeps the API functional and the
+# English-only expectations still hold.
+pulp_add_test_suite(pulp-test-font-locale-shaping LIBRARIES pulp::canvas)
+
 # pulp #2163 / font v2 Slice 3.2 — AA / hinting / subpixel policy centralization.
 add_executable(pulp-test-font-aa-hinting test_font_aa_hinting.cpp)
 target_link_libraries(pulp-test-font-aa-hinting PRIVATE pulp::canvas Catch2::Catch2WithMain)

@@ -16,6 +16,29 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <vector>
+
+// pulp #2163 — font v2 Slice 2.4. Probe for ICU's BreakIterator
+// headers. The bundled Skia binaries statically link `libskunicode_icu.a`
+// (so `SkUnicode_icu::makeBreakIterator` lives in libskia at link time),
+// but ICU's own public headers (`<unicode/brkiter.h>`) are *not* shipped
+// in `external/skia-build/include/`. Builds that happen to have a system
+// ICU on the include path (e.g. Homebrew `icu4c` with an explicit
+// `-I/opt/homebrew/opt/icu4c/include` and matching `-L`) will pick up
+// the real implementation; otherwise we fall back to the documented
+// degraded path: `word_break_step` defers to `cluster_step`, and
+// `line_break_opportunities` returns the trailing offset plus every
+// ASCII-space boundary. The API is always linkable.
+#if defined(PULP_HAS_SKIA) && __has_include(<unicode/brkiter.h>) && __has_include(<unicode/locid.h>)
+#  define PULP_HAS_ICU_BREAK_ITERATOR 1
+#  include <unicode/brkiter.h>
+#  include <unicode/locid.h>
+#  include <unicode/unistr.h>
+#  include <unicode/utext.h>
+#  include <memory>
+#else
+#  define PULP_HAS_ICU_BREAK_ITERATOR 0
+#endif
 
 namespace pulp::canvas {
 
@@ -244,6 +267,193 @@ std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
         }
         return prev;
     }
+}
+
+// ── Slice 2.4 — locale-aware word + line breaking (pulp #2163) ─────────
+//
+// The public surface (`word_break_step`, `line_break_opportunities`)
+// is always defined regardless of whether ICU's public headers are on
+// the include path. When PULP_HAS_ICU_BREAK_ITERATOR is 1, both
+// functions walk an `icu::BreakIterator`. Otherwise we fall back to:
+//   * `word_break_step` → `cluster_step` (the same single-cluster
+//     advance the editor already uses for caret movement).
+//   * `line_break_opportunities` → trailing offset only, plus every
+//     ASCII-space byte position. This is enough to keep paragraph
+//     layout from collapsing to a single run, and matches the
+//     degraded path documented in the header.
+
+#if PULP_HAS_ICU_BREAK_ITERATOR
+
+namespace {
+
+inline icu::Locale icu_locale_for(const std::string& bcp47) {
+    if (bcp47.empty()) return icu::Locale::getRoot();
+    UErrorCode status = U_ZERO_ERROR;
+    icu::Locale loc = icu::Locale::forLanguageTag(bcp47.c_str(), status);
+    if (U_FAILURE(status)) return icu::Locale::getRoot();
+    return loc;
+}
+
+// Build an ICU UnicodeString from UTF-8 input and a parallel index
+// from UTF-16 code-unit offsets back to UTF-8 byte offsets. ICU
+// BreakIterator returns offsets in code units (UTF-16), but our
+// callers speak UTF-8 byte offsets, so we translate at the boundary.
+struct Utf8Utf16Bridge {
+    icu::UnicodeString utf16;
+    // For each UTF-16 code-unit position `k` (0 .. utf16.length()),
+    // utf8_for_utf16[k] is the corresponding UTF-8 byte offset in
+    // the original input. Length is utf16.length() + 1; the final
+    // entry is the input's byte length.
+    std::vector<std::size_t> utf8_for_utf16;
+};
+
+// Inline UTF-8 scalar decode used by the bridge. The anonymous-
+// namespace helper above is not reachable here (different TU scope);
+// keep this duplicate trivially small.
+inline std::size_t utf8_scalar_len(const std::string& s, std::size_t i) {
+    if (i >= s.size()) return 0;
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) return 2;
+    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) return 3;
+    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) return 4;
+    return 1; // malformed: advance by 1 byte
+}
+
+inline Utf8Utf16Bridge build_bridge(const std::string& text) {
+    Utf8Utf16Bridge b;
+    b.utf16 = icu::UnicodeString::fromUTF8(icu::StringPiece(text.data(),
+                                                            static_cast<std::int32_t>(text.size())));
+    b.utf8_for_utf16.reserve(static_cast<std::size_t>(b.utf16.length()) + 1);
+
+    // Walk UTF-8 input one scalar at a time; for each scalar, record
+    // its starting UTF-8 byte offset against the UTF-16 unit position
+    // we have advanced to in `b.utf16` (1 unit for BMP, 2 units for
+    // supplementary planes).
+    std::size_t utf8_pos = 0;
+    while (utf8_pos < text.size()) {
+        b.utf8_for_utf16.push_back(utf8_pos);
+        const std::size_t bytes = utf8_scalar_len(text, utf8_pos);
+        // Determine how many UTF-16 units that scalar consumed:
+        // 4-byte UTF-8 => supplementary => 2 UTF-16 units.
+        const bool supplementary = (bytes == 4);
+        if (supplementary) {
+            // Surrogate pair: the trailing UTF-16 surrogate also
+            // points to the same UTF-8 byte offset start. ICU may
+            // return a break offset *between* the surrogates; we
+            // collapse those back to the scalar's UTF-8 start.
+            b.utf8_for_utf16.push_back(utf8_pos);
+        }
+        utf8_pos += bytes;
+    }
+    // Trailing sentinel: last UTF-16 position maps to text.size().
+    b.utf8_for_utf16.push_back(text.size());
+    return b;
+}
+
+inline std::size_t utf16_for_utf8(const Utf8Utf16Bridge& b,
+                                  std::size_t utf8_offset) {
+    // Binary search via std::lower_bound on the sorted (monotonic
+    // non-decreasing) utf8_for_utf16 vector.
+    auto it = std::lower_bound(b.utf8_for_utf16.begin(),
+                               b.utf8_for_utf16.end(),
+                               utf8_offset);
+    if (it == b.utf8_for_utf16.end()) {
+        return b.utf8_for_utf16.size() - 1;
+    }
+    return static_cast<std::size_t>(it - b.utf8_for_utf16.begin());
+}
+
+} // namespace
+
+#endif // PULP_HAS_ICU_BREAK_ITERATOR
+
+std::size_t word_break_step(const std::string& text,
+                            std::size_t byte_offset,
+                            const std::string& locale,
+                            bool forward) {
+#if PULP_HAS_ICU_BREAK_ITERATOR
+    if (text.empty()) return 0;
+    UErrorCode status = U_ZERO_ERROR;
+    std::unique_ptr<icu::BreakIterator> it(
+        icu::BreakIterator::createWordInstance(icu_locale_for(locale), status));
+    if (U_FAILURE(status) || !it) {
+        return cluster_step(text, byte_offset, forward);
+    }
+    Utf8Utf16Bridge bridge = build_bridge(text);
+    it->setText(bridge.utf16);
+    const std::int32_t cursor16 =
+        static_cast<std::int32_t>(utf16_for_utf8(bridge, byte_offset));
+    std::int32_t next16 = forward ? it->following(cursor16)
+                                  : it->preceding(cursor16);
+    if (next16 == icu::BreakIterator::DONE) {
+        return forward ? text.size() : 0;
+    }
+    if (next16 < 0) next16 = 0;
+    if (static_cast<std::size_t>(next16) >= bridge.utf8_for_utf16.size()) {
+        return text.size();
+    }
+    return bridge.utf8_for_utf16[static_cast<std::size_t>(next16)];
+#else
+    (void)locale;
+    return cluster_step(text, byte_offset, forward);
+#endif
+}
+
+std::vector<std::size_t> line_break_opportunities(const std::string& text,
+                                                  const std::string& locale) {
+    std::vector<std::size_t> out;
+#if PULP_HAS_ICU_BREAK_ITERATOR
+    if (text.empty()) {
+        out.push_back(0);
+        return out;
+    }
+    UErrorCode status = U_ZERO_ERROR;
+    std::unique_ptr<icu::BreakIterator> it(
+        icu::BreakIterator::createLineInstance(icu_locale_for(locale), status));
+    if (U_FAILURE(status) || !it) {
+        // Degraded fallback: trailing offset only.
+        out.push_back(text.size());
+        return out;
+    }
+    Utf8Utf16Bridge bridge = build_bridge(text);
+    it->setText(bridge.utf16);
+
+    out.reserve(8);
+    for (std::int32_t pos = it->first();
+         pos != icu::BreakIterator::DONE;
+         pos = it->next()) {
+        if (pos < 0) continue;
+        const std::size_t u8 =
+            (static_cast<std::size_t>(pos) < bridge.utf8_for_utf16.size())
+                ? bridge.utf8_for_utf16[static_cast<std::size_t>(pos)]
+                : text.size();
+        if (out.empty() || out.back() != u8) {
+            out.push_back(u8);
+        }
+    }
+    if (out.empty() || out.back() != text.size()) {
+        out.push_back(text.size());
+    }
+    return out;
+#else
+    (void)locale;
+    if (text.empty()) {
+        out.push_back(0);
+        return out;
+    }
+    // ASCII-space boundaries: emit the byte position immediately AFTER
+    // each space, matching ICU's UAX #14 behaviour for plain English
+    // ("Hello world" breaks at offset 6, i.e. just after the space).
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == ' ' || text[i] == '\t') {
+            const std::size_t boundary = i + 1;
+            if (boundary < text.size()) out.push_back(boundary);
+        }
+    }
+    out.push_back(text.size());
+    return out;
+#endif
 }
 
 } // namespace pulp::canvas
