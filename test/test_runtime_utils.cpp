@@ -445,18 +445,21 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
 #ifdef _WIN32
     auto result = run_process(
         "powershell",
-        {"-NoProfile", "-Command", "Write-Output (Get-Location).Path; Write-Output $args[0]", "value with spaces"},
+        {"-NoProfile", "-Command",
+         "Set-Content -Path marker.txt -Value ok; Write-Output $args[0]",
+         "value with spaces"},
         dir.string());
 #else
     auto result = run_process(
         "/bin/sh",
-        {"-c", "pwd; printf '%s\\n' \"$1\"", "sh", "value with spaces"},
+        {"-c", "printf ok > marker.txt; printf '%s\\n' \"$1\"", "sh",
+         "value with spaces"},
         dir.string());
 #endif
 
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == 0);
-    REQUIRE(result->stdout_output.find(dir.string()) != std::string::npos);
+    REQUIRE(std::filesystem::exists(dir / "marker.txt"));
     REQUIRE(result->stdout_output.find("value with spaces") != std::string::npos);
 
     std::error_code ec;
