@@ -179,3 +179,20 @@ TEST_CASE("FilterDesign notch preserves endpoint gains across Q values",
         REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));
     }
 }
+
+TEST_CASE("FilterDesign butterworth odd orders truncate to complete biquads",
+          "[signal][filter_design][codecov]") {
+    auto low = FilterDesign::butterworth_lowpass(5, 1600.0f, 48000.0f);
+    auto high = FilterDesign::butterworth_highpass(5, 1600.0f, 48000.0f);
+    REQUIRE(low.size() == 2);
+    REQUIRE(high.size() == 2);
+
+    for (const auto& c : low) {
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
+    }
+    for (const auto& c : high) {
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(0.0f, 0.01f));
+    }
+}
