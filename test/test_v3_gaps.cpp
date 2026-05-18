@@ -48,6 +48,25 @@ TEST_CASE("Bias reports state and processes separate buffers",
     REQUIRE_THAT(bias.process(0.5f), WithinAbs(0.25f, 1e-6f));
 }
 
+TEST_CASE("Bias zero and negative length buffers are no-ops",
+          "[signal][bias][coverage][phase3]") {
+    pulp::signal::Bias bias;
+    bias.set_bias(2.0f);
+
+    float in_place[] = {1.0f, 2.0f};
+    bias.process(in_place, 0);
+    bias.process(in_place, -3);
+    REQUIRE_THAT(in_place[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(in_place[1], WithinAbs(2.0f, 1e-6f));
+
+    const float input[] = {3.0f, 4.0f};
+    float output[] = {-1.0f, -2.0f};
+    bias.process(input, output, 0);
+    bias.process(input, output, -2);
+    REQUIRE_THAT(output[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(-2.0f, 1e-6f));
+}
+
 // ── MidiMessageSequence ─────────────────────────────────────────────────
 
 TEST_CASE("MidiMessageSequence maintains order", "[midi][sequence]") {
