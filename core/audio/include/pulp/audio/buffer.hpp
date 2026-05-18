@@ -116,7 +116,7 @@ public:
         return *this;
     }
 
-    Buffer(Buffer&& other) noexcept
+    Buffer(Buffer&& other)
         : data_(std::move(other.data_))
         , num_channels_(other.num_channels_)
         , num_samples_(other.num_samples_) {
@@ -126,7 +126,7 @@ public:
         other.ptrs_.clear();
     }
 
-    Buffer& operator=(Buffer&& other) noexcept {
+    Buffer& operator=(Buffer&& other) {
         if (this != &other) {
             data_ = std::move(other.data_);
             num_channels_ = other.num_channels_;
