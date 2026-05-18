@@ -7556,3 +7556,14 @@ reporting, and unsupported explicit provider errors. Local validation passed:
 held font/view/local-ci tranches were revalidated with
 `pulp-test-font-options`, `pulp-test-widgets`, and the four extracted
 local-ci helper tests. Still held locally for a larger 24-36 tranche PR batch.
+
+2026-05-18 00:11 PDT: added a tenth local-only coverage tooling tranche to
+`feature/phase3-codecov-batch-728`: commit `0a28ba817`
+(`test(coverage): cover python cobertura path rewrites`). It expands
+`tools/scripts/test_run_python_coverage_extra.py` over Cobertura filename
+normalization for Windows-style backslashes, dot sources, relative source
+prefixes, source-list clearing, and rewrite-to-repo-relative behavior for the
+Python coverage XML consumed by Codecov. Local validation passed:
+`python3 tools/scripts/test_run_python_coverage_extra.py CoberturaPathExtraTests`
+(2 tests), plus `git diff --check`. Still held locally for a larger 24-36
+tranche PR batch.
