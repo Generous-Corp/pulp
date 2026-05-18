@@ -712,6 +712,42 @@ TEST_CASE("SplitView paint emits horizontal and vertical divider grips",
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_circle) == 3);
 }
 
+TEST_CASE("SplitView can replace panes and lays out with custom divider width",
+          "[view][split_view][coverage][phase3-batch]") {
+    SplitView split;
+    split.set_bounds({0, 0, 300, 120});
+    split.set_split_fraction(0.25f);
+    split.set_divider_width(10.0f);
+
+    auto first = std::make_unique<View>();
+    auto second = std::make_unique<View>();
+    auto* original_first = first.get();
+    auto* second_ptr = second.get();
+    split.set_first(std::move(first));
+    split.set_second(std::move(second));
+    split.layout_children();
+
+    REQUIRE(split.first() == original_first);
+    REQUIRE(split.second() == second_ptr);
+    REQUIRE_THAT(split.divider_width(), WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(original_first->bounds().width, WithinAbs(70.0f, 0.001f));
+    REQUIRE_THAT(second_ptr->bounds().x, WithinAbs(80.0f, 0.001f));
+
+    auto replacement = std::make_unique<View>();
+    auto* replacement_ptr = replacement.get();
+    split.set_first(std::move(replacement));
+    split.layout_children();
+
+    REQUIRE(split.first() == replacement_ptr);
+    REQUIRE(split.second() == second_ptr);
+    REQUIRE_THAT(replacement_ptr->bounds().width, WithinAbs(70.0f, 0.001f));
+
+    split.set_second(nullptr);
+    REQUIRE(split.second() == nullptr);
+    split.layout_children();
+    REQUIRE(split.first() == replacement_ptr);
+}
+
 // ── PropertyList ────────────────────────────────────────────────────────────
 
 TEST_CASE("PropertyList basic operations", "[view][property_list]") {
