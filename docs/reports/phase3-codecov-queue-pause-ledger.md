@@ -7104,3 +7104,23 @@ inference and alternate sources`, and ran
 which reported 89.1% diff coverage for `core/view/src/design_import.cpp`
 and 94% overall for the held branch diff. This tranche is held locally and
 should be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 17:30 PDT: added another local-only held CSS transition parser
+tranche to the consolidated coverage batch. Next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727` now includes commit
+`ee3ce10a1` (`fix(view): reject malformed transition easing numbers`).
+The tranche hardens transition shorthand parsing so malformed
+`cubic-bezier(...)` numbers, malformed `steps(...)` counts, and time tokens
+such as `200msjunk` fall back instead of being partially accepted, while
+preserving valid whitespace-tolerant forms. Focused coverage in
+`test/test_widget_bridge.cpp` extends the existing transition shorthand
+tests over invalid and valid cubic-bezier/steps/time token parsing.
+Validation passed locally: `git diff --check`, built
+`pulp-test-widget-bridge`, ran direct `parse_transition_shorthand*`
+(6 test cases / 38 assertions), and ran
+`PULP_DIFF_COVER_CTEST_REGEX='parse_transition_shorthand|TransitionSpec default-constructed easing' tools/scripts/local_diff_cover.sh pulp-test-widget-bridge`,
+which reported 100% diff coverage for
+`core/view/include/pulp/view/css_animation.hpp` and 95% overall for the held
+branch diff. This tranche is held locally and should be aggregated into the
+larger PR rather than submitted individually.
