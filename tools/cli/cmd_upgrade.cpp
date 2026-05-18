@@ -82,8 +82,26 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (args[i] == "--cli-only")   { cli_only = true; continue; }
         if (args[i] == "--notes")      { notes_only = true; continue; }
         if (args[i] == "--json")       { notes_json = true; continue; }
-        if (args[i] == "--from" && i + 1 < args.size()) { from_override = args[++i]; continue; }
-        if (args[i] == "--to"   && i + 1 < args.size()) { to_override   = args[++i]; continue; }
+        if (args[i] == "--from") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp upgrade: --from requires a value\n";
+                return 2;
+            }
+            from_override = args[++i];
+            continue;
+        }
+        if (args[i] == "--to") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp upgrade: --to requires a value\n";
+                return 2;
+            }
+            to_override = args[++i];
+            continue;
+        }
+        if (!args[i].empty() && args[i][0] == '-') {
+            std::cerr << "pulp upgrade: unknown flag: " << args[i] << "\n";
+            return 2;
+        }
         if (args[i][0] != '-') target_version = args[i];
     }
 

@@ -33,7 +33,19 @@ int cmd_sdk(const std::vector<std::string>& args) {
         std::string version = PULP_SDK_VERSION;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--local") from_local = true;
-            else if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
+            else if (args[i] == "--version") {
+                if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                    std::cerr << "pulp sdk install: --version requires a value\n";
+                    return 2;
+                }
+                version = args[++i];
+            } else if (!args[i].empty() && args[i][0] == '-') {
+                std::cerr << "pulp sdk install: unknown flag: " << args[i] << "\n";
+                return 2;
+            } else {
+                std::cerr << "pulp sdk install: unknown argument: " << args[i] << "\n";
+                return 2;
+            }
         }
 
         if (from_local) {

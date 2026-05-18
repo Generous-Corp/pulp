@@ -1097,6 +1097,51 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
     REQUIRE(r.stderr_output.find("--type must be") != std::string::npos);
 }
 
+TEST_CASE("pulp create validates parser errors before scaffolding",
+          "[cli][shellout][create][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-create-parser-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto home = base / "home";
+    auto out = base / "out";
+    fs::create_directories(home);
+    {
+        std::ofstream cfg(home / "config.toml");
+        cfg << "[update]\nmode = \"off\"\n";
+    }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"create", "Missing Type", "--type"}, "--type requires a value"},
+        {{"create", "Missing Template", "--template", "--no-build"}, "--template requires a value"},
+        {{"create", "Missing Manufacturer", "--manufacturer"}, "--manufacturer requires a value"},
+        {{"create", "Missing Output", "--output"}, "--output requires a value"},
+        {{"create", "Missing Targets", "--targets"}, "--targets requires a value"},
+        {{"create", "Unknown Flag", "--definitely-not-create"}, "unknown flag"},
+    };
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+    }
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+
+    REQUIRE_FALSE(fs::exists(out));
+    fs::remove_all(base);
+}
+
 // #51 / #356: `pulp validate --strict` is supposed to upgrade
 // skipped-because-missing-tool into a hard failure.
 //
@@ -1441,6 +1486,66 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
     REQUIRE(r.stdout_output.find("\"summary\":")    != std::string::npos);
     REQUIRE(r.stdout_output.find("\"applies_if\":") != std::string::npos);
     REQUIRE(r.stdout_output.find("\"body\":")       != std::string::npos);
+}
+
+TEST_CASE("pulp upgrade validates parser errors before network access",
+          "[cli][shellout][upgrade][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"upgrade", "--from"}, "--from requires a value"},
+        {{"upgrade", "--from", "--to", "0.29.0"}, "--from requires a value"},
+        {{"upgrade", "--to"}, "--to requires a value"},
+        {{"upgrade", "--to", "--notes"}, "--to requires a value"},
+        {{"upgrade", "--definitely-not-upgrade"}, "unknown flag"},
+    };
+
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stdout_output.find("Downloading") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp sdk install validates parser errors before side effects",
+          "[cli][shellout][sdk][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-sdk-parser-home");
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"sdk", "install", "--version"}, "--version requires a value"},
+        {{"sdk", "install", "--version", "--local"}, "--version requires a value"},
+        {{"sdk", "install", "--definitely-not-sdk"}, "unknown flag"},
+        {{"sdk", "install", "extra"}, "unknown argument"},
+    };
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stdout_output.find("Downloading SDK") == std::string::npos);
+        REQUIRE(r.stdout_output.find("Building SDK") == std::string::npos);
+    }
+    pulp_unsetenv("PULP_HOME");
+
+    REQUIRE_FALSE(fs::exists(home / "sdk"));
+    REQUIRE_FALSE(fs::exists(home / "sdk-local"));
+    fs::remove_all(home);
 }
 
 TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
