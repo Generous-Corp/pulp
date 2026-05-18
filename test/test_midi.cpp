@@ -427,6 +427,38 @@ TEST_CASE("MidiMessageSequence sorts ranges and matches note-offs",
     REQUIRE(sequence.duration() == Approx(0.0));
 }
 
+TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx events",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    TimestampedMidiEvent sysex;
+    sysex.timestamp = 1.0;
+    sysex.status = 0xF0;
+    sysex.sysex = {0xF0, 0x7D, 0x01, 0xF7};
+
+    TimestampedMidiEvent note_on_zero_velocity;
+    note_on_zero_velocity.timestamp = 1.0;
+    note_on_zero_velocity.status = 0x90;
+    note_on_zero_velocity.data1 = 60;
+    note_on_zero_velocity.data2 = 0;
+
+    sequence.add_event(sysex);
+    sequence.add_event(note_on_zero_velocity);
+    sequence.add_cc(0.5, 2, 74, 64);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_cc());
+    REQUIRE(sequence[1].is_note_off());
+    REQUIRE_FALSE(sequence[1].is_note_on());
+    REQUIRE(sequence[2].is_sysex());
+    REQUIRE(sequence[2].sysex == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+
+    auto at_one_second = sequence.events_in_range(1.0, 1.1);
+    REQUIRE(at_one_second.size() == 2);
+    REQUIRE(at_one_second[0]->is_note_off());
+    REQUIRE(at_one_second[1]->is_sysex());
+}
+
 TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
     auto note = UmpPacket::note_on_2(0x1F, 0x2F, 0xC0, 0xABCD, 0xEE, 0x1234);
     REQUIRE(note.word_count == 2);
