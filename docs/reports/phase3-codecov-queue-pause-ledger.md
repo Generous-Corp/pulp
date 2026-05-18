@@ -7623,3 +7623,41 @@ malformed SVG gradient test, `pulp-test-widget-bridge-dispatch-global-key`,
 and `git diff --check`. Push used `PULP_VIA_SHIPYARD=1
 PULP_SKIP_DIFF_COVER=1 git push --force-with-lease`; pre-push gates completed
 cleanly and #2173 is now queued on GitHub-hosted CI at head `b9d74decf`.
+
+2026-05-18 00:55 PDT: rebased held batch
+`feature/phase3-codecov-batch-728` onto current `origin/main`
+(`35047b362`) after #2186/#2188/#2189 and later mainline updates landed. The
+only conflict was `test/CMakeLists.txt`; resolution preserved mainline font
+targets (`pulp-test-font-aa-hinting`, `pulp-test-font-flight-recorder`, etc.)
+alongside this batch's `pulp-test-font-options`. Current rebased local-only
+commit sequence is:
+`fe8a52247` (`test(canvas): cover font options and scopes`),
+`e00887e71` (`test(canvas): cover text run planner skeleton`),
+`4cf5522bd` (`test(canvas): cover font resolver fallbacks`),
+`ad0cfee4a` (`test(canvas): cover font registry stubs`),
+`a1ef5c53e` (`test(canvas): cover text planner cache edges`),
+`dd00c5193` (`test(canvas): cover shaped text value types`),
+`c981a6274` (`test(view): cover label baseline metrics`),
+`e5ff581c4` (`test(local-ci): cover extracted helper contracts`),
+`e98b34bf3` (`test(local-ci): cover github workflow settings`),
+`e4108309f` (`test(coverage): cover python cobertura path rewrites`),
+`38085e7f7` (`test(coverage): cover cobertura verifier edges`),
+`df65cbfc1` (`test(view): cover html dir attribute bridge`), and
+`fbb6db1fe` (`test(canvas): cover cluster step edge cases`). The thirteenth
+tranche extends `pulp-test-cluster-step` over offsets inside UTF-8 scalars,
+backward traversal through combining / regional-indicator / ZWJ clusters,
+malformed UTF-8 forward progress, extended combining ranges, and U+E0100
+variation selectors. It also fixes the discovered non-Skia stub edge where
+`cluster_step()` could return the same offset when called from a continuation
+byte in malformed truncated UTF-8. Local validation passed after rebase:
+`cmake --build build --target pulp-test-font-options pulp-test-cluster-step pulp-test-widget-bridge -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-font-options` (12 cases / 135 assertions),
+`./build/test/pulp-test-cluster-step` (13 cases / 48 assertions),
+`./build/test/pulp-test-widget-bridge "HTML dir attribute forwards to View writing direction"`
+(1 case / 5 assertions), `python3 tools/scripts/test_verify_cobertura_xml.py`
+(9 tests), `python3 tools/scripts/test_run_python_coverage_extra.py
+CoberturaPathExtraTests` (2 tests),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
+and `git diff --check`. Still held locally; do not push until the batch grows
+to roughly 24-36 coverage commits.
