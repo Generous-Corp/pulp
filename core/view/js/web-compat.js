@@ -435,10 +435,12 @@ Element.prototype.setAttribute = function(name, value) {
     // container child-order flip + the shaper consumes for bidi
     // base direction. Values: "ltr" | "rtl" | "auto" (CSS spec).
     else if (name === "dir" && typeof setDirection !== "undefined") {
-        var dv = String(value).toLowerCase();
-        if (dv === "rtl" || dv === "ltr" || dv === "auto") {
-            setDirection(this._id, dv);
-        }
+        // Codex review on PR #2181 (P2): the CSS `direction` path
+        // forwards every value to the bridge and lets it coerce
+        // unknowns to `auto_`. Mirror that here so dynamic updates
+        // from `dir="rtl"` to an unsupported value reset to default
+        // rather than leaving the previous bidi/layout state stuck.
+        setDirection(this._id, String(value).toLowerCase());
     }
 };
 

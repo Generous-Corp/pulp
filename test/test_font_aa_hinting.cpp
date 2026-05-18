@@ -24,43 +24,54 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 
-TEST_CASE("AA mode translates: Default → kAntiAlias", "[font][aa][issue-2163]") {
-    REQUIRE(sk_edging_for(AntiAliasMode::Default) == SkFont::Edging::kAntiAlias);
+// pulp #2163 — review-sweep update: `Default` / `PlatformDefault`
+// no longer hard-map to a specific Skia enum (Codex P2 review on
+// PR #2186). They resolve to `std::nullopt`, signalling "caller
+// preserves the existing per-context heuristic". Explicit modes
+// still resolve to the fixed enum.
+
+TEST_CASE("AA mode: Default returns nullopt (caller decides)", "[font][aa][issue-2163]") {
+    REQUIRE(sk_edging_for(AntiAliasMode::Default) == std::nullopt);
 }
 
 TEST_CASE("AA mode translates: LCD → kSubpixelAntiAlias", "[font][aa][issue-2163]") {
-    REQUIRE(sk_edging_for(AntiAliasMode::LCD) == SkFont::Edging::kSubpixelAntiAlias);
+    REQUIRE(sk_edging_for(AntiAliasMode::LCD)
+            == std::optional<SkFont::Edging>{SkFont::Edging::kSubpixelAntiAlias});
 }
 
 TEST_CASE("AA mode translates: Grayscale → kAntiAlias", "[font][aa][issue-2163]") {
-    REQUIRE(sk_edging_for(AntiAliasMode::Grayscale) == SkFont::Edging::kAntiAlias);
+    REQUIRE(sk_edging_for(AntiAliasMode::Grayscale)
+            == std::optional<SkFont::Edging>{SkFont::Edging::kAntiAlias});
 }
 
 TEST_CASE("AA mode translates: NoAA → kAlias", "[font][aa][issue-2163]") {
-    REQUIRE(sk_edging_for(AntiAliasMode::NoAA) == SkFont::Edging::kAlias);
+    REQUIRE(sk_edging_for(AntiAliasMode::NoAA)
+            == std::optional<SkFont::Edging>{SkFont::Edging::kAlias});
 }
 
 TEST_CASE("Hinting mode translates: None → kNone", "[font][hinting][issue-2163]") {
-    REQUIRE(sk_hinting_for(HintingMode::None) == SkFontHinting::kNone);
+    REQUIRE(sk_hinting_for(HintingMode::None)
+            == std::optional<SkFontHinting>{SkFontHinting::kNone});
 }
 
 TEST_CASE("Hinting mode translates: Slight → kSlight", "[font][hinting][issue-2163]") {
-    REQUIRE(sk_hinting_for(HintingMode::Slight) == SkFontHinting::kSlight);
+    REQUIRE(sk_hinting_for(HintingMode::Slight)
+            == std::optional<SkFontHinting>{SkFontHinting::kSlight});
 }
 
 TEST_CASE("Hinting mode translates: Normal → kNormal", "[font][hinting][issue-2163]") {
-    REQUIRE(sk_hinting_for(HintingMode::Normal) == SkFontHinting::kNormal);
+    REQUIRE(sk_hinting_for(HintingMode::Normal)
+            == std::optional<SkFontHinting>{SkFontHinting::kNormal});
 }
 
 TEST_CASE("Hinting mode translates: Full → kFull", "[font][hinting][issue-2163]") {
-    REQUIRE(sk_hinting_for(HintingMode::Full) == SkFontHinting::kFull);
+    REQUIRE(sk_hinting_for(HintingMode::Full)
+            == std::optional<SkFontHinting>{SkFontHinting::kFull});
 }
 
-TEST_CASE("Hinting mode translates: PlatformDefault → kNormal", "[font][hinting][issue-2163]") {
-    // Documented contract: PlatformDefault resolves to Skia's documented
-    // default (kNormal). When this changes per-platform, update both the
-    // mapping in font_resolver.hpp AND this assertion in the same PR.
-    REQUIRE(sk_hinting_for(HintingMode::PlatformDefault) == SkFontHinting::kNormal);
+TEST_CASE("Hinting mode: PlatformDefault returns nullopt (caller decides)",
+          "[font][hinting][issue-2163]") {
+    REQUIRE(sk_hinting_for(HintingMode::PlatformDefault) == std::nullopt);
 }
 
 TEST_CASE("Resolver propagates aa_mode onto ResolvedFont", "[font][aa][issue-2163]") {
@@ -71,7 +82,7 @@ TEST_CASE("Resolver propagates aa_mode onto ResolvedFont", "[font][aa][issue-216
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     REQUIRE(resolved.aa_mode == AntiAliasMode::LCD);
-    REQUIRE(resolved.sk_edging() == SkFont::Edging::kSubpixelAntiAlias);
+    REQUIRE(resolved.sk_edging() == std::optional<SkFont::Edging>{SkFont::Edging::kSubpixelAntiAlias});
 }
 
 TEST_CASE("Resolver propagates hinting_mode onto ResolvedFont", "[font][hinting][issue-2163]") {
@@ -82,7 +93,7 @@ TEST_CASE("Resolver propagates hinting_mode onto ResolvedFont", "[font][hinting]
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     REQUIRE(resolved.hinting_mode == HintingMode::Slight);
-    REQUIRE(resolved.sk_hinting() == SkFontHinting::kSlight);
+    REQUIRE(resolved.sk_hinting() == std::optional<SkFontHinting>{SkFontHinting::kSlight});
 }
 
 TEST_CASE("ResolvedFont accessors compose: NoAA + Full", "[font][aa][hinting][issue-2163]") {
@@ -93,22 +104,21 @@ TEST_CASE("ResolvedFont accessors compose: NoAA + Full", "[font][aa][hinting][is
     opts.hinting_mode = HintingMode::Full;
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
-    REQUIRE(resolved.sk_edging() == SkFont::Edging::kAlias);
-    REQUIRE(resolved.sk_hinting() == SkFontHinting::kFull);
+    REQUIRE(resolved.sk_edging() == std::optional<SkFont::Edging>{SkFont::Edging::kAlias});
+    REQUIRE(resolved.sk_hinting() == std::optional<SkFontHinting>{SkFontHinting::kFull});
 }
 
-TEST_CASE("Default-constructed FontOptions maps to AA on, normal hinting",
+TEST_CASE("Default-constructed FontOptions defers AA + hinting decisions",
           "[font][aa][hinting][issue-2163]") {
     FontOptions opts;
     opts.family_stack.push_back("Inter");
     opts.size = 14.0f;
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
-    // Defaults defined in font_options.hpp.
     REQUIRE(resolved.aa_mode == AntiAliasMode::Default);
     REQUIRE(resolved.hinting_mode == HintingMode::PlatformDefault);
-    REQUIRE(resolved.sk_edging() == SkFont::Edging::kAntiAlias);
-    REQUIRE(resolved.sk_hinting() == SkFontHinting::kNormal);
+    REQUIRE(resolved.sk_edging() == std::nullopt);
+    REQUIRE(resolved.sk_hinting() == std::nullopt);
 }
 
 #else  // !PULP_HAS_SKIA

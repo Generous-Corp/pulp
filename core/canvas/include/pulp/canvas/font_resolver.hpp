@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -69,25 +70,37 @@ namespace pulp::canvas {
 //   * HintingMode::Normal          → kNormal
 //   * HintingMode::Full            → kFull
 
-constexpr SkFont::Edging sk_edging_for(AntiAliasMode mode) noexcept {
+// Codex review on PR #2186 (P2): `AntiAliasMode::Default` is documented as
+// "follow the inside_non_opaque_layer() heuristic" (#1899) and
+// `HintingMode::PlatformDefault` as "let the platform pick". Hard-coding
+// either to a single Skia value erases the per-caller branch.
+//
+// Both helpers now return `std::optional`: `Default` / `PlatformDefault`
+// resolve to `nullopt` ("caller decides"); explicit modes resolve to the
+// fixed Skia enum. The convenience `ResolvedFont::sk_edging()` /
+// `sk_hinting()` accessors below pick a safe fallback for callers that
+// don't have an opaque-surface signal handy — but the structured path
+// keeps the heuristic intact.
+
+constexpr std::optional<SkFont::Edging> sk_edging_for(AntiAliasMode mode) noexcept {
     switch (mode) {
         case AntiAliasMode::LCD:       return SkFont::Edging::kSubpixelAntiAlias;
         case AntiAliasMode::Grayscale: return SkFont::Edging::kAntiAlias;
         case AntiAliasMode::NoAA:      return SkFont::Edging::kAlias;
-        case AntiAliasMode::Default:   break;
+        case AntiAliasMode::Default:   return std::nullopt;
     }
-    return SkFont::Edging::kAntiAlias;
+    return std::nullopt;
 }
 
-constexpr SkFontHinting sk_hinting_for(HintingMode mode) noexcept {
+constexpr std::optional<SkFontHinting> sk_hinting_for(HintingMode mode) noexcept {
     switch (mode) {
         case HintingMode::None:            return SkFontHinting::kNone;
         case HintingMode::Slight:          return SkFontHinting::kSlight;
         case HintingMode::Normal:          return SkFontHinting::kNormal;
         case HintingMode::Full:            return SkFontHinting::kFull;
-        case HintingMode::PlatformDefault: break;
+        case HintingMode::PlatformDefault: return std::nullopt;
     }
-    return SkFontHinting::kNormal;
+    return std::nullopt;
 }
 
 #endif  // PULP_HAS_SKIA
@@ -165,15 +178,18 @@ struct ResolvedFont {
     }
 
 #ifdef PULP_HAS_SKIA
-    /// Skia `SkFont::Edging` for the recorded `aa_mode`. See
-    /// `sk_edging_for(AntiAliasMode)` for the mapping table.
-    SkFont::Edging sk_edging() const noexcept {
+    /// Skia `SkFont::Edging` for the recorded `aa_mode`, or
+    /// `std::nullopt` for `AntiAliasMode::Default` (caller decides
+    /// — typically by branching on `inside_non_opaque_layer()` per
+    /// #1899). See `sk_edging_for(AntiAliasMode)` for the mapping.
+    std::optional<SkFont::Edging> sk_edging() const noexcept {
         return sk_edging_for(aa_mode);
     }
 
-    /// Skia `SkFontHinting` for the recorded `hinting_mode`. See
-    /// `sk_hinting_for(HintingMode)` for the mapping table.
-    SkFontHinting sk_hinting() const noexcept {
+    /// Skia `SkFontHinting` for the recorded `hinting_mode`, or
+    /// `std::nullopt` for `HintingMode::PlatformDefault` (caller
+    /// preserves backend-specific defaults). See `sk_hinting_for`.
+    std::optional<SkFontHinting> sk_hinting() const noexcept {
         return sk_hinting_for(hinting_mode);
     }
 #endif

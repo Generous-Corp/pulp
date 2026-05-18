@@ -245,6 +245,21 @@ static void cache_put_locked(FontResolver::Impl& impl,
 }
 
 ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
+    // Codex review on PR #2191 (P2): record on every successful
+    // resolve path, not just the family_stack branch.
+    auto record_event = [](const std::string& requested, const ResolvedFont& r) {
+        if (!r.resolved()) return;
+        FontFlightRecorder::instance().record_fallback({
+            /*requested_family*/ requested,
+            /*selected_family */ r.actual_family,
+            /*origin*/   static_cast<std::uint8_t>(r.origin),
+            /*generation*/ r.generation,
+            /*sequence*/ 0,
+        });
+    };
+    const std::string primary_requested = options.family_stack.empty()
+        ? std::string("<default>") : options.family_stack.front();
+
     // Cache lookup. Generation check happens at use site (callers compare
     // `resolved.generation` against `merged_generation_for(scope)`).
     const std::size_t key = options.hash();
@@ -257,6 +272,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             impl_->lru_order.splice(impl_->lru_order.end(),
                                      impl_->lru_order,
                                      it->second.lru_pos);
+            record_event(primary_requested, it->second.resolved);
             return it->second.resolved;
         }
     }
@@ -304,14 +320,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             r.typeface = apply_variation_axes(std::move(r.typeface));
             r.trace = std::move(trace);
             resolved = std::move(r);
-            // pulp #2163 — Slice 2.2 — record one event per resolution.
-            FontFlightRecorder::instance().record_fallback({
-                /*requested_family*/ family,
-                /*selected_family*/ resolved.actual_family,
-                /*origin*/   static_cast<std::uint8_t>(resolved.origin),
-                /*generation*/ resolved.generation,
-                /*sequence*/ 0,
-            });
+            record_event(family, resolved);
             std::lock_guard<std::mutex> lock(impl_->mtx);
             cache_put_locked(*impl_, key, resolved);
             return resolved;
@@ -332,6 +341,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     }
 
     resolved.trace = std::move(trace);
+    record_event(primary_requested, resolved);
     std::lock_guard<std::mutex> lock(impl_->mtx);
     cache_put_locked(*impl_, key, resolved);
     return resolved;
@@ -375,6 +385,14 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
         r.origin = FallbackOrigin::PlatformChar;
         r.trace.push_back({primary.actual_family, FallbackOrigin::PlatformChar,
                            true, r.actual_family, "char fallback"});
+        // Codex review on PR #2191 (P2): record char-fallback resolves too.
+        FontFlightRecorder::instance().record_fallback({
+            primary.actual_family.empty() ? std::string("<char-fallback>")
+                                          : primary.actual_family,
+            r.actual_family,
+            static_cast<std::uint8_t>(r.origin),
+            r.generation, 0,
+        });
     } else {
         r.origin = FallbackOrigin::NotFound;
         r.trace.push_back({primary.actual_family, FallbackOrigin::PlatformChar,
