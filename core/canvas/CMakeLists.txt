@@ -39,6 +39,13 @@ target_sources(pulp-canvas PRIVATE
     src/font_options.cpp
     src/font_scope.cpp
     src/font_resolver.cpp
+    # Pulp #2163 — Phase 1 / Slice 1.2.a. ShapedText is the canonical
+    # artifact produced by TextRunPlanner; both measurement
+    # (TextShaper) and paint (SkiaCanvas) consume the same instance
+    # so they cannot diverge. Skeleton wraps existing TextShaper
+    # internally; the real bidi/script iterator swap is the finish
+    # half of 1.2.a.
+    src/text_run_planner.cpp
 )
 
 # Text shaping via SkParagraph (default ON when Skia available, can be disabled)
