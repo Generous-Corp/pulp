@@ -527,26 +527,31 @@ TEST_CASE("run_process captures stderr separately",
     REQUIRE(result->stderr_output.find("bad-news") != std::string::npos);
 }
 
-TEST_CASE("run_process honors an explicit working directory",
+TEST_CASE("run_process honors working directory and preserves spaced arguments",
           "[runtime][child_process][coverage][phase3]") {
-    TemporaryFile unique(".wd");
-    auto dir = unique.path();
-    unique.release();
-    std::filesystem::remove(dir);
+    const auto dir = std::filesystem::temp_directory_path()
+        / "pulp-runtime-run-process-working-dir";
     std::filesystem::create_directories(dir);
 
 #ifdef _WIN32
-    auto result = run_process("powershell", {"-NoProfile", "-Command", "Get-Location"},
-                              dir.string());
+    auto result = run_process(
+        "powershell",
+        {"-NoProfile", "-Command", "Write-Output (Get-Location).Path; Write-Output $args[0]", "value with spaces"},
+        dir.string());
 #else
-    auto result = run_process("/bin/pwd", {}, dir.string());
+    auto result = run_process(
+        "/bin/sh",
+        {"-c", "pwd; printf '%s\\n' \"$1\"", "sh", "value with spaces"},
+        dir.string());
 #endif
 
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == 0);
     REQUIRE(result->stdout_output.find(dir.string()) != std::string::npos);
+    REQUIRE(result->stdout_output.find("value with spaces") != std::string::npos);
 
-    std::filesystem::remove_all(dir);
+    std::error_code ec;
+    std::filesystem::remove(dir, ec);
 }
 
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
