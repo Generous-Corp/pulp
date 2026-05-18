@@ -2105,6 +2105,16 @@ target_link_libraries(pulp-test-design-import-inline-babel
 catch_discover_tests(pulp-test-design-import-inline-babel
     PROPERTIES LABELS "parser-import")
 
+# pulp jsx-instrument-import experiment (2026-05-17). Loads a
+# pre-compiled JSX bundle from PULP_JSX_BUNDLE and asserts that the
+# Claude-style runtime harness can materialize it. See
+# planning/2026-05-17-jsx-instrument-import.md.
+add_executable(pulp-test-design-import-jsx-runtime test_design_import_jsx_runtime.cpp)
+target_link_libraries(pulp-test-design-import-jsx-runtime
+    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-jsx-runtime
+    PROPERTIES LABELS "parser-import")
+
 # Screenshot comparison tests (visual diff for design import validation)
 if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)

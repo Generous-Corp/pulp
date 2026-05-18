@@ -23,7 +23,8 @@ enum class DesignSource {
     v0,
     pencil,
     claude,   // Anthropic Claude Design — manual HTML/zip export, no Anthropic API
-    designmd  // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
+    designmd, // Google DESIGN.md (Apache-2.0) — YAML frontmatter + Markdown body
+    jsx       // Single-file React JSX instrument — compiled via esbuild + bundled React/ReactDOM
 };
 
 /// Convert string to DesignSource, returns nullopt for unknown sources.
@@ -324,6 +325,36 @@ std::optional<ClaudeBundle> parse_react_native_export(const std::string& tsx);
 /// `.pen`/`.fig` references, external CSS, framework wrappers, or any surface
 /// outside Pulp's supported runtime-import DOM/CSS/API subset.
 std::optional<ClaudeBundle> parse_pencil_react(const std::string& tsx);
+
+/// Wrap a pre-compiled JSX runtime bundle (esbuild IIFE of React + ReactDOM +
+/// the user's JSX component, produced by `tools/import-design/jsx-runtime/
+/// jsx-transform.mjs`) as a synthetic `ClaudeBundle` so the existing
+/// runtime-import harness (`parse_claude_html_with_runtime`) can materialize
+/// it. The C++ side does not compile JSX itself — the Node-side esbuild
+/// step is shelled out by the CLI before this is called.
+///
+/// `component_name` is purely cosmetic — it lands on the synthetic
+/// `<div id="root" data-jsx-component="…">` template, useful for diagnostic
+/// inspection.
+///
+/// Returns nullopt for sources that are obviously too small to be a real
+/// bundle (< 100 bytes), so the CLI can surface a clean diagnostic when the
+/// upstream Node transform produced an empty file.
+std::optional<ClaudeBundle> parse_jsx_react(const std::string& bundle_js,
+                                            const std::string& component_name = "JsxComponent");
+
+/// Synthesize a Claude-style HTML envelope around an arbitrary ClaudeBundle
+/// so the existing `parse_claude_html_with_runtime` harness can consume it
+/// without a real Claude Design HTML wrapper on input. Used by `--from jsx`
+/// (and future direct-bundle import sources) so they can ride the existing
+/// runtime materialization path without each one re-implementing the
+/// ScriptEngine + WidgetBridge + DOM-walker boot sequence.
+///
+/// The envelope uses `compressed:false` raw base64 for the manifest entries
+/// — gzip+deflate is unnecessary overhead for in-process synthesis (the
+/// existing test harness already exercises this code path). The template
+/// HTML is JSON-escaped per the bundler/template script-tag contract.
+std::string synthesize_runtime_envelope(const ClaudeBundle& bundle);
 
 /// Options for the `--execute-bundle` import lane.
 struct ClaudeRuntimeOptions {

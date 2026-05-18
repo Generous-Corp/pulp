@@ -29,6 +29,7 @@ std::optional<DesignSource> parse_design_source(const std::string& name) {
     if (name == "pencil")   return DesignSource::pencil;
     if (name == "claude")   return DesignSource::claude;
     if (name == "designmd") return DesignSource::designmd;
+    if (name == "jsx")      return DesignSource::jsx;
     return std::nullopt;
 }
 
@@ -40,6 +41,7 @@ const char* design_source_name(DesignSource source) {
         case DesignSource::pencil:   return "Pencil";
         case DesignSource::claude:   return "Claude Design";
         case DesignSource::designmd: return "DESIGN.md";
+        case DesignSource::jsx:      return "JSX instrument";
     }
     return "unknown";
 }
@@ -2387,6 +2389,80 @@ std::optional<ClaudeBundle> parse_pencil_react(const std::string& tsx) {
         "\"></div><script src=\"pencil-runtime-app\"></script>";
     return bundle;
 }
+
+std::optional<ClaudeBundle> parse_jsx_react(const std::string& bundle_js,
+                                            const std::string& component_name) {
+    // The C++ side does NOT compile JSX. The CLI shells out to
+    // `tools/import-design/jsx-runtime/jsx-transform.mjs` (Node + esbuild)
+    // and hands us the IIFE bundle as a string. We wrap it as a
+    // ClaudeBundle so the existing runtime harness can materialize it
+    // without a separate execution lane.
+    //
+    // The bundle is self-contained (ships React + ReactDOM + user JSX +
+    // a navigator/document shim banner that runs before any ESM import
+    // hoists). Mount happens against `document.getElementById('root')`
+    // — falls back to document.body when running under pulp-screenshot.
+    //
+    // pulp jsx-instrument-import experiment (2026-05-17). See
+    // planning/2026-05-17-jsx-instrument-import.md.
+    if (bundle_js.size() < 100) return std::nullopt;
+
+    ClaudeBundleAsset app;
+    app.uuid = "jsx-runtime-app";
+    app.mime = "text/javascript";
+    app.data.assign(bundle_js.begin(), bundle_js.end());
+
+    ClaudeBundle bundle;
+    bundle.assets.push_back(std::move(app));
+    bundle.javascript_indices.push_back(0);
+
+    // Escape the component name for embedding in an HTML attribute. The
+    // existing v0_html_attr_escape helper handles this safely.
+    bundle.template_html =
+        "<div id=\"root\" data-pulp-source=\"jsx\" data-jsx-component=\"" +
+        v0_html_attr_escape(component_name) +
+        "\"></div><script src=\"jsx-runtime-app\"></script>";
+    return bundle;
+}
+
+std::string synthesize_runtime_envelope(const ClaudeBundle& bundle) {
+    // Build a Claude-style HTML envelope around an arbitrary in-memory
+    // ClaudeBundle so `parse_claude_html_with_runtime` can consume it
+    // without a real Claude Design HTML wrapper on input. Uses raw base64
+    // (compressed:false) — gzip+deflate is unnecessary overhead for
+    // in-process synthesis. Matches the manifest_entry/build_envelope
+    // helpers in test_design_import_claude_runtime.cpp.
+
+    // Manifest: map of uuid → { mime, compressed:false, data: base64 }.
+    std::ostringstream manifest;
+    manifest << "{";
+    bool first = true;
+    for (const auto& asset : bundle.assets) {
+        if (!first) manifest << ",";
+        first = false;
+        const auto b64 = pulp::runtime::base64_encode(
+            asset.data.data(), asset.data.size());
+        manifest << "\"" << asset.uuid << "\":{"
+                 << "\"mime\":\"" << asset.mime << "\","
+                 << "\"compressed\":false,"
+                 << "\"data\":\"" << b64 << "\"}";
+    }
+    manifest << "}";
+
+    // Template HTML is JSON-escaped per the bundler/template script-tag
+    // contract — strings inside the script-tag body are quoted JSON.
+    // Reuse the file-scope json_string_literal helper.
+    const auto template_json = json_string_literal(bundle.template_html);
+
+    std::ostringstream html;
+    html << "<!DOCTYPE html><html><head><title>Pulp JSX Runtime Import</title>"
+            "</head><body>"
+            "<script type=\"__bundler/manifest\">" << manifest.str() << "</script>"
+            "<script type=\"__bundler/template\">" << template_json << "</script>"
+            "</body></html>";
+    return html.str();
+}
+
 
 // External-linkage thin wrapper around the anonymous-namespace
 // json_string_literal so widget_bridge.cpp (a separate TU) can use it
