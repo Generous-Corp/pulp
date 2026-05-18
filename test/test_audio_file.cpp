@@ -425,6 +425,43 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
     REQUIRE_FALSE(info.has_value());
 }
 
+TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
+          "[audio][file][coverage]") {
+    auto path = unique_temp_audio_path("_zero_frames.wav");
+    std::filesystem::remove(path);
+
+    const std::vector<uint8_t> wav = {
+        'R', 'I', 'F', 'F',
+        36, 0, 0, 0,
+        'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ',
+        16, 0, 0, 0,
+        1, 0,
+        1, 0,
+        0x44, 0xAC, 0, 0,
+        0x88, 0x58, 0x01, 0,
+        2, 0,
+        16, 0,
+        'd', 'a', 't', 'a',
+        0, 0, 0, 0,
+    };
+    {
+        std::ofstream f(path, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(wav.data()),
+                static_cast<std::streamsize>(wav.size()));
+    }
+
+    auto info = read_audio_file_info(path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->sample_rate == 44100);
+    REQUIRE(info->num_channels == 1);
+    REQUIRE(info->num_frames == 0);
+    REQUIRE(info->duration_seconds == 0.0);
+
+    REQUIRE_FALSE(read_audio_file(path.string()).has_value());
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empties",
           "[audio][file][issue-640]") {
     AudioFileData data;
