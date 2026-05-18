@@ -1165,6 +1165,20 @@ TEST_CASE("Phaser zero-length block processing is a no-op",
     REQUIRE_THAT(samples[1], WithinAbs(-0.25f, 1e-6f));
 }
 
+TEST_CASE("Phaser zero-length buffer processing is a no-op",
+          "[signal][phaser][coverage]") {
+    Phaser phaser;
+    phaser.set_sample_rate(48000.0f);
+    phaser.set_rate(1.0f);
+    phaser.set_depth(0.75f);
+    phaser.set_mix(1.0f);
+
+    std::array<float, 3> samples{{-1.0f, 0.25f, 1.0f}};
+    phaser.process(samples.data() + 1, 0);
+
+    REQUIRE(samples == std::array<float, 3>{{-1.0f, 0.25f, 1.0f}});
+}
+
 // ── Reverb ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Reverb produces decay tail", "[signal][reverb]") {
