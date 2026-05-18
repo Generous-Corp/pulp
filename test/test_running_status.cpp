@@ -347,3 +347,32 @@ TEST_CASE("feed preserves partial channel message across calls",
     REQUIRE(shorts[1].d1 == 0x3d);
     REQUIRE(shorts[1].d2 == 0x40);
 }
+
+TEST_CASE("feed preserves sysex payload across calls",
+          "[midi][running-status][coverage]") {
+    RunningStatusParser p;
+    std::vector<uint8_t> sysex;
+    std::vector<uint8_t> shorts;
+    p.on_sysex([&](const uint8_t* d, std::size_t s) {
+        sysex.assign(d, d + s);
+    });
+    p.on_short_message([&](const MidiEvent& e) {
+        shorts.push_back(e.message.data()[0]);
+    });
+
+    std::vector<uint8_t> first = {0xF0, 0x7D, 0x01};
+    std::vector<uint8_t> second = {0xF8, 0x02};
+    std::vector<uint8_t> third = {0x03, 0xF7};
+
+    p.feed(first.data(), first.size());
+    REQUIRE(sysex.empty());
+    REQUIRE(shorts.empty());
+
+    p.feed(second.data(), second.size());
+    REQUIRE(sysex.empty());
+    REQUIRE(shorts == std::vector<uint8_t>{0xF8});
+
+    p.feed(third.data(), third.size());
+    REQUIRE(sysex == std::vector<uint8_t>{0x7D, 0x01, 0x02, 0x03});
+    REQUIRE(shorts == std::vector<uint8_t>{0xF8});
+}
