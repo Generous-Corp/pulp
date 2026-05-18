@@ -2,6 +2,7 @@
 #include <pulp/audio/audio.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/channel_set.hpp>
+#include <pulp/audio/load_measurer.hpp>
 #include <cmath>
 #include <numbers>
 #include <thread>
@@ -324,6 +325,21 @@ TEST_CASE("Device metadata defaults and custom configs are stable",
     REQUIRE(config.buffer_size == 128);
     REQUIRE(config.input_channels == 2);
     REQUIRE(config.output_channels == 6);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.begin(0, 48000.0f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.begin(64, 0.0f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
 }
 
 TEST_CASE("ChannelSet maps standard layouts by count and name",
