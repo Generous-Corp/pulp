@@ -83,10 +83,24 @@ TEST_CASE("legacy_unversioned_sdk_tarball_filename: empty platform keeps legacy 
     REQUIRE(legacy_unversioned_sdk_tarball_filename("") == "pulp-sdk-.tar.gz");
 }
 
-TEST_CASE("sdk_tarball_filename: empty components remain literal",
-          "[cli][cache][coverage][phase3]") {
+TEST_CASE("sdk_tarball_filename: empty version keeps the version slot visible",
+          "[cli][cache][coverage][phase3-large]") {
+    REQUIRE(sdk_tarball_filename("", "linux-x64") ==
+            "pulp-sdk-v-linux-x64.tar.gz");
     REQUIRE(sdk_tarball_filename("", "darwin-arm64") ==
             "pulp-sdk-v-darwin-arm64.tar.gz");
+}
+
+TEST_CASE("sdk_tarball_filename: empty platform keeps the trailing platform slot",
+          "[cli][cache][coverage][phase3-large]") {
     REQUIRE(sdk_tarball_filename("0.92.0", "") ==
             "pulp-sdk-v0.92.0-.tar.gz");
+}
+
+TEST_CASE("sdk_tarball_filename: literal input is preserved for cache-key transparency",
+          "[cli][cache][coverage][phase3-large]") {
+    REQUIRE(sdk_tarball_filename(" 0.92.0 ", "linux x64") ==
+            "pulp-sdk-v 0.92.0 -linux x64.tar.gz");
+    REQUIRE(legacy_unversioned_sdk_tarball_filename("linux x64") ==
+            "pulp-sdk-linux x64.tar.gz");
 }
