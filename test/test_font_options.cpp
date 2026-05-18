@@ -280,3 +280,43 @@ TEST_CASE("TextRunPlanner captures scope generation and RTL base direction",
     auto explicit_gen = planner.shape("abc", opts);
     REQUIRE(explicit_gen.options.registry_generation == 12345);
 }
+
+TEST_CASE("TextRunPlanner handles empty text, cache hits, and ASCII breaks",
+          "[canvas][font][planner][coverage]") {
+    auto& planner = TextRunPlanner::instance();
+    planner.clear_cache();
+
+    FontOptions opts;
+    opts.family_stack = {"Inter"};
+    opts.size = 12.0f;
+
+    auto empty = planner.shape("", opts);
+    REQUIRE(empty.text.empty());
+    REQUIRE_FALSE(empty.empty());
+    REQUIRE(empty.index_map.scalar_count() == 0);
+    REQUIRE(empty.index_map.scalar_offsets == std::vector<std::uint32_t>{0});
+    REQUIRE(empty.line_breaks.empty());
+    REQUIRE(empty.runs.size() == 1);
+    REQUIRE(empty.runs[0].logical_start == 0);
+    REQUIRE(empty.runs[0].logical_end == 0);
+
+    const std::string spaced = "A B\tC\nD";
+    auto first = planner.shape(spaced, opts);
+    auto second = planner.shape(spaced, opts);
+    REQUIRE(second.text == first.text);
+    REQUIRE(second.options.hash() == first.options.hash());
+    REQUIRE(second.index_map.scalar_offsets == first.index_map.scalar_offsets);
+    REQUIRE(second.line_breaks.size() == 3);
+    REQUIRE(second.line_breaks[0].utf8_offset == 2);
+    REQUIRE(second.line_breaks[0].kind == LineBreakOpportunity::Kind::Soft);
+    REQUIRE(second.line_breaks[1].utf8_offset == 4);
+    REQUIRE(second.line_breaks[1].kind == LineBreakOpportunity::Kind::Soft);
+    REQUIRE(second.line_breaks[2].utf8_offset == 5);
+    REQUIRE(second.line_breaks[2].kind == LineBreakOpportunity::Kind::Hard);
+
+    planner.clear_cache();
+    auto after_clear = planner.shape(spaced, opts);
+    REQUIRE(after_clear.text == first.text);
+    REQUIRE(after_clear.index_map.scalar_offsets == first.index_map.scalar_offsets);
+    REQUIRE(after_clear.line_breaks.size() == first.line_breaks.size());
+}
