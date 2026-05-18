@@ -1627,6 +1627,12 @@ pulp_add_test_suite(pulp-test-view LIBRARIES pulp::view)
 # box-shadow honoring effective_corner_radius.
 pulp_add_test_suite(pulp-test-view-corner-radius LIBRARIES pulp::view)
 
+# View z-index + overflow tests (P5-3 follow-up — extracted from
+# test_view.cpp). Covers pulp #972 z-index paint-order + hit-test +
+# overflow:visible default for absolute-positioned popovers + pulp
+# #1148 slice (a) symmetric overflow:visible hit-test extension.
+pulp_add_test_suite(pulp-test-view-zindex-overflow LIBRARIES pulp::view)
+
 # DirtyTracker, GpuGraphRenderer, and RenderLoop timer-state tests
 # are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
 add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
