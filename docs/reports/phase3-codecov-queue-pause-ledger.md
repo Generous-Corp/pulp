@@ -7526,3 +7526,16 @@ assertions), ran
 `./build/test/pulp-test-widgets "[view][widget][baseline]"` (1 case / 7
 assertions), and `git diff --check` passed. Still held locally for a larger
 24-36 tranche PR batch.
+
+2026-05-18 00:07 PDT: added an eighth local-only tooling tranche to
+`feature/phase3-codecov-batch-728`: commit `3d8db1322`
+(`test(local-ci): cover extracted helper contracts`). It expands direct
+Python unit coverage for the #2179 local-CI helper split: target
+enable/default/unknown/disabled resolution, provenance normalization and
+summary formatting, queue normalization for legacy array and enveloped
+`{"jobs": [...]}` payloads, atomic queue save, GitHub workflow selector
+default source resolution, CLI selector override validation, and unknown
+workflow errors. Local validation passed:
+`python3 tools/local-ci/test_local_ci.py LocalCiTests.test_extracted_target_helpers_cover_empty_defaults_unknown_and_disabled LocalCiTests.test_extracted_provenance_helpers_normalize_result_and_summarize LocalCiTests.test_extracted_queue_helpers_accept_legacy_array_and_enveloped_queue LocalCiTests.test_extracted_github_workflow_helpers_resolve_sources_and_cli_overrides`
+(4 tests), plus `git diff --check`. Still held locally for a larger 24-36
+tranche PR batch.
