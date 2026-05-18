@@ -342,6 +342,32 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
     REQUIRE(measurer.peak_load() == 0.0f);
 }
 
+TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and resets peak load",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.set_smoothing(-1.0f);
+    measurer.begin(64, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() > 0.0f);
+
+    measurer.reset_peak();
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.set_smoothing(2.0f);
+    measurer.begin(64, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    measurer.end();
+    REQUIRE(measurer.load() > 0.0f);
+    REQUIRE(measurer.peak_load() >= measurer.load());
+
+    measurer.reset();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+}
+
 TEST_CASE("ChannelSet maps standard layouts by count and name",
           "[audio][channel-set][issue-640]") {
     REQUIRE(ChannelSet::from_channel_count(0).name == "Discrete 0");
