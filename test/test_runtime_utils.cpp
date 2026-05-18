@@ -665,6 +665,13 @@ TEST_CASE("Expression evaluator rejects trailing operators",
     REQUIRE_FALSE(evaluate("pow(2,)").has_value());
 }
 
+TEST_CASE("Expression evaluator handles nested function calls",
+          "[runtime][expression][coverage][phase3]") {
+    auto value = evaluate("max(min(10, 4), abs(-7))");
+    REQUIRE(value.has_value());
+    REQUIRE(*value == Catch::Approx(7.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
