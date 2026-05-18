@@ -610,6 +610,14 @@ TEST_CASE("IPv4 validation rejects malformed octet counts",
     REQUIRE_FALSE(is_valid_ipv4("127..0.1"));
 }
 
+TEST_CASE("IPv4 validation rejects out-of-range and signed octets",
+          "[runtime][ip][coverage][phase3-batch742]") {
+    REQUIRE_FALSE(is_valid_ipv4("256.0.0.1"));
+    REQUIRE_FALSE(is_valid_ipv4("1.2.3.-4"));
+    REQUIRE_FALSE(is_valid_ipv4("+1.2.3.4"));
+    REQUIRE_FALSE(is_valid_ipv4("1.2.3.999"));
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
