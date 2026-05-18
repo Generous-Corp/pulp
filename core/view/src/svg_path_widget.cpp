@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -30,9 +31,10 @@ inline void grad_skip_ws(const std::string& s, size_t& i) {
 bool parse_grad_float(const std::string& text, float& out) {
     const char* start = text.c_str();
     char* end = nullptr;
+    errno = 0;
     out = std::strtof(start, &end);
     return end != start && static_cast<size_t>(end - start) == text.size() &&
-           std::isfinite(out);
+           errno != ERANGE && std::isfinite(out);
 }
 
 std::optional<canvas::Color> parse_grad_color(const std::string& s, size_t& i) {
