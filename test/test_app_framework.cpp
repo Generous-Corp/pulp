@@ -402,9 +402,20 @@ TEST_CASE("AppSettings invalid typed values return null or false",
     settings.set_string("bad_int", "abc");
     settings.set_string("bad_float", "abc");
     settings.set_string("boolish", "yes");
+    settings.set_string("partial_int", "512junk");
+    settings.set_string("partial_float", "0.75oops");
+    settings.set_string("overflow_float", "1e999");
+    settings.set_string("spaced_int", "256\t");
+    settings.set_string("spaced_float", "0.5 ");
 
     REQUIRE_FALSE(settings.get_int("bad_int").has_value());
     REQUIRE_FALSE(settings.get_float("bad_float").has_value());
+    REQUIRE_FALSE(settings.get_int("partial_int").has_value());
+    REQUIRE_FALSE(settings.get_float("partial_float").has_value());
+    REQUIRE_FALSE(settings.get_float("overflow_float").has_value());
+    REQUIRE(settings.get_int("spaced_int").value() == 256);
+    REQUIRE(settings.get_float("spaced_float").value() > 0.49f);
+    REQUIRE(settings.get_float("spaced_float").value() < 0.51f);
     REQUIRE(settings.get_bool("boolish").value() == false);
     REQUIRE_FALSE(settings.load_window_state().has_value());
 }

@@ -3,6 +3,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 
 namespace pulp::view {
@@ -205,6 +206,32 @@ static std::filesystem::path platform_settings_root() {
 #endif
 }
 
+static bool parse_settings_int(const std::string& text, int& out) {
+    if (text.empty()) return false;
+    char* end = nullptr;
+    long value = std::strtol(text.c_str(), &end, 10);
+    if (end == text.c_str()) return false;
+    while (*end != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(*end))) return false;
+        ++end;
+    }
+    out = static_cast<int>(value);
+    return true;
+}
+
+static bool parse_settings_float(const std::string& text, float& out) {
+    if (text.empty()) return false;
+    char* end = nullptr;
+    float value = std::strtof(text.c_str(), &end);
+    if (end == text.c_str() || !std::isfinite(value)) return false;
+    while (*end != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(*end))) return false;
+        ++end;
+    }
+    out = value;
+    return true;
+}
+
 AppSettings::AppSettings(const std::string& app_name) {
     auto root = platform_settings_root();
     if (!root.empty()) {
@@ -221,8 +248,8 @@ std::optional<std::string> AppSettings::get_string(const std::string& key) const
 std::optional<int> AppSettings::get_int(const std::string& key) const {
     auto s = get_string(key);
     if (s) {
-        try { return std::stoi(*s); }
-        catch (...) { return std::nullopt; }
+        int value = 0;
+        if (parse_settings_int(*s, value)) return value;
     }
     return std::nullopt;
 }
@@ -230,8 +257,8 @@ std::optional<int> AppSettings::get_int(const std::string& key) const {
 std::optional<float> AppSettings::get_float(const std::string& key) const {
     auto s = get_string(key);
     if (s) {
-        try { return std::stof(*s); }
-        catch (...) { return std::nullopt; }
+        float value = 0.0f;
+        if (parse_settings_float(*s, value)) return value;
     }
     return std::nullopt;
 }
