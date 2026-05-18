@@ -186,6 +186,16 @@ TEST_CASE("BigInteger comparison covers equal and greater-than paths",
     REQUIRE(BigInteger().bit_count() == 0);
 }
 
+TEST_CASE("BigInteger preserves negative decimal values through arithmetic",
+          "[crypto][bigint][coverage][phase3]") {
+    auto negative = BigInteger::from_string("-42");
+    auto positive = BigInteger(50);
+
+    REQUIRE(negative.to_string() == "-42");
+    REQUIRE((negative + positive).to_string() == "8");
+    REQUIRE((negative * BigInteger(2)).to_string() == "-84");
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
