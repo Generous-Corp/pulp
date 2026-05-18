@@ -1480,6 +1480,12 @@ pulp_add_test_suite(pulp-test-path-to-sdf LIBRARIES pulp::canvas)
 # View and layout tests
 pulp_add_test_suite(pulp-test-view LIBRARIES pulp::view)
 
+# View corner-radius tests (P5-3 first cut — extracted from test_view.cpp).
+# Covers pulp #1731 Panel + View percent-radius math, per-corner radius
+# resolution, reflow-on-bounds-change, view border stroke + outline +
+# box-shadow honoring effective_corner_radius.
+pulp_add_test_suite(pulp-test-view-corner-radius LIBRARIES pulp::view)
+
 # DirtyTracker, GpuGraphRenderer, and RenderLoop timer-state tests
 # are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
 add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
