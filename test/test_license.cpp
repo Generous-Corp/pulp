@@ -159,6 +159,19 @@ TEST_CASE("BigInteger uint64 constructor preserves unsigned high values",
     REQUIRE_FALSE(max_value.is_zero());
 }
 
+TEST_CASE("BigInteger ordering covers equal and greater comparisons",
+          "[crypto][bigint][coverage][phase3-large]") {
+    BigInteger low(99);
+    BigInteger same_low(99);
+    BigInteger high(100);
+
+    REQUIRE_FALSE(low < same_low);
+    REQUIRE_FALSE(high < low);
+    REQUIRE(low < high);
+    REQUIRE(low == same_low);
+    REQUIRE(high != low);
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
