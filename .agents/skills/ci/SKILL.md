@@ -633,9 +633,12 @@ test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "W
 # Fallback (worktree-local legacy config)
 test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config.json"
 
-# Verify GitHub Actions runner routing. Namespace is decommissioned.
+# Verify GitHub Actions runner routing. Namespace handles macOS PR work
+# (2026-05-18 re-commissioning); GHA-hosted handles Linux+Windows.
 gh variable list -R danielraffel/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
 gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
+gh variable list -R danielraffel/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
+gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
@@ -701,11 +704,24 @@ Then proceed with the `ship` workflow below.
 ## Runner Priority (hard rule)
 
 **GitHub-hosted is the default runner provider** for Linux and Windows.
-macOS routes to the local self-hosted runner through
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` when that repo variable is set; this is the
-only branch-protection blocker on `main`. Namespace is decommissioned: do not
-use `--mode namespace`, do not set `PULP_NAMESPACE_*_RUNS_ON_JSON`, and do not
-redispatch PRs to Namespace.
+macOS routes to **Namespace** (`namespace-profile-generouscorp-macos`) by
+default as of 2026-05-18 re-commissioning, with the local self-hosted Mac
+(`Daniels-MacBook-Pro`) as a manual fallback the operator can force via
+`workflow_dispatch macos_runner_selector_json` or by raising
+`PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` back above 0. The required
+branch-protection check on `main` is the `macos` alias job — that name MUST
+NOT be renamed.
+
+Routing variables (verify before debugging "stuck" macOS PRs):
+- `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON = ["self-hosted","sanitizer"]` (local fallback selector)
+- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON = "namespace-profile-generouscorp-macos"` (Namespace mac profile)
+- `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD = 0` (always overflow to Namespace)
+
+`shipyard pr` is the authoritative ship path. Do NOT push empty commits to
+retrigger a slow macOS check — the queue is paced by Namespace concurrency
+limits, not stuck. If macOS is queued >45 min, check
+`gh api repos/danielraffel/pulp/actions/runners` first.
 
 The default chain (`.github/workflows/build.yml` `resolve-provider` job):
 

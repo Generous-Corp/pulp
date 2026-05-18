@@ -301,7 +301,9 @@ jobs:
           # Previously this used `mode=optional-namespace` which has a hard
           # early-return when REQUESTED_PROVIDER != "namespace", silently
           # ignoring the explicit env. With DEFAULT_RUNNER_PROVIDER set to
-          # "github-hosted" (current operator policy — Namespace decommissioned)
+          # "github-hosted" (operator default — Linux/Windows on GHA; macOS
+          # routes to Namespace via PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON
+          # with PULP_LOCAL_MAC_OVERFLOW_THRESHOLD=0; see 2026-05-18 cutover)
           # that meant the macOS leg always fell through to macos-15 GH-hosted
           # even when PULP_LOCAL_MACOS_RUNS_ON_JSON pointed at the local
           # self-hosted runner. Switching to provider mode wires the
