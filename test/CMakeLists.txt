@@ -1710,6 +1710,13 @@ pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
 # #1901 4-arg canvasFillText prior-state preservation.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 
+# Widget bridge — Canvas2D Wave 2 cheap-wiring surface (P5-1 follow-up).
+# Covers canvas2d/fill + canvas2d/clip evenodd, canvas2d/roundRect
+# 4-corner radii, canvas2d/ellipse rotation, canvas2d/strokeText
+# dedicated-command routing — the five Wave 2 partial → supported
+# compat.json entries.
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
+
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
