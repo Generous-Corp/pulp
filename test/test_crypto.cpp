@@ -51,6 +51,15 @@ TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
     REQUIRE(digest == expected);
 }
 
+TEST_CASE("SHA-1 empty input matches known digest", "[crypto][sha1][coverage]") {
+    const std::vector<uint8_t> expected = {
+        0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
+        0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
+    };
+
+    REQUIRE(sha1("") == expected);
+}
+
 TEST_CASE("SHA-1 pointer overload preserves embedded NUL bytes",
           "[crypto][sha1][coverage][issue-641]") {
     const std::vector<uint8_t> data = {'w', 's', 0x00, 'k', 'e', 'y'};
