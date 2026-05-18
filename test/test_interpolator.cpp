@@ -105,3 +105,11 @@ TEST_CASE("Interpolator hermite reproduces quadratic midpoint samples",
     REQUIRE_THAT(Interpolator::hermite(0.25f, 4.0f, 1.0f, 0.0f, 1.0f),
                  WithinAbs(0.5625f, 1e-6f));
 }
+
+TEST_CASE("Interpolator lagrange reproduces cubic samples",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::lagrange(0.25f, -1.0f, 0.0f, 1.0f, 8.0f),
+                 WithinAbs(0.015625f, 1e-6f));
+    REQUIRE_THAT(Interpolator::lagrange(0.75f, -8.0f, -1.0f, 0.0f, 1.0f),
+                 WithinAbs(-0.015625f, 1e-6f));
+}
