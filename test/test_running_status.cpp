@@ -316,3 +316,34 @@ TEST_CASE("reset() clears pending system-common state",
     p.feed(b.data(), b.size());
     REQUIRE(shorts.empty());
 }
+
+TEST_CASE("feed preserves partial channel message across calls",
+          "[midi][running-status][coverage]") {
+    RunningStatusParser p;
+    std::vector<Captured> shorts;
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    std::vector<uint8_t> first = {0x90, 0x3c};
+    std::vector<uint8_t> second = {0x7f, 0x3d};
+    std::vector<uint8_t> third = {0x40};
+
+    p.feed(first.data(), first.size());
+    REQUIRE(shorts.empty());
+
+    p.feed(second.data(), second.size());
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x3c);
+    REQUIRE(shorts[0].d2 == 0x7f);
+
+    p.feed(third.data(), third.size());
+    REQUIRE(shorts.size() == 2);
+    REQUIRE(shorts[1].status == 0x90);
+    REQUIRE(shorts[1].d1 == 0x3d);
+    REQUIRE(shorts[1].d2 == 0x40);
+}
