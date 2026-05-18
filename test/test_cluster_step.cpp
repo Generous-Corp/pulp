@@ -92,3 +92,67 @@ TEST_CASE("cluster_step: variation selector glues to base", "[font][cluster][emo
     REQUIRE(s.size() == 6u);
     REQUIRE(cluster_step(s, 0, true) == 6u);
 }
+
+TEST_CASE("cluster_step: offsets inside UTF-8 scalars snap to cluster boundary",
+          "[font][cluster][utf8]") {
+    // a + é (2 bytes) + 😀 (4 bytes) + b
+    std::string s = "a\xC3\xA9\xF0\x9F\x98\x80"
+                    "b";
+    REQUIRE(s.size() == 8u);
+
+    REQUIRE(cluster_step(s, 2, true) == 3u);  // inside é
+    REQUIRE(cluster_step(s, 4, true) == 7u);  // inside 😀
+    REQUIRE(cluster_step(s, 6, true) == 7u);  // inside 😀
+
+    REQUIRE(cluster_step(s, 7, false) == 3u);
+    REQUIRE(cluster_step(s, 6, false) == 3u);
+    REQUIRE(cluster_step(s, 3, false) == 1u);
+}
+
+TEST_CASE("cluster_step: backward traversal returns compound-cluster starts",
+          "[font][cluster][emoji][combining]") {
+    std::string s = "A"
+                    "e\xCC\x81"              // e + combining acute
+                    "\xF0\x9F\x87\xBA"
+                    "\xF0\x9F\x87\xB8"       // US flag
+                    "\xF0\x9F\x91\xA8"
+                    "\xE2\x80\x8D"
+                    "\xF0\x9F\x91\xA9";      // man ZWJ woman
+    REQUIRE(s.size() == 23u);
+
+    REQUIRE(cluster_step(s, s.size(), false) == 12u);
+    REQUIRE(cluster_step(s, 12, false) == 4u);
+    REQUIRE(cluster_step(s, 4, false) == 1u);
+    REQUIRE(cluster_step(s, 1, false) == 0u);
+}
+
+TEST_CASE("cluster_step: malformed UTF-8 always makes forward progress",
+          "[font][cluster][utf8]") {
+    std::string truncated = "A\xE2\x82";
+    REQUIRE(truncated.size() == 3u);
+    REQUIRE(cluster_step(truncated, 0, true) == 1u);
+    REQUIRE(cluster_step(truncated, 1, true) == 2u);
+    REQUIRE(cluster_step(truncated, 2, true) == 3u);
+
+    std::string stray_continuation = "\x80"
+                                     "B";
+    REQUIRE(cluster_step(stray_continuation, 0, true) == 1u);
+    REQUIRE(cluster_step(stray_continuation, 1, true) == 2u);
+    REQUIRE(cluster_step(stray_continuation, 2, false) == 1u);
+}
+
+TEST_CASE("cluster_step: extended combining ranges attach to base",
+          "[font][cluster][combining]") {
+    // U+1AB0 combining mark.
+    std::string extended_latin = "a\xE1\xAA\xB0";
+    REQUIRE(cluster_step(extended_latin, 0, true) == extended_latin.size());
+    REQUIRE(cluster_step(extended_latin, extended_latin.size(), false) == 0u);
+
+    // U+20D0 combining mark.
+    std::string symbol_mark = "x\xE2\x83\x90";
+    REQUIRE(cluster_step(symbol_mark, 0, true) == symbol_mark.size());
+
+    // U+E0100 variation selector, encoded as four UTF-8 bytes.
+    std::string variation_selector = "z\xF3\xA0\x84\x80";
+    REQUIRE(cluster_step(variation_selector, 0, true) == variation_selector.size());
+}

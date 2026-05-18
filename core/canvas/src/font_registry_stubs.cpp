@@ -11,6 +11,7 @@
 
 #include <pulp/canvas/bundled_fonts.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -186,7 +187,9 @@ std::size_t cluster_step(const std::string& text, std::size_t byte_offset,
         if (i > 0 && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) {
             i = skip_utf8_back_to_lead(text, i);
         }
-        return cluster_boundary_after(text, i);
+        std::size_t next = cluster_boundary_after(text, i);
+        if (next <= byte_offset) return std::min(byte_offset + 1, text.size());
+        return next;
     } else {
         if (byte_offset == 0) return 0;
         // Forward scan collecting boundaries until we cross
