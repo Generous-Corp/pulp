@@ -137,10 +137,38 @@ std::future<FontState> register_font_url(const std::string& url,
 
 /// Slice 3.5 — register a WOFF2-compressed font at runtime. Gated on
 /// the Phase 2 sanitizer (validate_font_bytes); rejects malformed
-/// payloads cleanly. Skeleton returns false; the implementation slice
-/// wires Brotli decompression behind the budget + consent path.
+/// payloads cleanly.
+///
+/// Behaviour today (security-gated, detection-only):
+///   * Null / empty input → false.
+///   * Bytes whose first 4 bytes are not the WOFF2 magic (`wOF2`,
+///     0x774F4632 big-endian) → false. This is the structural reject
+///     path and works on every build.
+///   * Bytes WITH valid WOFF2 magic, when no Brotli/woff2 decoder is
+///     linked into the build → false. Callers can probe this case
+///     ahead of time via `woff2_decoder_available()` and route
+///     through `register_font(...)` with a pre-decoded TTF/OTF
+///     payload instead.
+///   * Bytes WITH valid WOFF2 magic when a decoder IS linked → the
+///     payload is decompressed, validated via `validate_font_bytes`,
+///     and forwarded to `register_font(...)`.
+///
+/// Vendoring an in-tree woff2/Brotli decoder is intentionally deferred:
+/// Pulp's MIT release stays free of large third-party blobs until a
+/// real workload demands one. See `planning/2026-05-18-font-hardening-
+/// phase23-execution-plan.md` Slice 3.5.
 bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
                          const std::string& family_override = "");
+
+/// Slice 3.5 — runtime check for WOFF2 decoder availability. Returns
+/// `false` on builds where no Brotli/woff2 implementation is linked,
+/// meaning `register_font_woff2(...)` cannot succeed regardless of
+/// input. Callers can use this to fall back to a pre-decoded TTF/OTF
+/// payload registered via `register_font(...)` instead.
+///
+/// Available on every build (Skia or no Skia), so plugin startup can
+/// branch on it without `#ifdef`s leaking into user code.
+bool woff2_decoder_available() noexcept;
 
 /// Slice 3.6 — grapheme-aware cursor step for TextEditor. Returns the
 /// UTF-8 byte offset of the cluster boundary one step forward (or

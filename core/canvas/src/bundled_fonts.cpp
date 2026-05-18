@@ -433,6 +433,84 @@ bool is_font_registered(const std::string& family) {
     return map.find(family) != map.end();
 }
 
+// pulp #2163 — font v2 Slice 3.5. WOFF2 runtime decoding.
+//
+// Pulp doesn't currently vendor Brotli or the Google `woff2` library,
+// and the prebuilt Skia we ship is configured without its WOFF2
+// converter exposed as a public symbol. That means the actual
+// decompression step is gated on `__has_include(<woff2/decode.h>)` —
+// if a downstream build vendors `external/woff2/` and links it into
+// `pulp-canvas`, the real path lights up automatically; otherwise the
+// surface stays at "structural-detect + fail cleanly", which is still
+// a strict improvement over the pre-3.5 unconditional `return false`
+// because callers can now distinguish "not a WOFF2 file" from
+// "WOFF2 file but no decoder linked" via `woff2_decoder_available()`.
+//
+// WOFF2 file signature is the 4-byte tag 'wOF2' = 0x77_4F_46_32 read
+// big-endian at offset 0. See W3C WOFF2 §3, table 1.
+namespace {
+constexpr std::uint32_t kWoff2Magic = 0x774F4632u; // 'wOF2'
+} // namespace
+
+#if __has_include(<woff2/decode.h>)
+#include <woff2/decode.h>
+#define PULP_WOFF2_DECODER 1
+#else
+#define PULP_WOFF2_DECODER 0
+#endif
+
+bool woff2_decoder_available() noexcept {
+#if PULP_WOFF2_DECODER
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
+                         const std::string& family_override) {
+    // Null or too-short to hold the 4-byte signature → not a WOFF2
+    // file at all. Reject before we even probe the decoder so that
+    // truncated/garbage input returns false on every build.
+    if (!woff2_data || size < 4) return false;
+
+    const std::uint32_t magic =
+        (static_cast<std::uint32_t>(woff2_data[0]) << 24)
+      | (static_cast<std::uint32_t>(woff2_data[1]) << 16)
+      | (static_cast<std::uint32_t>(woff2_data[2]) <<  8)
+      |  static_cast<std::uint32_t>(woff2_data[3]);
+    if (magic != kWoff2Magic) return false;
+
+#if PULP_WOFF2_DECODER
+    // Real path: WOFF2 → sfnt → validator → register_font.
+    //
+    // The Google woff2 library exposes `ComputeWOFF2FinalSize` so we
+    // can pre-size the output buffer, and `ConvertWOFF2ToTTF` for the
+    // actual decompress. A WOFF2 header capping at 30MB is plenty for
+    // any reasonable plugin font; reject anything larger to keep the
+    // memory pressure bounded against hostile payloads. The Phase 2
+    // sanitizer (`validate_font_bytes`) runs on the decompressed sfnt
+    // before we touch Skia.
+    constexpr std::size_t kMaxDecompressed = 30u * 1024u * 1024u;
+    std::size_t out_size = woff2::ComputeWOFF2FinalSize(woff2_data, size);
+    if (out_size == 0 || out_size > kMaxDecompressed) return false;
+
+    std::vector<std::uint8_t> sfnt(out_size);
+    if (!woff2::ConvertWOFF2ToTTF(sfnt.data(), out_size, woff2_data, size)) {
+        return false;
+    }
+    if (!validate_font_bytes(sfnt.data(), out_size)) return false;
+    return register_font(sfnt.data(), out_size, family_override);
+#else
+    // No decoder linked. The bytes look like a WOFF2 file but we
+    // cannot decompress them on this build. Caller should consult
+    // `woff2_decoder_available()` and fall back to a pre-decoded
+    // TTF/OTF via `register_font(...)`.
+    (void)family_override;
+    return false;
+#endif
+}
+
 std::uint64_t font_registration_generation() noexcept {
     return registration_generation().load(std::memory_order_acquire);
 }

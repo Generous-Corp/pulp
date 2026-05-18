@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <string>
 
 namespace pulp::canvas {
@@ -259,6 +260,17 @@ bool register_font_file(const std::string&, const std::string&) {
     return false;
 }
 
+// pulp #2163 — font v2 Slice 2.1 (non-Skia). register_font_url has
+// no register_font to land on, so every URL resolves to Failed.
+// Matches the contract of the Skia-side implementation: never block
+// the caller, always return a ready future.
+std::future<FontState> register_font_url(const std::string&,
+                                         const std::string&) {
+    std::promise<FontState> p;
+    p.set_value(FontState::Failed);
+    return p.get_future();
+}
+
 bool is_font_registered(const std::string&) {
     return false;
 }
@@ -273,9 +285,35 @@ bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
     return data != nullptr && size > 0;
 }
 
-// pulp #2163 — font v2 Phase 3 skeletons.
-bool register_font_woff2(const std::uint8_t*, std::size_t, const std::string&) {
-    return false;  // Phase 3 impl wires Brotli decompression + sanitizer.
+// pulp #2163 — font v2 Slice 3.5 (non-Skia). Without Skia we can't
+// register a typeface even if we had a decoder, so the result is
+// always false. Still validates the WOFF2 magic bytes so the
+// "is this even a WOFF2 file?" test surface returns the same answer
+// on both Skia and non-Skia builds — that property keeps the
+// `register_font_woff2` test suite uniform regardless of how Skia
+// was configured.
+bool register_font_woff2(const std::uint8_t* woff2_data, std::size_t size,
+                         const std::string&) {
+    if (!woff2_data || size < 4) return false;
+    const std::uint32_t magic =
+        (static_cast<std::uint32_t>(woff2_data[0]) << 24)
+      | (static_cast<std::uint32_t>(woff2_data[1]) << 16)
+      | (static_cast<std::uint32_t>(woff2_data[2]) <<  8)
+      |  static_cast<std::uint32_t>(woff2_data[3]);
+    if (magic != 0x774F4632u) return false;   // 'wOF2'
+    // Magic is correct but we have neither a decoder nor Skia to
+    // hand the result to. Surface as a clean failure; consult
+    // `woff2_decoder_available()` ahead of time to avoid this path.
+    return false;
+}
+
+bool woff2_decoder_available() noexcept {
+    // Non-Skia builds never carry the decoder regardless of whether
+    // `<woff2/decode.h>` happens to be present in the include path,
+    // because `register_font_woff2` has nowhere to land the
+    // decompressed sfnt — `register_font` is itself a `return false`
+    // stub on this build.
+    return false;
 }
 
 } // namespace pulp::canvas

@@ -892,6 +892,13 @@ add_executable(pulp-test-font-async-lifecycle test_font_async_lifecycle.cpp)
 target_link_libraries(pulp-test-font-async-lifecycle PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-async-lifecycle)
 
+# pulp #2163 / font v2 Slice 3.5 — WOFF2 runtime decoding (security-gated).
+# Structural rejection + decoder-availability probe; no Skia link
+# required because the negative paths are universal.
+add_executable(pulp-test-font-woff2 test_font_woff2.cpp)
+target_link_libraries(pulp-test-font-woff2 PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-font-woff2)
+
 # pulp #2163 / font v2 Slice 3.1 — color-font predicate on ResolvedFont.
 # Gated on PULP_HAS_SKIA — the predicate returns false without a real
 # typeface so the resolver-bound assertions can't fire on non-Skia.
