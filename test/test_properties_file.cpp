@@ -443,6 +443,20 @@ TEST_CASE("PropertiesFile remove and reinsert keeps sorted key enumeration",
     REQUIRE(props.get_string("b").value_or("") == "new");
 }
 
+TEST_CASE("PropertiesFile empty string values remain present",
+          "[state][properties][coverage][phase3-github]") {
+    PropertiesFile props;
+    props.set_string("empty", "");
+
+    REQUIRE(props.contains("empty"));
+    REQUIRE(props.get_string("empty").has_value());
+    REQUIRE(props.get_string("empty").value() == "");
+
+    props.remove("empty");
+    REQUIRE_FALSE(props.contains("empty"));
+    REQUIRE_FALSE(props.get_string("empty").has_value());
+}
+
 // ── ApplicationProperties ───────────────────────────────────────────────
 
 TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][properties]") {
