@@ -459,6 +459,23 @@ TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx even
     REQUIRE(at_one_second[1]->is_sysex());
 }
 
+TEST_CASE("MidiMessageSequence inserts equal timestamps before existing events",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    sequence.add_note_on(1.0, 0, 60, 100);
+    sequence.add_cc(1.0, 0, 74, 64);
+    sequence.add_note_off(1.0, 0, 60);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_note_off());
+    REQUIRE(sequence[1].is_cc());
+    REQUIRE(sequence[2].is_note_on());
+
+    auto in_range = sequence.events_in_range(1.0, 1.0);
+    REQUIRE(in_range.empty());
+}
+
 TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
     auto note = UmpPacket::note_on_2(0x1F, 0x2F, 0xC0, 0xABCD, 0xEE, 0x1234);
     REQUIRE(note.word_count == 2);
