@@ -201,6 +201,17 @@ TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("ScopeGuard dismiss after move suppresses transferred cleanup",
+          "[runtime][scope_guard][coverage][phase3]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        auto moved = std::move(guard);
+        moved.dismiss();
+    }
+    REQUIRE(calls == 0);
+}
+
 TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
           "[runtime][scope_guard][coverage][issue-641]") {
     int calls = 0;
