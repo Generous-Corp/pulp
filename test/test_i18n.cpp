@@ -251,6 +251,16 @@ TEST_CASE("i18n .strings parser permits empty keys",
     REQUIRE(strings.translate("") == "metadata");
 }
 
+TEST_CASE("i18n .strings load failure leaves existing translations intact",
+          "[runtime][i18n][coverage][phase3-batch742]") {
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE_FALSE(strings.load_strings_file("/tmp/pulp_missing_strings_742.strings"));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
+}
+
 // ── .po file format ─────────────────────────────────────────────────────
 
 TEST_CASE("i18n load .po file", "[runtime][i18n]") {
