@@ -38,6 +38,22 @@ std::optional<std::uint16_t> try_bind_loopback(Socket& server, std::uint16_t por
     return port;
 }
 
+std::optional<std::uint16_t> try_bind_loopback_ephemeral(Socket& server) {
+    if (!server.bind("127.0.0.1", 0)) return std::nullopt;
+    if (!server.listen(1)) return std::nullopt;
+    const auto port = server.local_port();
+    if (port == 0) return std::nullopt;
+    return port;
+}
+
+std::optional<std::uint16_t> try_bind_udp_ephemeral(Socket& socket,
+                                                    std::string_view address = "127.0.0.1") {
+    if (!socket.bind(address, 0)) return std::nullopt;
+    const auto port = socket.local_port();
+    if (port == 0) return std::nullopt;
+    return port;
+}
+
 std::optional<std::uint16_t> try_bind_udp(Socket& socket,
                                           std::uint16_t start,
                                           std::string_view address = "127.0.0.1") {
@@ -573,6 +589,129 @@ TEST_CASE("TcpStream zero-byte I/O succeeds while connected",
     stream.close();
     join_server.join();
     REQUIRE(client_ok);
+}
+
+// ── Socket edge cases ───────────────────────────────────────────────────
+
+TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket receiver;
+    REQUIRE(receiver.create(SocketType::UDP));
+    auto port = try_bind_udp_ephemeral(receiver);
+    REQUIRE(port);
+
+    Socket sender;
+    REQUIRE(sender.create(SocketType::UDP));
+    const std::array<std::uint8_t, 4> payload{'p', 'u', 'l', 'p'};
+    REQUIRE(sender.send_to(payload.data(), payload.size(), "127.0.0.1", *port) ==
+            static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 8> buffer{};
+    std::string from_address;
+    std::uint16_t from_port = 0;
+    const int received = receiver.receive_from(buffer.data(), buffer.size(),
+                                               from_address, from_port);
+    REQUIRE(received == static_cast<int>(payload.size()));
+    REQUIRE(std::equal(payload.begin(), payload.end(), buffer.begin()));
+    REQUIRE(from_address == "127.0.0.1");
+    REQUIRE(from_port != 0);
+}
+
+TEST_CASE("Socket UDP send_to and receive_from fail before create",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket socket;
+    std::array<std::uint8_t, 4> buffer{};
+    std::string from_address = "unchanged";
+    std::uint16_t from_port = 7777;
+
+    REQUIRE(socket.send_to(buffer.data(), buffer.size(), "127.0.0.1", 9) == -1);
+    REQUIRE(socket.receive_from(buffer.data(), buffer.size(), from_address, from_port) == -1);
+    REQUIRE(from_address == "unchanged");
+    REQUIRE(from_port == 7777);
+}
+
+TEST_CASE("Socket local_port reports bound UDP ephemeral port",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket socket;
+    REQUIRE(socket.local_port() == 0);
+    REQUIRE(socket.create(SocketType::UDP));
+    REQUIRE(socket.local_port() == 0);
+    REQUIRE(socket.bind("127.0.0.1", 0));
+    REQUIRE(socket.local_port() != 0);
+}
+
+TEST_CASE("Socket TCP loopback send receive and close",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+
+    auto bound_port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(bound_port);
+    const auto port = *bound_port;
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> server_done{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 8> buffer{};
+        const int received = accepted->receive(buffer.data(), buffer.size());
+        if (received > 0) {
+            accepted->send(buffer.data(), static_cast<std::size_t>(received));
+        }
+        accepted->close();
+        server_done.store(true);
+    });
+    ThreadJoiner join_server{server_thread};
+
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", port));
+
+    const std::array<std::uint8_t, 4> payload{'t', 'c', 'p', '!'};
+    REQUIRE(client.send(payload.data(), payload.size()) == static_cast<int>(payload.size()));
+
+    std::array<std::uint8_t, 8> echo{};
+    REQUIRE(client.receive(echo.data(), echo.size()) == static_cast<int>(payload.size()));
+    REQUIRE(std::equal(payload.begin(), payload.end(), echo.begin()));
+
+    client.close();
+    join_server.join();
+    REQUIRE(server_done.load());
+}
+
+TEST_CASE("Socket move construction transfers open UDP handle",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket original;
+    REQUIRE(original.create(SocketType::UDP));
+    REQUIRE(original.is_open());
+
+    Socket moved(std::move(original));
+    REQUIRE_FALSE(original.is_open());
+    REQUIRE(moved.is_open());
+    REQUIRE(moved.bind("127.0.0.1", 0));
+    moved.close();
+    REQUIRE_FALSE(moved.is_open());
+}
+
+TEST_CASE("Socket move assignment closes old handle and adopts new one",
+          "[network_stream][socket][coverage][phase3]") {
+    Socket old_socket;
+    REQUIRE(old_socket.create(SocketType::UDP));
+    REQUIRE(old_socket.bind("127.0.0.1", 0));
+
+    Socket replacement;
+    REQUIRE(replacement.create(SocketType::UDP));
+
+    old_socket = std::move(replacement);
+    REQUIRE(old_socket.is_open());
+    REQUIRE_FALSE(replacement.is_open());
+    old_socket.close();
+    REQUIRE_FALSE(old_socket.is_open());
 }
 
 // ── HttpStream edge cases ───────────────────────────────────────────────

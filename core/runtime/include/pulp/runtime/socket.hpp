@@ -53,6 +53,9 @@ public:
     /// Whether the socket is open.
     bool is_open() const;
 
+    /// Bound local port, or 0 when unavailable/unbound.
+    uint16_t local_port() const;
+
     // No copy, move OK
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
@@ -60,7 +63,11 @@ public:
     Socket& operator=(Socket&& other) noexcept;
 
 private:
+#ifdef _WIN32
+    std::uintptr_t fd_ = ~std::uintptr_t{0};
+#else
     int fd_ = -1;
+#endif
     SocketType type_ = SocketType::TCP;
 };
 

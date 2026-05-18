@@ -167,6 +167,25 @@ TEST_CASE("CiDiscovery ignores malformed and unhandled messages",
     REQUIRE(ci.process_message(unknown.data(), unknown.size()).empty());
 }
 
+TEST_CASE("CiDiscovery rejects wrong universal sysex headers",
+          "[midi][ci][codecov]") {
+    CiDiscovery ci;
+    auto wrong_universal_id = make_ci_header(CiMessageType::DiscoveryInquiry,
+                                             MUID{0x00011111}, MUID::broadcast());
+    wrong_universal_id[1] = 0x7D;
+    wrong_universal_id.push_back(0xF7);
+
+    auto wrong_ci_subid = make_ci_header(CiMessageType::DiscoveryInquiry,
+                                         MUID{0x00011111}, MUID::broadcast());
+    wrong_ci_subid[3] = 0x0E;
+    wrong_ci_subid.push_back(0xF7);
+
+    REQUIRE(ci.process_message(wrong_universal_id.data(),
+                               wrong_universal_id.size()).empty());
+    REQUIRE(ci.process_message(wrong_ci_subid.data(),
+                               wrong_ci_subid.size()).empty());
+}
+
 TEST_CASE("CiDiscovery ignores undersized discovery replies",
           "[midi][ci][codecov]") {
     CiDiscovery ci;
@@ -194,6 +213,46 @@ TEST_CASE("CiDiscovery ignores inquiries addressed to another MUID",
     inquiry.push_back(0xF7);
 
     REQUIRE(responder.process_message(inquiry.data(), inquiry.size()).empty());
+}
+
+TEST_CASE("CiDiscovery responds to inquiry addressed directly to local MUID",
+          "[midi][ci][codecov]") {
+    CiDiscovery responder;
+    CiDeviceInfo info = responder.device_info();
+    info.muid = MUID{0x00001234};
+    responder.set_device_info(info);
+
+    MUID peer{0x00005678};
+    auto inquiry = make_ci_header(CiMessageType::DiscoveryInquiry,
+                                  peer, info.muid);
+    inquiry.push_back(0xF7);
+
+    auto reply = responder.process_message(inquiry.data(), inquiry.size());
+
+    REQUIRE(reply.size() == 31);
+    REQUIRE(reply[4] == static_cast<uint8_t>(CiMessageType::DiscoveryReply));
+    REQUIRE(read_muid_at(reply, 6) == info.muid.value);
+    REQUIRE(read_muid_at(reply, 10) == peer.value);
+}
+
+TEST_CASE("CiDiscovery stores minimal-length discovery replies",
+          "[midi][ci][codecov]") {
+    CiDiscovery ci;
+    std::vector<CiDeviceInfo> callbacks;
+    ci.on_device_discovered = [&](const CiDeviceInfo& info) {
+        callbacks.push_back(info);
+    };
+
+    auto reply = make_ci_header(CiMessageType::DiscoveryReply,
+                                MUID{0x00022222}, ci.local_muid());
+    while (reply.size() < 30)
+        reply.push_back(0);
+
+    REQUIRE(ci.process_message(reply.data(), reply.size()).empty());
+    REQUIRE(ci.discovered_devices().size() == 1);
+    REQUIRE(ci.discovered_devices()[0].muid.value == 0x00022222);
+    REQUIRE(callbacks.size() == 1);
+    REQUIRE(callbacks[0].muid.value == 0x00022222);
 }
 
 TEST_CASE("CiDiscovery stores discovery replies and fires callbacks",
@@ -254,6 +313,16 @@ TEST_CASE("CiDiscovery profile management ignores unknown profiles",
     REQUIRE_FALSE(ci.disable_profile(unknown));
     REQUIRE_FALSE(ci.profiles()[0].enabled);
     REQUIRE(callback_count == 0);
+}
+
+TEST_CASE("ProfileId equality ignores reserved byte",
+          "[midi][ci][codecov]") {
+    ProfileId lhs{0x01, 0x02, 0x03, 0x04, 0x00};
+    ProfileId same_identity{0x01, 0x02, 0x03, 0x04, 0x7F};
+    ProfileId different_level{0x01, 0x02, 0x03, 0x05, 0x00};
+
+    REQUIRE(lhs == same_identity);
+    REQUIRE_FALSE(lhs == different_level);
 }
 
 TEST_CASE("CiDiscovery profile callback", "[midi][ci]") {
@@ -334,6 +403,26 @@ TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
     auto reply = ci.process_message(inquiry.data(), inquiry.size());
     // Profile inquiry is type 0x24, we handle it
     REQUIRE_FALSE(reply.empty());
+}
+
+TEST_CASE("CiDiscovery profile inquiry with no profiles reports zero counts",
+          "[midi][ci][codecov]") {
+    CiDiscovery responder;
+    MUID peer{0x0002468A};
+    auto inquiry = make_ci_header(CiMessageType::ProfileInquiry,
+                                  peer, responder.local_muid());
+    inquiry.push_back(0xF7);
+
+    auto reply = responder.process_message(inquiry.data(), inquiry.size());
+
+    REQUIRE(reply.size() == 19);
+    REQUIRE(reply[4] == static_cast<uint8_t>(CiMessageType::ProfileReply));
+    REQUIRE(read_muid_at(reply, 10) == peer.value);
+    REQUIRE(reply[14] == 0);
+    REQUIRE(reply[15] == 0);
+    REQUIRE(reply[16] == 0);
+    REQUIRE(reply[17] == 0);
+    REQUIRE(reply[18] == 0xF7);
 }
 
 TEST_CASE("CiDiscovery profile reply echoes inquirer MUID", "[midi][ci]") {

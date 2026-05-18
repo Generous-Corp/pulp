@@ -263,6 +263,55 @@ TEST_CASE("MidiKeyboardState handles invalid channels and reset without callback
     REQUIRE(note_off_count == 0);
 }
 
+TEST_CASE("MidiKeyboardState all_notes_off releases every channel in order",
+          "[midi][keyboard][codecov]") {
+    MidiKeyboardState keys;
+    std::vector<std::pair<int, int>> released;
+    keys.on_note_off = [&](uint8_t channel, uint8_t note) {
+        released.emplace_back(channel, note);
+    };
+
+    keys.process(MidiEvent::note_on(1, 60, 100));
+    keys.process(MidiEvent::note_on(0, 64, 80));
+    keys.process(MidiEvent::note_on(1, 67, 90));
+
+    REQUIRE(keys.total_notes_held() == 3);
+    keys.all_notes_off();
+
+    REQUIRE_FALSE(keys.any_notes_held());
+    REQUIRE((released == std::vector<std::pair<int, int>>{
+        {0, 64},
+        {1, 60},
+        {1, 67},
+    }));
+}
+
+TEST_CASE("MidiKeyboardState channel release preserves other held notes",
+          "[midi][keyboard][codecov]") {
+    MidiKeyboardState keys;
+    std::vector<std::pair<int, int>> released;
+    keys.on_note_off = [&](uint8_t channel, uint8_t note) {
+        released.emplace_back(channel, note);
+    };
+
+    keys.process(MidiEvent::note_on(0, 48, 100));
+    keys.process(MidiEvent::note_on(2, 60, 96));
+    keys.process(MidiEvent::note_on(2, 64, 80));
+    keys.process(MidiEvent::note_on(5, 72, 70));
+
+    keys.all_notes_off(2);
+
+    REQUIRE_FALSE(keys.is_note_on(2, 60));
+    REQUIRE_FALSE(keys.is_note_on(2, 64));
+    REQUIRE(keys.is_note_on(0, 48));
+    REQUIRE(keys.is_note_on(5, 72));
+    REQUIRE(keys.total_notes_held() == 2);
+    REQUIRE((released == std::vector<std::pair<int, int>>{
+        {2, 60},
+        {2, 64},
+    }));
+}
+
 TEST_CASE("RpnParser emits RPN NRPN and increment callbacks",
           "[midi][rpn][codecov]") {
     RpnParser parser;
@@ -465,6 +514,74 @@ TEST_CASE("UMP conversion scales MIDI 1.0 events both directions",
     REQUIRE_FALSE(ump_to_midi1_event(UmpPacket::per_note_pitch_bend(0, 1, 60, 0), out));
 }
 
+TEST_CASE("UMP conversion covers note-off cc and unsupported packet paths",
+          "[midi][ump][codecov]") {
+    auto note_off = midi1_event_to_ump2(MidiEvent::note_off(9, 36, 64), 12);
+    REQUIRE(note_off.message_type() == UmpMessageType::Midi2ChannelVoice);
+    REQUIRE(note_off.group() == 12);
+    REQUIRE(note_off.status() == static_cast<uint8_t>(0x80 | 9));
+    REQUIRE(note_off.note_number() == 36);
+    REQUIRE(note_off.velocity_16() == scale_7_to_16(64));
+
+    auto cc = UmpPacket::cc_2(3, 4, 74, 127u << 25);
+    MidiEvent out;
+    REQUIRE(ump_to_midi1_event(cc, out));
+    REQUIRE(out.is_cc());
+    REQUIRE(out.channel() == 4);
+    REQUIRE(out.cc_number() == 74);
+    REQUIRE(out.cc_value() == 127);
+
+    UmpPacket utility{};
+    utility.word_count = UmpPacket::size_for_type(UmpMessageType::Utility);
+    utility.words[0] = 0;
+    REQUIRE_FALSE(ump_to_midi1_event(utility, out));
+}
+
+TEST_CASE("UMP conversion preserves MIDI 1.0 fallback bytes",
+          "[midi][ump][codecov]") {
+    auto program = midi1_event_to_ump2(MidiEvent::program_change(5, 42), 15);
+
+    REQUIRE(program.message_type() == UmpMessageType::Midi1ChannelVoice);
+    REQUIRE(program.group() == 15);
+    REQUIRE(program.word_count == 1);
+
+    MidiEvent out;
+    REQUIRE(ump_to_midi1_event(program, out));
+    REQUIRE(out.is_program_change());
+    REQUIRE(out.channel() == 5);
+    REQUIRE(out.data()[1] == 42);
+    REQUIRE(out.data()[2] == 0);
+}
+
+TEST_CASE("MIDI 1.0 fallback conversion preserves requested group and offsets",
+          "[midi][ump][buffer][codecov]") {
+    MidiBuffer midi;
+    auto program = MidiEvent::program_change(14, 91);
+    program.sample_offset = 256;
+    midi.add(program);
+
+    UmpBuffer ump;
+    midi1_to_ump(midi, ump, 11);
+
+    REQUIRE(ump.size() == 1);
+    REQUIRE(ump[0].sample_offset == 256);
+    REQUIRE(ump[0].packet.message_type() == UmpMessageType::Midi1ChannelVoice);
+    REQUIRE(ump[0].packet.group() == 11);
+    REQUIRE(((ump[0].packet.words[0] >> 16) & 0xFF) == 0xCE);
+    REQUIRE(((ump[0].packet.words[0] >> 8) & 0xFF) == 91);
+    REQUIRE((ump[0].packet.words[0] & 0xFF) == 0);
+}
+
+TEST_CASE("UMP scaling helpers preserve boundary values around pitch center",
+          "[midi][ump][codecov]") {
+    REQUIRE(scale_14_to_32(0) == 0);
+    REQUIRE(scale_14_to_32(0x3FFF) == 0xFFFFFFFFu);
+    REQUIRE(scale_32_to_14(0) == 0);
+    REQUIRE(scale_32_to_14(0xFFFFFFFFu) == 0x3FFF);
+    REQUIRE(scale_32_to_14(scale_14_to_32(0x1FFF)) == 0x1FFF);
+    REQUIRE(scale_32_to_14(scale_14_to_32(0x2001)) == 0x2000);
+}
+
 TEST_CASE("UmpBuffer and MidiBuffer bridge preserve order and offsets",
           "[midi][ump][buffer][codecov]") {
     MidiBuffer midi;
@@ -497,6 +614,24 @@ TEST_CASE("UmpBuffer and MidiBuffer bridge preserve order and offsets",
 
     ump.clear();
     REQUIRE(ump.empty());
+}
+
+TEST_CASE("UmpBuffer flatten skips packets without MIDI 1.0 equivalents",
+          "[midi][ump][buffer][codecov]") {
+    UmpBuffer ump;
+    ump.add({UmpPacket::note_on_2(1, 2, 60, scale_7_to_16(96)), 12});
+    ump.add({UmpPacket::per_note_pitch_bend(1, 2, 60, 0x90000000u), 18});
+    ump.add({UmpPacket::cc_2(1, 2, 74, 64u << 25), 24});
+
+    MidiBuffer midi;
+    ump_to_midi1(ump, midi);
+
+    REQUIRE(midi.size() == 2);
+    REQUIRE(midi[0].is_note_on());
+    REQUIRE(midi[0].sample_offset == 12);
+    REQUIRE(midi[1].is_cc());
+    REQUIRE(midi[1].cc_number() == 74);
+    REQUIRE(midi[1].sample_offset == 24);
 }
 
 TEST_CASE("MPE buffer binding records tracker callbacks with sample offsets",
