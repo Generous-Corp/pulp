@@ -1484,3 +1484,48 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][iss
     REQUIRE(blocks.load() > 0);
     REQUIRE(bad_samples.load() == 0);
 }
+
+TEST_CASE("ParameterEventQueue sorts sample offsets and preserves duplicates",
+          "[host][params][codecov]") {
+    ParameterEventQueue queue;
+    queue.push({3, 64, 0.75f});
+    queue.push(ParameterEvent{1, 0, 0.25f});
+    queue.push({2, 32, 0.5f});
+    queue.push({4, 32, 0.6f});
+
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE(queue.size() == 4);
+
+    queue.sort();
+    const auto& events = queue.events();
+    REQUIRE(events[0].param_id == 1);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE(events[1].param_id == 2);
+    REQUIRE(events[1].sample_offset == 32);
+    REQUIRE(events[2].param_id == 4);
+    REQUIRE(events[2].sample_offset == 32);
+    REQUIRE(events[3].param_id == 3);
+    REQUIRE(events[3].sample_offset == 64);
+}
+
+TEST_CASE("ParameterEventQueue iteration and clear expose queued values",
+          "[host][params][codecov]") {
+    ParameterEventQueue queue;
+    queue.push({10, -4, -1.0f});
+    queue.push({11, 128, 1.0f});
+
+    int id_sum = 0;
+    float value_sum = 0.0f;
+    for (const auto& event : queue) {
+        id_sum += static_cast<int>(event.param_id);
+        value_sum += event.value;
+    }
+
+    REQUIRE(id_sum == 21);
+    REQUIRE_THAT(value_sum, WithinAbs(0.0f, 1e-6f));
+
+    queue.clear();
+    REQUIRE(queue.empty());
+    REQUIRE(queue.size() == 0);
+    REQUIRE(queue.begin() == queue.end());
+}
