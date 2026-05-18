@@ -7340,3 +7340,16 @@ locally: `git diff --check`, built `pulp-test-atk-mapping` and
 `./build/test/pulp-test-uia-mapping "[a11y][uia]"`, which passed 18 test
 cases / 66 assertions across both binaries. This tranche is held locally and
 should be aggregated into the larger PR rather than submitted individually.
+
+2026-05-17 23:24 PDT: added another local-only held view input coverage
+tranche to the consolidated next-batch branch
+`feature/phase3-codecov-next-batch-727` in
+`/private/tmp/pulp-phase3-codecov-next-batch-727`. The branch now includes
+commit `96d6156b3` (`test(view): cover input event fallback helpers`). The
+tranche extends `test/test_input_events.cpp` over combined key-modifier
+helper independence and unknown pointer-type fallback to the mouse string
+without touch/pen/primary flags. Validation passed locally:
+`git diff --check`, built `pulp-test-input-events`, and ran
+`./build/test/pulp-test-input-events "[view][input]"`, which passed 24 test
+cases / 93 assertions. This tranche is held locally and should be aggregated
+into the larger PR rather than submitted individually.
