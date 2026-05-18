@@ -136,6 +136,52 @@ TEST_CASE("Font resolver trace names cover every fallback origin",
     REQUIRE(std::string(to_string(FallbackOrigin::NotFound)) == "not-found");
 }
 
+TEST_CASE("ResolvedFont default state is unresolved without a typeface",
+          "[canvas][font][resolver][coverage]") {
+    ResolvedFont font;
+    REQUIRE_FALSE(font.has_typeface());
+    REQUIRE_FALSE(font.resolved());
+    REQUIRE(font.origin == FallbackOrigin::NotFound);
+    REQUIRE(font.generation == 0);
+    REQUIRE(font.scope == FontScopeId::global());
+    REQUIRE(font.trace.empty());
+    REQUIRE_FALSE(font.synthesis.faux_bold);
+    REQUIRE_FALSE(font.synthesis.faux_italic);
+    REQUIRE_FALSE(font.synthesis.faux_width);
+}
+
+#ifndef PULP_HAS_SKIA
+TEST_CASE("FontResolver non-Skia path returns scoped NotFound results",
+          "[canvas][font][resolver][coverage]") {
+    auto& resolver = FontResolver::instance();
+    resolver.clear_cache();
+
+    constexpr std::uint64_t plugin_id = 728245;
+    auto& scope = plugin_scope(plugin_id);
+    scope.bump_generation();
+
+    FontOptions opts;
+    opts.family_stack = {"Inter", "Missing Family"};
+    opts.scope = scope.id();
+    opts.locale = "en-US";
+
+    auto primary = resolver.resolve_family_list(opts);
+    REQUIRE_FALSE(primary.resolved());
+    REQUIRE_FALSE(primary.has_typeface());
+    REQUIRE(primary.origin == FallbackOrigin::NotFound);
+    REQUIRE(primary.scope == opts.scope);
+    REQUIRE(primary.generation == merged_generation_for(opts.scope));
+    REQUIRE(primary.trace.empty());
+
+    auto fallback = resolver.resolve_character_fallback(opts, primary, 0x1F642);
+    REQUIRE_FALSE(fallback.resolved());
+    REQUIRE_FALSE(fallback.has_typeface());
+    REQUIRE(fallback.origin == FallbackOrigin::NotFound);
+    REQUIRE(fallback.scope == opts.scope);
+    REQUIRE(fallback.generation == merged_generation_for(opts.scope));
+}
+#endif
+
 TEST_CASE("TextRunPlanner skeleton maps UTF-8 scalars and line breaks",
           "[canvas][font][planner][coverage]") {
     auto& planner = TextRunPlanner::instance();
