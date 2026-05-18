@@ -39,6 +39,61 @@ TEST_CASE("Platform detection", "[platform]") {
     }
 }
 
+TEST_CASE("Platform detection flags are mutually consistent",
+          "[platform][coverage][phase3]") {
+    const int os_flags =
+        static_cast<int>(is_macos) +
+        static_cast<int>(is_ios) +
+        static_cast<int>(is_windows) +
+        static_cast<int>(is_linux) +
+        static_cast<int>(is_android);
+    REQUIRE(os_flags == 1);
+
+    REQUIRE(is_apple == (is_macos || is_ios));
+    REQUIRE(is_desktop == (is_macos || is_windows || is_linux));
+    REQUIRE(is_mobile == (is_ios || is_android));
+    REQUIRE_FALSE((is_desktop && is_mobile));
+
+    switch (current_os) {
+        case OS::macOS:   REQUIRE(is_macos); break;
+        case OS::iOS:     REQUIRE(is_ios); break;
+        case OS::Windows: REQUIRE(is_windows); break;
+        case OS::Linux:   REQUIRE(is_linux); break;
+        case OS::Android: REQUIRE(is_android); break;
+        case OS::Unknown: FAIL("current OS should be known in supported test lanes"); break;
+    }
+}
+
+TEST_CASE("Architecture detection flags are mutually consistent",
+          "[platform][coverage][phase3]") {
+    REQUIRE(is_arm == (current_arch == Arch::ARM64 || current_arch == Arch::ARM32));
+    REQUIRE(is_x86 == (current_arch == Arch::x86_64 || current_arch == Arch::x86));
+    REQUIRE(is_64bit == (current_arch == Arch::x86_64 || current_arch == Arch::ARM64));
+    REQUIRE_FALSE((is_arm && is_x86));
+
+    switch (current_arch) {
+        case Arch::x86_64:
+            REQUIRE(is_x86);
+            REQUIRE(is_64bit);
+            break;
+        case Arch::ARM64:
+            REQUIRE(is_arm);
+            REQUIRE(is_64bit);
+            break;
+        case Arch::ARM32:
+            REQUIRE(is_arm);
+            REQUIRE_FALSE(is_64bit);
+            break;
+        case Arch::x86:
+            REQUIRE(is_x86);
+            REQUIRE_FALSE(is_64bit);
+            break;
+        case Arch::Unknown:
+            FAIL("current architecture should be known in supported test lanes");
+            break;
+    }
+}
+
 #ifdef __APPLE__
 TEST_CASE("Apple-specific detection", "[platform]") {
     REQUIRE(is_apple);
