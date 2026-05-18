@@ -159,6 +159,19 @@ TEST_CASE("MemoryStream close is idempotent",
     REQUIRE(stream.write(&byte, 1).closed());
 }
 
+TEST_CASE("MemoryStream write copies caller storage",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream;
+    std::uint8_t payload[] = {1, 2, 3};
+    REQUIRE(stream.write(payload, sizeof(payload)).bytes == sizeof(payload));
+
+    payload[0] = 9;
+    payload[1] = 9;
+    payload[2] = 9;
+
+    REQUIRE(stream.buffer() == std::vector<std::uint8_t>{1, 2, 3});
+}
+
 TEST_CASE("MemoryStream close rejects further I/O", "[stream]") {
     MemoryStream s;
     s.close();
