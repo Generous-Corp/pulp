@@ -8472,3 +8472,31 @@ demoted only because the clean coverage configure still hits the known
 FetchContent `mbedtls` tag checkout failure; GitHub-hosted CI remains the
 validation source. Auto-merge was enabled for #2228 after PR creation. No
 Namespace dispatch.
+
+2026-05-18 09:53 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-batch-738` as #2231
+(`test: batch phase3 coverage state runtime signal edges`). The branch is 24
+commits ahead of current `origin/main` after rebasing over the latest two main
+commits and batches state/runtime/signal/canvas coverage: mixed properties
+string escapes, copied binding callback/store behavior, StateStore custom
+version and reset notification ordering, undo transaction/clear notification
+edges, CachedProperty mismatch/move paths, scope guard ownership, trailing
+newline text diff, multi-argument expression parsing, JSON-RPC callback
+cleanup, MemoryStream closed-clear behavior, MD5 embedded-NUL input,
+BigInteger ordering, near-Nyquist filter design, single-pixel image
+convolution, FastMath clamp/soft-clip/dB/tanh/pow/reciprocal helpers, and Bias
+zero-length buffer handling. Focused local validation passed before push, then
+the branch was rebased and the touched signal targets were revalidated:
+`pulp-test-dsp-enhancements "[dsp][fast_math]"`,
+`pulp-test-v3-gaps "Bias handles zero-length in-place buffers"`, and
+`git diff --check`; the pre-rebase validation sweep also covered
+`pulp-test-properties`, `pulp-test-filter-design`,
+`pulp-test-image-convolution`, `pulp-test-binding`, `pulp-test-state`,
+`pulp-test-runtime-utils`, `pulp-test-json-rpc`, `pulp-test-stream`,
+`pulp-test-crypto`, `pulp-test-license`, `pulp-test-undo-manager`, and
+`pulp-test-state-tree`. Local pre-push gates passed with diff-cover disabled
+for the known clean-coverage FetchContent `mbedtls` checkout issue.
+GraphQL is still rate-limited, so #2231 was opened through the GitHub REST API
+and labeled `codecov` through REST; auto-merge still needs to be enabled once
+GraphQL quota recovers. Monitoring remains GitHub-hosted only. No Namespace
+dispatch.
