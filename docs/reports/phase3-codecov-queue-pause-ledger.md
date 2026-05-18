@@ -7465,6 +7465,19 @@ registry-generation preservation. Validation passed locally: rebuilt
 assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
+2026-05-18 00:00 PDT: added a fourth local-only font/canvas tranche to
+`feature/phase3-codecov-batch-728`: commit `556382a76`
+(`test(canvas): cover font registry stubs`). It extends
+`pulp-test-font-options` over non-Skia public font registration stubs,
+byte-validation guard behavior, generation no-op semantics, and the naive
+UTF-8 continuation-byte skipping in the `cluster_step` skeleton. The stub
+tests are guarded behind `#ifndef PULP_HAS_SKIA` so Skia/GPU lanes do not
+depend on stub-only symbols. Validation passed locally: rebuilt
+`pulp-test-font-options`, ran
+`./build/test/pulp-test-font-options "[canvas][font]"` (10 cases / 98
+assertions), and `git diff --check` passed. Still held locally for the next
+large batch PR.
+
 2026-05-17 23:55 PDT: added a third local-only font/canvas tranche to
 `feature/phase3-codecov-batch-728`: commit `0021239cd`
 (`test(canvas): cover font resolver fallbacks`). It extends
