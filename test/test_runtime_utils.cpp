@@ -11,12 +11,14 @@
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/text_diff.hpp>
+#include "../external/cpp-httplib/httplib.h"
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
 #include <iterator>
+#include <thread>
 
 using namespace pulp::runtime;
 
@@ -665,6 +667,57 @@ TEST_CASE("HTTP helpers reject malformed URL hosts and schemes",
     REQUIRE(http_get("http://example.com:not-a-port/path", 1).error == "Invalid URL");
     REQUIRE(http_post("file://example.com/path", "body", "text/plain", 1).error == "Invalid URL");
     REQUIRE_FALSE(http_download("http://", "/tmp/pulp-url-invalid-download-656", 1));
+}
+
+TEST_CASE("HTTP helpers round-trip against a loopback server",
+          "[runtime][http][url][coverage][phase3]") {
+    httplib::Server server;
+    server.Get("/hello", [](const httplib::Request& request, httplib::Response& response) {
+        response.set_header("X-Pulp-Test",
+                            request.has_param("name") ? request.get_param_value("name") : "missing");
+        response.set_content("hello", "text/plain");
+    });
+    server.Post("/echo", [](const httplib::Request& request, httplib::Response& response) {
+        response.set_header("X-Content-Type", request.get_header_value("Content-Type"));
+        response.set_content(request.body, "text/plain");
+    });
+    server.Get("/download", [](const httplib::Request&, httplib::Response& response) {
+        response.set_content(std::string("payload\0bytes", 13), "application/octet-stream");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+
+    std::thread thread([&] { server.listen_after_bind(); });
+    auto stop_server = make_scope_guard([&] {
+        server.stop();
+        if (thread.joinable())
+            thread.join();
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!server.is_running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(server.is_running());
+
+    const auto base = std::string("http://127.0.0.1:") + std::to_string(port);
+    const auto get_response = http_get(base + "/hello?name=agent", 2);
+    REQUIRE(get_response.ok());
+    REQUIRE(get_response.status_code == 200);
+    REQUIRE(get_response.body == "hello");
+    REQUIRE(get_response.headers.at("X-Pulp-Test") == "agent");
+
+    const auto post_response = http_post(base + "/echo", "body=42", "text/custom", 2);
+    REQUIRE(post_response.ok());
+    REQUIRE(post_response.body == "body=42");
+    REQUIRE(post_response.headers.at("X-Content-Type").find("text/custom") != std::string::npos);
+
+    TemporaryFile downloaded(".bin");
+    REQUIRE(http_download(base + "/download", downloaded.path_string(), 2));
+    std::ifstream file(downloaded.path(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    REQUIRE(bytes == std::string("payload\0bytes", 13));
 }
 
 // ── Text Diff ────────────────────────────────────────────────────────────
