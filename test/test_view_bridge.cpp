@@ -227,6 +227,46 @@ TEST_CASE("ViewBridge defers on_view_opened until notify_attached", "[view_bridg
     REQUIRE(p.closed_count == 1);
 }
 
+TEST_CASE("ViewBridge stores detached resize state and resets on reopen",
+          "[view_bridge][coverage][phase3]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.width() == 480);
+    REQUIRE(bridge.height() == 320);
+
+    bridge.resize(700, 500);
+    REQUIRE(bridge.width() == 700);
+    REQUIRE(bridge.height() == 500);
+    REQUIRE(p.resize_count == 0);
+
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.width() == 480);
+    REQUIRE(bridge.height() == 320);
+
+    bridge.resize(900, 600);
+    REQUIRE(bridge.width() == 900);
+    REQUIRE(bridge.height() == 600);
+    REQUIRE(p.resize_count == 0);
+
+    bridge.notify_attached();
+    bridge.resize(1024, 768);
+    REQUIRE(p.resize_count == 1);
+    REQUIRE(p.last_w == 1024);
+    REQUIRE(p.last_h == 768);
+
+    bridge.close();
+    REQUIRE(bridge.width() == 1024);
+    REQUIRE(bridge.height() == 768);
+
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.width() == 480);
+    REQUIRE(bridge.height() == 320);
+}
+
 TEST_CASE("ViewBridge close without attach does not fire on_view_closed", "[view_bridge]") {
     // Simulates: adapter called open(), then host attach failed, so
     // notify_attached() was never invoked. close() must NOT fire
