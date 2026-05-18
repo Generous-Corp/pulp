@@ -8189,3 +8189,20 @@ each slice. PR monitoring remains GitHub-hosted only and REST-only while
 GraphQL quota is exhausted: #2173, #2202, #2208, and #2210 currently have no
 failing checks and are blocked only on queued/running GitHub-hosted lanes. No
 Namespace dispatch.
+
+2026-05-18 05:27 PDT: continued held large GitHub-only coverage batch
+`feature/phase3-codecov-batch-731`, now 12 local commits ahead of
+`origin/main` and still intentionally held for a larger PR. New local-only
+commits since the previous ledger entry: `2b2265897` (`test(view): cover theme
+preset semantic mapping`), `baf8bb18f` (`test(events): cover timer lifecycle
+guards`), `ee301bc80` (`test(view): cover waveform editor shortcut edges`),
+and `2f2eb2bbb` (`test(view): cover split view pane replacement`). Focused
+local validation passed: `pulp-test-theme-presets` `[view][presets][derive]`,
+`pulp-test-events-timer-helpers` `[events][timer]`,
+`pulp-test-waveform-editor` `[view][waveform_editor]`,
+`pulp-test-phase9-widgets` `[view][split_view]`, and `git diff --check` after
+each slice. A sidecar coverage explorer could not start because the agent
+thread limit was already reached, so coverage work continued locally. PR
+monitoring remains GitHub-hosted only and REST-only: #2173, #2202, #2208, and
+#2210 still have no failing checks and are blocked only on queued/running
+GitHub-hosted lanes. No Namespace dispatch.
