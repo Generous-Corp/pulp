@@ -91,3 +91,9 @@ TEST_CASE("Interpolator sinc6 impulse response is symmetric at midpoint", "[sign
     REQUIRE(left > 0.0f);
     REQUIRE(outer_left < 0.0f);
 }
+
+TEST_CASE("Interpolator linear preserves constants outside the unit interval",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::linear(-2.0f, -0.75f, -0.75f), WithinAbs(-0.75f, 1e-6f));
+    REQUIRE_THAT(Interpolator::linear(3.0f, 4.5f, 4.5f), WithinAbs(4.5f, 1e-6f));
+}
