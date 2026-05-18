@@ -38,6 +38,24 @@ TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[stat
     REQUIRE_FALSE(props.get_double("gain").has_value());
 }
 
+TEST_CASE("PropertiesFile numeric getters reject partially parsed strings",
+          "[state][properties][coverage][phase3-large]") {
+    PropertiesFile props;
+    props.set_string("count_suffix", "12items");
+    props.set_string("count_prefix", "id12");
+    props.set_string("gain_suffix", "0.5db");
+    props.set_string("gain_prefix", "level0.5");
+    props.set_string("negative", "-12");
+    props.set_string("fraction", "-12.25");
+
+    REQUIRE_FALSE(props.get_int("count_suffix").has_value());
+    REQUIRE_FALSE(props.get_int("count_prefix").has_value());
+    REQUIRE_FALSE(props.get_double("gain_suffix").has_value());
+    REQUIRE_FALSE(props.get_double("gain_prefix").has_value());
+    REQUIRE(props.get_int("negative").value_or(0) == -12);
+    REQUIRE_THAT(props.get_double("fraction").value_or(0.0), WithinAbs(-12.25, 0.001));
+}
+
 TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
           "[state][properties][issue-641]") {
     PropertiesFile props;

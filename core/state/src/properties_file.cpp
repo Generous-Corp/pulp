@@ -91,7 +91,10 @@ std::optional<int64_t> PropertiesFile::get_int(std::string_view key) const {
     auto it = values_.find(key);
     if (it == values_.end()) return std::nullopt;
     try {
-        return std::stoll(it->second);
+        size_t consumed = 0;
+        auto value = std::stoll(it->second, &consumed);
+        if (consumed != it->second.size()) return std::nullopt;
+        return value;
     } catch (...) {
         return std::nullopt;
     }
@@ -105,7 +108,10 @@ std::optional<double> PropertiesFile::get_double(std::string_view key) const {
     auto it = values_.find(key);
     if (it == values_.end()) return std::nullopt;
     try {
-        return std::stod(it->second);
+        size_t consumed = 0;
+        auto value = std::stod(it->second, &consumed);
+        if (consumed != it->second.size()) return std::nullopt;
+        return value;
     } catch (...) {
         return std::nullopt;
     }
