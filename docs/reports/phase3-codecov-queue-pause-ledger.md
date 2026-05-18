@@ -7956,3 +7956,17 @@ origin/main --head HEAD --mode=report`, and `git diff --check`. Current
 monitoring state: PR #2173 is at head `d3a06e5d` and PR #2202 is at head
 `43711a2b`; both have no failing GitHub checks at this update and are waiting
 on queued/running GitHub-hosted lanes. No Namespace dispatch.
+
+2026-05-18 03:19 PDT: pushed `feature/phase3-codecov-batch-729` and opened
+GitHub-hosted PR #2208 (`test: batch phase3 coverage format runtime edges`).
+Initial CI surfaced the current source-contract gate gap for the JSX
+experiment (`jsx` parser label missing from `source-contracts.json` and
+`jsx-roundtrip.sh` unreferenced). Applied the existing root-cause registry fix
+as commit `6418cbd85` (`test(import): register jsx source contract`), bringing
+the batch to 30 commits. Local validation for the fix passed:
+`python3 tools/import-validation/check-source-contracts.py --strict`,
+`python3 tools/import-validation/test_source_contracts.py`, and `git diff
+--check`. Pushed the corrected head with `PULP_SKIP_PREPUSH=1` after local
+validation; #2208 checks restarted with no failures at this update. PR #2173
+and PR #2202 remain open with no failing checks, still waiting on
+queued/running GitHub-hosted lanes. No Namespace dispatch.
