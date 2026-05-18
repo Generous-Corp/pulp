@@ -119,6 +119,13 @@ TEST_CASE("FastMath clamp_unit", "[signal][fast_math]") {
     REQUIRE(FastMath::clamp_unit(-2.0f) == -1.0f);
 }
 
+TEST_CASE("FastMath tanh is odd within unclamped range",
+          "[signal][fast_math][codecov]") {
+    for (float value : {0.125f, 0.75f, 2.5f, 3.75f}) {
+        REQUIRE_THAT(FastMath::tanh(value), WithinAbs(-FastMath::tanh(-value), 1e-6f));
+    }
+}
+
 TEST_CASE("FastMath tanh remains odd inside the approximation range",
           "[signal][fast_math][codecov]") {
     for (float value : {0.125f, 0.75f, 1.5f, 3.5f}) {
@@ -135,4 +142,12 @@ TEST_CASE("FastMath exp2 is monotonic across fractional octaves",
         REQUIRE(next > previous);
         previous = next;
     }
+}
+
+TEST_CASE("FastMath log2 orders common gain ratios",
+          "[signal][fast_math][codecov]") {
+    REQUIRE(FastMath::log2(0.25f) < FastMath::log2(0.5f));
+    REQUIRE(FastMath::log2(0.5f) < FastMath::log2(1.0f));
+    REQUIRE(FastMath::log2(1.0f) < FastMath::log2(2.0f));
+    REQUIRE(FastMath::log2(2.0f) < FastMath::log2(4.0f));
 }
