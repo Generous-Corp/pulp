@@ -731,6 +731,14 @@ TEST_CASE("Expression evaluator covers remaining built-in math functions",
     auto powered = evaluate("pow(2, 5)");
     REQUIRE(powered.has_value());
     REQUIRE(*powered == Catch::Approx(32.0));
+
+    REQUIRE(evaluate("log(e)").value_or(0.0) == Catch::Approx(1.0));
+    REQUIRE(evaluate("log10(1000)").value_or(0.0) == Catch::Approx(3.0));
+    REQUIRE(evaluate("exp(1)").value_or(0.0) == Catch::Approx(2.71828182845904523536));
+    REQUIRE(evaluate("floor(2.9) + ceil(2.1) + round(2.5)").value_or(0.0)
+            == Catch::Approx(8.0));
+    REQUIRE(evaluate("max(2, 5) + pow(2, 3)").value_or(0.0) == Catch::Approx(13.0));
+    REQUIRE(evaluate("tan(0)").value_or(1.0) == Catch::Approx(0.0));
 }
 
 TEST_CASE("Expression evaluator covers built-in math function variants",
