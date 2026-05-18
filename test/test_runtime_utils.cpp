@@ -602,6 +602,14 @@ TEST_CASE("IPv4 validation accepts boundary octets",
     REQUIRE(is_valid_ipv4("255.255.255.255"));
 }
 
+TEST_CASE("IPv4 validation rejects malformed octet counts",
+          "[runtime][ip][coverage][phase3-batch742]") {
+    REQUIRE_FALSE(is_valid_ipv4(""));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0"));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.0.1.2"));
+    REQUIRE_FALSE(is_valid_ipv4("127..0.1"));
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
