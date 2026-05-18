@@ -7970,3 +7970,32 @@ the batch to 30 commits. Local validation for the fix passed:
 validation; #2208 checks restarted with no failures at this update. PR #2173
 and PR #2202 remain open with no failing checks, still waiting on
 queued/running GitHub-hosted lanes. No Namespace dispatch.
+
+2026-05-18 03:41 PDT: continued GitHub-hosted PR monitoring and started the
+next held local batch `feature/phase3-codecov-batch-730`, currently 6 commits
+ahead of `origin/main` and intentionally not opened yet while it grows toward
+the next large PR. Batch #730 currently contains: `98a169d61` (`test(signal):
+cover dsp utility edge paths`), `0600defa4` (`test(host): cover parameter event
+queue edges`), `ca277fa7e` (`test(canvas): cover text run planner artifacts`),
+`b6db294ff` (`test(canvas): cover font option hash fields`), `1acb70bfc`
+(`test(view): cover live constant registry edges`), and `b90578131`
+(`test(format): cover editor ui fallback`). Local focused validation passed:
+`pulp-test-dsp-expansion` (49 cases / 758 assertions),
+`pulp-test-host "ParameterEventQueue*"`, `pulp-test-text-shaper
+"TextRunPlanner*"`, `pulp-test-font-variable-axes "FontOptions hash*"`,
+`pulp-test-view "LiveConstant*"`, `pulp-test-headless "build_editor_ui*"`,
+and `git diff --check`.
+
+Also investigated #2202 after GitHub completed the failed run. macOS ARM64 was
+the known external timeout in `cmake-ios-auv3-configure` after 5879/5880 tests
+passed. Windows surfaced one real test portability failure: `FileStream move
+assignment handles self and closed sources` attempted to remove a temp file
+while a `FileStream` reader was still open, which POSIX allows but Windows
+correctly rejects. Fixed root cause in #2202 as `f1c5577c5` (`test(runtime):
+close file stream before cleanup`) and pushed the branch; local validation
+passed `pulp-test-stream "FileStream move assignment handles self and closed
+sources"` and `git diff --check`. The local diff-coverage pre-push configure
+failed while fetching `mbedtls` tag `v3.6.2`, so only that pre-push
+diff-coverage failure was demoted for push; GitHub-hosted CI restarted with no
+failures at this ledger update. #2173 and #2208 remain open with no failing
+checks, waiting on queued/running GitHub-hosted lanes. No Namespace dispatch.
