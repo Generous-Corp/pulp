@@ -8,6 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01160"></a>
+## [0.116.0] - 2026-05-18
+
+- feat(canvas): register_font_url async lifecycle (font v2 Slice 2.1) ([#2246](https://github.com/danielraffel/pulp/pull/2246))
+- refactor(view-js): Phase 5 P5-7 first cut — extract CSS selector engine ([#2245](https://github.com/danielraffel/pulp/pull/2245))
+- feat(canvas): color-font predicate on ResolvedFont (font v2 Slice 3.1) ([#2243](https://github.com/danielraffel/pulp/pull/2243))
+- refactor(view-js): Phase 5 P5-6 first cut — extract native GPU canvas helpers ([#2242](https://github.com/danielraffel/pulp/pull/2242))
+- feat(canvas): TextRunPlanner::shape_batch parallel shaping (font v2 Slice 3.7) ([#2240](https://github.com/danielraffel/pulp/pull/2240))
+- fix(release): supersede only past latest-published — stop SDK starvation cascade ([#2238](https://github.com/danielraffel/pulp/pull/2238))
+- test: batch phase3 coverage format runtime edges ([#2208](https://github.com/danielraffel/pulp/pull/2208))
+- refactor(view): Phase 4 R2-2 header-diet first cut — view_fwd.hpp + out-of-line dtor ([#2236](https://github.com/danielraffel/pulp/pull/2236))
+- docs(experimental): document pulp-rs production status (U-4) ([#2187](https://github.com/danielraffel/pulp/pull/2187))
+
 <a id="v01150"></a>
 ## [0.115.0] - 2026-05-18
 
@@ -17,21 +30,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 ## [0.114.0] - 2026-05-18
 
 - feat(motion): Phase 11 — native bridges, visual+ enhancements, scroll/outlier, CLI/MCP ([#2168](https://github.com/danielraffel/pulp/pull/2168))
-
-<a id="v011312"></a>
-## [0.113.12] - 2026-05-18
-
-- refactor(view-js): P5-7 first cut — extracted CSS selector engine from web-compat-document.js (-381 lines, 1,961 → 1,580)
-
-<a id="v011311"></a>
-## [0.113.11] - 2026-05-18
-
-- refactor(view-js): P5-6 first cut — extracted native GPU helpers from web-compat-canvas.js (-536 lines, 2,117 → 1,581)
-
-<a id="v011310"></a>
-## [0.113.10] - 2026-05-18
-
-- refactor(view): R2-2 header-diet first cut — added <pulp/view/view_fwd.hpp> + moved View::~View() body to view.cpp (no ABI change)
 
 <a id="v01139"></a>
 ## [0.113.9] - 2026-05-18
@@ -1983,11 +1981,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.116.0]: https://github.com/danielraffel/pulp/releases/tag/v0.116.0
 [0.115.0]: https://github.com/danielraffel/pulp/releases/tag/v0.115.0
 [0.114.0]: https://github.com/danielraffel/pulp/releases/tag/v0.114.0
-[0.113.12]: https://github.com/danielraffel/pulp/releases/tag/v0.113.12
-[0.113.11]: https://github.com/danielraffel/pulp/releases/tag/v0.113.11
-[0.113.10]: https://github.com/danielraffel/pulp/releases/tag/v0.113.10
 [0.113.9]: https://github.com/danielraffel/pulp/releases/tag/v0.113.9
 [0.113.8]: https://github.com/danielraffel/pulp/releases/tag/v0.113.8
 [0.113.5]: https://github.com/danielraffel/pulp/releases/tag/v0.113.5
