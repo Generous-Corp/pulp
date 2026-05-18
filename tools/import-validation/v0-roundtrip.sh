@@ -78,7 +78,7 @@ if [[ $COVERAGE -eq 1 ]]; then
   default_ctest_regex='parse_v0_dev_react|WidgetBridge __pulpRuntimeImport__ dispatches v0|WidgetBridge __pulpRuntimeImport__ surfaces parse failure'
   export PULP_DIFF_COVER_CTEST_REGEX="${PULP_DIFF_COVER_CTEST_REGEX:-$default_ctest_regex}"
   bash "$PULP_DIR/tools/scripts/local_diff_cover.sh" \
-    pulp-test-design-import pulp-test-widget-bridge
+    pulp-test-design-import pulp-test-widget-bridge-runtime-import
   green "v0 parser diff coverage passed"
   exit 0
 fi
@@ -99,11 +99,11 @@ find_test_exe() {
 if [[ $SKIP_BUILD -eq 0 ]]; then
   cmake -S "$PULP_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
   cmake --build "$BUILD_DIR" --parallel "$BUILD_JOBS" \
-    --target pulp-test-design-import pulp-test-widget-bridge
+    --target pulp-test-design-import pulp-test-widget-bridge-runtime-import
 fi
 
 DESIGN_IMPORT_TEST="$(find_test_exe pulp-test-design-import)"
-WIDGET_BRIDGE_TEST="$(find_test_exe pulp-test-widget-bridge)"
+WIDGET_BRIDGE_TEST="$(find_test_exe pulp-test-widget-bridge-runtime-import)"
 
 "$DESIGN_IMPORT_TEST" '[phase-6.6.2]'
 "$WIDGET_BRIDGE_TEST" '[phase-6.6.2]'
