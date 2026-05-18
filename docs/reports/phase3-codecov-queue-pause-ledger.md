@@ -8885,3 +8885,17 @@ validation passed: `cmake --build build --target pulp-test-cli-upgrade-url`,
 `git diff --check`. Branch is clean and 17 commits ahead of `origin/main`;
 still held locally to build toward a larger GitHub-hosted PR. No Namespace
 dispatch.
+
+2026-05-18 15:21 PDT: continued the held local-only GitHub batch
+`feature/phase3-codecov-batch-747` with commit `ebc7d258e`
+(`test(cli): cover run parser frame edge paths`). This tranche adds
+deterministic `pulp run` parser coverage for `--frames` overflow values,
+plus-prefixed frame values, and repeated `--` separator behavior. Local
+validation initially caught the existing separator contract (extra separators
+are ignored, not forwarded), and the test was adjusted to document that
+behavior. Focused local validation passed:
+`cmake --build build --target pulp-test-cli-run-options`,
+`build/test/pulp-test-cli-run-options` (87 assertions in 17 test cases), and
+`git diff --check`. Branch is clean and 18 commits ahead of `origin/main`;
+still held locally to build toward a larger GitHub-hosted PR. No Namespace
+dispatch.
