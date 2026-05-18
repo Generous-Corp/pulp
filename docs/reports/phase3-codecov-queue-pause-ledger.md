@@ -8113,6 +8113,40 @@ log until the overall workflow completes; keep monitoring and inspect before
 patching or rerunning. #2208 has no failures and remains queued/running on
 GitHub-hosted lanes. No Namespace dispatch.
 
+2026-05-18 05:59 PDT: completed held large GitHub-only coverage batch
+`feature/phase3-codecov-batch-731` at 24 local commits ahead of
+`origin/main`, ready to publish as the next batched PR. New local-only commits
+since the last ledger entry: `3d2089d5c` (`test(runtime): cover base64
+alphabet and whitespace edges`), `3c6bcfb99` (`test(audio): cover focus
+subscriber snapshot dispatch`), `c02c5bfa5` (`test(midi): cover ump buffer
+event operations`), `5c985fd69` (`test(cli): cover json parser duplicate and
+escape edges`), `29018f93c` (`test(view): cover image cache decoder and clear
+contracts`), `f8f000f90` (`test(platform): cover popup menu item ordering`),
+`cc40ae2e5` (`test(cli): cover shell quote empty arguments`), and
+`eda886d69` (`test(audio): cover callback context defaults`). Focused local
+validation passed for the newly added final tranches:
+`pulp-test-runtime-utils` `[runtime][base64]`, `pulp-test-audio-focus`
+`[audio][focus]`, `pulp-test-midi-buffer-ump` `[midi][buffer][ump]`,
+`pulp-test-cli-json-parser` `[cli][json-parser]`, `pulp-test-image-cache`,
+`pulp-test-file-dialog` `[platform][popup-menu]`,
+`pulp-test-cli-shell-quote` `[cli][shell-quote]`, and `pulp-test-audio`
+focused CallbackContext case. Before publish, `git fetch origin main` showed
+no incoming divergence (`origin/main...HEAD` = `0 24`), all changed test
+targets built successfully, all selected changed test binaries passed
+(`pulp-test-resizable-shell`, `pulp-test-theme-contrast`,
+`pulp-test-motion-cost`, `pulp-test-motion-preferences`,
+`pulp-test-table-model`, `pulp-test-midi-file`, `pulp-test-state-tree`,
+`pulp-test-runtime-utils`, `pulp-test-theme-presets`,
+`pulp-test-events-timer-helpers`, `pulp-test-waveform-editor`,
+`pulp-test-phase9-widgets`, `pulp-test-image-convolution`,
+`pulp-test-fast-math`, `pulp-test-property-list`, `pulp-test-vendor-url`,
+`pulp-test-audio-focus`, `pulp-test-midi-buffer-ump`,
+`pulp-test-cli-json-parser`, `pulp-test-image-cache`, `pulp-test-file-dialog`,
+`pulp-test-cli-shell-quote`, and `pulp-test-audio "~[coreaudio]"`), and
+`git diff --check` passed. REST-only PR monitoring showed #2173, #2208, and
+#2210 still open with no failing checks; all are blocked only on queued/running
+GitHub-hosted lanes. No Namespace dispatch.
+
 2026-05-18 05:47 PDT: repaired and continued GitHub-only coverage work after
 new PR queue failures. PR #2202 had merged, so its worktree
 `/private/tmp/pulp-phase3-codecov-batch-728`, local branch
