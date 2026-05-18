@@ -7765,3 +7765,17 @@ with an `sdf-text` skip trailer for the small `path_to_sdf` null-input guard,
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
 (patch bump suggested because this batch includes source fixes), and
 `git diff --check`. Batch #728 is now 17 local commits ahead and remains held.
+
+2026-05-18 01:32 PDT: added an eighteenth local-only MIDI-CI tranche to held
+batch `feature/phase3-codecov-batch-728`: commit `a327f3d15`
+(`test(midi): cover ci null message input`). It adds deterministic coverage for
+`CiDiscovery::process_message(nullptr, size)` at both zero and non-zero sizes
+and fixes the parser to return no responses instead of dereferencing a null
+buffer before the existing size/header guards. Local validation passed:
+`cmake --build build --target pulp-test-midi-ci -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-midi-ci` (26 cases / 126 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`
+with the existing `sdf-text` skip trailer for the earlier SDF helper guard,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
+(patch bump suggested because this batch includes source fixes), and
+`git diff --check`. Batch #728 is now 18 local commits ahead and remains held.
