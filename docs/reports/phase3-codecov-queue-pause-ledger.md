@@ -8791,3 +8791,18 @@ macOS build/execution of 24 touched test binaries: `pulp-test-theme`,
 GitHub REST API because the session's GraphQL quota is exhausted. Initial CI
 state was 20 pending checks, 0 failures. GitHub-hosted CI is the intended
 validation source. No Namespace dispatch.
+
+2026-05-18 15:11 PDT: continued the held local-only GitHub batch
+`feature/phase3-codecov-batch-747` with commit `c87bed902`
+(`test(cli): cover version diagnostics edge paths`). This tranche adds
+deterministic `pulp doctor --versions` coverage for non-comparable plugin
+manifest tags, missing plugin override fallback behavior, empty plugin
+discovery, execution-preflight highest-required-version selection, malformed
+`cli_min_version` TOML values, nameless project label fallback, missing
+plugin-min manifest paths, scanned/missing project rendering, and JSON escaping
+for quoted, backslash, newline, and tab-bearing fields. Focused local validation
+passed: `cmake --build build --target pulp-test-cli-version-diag`,
+`build/test/pulp-test-cli-version-diag` (115 assertions in 44 test cases), and
+`git diff --check`. Branch is clean and 12 commits ahead of `origin/main`;
+still held locally to build toward a larger GitHub-hosted PR. No Namespace
+dispatch.
