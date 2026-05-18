@@ -70,6 +70,16 @@ TEST_CASE("ScopeGuard move transfers the active cleanup",
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("PULP_ON_SCOPE_EXIT macro captures local state",
+          "[runtime][scope_guard][coverage][phase3]") {
+    int value = 0;
+    {
+        PULP_ON_SCOPE_EXIT(value += 7;);
+        value = 3;
+    }
+    REQUIRE(value == 10);
+}
+
 // ── TemporaryFile ───────────────────────────────────────────────────────
 
 TEST_CASE("TemporaryFile creates and deletes", "[runtime][temp_file]") {
