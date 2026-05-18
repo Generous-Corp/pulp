@@ -290,6 +290,37 @@ TEST_CASE("undefined system statuses cancel pending system common data",
     REQUIRE(v[0].d2 == 0x7F);
 }
 
+TEST_CASE("empty feed and reset drop partial running-status messages",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser parser;
+    std::vector<Captured> shorts;
+    parser.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    parser.feed(nullptr, 0);
+    REQUIRE(shorts.empty());
+
+    std::vector<uint8_t> partial = {0x90, 0x3C};
+    parser.feed(partial.data(), partial.size());
+    REQUIRE(shorts.empty());
+
+    parser.reset();
+    std::vector<uint8_t> trailing_data = {0x7F};
+    parser.feed(trailing_data.data(), trailing_data.size());
+    REQUIRE(shorts.empty());
+
+    std::vector<uint8_t> complete = {0x90, 0x40, 0x64};
+    parser.feed(complete.data(), complete.size());
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x40);
+    REQUIRE(shorts[0].d2 == 0x64);
+}
+
 TEST_CASE("system common interruption inside sysex is reprocessed",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;
