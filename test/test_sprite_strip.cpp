@@ -58,3 +58,38 @@ TEST_CASE("SpriteStrip empty", "[view][sprite]") {
     REQUIRE_FALSE(strip.loaded());
     REQUIRE(strip.frame_for_value(0.5f) == 0);
 }
+
+TEST_CASE("SpriteStrip clamps frame lookup and exposes loaded data",
+          "[view][sprite][coverage][phase3]") {
+    SpriteStrip strip;
+    std::vector<uint8_t> data(4 * 20 * 4, 77);
+    strip.load(data.data(), data.size(), 4, 20, 5);
+
+    REQUIRE(strip.total_width() == 4);
+    REQUIRE(strip.total_height() == 20);
+    REQUIRE(strip.data_size() == data.size());
+    REQUIRE(strip.data() != nullptr);
+    REQUIRE(strip.data()[0] == 77);
+
+    REQUIRE(strip.frame_for_value(-1.0f) == 0);
+    REQUIRE(strip.frame_for_value(2.0f) == 4);
+    REQUIRE(strip.frame_for_value(0.24f) == 1);
+
+    int x = -1;
+    int y = -1;
+    strip.frame_offset(-2, x, y);
+    REQUIRE(x == 0);
+    REQUIRE(y == -8);
+}
+
+TEST_CASE("SpriteStrip interpolation flag is independently configurable",
+          "[view][sprite][coverage][phase3]") {
+    SpriteStrip strip;
+    REQUIRE_FALSE(strip.interpolate());
+
+    strip.set_interpolate(true);
+    REQUIRE(strip.interpolate());
+
+    strip.set_interpolate(false);
+    REQUIRE_FALSE(strip.interpolate());
+}
