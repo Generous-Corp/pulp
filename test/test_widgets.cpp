@@ -42,6 +42,14 @@ std::shared_ptr<SpriteStrip> make_sprite_strip(
     return strip;
 }
 
+Label* add_child_label(View& parent, std::string text = "x") {
+    auto child = std::make_unique<Label>(std::move(text));
+    child->set_bounds({0, 0, 100, 20});
+    auto* raw = child.get();
+    parent.add_child(std::move(child));
+    return raw;
+}
+
 }  // namespace
 
 TEST_CASE("Label renders text", "[view][widget]") {
@@ -381,6 +389,33 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     const float snap_lh = 10.0f * 1.6f;
     REQUIRE_THAT(snap.measured_height(50.0f),    WithinAbs(snap_lh, 0.01f));
     REQUIRE_THAT(snap.measured_height(10000.0f), WithinAbs(snap_lh, 0.01f));
+}
+
+TEST_CASE("Label baseline_y follows text metrics and inherited font size",
+          "[view][widget][baseline][coverage]") {
+    Label normal("CHAIN");
+    normal.set_font_size(14.0f);
+    const float normal_baseline = normal.baseline_y();
+    REQUIRE(normal_baseline > 0.0f);
+    REQUIRE(normal_baseline < normal.intrinsic_height());
+
+    Label large("CHAIN");
+    large.set_font_size(28.0f);
+    REQUIRE(large.baseline_y() > normal_baseline);
+
+    Label empty("");
+    empty.set_font_size(14.0f);
+    REQUIRE(empty.baseline_y() > 0.0f);
+
+    View parent;
+    parent.set_bounds({0, 0, 200, 100});
+    auto* inherited = add_child_label(parent, "INFO");
+    parent.set_inheritable_font_size(24.0f);
+    REQUIRE_FALSE(inherited->has_own_font_size());
+    REQUIRE(inherited->baseline_y() > normal_baseline);
+
+    inherited->set_font_size(10.0f);
+    REQUIRE(inherited->baseline_y() < normal_baseline);
 }
 
 TEST_CASE("Label intrinsic_width is sane for typical chrome strings",
