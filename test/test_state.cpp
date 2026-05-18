@@ -729,6 +729,20 @@ TEST_CASE("EditHistory coalesces matching descriptions and clamps max depth",
     REQUIRE_FALSE(history.can_undo());
 }
 
+TEST_CASE("StateStore unknown modulation and reset calls are inert",
+          "[state][store][coverage][phase3-github]") {
+    StateStore store;
+    store.add_parameter(make_param_info(3, "Depth", "", {0.0f, 1.0f, 0.25f}));
+
+    store.set_mod_offset(404, 3.0f);
+    store.add_mod_offset(404, 2.0f);
+    REQUIRE_THAT(store.get_modulated(404), WithinAbs(0.0f, 1e-6f));
+
+    store.reset_to_default(404);
+    store.reset_all_to_defaults();
+    REQUIRE_THAT(store.get_value(3), WithinAbs(0.25f, 1e-6f));
+}
+
 TEST_CASE("StateStore deserialize keeps complete prefix on short declared count",
           "[state][serialize][coverage][phase3-large]") {
     StateStore source;
