@@ -7809,3 +7809,18 @@ semantics. Local validation passed:
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
 and `git diff --check`. Batch #728 is now 20 local commits ahead and remains
 held for the larger 24-36 commit PR.
+
+2026-05-18 02:09 PDT: rebased held batch
+`feature/phase3-codecov-batch-728` cleanly onto current `origin/main`, then
+added a twenty-first local-only runtime BigInteger tranche: commit
+`b30e6ce13` (`test(runtime): cover bigint assignment identities`). It extends
+`pulp-test-license` over `BigInteger` self copy-assignment, self
+move-assignment, addition/multiplication/modulo identity values, and
+zero-exponent modular exponentiation. Local validation passed:
+`cmake --build build --target pulp-test-license -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-license "[crypto][bigint]" -r compact`
+(15 cases / 38 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
+and `git diff --check`. Batch #728 is now 21 local commits ahead and remains
+held for the larger 24-36 commit PR.
