@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01135"></a>
+## [0.113.5] - 2026-05-18
+
+- refactor(view): R2-5 first cut — extracted PNG capture helpers (nsdata_to_bytes, bitmap_rep_to_png, encode_rgba_to_png, capture_view_cache_png, capture_window_content_png, capture_window_screencapture_png) from window_host_mac.mm (-107 lines, 2,529 → 2,422)
+
 <a id="v01134"></a>
 ## [0.113.4] - 2026-05-18
 
@@ -1936,6 +1941,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.113.5]: https://github.com/danielraffel/pulp/releases/tag/v0.113.5
 [0.113.4]: https://github.com/danielraffel/pulp/releases/tag/v0.113.4
 [0.113.3]: https://github.com/danielraffel/pulp/releases/tag/v0.113.3
 [0.113.2]: https://github.com/danielraffel/pulp/releases/tag/v0.113.2
