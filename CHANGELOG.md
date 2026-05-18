@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01110"></a>
+## [0.111.0] - 2026-05-18
+
+- feat(design-import): Phase A — default shortcuts (source-matched heuristic) ([#2161](https://github.com/danielraffel/pulp/pull/2161))
+
 <a id="v01100"></a>
 ## [0.110.0] - 2026-05-17
 
@@ -1894,6 +1899,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.111.0]: https://github.com/danielraffel/pulp/releases/tag/v0.111.0
 [0.110.0]: https://github.com/danielraffel/pulp/releases/tag/v0.110.0
 [0.109.0]: https://github.com/danielraffel/pulp/releases/tag/v0.109.0
 [0.108.0]: https://github.com/danielraffel/pulp/releases/tag/v0.108.0
