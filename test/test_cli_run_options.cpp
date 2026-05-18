@@ -172,6 +172,27 @@ TEST_CASE("pulp run forwards arguments after `--` verbatim",
     REQUIRE(args[3] == "--debug-port=9222");
 }
 
+TEST_CASE("pulp run forwards all tokens after separator including known flags",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({"target", "--", "--headless", "--frames", "9"});
+    REQUIRE(r.target_name == "target");
+    REQUIRE_FALSE(r.headless);
+    REQUIRE(r.frames == 1);
+    REQUIRE(r.user_pass_through == std::vector<std::string>{
+        "--headless", "--frames", "9",
+    });
+
+    auto args = assemble_launch_args(r);
+    REQUIRE(args == r.user_pass_through);
+}
+
+TEST_CASE("pulp run treats additional positionals as pass-through",
+          "[cli][run][coverage]") {
+    auto r = parse_run_options({"primary-target", "secondary", "third"});
+    REQUIRE(r.target_name == "primary-target");
+    REQUIRE(r.user_pass_through == std::vector<std::string>{"secondary", "third"});
+}
+
 TEST_CASE("pulp run preserves unknown flags as pass-through",
           "[cli][run][issue-914]") {
     // Legacy cmd_run silently dropped unknown flags; preserving that
