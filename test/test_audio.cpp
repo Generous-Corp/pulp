@@ -4,6 +4,7 @@
 #include <pulp/audio/channel_set.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <thread>
 #include <chrono>
@@ -253,6 +254,21 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
     REQUIRE(measurer.peak_load() == 0.0f);
 
     measurer.begin(64, 0.0f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.begin(64, std::numeric_limits<float>::infinity());
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.begin(std::numeric_limits<int>::max(), 1.0e-30f);
     measurer.end();
     REQUIRE(measurer.load() == 0.0f);
     REQUIRE(measurer.peak_load() == 0.0f);
