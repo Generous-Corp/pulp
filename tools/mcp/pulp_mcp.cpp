@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/excerpt_service.hpp>
@@ -500,7 +501,13 @@ static int extract_int(const std::string& json, const std::string& key, int fall
     auto raw = extract_raw(json, key);
     if (raw.empty() || raw == "null") return fallback;
     try {
-        return std::stoi(raw);
+        std::size_t pos = 0;
+        int value = std::stoi(raw, &pos);
+        while (pos < raw.size()) {
+            if (!std::isspace(static_cast<unsigned char>(raw[pos]))) return fallback;
+            ++pos;
+        }
+        return value;
     } catch (...) {
         return fallback;
     }
@@ -510,7 +517,13 @@ static double extract_double(const std::string& json, const std::string& key, do
     auto raw = extract_raw(json, key);
     if (raw.empty() || raw == "null") return fallback;
     try {
-        return std::stod(raw);
+        std::size_t pos = 0;
+        double value = std::stod(raw, &pos);
+        while (pos < raw.size()) {
+            if (!std::isspace(static_cast<unsigned char>(raw[pos]))) return fallback;
+            ++pos;
+        }
+        return value;
     } catch (...) {
         return fallback;
     }
