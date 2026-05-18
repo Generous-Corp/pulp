@@ -223,6 +223,28 @@ TEST_CASE("RpnParser suppresses increment while parameter is being reselected",
                                             static_cast<uint16_t>((3 << 7) | 5)});
 }
 
+TEST_CASE("RpnParser reset clears selected parameters on every channel",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    int calls = 0;
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
+    rpn.on_nrpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
+
+    rpn.process(MidiEvent::cc(0, 101, 1));
+    rpn.process(MidiEvent::cc(0, 100, 2));
+    rpn.process(MidiEvent::cc(15, 99, 3));
+    rpn.process(MidiEvent::cc(15, 98, 4));
+
+    rpn.reset();
+
+    rpn.process(MidiEvent::cc(0, 6, 5));
+    rpn.process(MidiEvent::cc(0, 38, 6));
+    rpn.process(MidiEvent::cc(15, 6, 7));
+    rpn.process(MidiEvent::cc(15, 38, 8));
+
+    REQUIRE(calls == 0);
+}
+
 // ── MidiKeyboardState ────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboardState tracks note on/off", "[midi][keyboard]") {
