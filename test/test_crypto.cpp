@@ -113,6 +113,16 @@ TEST_CASE("MD5 binary data returns raw digest bytes",
     REQUIRE(md5(data.data(), data.size()) == expected);
 }
 
+TEST_CASE("MD5 hex string_view preserves embedded NUL bytes",
+          "[crypto][md5][coverage][phase3-large]") {
+    std::string payload = "abc";
+    payload.push_back('\0');
+    payload += "def";
+
+    REQUIRE(md5_hex(std::string_view(payload.data(), payload.size())) ==
+            "a5e4d5963ae44c1f4bfb37b1a3d55a3c");
+}
+
 // ── AES-256-CBC ─────────────────────────────────────────────────────────
 
 TEST_CASE("AES encrypt/decrypt round-trip", "[crypto][aes]") {
