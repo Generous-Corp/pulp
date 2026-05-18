@@ -724,6 +724,22 @@ TEST_CASE("CachedProperty ignores mismatched external updates",
     REQUIRE(tree->get_string("name") == "Restored");
 }
 
+TEST_CASE("CachedProperty bool ignores non-bool external updates",
+          "[state][cached][coverage][phase3]") {
+    auto tree = StateTree::create("params");
+    tree->set("enabled", true);
+    CachedProperty<bool> enabled(tree, "enabled", false);
+
+    REQUIRE(enabled.get());
+
+    tree->set("enabled", std::string("false"));
+    REQUIRE(enabled.get());
+
+    enabled = false;
+    REQUIRE_FALSE(enabled.get());
+    REQUIRE_FALSE(tree->get_bool("enabled", true));
+}
+
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
 
 TEST_CASE("StateTreeSynchroniser records property and child deltas", "[state][sync]") {
