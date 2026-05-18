@@ -361,7 +361,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(label_, cx, b.height - 6);
+        canvas.fill_text_anchored(label_, cx, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
     }
 
     // Value text in center (always drawn, even with shader)
@@ -484,9 +484,9 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
         if (vert) {
-            canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
+            canvas.fill_text_anchored(label_, b.width * 0.5f, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
         } else {
-            canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
+            canvas.fill_text_anchored(label_, b.width * 0.5f, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
         }
     }
 }
@@ -686,7 +686,7 @@ void Toggle::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
+        canvas.fill_text_anchored(label_, b.width * 0.5f, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
     }
 }
 
@@ -746,7 +746,7 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(text_color);
         canvas.set_font("Inter", 13);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(label_, b.width * 0.5f, b.height * 0.5f + 4.5f);
+        canvas.fill_text_anchored(label_, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     }
 }
 

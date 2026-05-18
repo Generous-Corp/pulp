@@ -46,6 +46,7 @@
 #include <pulp/canvas/emoji_segmenter.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/text_font_context.hpp>
 #include "modules/skparagraph/include/Paragraph.h"
@@ -1506,6 +1507,54 @@ static bool active_typeface_covers_text(SkTypeface* tf, const std::string& text)
 
 void SkiaCanvas::set_text_align(TextAlign align) {
     text_align_ = align;
+}
+
+void SkiaCanvas::fill_text_anchored(const std::string& text,
+                                    float x, float y, TextAnchor anchor) {
+    GUARD_CANVAS;
+    if (text.empty()) return;
+    // pulp #2163 / font v2 Slice 1.2.b — translate the anchor's y
+    // reference into a baseline-y, then delegate to fill_text. The
+    // worst-case-glyph metrics (SkFontMetrics::fTop / fBottom flipped
+    // positive) come from TextShaper, which pulls them from the same
+    // resolved typeface the painter will use — guarantees that the
+    // anchor-y → baseline-y math matches what the painter actually
+    // does, slice-1.3 parity harness asserts pixel-equal output.
+    if (anchor == TextAnchor::Baseline) {
+        fill_text(text, x, y);
+        return;
+    }
+
+    auto& shaper = global_text_shaper();
+    auto prepared = shaper.prepare(text, font_family_, font_size_);
+    float ascent  = prepared.ascent();    // distance above baseline
+    float descent = prepared.descent();   // distance below baseline
+    if (ascent <= 0.0f)  ascent  = font_size_ * 0.85f;  // fallback
+    if (descent <= 0.0f) descent = font_size_ * 0.2f;   // fallback
+
+    float baseline_y = y;
+    switch (anchor) {
+        case TextAnchor::Baseline:
+            // Already handled.
+            break;
+        case TextAnchor::GlyphTop:
+            // y is glyph-top. Baseline sits `ascent` below.
+            baseline_y = y + ascent;
+            break;
+        case TextAnchor::GlyphCenter:
+            // y is glyph vertical center. Baseline sits half the glyph
+            // box height below the center, offset by the asymmetry
+            // between ascent and descent.
+            baseline_y = y + (ascent - descent) * 0.5f;
+            break;
+        case TextAnchor::EmBoxTop:
+            // y is em-box top. Baseline is at `font_size * baseline_ratio`
+            // — for most Latin fonts ascent/font_size ≈ 0.8, so use that
+            // as the em-box-to-baseline distance directly.
+            baseline_y = y + font_size_ * 0.8f;
+            break;
+    }
+    fill_text(text, x, baseline_y);
 }
 
 void SkiaCanvas::fill_text(const std::string& text, float x, float y) {

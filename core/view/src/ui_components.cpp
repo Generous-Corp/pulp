@@ -320,7 +320,8 @@ void ProgressBar::paint(canvas::Canvas& canvas) {
         canvas.set_font("system", 10);
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.set_fill_color(resolve_color("text", canvas::Color::hex(0xe0e0e0)));
-        canvas.fill_text(label_, b.x + b.width / 2, b.y + b.height / 2 + 3);
+        canvas.fill_text_anchored(label_, b.x + b.width / 2, b.y + b.height / 2,
+                                  canvas::Canvas::TextAnchor::GlyphCenter);
     }
 }
 
@@ -357,7 +358,8 @@ void CallOutBox::paint(canvas::Canvas& canvas) {
 
     canvas.set_font("system", 13);
     canvas.set_fill_color(resolve_color("text", canvas::Color::hex(0xe0e0e0)));
-    canvas.fill_text(message_, b.x + 16, b.y + b.height / 2 + 4);
+    canvas.fill_text_anchored(message_, b.x + 16, b.y + b.height / 2,
+                              canvas::Canvas::TextAnchor::GlyphCenter);
 }
 
 bool CallOutBox::on_key_event(const KeyEvent& event) {

@@ -102,6 +102,9 @@ public:
     void clear_font_features() override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
+    // pulp #2163 / font v2 Slice 1.2.b — typed anchor variant.
+    void fill_text_anchored(const std::string& text, float x, float y,
+                            TextAnchor anchor) override;
     // pulp #1525 — Canvas2D fillText(text,x,y,maxWidth) + strokeText(text,x,y,maxWidth).
     void fill_text_with_max_width(const std::string& text,
                                   float x, float y, float max_width) override;

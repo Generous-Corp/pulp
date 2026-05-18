@@ -730,6 +730,46 @@ public:
     virtual void fill_text(const std::string& text, float x, float y) = 0;
     virtual float measure_text(const std::string& text) = 0;
 
+    /// pulp #2163 / font v2 Slice 1.2.b — explicit, typed vertical-anchor
+    /// API. The historical `fill_text(text, x, y)` follows the Canvas2D
+    /// spec (web-compat baseline semantics) — `y` is the text baseline.
+    /// Non-spec callers (widgets that mix labels with knobs / faders
+    /// inside flex rows) need to opt for a different reference line so
+    /// mixed-fontSize centered rows align on glyph reference, not box
+    /// reference. Anchor modes:
+    ///
+    ///   Baseline    — y is the baseline (Canvas2D web-spec default).
+    ///   GlyphTop    — y is the top of the worst-case glyph bbox
+    ///                  (SkFontMetrics::fTop). Useful when the caller
+    ///                  computes top-of-text manually.
+    ///   GlyphCenter — y is the vertical CENTER of the glyph bbox.
+    ///                  Use for `vertical-align: middle` semantics
+    ///                  where you want the painted glyphs (not the
+    ///                  measure box) centered on a target line.
+    ///   EmBoxTop    — y is the top of the em-box (font-size based,
+    ///                  font-independent). Use when laying out
+    ///                  uniform-sized glyph grids.
+    ///
+    /// Default implementation translates `y` into baseline-y using
+    /// `measure_text`-style metrics and delegates to `fill_text`. Skia
+    /// override uses SkFontMetrics directly so the anchor lands on the
+    /// exact pixel the parity harness asserts (Slice 1.3).
+    enum class TextAnchor {
+        Baseline,
+        GlyphTop,
+        GlyphCenter,
+        EmBoxTop,
+    };
+    virtual void fill_text_anchored(const std::string& text,
+                                    float x, float y, TextAnchor anchor) {
+        // Default fallback: treat all anchors as Baseline. Backends
+        // that have access to font metrics override this. The override
+        // path is the one widget callsites use; the default exists so
+        // RecordingCanvas / base mocks compile without changes.
+        (void)anchor;
+        fill_text(text, x, y);
+    }
+
     /// pulp #1525 — Canvas2D `fillText(text, x, y, maxWidth)` spec form.
     /// When `max_width > 0` and the natural rendered advance exceeds it,
     /// the backend MUST scale the text horizontally so the resulting run

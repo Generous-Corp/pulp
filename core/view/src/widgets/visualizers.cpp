@@ -35,7 +35,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(120, 120, 140)));
         canvas.set_font("Inter", 10);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text("IMG", b.width * 0.5f, b.height * 0.5f + 3);
+        canvas.fill_text_anchored("IMG", b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
         return;
     }
 
@@ -240,7 +240,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
     auto name = path_;
     auto slash = name.rfind('/');
     if (slash != std::string::npos) name = name.substr(slash + 1);
-    canvas.fill_text(name, b.width * 0.5f, b.height * 0.5f + 3);
+    canvas.fill_text_anchored(name, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
 }
 
 // ── Meter ────────────────────────────────────────────────────────────────────
@@ -392,7 +392,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
 
     if (!x_label_.empty()) {
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(x_label_, b.width * 0.5f, b.height - 6);
+        canvas.fill_text_anchored(x_label_, b.width * 0.5f, b.height - 6, canvas::Canvas::TextAnchor::Baseline);
     }
     if (!y_label_.empty()) {
         canvas.set_text_align(canvas::TextAlign::left);
