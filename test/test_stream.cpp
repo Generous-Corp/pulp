@@ -132,6 +132,21 @@ TEST_CASE("MemoryStream read cursor remains at end after EOF",
     REQUIRE(stream.read_position() == 2);
 }
 
+TEST_CASE("MemoryStream rewind after EOF allows replay",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{4, 5, 6});
+    std::uint8_t out[3]{};
+
+    REQUIRE(stream.read(out, sizeof(out)).bytes == 3);
+    REQUIRE(stream.read(out, 1).closed());
+
+    stream.rewind();
+    REQUIRE(stream.read_position() == 0);
+    REQUIRE(stream.read(out, 2).bytes == 2);
+    REQUIRE(out[0] == 4);
+    REQUIRE(out[1] == 5);
+}
+
 TEST_CASE("MemoryStream close rejects further I/O", "[stream]") {
     MemoryStream s;
     s.close();
