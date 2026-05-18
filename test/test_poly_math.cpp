@@ -37,6 +37,15 @@ TEST_CASE("Polynomial roots_quadratic complex roots", "[signal][poly]") {
     REQUIRE(std::abs(r1.imag()) > 0.9f);
 }
 
+TEST_CASE("Polynomial roots_quadratic reports repeated real roots",
+          "[signal][poly][coverage][phase3]") {
+    auto [r1, r2] = Polynomial::roots_quadratic(1.0f, -2.0f, 1.0f);
+    REQUIRE_THAT(r1.real(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(r2.real(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(r1.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(r2.imag(), WithinAbs(0.0f, 0.001f));
+}
+
 TEST_CASE("Polynomial roots_quadratic handles degenerate coefficients",
           "[signal][poly][issue-645]") {
     auto [linear_a, linear_b] = Polynomial::roots_quadratic(0.0f, 2.0f, -8.0f);
@@ -172,6 +181,24 @@ TEST_CASE("Mat2 inverse returns identity for singular matrices",
 TEST_CASE("Mat3 determinant", "[signal][matrix]") {
     auto id = Mat3::identity();
     REQUIRE_THAT(id.determinant(), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("Mat3 determinant and identity composition cover nontrivial matrices",
+          "[signal][matrix][coverage][phase3]") {
+    Mat3 a{{{2.0f, -1.0f, 0.5f},
+            {3.0f, 4.0f, -2.0f},
+            {1.0f, 0.0f, 5.0f}}};
+
+    REQUIRE_THAT(a.determinant(), WithinAbs(55.0f, 0.001f));
+
+    auto left = Mat3::identity() * a;
+    auto right = a * Mat3::identity();
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            REQUIRE_THAT(left.m[row][col], WithinAbs(a.m[row][col], 0.001f));
+            REQUIRE_THAT(right.m[row][col], WithinAbs(a.m[row][col], 0.001f));
+        }
+    }
 }
 
 TEST_CASE("Mat3 multiply composes non-identity matrices",
