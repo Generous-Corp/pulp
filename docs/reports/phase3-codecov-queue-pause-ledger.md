@@ -7441,7 +7441,7 @@ GitHub-only CI. PR #2173 is open with head
 2026-05-17 23:50 PDT: started the next held large coverage batch from
 current `origin/main` in `/private/tmp/pulp-phase3-codecov-batch-728` on
 branch `feature/phase3-codecov-batch-728`. First local-only tranche is
-commit `27ebbbdee` (`test(canvas): cover font options and scopes`). It adds
+commit `67d991566` (`test(canvas): cover font options and scopes`). It adds
 `pulp-test-font-options` and covers the newly landed font v2 typed cache-key
 surface: full `FontOptions` hash participation, OpenType tag packing,
 plugin/view/global `FontScopeId` factories, scope generation isolation,
@@ -7453,7 +7453,7 @@ assertions), and `git diff --check` passed. This branch is intentionally held
 locally until it accumulates a larger 24-36-tranche PR batch.
 
 2026-05-17 23:52 PDT: added a second local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `fb6d18abb`
+`feature/phase3-codecov-batch-728`: commit `f5ab064c5`
 (`test(canvas): cover text run planner skeleton`). It extends
 `pulp-test-font-options` over `TextRunPlanner` skeleton behavior: mixed
 UTF-8 scalar offset mapping, hard newline and soft tab line-break
@@ -7488,7 +7488,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-18 00:00 PDT: added a fourth local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `dd332eb95`
+`feature/phase3-codecov-batch-728`: commit `e4632fc0d`
 (`test(canvas): cover font registry stubs`). It extends
 `pulp-test-font-options` over non-Skia public font registration stubs,
 byte-validation guard behavior, generation no-op semantics, and the naive
@@ -7501,7 +7501,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-17 23:55 PDT: added a third local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `49e9605d5`
+`feature/phase3-codecov-batch-728`: commit `396aecdd4`
 (`test(canvas): cover font resolver fallbacks`). It extends
 `pulp-test-font-options` over `ResolvedFont` default unresolved state and the
 non-Skia `FontResolver` family/character fallback paths, including scoped
@@ -7515,7 +7515,7 @@ large batch PR.
 `feature/phase3-codecov-batch-728` onto `origin/main` after #2175, #2177,
 and #2179 landed. The rebase preserved mainline `pulp-test-font-scope-budget`
 and `pulp-test-font-security` targets alongside this batch's
-`pulp-test-font-options`; current batch head is commit `a75dad13b`
+`pulp-test-font-options`; current batch head is commit `0945635d3`
 (`test(view): cover label baseline metrics`). The seventh local-only tranche
 adds direct `Label::baseline_y()` coverage for font-metric scaling, empty
 label fallback, inherited font-size propagation, and explicit child font-size
@@ -7528,7 +7528,7 @@ assertions), and `git diff --check` passed. Still held locally for a larger
 24-36 tranche PR batch.
 
 2026-05-18 00:07 PDT: added an eighth local-only tooling tranche to
-`feature/phase3-codecov-batch-728`: commit `e80d7d10e`
+`feature/phase3-codecov-batch-728`: commit `267138434`
 (`test(local-ci): cover extracted helper contracts`). It expands direct
 Python unit coverage for the #2179 local-CI helper split: target
 enable/default/unknown/disabled resolution, provenance normalization and
@@ -7543,7 +7543,7 @@ tranche PR batch.
 2026-05-18 00:07 PDT: rebased held batch
 `feature/phase3-codecov-batch-728` onto `origin/main` after #2180 landed.
 The rebase preserved mainline `pulp-test-font-variable-axes` alongside this
-batch's `pulp-test-font-options`; current batch head is commit `3a081babb`
+batch's `pulp-test-font-options`; current batch head is commit `da6ad6f46`
 (`test(local-ci): cover github workflow settings`). The ninth local-only
 tooling tranche expands direct coverage for GitHub Actions defaults and
 selector helpers: display-setting normalization, integer timing validation,
@@ -7558,7 +7558,7 @@ held font/view/local-ci tranches were revalidated with
 local-ci helper tests. Still held locally for a larger 24-36 tranche PR batch.
 
 2026-05-18 00:11 PDT: added a tenth local-only coverage tooling tranche to
-`feature/phase3-codecov-batch-728`: commit `0a28ba817`
+`feature/phase3-codecov-batch-728`: commit `ed5d03fc2`
 (`test(coverage): cover python cobertura path rewrites`). It expands
 `tools/scripts/test_run_python_coverage_extra.py` over Cobertura filename
 normalization for Windows-style backslashes, dot sources, relative source
@@ -7569,7 +7569,7 @@ Python coverage XML consumed by Codecov. Local validation passed:
 tranche PR batch.
 
 2026-05-18 00:12 PDT: added an eleventh local-only coverage tooling tranche
-to `feature/phase3-codecov-batch-728`: commit `ed3c41751`
+to `feature/phase3-codecov-batch-728`: commit `3f7940b12`
 (`test(coverage): cover cobertura verifier edges`). It expands
 `tools/scripts/test_verify_cobertura_xml.py` over non-numeric
 `lines-valid`, missing `lines-valid`, hint propagation on structurally empty
@@ -7578,3 +7578,24 @@ pre-upload verifier against silently accepting unusable Cobertura XML. Local
 validation passed: `python3 tools/scripts/test_verify_cobertura_xml.py`
 (9 tests), plus `git diff --check`. Still held locally for a larger 24-36
 tranche PR batch.
+
+2026-05-18 00:16 PDT: rebased held batch
+`feature/phase3-codecov-batch-728` onto `origin/main` after #2181 and #2183
+landed; current batch head is commit `46337badc`
+(`test(view): cover html dir attribute bridge`). The twelfth local-only
+view/web-compat tranche adds direct `Element.setAttribute('dir', ...)`
+coverage for `rtl`, `ltr`, `auto`, case normalization, and invalid-value
+round-trip behavior. The test exposed that #2181 updated the legacy
+`web-compat.js` shim but not the split `web-compat-element.js` prelude that
+WidgetBridge actually evaluates; the tranche syncs that root-cause fix so
+HTML `dir` attributes reach `View::WritingDirection` through the active
+runtime path. Local validation passed after rebase:
+`./build/test/pulp-test-widget-bridge "HTML dir attribute forwards to View writing direction"`
+(1 case / 5 assertions),
+`python3 tools/scripts/test_verify_cobertura_xml.py` (9 tests),
+`python3 tools/scripts/test_run_python_coverage_extra.py CoberturaPathExtraTests`
+(2 tests), the five extracted local-ci helper tests,
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`,
+and `git diff --check`. Still held locally for a larger 24-36 tranche PR
+batch.
