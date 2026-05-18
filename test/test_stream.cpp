@@ -50,6 +50,15 @@ TEST_CASE("StreamResult helper predicates classify errors",
     REQUIRE_FALSE(invalid.closed());
 }
 
+TEST_CASE("StreamResult factory preserves explicit zero-byte success",
+          "[stream][coverage][phase3]") {
+    auto result = StreamResult::make(0);
+    REQUIRE(result.ok());
+    REQUIRE_FALSE(result.would_block());
+    REQUIRE_FALSE(result.closed());
+    REQUIRE(result.bytes == 0);
+}
+
 TEST_CASE("MemoryStream round-trip", "[stream]") {
     MemoryStream s;
     const std::uint8_t msg[] = {1, 2, 3, 4, 5};
