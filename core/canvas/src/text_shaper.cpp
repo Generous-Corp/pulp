@@ -8,6 +8,8 @@
 
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/emoji_segmenter.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <pulp/canvas/font_options.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
 #include <cmath>
@@ -462,65 +464,38 @@ struct TextShaper::Impl {
     std::mutex metrics_mutex;
 
 #ifdef PULP_HAS_TEXT_SHAPING
-    // pulp #2163 — shared typeface resolution. Same comma-list walk used
-    // by measure_segment so the typeface used for width measurement is
-    // identical to the one used for line metrics. Returns null when no
-    // family matched and there's no platform fallback (non-Skia build,
-    // RefEmpty mgr, etc.).
+    // pulp #2163 / font v2 Slice 1.1.a (caller migration) — typeface
+    // resolution now routes through FontResolver. Comma-list parsing
+    // happens once inside the resolver; the registered → bundled →
+    // platform cascade is shared with skia_canvas. Returns null when
+    // no family matched and there's no platform fallback (non-Skia
+    // build, RefEmpty mgr, etc.).
     sk_sp<SkTypeface> resolve_typeface(const std::string& font_family) {
-        auto try_family = [&](const std::string& fam) -> sk_sp<SkTypeface> {
-            std::string clean = fam;
-            size_t a = clean.find_first_not_of(" \t");
-            size_t b = clean.find_last_not_of(" \t");
-            if (a == std::string::npos) return nullptr;
-            clean = clean.substr(a, b - a + 1);
-            if (clean.size() >= 2
-                && (clean.front() == '"' || clean.front() == '\'')
-                && clean.back() == clean.front()) {
-                clean = clean.substr(1, clean.size() - 2);
+        FontOptions opts;
+        // Mirror skia_canvas.cpp's split_font_family_list so comma-
+        // separated CSS family stacks are walked correctly. Strip
+        // whitespace + matching outer quotes.
+        size_t pos = 0;
+        while (pos < font_family.size()) {
+            size_t comma = font_family.find(',', pos);
+            std::string seg = font_family.substr(
+                pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
+            pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
+            // Strip outer whitespace.
+            size_t a = seg.find_first_not_of(" \t");
+            size_t b = seg.find_last_not_of(" \t");
+            if (a == std::string::npos) continue;
+            seg = seg.substr(a, b - a + 1);
+            // Strip matching outer quotes.
+            if (seg.size() >= 2
+                && (seg.front() == '"' || seg.front() == '\'')
+                && seg.back() == seg.front()) {
+                seg = seg.substr(1, seg.size() - 2);
             }
-            if (clean.empty()) return nullptr;
-            auto tf = match_registered_typeface(clean, SkFontStyle::Normal());
-            if (tf) return tf;
-            if (font_mgr && font_mgr->countFamilies() > 0) {
-                tf = font_mgr->matchFamilyStyle(clean.c_str(), SkFontStyle::Normal());
-                if (tf) {
-                    SkString actual;
-                    tf->getFamilyName(&actual);
-                    std::string a_str(actual.c_str(), actual.size());
-                    auto lower = [](std::string s) {
-                        for (auto& c : s)
-                            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                        return s;
-                    };
-                    std::string al = lower(a_str), cl = lower(clean);
-                    if (al == cl
-                        || al.find(cl) != std::string::npos
-                        || cl.find(al) != std::string::npos) {
-                        return tf;
-                    }
-                }
-            }
-            return nullptr;
-        };
-        sk_sp<SkTypeface> tf;
-        if (font_family.find(',') == std::string::npos) {
-            tf = try_family(font_family);
-        } else {
-            size_t pos = 0;
-            while (pos < font_family.size()) {
-                size_t comma = font_family.find(',', pos);
-                std::string segment = font_family.substr(
-                    pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-                pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-                tf = try_family(segment);
-                if (tf) break;
-            }
+            if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
         }
-        if (!tf && font_mgr && font_mgr->countFamilies() > 0) {
-            tf = font_mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
-        }
-        return tf;
+        auto resolved = FontResolver::instance().resolve_family_list(opts);
+        return resolved.typeface;
     }
 #endif
 
