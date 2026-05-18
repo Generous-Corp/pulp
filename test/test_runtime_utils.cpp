@@ -1138,3 +1138,11 @@ TEST_CASE("Range expansion handles negative domains",
     REQUIRE(range.expanded(-1) == IntRange(-10, 0));
     REQUIRE(range.expanded(-7) == range);
 }
+
+TEST_CASE("FloatRange constrain clamps fractional values",
+          "[runtime][range][coverage][phase3]") {
+    FloatRange range(-1.0f, 1.0f);
+    REQUIRE_THAT(range.constrain(-2.5f), Catch::Matchers::WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(range.constrain(0.25f), Catch::Matchers::WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(range.constrain(2.5f), Catch::Matchers::WithinAbs(1.0f, 1e-6f));
+}
