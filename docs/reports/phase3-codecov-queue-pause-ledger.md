@@ -8963,3 +8963,16 @@ JSON escaping of from/to hop version strings. Focused local validation passed:
 in 14 test cases), and `git diff --check`. Branch is clean and 23 commits
 ahead of `origin/main`; still held locally to build toward a larger
 GitHub-hosted PR. No Namespace dispatch.
+
+2026-05-18 15:40 PDT: completed the 24th commit in the held local-only GitHub
+batch `feature/phase3-codecov-batch-747` with commit `783dbc484`
+(`fix(cli): bound json parser recovery`). This tranche adds shared CLI JSON
+parser coverage for short unicode escape tails and missing object/array
+delimiters. Local validation exposed an infinite loop when malformed arrays
+omitted commas, so the parser now treats plausible adjacent values as recovery
+points and stops at EOF instead of spinning. Focused local validation passed:
+`cmake --build build --target pulp-test-cli-json-parser`,
+`build/test/pulp-test-cli-json-parser` (81 assertions in 21 test cases), and
+`git diff --check`. Branch is clean and 24 commits ahead of `origin/main`;
+ready for a broader local validation pass before opening the batched
+GitHub-hosted PR. No Namespace dispatch.
