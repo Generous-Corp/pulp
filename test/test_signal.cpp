@@ -109,6 +109,22 @@ TEST_CASE("Gain linear setter and buffer processing", "[signal][gain][issue-645]
     REQUIRE_THAT(buffer[2], WithinAbs(0.125f, 1e-6f));
 }
 
+TEST_CASE("Gain dB conversion floors zero and negative linear values",
+          "[signal][gain][coverage][phase3]") {
+    REQUIRE_THAT(linear_to_db(0.0f), WithinAbs(-200.0f, 0.001f));
+    REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 0.001f));
+
+    Gain g;
+    g.set_gain_linear(0.0f);
+    REQUIRE_THAT(g.gain_db(), WithinAbs(-200.0f, 0.001f));
+    REQUIRE_THAT(g.process(0.5f), WithinAbs(0.0f, 1e-6f));
+
+    float buffer[] = {1.0f, -1.0f};
+    g.process(buffer, 0);
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-1.0f, 1e-6f));
+}
+
 TEST_CASE("SimpleMixer", "[signal][mix]") {
     SimpleMixer mixer;
 
