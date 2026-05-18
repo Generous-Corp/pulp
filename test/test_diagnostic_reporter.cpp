@@ -193,3 +193,40 @@ TEST_CASE("HostType names and feature heuristics cover fixed-size and no-sidecha
     REQUIRE(host_supports_sidechain(HostType::Reaper));
     REQUIRE(host_supports_sidechain(HostType::Unknown));
 }
+
+TEST_CASE("HostType names cover every declared host enum",
+          "[format][host-type][coverage][phase3]") {
+    REQUIRE(host_type_name(HostType::LogicPro) == "Logic Pro");
+    REQUIRE(host_type_name(HostType::GarageBand) == "GarageBand");
+    REQUIRE(host_type_name(HostType::AbletonLive) == "Ableton Live");
+    REQUIRE(host_type_name(HostType::Reaper) == "REAPER");
+    REQUIRE(host_type_name(HostType::ProTools) == "Pro Tools");
+    REQUIRE(host_type_name(HostType::Cubase) == "Cubase");
+    REQUIRE(host_type_name(HostType::Nuendo) == "Nuendo");
+    REQUIRE(host_type_name(HostType::StudioOne) == "Studio One");
+    REQUIRE(host_type_name(HostType::FLStudio) == "FL Studio");
+    REQUIRE(host_type_name(HostType::Bitwig) == "Bitwig Studio");
+    REQUIRE(host_type_name(HostType::Maschine) == "Maschine");
+    REQUIRE(host_type_name(HostType::AudacityTenacity) == "Audacity/Tenacity");
+    REQUIRE(host_type_name(HostType::Ardour) == "Ardour");
+    REQUIRE(host_type_name(HostType::Standalone) == "Pulp Standalone");
+}
+
+TEST_CASE("HostType feature heuristics default permissive for modern hosts",
+          "[format][host-type][coverage][phase3]") {
+    for (auto host : {HostType::LogicPro,
+                      HostType::AbletonLive,
+                      HostType::Reaper,
+                      HostType::Cubase,
+                      HostType::Nuendo,
+                      HostType::StudioOne,
+                      HostType::FLStudio,
+                      HostType::Bitwig,
+                      HostType::Maschine,
+                      HostType::Ardour,
+                      HostType::Standalone,
+                      HostType::Other}) {
+        REQUIRE(host_supports_resize(host));
+        REQUIRE(host_supports_sidechain(host));
+    }
+}
