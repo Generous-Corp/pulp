@@ -342,6 +342,14 @@ TEST_CASE("LicenseValidator validate rejects empty payload section",
     REQUIRE(validator.validate(".sig") == LicenseStatus::InvalidSignature);
 }
 
+TEST_CASE("LicenseValidator validate rejects an empty signature section",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpSynth\"}";
+
+    REQUIRE(validator.validate(base64_encode(payload) + ".") == LicenseStatus::InvalidSignature);
+}
+
 TEST_CASE("LicenseValidator validate rejects malformed signature encoding",
           "[crypto][license][coverage][phase3-large]") {
     LicenseValidator validator;
