@@ -3,6 +3,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/theme_contrast.hpp>
 
+#include <algorithm>
+
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
@@ -85,6 +87,20 @@ TEST_CASE("Auto contrast picks black on light background", "[view][contrast]") {
     REQUIRE(fg.r == Catch::Approx(0.0f));
     REQUIRE(fg.g == Catch::Approx(0.0f));
     REQUIRE(fg.b == Catch::Approx(0.0f));
+}
+
+TEST_CASE("Auto contrast fallback chooses the higher ratio color",
+          "[view][contrast][coverage][phase3]") {
+    auto background = Color::rgba8(128, 128, 128);
+    auto fg = auto_contrast_foreground(background, ContrastLevel::aaa_normal);
+
+    REQUIRE_THAT(contrast_ratio(fg, background),
+                 WithinAbs(std::max(contrast_ratio(Color::rgba8(255, 255, 255), background),
+                                    contrast_ratio(Color::rgba8(0, 0, 0), background)),
+                           0.001));
+    REQUIRE(fg.r8() == 0);
+    REQUIRE(fg.g8() == 0);
+    REQUIRE(fg.b8() == 0);
 }
 
 TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
