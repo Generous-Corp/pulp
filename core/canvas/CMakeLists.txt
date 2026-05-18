@@ -81,6 +81,7 @@ if(PULP_HAS_SKIA)
         src/skia_canvas_mask.cpp
         src/skia_canvas_gradients.cpp
         src/skia_canvas_box_shadow.cpp
+        src/skia_canvas_opacity.cpp
         src/bundled_fonts.cpp
         # TextFontContext glues emoji_segmenter into the SkShaper +
         # SkParagraph paths and owns the per-context FontCollection used
