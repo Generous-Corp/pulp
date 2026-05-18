@@ -3,6 +3,7 @@
 #include "pulp/canvas/font_options.hpp"
 #include "pulp/canvas/font_resolver.hpp"
 #include "pulp/canvas/font_scope.hpp"
+#include "pulp/canvas/text_run_planner.hpp"
 
 #include <functional>
 
@@ -133,4 +134,65 @@ TEST_CASE("Font resolver trace names cover every fallback origin",
     REQUIRE(std::string(to_string(FallbackOrigin::PlatformChar)) == "platform-char");
     REQUIRE(std::string(to_string(FallbackOrigin::Synthetic)) == "synthetic");
     REQUIRE(std::string(to_string(FallbackOrigin::NotFound)) == "not-found");
+}
+
+TEST_CASE("TextRunPlanner skeleton maps UTF-8 scalars and line breaks",
+          "[canvas][font][planner][coverage]") {
+    auto& planner = TextRunPlanner::instance();
+    planner.clear_cache();
+
+    FontOptions opts;
+    opts.family_stack = {"Inter"};
+    opts.size = 16.0f;
+    opts.direction = BaseDirection::LTR;
+
+    const std::string text = std::string("A") + "\xC3\xA9" + "\xF0\x9F\x99\x82"
+                           + "\nB\tC";
+    auto shaped = planner.shape(text, opts);
+
+    REQUIRE(shaped.text == text);
+    REQUIRE_FALSE(shaped.empty());
+    REQUIRE(shaped.runs.size() == 1);
+    REQUIRE(shaped.runs[0].logical_start == 0);
+    REQUIRE(shaped.runs[0].logical_end == text.size());
+    REQUIRE(shaped.runs[0].bidi_level == 0);
+
+    REQUIRE(shaped.index_map.scalar_count() == 7);
+    REQUIRE(shaped.index_map.scalar_offsets
+            == std::vector<std::uint32_t>{0, 1, 3, 7, 8, 9, 10, 11});
+
+    REQUIRE(shaped.line_breaks.size() == 2);
+    REQUIRE(shaped.line_breaks[0].utf8_offset == 7);
+    REQUIRE(shaped.line_breaks[0].kind == LineBreakOpportunity::Kind::Hard);
+    REQUIRE(shaped.line_breaks[1].utf8_offset == 10);
+    REQUIRE(shaped.line_breaks[1].kind == LineBreakOpportunity::Kind::Soft);
+}
+
+TEST_CASE("TextRunPlanner captures scope generation and RTL base direction",
+          "[canvas][font][planner][coverage]") {
+    auto& planner = TextRunPlanner::instance();
+    planner.clear_cache();
+
+    constexpr std::uint64_t plugin_id = 728144;
+    auto& scope = plugin_scope(plugin_id);
+    scope.bump_generation();
+
+    FontOptions opts;
+    opts.family_stack = {"Inter"};
+    opts.scope = scope.id();
+    opts.direction = BaseDirection::RTL;
+
+    const auto expected_generation = merged_generation_for(opts.scope);
+    auto shaped = planner.shape("abc", opts);
+
+    REQUIRE(shaped.options.scope == opts.scope);
+    REQUIRE(shaped.options.registry_generation == expected_generation);
+    REQUIRE(shaped.runs.size() == 1);
+    REQUIRE(shaped.runs[0].bidi_level == 1);
+    REQUIRE(shaped.runs[0].font.scope == opts.scope);
+    REQUIRE(shaped.runs[0].font.generation == expected_generation);
+
+    opts.registry_generation = 12345;
+    auto explicit_gen = planner.shape("abc", opts);
+    REQUIRE(explicit_gen.options.registry_generation == 12345);
 }
