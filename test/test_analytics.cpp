@@ -215,6 +215,32 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("FileAnalyticsDestination keeps buffered events when open fails",
+          "[runtime][analytics][coverage][phase3-batch742]") {
+    auto root = std::filesystem::temp_directory_path() / "pulp_analytics_missing_parent_742";
+    auto path = root / "events.jsonl";
+    std::filesystem::remove_all(root);
+
+    FileAnalyticsDestination dest(path.string());
+    AnalyticsEvent event;
+    event.name = "retry";
+    event.timestamp = 42.0;
+    dest.log_event(event);
+
+    dest.flush();
+    REQUIRE_FALSE(std::filesystem::exists(path));
+
+    std::filesystem::create_directories(root);
+    dest.flush();
+
+    std::ifstream f(path);
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"retry\"") != std::string::npos);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("FileAnalyticsDestination auto flushes at batch threshold", "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
