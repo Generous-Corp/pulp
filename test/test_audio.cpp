@@ -167,6 +167,31 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
     REQUIRE(buf.view().empty());
 }
 
+TEST_CASE("Buffer resize from empty regrows zero-filled channels",
+          "[audio][buffer][coverage]") {
+    Buffer<float> buf(2, 3);
+    buf.channel(0)[0] = 1.0f;
+    buf.channel(1)[2] = -1.0f;
+
+    buf.resize(0, 0);
+    REQUIRE(buf.num_channels() == 0);
+    REQUIRE(buf.num_samples() == 0);
+    REQUIRE(buf.view().empty());
+
+    buf.resize(2, 2);
+    REQUIRE(buf.num_channels() == 2);
+    REQUIRE(buf.num_samples() == 2);
+    REQUIRE_FALSE(buf.view().empty());
+    REQUIRE(buf.view().channel_ptr(0) == buf.channel(0).data());
+    REQUIRE(buf.view().channel_ptr(1) == buf.channel(1).data());
+
+    for (std::size_t ch = 0; ch < buf.num_channels(); ++ch) {
+        for (auto sample : buf.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+}
+
 TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
           "[audio][buffer][codecov]") {
     Buffer<float> zero_channels(0, 8);
