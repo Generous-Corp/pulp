@@ -1,30 +1,24 @@
-// Phase 1a POC test for partial-rendering / damage-tracking
-// (`planning/2026-05-17-partial-rendering-design.md`).
+// Headless POC test for the partial-rendering / damage-tracking
+// path. The production host wiring lives behind macOS (Skia + Metal)
+// and needs a real GPU device for end-to-end coverage; this file
+// exercises the `pulp::render::DirtyTracker` contract the host wiring
+// depends on so any change to invalidation, coalescing, union-bounds,
+// or clear semantics is caught before touching the host code.
 //
-// The full Phase 1b production wiring lives behind the macOS host —
-// it needs Skia + a Metal device to test end-to-end. This test
-// exercises the wiring contract the host POC depends on at the
-// `pulp::render::DirtyTracker` level so any change to the tracker's
-// invalidation, coalescing, union-bounds, or clear semantics that
-// would break the host gate is caught before we touch the host code.
-//
-// What the host POC needs to be true (and what this test asserts):
-//   1. The first frame is dirty (no clear() before any invalidate
-//      → tracker must report needs_full_repaint()).
+// Assertions:
+//   1. First frame is dirty (no clear before any invalidate →
+//      needs_full_repaint() == true).
 //   2. After clear() the tracker is fully clean.
-//   3. A single per-rect invalidate() pushes a union exactly equal to
-//      the rect, with needs_full_repaint() == false (so the Phase 1b
-//      gate would clip to that exact rect, not fall back to full).
+//   3. A single per-rect invalidate() yields a union exactly equal to
+//      the rect, with needs_full_repaint() == false.
 //   4. Two disjoint per-rect invalidations coalesce to their bounding
-//      box, still without flipping to full repaint while under the
-//      area threshold.
-//   5. invalidate_all() always wins, regardless of what was previously
-//      pushed (matches the Phase 1a host wiring where the animation
-//      / FrameClock pump pushes invalidate_all() per Codex's
-//      correction 2).
-//   6. The frame counter increments on each clear(). This is how the
-//      host's debug print correlates "[partial-render] frame=N" with
-//      vsync ticks.
+//      box, no flip to full repaint while under the area threshold.
+//   5. invalidate_all() wins regardless of prior pushes — matches the
+//      host path where the animation / FrameClock pump invalidates
+//      the whole viewport.
+//   6. The frame counter increments on each clear(), letting the host
+//      debug print correlate "[partial-render] frame=N" with vsync
+//      ticks.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -32,15 +26,15 @@
 
 using pulp::render::DirtyTracker;
 
-TEST_CASE("Phase 1a: first frame is full-repaint dirty", "[render][partial-render][issue-partial-1a]") {
+TEST_CASE("partial-rendering POC: first frame is full-repaint dirty", "[render][partial-render]") {
     DirtyTracker dt;
     REQUIRE(dt.is_dirty());
     REQUIRE(dt.needs_full_repaint());
     REQUIRE(dt.frame_count() == 0u);
 }
 
-TEST_CASE("Phase 1a: clear() resets dirty state and advances frame counter",
-          "[render][partial-render][issue-partial-1a]") {
+TEST_CASE("partial-rendering POC: clear() resets dirty state and advances frame counter",
+          "[render][partial-render]") {
     DirtyTracker dt;
     dt.clear();
     REQUIRE_FALSE(dt.is_dirty());
@@ -51,12 +45,12 @@ TEST_CASE("Phase 1a: clear() resets dirty state and advances frame counter",
     REQUIRE(dt.frame_count() == 2u);
 }
 
-TEST_CASE("Phase 1a: single request_repaint(rect) → union equals that rect, no full repaint",
-          "[render][partial-render][issue-partial-1a]") {
-    // This is the per-View / per-widget invalidation path Phase 1b
-    // will plumb through. The Phase 1a host wiring still calls
+TEST_CASE("partial-rendering POC: single request_repaint(rect) → union equals that rect, no full repaint",
+          "[render][partial-render]") {
+    // This is the per-View / per-widget invalidation path the follow-up partial-rendering slice
+    // will plumb through. The the host wiring still calls
     // invalidate_all(), but the tracker contract must support the
-    // rect path so Phase 1b doesn't require a tracker API change.
+    // rect path so the follow-up partial-rendering slice doesn't require a tracker API change.
     DirtyTracker dt;
     dt.clear();  // start clean
 
@@ -76,8 +70,8 @@ TEST_CASE("Phase 1a: single request_repaint(rect) → union equals that rect, no
     REQUIRE(b.h == Catch::Approx(40.0f));
 }
 
-TEST_CASE("Phase 1a: two disjoint invalidations coalesce to bounding box",
-          "[render][partial-render][issue-partial-1a]") {
+TEST_CASE("partial-rendering POC: two disjoint invalidations coalesce to bounding box",
+          "[render][partial-render]") {
     DirtyTracker dt;
     dt.clear();
     dt.set_viewport(800, 600);
@@ -97,13 +91,13 @@ TEST_CASE("Phase 1a: two disjoint invalidations coalesce to bounding box",
     REQUIRE(b.y + b.h == Catch::Approx(550.0f));
 }
 
-TEST_CASE("Phase 1a: invalidate_all() always wins, matching the pump-driver path",
-          "[render][partial-render][issue-partial-1a]") {
+TEST_CASE("partial-rendering POC: invalidate_all() always wins, matching the pump-driver path",
+          "[render][partial-render]") {
     // Codex review correction 2: animation / FrameClock pump drivers
     // call tracker_.invalidate_all() because they mutate visual state
     // without going through request_repaint(). This test pins that
     // contract: invalidate_all() must override and clear any pending
-    // partial rects so the Phase 1b clip would degrade to full-screen
+    // partial rects so the the follow-up partial-rendering slice clip would degrade to full-screen
     // (which is safe; better than missing pixels).
     DirtyTracker dt;
     dt.clear();
@@ -119,10 +113,10 @@ TEST_CASE("Phase 1a: invalidate_all() always wins, matching the pump-driver path
     REQUIRE(dt.dirty_rects().empty());
 }
 
-TEST_CASE("Phase 1a: area threshold escalates partial → full when many rects accumulate",
-          "[render][partial-render][issue-partial-1a]") {
+TEST_CASE("partial-rendering POC: area threshold escalates partial → full when many rects accumulate",
+          "[render][partial-render]") {
     // The host pushes one invalidate_all per repaint() today, so the
-    // area-threshold escalation is mostly a Phase 1b concern. Test it
+    // area-threshold escalation is mostly a the follow-up partial-rendering slice concern. Test it
     // here anyway so the contract doesn't quietly drift.
     DirtyTracker dt;
     dt.clear();

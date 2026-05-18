@@ -166,19 +166,47 @@ private:
     /// rect reflects what the user actually sees.
     struct LayoutSnapshot {
         struct Line {
-            int start = 0;          ///< Codepoint index of first char on this visual line
-            int end = 0;            ///< Codepoint index one past the last char
-            float baseline_y = 0.f; ///< Baseline y in local coords
-            float top_y = 0.f;      ///< Top y in local coords (used for hit-test)
-            float inner_x = 0.f;    ///< Left x in local coords (after scroll)
-            float line_height = 0.f;///< Vertical span of this visual line
-            std::vector<float> x_offsets; ///< Cumulative x of each char start; size = (end-start)+1
+            int start = 0;
+            int end = 0;
+            float baseline_y = 0.f;
+            float top_y = 0.f;
+            float inner_x = 0.f;
+            float line_height = 0.f;
+            /// Cumulative x of each char start; size = (end-start)+1.
+            /// Built once per cache-key change rather than per paint.
+            std::vector<float> x_offsets;
         };
         std::vector<Line> lines;
-        bool multi_line = false;     ///< True when populated by the multi-line branch
-        float fallback_char_w = 0.f; ///< Used when paint hasn't run yet (single-line caret hint)
+        bool multi_line = false;
+        float fallback_char_w = 0.f;
     };
     mutable LayoutSnapshot last_layout_;
+
+    /// Cache key for `last_layout_`. The expensive `x_offsets` arrays
+    /// only rebuild when one of these inputs changes (text edit, font
+    /// change, viewport resize, mode flip, scroll), NOT on every paint
+    /// — paint is a 60Hz hot path on the UI thread.
+    struct LayoutCacheKey {
+        std::size_t text_hash = 0;
+        float font_size = 0.f;
+        float bounds_width = 0.f;
+        float bounds_height = 0.f;
+        float scroll_offset = 0.f;
+        bool multi_line = false;
+        bool password_mode = false;
+        bool placeholder_visible = false;
+        bool operator==(const LayoutCacheKey& o) const noexcept {
+            return text_hash == o.text_hash
+                && font_size == o.font_size
+                && bounds_width == o.bounds_width
+                && bounds_height == o.bounds_height
+                && scroll_offset == o.scroll_offset
+                && multi_line == o.multi_line
+                && password_mode == o.password_mode
+                && placeholder_visible == o.placeholder_visible;
+        }
+    };
+    mutable LayoutCacheKey last_layout_key_;
 
     void push_undo();
     void insert_text(const std::string& t);

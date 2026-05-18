@@ -1629,11 +1629,10 @@ target_include_directories(pulp-test-dirty-tracker PRIVATE
 target_link_libraries(pulp-test-dirty-tracker PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-dirty-tracker)
 
-# Phase 1a partial-rendering POC test
-# (planning/2026-05-17-partial-rendering-design.md). Pins the
-# DirtyTracker contract the macOS GPU host's Phase 1a wiring relies on.
+# Partial-rendering POC test. Pins the DirtyTracker contract the
+# macOS GPU host's tracker wiring relies on.
 # The host integration itself needs Skia + a Metal device for end-to-end
-# coverage, so that lives in Phase 1b.
+# coverage, so that lives in the follow-up partial-rendering slice.
 add_executable(pulp-test-partial-rendering-poc test_partial_rendering_poc.cpp)
 target_include_directories(pulp-test-partial-rendering-poc PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)

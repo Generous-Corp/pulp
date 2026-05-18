@@ -1025,25 +1025,28 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 - (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a {
     (void)r; (void)a;
-    // Return the caret rect in screen coordinates for IME candidate window positioning
+    // IME candidate window positioning. `TextEditor::caret_rect()` is
+    // the post-paint, layout-aware caret geometry — single source of
+    // truth for both the visible caret and the IME hook so the
+    // candidate window aligns with the rendered position even when
+    // the text is wrapped or proportional-width.
     auto* te = [self focusedTextEditor];
     if (!te) return NSZeroRect;
 
-    // Approximate caret position using monospace character width
-    float char_w = te->font_size() * 0.6f;
-    float caret_x = 6.0f + te->caret_pos() * char_w;
-    float caret_y = 0;
+    pulp::view::Rect caret = te->caret_rect();
+    float local_x = caret.x;
+    float local_y = caret.y;
+    float caret_w = caret.width > 0.f ? caret.width : 1.0f;
+    float caret_h = caret.height > 0.f ? caret.height : te->font_size();
 
-    // Walk up parents to get root-relative position
-    float rx = caret_x, ry = caret_y;
+    float rx = local_x, ry = local_y;
     for (auto* v = static_cast<pulp::view::View*>(te); v; v = v->parent()) {
         rx += v->bounds().x;
         ry += v->bounds().y;
     }
 
-    // Convert to NSView coordinates (bottom-up)
     float viewHeight = static_cast<float>(self.bounds.size.height);
-    NSRect viewRect = NSMakeRect(rx, viewHeight - ry - te->font_size(), char_w, te->font_size());
+    NSRect viewRect = NSMakeRect(rx, viewHeight - ry - caret_h, caret_w, caret_h);
     NSRect windowRect = [self convertRect:viewRect toView:nil];
     return [self.window convertRectToScreen:windowRect];
 }
@@ -1784,7 +1787,7 @@ public:
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
 
-            // Phase 1a: arm the dirty tracker for the first frame and
+            // arm the dirty tracker for the first frame and
             // optionally enable debug-printing of the per-frame union rect.
             tracker_.invalidate_all();
             tracker_.set_viewport(options.width, options.height);
@@ -1908,9 +1911,9 @@ public:
 
     void repaint() override {
         needs_repaint_ = true;
-        // Phase 1a: until widgets pass per-rect bounds through
+        // until widgets pass per-rect bounds through
         // request_repaint(), every host-level repaint() invalidates
-        // the whole viewport. Phase 1b adds the Rect overload.
+        // the whole viewport. the follow-up partial-rendering slice adds the Rect overload.
         tracker_.invalidate_all();
         ++request_repaint_dirty_frames_;
     }
@@ -2139,7 +2142,7 @@ private:
     std::atomic<bool> needs_repaint_{true};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
-    // Phase 1a: partial-rendering POC. Tracks per-frame invalidations
+    // partial-rendering POC. Tracks per-frame invalidations
     // pushed by repaint() and the animation / FrameClock pump. The
     // render gate still uses the existing needs_repaint_/animation
     // flags so observable behaviour does not change in this slice —
@@ -2147,7 +2150,7 @@ private:
     // per painted frame when PULP_PARTIAL_RENDERING_DEBUG=1 in the
     // environment so we can audit "the dirty rect we WOULD have
     // clipped to" against the unconditional repaint that still ships.
-    // Phase 1b promotes the tracker to the authoritative gate + adds
+    // the follow-up partial-rendering slice promotes the tracker to the authoritative gate + adds
     // Skia clipIRect.
     render::DirtyTracker tracker_;
     bool partial_rendering_debug_ = false;
@@ -2348,8 +2351,8 @@ private:
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
 
-        // Phase 1a: emit the per-frame dirty-rect decision the host
-        // WOULD use to clip in Phase 1b. The actual paint path is
+        // emit the per-frame dirty-rect decision the host
+        // WOULD use to clip in the follow-up partial-rendering slice. The actual paint path is
         // unchanged; this is a wiring trace only. Gated on env so
         // production CI logs stay quiet.
         if (partial_rendering_debug_ && tracker_.is_dirty()) {
@@ -2401,8 +2404,8 @@ private:
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
-        // Phase 1a: clear the tracker AFTER present so the next frame
-        // starts clean. Phase 1b will gate begin_frame() on
+        // clear the tracker AFTER present so the next frame
+        // starts clean. the follow-up partial-rendering slice will gate begin_frame() on
         // tracker_.is_dirty() before paying for any of the above work.
         tracker_.clear();
         return captured;
@@ -2452,11 +2455,11 @@ private:
                     advance_widget_animations(&self->root_, 1.0f / 60.0f);
                     if (animate || tick_subscribers) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
-                        // Phase 1a (Codex correction 2): animation /
+                        // Note: animation pump: animation /
                         // frame-clock pumps mutate view state without
                         // going through request_repaint(), so for the
                         // tracker they count as a full-surface dirty
-                        // until Phase 1b audits and converts the
+                        // until the follow-up partial-rendering slice audits and converts the
                         // animating widget paths to per-rect repaints.
                         self->tracker_.invalidate_all();
                         ++self->pump_dirty_frames_;

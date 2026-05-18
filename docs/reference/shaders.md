@@ -50,10 +50,12 @@ What is **not** covered by `Canvas::draw_with_sksl` and friends:
   Geometry comes from Skia's draw primitives (the runtime effect fills
   a rect, not arbitrary triangle lists).
 - **Compute / mesh / tessellation / geometry shaders.** Use the Dawn
-  compute path directly via `core/render/include/pulp/render/gpu_compute.hpp`
-  (`GpuCompute::create_pipeline`, `dispatch_workgroups`) when you need
-  WGSL compute. PBR materials and Three.js bridging already ride this
-  path.
+  compute path via the `GpuCompute` interface
+  (`core/render/include/pulp/render/gpu_compute.hpp`) — the published
+  surface is `compute_magnitude`, `complex_multiply`, `batch_magnitude`,
+  and the `benchmark_*` helpers. PBR materials and Three.js bridging
+  already ride this path. Direct WGSL authoring lives behind the same
+  interface; see existing call sites for the pattern.
 - **Raw vertex / index buffer authoring.** Out of scope through SkSL.
   Drop down to Dawn (`core/render/include/pulp/render/gpu_surface.hpp`)
   if you need it.

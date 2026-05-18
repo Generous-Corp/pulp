@@ -68,7 +68,7 @@ modules:
     summary: >
       GPU surface management (Dawn, Skia Graphite) — Metal, D3D12, Vulkan backends.
       DirtyTracker for partial repaint optimization with rect coalescing.
-      DrawBatcher for draw call merging with overlap detection.
+      Draw-call coalescing handled by Skia/Graphite Recorder; no Pulp-level batcher.
       RenderPassManager for multi-pass frame ordering and budget tracking.
       Atlas systems: ImageAtlas, GradientAtlas, GlyphAtlas, PathAtlas, BufferPool.
       GPU graph renderers: GpuGraphRenderer (1D), GpuHeatMapRenderer (2D), GpuBarRenderer.
