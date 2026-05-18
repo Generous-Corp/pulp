@@ -424,6 +424,17 @@ TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
     REQUIRE(std::memcmp(out, fresh, sizeof(fresh)) == 0);
 }
 
+TEST_CASE("MemoryStream default construction reports open empty stream",
+          "[stream][memory][coverage][phase3-large]") {
+    MemoryStream empty;
+    REQUIRE(empty.is_open());
+    REQUIRE(empty.size() == 0);
+    REQUIRE(empty.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(empty.read(&byte, 1).closed());
+}
+
 TEST_CASE("FileStream reopen closes the previous handle",
           "[stream][file][coverage][phase3]") {
     auto first = make_temp_path("pulp_stream_reopen_first");
@@ -455,6 +466,28 @@ TEST_CASE("FileStream reopen closes the previous handle",
 
     std::filesystem::remove(first);
     std::filesystem::remove(second);
+}
+
+TEST_CASE("FileStream move construction transfers open handle and closes source",
+          "[stream][file][coverage][phase3-large]") {
+    auto path = make_temp_path("pulp_stream_move_construct");
+    const std::uint8_t payload[] = {'m', 'o', 'v', 'e'};
+
+    FileStream writer(path.string(), FileStream::Mode::Write);
+    REQUIRE(writer.is_open());
+    FileStream moved(std::move(writer));
+    REQUIRE_FALSE(writer.is_open());
+    REQUIRE(moved.is_open());
+    REQUIRE(moved.write(payload, sizeof(payload)).bytes == sizeof(payload));
+    REQUIRE(moved.flush());
+    moved.close();
+
+    FileStream reader(path.string(), FileStream::Mode::Read);
+    std::uint8_t out[sizeof(payload)]{};
+    REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
+    REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("FileStream move assignment handles self and closed sources",
