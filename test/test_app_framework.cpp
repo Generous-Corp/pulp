@@ -106,6 +106,16 @@ TEST_CASE("KeyShortcut parses named keys and rejects invalid function keys",
     REQUIRE(KeyShortcut::from_string("Down").key == KeyCode::down);
 }
 
+TEST_CASE("KeyShortcut parses modifiers independent of their order",
+          "[view][keys][coverage][phase3]") {
+    auto ks = KeyShortcut::from_string("Shift+Meta+Cmd+A");
+    REQUIRE(ks.key == KeyCode::a);
+    REQUIRE((ks.modifiers & kModShift) != 0);
+    REQUIRE((ks.modifiers & kModMeta) != 0);
+    REQUIRE((ks.modifiers & kModCmd) != 0);
+    REQUIRE(ks.to_string() == "Cmd+Shift+Meta+A");
+}
+
 TEST_CASE("KeyShortcut to_string covers modifiers and named keys",
           "[view][keys]") {
     KeyShortcut ks;
@@ -545,6 +555,35 @@ TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
     REQUIRE(settings.load());
     REQUIRE(settings.get_string("first").value() == "kept");
     REQUIRE_FALSE(settings.get_string("broken").has_value());
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load clears stale values from an empty settings file",
+          "[view][settings][coverage][phase3]") {
+    auto root = make_temp_root("pulp-app-settings-empty");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("PulpSettingsEmptyCoverage");
+    settings.set_string("stale", "value");
+    REQUIRE(settings.get_string("stale").has_value());
+
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream f(settings.settings_path());
+        f << "{}\n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE_FALSE(settings.get_string("stale").has_value());
+    REQUIRE_FALSE(settings.load_window_state().has_value());
 
     std::filesystem::remove_all(root);
 }
