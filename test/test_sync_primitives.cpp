@@ -85,6 +85,17 @@ TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
 
 // ── TripleBuffer tests ────────────────────────────────────────────────────
 
+TEST_CASE("TripleBuffer default constructor exposes value-initialized front buffer",
+          "[runtime][triple_buffer][coverage][phase3]") {
+    TripleBuffer<TransportState> buf;
+
+    const auto& initial = buf.read();
+    REQUIRE(initial.tempo == 120.0);
+    REQUIRE(initial.beat_position == 0.0);
+    REQUIRE(initial.time_sig_num == 4);
+    REQUIRE(initial.time_sig_den == 4);
+}
+
 TEST_CASE("TripleBuffer basic read/write", "[runtime][triple_buffer]") {
     TripleBuffer<int> buf(0);
 
