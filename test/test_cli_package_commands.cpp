@@ -271,6 +271,12 @@ TEST_CASE("cmd_target manages project targets from local pulp.toml",
     auto invalid = run_in_project(tmp.path, [&] { return cmd_target({"add", "Mars-x64"}); });
     REQUIRE(invalid.exit_code == 1);
     REQUIRE(invalid.stderr_text.find("Invalid target: Mars-x64") != std::string::npos);
+    REQUIRE(invalid.stdout_text.find("Valid platforms") != std::string::npos);
+
+    auto invalid_arch = run_in_project(tmp.path, [&] { return cmd_target({"add", "Linux-ppc64"}); });
+    REQUIRE(invalid_arch.exit_code == 1);
+    REQUIRE(invalid_arch.stderr_text.find("Invalid target: Linux-ppc64") != std::string::npos);
+    REQUIRE(invalid_arch.stdout_text.find("Valid architectures") != std::string::npos);
 
     auto remove_linux = run_in_project(tmp.path, [&] { return cmd_target({"remove", "Linux-x64"}); });
     REQUIRE(remove_linux.exit_code == 0);
@@ -306,6 +312,10 @@ TEST_CASE("cmd_target manages project targets from local pulp.toml",
     REQUIRE(list_extra_arg.exit_code == 2);
     REQUIRE(list_extra_arg.stderr_text.find("Unexpected target list argument") !=
             std::string::npos);
+
+    auto remove_invalid = run_in_project(tmp.path, [&] { return cmd_target({"remove", "Linux-ppc64"}); });
+    REQUIRE(remove_invalid.exit_code == 1);
+    REQUIRE(remove_invalid.stderr_text.find("Invalid target: Linux-ppc64") != std::string::npos);
 
     auto unknown = run_in_project(tmp.path, [&] { return cmd_target({"rename"}); });
     REQUIRE(unknown.exit_code == 1);
@@ -905,6 +915,24 @@ TEST_CASE("cmd_add accepts commercial override for proprietary packages",
     REQUIRE(accepted.stdout_text.find("Added Commercial SDK v2.0.0") != std::string::npos);
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json")
                 .packages.count("commercial-sdk") == 1);
+}
+
+TEST_CASE("cmd_add permits review-required licenses with local metadata updates",
+          "[cli][package-commands][add-remove][coverage]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+
+    auto added = run_in_project(tmp.path, [&] {
+        return cmd_add({"mpl-analyzer", "--no-cmake"});
+    });
+    REQUIRE(added.exit_code == 0);
+    REQUIRE(added.stdout_text.find("requires manual review") != std::string::npos);
+    REQUIRE(added.stdout_text.find("Added MPL Analyzer v0.9.0") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("mpl-analyzer") == 1);
+    REQUIRE(read_file(tmp.path / "DEPENDENCIES.md").find("MPL Analyzer") != std::string::npos);
+    REQUIRE(read_file(tmp.path / "NOTICE.md").find("## MPL Analyzer") != std::string::npos);
 }
 
 TEST_CASE("cmd_remove handles help and registry-free removal",
