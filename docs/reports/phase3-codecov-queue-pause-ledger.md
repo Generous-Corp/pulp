@@ -8382,3 +8382,30 @@ configure still hits the known FetchContent `mbedtls` tag checkout failure;
 GitHub-hosted CI remains the validation source. #2210 was separately updated
 and pushed at `8a3bb3152` after local `pulp-test-font-axis-animation` passed.
 No Namespace dispatch.
+
+2026-05-18 08:20 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-batch-734` as #2222
+(`test: batch phase3 coverage midi runtime state audio edges`). The branch is
+24 commits ahead of `origin/main` and covers MIDI raw/running-status parsers,
+MIDI buffer sidecar move semantics, runtime scope/base64/expression/i18n
+edges, event broadcaster snapshot dispatch, memory channel reentrant replies,
+license BigInteger comparisons, state schema/properties/cached-property/sync
+decode edges, audio channel layout/buffer copy+move behavior, and processor
+descriptor vendor metadata defaults. Focused local validation passed for all
+touched suites: `pulp-test-raw-midi-parser`, `pulp-test-running-status`,
+`pulp-test-runtime`, `pulp-test-state`, `pulp-test-runtime-utils`,
+`pulp-test-events-async-helpers`, `pulp-test-memory-message-channel`,
+`pulp-test-license`, `pulp-test-i18n`, `pulp-test-midi-buffer-sysex`,
+`pulp-test-midi-buffer-ump`, `pulp-test-audio`, `pulp-test-properties`,
+`pulp-test-state-tree`, `pulp-test-processor-defaults`, and
+`git diff --check`. The batch includes a real SDK fix in
+`core/audio/include/pulp/audio/buffer.hpp`: copied `Buffer<T>` instances now
+refresh cached channel pointers so copies own independent storage instead of
+pointing back at the source buffer. Local source/version/contract gates passed.
+Local pre-push diff-cover was demoted only because the clean coverage
+configure still hits the known FetchContent `mbedtls` tag checkout failure;
+GitHub-hosted CI remains the validation source. GraphQL PR creation was
+rate-limited, so #2222 was opened through the GitHub REST API and labeled
+`codecov` through REST. Monitoring remains GitHub-hosted only; #2219 now has a
+Linux hosted failure pending log availability after the still-running workflow
+finishes. No Namespace dispatch.
