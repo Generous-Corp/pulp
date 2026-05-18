@@ -376,6 +376,24 @@ TEST_CASE("sample conversion no-ops leave sentinel outputs untouched",
     REQUIRE(int32_out == 23);
 }
 
+TEST_CASE("int24 to float preserves sign-extension boundaries",
+          "[audio][convert][coverage][phase3]") {
+    const uint8_t packed[] = {
+        0x01, 0x00, 0x00, // +1
+        0xFE, 0xFF, 0xFF, // -2
+        0x00, 0x00, 0x40, // +0.5
+        0x00, 0x00, 0xC0, // -0.5
+    };
+
+    float dst[4] = {};
+    int24_to_float(packed, dst, 4);
+
+    REQUIRE_THAT(dst[0], WithinAbs(1.0f / 8388608.0f, 0.0000001f));
+    REQUIRE_THAT(dst[1], WithinAbs(-2.0f / 8388608.0f, 0.0000001f));
+    REQUIRE_THAT(dst[2], WithinAbs(0.5f, 0.0000001f));
+    REQUIRE_THAT(dst[3], WithinAbs(-0.5f, 0.0000001f));
+}
+
 // ── WAV file I/O ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Write and read WAV file", "[audio][file]") {
