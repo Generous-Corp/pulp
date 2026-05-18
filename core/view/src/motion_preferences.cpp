@@ -31,45 +31,76 @@ MotionPreferences& MotionPreferences::instance() {
 }
 
 MotionPreferences::MotionPreferences() {
+    // Construction runs once under the `static` init guard; no
+    // contention on `mtx_` is possible at this point.
     last_os_ = detect_system_policy();
 }
 
 MotionPreferences::~MotionPreferences() = default;
 
-MotionPolicy MotionPreferences::policy() const {
+MotionPolicy MotionPreferences::policy_locked() const {
     if (override_) return *override_;
     return last_os_;
+}
+
+MotionPolicy MotionPreferences::policy() const {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return policy_locked();
+}
+
+double MotionPreferences::duration_scale() const {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return duration_scale_;
+}
+
+bool MotionPreferences::has_override() const noexcept {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return override_.has_value();
 }
 
 void MotionPreferences::set_duration_scale(double scale) {
     if (scale < 0.0) scale = 0.0;
     if (scale > 2.0) scale = 2.0;
+    std::lock_guard<std::mutex> lock(mtx_);
     duration_scale_ = scale;
 }
 
 void MotionPreferences::set_override(std::optional<MotionPolicy> p) {
-    auto before = policy();
-    override_ = p;
-    auto after = policy();
-    if (before != after) notify_changed(after);
+    MotionPolicy after{};
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        const auto before = policy_locked();
+        override_ = p;
+        after = policy_locked();
+        changed = (before != after);
+    }
+    if (changed) notify_changed(after);
 }
 
 bool MotionPreferences::poll() {
-    if (override_) return false;
-    auto current = detect_system_policy();
-    if (current != last_os_) {
-        last_os_ = current;
-        notify_changed(current);
-        return true;
+    MotionPolicy current{};
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (override_) return false;
+        current = detect_system_policy();
+        if (current != last_os_) {
+            last_os_ = current;
+            changed = true;
+        }
     }
-    return false;
+    if (changed) notify_changed(current);
+    return changed;
 }
 
 void MotionPreferences::on_policy_changed(std::function<void(MotionPolicy)> cb) {
+    std::lock_guard<std::mutex> lock(mtx_);
     callback_ = std::move(cb);
 }
 
 void MotionPreferences::reset_for_tests() {
+    std::lock_guard<std::mutex> lock(mtx_);
     override_.reset();
     duration_scale_ = 1.0;
     callback_ = {};
@@ -77,7 +108,15 @@ void MotionPreferences::reset_for_tests() {
 }
 
 void MotionPreferences::notify_changed(MotionPolicy p) {
-    if (callback_) callback_(p);
+    // Snapshot the callback under the lock so a re-entrant callback
+    // (one that calls back into MotionPreferences::set_override or
+    // set_duration_scale) can't self-deadlock.
+    std::function<void(MotionPolicy)> cb_copy;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        cb_copy = callback_;
+    }
+    if (cb_copy) cb_copy(p);
 }
 
 MotionPolicy MotionPreferences::detect_system_policy() {

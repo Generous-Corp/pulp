@@ -12,9 +12,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <atomic>
 #include <cstdio>
 #include <optional>
+#include <set>
 #include <string>
+#include <thread>
 #if defined(_WIN32)
 #include <process.h>
 #define pulp_test_getpid() static_cast<long>(::_getpid())
@@ -586,4 +589,151 @@ TEST_CASE("Tween under Reduced + duration_scale 0.5 halves settling_time",
     REQUIRE(st == Approx(0.5).margin(0.06));
 
     coord.reset();
+}
+
+// ── Thread-safety smoke (bug #2148) ──────────────────────────────────
+//
+// The process-wide MotionPreferences singleton was guarded by zero
+// synchronization pre-#2148: today only tests call setters, but the JS
+// bridge and any future async OS-poll thread would tear. These cases
+// hammer the setter / getter / callback surface from multiple threads
+// and assert "no torn reads" + "no crash" — the same shape we want
+// future async callers to be safe under.
+//
+// True data-race detection is the job of TSan; these are deterministic
+// smoke tests that any host can run. Every observed policy value must
+// be from the closed set we wrote ({Reduced, Off, nullopt-back-to-OS});
+// every observed duration scale must be one of the values we set.
+
+TEST_CASE("MotionPreferences set_override hammered from N threads stays consistent",
+          "[motion-preferences][bug-sweep][thread-safety]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+
+    const int writers = 4;
+    const int readers = 4;
+    const int iters = 2000;
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop{false};
+
+    auto os_policy = prefs.policy();   // baseline before any override
+
+    std::vector<std::thread> threads;
+    threads.reserve(writers + readers);
+
+    for (int w = 0; w < writers; ++w) {
+        threads.emplace_back([&, w] {
+            while (!go.load(std::memory_order_acquire)) {}
+            for (int i = 0; i < iters; ++i) {
+                switch ((w + i) % 3) {
+                    case 0: prefs.set_override(MotionPolicy::Reduced); break;
+                    case 1: prefs.set_override(MotionPolicy::Off);     break;
+                    case 2: prefs.set_override(std::nullopt);          break;
+                }
+            }
+        });
+    }
+
+    // Collect observed policy values in each reader to assert every
+    // observation is from the legal write set + the baseline OS value.
+    std::vector<std::vector<MotionPolicy>> observations(readers);
+    for (int r = 0; r < readers; ++r) {
+        threads.emplace_back([&, r] {
+            while (!go.load(std::memory_order_acquire)) {}
+            while (!stop.load(std::memory_order_acquire)) {
+                observations[r].push_back(prefs.policy());
+                (void)prefs.duration_scale();
+                (void)prefs.has_override();
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_release);
+
+    // Wait for writers to finish then signal readers to stop.
+    for (int t = 0; t < writers; ++t) threads[t].join();
+    stop.store(true, std::memory_order_release);
+    for (int t = writers; t < writers + readers; ++t) threads[t].join();
+
+    // Every observed value must be a legal write or the OS baseline.
+    std::set<MotionPolicy> legal{MotionPolicy::Reduced, MotionPolicy::Off,
+                                 os_policy};
+    for (const auto& obs : observations) {
+        for (auto p : obs) {
+            REQUIRE(legal.count(p) == 1);
+        }
+    }
+}
+
+TEST_CASE("MotionPreferences set_duration_scale hammered from N threads",
+          "[motion-preferences][bug-sweep][thread-safety]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+
+    const int writers = 4;
+    const int readers = 4;
+    const int iters = 2000;
+    std::atomic<bool> go{false};
+    std::atomic<bool> stop{false};
+
+    const std::vector<double> values{0.0, 0.25, 0.5, 1.0, 1.5, 2.0};
+
+    std::vector<std::thread> threads;
+    threads.reserve(writers + readers);
+
+    for (int w = 0; w < writers; ++w) {
+        threads.emplace_back([&, w] {
+            while (!go.load(std::memory_order_acquire)) {}
+            for (int i = 0; i < iters; ++i) {
+                prefs.set_duration_scale(values[(w + i) % values.size()]);
+            }
+        });
+    }
+
+    std::vector<std::vector<double>> observations(readers);
+    for (int r = 0; r < readers; ++r) {
+        threads.emplace_back([&, r] {
+            while (!go.load(std::memory_order_acquire)) {}
+            while (!stop.load(std::memory_order_acquire)) {
+                observations[r].push_back(prefs.duration_scale());
+            }
+        });
+    }
+
+    go.store(true, std::memory_order_release);
+    for (int t = 0; t < writers; ++t) threads[t].join();
+    stop.store(true, std::memory_order_release);
+    for (int t = writers; t < writers + readers; ++t) threads[t].join();
+
+    // Every observed scale must be in [0.0, 2.0]: the setter clamps,
+    // and torn reads would manifest as out-of-range garbage.
+    for (const auto& obs : observations) {
+        for (auto v : obs) {
+            REQUIRE(v >= 0.0);
+            REQUIRE(v <= 2.0);
+        }
+    }
+}
+
+TEST_CASE("MotionPreferences callback that re-enters set_override does not deadlock",
+          "[motion-preferences][bug-sweep][thread-safety]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    // Force a known starting policy so the first set_override(Reduced)
+    // is a real transition even on runners that default to Reduced.
+    prefs.set_override(MotionPolicy::Full);
+
+    std::atomic<int> fired{0};
+    // Inside the callback, mutate the duration scale — a setter call
+    // that grabs `mtx_`. If notify_changed held `mtx_` across the
+    // callback fire, this would self-deadlock.
+    prefs.on_policy_changed([&](MotionPolicy) {
+        prefs.set_duration_scale(0.5);
+        ++fired;
+    });
+
+    prefs.set_override(MotionPolicy::Reduced);
+    prefs.set_override(MotionPolicy::Off);
+    REQUIRE(fired.load() == 2);
+    REQUIRE(prefs.duration_scale() == Approx(0.5));
 }

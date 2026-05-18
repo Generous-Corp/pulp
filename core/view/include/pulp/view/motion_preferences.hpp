@@ -16,6 +16,7 @@
 /// primitive starts; the singleton lives behind `current()`.
 
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,7 +56,7 @@ public:
     /// Current duration scale (default 1.0). Clamped to [0.0, 2.0].
     /// Only meaningful when `policy() == Reduced`; primitives may use it
     /// regardless if they want a softer slowdown under `Full`.
-    double duration_scale() const { return duration_scale_; }
+    double duration_scale() const;
 
     /// Set the duration scale. Clamped to [0.0, 2.0]. Sticks across
     /// override changes; not derived from the OS.
@@ -66,7 +67,7 @@ public:
     void set_override(std::optional<MotionPolicy> p);
 
     /// Returns true if an override is currently in effect.
-    bool has_override() const noexcept { return override_.has_value(); }
+    bool has_override() const noexcept;
 
     /// Poll the OS for a changed reduced-motion setting. Returns true
     /// when the effective policy changes since the last poll. When an
@@ -90,8 +91,16 @@ private:
     /// Platform-specific OS detection.
     static MotionPolicy detect_system_policy();
 
+    /// Compute the effective policy under `mtx_`. Caller holds the lock.
+    MotionPolicy policy_locked() const;
+
+    /// Snapshot a copy of the callback under `mtx_`, drop the lock, and
+    /// invoke. Avoids self-deadlock when a callback re-enters
+    /// `MotionPreferences::set_override` / `set_duration_scale`.
     void notify_changed(MotionPolicy p);
 
+    /// Protects every member below; never held across a callback fire.
+    mutable std::mutex mtx_;
     MotionPolicy last_os_ = MotionPolicy::Full;
     std::optional<MotionPolicy> override_;
     double duration_scale_ = 1.0;
