@@ -8546,3 +8546,19 @@ assertion was caught locally and adjusted to match the approximate math contract
 before push. The branch was pushed with `PULP_SKIP_PREPUSH=1`; GitHub-hosted CI
 is the intended validation source. #2233 was opened and labeled `codecov`
 through the GitHub REST API. No Namespace dispatch.
+
+2026-05-18 11:05 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-github-batch-741` as #2234
+(`test: batch phase3 coverage for runtime stream edges`). The branch is 25
+commits ahead of current `origin/main` after a clean rebase and covers runtime
+stream helper/memory-stream edge cases plus expression evaluator, text diff,
+and range behavior. Focused local validation passed after rebase:
+`cmake --build build --target pulp-test-stream pulp-test-runtime-utils`,
+`pulp-test-stream`, `pulp-test-runtime-utils`, and
+`git diff --check origin/main...HEAD`. Local validation caught and corrected two
+test-contract mismatches before push: text diff does not keep a terminal empty
+line as a standalone diff entry, and `Range<T>::constrain()` clamps to
+`[start, end - 1]` for float aliases as well as integer aliases. The branch was
+pushed with `PULP_SKIP_PREPUSH=1`; GitHub-hosted CI is the intended validation
+source. #2234 was opened and labeled `codecov` through the GitHub REST API. No
+Namespace dispatch.
