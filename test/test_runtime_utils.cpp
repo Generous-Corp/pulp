@@ -753,6 +753,16 @@ TEST_CASE("Expression evaluator tolerates whitespace around tokens",
     REQUIRE(*value == Catch::Approx(9.0));
 }
 
+TEST_CASE("ExpressionEvaluator replaces registered unary functions",
+          "[runtime][expression][coverage][phase3]") {
+    ExpressionEvaluator evaluator;
+    evaluator.register_function("shape", [](double x) { return x + 1.0; });
+    REQUIRE(*evaluator.evaluate("shape(4)") == Catch::Approx(5.0));
+
+    evaluator.register_function("shape", [](double x) { return x * 2.0; });
+    REQUIRE(*evaluator.evaluate("shape(4)") == Catch::Approx(8.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
