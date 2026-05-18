@@ -186,6 +186,26 @@ TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
     default_view.clear();
 }
 
+TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
+          "[audio][buffer][coverage][phase3-github]") {
+    Buffer<float> buffer(2, 2);
+    buffer.channel(0)[0] = 1.0f;
+    buffer.channel(1)[1] = -1.0f;
+
+    buffer.resize(0, 0);
+    REQUIRE(buffer.num_channels() == 0);
+    REQUIRE(buffer.num_samples() == 0);
+    REQUIRE(buffer.view().empty());
+
+    buffer.resize(2, 2);
+    REQUIRE_FALSE(buffer.view().empty());
+    for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch) {
+        for (float sample : buffer.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+}
+
 TEST_CASE("AudioFileData reports shape from first channel",
           "[audio][file][codecov]") {
     AudioFileData empty;
