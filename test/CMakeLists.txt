@@ -867,6 +867,11 @@ add_executable(pulp-test-font-flight-recorder test_font_flight_recorder.cpp)
 target_link_libraries(pulp-test-font-flight-recorder PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-flight-recorder)
 
+# Font subsystem typed options and scope generation tests
+add_executable(pulp-test-font-options test_font_options.cpp)
+target_link_libraries(pulp-test-font-options PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-font-options)
+
 # pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
 # 0.5px for a hand-picked sample set representative of CHAIN INFO /
