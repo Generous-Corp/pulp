@@ -212,6 +212,19 @@ TEST_CASE("OSC decode ignores unknown type tags without adding arguments",
     REQUIRE(decoded.args.empty());
 }
 
+TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes",
+          "[osc][codec][codecov]") {
+    std::vector<uint8_t> data;
+    append_osc_string(data, "/mixed");
+    append_osc_string(data, ",xi");
+    data.insert(data.end(), {0x00, 0x00, 0x00, 0x2A});
+
+    auto decoded = decode(data.data(), data.size());
+    REQUIRE(decoded.address == "/mixed");
+    REQUIRE(decoded.args.size() == 1);
+    REQUIRE(decoded.get_int(0) == 42);
+}
+
 TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
           "[osc][codec][codecov]") {
     const std::vector<uint8_t> data{'/', 'b', 'a', 'r'};
