@@ -8562,3 +8562,21 @@ line as a standalone diff entry, and `Range<T>::constrain()` clamps to
 pushed with `PULP_SKIP_PREPUSH=1`; GitHub-hosted CI is the intended validation
 source. #2234 was opened and labeled `codecov` through the GitHub REST API. No
 Namespace dispatch.
+
+2026-05-18 11:31 PDT: pushed and opened the next GitHub-only coverage batch
+`feature/phase3-codecov-github-batch-742` as #2237
+(`test: batch phase3 coverage for runtime parser edges`). The branch is 24
+commits ahead of current `origin/main` and batches deterministic runtime unit
+coverage across i18n load-failure preservation, JSON-RPC closed/detached channel
+paths, analytics flush retry and enabled-state behavior, IPv4 parser boundaries,
+license payload/signature parse edges, crypto hash/AES padding edges, and typed
+identity formatting/round-trip checks. Focused local validation passed before
+push: `cmake --build build --target pulp-test-i18n pulp-test-json-rpc
+pulp-test-analytics pulp-test-runtime-utils pulp-test-license pulp-test-crypto
+pulp-test-identity`, `pulp-test-i18n`, `pulp-test-json-rpc`,
+`pulp-test-analytics`, `pulp-test-runtime-utils`, `pulp-test-license`,
+`pulp-test-crypto`, `pulp-test-identity`, and
+`git diff --check origin/main...HEAD`. The branch was pushed with
+`PULP_SKIP_PREPUSH=1`; GitHub-hosted CI is the intended validation source.
+#2237 was opened and labeled `codecov` through the GitHub REST API. No Namespace
+dispatch.
