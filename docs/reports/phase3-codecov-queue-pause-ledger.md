@@ -7934,3 +7934,25 @@ and remains held for a larger PR. PR #2173 is corrected back to head
 at head `a6befed35` with the Windows duplicate-symbol fix and parsed compat
 skip trailers. Both PRs are on GitHub-hosted CI only, with no failures at this
 ledger update.
+
+2026-05-18 03:14 PDT: completed the next large local-only coverage tranche
+for `feature/phase3-codecov-batch-729`; the held batch is now 29 commits
+ahead of current `origin/main` and remains GitHub-hosted only. Since the last
+ledger entry, the batch added host/format coverage for editor compatibility,
+parameter-event rvalue paths, diagnostic snapshot replacement, descriptor bus
+helpers, unbounded aspect hints, MIDI-only descriptor validation, validation
+status/report defaults, sanitizer payload report generation, unitless
+diagnostic parameter rendering, tempo hook defaults, and tempo hook exception
+propagation; it also added view waveform/live-constant/table-model edges,
+runtime sync/logging helpers, MIDI running-status split feeds, and ADSR
+release/retrigger coverage. Local validation passed for the newly added final
+format tranche: `pulp-test-descriptor-validation -r compact` (24 cases / 61
+assertions), `pulp-test-validation-harness -r compact` (40 cases / 285
+assertions), `pulp-test-diagnostic -r compact` (12 cases / 55 assertions),
+`pulp-test-transport-hook -r compact` (9 cases / 24 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD
+--mode=report`, `python3 tools/scripts/version_bump_check.py --base
+origin/main --head HEAD --mode=report`, and `git diff --check`. Current
+monitoring state: PR #2173 is at head `d3a06e5d` and PR #2202 is at head
+`43711a2b`; both have no failing GitHub checks at this update and are waiting
+on queued/running GitHub-hosted lanes. No Namespace dispatch.
