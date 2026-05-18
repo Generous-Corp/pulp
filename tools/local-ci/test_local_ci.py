@@ -358,6 +358,133 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(self.mod.resolve_targets(config, None), ["mac", "ubuntu"])
         self.assertEqual(self.mod.resolve_targets(config, ["windows", "mac", "windows"]), ["mac", "windows"])
 
+    def test_extracted_target_helpers_cover_empty_defaults_unknown_and_disabled(self):
+        config = {
+            "targets": {
+                "mac": {"enabled": True},
+                "linux": {"enabled": False},
+                "windows": {},
+            },
+            "defaults": {"targets": []},
+        }
+
+        self.assertEqual(self.mod.enabled_targets(config), ["mac", "windows"])
+        self.assertEqual(self.mod.resolve_targets(config, None), [])
+
+        with self.assertRaisesRegex(ValueError, "Unknown target\\(s\\): ios"):
+            self.mod.resolve_targets(config, ["ios"])
+
+        with self.assertRaisesRegex(ValueError, "Requested target\\(s\\) disabled"):
+            self.mod.resolve_targets(config, ["linux"])
+
+    def test_extracted_provenance_helpers_normalize_result_and_summarize(self):
+        direct = self.mod.normalize_provenance({"direct_backend": ""})
+        self.assertEqual(direct["execution_kind"], "direct")
+        self.assertEqual(direct["direct_backend"], "")
+        self.assertEqual(self.mod.provenance_summary(direct), "direct via local-ci")
+
+        hosted = self.mod.normalize_provenance(
+            {
+                "execution_kind": "hosted",
+                "hosted_orchestrator": "github-actions",
+                "runner_provider": "github-hosted",
+                "runner_selector": "macos-15",
+                "run_id": "12345",
+            }
+        )
+        self.assertEqual(
+            self.mod.provenance_summary(hosted),
+            "hosted via github-actions/github-hosted selector=macos-15 run=12345",
+        )
+
+        result = self.mod.normalize_result({"submission": {"provenance": hosted}})
+        self.assertEqual(result["provenance"]["run_id"], "12345")
+
+    def test_extracted_queue_helpers_accept_legacy_array_and_enveloped_queue(self):
+        legacy_job = {
+            "branch": "feature/local-ci",
+            "sha": "abc123",
+            "queued_at": "2026-05-18T00:00:00Z",
+            "priority": " HIGH ",
+            "targets": ["windows", "mac", "mac"],
+            "validation": " smoke ",
+            "submission": {
+                "provenance": {
+                    "execution_kind": "hosted",
+                    "hosted_orchestrator": "github-actions",
+                    "runner_provider": "github-hosted",
+                }
+            },
+        }
+
+        normalized = self.mod.normalize_job(legacy_job)
+        self.assertEqual(len(normalized["id"]), 12)
+        self.assertEqual(normalized["priority"], "high")
+        self.assertEqual(normalized["targets"], ["mac", "windows"])
+        self.assertEqual(normalized["validation"], "smoke")
+        self.assertEqual(normalized["status"], "pending")
+        self.assertEqual(normalized["provenance"]["execution_kind"], "hosted")
+
+        queue_file = self.mod.queue_path()
+        queue_file.parent.mkdir(parents=True, exist_ok=True)
+        queue_file.write_text(json.dumps([legacy_job]) + "\n")
+        self.assertEqual(self.mod.load_queue_unlocked()[0]["targets"], ["mac", "windows"])
+
+        queue_file.write_text(json.dumps({"jobs": [legacy_job]}) + "\n")
+        self.assertEqual(self.mod.load_queue_unlocked()[0]["priority"], "high")
+
+        self.mod.save_queue_unlocked([normalized])
+        self.assertEqual(json.loads(queue_file.read_text())[0]["id"], normalized["id"])
+
+    def test_extracted_github_workflow_helpers_resolve_sources_and_cli_overrides(self):
+        config = {
+            "github_actions": {
+                "defaults": {"provider": "namespace"},
+                "workflows": {
+                    "build": {
+                        "providers": {
+                            "namespace": {
+                                "linux_runner_selector_json": '["ns-linux"]',
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        repo_vars = {
+            "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON": '"ns-windows"',
+        }
+
+        defaults, sources = self.mod.resolve_workflow_dispatch_defaults(
+            config,
+            repo_vars,
+            "build",
+            "namespace",
+            ["linux_runner_selector_json", "windows_runner_selector_json"],
+        )
+        self.assertEqual(defaults["linux_runner_selector_json"], '["ns-linux"]')
+        self.assertEqual(defaults["windows_runner_selector_json"], '"ns-windows"')
+        self.assertIn("config github_actions.workflows.build", sources["linux_runner_selector_json"])
+        self.assertIn("repo variable", sources["windows_runner_selector_json"])
+
+        args = SimpleNamespace(
+            linux_runner_selector_json='"ubuntu-24.04"',
+            windows_runner_selector_json=None,
+            macos_runner_selector_json=None,
+        )
+        self.assertEqual(
+            self.mod.resolve_cli_dispatch_field_values(args, ["linux_runner_selector_json"]),
+            {"linux_runner_selector_json": '"ubuntu-24.04"'},
+        )
+
+        with self.assertRaisesRegex(ValueError, "not supported for this workflow"):
+            self.mod.resolve_cli_dispatch_field_values(args, ["macos_runner_selector_json"])
+
+        with self.assertRaisesRegex(ValueError, "Unknown workflow"):
+            self.mod.resolve_default_provider_for_workflow(
+                {"provider": "github-hosted"}, "missing"
+            )
+
     def test_windows_checkout_path_helpers_join_and_detect_unsafe_roots(self):
         self.assertEqual(
             self.mod.windows_path_join(r"C:\Users\daniel\\", r"\Code\\", "pulp"),
