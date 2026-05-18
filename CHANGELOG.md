@@ -8,10 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01250"></a>
-## [0.125.0] - 2026-05-18
+<a id="v01260"></a>
+## [0.126.0] - 2026-05-18
 
-- refactor(view-js): P5-7 follow-up — extracted WebGPU mock factories from web-compat-document.js (-563 lines, 1,579 → 1,016)
+- refactor(test): P5-2 follow-up — extracted CG gradient/pattern cluster from test_canvas.cpp (-628 lines, 3,363 → 2,735)
 
 <a id="v01150"></a>
 ## [0.115.0] - 2026-05-18
