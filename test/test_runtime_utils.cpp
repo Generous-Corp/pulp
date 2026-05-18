@@ -867,6 +867,28 @@ TEST_CASE("DoubleRange intersections and unions preserve fractional bounds",
     REQUIRE_THAT(combined.end, Catch::Matchers::WithinAbs(4.0, 1e-12));
 }
 
+TEST_CASE("SizeRange and FloatRange cover containment and expansion helpers",
+          "[runtime][range][coverage][phase3]") {
+    SizeRange bytes = SizeRange::from_start_length(4u, 8u);
+    REQUIRE(bytes.start == 4u);
+    REQUIRE(bytes.end == 12u);
+    REQUIRE(bytes.length() == 8u);
+    REQUIRE(bytes.contains(4u));
+    REQUIRE_FALSE(bytes.contains(12u));
+    REQUIRE(bytes.contains(SizeRange(6u, 10u)));
+
+    auto expanded = bytes.expanded(16u);
+    REQUIRE(expanded == SizeRange(4u, 17u));
+
+    FloatRange unit(0.0f, 1.0f);
+    REQUIRE(unit.contains(0.25f));
+    REQUIRE_FALSE(unit.contains(1.0f));
+
+    auto overlap = unit.intersection(FloatRange(0.5f, 2.0f));
+    REQUIRE_THAT(overlap.start, Catch::Matchers::WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(overlap.end, Catch::Matchers::WithinAbs(1.0f, 1e-6f));
+}
+
 TEST_CASE("Range boundary touch points remain non-intersections",
           "[runtime][range][coverage][issue-641]") {
     REQUIRE_FALSE(IntRange(0, 10).intersects(IntRange(10, 20)));
