@@ -1,0 +1,726 @@
+{
+  "version": "1.0",
+  "description": "Multilingual torture corpus for Pulp font-subsystem v2 parity harness. Each entry exercises a specific shaping, bidi, clustering, fallback, or sizing hazard the v2 hardening plan (Slice 1.3 parity harness) must defend against. Tests measure-vs-paint geometry parity, index-map correctness, locale-aware face selection, and cluster atomicity.",
+  "schema": {
+    "id": "kebab-case unique identifier",
+    "text": "raw UTF-8 string to shape",
+    "categories": "one or more of: bidi, cluster, emoji-zwj, combining-marks, regional-indicators, keycap, fallback-arrow, small-size, mixed-script, cjk, thai, vietnamese, devanagari",
+    "locale": "BCP-47 language tag, hints face selection (especially Han unification)",
+    "expected_clusters": "best-estimate grapheme-cluster count (UAX #29 extended grapheme clusters)",
+    "expected_runs_at_least": "minimum shaped-run count after bidi + script analysis",
+    "notes": "what this entry stresses and what could break"
+  },
+  "entries": [
+    {
+      "id": "bidi-arabic-english-001",
+      "text": "Hello عالم",
+      "categories": [
+        "bidi",
+        "mixed-script"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 10,
+      "expected_runs_at_least": 2,
+      "notes": "Classic Arabic+English bidi. Visual order is 'Hello مل ا ع' but logical bytes are LTR-Latin then LTR-stored RTL-shaped Arabic. Selecting the visual 'عالم' must highlight bytes 6..15 via the index map; getting endpoint mapping wrong is the most common bidi bug."
+    },
+    {
+      "id": "bidi-arabic-english-002",
+      "text": "The book الكتاب is here",
+      "categories": [
+        "bidi",
+        "mixed-script"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 23,
+      "expected_runs_at_least": 3,
+      "notes": "Three runs: LTR 'The book ', RTL 'الكتاب', LTR ' is here'. Tests run-boundary x-position parity and that selection caret traversal between runs lands on a grapheme boundary."
+    },
+    {
+      "id": "bidi-hebrew-english-001",
+      "text": "code: שלום עולם end",
+      "categories": [
+        "bidi",
+        "mixed-script"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 19,
+      "expected_runs_at_least": 3,
+      "notes": "Hebrew bidi with two Hebrew words separated by ASCII space. Bidi level resolution for the space between שלום and עולם must place it within the RTL run, not as a separate LTR neutral."
+    },
+    {
+      "id": "bidi-hebrew-english-002",
+      "text": "Hello שלום!",
+      "categories": [
+        "bidi",
+        "mixed-script"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 11,
+      "expected_runs_at_least": 2,
+      "notes": "Trailing exclamation. Per UAX #9, the '!' inherits the embedding level of the preceding strong Hebrew character and visually attaches to its left in display order. A common painter bug is rendering it on the wrong side."
+    },
+    {
+      "id": "bidi-arabic-digits-001",
+      "text": "السعر 1234 ريال",
+      "categories": [
+        "bidi"
+      ],
+      "locale": "ar-SA",
+      "expected_clusters": 15,
+      "expected_runs_at_least": 3,
+      "notes": "Arabic with embedded European digits. EN digits in an RTL paragraph form their own LTR sub-run inside the RTL frame. Selecting the digit group must map to the correct byte range despite the embedded direction change."
+    },
+    {
+      "id": "bidi-arabic-pure-001",
+      "text": "العربية هي لغة جميلة",
+      "categories": [
+        "bidi"
+      ],
+      "locale": "ar-SA",
+      "expected_clusters": 20,
+      "expected_runs_at_least": 1,
+      "notes": "Pure Arabic, RTL paragraph. Tests contextual Arabic shaping (isolated / initial / medial / final forms) — every letter changes glyph depending on neighbors. Measurement and paint must agree on the same shaped form."
+    },
+    {
+      "id": "bidi-rtl-quote-001",
+      "text": "He said \"שלום\" loudly",
+      "categories": [
+        "bidi"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 21,
+      "expected_runs_at_least": 3,
+      "notes": "ASCII quotes around RTL text. The opening and closing quotes are mirrored by bidi mirroring rules in some rendering contexts; pulp must either mirror consistently in measure+paint or not at all."
+    },
+    {
+      "id": "devanagari-virama-ksha-001",
+      "text": "क्ष",
+      "categories": [
+        "cluster",
+        "devanagari"
+      ],
+      "locale": "hi-IN",
+      "expected_clusters": 2,
+      "expected_runs_at_least": 1,
+      "notes": "ka (U+0915) + virama (U+094D) + ssa (U+0937) renders as the single conjunct glyph 'kṣa'. UAX #29 counts this as 2 grapheme clusters (ka, then virama+ssa together), but visually and from a selection-atomicity standpoint a fallback boundary in the middle is a P0 bug. The harness should test BOTH the UAX #29 boundary AND the visual-cluster atomicity. See SCHEMA_NOTES.md."
+    },
+    {
+      "id": "devanagari-conjunct-002",
+      "text": "क्षत्रिय",
+      "categories": [
+        "cluster",
+        "devanagari"
+      ],
+      "locale": "hi-IN",
+      "expected_clusters": 5,
+      "expected_runs_at_least": 1,
+      "notes": "kṣa + tri + ya — multi-conjunct word for 'kshatriya'. UAX #29 reports 5 grapheme clusters; visually it reads as 3 syllables. 8 codepoints with two viramas. Tests that the index map handles many-codepoints-per-cluster correctly across multiple conjuncts in a row."
+    },
+    {
+      "id": "devanagari-vowel-mark-001",
+      "text": "नमस्ते",
+      "categories": [
+        "cluster",
+        "devanagari",
+        "combining-marks"
+      ],
+      "locale": "hi-IN",
+      "expected_clusters": 4,
+      "expected_runs_at_least": 1,
+      "notes": "'namaste' — na, ma, s+virama+t, e-vowel-mark. Last cluster has the vowel sign re-ordered to appear before its base consonant by the shaper. Logical-order index map must still point to the underlying byte offsets."
+    },
+    {
+      "id": "devanagari-reordered-i-001",
+      "text": "हिंदी",
+      "categories": [
+        "cluster",
+        "devanagari"
+      ],
+      "locale": "hi-IN",
+      "expected_clusters": 2,
+      "expected_runs_at_least": 1,
+      "notes": "'Hindi' in Devanagari (हिंदी). The vowel sign 'i' (U+093F) is stored AFTER its base consonant but rendered BEFORE it. UAX #29 reports 2 clusters here; visual-to-logical caret movement must respect storage order, not visual order, regardless of the cluster boundary."
+    },
+    {
+      "id": "thai-no-spaces-001",
+      "text": "สวัสดีครับ",
+      "categories": [
+        "thai",
+        "cluster"
+      ],
+      "locale": "th-TH",
+      "expected_clusters": 7,
+      "expected_runs_at_least": 1,
+      "notes": "'Hello (polite, male)' in Thai. No whitespace word breaks — Thai requires ICU dictionary segmentation to find word boundaries for line-break opportunities. Until 1.4 lands the dictionary, lines must not break inside a word."
+    },
+    {
+      "id": "thai-tone-marks-001",
+      "text": "ภาษาไทย",
+      "categories": [
+        "thai",
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "th-TH",
+      "expected_clusters": 7,
+      "expected_runs_at_least": 1,
+      "notes": "'Thai language'. Stacked vowel + tone marks above and below the base consonant. UAX #29 reports 7 grapheme clusters here (Thai diacritics segment as their own clusters under UAX #29 even though visually they ride on adjacent consonants). The harness should treat the visual cluster as glued for selection purposes."
+    },
+    {
+      "id": "thai-sentence-001",
+      "text": "ฉันชอบกินข้าว",
+      "categories": [
+        "thai"
+      ],
+      "locale": "th-TH",
+      "expected_clusters": 10,
+      "expected_runs_at_least": 1,
+      "notes": "'I like to eat rice' — a no-spaces Thai sentence. Tests that the measurement pass produces the same advance widths as the paint pass for a long unbroken Thai run."
+    },
+    {
+      "id": "cjk-zh-hans-001",
+      "text": "中文测试",
+      "categories": [
+        "cjk",
+        "mixed-script"
+      ],
+      "locale": "zh-Hans-CN",
+      "expected_clusters": 4,
+      "expected_runs_at_least": 1,
+      "notes": "Simplified Chinese 'Chinese test'. Locale tag selects a zh-Hans-preferring face. Han-unification: same codepoints under ja-JP locale should pick a Japanese face with subtly different glyph shapes for some characters."
+    },
+    {
+      "id": "cjk-ja-jp-001",
+      "text": "日本語テスト",
+      "categories": [
+        "cjk"
+      ],
+      "locale": "ja-JP",
+      "expected_clusters": 6,
+      "expected_runs_at_least": 1,
+      "notes": "Japanese 'Japanese test' mixing kanji + katakana. ja-JP locale must select a Japanese-preferring face. The same characters with locale=zh-Hans should pick a different face — visual regression catches the wrong choice."
+    },
+    {
+      "id": "cjk-ja-mixed-001",
+      "text": "これは日本語のテスト123です",
+      "categories": [
+        "cjk",
+        "mixed-script"
+      ],
+      "locale": "ja-JP",
+      "expected_clusters": 15,
+      "expected_runs_at_least": 2,
+      "notes": "Hiragana + kanji + katakana + ASCII digits + hiragana. Multiple run boundaries on script change. Digit run gets Latin-face fallback while CJK runs use the Japanese face — face-boundary geometry must match in measure+paint."
+    },
+    {
+      "id": "cjk-ko-kr-001",
+      "text": "한국어 테스트",
+      "categories": [
+        "cjk"
+      ],
+      "locale": "ko-KR",
+      "expected_clusters": 7,
+      "expected_runs_at_least": 1,
+      "notes": "Korean Hangul 'Korean test'. Hangul syllable blocks are precomposed; each visible block is one codepoint (NFC). Tests ko-KR locale face selection — distinct from zh/ja."
+    },
+    {
+      "id": "cjk-ko-jamo-001",
+      "text": "한",
+      "categories": [
+        "cjk",
+        "cluster"
+      ],
+      "locale": "ko-KR",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Decomposed Hangul 'han' as three jamo (initial U+1112, vowel U+1161, final U+11AB) instead of the precomposed syllable U+D55C. Shaper must combine them into ONE syllable cluster. Tests jamo-to-syllable shaping path most fonts implement via GSUB."
+    },
+    {
+      "id": "cjk-han-unification-001",
+      "text": "骨",
+      "categories": [
+        "cjk"
+      ],
+      "locale": "zh-Hans-CN",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "U+9AA8 is unified across Chinese, Japanese, Korean but has distinct glyph forms — the top component leans differently. With locale=zh-Hans we expect the PRC form; same codepoint at locale=ja-JP should produce visibly different glyph outline. Locale-aware face selection guard."
+    },
+    {
+      "id": "cjk-han-unification-002",
+      "text": "骨",
+      "categories": [
+        "cjk"
+      ],
+      "locale": "ja-JP",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Same codepoint as cjk-han-unification-001 with ja-JP locale. Pair these two entries in the parity harness to catch regressions where locale-tagging is ignored and both render with the same face."
+    },
+    {
+      "id": "emoji-zwj-family-4-001",
+      "text": "👨‍👩‍👧‍👦",
+      "categories": [
+        "emoji-zwj",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Four-person family ZWJ sequence: man (U+1F468) + ZWJ + woman (U+1F469) + ZWJ + girl (U+1F467) + ZWJ + boy (U+1F466). 7 codepoints, 11 UTF-16 code units. MUST be one grapheme cluster — splitting it is the canonical emoji-cluster bug. If the font lacks the sequence, fallback rule says render 4 individual emoji, but cluster atomicity for cursor / selection must remain."
+    },
+    {
+      "id": "emoji-zwj-couple-001",
+      "text": "👨‍❤️‍👨",
+      "categories": [
+        "emoji-zwj",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Couple-with-heart ZWJ sequence: man + ZWJ + heart (U+2764) + VS16 (U+FE0F) + ZWJ + man. The VS16 selector forces emoji presentation on the heart. Six codepoints, one cluster."
+    },
+    {
+      "id": "emoji-skin-tone-001",
+      "text": "👋🏽",
+      "categories": [
+        "emoji-zwj",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Waving hand (U+1F44B) + medium skin-tone modifier (U+1F3FD). The modifier is a separate codepoint but combines into ONE grapheme cluster. Cursor cannot land between them."
+    },
+    {
+      "id": "emoji-skin-tone-zwj-001",
+      "text": "👩🏾‍🔬",
+      "categories": [
+        "emoji-zwj",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Woman + medium-dark skin tone + ZWJ + microscope = 'woman scientist: medium-dark skin tone'. Combines skin-tone modifier WITH profession ZWJ sequence. Cluster atomicity across both extension mechanisms."
+    },
+    {
+      "id": "emoji-flag-us-001",
+      "text": "🇺🇸",
+      "categories": [
+        "regional-indicators",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "U.S. flag = regional indicator U (U+1F1FA) + regional indicator S (U+1F1F8). Two codepoints, four UTF-16 code units, one grapheme cluster. Tests that the parity harness pairs RI letters; rendering them as two separate boxed letters is the fallback-bug signature."
+    },
+    {
+      "id": "emoji-flag-jp-001",
+      "text": "🇯🇵",
+      "categories": [
+        "regional-indicators",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Japan flag = RI-J + RI-P. Same shape as US flag but different country code. Pair with us-001 to confirm two consecutive flags (🇺🇸🇯🇵) cluster correctly — see emoji-flag-pair-001."
+    },
+    {
+      "id": "emoji-flag-il-001",
+      "text": "🇮🇱",
+      "categories": [
+        "regional-indicators",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Israel flag = RI-I + RI-L. Listed as a third sample to exercise RI pairing logic on a third unrelated country."
+    },
+    {
+      "id": "emoji-flag-pair-001",
+      "text": "🇺🇸🇯🇵",
+      "categories": [
+        "regional-indicators",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 2,
+      "expected_runs_at_least": 1,
+      "notes": "US flag immediately followed by JP flag. Four RI codepoints must group as 2+2, NOT 1+2+1 or 4. Classic bug: greedy pairing collapses or splits incorrectly when an odd number of RIs is followed by another."
+    },
+    {
+      "id": "keycap-1-001",
+      "text": "1️⃣",
+      "categories": [
+        "keycap",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Keycap '1': ASCII '1' (U+0031) + VS16 (U+FE0F) + combining keycap enclosure (U+20E3). Three codepoints, one cluster. Most-common test for the 'tag with combining mark stays glued' rule."
+    },
+    {
+      "id": "keycap-2-001",
+      "text": "2️⃣",
+      "categories": [
+        "keycap",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Keycap '2' — second instance to confirm the path is not hard-coded to '1'."
+    },
+    {
+      "id": "keycap-3-001",
+      "text": "3️⃣",
+      "categories": [
+        "keycap",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Keycap '3'. Three consecutive single-cluster keycaps in the harness produce 3 clusters; getting 6 indicates VS16 or U+20E3 was split off."
+    },
+    {
+      "id": "keycap-hash-001",
+      "text": "#️⃣",
+      "categories": [
+        "keycap",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Keycap '#'. Same pattern as digit keycaps but the base is a punctuation character; useful to confirm keycap rule applies to any 'keycap base' (0-9, #, *) per UTS #51."
+    },
+    {
+      "id": "combining-marks-nfd-e-001",
+      "text": "é",
+      "categories": [
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Decomposed 'é' = 'e' + combining acute (U+0301). Two codepoints, one cluster. Pair with combining-marks-nfc-e-001 to catch a parity harness that only handles NFC."
+    },
+    {
+      "id": "combining-marks-nfc-e-001",
+      "text": "é",
+      "categories": [
+        "combining-marks"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Pre-composed 'é' = U+00E9. One codepoint, one cluster. Visually identical to combining-marks-nfd-e-001 but distinct byte layout. Measure+paint must produce identical advance width for both."
+    },
+    {
+      "id": "combining-marks-stacked-001",
+      "text": "à́̂̃",
+      "categories": [
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Latin 'a' with four stacked accents (grave, acute, circumflex, tilde). Tests that arbitrarily many combining marks remain glued to the base in a single cluster. Often the source of 'zalgo' visual stress."
+    },
+    {
+      "id": "combining-marks-zalgo-001",
+      "text": "ź̂̃̄̅̆̇̈",
+      "categories": [
+        "combining-marks",
+        "cluster",
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Eight combining marks on 'z'. Combined with small-size rendering this stress-tests vertical bounds and ink-rect calculation; the paint pass must report the same ink box as the measure pass."
+    },
+    {
+      "id": "vietnamese-tieng-viet-001",
+      "text": "Tiếng Việt",
+      "categories": [
+        "vietnamese",
+        "combining-marks"
+      ],
+      "locale": "vi-VN",
+      "expected_clusters": 10,
+      "expected_runs_at_least": 1,
+      "notes": "'Vietnamese language'. Stacked diacritics (circumflex+acute on 'ê', dot-below+breve on 'ệ' etc.). Most fonts ship single-glyph precomposed forms but some fonts only have the base+mark pieces; measure+paint must agree regardless of which path the shaper takes."
+    },
+    {
+      "id": "vietnamese-stacked-u-001",
+      "text": "ự",
+      "categories": [
+        "vietnamese",
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "vi-VN",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Vietnamese 'u' with horn + dot-below (U+1EF1). Single precomposed codepoint, one cluster. Compare in the harness against its NFD form 'u' + U+031B + U+0323 for parity (see vietnamese-stacked-u-nfd-001)."
+    },
+    {
+      "id": "vietnamese-stacked-u-nfd-001",
+      "text": "ự",
+      "categories": [
+        "vietnamese",
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "vi-VN",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "NFD form of ự: 'u' + combining horn + combining dot-below. Three codepoints, one cluster. Should render identically to the precomposed form despite different mark-attachment paths inside the shaper."
+    },
+    {
+      "id": "vietnamese-stacked-o-001",
+      "text": "ỡ",
+      "categories": [
+        "vietnamese",
+        "combining-marks",
+        "cluster"
+      ],
+      "locale": "vi-VN",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Vietnamese 'o' with horn + tilde (U+1EE1). Same stacking pattern as ự but with tilde above; tests another mark-class combination."
+    },
+    {
+      "id": "vietnamese-sentence-001",
+      "text": "Xin chào, tôi tên là Nguyễn",
+      "categories": [
+        "vietnamese",
+        "combining-marks"
+      ],
+      "locale": "vi-VN",
+      "expected_clusters": 27,
+      "expected_runs_at_least": 1,
+      "notes": "'Hello, my name is Nguyen' — full Vietnamese sentence with multiple diacritic combinations across words. Sentence-level smoke test for the Vietnamese diacritic path."
+    },
+    {
+      "id": "fallback-arrow-left-001",
+      "text": "←",
+      "categories": [
+        "fallback-arrow"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "U+2190 LEFTWARDS ARROW. The exact codepoint range that triggered the Chainer fallback bug. Many UI fonts lack U+2190..U+21FF; fallback must select the SAME face the measure pass selected, or advance widths diverge."
+    },
+    {
+      "id": "fallback-arrow-right-001",
+      "text": "→",
+      "categories": [
+        "fallback-arrow"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "U+2192 RIGHTWARDS ARROW. Same Chainer-fallback hazard. Common in plugin labels like 'res→' or 'cutoff→'."
+    },
+    {
+      "id": "fallback-arrow-bidirectional-001",
+      "text": "↔",
+      "categories": [
+        "fallback-arrow"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "U+2194 LEFT RIGHT ARROW. Third arrow to confirm the fallback strategy applies across U+2190..U+21FF range, not just to the canonical left/right pair."
+    },
+    {
+      "id": "fallback-arrow-double-001",
+      "text": "⇐ ⇒ ⇔",
+      "categories": [
+        "fallback-arrow",
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 5,
+      "expected_runs_at_least": 1,
+      "notes": "Three double-stroke arrows U+21D0, U+21D2, U+21D4 separated by spaces. Tests three consecutive fallbacks in one shaped run — the runs must coalesce (same fallback face) rather than split per character."
+    },
+    {
+      "id": "fallback-arrow-up-down-001",
+      "text": "↑↓",
+      "categories": [
+        "fallback-arrow",
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 2,
+      "expected_runs_at_least": 1,
+      "notes": "U+2191 UP + U+2193 DOWN. Plugin label use case (e.g. 'res↑', 'cutoff↓'). Vertical arrows often have different metrics than horizontal — measure+paint vertical bounds must match for small-cap rendering."
+    },
+    {
+      "id": "small-size-crossover-001",
+      "text": "CROSSOVER",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 9,
+      "expected_runs_at_least": 1,
+      "notes": "All-caps plugin label. Marked for 7px rendering. Tests the hinting / bitmap-strike path at very small sizes; advance-width rounding bugs surface here as overlapping or gapped glyphs."
+    },
+    {
+      "id": "small-size-mid-side-001",
+      "text": "MID / SIDE WIDTH",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 16,
+      "expected_runs_at_least": 1,
+      "notes": "Plugin label with ASCII slash and spaces. 7px rendering. Validates space-collapse and slash advance at small sizes — the slash often has special metrics that diverge from generic glyph advance."
+    },
+    {
+      "id": "small-size-arrow-label-001",
+      "text": "res↑",
+      "categories": [
+        "small-size",
+        "fallback-arrow"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 4,
+      "expected_runs_at_least": 1,
+      "notes": "Mini-label combining ASCII with U+2191. 7px size + fallback boundary in the same string — the worst-case parity scenario, and exactly the original Chainer bug shape."
+    },
+    {
+      "id": "small-size-cutoff-arrow-001",
+      "text": "cutoff→",
+      "categories": [
+        "small-size",
+        "fallback-arrow"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 7,
+      "expected_runs_at_least": 1,
+      "notes": "ASCII prefix + U+2192 right-arrow at 7px. Pair with small-size-arrow-label-001 in the harness to test that ASCII+arrow combinations are stable across multiple labels."
+    },
+    {
+      "id": "small-size-numeric-001",
+      "text": "0.5 dB",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 6,
+      "expected_runs_at_least": 1,
+      "notes": "Numeric readout style. 7px rendering. Tests digit-pair kerning and decimal-point positioning at small size; common in plugin meter labels."
+    },
+    {
+      "id": "mixed-script-cjk-latin-arabic-001",
+      "text": "中文 with English والعربية",
+      "categories": [
+        "mixed-script",
+        "bidi",
+        "cjk"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 24,
+      "expected_runs_at_least": 4,
+      "notes": "Three scripts and a bidi flip in one line: Han, Latin, Arabic. Run-segmentation must produce at least 4 runs (CJK, Latin, Arabic shaped RTL, possibly trailing). Each run boundary is a face-change opportunity where measure+paint coordinates can drift."
+    },
+    {
+      "id": "mixed-script-greek-latin-001",
+      "text": "α-β testing in αβγ mode",
+      "categories": [
+        "mixed-script",
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 23,
+      "expected_runs_at_least": 2,
+      "notes": "Greek letters mixed with Latin in a plugin-style label. Greek often falls back to a different face on UI font setups; tests fallback-cache stability across multiple Greek runs."
+    },
+    {
+      "id": "mixed-script-symbol-001",
+      "text": "f₀ = 440 Hz · ƒ ≈ 4.4×10²",
+      "categories": [
+        "mixed-script",
+        "fallback-arrow",
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 25,
+      "expected_runs_at_least": 2,
+      "notes": "Subscript zero, ASCII digits, middle dot, florin, almost-equal, superscript digits. A realistic plugin parameter readout. Many of these characters live in fallback fonts; tests the same fallback discipline as the arrow cases."
+    },
+    {
+      "id": "mixed-script-rtl-cjk-001",
+      "text": "מבחן 中文 test",
+      "categories": [
+        "mixed-script",
+        "bidi",
+        "cjk"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 12,
+      "expected_runs_at_least": 3,
+      "notes": "Hebrew + Chinese + English. Three scripts, two direction changes. Tests bidi-resolution AND face-selection interaction — these two passes must not race."
+    },
+    {
+      "id": "edge-empty-001",
+      "text": "",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 0,
+      "expected_runs_at_least": 0,
+      "notes": "Empty string. Measure+paint must return zero-width zero-height geometry without crashing. Boundary test."
+    },
+    {
+      "id": "edge-single-space-001",
+      "text": " ",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 1,
+      "expected_runs_at_least": 1,
+      "notes": "Single ASCII space. Often special-cased by shapers (no glyph drawn, advance only). Measure and paint must report the same advance."
+    },
+    {
+      "id": "edge-zwnj-001",
+      "text": "می‌خواهم",
+      "categories": [
+        "bidi",
+        "cluster"
+      ],
+      "locale": "fa-IR",
+      "expected_clusters": 7,
+      "expected_runs_at_least": 1,
+      "notes": "Persian 'I want' using a ZWNJ (U+200C) between می and خواهم to prevent ligation. Zero-width non-joiner is invisible but changes glyph shaping; the index map must still map a click at its position to a valid byte offset."
+    },
+    {
+      "id": "edge-bom-001",
+      "text": "﻿Hello",
+      "categories": [
+        "small-size"
+      ],
+      "locale": "en-US",
+      "expected_clusters": 6,
+      "expected_runs_at_least": 1,
+      "notes": "Leading byte-order mark / zero-width no-break space. UAX #29 treats a leading BOM as part of the first grapheme cluster; many shapers drop it silently. Either behavior is acceptable so long as measure+paint agree."
+    }
+  ]
+}
