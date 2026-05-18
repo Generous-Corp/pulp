@@ -7751,3 +7751,17 @@ non-positive spread. Local validation passed:
 `python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
 (patch bump suggested because this tranche includes a source fix), and
 `git diff --check`. Batch #728 is now 16 local commits ahead and remains held.
+
+2026-05-18 01:27 PDT: added a seventeenth local-only SDF atlas-cache tranche
+to held batch `feature/phase3-codecov-batch-728`: commit `3e5821fea`
+(`test(canvas): cover sdf atlas cache residency edges`). It extends
+`pulp-test-sdf-atlas-cache` over duplicate seed glyph de-duplication and
+re-ensuring a glyph after eviction, verifying resident-entry count, frame
+recency stamping, and dirty upload state. Local validation passed:
+`cmake --build build --target pulp-test-sdf-atlas-cache -j$(sysctl -n hw.ncpu)`,
+`./build/test/pulp-test-sdf-atlas-cache` (13 cases / 81 assertions),
+`python3 tools/scripts/skill_sync_check.py --base origin/main --head HEAD --mode=report`
+with an `sdf-text` skip trailer for the small `path_to_sdf` null-input guard,
+`python3 tools/scripts/version_bump_check.py --base origin/main --head HEAD --mode=report`
+(patch bump suggested because this batch includes source fixes), and
+`git diff --check`. Batch #728 is now 17 local commits ahead and remains held.
