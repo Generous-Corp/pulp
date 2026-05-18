@@ -232,6 +232,21 @@ TEST_CASE("Theme from_json maps malformed color strings to default color",
     REQUIRE(theme.color("bad.short").value() == Color{});
 }
 
+TEST_CASE("Theme from_json maps invalid hex digits to default color",
+          "[view][theme][coverage][phase3]") {
+    auto theme = Theme::from_json(R"({
+        "colors": {
+            "bad.digit": "#12xx56",
+            "bad.tail": "#123456zz",
+            "bad.long": "#fffffffff"
+        }
+    })");
+
+    REQUIRE(theme.color("bad.digit").value() == Color{});
+    REQUIRE(theme.color("bad.tail").value() == Color{});
+    REQUIRE(theme.color("bad.long").value() == Color{});
+}
+
 TEST_CASE("Theme JSON parser covers optional sections and alpha colors",
           "[view][theme][coverage][issue-651]") {
     auto theme = Theme::from_json(R"({
