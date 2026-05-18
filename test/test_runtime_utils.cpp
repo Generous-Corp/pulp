@@ -907,6 +907,18 @@ TEST_CASE("SizeRange and FloatRange cover containment and expansion helpers",
     REQUIRE_THAT(overlap.end, Catch::Matchers::WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("Floating Range constrain clamps to the continuous upper bound",
+          "[runtime][range][coverage][phase3]") {
+    FloatRange unit(0.0f, 1.0f);
+    REQUIRE_THAT(unit.constrain(-2.0f), Catch::Matchers::WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(unit.constrain(0.25f), Catch::Matchers::WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(unit.constrain(2.0f), Catch::Matchers::WithinAbs(1.0f, 1e-6f));
+
+    DoubleRange bipolar(-1.0, 1.0);
+    REQUIRE_THAT(bipolar.constrain(-2.0), Catch::Matchers::WithinAbs(-1.0, 1e-12));
+    REQUIRE_THAT(bipolar.constrain(2.0), Catch::Matchers::WithinAbs(1.0, 1e-12));
+}
+
 TEST_CASE("Range boundary touch points remain non-intersections",
           "[runtime][range][coverage][issue-641]") {
     REQUIRE_FALSE(IntRange(0, 10).intersects(IntRange(10, 20)));

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <type_traits>
 
 namespace pulp::runtime {
 
@@ -50,7 +51,11 @@ struct Range {
 
     /// Constrain a value to this range [start, end)
     constexpr T constrain(T value) const {
-        return std::clamp(value, start, end > start ? end - T(1) : start);
+        if constexpr (std::is_integral_v<T>) {
+            return std::clamp(value, start, end > start ? end - T(1) : start);
+        } else {
+            return std::clamp(value, start, end > start ? end : start);
+        }
     }
 
     /// Expand range to include a value
