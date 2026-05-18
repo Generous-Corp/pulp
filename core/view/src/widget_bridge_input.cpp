@@ -71,6 +71,14 @@ std::string keycode_to_w3c_key(int key_code, bool shift_held) {
     return "Unidentified";
 }
 
+bool shortcut_key_matches(KeyCode registered_key, int incoming_key_code) noexcept {
+    if (registered_key == static_cast<KeyCode>(incoming_key_code)) return true;
+    if (incoming_key_code >= 'A' && incoming_key_code <= 'Z') {
+        return registered_key == static_cast<KeyCode>(incoming_key_code + ('a' - 'A'));
+    }
+    return false;
+}
+
 } // namespace
 
 void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
@@ -97,9 +105,8 @@ void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_d
         (View::focused_input_ != nullptr &&
          View::focused_input_->accepts_text_input());
 
-    auto kc = static_cast<KeyCode>(key_code);
     for (auto& s : shortcuts_) {
-        if (s.key == kc && s.modifiers == modifiers) {
+        if (shortcut_key_matches(s.key, key_code) && s.modifiers == modifiers) {
             if (!has_global_modifier && text_input_focused) {
                 // Let the key fall through to the focused text input.
                 break;
