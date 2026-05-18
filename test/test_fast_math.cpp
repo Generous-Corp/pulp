@@ -76,6 +76,13 @@ TEST_CASE("FastMath log2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::log2(0.5f), WithinAbs(-1.0, 0.02));
 }
 
+TEST_CASE("FastMath log2 handles normalized power-of-two range",
+          "[signal][fast_math][coverage][phase3]") {
+    REQUIRE_THAT(FastMath::log2(0.25f), WithinAbs(-2.0f, 0.02f));
+    REQUIRE_THAT(FastMath::log2(16.0f), WithinAbs(4.0f, 0.02f));
+    REQUIRE_THAT(FastMath::log2(1024.0f), WithinAbs(10.0f, 0.02f));
+}
+
 TEST_CASE("FastMath pow approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::pow(2.0f, 3.0f), WithinAbs(8.0, 0.1));
     REQUIRE_THAT(FastMath::pow(10.0f, 2.0f), WithinAbs(100.0, 1.0));
