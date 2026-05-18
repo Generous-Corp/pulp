@@ -174,6 +174,30 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
     REQUIRE(model.cell_text(1, 1) == "two");
 }
 
+TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
+          "[gui][table][coverage][phase3]") {
+    SimpleTableModel model;
+    model.set_data({
+        {"Alpha", "3"},
+        {"Gamma", "1"},
+        {"Beta", "2"},
+    });
+
+    REQUIRE(model.cell_text(-1, 0).empty());
+    REQUIRE(model.cell_text(99, 0).empty());
+    REQUIRE(model.cell_text(0, -1).empty());
+    REQUIRE(model.cell_text(0, 99).empty());
+
+    REQUIRE(model.sort(0, false));
+    REQUIRE(model.cell_text(0, 0) == "Gamma");
+    REQUIRE(model.cell_text(1, 0) == "Beta");
+    REQUIRE(model.cell_text(2, 0) == "Alpha");
+
+    REQUIRE(model.sort(1, true));
+    REQUIRE(model.cell_text(0, 1) == "1");
+    REQUIRE(model.cell_text(2, 1) == "3");
+}
+
 TEST_CASE("TableListBox clear columns and model-less clicks are stable",
           "[gui][table][coverage][issue-653]") {
     TableListBox table;
