@@ -146,6 +146,19 @@ TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
     REQUIRE(strings.count() == 0);
 }
 
+TEST_CASE("i18n clear leaves selected locale intact",
+          "[runtime][i18n][coverage][phase3]") {
+    LocalisedStrings strings;
+    strings.set_locale("ja");
+    strings.add("hello", "konnichiwa");
+
+    strings.clear();
+
+    REQUIRE(strings.count() == 0);
+    REQUIRE(strings.locale() == "ja");
+    REQUIRE(strings.translate("hello") == "hello");
+}
+
 TEST_CASE("i18n locale get and set", "[runtime][i18n]") {
     LocalisedStrings strings;
     REQUIRE(strings.locale() == "en");
