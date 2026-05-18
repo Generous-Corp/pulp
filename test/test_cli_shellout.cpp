@@ -2812,6 +2812,48 @@ TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
     fs::remove_all(tmp_home);
 }
 
+TEST_CASE("pulp loop validates value options before focus state changes",
+          "[cli][shellout][loop][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-loop-parser-errors");
+    fs::create_directories(tmp_home);
+    ScopedEnvVar pulp_home("PULP_HOME");
+    pulp_home.set(tmp_home.string());
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string stderr_substring;
+    };
+    const std::vector<Case> cases = {
+        {{"loop", "--platform"}, "--platform requires a value"},
+        {{"loop", "--platform", "--no-watch"}, "--platform requires a value"},
+        {{"loop", "--watch-issues"}, "--watch-issues requires a value"},
+        {{"loop", "--watch-issues", "--no-watch"}, "--watch-issues requires a value"},
+        {{"loop", "--ar-swap-from"}, "--ar-swap-from requires a value"},
+        {{"loop", "--ar-swap-from", "--no-watch"}, "--ar-swap-from requires a value"},
+        {{"loop", "--run"}, "--run requires a value"},
+        {{"loop", "--run", "--target", "pulp-format"}, "--run requires a value"},
+        {{"loop", "--target"}, "--target requires a value"},
+        {{"loop", "--target", "--no-watch"}, "--target requires a value"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("loop args size: " << c.args.size());
+        auto r = run_pulp(c.args, 10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.stderr_substring) != std::string::npos);
+    }
+
+    auto status = run_pulp({"loop", "--status"}, 10000);
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("focus platform: (none") != std::string::npos);
+
+    fs::remove_all(tmp_home);
+}
+
 TEST_CASE("pulp loop --watch-issues prints deferred-slice hint",
           "[cli][shellout][loop][issue-940]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
