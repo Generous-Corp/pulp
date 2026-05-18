@@ -1326,6 +1326,25 @@ TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
     }
 }
 
+TEST_CASE("LinkwitzRiley retuning replaces previous cutoff state",
+          "[signal][lr][coverage][phase3-github]") {
+    auto response_after_setup = [](float first_cutoff, float second_cutoff) {
+        LinkwitzRiley lr;
+        lr.set_frequency(first_cutoff, 48000.0f);
+        for (int i = 0; i < 32; ++i) {
+            (void)lr.process((i % 2 == 0) ? 0.5f : -0.5f);
+        }
+        lr.set_frequency(second_cutoff, 48000.0f);
+        return lr.process(1.0f);
+    };
+
+    auto from_low = response_after_setup(300.0f, 2400.0f);
+    auto from_high = response_after_setup(9000.0f, 2400.0f);
+
+    REQUIRE_THAT(from_low.low, WithinAbs(from_high.low, 1e-6f));
+    REQUIRE_THAT(from_low.high, WithinAbs(from_high.high, 1e-6f));
+}
+
 // ── WindowFunction ───────────────────────────────────────────────────────────
 
 TEST_CASE("WindowFunction Hann", "[signal][window]") {
