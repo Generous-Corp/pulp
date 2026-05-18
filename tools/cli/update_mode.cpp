@@ -67,7 +67,28 @@ std::string extract_json_str(const std::string& body, const std::string& key) {
     try {
         std::regex re("\"" + key + "\"\\s*:\\s*\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"");
         std::smatch m;
-        if (std::regex_search(body, m, re)) return m[1].str();
+        if (std::regex_search(body, m, re)) {
+            std::string raw = m[1].str();
+            std::string out;
+            out.reserve(raw.size());
+            for (size_t i = 0; i < raw.size(); ++i) {
+                char c = raw[i];
+                if (c == '\\' && i + 1 < raw.size()) {
+                    char esc = raw[++i];
+                    switch (esc) {
+                        case '"': out += '"'; break;
+                        case '\\': out += '\\'; break;
+                        case 'n': out += '\n'; break;
+                        case 'r': out += '\r'; break;
+                        case 't': out += '\t'; break;
+                        default: out += esc; break;
+                    }
+                } else {
+                    out += c;
+                }
+            }
+            return out;
+        }
     } catch (const std::regex_error&) {}
     return {};
 }
@@ -81,6 +102,22 @@ std::int64_t extract_json_i64(const std::string& body, const std::string& key) {
         }
     } catch (const std::regex_error&) {}
     return 0;
+}
+
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
 }
 
 }  // namespace
@@ -160,9 +197,9 @@ bool clear_snooze(const fs::path& snooze_path) {
 std::string serialize_pending_upgrade(const PendingUpgrade& p) {
     std::ostringstream os;
     os << "{"
-       << "\"version\":\""   << p.version               << "\","
+       << "\"version\":\""   << json_escape(p.version)  << "\","
        << "\"staged_at\":"    << p.staged_at_epoch_sec   << ","
-       << "\"binary\":\""    << p.staged_binary_path    << "\""
+       << "\"binary\":\""    << json_escape(p.staged_binary_path) << "\""
        << "}\n";
     return os.str();
 }

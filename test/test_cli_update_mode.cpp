@@ -182,6 +182,23 @@ TEST_CASE("pending-upgrade JSON round-trips through serialize/parse",
     REQUIRE(parsed->staged_binary_path == "/tmp/pulp-upgrade-0.31.0/pulp");
 }
 
+TEST_CASE("pending-upgrade JSON escapes string fields",
+          "[cli][update-mode][coverage]") {
+    um::PendingUpgrade p;
+    p.version = "0.31.0-rc\"1";
+    p.staged_at_epoch_sec = 7;
+    p.staged_binary_path = R"(C:\Temp\pulp "candidate"\pulp.exe)";
+
+    auto serialized = um::serialize_pending_upgrade(p);
+    REQUIRE(serialized.find("\\\"") != std::string::npos);
+    REQUIRE(serialized.find("\\\\") != std::string::npos);
+
+    auto parsed = um::parse_pending_upgrade(serialized);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->version == p.version);
+    REQUIRE(parsed->staged_binary_path == p.staged_binary_path);
+}
+
 TEST_CASE("parse_pending_upgrade rejects markers without a version",
           "[cli][update-mode][issue-550]") {
     // Version-less markers are junk — if we accepted them we'd loop
