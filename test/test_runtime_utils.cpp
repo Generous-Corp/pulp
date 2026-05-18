@@ -794,6 +794,16 @@ TEST_CASE("text_diff keeps repeated-line matches stable",
     REQUIRE(diff[5].text == "same");
 }
 
+TEST_CASE("text_diff treats identical multiline inputs as equal entries",
+          "[runtime][text-diff][coverage][phase3]") {
+    auto diff = text_diff("one\ntwo\nthree", "one\ntwo\nthree");
+    REQUIRE(diff.size() == 3);
+    for (const auto& entry : diff) {
+        REQUIRE(entry.op == DiffOp::Equal);
+    }
+    REQUIRE(format_diff(diff) == "  one\n  two\n  three\n");
+}
+
 TEST_CASE("text_diff handles replacement ties and empty line formatting",
           "[runtime][text-diff][coverage][phase3]") {
     auto diff = text_diff("old-a\n\nold-b", "new-a\nnew-b");
