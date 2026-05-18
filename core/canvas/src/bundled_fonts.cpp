@@ -367,20 +367,97 @@ void bump_font_registration_generation() noexcept {
     bump_generation();
 }
 
-// pulp #2163 — font v2 Slice 2.8 skeleton. The Phase 2 implementation
-// slice replaces this with a Chromium-`ots`-style sanitizer that
-// verifies the TTF/OTF table directory + critical-table checksums and
-// rejects malformed inputs. For now we just confirm Skia can parse the
-// bytes into an SkTypeface — that gates the most catastrophic crashes
-// (truncated streams, garbage data) without the full per-table audit.
+// pulp #2163 — font v2 Slice 2.8 implementation. Structural TTF/OTF
+// sanitizer. Validates the file header + table directory before
+// handing bytes to Skia. Catches:
+//   * truncated headers / files smaller than 12 bytes
+//   * bad sfnt magic (not TTF / OTF / Mac TrueType / Type 1)
+//   * malformed table directory (numTables claims more bytes than file
+//     contains)
+//   * out-of-bounds table entries (offset + length overflow file size)
+//   * missing required tables (head, name, cmap, maxp)
+//   * head table absent or too small to read its magic / version
+//
+// What this catches but per-table checksum verification doesn't:
+// truncated tables, integer-overflow attempts in length fields,
+// missing critical tables. The full per-table checksum gate (full
+// Chromium-ots port) is a follow-up; this MVP rejects the practical
+// attack surface a plugin developer would actually drop into
+// `register_font`.
+
+namespace {
+
+inline std::uint16_t read_u16_be(const std::uint8_t* p) noexcept {
+    return static_cast<std::uint16_t>((p[0] << 8) | p[1]);
+}
+inline std::uint32_t read_u32_be(const std::uint8_t* p) noexcept {
+    return (static_cast<std::uint32_t>(p[0]) << 24)
+         | (static_cast<std::uint32_t>(p[1]) << 16)
+         | (static_cast<std::uint32_t>(p[2]) <<  8)
+         |  static_cast<std::uint32_t>(p[3]);
+}
+
+inline bool is_valid_sfnt_magic(std::uint32_t magic) noexcept {
+    return magic == 0x00010000u   // TrueType
+        || magic == 0x4F54544Fu   // 'OTTO' — OpenType / CFF
+        || magic == 0x74727565u   // 'true' — old Mac TrueType
+        || magic == 0x74797031u;  // 'typ1' — PostScript Type 1
+}
+
+} // namespace
+
 bool validate_font_bytes(const std::uint8_t* data, std::size_t size) {
-    if (!data || size == 0) return false;
-    auto sk_data = SkData::MakeWithCopy(data, size);
-    if (!sk_data) return false;
-    auto mgr = platform_font_manager();
-    if (!mgr) return true; // can't validate without a mgr; accept conservatively
-    auto face = mgr->makeFromData(std::move(sk_data));
-    return static_cast<bool>(face);
+    if (!data) return false;
+    // sfnt header is 12 bytes (magic + numTables + searchRange +
+    // entrySelector + rangeShift) — anything shorter is malformed.
+    if (size < 12) return false;
+
+    const std::uint32_t magic = read_u32_be(data);
+    if (!is_valid_sfnt_magic(magic)) return false;
+
+    const std::uint16_t num_tables = read_u16_be(data + 4);
+    if (num_tables == 0) return false;
+
+    // Table directory: each entry is 16 bytes (tag, checksum, offset,
+    // length). Verify the directory itself fits in the file.
+    const std::size_t dir_end = 12u + 16u * static_cast<std::size_t>(num_tables);
+    if (dir_end > size) return false;
+
+    // Required tables — names taken from the OpenType spec, presence
+    // verified by tag scan. Absent any of these, Skia's downstream
+    // parse will at best produce a degenerate typeface; reject early.
+    constexpr std::uint32_t kHead = 0x68656164u; // 'head'
+    constexpr std::uint32_t kName = 0x6E616D65u; // 'name'
+    constexpr std::uint32_t kCmap = 0x636D6170u; // 'cmap'
+    constexpr std::uint32_t kMaxp = 0x6D617870u; // 'maxp'
+    bool has_head = false, has_name = false, has_cmap = false, has_maxp = false;
+    std::uint32_t head_offset = 0, head_length = 0;
+
+    for (std::uint16_t i = 0; i < num_tables; ++i) {
+        const std::uint8_t* entry = data + 12 + 16 * i;
+        const std::uint32_t tag    = read_u32_be(entry);
+        const std::uint32_t offset = read_u32_be(entry + 8);
+        const std::uint32_t length = read_u32_be(entry + 12);
+        // Out-of-bounds or overflow.
+        if (offset > size) return false;
+        if (length > size - offset) return false;
+        if (tag == kHead) { has_head = true; head_offset = offset; head_length = length; }
+        else if (tag == kName) has_name = true;
+        else if (tag == kCmap) has_cmap = true;
+        else if (tag == kMaxp) has_maxp = true;
+    }
+    if (!has_head || !has_name || !has_cmap || !has_maxp) return false;
+
+    // The head table starts with a 4-byte major.minor version and a
+    // 4-byte font revision, followed by the checksum-adjustment field
+    // and the magic number 0x5F0F3CF5. A spec-conformant head is at
+    // least 54 bytes; reject anything smaller as a structural fail.
+    if (head_length < 54) return false;
+    const std::uint8_t* head = data + head_offset;
+    const std::uint32_t head_magic = read_u32_be(head + 12);
+    if (head_magic != 0x5F0F3CF5u) return false;
+
+    return true;
 }
 
 } // namespace pulp::canvas

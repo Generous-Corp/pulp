@@ -959,6 +959,11 @@ add_executable(pulp-test-font-scope-budget test_font_scope_budget.cpp)
 target_link_libraries(pulp-test-font-scope-budget PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-font-scope-budget)
 
+# pulp #2163 / font v2 Slice 2.8 — TTF/OTF structural sanitizer.
+add_executable(pulp-test-font-security test_font_security.cpp)
+target_link_libraries(pulp-test-font-security PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-font-security)
+
 # pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
 # 0.5px for a hand-picked sample set representative of CHAIN INFO /
