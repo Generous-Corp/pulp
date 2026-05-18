@@ -1963,8 +1963,18 @@ catch_discover_tests(pulp-test-platform-key-wireup
 add_executable(pulp-test-widget-bridge-dispatch-global-key
     test_widget_bridge_dispatch_global_key.cpp)
 target_link_libraries(pulp-test-widget-bridge-dispatch-global-key
-    PRIVATE pulp::view Catch2::Catch2WithMain)
+    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-widget-bridge-dispatch-global-key)
+
+# pulp #2128 follow-up — pin WidgetBridge::dispatch_document_event +
+# the real document.addEventListener. Platform hosts fire synthetic
+# outside-click events on Esc through this path so React popovers
+# (Spectr's PickerDropdown, ContextMenu, etc.) close automatically.
+add_executable(pulp-test-widget-bridge-dispatch-document-event
+    test_widget_bridge_dispatch_document_event.cpp)
+target_link_libraries(pulp-test-widget-bridge-dispatch-document-event
+    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-bridge-dispatch-document-event)
 
 # pulp #1035 — `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary

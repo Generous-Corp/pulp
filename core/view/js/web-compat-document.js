@@ -818,14 +818,55 @@ var document = {
         return el;
     },
 
-    // pulp #2101 — EventTarget no-ops at the document level. Three.js's
-    // OrbitControls (and any other helper that takes an Element + walks
-    // up to `ownerDocument`) calls `ownerDocument.removeEventListener`
-    // on cleanup; without these the call throws and Three.js's async-
-    // executor swallows it, surfacing as a broken-but-silent demo.
-    addEventListener: function() {},
-    removeEventListener: function() {},
-    dispatchEvent: function() { return true; }
+    // pulp #2128 follow-up — document-level EventTarget with real fan-out.
+    //
+    // Previously these were no-ops (pulp #2101), kept that way so Three.js
+    // OrbitControls' `ownerDocument.removeEventListener` didn't throw on
+    // cleanup. That cleanup story is preserved (removeEventListener still
+    // doesn't throw on unknown handlers) but listeners now actually fire,
+    // which is needed so React "click-outside" patterns that hook
+    // `document.addEventListener('mousedown', onDoc)` work — Spectr's
+    // PickerDropdown, ContextMenu close-on-outside-click, and every
+    // React popover that uses this pattern were silently dead before.
+    //
+    // The bridge dispatches into this map via `__dispatch__('document',
+    // eventName, eventObj)` from C++ (see widget_bridge.cpp __dispatch__
+    // preamble + claimOverlay's dismiss path).
+    __eventListeners__: {},
+    addEventListener: function(type, handler) {
+        if (typeof type !== 'string' || typeof handler !== 'function') return;
+        var list = this.__eventListeners__[type] || (this.__eventListeners__[type] = []);
+        if (list.indexOf(handler) < 0) list.push(handler);
+    },
+    removeEventListener: function(type, handler) {
+        var list = this.__eventListeners__ && this.__eventListeners__[type];
+        if (!list) return;
+        var idx = list.indexOf(handler);
+        if (idx >= 0) list.splice(idx, 1);
+    },
+    dispatchEvent: function(event) {
+        if (!event || typeof event !== 'object' || typeof event.type !== 'string') return true;
+        var list = this.__eventListeners__ && this.__eventListeners__[event.type];
+        if (!list || !list.length) return true;
+        if (typeof event.preventDefault !== 'function') {
+            event.preventDefault = function() { this.defaultPrevented = true; };
+        }
+        if (typeof event.stopPropagation !== 'function') {
+            event.stopPropagation = function() {};
+        }
+        // Snapshot the list to tolerate handlers that
+        // remove themselves during dispatch.
+        var snapshot = list.slice();
+        for (var i = 0; i < snapshot.length; i++) {
+            try { snapshot[i](event); }
+            catch (e) {
+                if (typeof __dispatchError__ === 'function') {
+                    __dispatchError__('document', event.type, String(e && e.stack ? e.stack : e));
+                }
+            }
+        }
+        return !event.defaultPrevented;
+    }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
