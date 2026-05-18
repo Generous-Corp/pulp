@@ -251,3 +251,17 @@ TEST_CASE("Mat2 inverse handles negative determinants",
     REQUIRE_THAT(product.m[1][0], WithinAbs(0.0f, 0.001f));
     REQUIRE_THAT(product.m[1][1], WithinAbs(1.0f, 0.001f));
 }
+
+TEST_CASE("Mat3 multiplication preserves identity on both sides",
+          "[signal][matrix][codecov]") {
+    Mat3 matrix{{{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}, {7.0f, 8.0f, 9.0f}}};
+    auto left = Mat3::identity() * matrix;
+    auto right = matrix * Mat3::identity();
+
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            REQUIRE_THAT(left.m[row][col], WithinAbs(matrix.m[row][col], 0.001f));
+            REQUIRE_THAT(right.m[row][col], WithinAbs(matrix.m[row][col], 0.001f));
+        }
+    }
+}
