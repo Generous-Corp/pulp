@@ -51,8 +51,12 @@ TEST_CASE("FontResolver: animation respects LRU cache cap", "[font][axes]") {
         });
         (void) r.resolve_family_list(opts);
     }
+#ifdef PULP_HAS_SKIA
     REQUIRE(r.cache_size() <= 16u);
     REQUIRE(r.cache_size() >= 1u);  // at least one entry survived
+#else
+    REQUIRE(r.cache_size() == 0u);
+#endif
 
     r.set_cache_capacity(256);  // restore default-ish
     r.clear_cache();
@@ -69,8 +73,12 @@ TEST_CASE("FontResolver: capacity=0 disables cap (legacy unbounded)", "[font][ax
         opts.size = 14.0f + static_cast<float>(i) * 0.1f;  // distinct size each iter
         (void) r.resolve_family_list(opts);
     }
+#ifdef PULP_HAS_SKIA
     // No cap → cache holds every distinct key.
     REQUIRE(r.cache_size() >= 40u);
+#else
+    REQUIRE(r.cache_size() == 0u);
+#endif
 
     r.set_cache_capacity(256);
     r.clear_cache();
@@ -88,10 +96,16 @@ TEST_CASE("FontResolver: shrinking the cap evicts oldest immediately",
         opts.size = 14.0f + static_cast<float>(i) * 0.5f;
         (void) r.resolve_family_list(opts);
     }
+#ifdef PULP_HAS_SKIA
     REQUIRE(r.cache_size() == 32u);
 
     r.set_cache_capacity(8);
     REQUIRE(r.cache_size() == 8u);
+#else
+    REQUIRE(r.cache_size() == 0u);
+    r.set_cache_capacity(8);
+    REQUIRE(r.cache_size() == 0u);
+#endif
 
     r.set_cache_capacity(256);
     r.clear_cache();
@@ -114,6 +128,7 @@ TEST_CASE("FontResolver: LRU hit promotes entry past eviction line",
     resolve_size(11.0f);
     resolve_size(12.0f);
     resolve_size(13.0f);
+#ifdef PULP_HAS_SKIA
     REQUIRE(r.cache_size() == 4u);
 
     // Touch the oldest (10.0f) — promotes it to most-recent.
@@ -126,6 +141,78 @@ TEST_CASE("FontResolver: LRU hit promotes entry past eviction line",
     auto before_size = r.cache_size();
     resolve_size(10.0f);  // hit, no insert
     REQUIRE(r.cache_size() == before_size);
+#else
+    REQUIRE(r.cache_size() == 0u);
+    resolve_size(10.0f);
+    resolve_size(14.0f);
+    REQUIRE(r.cache_size() == 0u);
+#endif
+
+    r.set_cache_capacity(256);
+    r.clear_cache();
+}
+
+TEST_CASE("FontResolver: explicit generation splits otherwise identical cache keys",
+          "[font][axes][coverage]") {
+    auto& r = FontResolver::instance();
+    r.clear_cache();
+    r.set_cache_capacity(8);
+
+    FontOptions opts;
+    opts.family_stack.push_back("Inter");
+    opts.size = 14.0f;
+
+    opts.registry_generation = 100;
+    (void) r.resolve_family_list(opts);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(r.cache_size() == 1u);
+
+    opts.registry_generation = 101;
+    (void) r.resolve_family_list(opts);
+    REQUIRE(r.cache_size() == 2u);
+
+    opts.registry_generation = 100;
+    (void) r.resolve_family_list(opts);
+    REQUIRE(r.cache_size() == 2u);
+#else
+    REQUIRE(r.cache_size() == 0u);
+
+    opts.registry_generation = 101;
+    (void) r.resolve_family_list(opts);
+    REQUIRE(r.cache_size() == 0u);
+#endif
+
+    r.set_cache_capacity(256);
+    r.clear_cache();
+}
+
+TEST_CASE("FontResolver: empty family stack uses a distinct default cache key",
+          "[font][axes][coverage]") {
+    auto& r = FontResolver::instance();
+    r.clear_cache();
+    r.set_cache_capacity(8);
+
+    FontOptions default_opts;
+    default_opts.size = 14.0f;
+    (void) r.resolve_family_list(default_opts);
+#ifdef PULP_HAS_SKIA
+    REQUIRE(r.cache_size() == 1u);
+
+    FontOptions explicit_opts = default_opts;
+    explicit_opts.family_stack.push_back("Inter");
+    (void) r.resolve_family_list(explicit_opts);
+    REQUIRE(r.cache_size() == 2u);
+
+    (void) r.resolve_family_list(default_opts);
+    REQUIRE(r.cache_size() == 2u);
+#else
+    REQUIRE(r.cache_size() == 0u);
+
+    FontOptions explicit_opts = default_opts;
+    explicit_opts.family_stack.push_back("Inter");
+    (void) r.resolve_family_list(explicit_opts);
+    REQUIRE(r.cache_size() == 0u);
+#endif
 
     r.set_cache_capacity(256);
     r.clear_cache();
