@@ -755,3 +755,14 @@ TEST_CASE("Special functions cover sinc and Lanczos boundaries",
     REQUIRE_THAT(lanczos(-3.0f, 3), WithinAbs(0.0f, 1e-6f));
     REQUIRE(lanczos(0.5f, 3) > 0.0f);
 }
+
+TEST_CASE("Special functions convert gain and MIDI reference points",
+          "[signal][math][coverage][phase3]") {
+    REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 1e-6f));
+
+    REQUIRE_THAT(freq_to_midi(440.0f), WithinAbs(69.0f, 1e-6f));
+    REQUIRE_THAT(midi_to_freq(69.0f), WithinAbs(440.0f, 1e-6f));
+    REQUIRE_THAT(midi_to_freq(81.0f), WithinAbs(880.0f, 1e-5f));
+}
