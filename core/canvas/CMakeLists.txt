@@ -62,6 +62,7 @@ target_include_directories(pulp-canvas PRIVATE
 if(APPLE)
     target_sources(pulp-canvas PRIVATE
         platform/mac/cg_canvas.mm
+        platform/mac/cg_canvas_gradients.mm
     )
     target_link_libraries(pulp-canvas PRIVATE
         "-framework CoreGraphics"
