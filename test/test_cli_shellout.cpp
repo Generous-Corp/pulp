@@ -1049,10 +1049,12 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     fs::current_path(fs::temp_directory_path());
     auto strict = exec(bin.string(), {"validate", "--strict"}, 10000);
     auto bogus = exec(bin.string(), {"validate", "--this-flag-does-not-exist"}, 10000);
+    auto missing_report = exec(bin.string(), {"validate", "--report"}, 10000);
     fs::current_path(cwd_saver);
 
     REQUIRE_FALSE(strict.timed_out);
     REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE_FALSE(missing_report.timed_out);
 
     // --strict is known: flag parser accepts, we fall through to the
     // project-root bail-out, exit 1.
@@ -1066,6 +1068,12 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     REQUIRE(bogus.stderr_output.find("unknown flag") != std::string::npos);
     REQUIRE(bogus.stderr_output.find("--this-flag-does-not-exist")
             != std::string::npos);
+
+    REQUIRE(missing_report.exit_code == 2);
+    REQUIRE(missing_report.stderr_output.find("--report requires a path")
+            != std::string::npos);
+    REQUIRE(missing_report.stderr_output.find("not in a Pulp project directory")
+            == std::string::npos);
 }
 
 TEST_CASE("pulp validate strict json report records missing VST3 validators",

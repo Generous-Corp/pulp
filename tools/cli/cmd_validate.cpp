@@ -28,8 +28,13 @@ int cmd_validate(const std::vector<std::string>& args) {
         else if (args[i] == "--json") json_output = true;
         else if (args[i] == "--screenshot") screenshot = true;
         else if (args[i] == "--strict") strict = true;
-        else if (args[i] == "--report" && i + 1 < args.size())
+        else if (args[i] == "--report") {
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                std::cerr << "pulp validate: --report requires a path\n";
+                return 2;
+            }
             report_path = args[++i];
+        }
         else if (args[i].size() >= 2 && args[i].substr(0, 2) == "--") {
             std::cerr << "pulp validate: unknown flag: " << args[i] << "\n";
             std::cerr << "Known flags: --all --json --screenshot --strict "
