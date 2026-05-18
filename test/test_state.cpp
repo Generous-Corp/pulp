@@ -478,6 +478,23 @@ TEST_CASE("StateStore preserves parameter display conversion callbacks",
     REQUIRE_THAT(stored->from_string("concert"), WithinAbs(440.0f, 0.001f));
 }
 
+TEST_CASE("StateStore unknown modulation writes are no-ops",
+          "[state][store][coverage][phase3]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
+
+    store.set_mod_offset(999, 10.0f);
+    store.add_mod_offset(999, 10.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(store.get_modulated(999), WithinAbs(0.0f, 0.001f));
+
+    store.set_mod_offset(1, 0.5f);
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.75f, 0.001f));
+    store.reset_all_mod();
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.25f, 0.001f));
+}
+
 TEST_CASE("ParamRange ignores negative step and still clamps output",
           "[state][range][coverage][phase3-large]") {
     ParamRange range{0.0f, 10.0f, 5.0f, -2.0f};
