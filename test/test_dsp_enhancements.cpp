@@ -20,6 +20,15 @@ TEST_CASE("FastMath clamps saturation helper boundaries",
     REQUIRE_THAT(FastMath::clamp_unit(2.0f), WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("FastMath soft clip covers linear and saturated regions",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::soft_clip(-2.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(2.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(0.75f), WithinAbs(0.6875f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(-0.75f), WithinAbs(-0.6875f, 1e-6f));
+}
+
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
 TEST_CASE("DryWetMixer fully wet", "[dsp][dry_wet]") {
