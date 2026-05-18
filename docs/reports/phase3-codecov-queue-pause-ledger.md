@@ -9185,3 +9185,21 @@ pulp-test-cli-package-commands`, `build/test/pulp-test-cli-package-commands
 cwd (32 assertions), and `git diff --check`. Batch 748 is clean, local-only,
 current with `origin/main`, and now 15 commits ahead; keep accumulating
 toward a 24-36 commit GitHub-hosted PR batch before dispatch.
+
+2026-05-18 16:54 PDT: continued held local batch
+`feature/phase3-codecov-batch-748` with four more local-only parser/coverage
+commits: `4ea6c64fa` (`fix(cli): reject misc command extras`) rejects extra
+`pulp status`/`pulp clean` arguments before project resolution or deletion;
+`2c4f028d6` (`fix(cli): reject doctor parser gaps`) covers `pulp doctor
+--only` missing/flag-looking values and extra positional arguments before the
+slow doctor pipeline; `6f5b087e2` (`fix(cli): reject config command extras`)
+rejects extra get/set/list args under isolated config tests; and `b068518eb`
+(`fix(cli): reject projects parser errors`) rejects projects list/add/remove
+parser errors before registry mutation. Focused local validation passed:
+`cmake --build build --target pulp-cli pulp-test-cli-shellout` with filters
+`"[cli][shellout][misc][coverage][phase3]"` (6 assertions),
+`"[cli][shellout][doctor][issue-355]"` (19 assertions),
+`"[cli][shellout][config][issue-643]"` (43 assertions across 2 test cases),
+and `"[cli][shellout][projects][coverage][phase3]"` (13 assertions), plus
+`git diff --check`. Batch 748 is clean, local-only, and now 19 commits ahead;
+continue accumulating toward the 24-36 commit PR threshold.
