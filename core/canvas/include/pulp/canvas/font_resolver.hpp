@@ -31,11 +31,66 @@
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
+#include "include/core/SkFont.h"
+#include "include/core/SkFontTypes.h"
 #include "include/core/SkRefCnt.h"
 class SkTypeface;
 #endif
 
 namespace pulp::canvas {
+
+#ifdef PULP_HAS_SKIA
+
+// ── AA / hinting policy (font v2 Slice 3.2) ──────────────────────────────
+//
+// Pure enum-to-enum translation from the platform-neutral FontOptions modes
+// (HintingMode, AntiAliasMode) to Skia's paint flags (SkFont::Edging,
+// SkFontHinting). Centralised here so every Skia-backed paint path —
+// SkiaCanvas, TextShaper, SDF glyph atlas — pulls the same policy out of
+// the resolver instead of inventing its own mapping. Stateless and
+// branch-free; safe to call from the audio thread (no allocations, no
+// locks, no Skia globals touched).
+//
+// Mapping rules (locked by test_font_aa_hinting):
+//   * AntiAliasMode::Default     → kAntiAlias (the existing in_non_opaque_layer
+//                                  heuristic in SkiaCanvas can still pick
+//                                  kSubpixelAntiAlias when it knows the
+//                                  destination is opaque; callers that want
+//                                  to bypass the heuristic explicitly opt in
+//                                  via LCD / Grayscale / NoAA).
+//   * AntiAliasMode::LCD         → kSubpixelAntiAlias
+//   * AntiAliasMode::Grayscale   → kAntiAlias
+//   * AntiAliasMode::NoAA        → kAlias
+//
+//   * HintingMode::PlatformDefault → kNormal (Skia's documented default for
+//                                    sk_app + most platform back-ends).
+//   * HintingMode::None            → kNone
+//   * HintingMode::Slight          → kSlight
+//   * HintingMode::Normal          → kNormal
+//   * HintingMode::Full            → kFull
+
+constexpr SkFont::Edging sk_edging_for(AntiAliasMode mode) noexcept {
+    switch (mode) {
+        case AntiAliasMode::LCD:       return SkFont::Edging::kSubpixelAntiAlias;
+        case AntiAliasMode::Grayscale: return SkFont::Edging::kAntiAlias;
+        case AntiAliasMode::NoAA:      return SkFont::Edging::kAlias;
+        case AntiAliasMode::Default:   break;
+    }
+    return SkFont::Edging::kAntiAlias;
+}
+
+constexpr SkFontHinting sk_hinting_for(HintingMode mode) noexcept {
+    switch (mode) {
+        case HintingMode::None:            return SkFontHinting::kNone;
+        case HintingMode::Slight:          return SkFontHinting::kSlight;
+        case HintingMode::Normal:          return SkFontHinting::kNormal;
+        case HintingMode::Full:            return SkFontHinting::kFull;
+        case HintingMode::PlatformDefault: break;
+    }
+    return SkFontHinting::kNormal;
+}
+
+#endif  // PULP_HAS_SKIA
 
 // ── Trace types ──────────────────────────────────────────────────────────
 
@@ -90,6 +145,13 @@ struct ResolvedFont {
     std::vector<FallbackTraceStep> trace;
     SynthesisTrace                 synthesis;
 
+    /// AA/hinting policy carried over from the originating `FontOptions`.
+    /// Recorded at resolve time so paint paths can derive Skia flags
+    /// without round-tripping through the original options blob.
+    /// (font v2 Slice 3.2)
+    AntiAliasMode aa_mode      = AntiAliasMode::Default;
+    HintingMode   hinting_mode = HintingMode::PlatformDefault;
+
     bool has_typeface() const noexcept {
 #ifdef PULP_HAS_SKIA
         return static_cast<bool>(typeface);
@@ -101,6 +163,20 @@ struct ResolvedFont {
     bool resolved() const noexcept {
         return origin != FallbackOrigin::NotFound;
     }
+
+#ifdef PULP_HAS_SKIA
+    /// Skia `SkFont::Edging` for the recorded `aa_mode`. See
+    /// `sk_edging_for(AntiAliasMode)` for the mapping table.
+    SkFont::Edging sk_edging() const noexcept {
+        return sk_edging_for(aa_mode);
+    }
+
+    /// Skia `SkFontHinting` for the recorded `hinting_mode`. See
+    /// `sk_hinting_for(HintingMode)` for the mapping table.
+    SkFontHinting sk_hinting() const noexcept {
+        return sk_hinting_for(hinting_mode);
+    }
+#endif
 };
 
 // ── FontResolver ─────────────────────────────────────────────────────────

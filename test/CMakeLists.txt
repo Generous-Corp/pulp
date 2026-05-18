@@ -974,6 +974,17 @@ add_executable(pulp-test-cluster-step test_cluster_step.cpp)
 target_link_libraries(pulp-test-cluster-step PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cluster-step)
 
+# pulp #2163 / font v2 Slice 3.2 — AA / hinting / subpixel policy centralization.
+# Locks the enum-to-Skia translation table on ResolvedFont so a stealth change
+# (e.g. flipping AntiAliasMode::Default to kSubpixelAntiAlias) is caught by an
+# automated test instead of by goldens drift weeks later.
+add_executable(pulp-test-font-aa-hinting test_font_aa_hinting.cpp)
+target_link_libraries(pulp-test-font-aa-hinting PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_link_libraries(pulp-test-font-aa-hinting PRIVATE skia::skia)
+endif()
+catch_discover_tests(pulp-test-font-aa-hinting)
+
 # pulp #2163 — font v2 Slice 1.3 measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
 # 0.5px for a hand-picked sample set representative of CHAIN INFO /

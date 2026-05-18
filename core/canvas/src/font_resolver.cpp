@@ -105,6 +105,9 @@ ResolvedFont resolve_one_family(const std::string& family,
     ResolvedFont r;
     r.scope = opts.scope;
     r.generation = merged_generation_for(opts.scope);
+    // Slice 3.2: AA / hinting policy travels alongside the resolved face.
+    r.aa_mode = opts.aa_mode;
+    r.hinting_mode = opts.hinting_mode;
 
     // 1) Registered (scoped). Phase 1.1.a only consults the global
     //    registered map; per-scope storage arrives in 1.1.b.
@@ -200,6 +203,12 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     ResolvedFont resolved;
     resolved.scope = options.scope;
     resolved.generation = merged_generation_for(options.scope);
+    // pulp #2163 — font v2 Slice 3.2. AA / hinting policy carried straight
+    // out of FontOptions onto the ResolvedFont so paint paths derive Skia
+    // flags from one canonical source. See `sk_edging_for` / `sk_hinting_for`
+    // in font_resolver.hpp for the enum translation.
+    resolved.aa_mode = options.aa_mode;
+    resolved.hinting_mode = options.hinting_mode;
 
     // pulp #2163 — font v2 Slice 2.3. After a face resolves, if the
     // caller requested variation axes (`font-variation-settings`),
@@ -264,6 +273,10 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     ResolvedFont r;
     r.scope = options.scope;
     r.generation = merged_generation_for(options.scope);
+    // Slice 3.2: char-fallback faces carry the same AA / hinting policy
+    // as the primary so paint paths stay consistent across the run.
+    r.aa_mode = options.aa_mode;
+    r.hinting_mode = options.hinting_mode;
 
     sk_sp<SkFontMgr> mgr = platform_font_manager();
     if (!mgr) {
@@ -308,6 +321,8 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     ResolvedFont r;
     r.scope = options.scope;
     r.generation = merged_generation_for(options.scope);
+    r.aa_mode = options.aa_mode;
+    r.hinting_mode = options.hinting_mode;
     r.origin = FallbackOrigin::NotFound;
     return r;
 }
@@ -318,6 +333,8 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
     ResolvedFont r;
     r.scope = options.scope;
     r.generation = merged_generation_for(options.scope);
+    r.aa_mode = options.aa_mode;
+    r.hinting_mode = options.hinting_mode;
     r.origin = FallbackOrigin::NotFound;
     return r;
 }
