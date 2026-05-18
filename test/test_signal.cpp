@@ -672,6 +672,23 @@ TEST_CASE("Oscillator reset, phase wrap, and PolyBLEP edges are deterministic",
     REQUIRE_THAT(triangle.phase(), WithinAbs(0.2f, 1e-6f));
 }
 
+TEST_CASE("Oscillator zero frequency leaves phase stationary",
+          "[signal][osc][coverage]") {
+    Oscillator osc;
+    osc.set_sample_rate(48000.0f);
+    osc.set_frequency(0.0f);
+    osc.set_waveform(Oscillator::Waveform::square);
+
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(std::isfinite(osc.next()));
+        REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    }
+
+    osc.reset();
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(osc.frequency(), WithinAbs(0.0f, 1e-6f));
+}
+
 // ── SVF ──────────────────────────────────────────────────────────────────────
 
 TEST_CASE("SVF lowpass attenuates high frequencies", "[signal][svf]") {
