@@ -663,6 +663,17 @@ TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][iss
     REQUIRE(decoded.get_int(0) == 123);
 }
 
+TEST_CASE("OSC decode keeps explicit defaults for out-of-range access",
+          "[osc][message][coverage][phase3-github]") {
+    Message msg("/defaults");
+    msg.add(12).add(std::string("name"));
+
+    REQUIRE(msg.get_int(4, -9) == -9);
+    REQUIRE_THAT(msg.get_float(4, -0.5f), WithinAbs(-0.5f, 1e-6f));
+    REQUIRE(msg.get_string(4, "fallback") == "fallback");
+    REQUIRE(msg.get_string(0, "wrong") == "wrong");
+}
+
 TEST_CASE("OSC Sender::send_raw without connect is rejected", "[osc][udp][sender][issue-644]") {
     Sender tx;
     uint8_t payload[] = {0, 1, 2, 3};
