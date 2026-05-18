@@ -210,13 +210,34 @@ public:
     /// bumps baked into cache keys.
     void clear_cache();
 
+    /// pulp #2163 — font v2 Slice 3.3 (variable-font animation).
+    /// Cap the resolver cache so per-frame axis-instance variation
+    /// (60fps animation across `wght` 100→900 = 60 distinct cache
+    /// keys per second per animation) doesn't grow unbounded. Default
+    /// 256 entries — enough to hold a handful of animations + the
+    /// static set, small enough that the LRU eviction reliably fires
+    /// on real animations. Setting 0 disables the cap (back to the
+    /// pre-3.3 unbounded behavior). Setting a value shrinks the cache
+    /// immediately if it's currently over the new cap.
+    void set_cache_capacity(std::size_t entries);
+    std::size_t cache_capacity() const noexcept;
+
+    /// Current number of cached entries. Test-only — production code
+    /// should not rely on cache size directly.
+    std::size_t cache_size() const noexcept;
+
+    /// Implementation detail — exposed publicly only so the
+    /// slice-3.3 LRU helper (`cache_put_locked_impl` in
+    /// font_resolver.cpp) can reach the nested type. The struct
+    /// definition still lives in the .cpp; this is name-only.
+    struct Impl;
+
 private:
     FontResolver();
     ~FontResolver();
     FontResolver(const FontResolver&) = delete;
     FontResolver& operator=(const FontResolver&) = delete;
 
-    struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
