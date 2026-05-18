@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01100"></a>
+## [0.110.0] - 2026-05-17
+
+- feat(view): Esc closes React popovers via document outside-click fan-out (#2128 follow-up) ([#2139](https://github.com/danielraffel/pulp/pull/2139))
+- refactor(local-ci): R2-1 cluster — normalize + git_helpers + io_utils + footprint ([#2159](https://github.com/danielraffel/pulp/pull/2159))
+- refactor/p4 batch ([#2158](https://github.com/danielraffel/pulp/pull/2158))
+- refactor(phase-3): C2 root CMakeLists split + R2-9 PulpUtils split ([#2147](https://github.com/danielraffel/pulp/pull/2147))
+- test: batch broad phase3 coverage edges ([#2143](https://github.com/danielraffel/pulp/pull/2143))
+- refactor(phase-2): R2-4 cli_common split + R2-6 widgets split + R2-8 doctor filters ([#2145](https://github.com/danielraffel/pulp/pull/2145))
+
 <a id="v01090"></a>
 ## [0.109.0] - 2026-05-17
 
@@ -1884,6 +1894,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.110.0]: https://github.com/danielraffel/pulp/releases/tag/v0.110.0
 [0.109.0]: https://github.com/danielraffel/pulp/releases/tag/v0.109.0
 [0.108.0]: https://github.com/danielraffel/pulp/releases/tag/v0.108.0
 [0.107.0]: https://github.com/danielraffel/pulp/releases/tag/v0.107.0
