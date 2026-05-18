@@ -117,6 +117,23 @@ TEST_CASE("TemporaryFile self move assignment preserves ownership",
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("ScopeGuard dismiss and move control destructor execution",
+          "[runtime][scope_guard][coverage][phase3-github]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        guard.dismiss();
+    }
+    REQUIRE(calls == 0);
+
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        auto moved = std::move(guard);
+        (void)moved;
+    }
+    REQUIRE(calls == 1);
+}
+
 // ── MemoryMappedFile ────────────────────────────────────────────────────
 
 TEST_CASE("MemoryMappedFile maps a file", "[runtime][mmap]") {
