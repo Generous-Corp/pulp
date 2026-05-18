@@ -7441,7 +7441,7 @@ GitHub-only CI. PR #2173 is open with head
 2026-05-17 23:50 PDT: started the next held large coverage batch from
 current `origin/main` in `/private/tmp/pulp-phase3-codecov-batch-728` on
 branch `feature/phase3-codecov-batch-728`. First local-only tranche is
-commit `f703f28fe` (`test(canvas): cover font options and scopes`). It adds
+commit `d5febebe8` (`test(canvas): cover font options and scopes`). It adds
 `pulp-test-font-options` and covers the newly landed font v2 typed cache-key
 surface: full `FontOptions` hash participation, OpenType tag packing,
 plugin/view/global `FontScopeId` factories, scope generation isolation,
@@ -7453,7 +7453,7 @@ assertions), and `git diff --check` passed. This branch is intentionally held
 locally until it accumulates a larger 24-36-tranche PR batch.
 
 2026-05-17 23:52 PDT: added a second local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `6ae3f0838`
+`feature/phase3-codecov-batch-728`: commit `55272f9c9`
 (`test(canvas): cover text run planner skeleton`). It extends
 `pulp-test-font-options` over `TextRunPlanner` skeleton behavior: mixed
 UTF-8 scalar offset mapping, hard newline and soft tab line-break
@@ -7466,7 +7466,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-18 00:06 PDT: added a sixth local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `406855740`
+`feature/phase3-codecov-batch-728`: commit `191e26f93`
 (`test(canvas): cover shaped text value types`). It extends
 `pulp-test-font-options` over `RunMetrics::line_height`,
 `UnicodeIndexMap::scalar_count`, `ShapedText::empty`, and populated
@@ -7477,7 +7477,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-18 00:03 PDT: added a fifth local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `52cff6992`
+`feature/phase3-codecov-batch-728`: commit `95001999d`
 (`test(canvas): cover text planner cache edges`). It extends
 `pulp-test-font-options` over empty-text shaping, cache-hit parity,
 `clear_cache()` behavior, and ASCII space/tab/newline soft/hard break
@@ -7488,7 +7488,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-18 00:00 PDT: added a fourth local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `556382a76`
+`feature/phase3-codecov-batch-728`: commit `a4cf6a8ae`
 (`test(canvas): cover font registry stubs`). It extends
 `pulp-test-font-options` over non-Skia public font registration stubs,
 byte-validation guard behavior, generation no-op semantics, and the naive
@@ -7501,7 +7501,7 @@ assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
 
 2026-05-17 23:55 PDT: added a third local-only font/canvas tranche to
-`feature/phase3-codecov-batch-728`: commit `0021239cd`
+`feature/phase3-codecov-batch-728`: commit `91c191711`
 (`test(canvas): cover font resolver fallbacks`). It extends
 `pulp-test-font-options` over `ResolvedFont` default unresolved state and the
 non-Skia `FontResolver` family/character fallback paths, including scoped
@@ -7510,3 +7510,19 @@ rebuilt `pulp-test-font-options`, ran
 `./build/test/pulp-test-font-options "[canvas][font]"` (8 cases / 78
 assertions), and `git diff --check` passed. Still held locally for the next
 large batch PR.
+
+2026-05-18 00:04 PDT: rebased held batch
+`feature/phase3-codecov-batch-728` onto `origin/main` after #2175, #2177,
+and #2179 landed. The rebase preserved mainline `pulp-test-font-scope-budget`
+and `pulp-test-font-security` targets alongside this batch's
+`pulp-test-font-options`; current batch head is commit `ce9e07182`
+(`test(view): cover label baseline metrics`). The seventh local-only tranche
+adds direct `Label::baseline_y()` coverage for font-metric scaling, empty
+label fallback, inherited font-size propagation, and explicit child font-size
+override. Local validation passed after rebase: built
+`pulp-test-font-options` and `pulp-test-widgets`, ran
+`./build/test/pulp-test-font-options "[canvas][font]"` (12 cases / 135
+assertions), ran
+`./build/test/pulp-test-widgets "[view][widget][baseline]"` (1 case / 7
+assertions), and `git diff --check` passed. Still held locally for a larger
+24-36 tranche PR batch.
