@@ -43,8 +43,8 @@ public:
                  const audio::BufferView<const float>& input);
 
     /// Process a block of audio with explicit transport/timeline context.
-    /// Any zero-valued `sample_rate` / `num_samples` fields are defaulted from
-    /// the prepared host configuration and current buffer size.
+    /// Any non-positive `sample_rate` / `num_samples` fields are defaulted
+    /// from the prepared host configuration and current buffer size.
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  ProcessContext context);

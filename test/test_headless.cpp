@@ -155,6 +155,35 @@ TEST_CASE("HeadlessHost fills default process context",
     REQUIRE(last_context.num_samples == 32);
 }
 
+TEST_CASE("HeadlessHost defaults non-positive context fields",
+          "[headless][coverage][phase3]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(88200.0, 512);
+
+    pulp::audio::Buffer<float> in(1, 8), out(1, 8);
+    const float* in_ptrs[1] = {in.channel(0).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    auto out_view = out.view();
+
+    pulp::format::ProcessContext zero_ctx;
+    host.process(out_view, in_view, zero_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
+    REQUIRE(last_context.num_samples == 8);
+
+    pulp::format::ProcessContext explicit_ctx;
+    explicit_ctx.sample_rate = -1.0;
+    explicit_ctx.num_samples = -32;
+    host.process(out_view, in_view, explicit_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
+    REQUIRE(last_context.num_samples == 8);
+
+    explicit_ctx.sample_rate = 44100.0;
+    explicit_ctx.num_samples = 4;
+    host.process(out_view, in_view, explicit_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
+    REQUIRE(last_context.num_samples == 4);
+}
+
 TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
