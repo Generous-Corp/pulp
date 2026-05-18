@@ -157,6 +157,19 @@ TEST_CASE("SimpleMixer clamps mix and processes buffers",
     REQUIRE_THAT(output[2], WithinAbs(-0.5f, 1e-6f));
 }
 
+TEST_CASE("SimpleMixer zero-length buffer processing leaves output untouched",
+          "[signal][mix][coverage][phase3]") {
+    SimpleMixer mixer;
+    mixer.set_mix(0.5f);
+
+    const float dry[] = {1.0f};
+    const float wet[] = {-1.0f};
+    float output[] = {42.0f};
+    mixer.process(dry, wet, output, 0);
+
+    REQUIRE_THAT(output[0], WithinAbs(42.0f, 1e-6f));
+}
+
 // ── Compressor ───────────────────────────────────────────────────────────────
 
 TEST_CASE("Compressor reduces loud signals", "[signal][comp]") {
