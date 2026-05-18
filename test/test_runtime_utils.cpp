@@ -626,6 +626,17 @@ TEST_CASE("IPv4 validation rejects whitespace-padded addresses",
     REQUIRE_FALSE(is_valid_ipv4("\t127.0.0.1"));
 }
 
+TEST_CASE("base64 decodes final quantum without padding",
+          "[runtime][base64][coverage][phase3-github]") {
+    auto one = base64_decode("TQ");
+    REQUIRE(one.has_value());
+    REQUIRE(*one == std::vector<uint8_t>{'M'});
+
+    auto two = base64_decode("TWE");
+    REQUIRE(two.has_value());
+    REQUIRE(*two == std::vector<uint8_t>{'M', 'a'});
+}
+
 // ── Expression ─────────────────────────────────────────────────────────
 
 TEST_CASE("Expression evaluator handles precedence and exponent edge cases",
