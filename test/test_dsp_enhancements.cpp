@@ -37,6 +37,17 @@ TEST_CASE("FastMath dB conversion covers silent and unity cases",
     REQUIRE_THAT(FastMath::gain_to_db(1.0f), WithinAbs(0.0f, 1e-4f));
 }
 
+TEST_CASE("FastMath tanh covers clamps and odd symmetry",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::tanh(0.0f), WithinAbs(0.0f, 1e-6f));
+
+    const auto positive = FastMath::tanh(0.75f);
+    const auto negative = FastMath::tanh(-0.75f);
+    REQUIRE_THAT(negative, WithinAbs(-positive, 1e-6f));
+}
+
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
 TEST_CASE("DryWetMixer fully wet", "[dsp][dry_wet]") {
