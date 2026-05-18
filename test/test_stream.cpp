@@ -187,6 +187,17 @@ TEST_CASE("MemoryStream write preserves existing unread prefix",
     REQUIRE(out[1] == 30);
 }
 
+TEST_CASE("MemoryStream clear is idempotent on open streams",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    stream.clear();
+    stream.clear();
+
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+}
+
 TEST_CASE("MemoryStream close rejects further I/O", "[stream]") {
     MemoryStream s;
     s.close();
