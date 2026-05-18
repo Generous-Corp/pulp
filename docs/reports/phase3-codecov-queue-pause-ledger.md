@@ -8337,3 +8337,28 @@ frame instead of wrapping to the next iteration's start. PR monitoring remains
 GitHub-hosted only and REST-only while GraphQL quota is exhausted: #2173,
 #2208, #2210, and #2211 have no failing checks and are blocked only on
 queued/running GitHub-hosted lanes. No Namespace dispatch.
+
+2026-05-18 06:49 PDT: pushed and opened the larger GitHub-only coverage batch
+`feature/phase3-codecov-batch-732` as #2219
+(`test: batch phase3 coverage host and view edges`) at head
+`6b1715fb2bed62968b9f248b2cbabe2aaa79a1f1`, after rebasing cleanly on
+`origin/main`. The PR contains 24 focused commits across runtime, platform,
+MIDI, state, host, and view coverage. Additional commits since the 06:24
+ledger entry cover asset cache replacement accounting, scanner default paths,
+instant splash lifecycle, cancel token lifecycle, custom drop payloads,
+keybinding save failure, file browser/tree navigation, modulation matrix
+mutation edges, new lasso overlay tests, new split view tests, resizable shell
+state contracts, AutoUi empty/unmatched sync paths, SimpleTableModel
+replacement/sort behavior, and SystemTrayIcon lifecycle stubs. Focused local
+validation passed for each touched suite, including the new `pulp-test-lasso`
+and `pulp-test-split-view` targets, plus `git diff --check`. The asset cache
+tests found and fixed a real accounting bug: replacing an existing cache key
+now subtracts the old byte size before adding the new entry. Local pre-push was
+skipped on push because the local diff-cover hook's clean coverage configure
+hit the known FetchContent `mbedtls` tag checkout failure; GitHub-hosted CI is
+the validation source for #2219. A `codecov` label was requested via REST. PR
+monitoring remains GitHub-hosted only and REST-only: #2173, #2208, #2210, and
+#2211 have no current failures; #2210 was patched and repushed at
+`031f7fa2d9d24245d7e6761ef4e93370b9321642` after its Windows hosted lane
+found a real test portability issue in `run_process honors working directory
+and preserves spaced arguments`. No Namespace dispatch.
