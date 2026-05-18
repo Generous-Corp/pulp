@@ -749,6 +749,24 @@ TEST_CASE("pulp config rejects malformed and invalid update keys",
     REQUIRE(bad_interval.exit_code != 0);
     REQUIRE(bad_interval.stderr_output.find("non-negative integer") != std::string::npos);
     REQUIRE_FALSE(config_written);
+
+    auto extra_get = run_pulp({"config", "get", "update.mode", "extra"}, 10000);
+    REQUIRE_FALSE(extra_get.timed_out);
+    REQUIRE(extra_get.exit_code == 2);
+    REQUIRE(extra_get.stderr_output.find("unexpected `pulp config get` argument") !=
+            std::string::npos);
+
+    auto extra_set = run_pulp({"config", "set", "update.mode", "manual", "extra"}, 10000);
+    REQUIRE_FALSE(extra_set.timed_out);
+    REQUIRE(extra_set.exit_code == 2);
+    REQUIRE(extra_set.stderr_output.find("unexpected `pulp config set` argument") !=
+            std::string::npos);
+
+    auto extra_list = run_pulp({"config", "list", "extra"}, 10000);
+    REQUIRE_FALSE(extra_list.timed_out);
+    REQUIRE(extra_list.exit_code == 2);
+    REQUIRE(extra_list.stderr_output.find("unexpected `pulp config list` argument") !=
+            std::string::npos);
 }
 
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
