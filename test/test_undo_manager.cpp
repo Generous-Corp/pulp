@@ -215,6 +215,37 @@ TEST_CASE("UndoManager add_without_executing", "[state][undo]") {
     REQUIRE(v == 0);
 }
 
+TEST_CASE("UndoManager add_without_executing participates in transactions",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int x = 10;
+    int y = 20;
+
+    um.begin_transaction("Already moved");
+    um.add_without_executing(UndoAction::create("Set X",
+        [&] { x = 0; },
+        [&] { x = 10; }));
+    um.add_without_executing(UndoAction::create("Set Y",
+        [&] { y = 0; },
+        [&] { y = 20; }));
+    um.end_transaction();
+
+    REQUIRE(x == 10);
+    REQUIRE(y == 20);
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo_name() == "Already moved");
+
+    REQUIRE(um.undo());
+    REQUIRE(x == 0);
+    REQUIRE(y == 0);
+    REQUIRE(um.redo_count() == 1);
+    REQUIRE(um.redo_name() == "Already moved");
+
+    REQUIRE(um.redo());
+    REQUIRE(x == 10);
+    REQUIRE(y == 20);
+}
+
 TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     UndoManager um;
     int v = 0;
