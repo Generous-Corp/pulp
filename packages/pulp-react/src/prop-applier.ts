@@ -569,15 +569,16 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         call('registerPointer', id);
     }
     // pulp jsx-instrument-import 2026-05-17 — also arm the pointer
-    // dispatch path for mouse events. Native NSEvent → on_mouse_event
-    // dispatches via View::on_pointer_event lambda (the W3C bubbling
-    // channel); on_click only fires on full mouse-up. Imported JSX
-    // bundles (Chainer's knobs/faders/XY pad) install onMouseDown
-    // handlers that need to fire on press, not release. Without this
-    // pre-fix, hit_test returns the widget with has_pointer=no and the
-    // bridge's pointer event lambda never fires for mouse* event types.
+    // dispatch path for mouse events (NOT onClick — that's the W3C
+    // click-on-release semantic which routes through on_click, and the
+    // pulp #1381 test asserts onClick alone never triggers registerPointer).
+    // Imported JSX bundles (Chainer's knobs/faders/XY pad) install
+    // onMouseDown / onMouseMove / onMouseUp handlers that need to fire on
+    // press, not release. Without this pre-fix, hit_test returns the
+    // widget with has_pointer=no and the bridge's pointer event lambda
+    // never fires for mouse* event types.
     if (eventName === 'mousedown' || eventName === 'mouseup' ||
-        eventName === 'mousemove' || eventName === 'click') {
+        eventName === 'mousemove') {
         call('registerPointer', id);
     }
     if (isWheelEvent(eventName)) {

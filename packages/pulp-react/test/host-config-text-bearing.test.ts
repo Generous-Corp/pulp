@@ -27,11 +27,34 @@ describe('host-config shouldSetTextContent (pulp #109 — TEXT_BEARING)', () => 
         expect(fn(tag, {})).toBe(true);
     });
 
-    it('non-text containers (div, View, section) still return false', () => {
-        expect(fn('div', {})).toBe(false);
+    it('user-named components (View, Panel) are NOT text-bearing', () => {
+        // pulp #2163 — div / section / article / etc were added to
+        // TEXT_BEARING so imported JSX (Chainer's `<div>CROSSOVER</div>`
+        // section titles) render as Labels instead of empty Cols.
+        // shouldSetTextContent still gates on actual text content
+        // (children must be pure string/number), so an element-bearing
+        // div still routes to createCol — see the children-aware
+        // tests below.
+        //
+        // Non-HTML user components (uppercase names like View, Panel)
+        // remain non-text-bearing regardless of children, since they
+        // represent component references not intrinsic elements.
         expect(fn('View', {})).toBe(false);
-        expect(fn('section', {})).toBe(false);
         expect(fn('Panel', {})).toBe(false);
+    });
+
+    it('HTML container tags (div, section, article) are text-bearing when children are pure text', () => {
+        // pulp #2163 — extended TEXT_BEARING to cover container tags so
+        // imported designs with `<div>section title</div>` render the
+        // text as a Label rather than creating an empty Col + a separate
+        // text Label sibling (which would double up the rendering).
+        // Empty children also short-circuits to true (text-able empty
+        // container, no element to mount).
+        expect(fn('div', {})).toBe(true);
+        expect(fn('section', {})).toBe(true);
+        expect(fn('article', {})).toBe(true);
+        expect(fn('header', {})).toBe(true);
+        expect(fn('footer', {})).toBe(true);
     });
 
     it('uppercase variants do NOT match (HTML tags are lowercase by JSX convention)', () => {
