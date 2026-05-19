@@ -643,6 +643,6 @@ TEST_CASE("render_report_json escapes project fields",
 
     REQUIRE(rc == 0);
     auto out = capture.str();
-    REQUIRE(out.find(R"JSON("path": "/tmp/project\"with\\chars")JSON") != std::string::npos);
-    REQUIRE(out.find(R"JSON("name": "Quoted \"Project\"\nName")JSON") != std::string::npos);
+    REQUIRE(out.find("\"path\": \"/tmp/project\\\"with\\\\chars\"") != std::string::npos);
+    REQUIRE(out.find("\"name\": \"Quoted \\\"Project\\\"\\nName\"") != std::string::npos);
 }
