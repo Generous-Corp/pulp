@@ -9935,3 +9935,15 @@ send uses binary send"` (3 assertions / 1 case),
 "[runtime][message_channel][coverage][phase3]"` (16 assertions / 5 cases),
 and `git diff --check`. The batch now has 3 local coverage commits; continue
 accumulating before opening a PR.
+
+2026-05-19 01:25 PDT: added `0fccbcea1` (`test(runtime): cover json rpc
+empty response callbacks`) to `feature/phase3-codecov-runtime-state-batch-752`.
+This covers `JsonRpcPeer::dispatch_response()` when a pending request has an
+empty response callback, asserting the response is consumed cleanly and a later
+request still receives id `2` and dispatches its callback. Focused local
+validation passed: `cmake --build build --target pulp-test-json-rpc`,
+`./build/test/pulp-test-json-rpc "JsonRpcPeer consumes responses for requests
+without callbacks"` (8 assertions / 1 case), `./build/test/pulp-test-json-rpc
+"[json_rpc][coverage][phase3]"` (34 assertions / 6 cases), and `git diff
+--check`. The batch now has 4 local coverage commits; continue accumulating
+before opening a PR.
