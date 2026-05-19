@@ -9465,3 +9465,16 @@ assertions / 1 case), `./build/test/pulp-test-host-regression
 "[host][scanner][coverage][phase3]"` (10 assertions / 1 case), and `git diff
 --check`. The held batch now has 17 local coverage commits; continue
 accumulating before opening a PR.
+
+2026-05-18 21:02 PDT: added `6c99120ed` (`test(host): cover graph remove-node
+invalidation`) to the held `feature/phase3-codecov-host-cache-batch-750`
+batch. This covers `SignalGraph::remove_node()` pruning attached connections,
+rejecting a second removal, and invalidating the live compiled graph so
+subsequent `process()` calls silence output until the graph is prepared again.
+Focused local validation passed: `cmake --build build --target pulp-test-host`,
+`./build/test/pulp-test-host "SignalGraph remove_node prunes edges and
+invalidates live graph"` (24 assertions / 1 case),
+`./build/test/pulp-test-host "[host][graph][coverage][phase3]"` (73 assertions
+/ 5 cases; expected prepare-failure log from the existing failing-slot test),
+and `git diff --check`. The held batch now has 18 local coverage commits;
+continue accumulating before opening a PR.
