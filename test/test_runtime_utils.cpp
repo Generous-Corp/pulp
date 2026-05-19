@@ -836,9 +836,15 @@ TEST_CASE("run_process captures stdout and stderr from one child",
 
 TEST_CASE("run_process honors working directory and preserves spaced arguments",
           "[runtime][child_process][coverage][phase3]") {
-    const auto dir = std::filesystem::temp_directory_path()
-        / "pulp-runtime-run-process-working-dir";
-    std::filesystem::create_directories(dir);
+    TemporaryFile marker(".cwd");
+    const auto dir = marker.path();
+    marker.release();
+    std::filesystem::remove(dir);
+    REQUIRE(std::filesystem::create_directory(dir));
+    auto cleanup = make_scope_guard([&] {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    });
 
 #ifdef _WIN32
     auto result = run_process(
@@ -858,9 +864,6 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
     REQUIRE(result->exit_code == 0);
     REQUIRE(std::filesystem::exists(dir / "marker.txt"));
     REQUIRE(result->stdout_output.find("value with spaces") != std::string::npos);
-
-    std::error_code ec;
-    std::filesystem::remove(dir, ec);
 }
 
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
