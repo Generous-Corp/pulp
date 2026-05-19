@@ -307,7 +307,7 @@ identity. If you write a custom codegen path, preserve this pattern
 so the inspector can still trace identity.
 
 **Phase 0b — `setAnchor()` bridge wiring:** the web-compat codegen
-path *also* emits a functional `setAnchor('<var>', '<anchor>')` call
+path *also* emits a functional `setAnchor(<var>._id, '<anchor>')` call
 after each createElement, AND the call is emitted unconditionally —
 NOT gated on `opts.include_comments`. Rationale: the
 `// @pulp-anchor` trail is cosmetic (for grep / debugging), but
@@ -318,6 +318,18 @@ path, emit both: the comment (gated) for debuggability and the
 setAnchor call (unconditional) for the runtime. The bridge side
 (`WidgetBridge::setAnchor`) is a silent no-op on unknown widget IDs,
 matching the rest of the bridge's tolerance for unmounted ids.
+
+<!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
+**Codex P1 follow-up (#2303):** The first argument to `setAnchor` <!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
+MUST be the element's internal `_id` (the auto-generated `__el_N__`
+that `document.createElement` assigns in `core/view/js/web-compat.js`),
+NOT the generated JS variable name. The bridge keys `widget()` lookup
+on `_id`; passing the var name silently no-ops and breaks the entire
+anchor wiring chain for web-compat imports. Pre-fix codegen emitted
+`setAnchor('var', ...)` (broken); post-fix emits `setAnchor(var._id, ...)`
+(correct). If you write a new codegen variant or a non-web-compat
+shim, ensure whatever id you pass matches the bridge's widget()
+lookup key — not the JS-local variable name.
 
 Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
 the native codegen has many early-return branches that need each to
