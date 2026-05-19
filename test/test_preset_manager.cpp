@@ -257,6 +257,26 @@ TEST_CASE("PresetManager load skips parameter keys with missing value separators
     REQUIRE_FALSE(pm.has_unsaved_changes());
 }
 
+TEST_CASE("PresetManager load accepts parameter values that end at EOF",
+          "[state][preset][coverage][phase3]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-terminal-value");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, 0.0f);
+    store.set_value(2, 40.0f);
+
+    const auto preset_path = sandbox.root / "TerminalValue.json";
+    write_text_file(preset_path, R"json({"parameters":{"Gain":-6)json");
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(store.get_value(1) == Catch::Approx(-6.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(40.0f));
+    REQUIRE(pm.current_preset_name() == "TerminalValue");
+    REQUIRE_FALSE(pm.has_unsaved_changes());
+}
+
 TEST_CASE("PresetManager load clamps out-of-range parameter values",
           "[state][preset][coverage][issue-647]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-clamp");
