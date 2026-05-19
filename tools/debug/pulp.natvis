@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Visual Studio (and any natvis-aware Windows debugger) display
+formatters for Pulp core types. Drop a copy into
+`%USERPROFILE%\Documents\Visual Studio 20XX\Visualizers\` or add
+this path to the project's debugger settings:
+
+    Debug → Options → Debugging → Output Window → "Natvis
+    diagnostic messages" + load the file at debugger start.
+
+For LLDB on macOS / Linux, see tools/debug/pulp_lldb.py.
+
+Per sudara "Big List of JUCE Tips" #21.
+-->
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <!-- pulp::state::ParamValue: an atomic<float> + atomic<float>
+       modulation offset. _Storage is MSVC's internal name for the
+       underlying float bytes. -->
+  <Type Name="pulp::state::ParamValue">
+    <DisplayString>{{ value={value_._Storage} mod={mod_offset_._Storage} }}</DisplayString>
+    <Expand>
+      <Item Name="value">value_._Storage</Item>
+      <Item Name="mod_offset">mod_offset_._Storage</Item>
+    </Expand>
+  </Type>
+
+  <!-- pulp::state::ParamInfo: parameter metadata. -->
+  <Type Name="pulp::state::ParamInfo">
+    <DisplayString>{{ id={id} name={name} unit={unit} }}</DisplayString>
+    <Expand>
+      <Item Name="id">id</Item>
+      <Item Name="name">name</Item>
+      <Item Name="unit">unit</Item>
+      <Item Name="min">range.min</Item>
+      <Item Name="max">range.max</Item>
+      <Item Name="default">range.default_value</Item>
+      <Item Name="step">range.step</Item>
+      <Item Name="group_id">group_id</Item>
+    </Expand>
+  </Type>
+
+  <!-- pulp::state::ParamRange: numeric bounds. -->
+  <Type Name="pulp::state::ParamRange">
+    <DisplayString>[{min}..{max}] default={default_value} step={step}</DisplayString>
+  </Type>
+
+  <!-- pulp::state::StateStore: surfaces the active parameter count
+       and registered listener count. The full param vector is
+       reachable under params_ if you want to drill in. -->
+  <Type Name="pulp::state::StateStore">
+    <DisplayString>StateStore ({params_._Mypair._Myval2._Mylast - params_._Mypair._Myval2._Myfirst} params)</DisplayString>
+    <Expand>
+      <Item Name="param_count">params_._Mypair._Myval2._Mylast - params_._Mypair._Myval2._Myfirst</Item>
+      <Item Name="state_version">state_version_</Item>
+      <Item Name="params">params_</Item>
+      <Item Name="groups">groups_</Item>
+      <Item Name="values">values_</Item>
+    </Expand>
+  </Type>
+
+  <!-- pulp::canvas::Rect: x, y, w, h. -->
+  <Type Name="pulp::canvas::Rect">
+    <DisplayString>{{ x={x} y={y} w={w} h={h} }}</DisplayString>
+    <Expand>
+      <Item Name="x">x</Item>
+      <Item Name="y">y</Item>
+      <Item Name="w">w</Item>
+      <Item Name="h">h</Item>
+      <Item Name="right">x + w</Item>
+      <Item Name="bottom">y + h</Item>
+    </Expand>
+  </Type>
+
+  <!-- pulp::canvas::Point: 2D point. -->
+  <Type Name="pulp::canvas::Point">
+    <DisplayString>({x}, {y})</DisplayString>
+  </Type>
+
+  <!-- pulp::canvas::Color: 4-byte RGBA color. -->
+  <Type Name="pulp::canvas::Color">
+    <DisplayString>{{ r={r,d} g={g,d} b={b,d} a={a,d} }}</DisplayString>
+  </Type>
+
+  <!-- pulp::audio::BufferView: channels x frames audio buffer.
+       Format string previews the dimensions; channels/frames are
+       reachable for drilling in. -->
+  <Type Name="pulp::audio::BufferView&lt;*&gt;">
+    <DisplayString>BufferView {num_channels}ch x {num_frames} frames</DisplayString>
+    <Expand>
+      <Item Name="num_channels">num_channels</Item>
+      <Item Name="num_frames">num_frames</Item>
+      <ArrayItems>
+        <Size>num_channels</Size>
+        <ValuePointer>channel_data_</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- pulp::state::ListenerToken: RAII subscription handle. -->
+  <Type Name="pulp::state::ListenerToken">
+    <DisplayString Condition="id_ == 0">empty</DisplayString>
+    <DisplayString>token #{id_}</DisplayString>
+  </Type>
+
+</AutoVisualizer>
