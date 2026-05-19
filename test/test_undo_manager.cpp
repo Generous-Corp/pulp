@@ -229,6 +229,33 @@ TEST_CASE("UndoManager add_without_executing", "[state][undo]") {
     REQUIRE(v == 0);
 }
 
+TEST_CASE("UndoManager add_without_executing participates in transactions",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    std::vector<int> values;
+    values.push_back(1);
+
+    um.begin_transaction("Batch");
+    um.add_without_executing(UndoAction::create("Already pushed",
+        [&] { values.pop_back(); },
+        [&] { values.push_back(1); }));
+    um.perform(UndoAction::create("Push two",
+        [&] { values.pop_back(); },
+        [&] { values.push_back(2); }));
+    um.end_transaction();
+
+    REQUIRE(values == std::vector<int>{1, 2});
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo_name() == "Batch");
+
+    REQUIRE(um.undo());
+    REQUIRE(values.empty());
+    REQUIRE(um.redo_name() == "Batch");
+
+    REQUIRE(um.redo());
+    REQUIRE(values == std::vector<int>{1, 2});
+}
+
 TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     UndoManager um;
     int v = 0;
