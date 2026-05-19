@@ -472,6 +472,38 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
     REQUIRE(graph.node(input) == nullptr);
 }
 
+TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto gain = graph.add_gain_node("Gain");
+    auto output = graph.add_output_node(1, "Output");
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connections().size() == 2);
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> input_samples(8, 0.5f);
+    std::vector<float> output_samples(8, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 8);
+
+    graph.process(out_view, in_view, 8);
+    for (float sample : output_samples) REQUIRE(sample == 0.5f);
+
+    REQUIRE(graph.remove_node(gain));
+    REQUIRE_FALSE(graph.remove_node(gain));
+    REQUIRE(graph.node(gain) == nullptr);
+    REQUIRE(graph.connections().empty());
+
+    std::fill(output_samples.begin(), output_samples.end(), -1.0f);
+    graph.process(out_view, in_view, 8);
+    for (float sample : output_samples) REQUIRE(sample == 0.0f);
+}
+
 TEST_CASE("SignalGraph connections", "[host][graph]") {
     SignalGraph graph;
     auto a = graph.add_input_node(2);
