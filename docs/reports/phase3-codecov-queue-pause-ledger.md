@@ -10086,3 +10086,15 @@ without callbacks"` (8 assertions / 1 case), `./build/test/pulp-test-json-rpc
 "[json_rpc][coverage][phase3]"` (34 assertions / 6 cases), and `git diff
 --check`. The batch now has 4 local coverage commits; continue accumulating
 before opening a PR.
+
+2026-05-18 22:35 PDT: added `3e6727ca9` (`test(runtime): cover websocket
+closed stream guards`) to `feature/phase3-codecov-runtime-state-batch-752`,
+then merged current `origin/main` as `1e3258767`. This covers
+`WebSocketChannel::connect()` and `WebSocketChannel::accept()` returning
+`nullptr` for null or closed `TcpStream` inputs before attempting a handshake.
+Focused local validation passed after the main merge: `cmake --build build
+--target pulp-test-websocket-channel -j4`,
+`./build/test/pulp-test-websocket-channel "WebSocketChannel rejects null and
+closed streams before handshake"` (6 assertions / 1 case), and `git diff
+--check`. The batch now has 5 local coverage commits plus the main merge;
+continue accumulating before opening a PR.
