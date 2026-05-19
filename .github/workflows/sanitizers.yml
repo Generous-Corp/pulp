@@ -91,9 +91,9 @@ jobs:
           EXPLICIT_TSAN_RUNNER_SELECTOR_JSON: ${{ inputs.tsan_runner_selector_json || '' }}
           EXPLICIT_UBSAN_RUNNER_SELECTOR_JSON: ${{ inputs.ubsan_runner_selector_json || '' }}
           EXPLICIT_RTSAN_RUNNER_SELECTOR_JSON: ${{ inputs.rtsan_runner_selector_json || '' }}
-          ASAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_ASAN_RUNS_ON_JSON }}
-          TSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_TSAN_RUNS_ON_JSON }}
-          UBSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_UBSAN_RUNS_ON_JSON }}
+          ASAN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_SANITIZER_ASAN_RUNS_ON_JSON }}
+          TSAN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_SANITIZER_TSAN_RUNS_ON_JSON }}
+          UBSAN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_SANITIZER_UBSAN_RUNS_ON_JSON }}
           RTSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_RTSAN_RUNS_ON_JSON }}
         run: |
           set -euo pipefail

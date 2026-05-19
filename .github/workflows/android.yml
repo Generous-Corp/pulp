@@ -25,11 +25,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+      - id: resolve
+        env:
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          macos=$(python3 tools/scripts/resolve_runs_on.py \
+            --target-name "Android Build (macOS)" \
+            --mode default \
+            --override-env MACOS_RUNS_ON_JSON \
+            --default-label macos-latest)
+          echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+
   android-build:
+    needs: resolve-runners
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: macos-latest
+            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
+          - os: windows-latest
+            runs_on_json: '"windows-latest"'
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 30
 
     steps:
@@ -134,8 +160,8 @@ jobs:
   # once a working runner configuration lands.
   android-emulator-test:
     if: ${{ vars.PULP_ANDROID_EMULATOR_ENABLED == 'true' }}
-    runs-on: macos-latest
-    needs: android-build
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.macos_runs_on) }}
+    needs: [resolve-runners, android-build]
     timeout-minutes: 20
 
     steps:
