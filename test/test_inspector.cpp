@@ -426,6 +426,134 @@ TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
     REQUIRE(after_alt_hover.command_count() == baseline_count);
 }
 
+// ── Phase 0b PR-C-1: gesture-tweak emission via TweakStore ────────────────
+#include <pulp/inspect/tweak_store.hpp>
+#include <choc/containers/choc_Value.h>
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection writes to TweakStore",
+          "[inspect][overlay][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:0:42");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    // Simulate selection via the overlay's normal click path.
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    // Emit a tweak — overlay maps selected_->anchor_id() to the store.
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE(ok);
+    REQUIRE(store.count() == 1);
+    auto v = store.lookup("figma:0:42", "layout.padding");
+    REQUIRE(v.has_value());
+    REQUIRE(v->getInt32() == 12);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "without a selection",
+          "[inspect][overlay][gesture]") {
+    View root;
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    // No view selected.
+    REQUIRE(overlay.selected_view() == nullptr);
+    bool ok = overlay.emit_tweak_for_selection(
+        "paint.bg", choc::value::createString("#abc"), "color-picker");
+    REQUIRE_FALSE(ok);
+    REQUIRE(store.count() == 0);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "when selected view has no anchor",
+          "[inspect][overlay][gesture]") {
+    // Hand-authored views (not imported from a design) have no anchor.
+    // Inspector gesture-tweak emission should silently no-op rather
+    // than synthesize an anchor — those tweaks have nowhere to land
+    // safely on re-import.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    // intentionally no set_anchor_id() call
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+    REQUIRE(child_ptr->anchor_id().empty());
+
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE_FALSE(ok);
+    REQUIRE(store.count() == 0);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "without a TweakStore",
+          "[inspect][overlay][gesture]") {
+    // Inspector can run with no TweakStore wired (e.g. in tests of just
+    // the overlay, or contexts where persistence is disabled). The
+    // emission path must tolerate that.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:0:99");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    // intentionally NOT calling set_tweak_store
+
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE_FALSE(ok);
+    REQUIRE(overlay.tweak_store() == nullptr);
+}
+
+TEST_CASE("InspectorOverlay: tweak_store() round-trips set_tweak_store",
+          "[inspect][overlay][gesture]") {
+    View root;
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    REQUIRE(overlay.tweak_store() == nullptr);
+    overlay.set_tweak_store(&store);
+    REQUIRE(overlay.tweak_store() == &store);
+    overlay.set_tweak_store(nullptr);
+    REQUIRE(overlay.tweak_store() == nullptr);
+}
+
 // ── InspectorWindow ────────────────────────────────────────────────────────
 
 TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][window][issue-641]") {

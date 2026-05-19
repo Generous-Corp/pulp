@@ -7,14 +7,19 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <choc/containers/choc_Value.h>
+
 #include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
 namespace pulp::render { class RenderPassManager; }
 
 namespace pulp::inspect {
+
+class TweakStore;
 
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -40,6 +45,25 @@ public:
 
     // ── Data sources ────────────────────────────────────────────────
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
+
+    /// Phase 0b PR-C-1 — connect the inspector overlay to the in-process
+    /// TweakStore so gesture detectors can persist direct-manipulation
+    /// edits without round-tripping through the TCP protocol. The
+    /// protocol path (Inspector.applyTweak) still works independently;
+    /// this is the FAST in-process path for overlay-driven gestures.
+    /// Setting nullptr disables the in-process emission (e.g. when no
+    /// TweakStore is wired into the host).
+    void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
+    TweakStore* tweak_store() const { return tweak_store_; }
+
+    /// Emit a tweak for the currently-selected view's anchor. Returns
+    /// false if there's no selection, the selection has no anchor_id,
+    /// or no TweakStore is attached. Used by gesture-detection code in
+    /// the overlay (drag-handles, color-picker, field-edit) — Phase 3a
+    /// builds on this with actual UI; PR-C-1 ships only the data path.
+    bool emit_tweak_for_selection(std::string_view property_path,
+                                  choc::value::Value value,
+                                  std::string_view source = "inspector-gesture");
 
     // ── Selection ───────────────────────────────────────────────────
     View* selected_view() const { return selected_; }
@@ -70,6 +94,10 @@ private:
 
     // Optional stats source
     render::RenderPassManager* rpm_ = nullptr;
+
+    // Phase 0b PR-C-1: optional in-process gesture-tweak persistence.
+    // When null, emit_tweak_for_selection() is a no-op.
+    TweakStore* tweak_store_ = nullptr;
 
     // ── Flat tree for rendering ─────────────────────────────────────
     struct TreeItem {

@@ -1,6 +1,7 @@
 // inspector_overlay.cpp — Visual inspector overlay implementation
 
 #include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/inspect/tweak_store.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/render/render_pass.hpp>
 
@@ -55,6 +56,32 @@ void InspectorOverlay::set_active(bool active) {
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
     }
+}
+
+// ── Phase 0b PR-C-1: in-process gesture-tweak emission ─────────────────────
+//
+// Routes overlay-driven direct-manipulation edits (drag handles, color
+// pick, field edit — Phase 3a builds the actual UI on top of this) to
+// the in-process TweakStore. The protocol path (Inspector.applyTweak
+// over TCP) still works for remote clients; this is the fast in-process
+// path that avoids JSON marshaling for overlay gestures.
+//
+// Returns false (silent no-op) when any precondition isn't met:
+//   - no view currently selected (selected_ == nullptr)
+//   - the selected view has no anchor_id (not imported from a design)
+//   - no TweakStore wired into the overlay
+// All three are valid runtime states (e.g. inspector active on a
+// hand-authored UI with no imports). False = "didn't apply"; the caller
+// decides whether that's noteworthy.
+bool InspectorOverlay::emit_tweak_for_selection(std::string_view property_path,
+                                                choc::value::Value value,
+                                                std::string_view source) {
+    if (!selected_) return false;
+    const auto& anchor = selected_->anchor_id();
+    if (anchor.empty()) return false;
+    if (!tweak_store_) return false;
+    tweak_store_->apply_tweak(anchor, property_path, std::move(value), source);
+    return true;
 }
 
 // ── Coordinate helpers ──────────────────────────────────────────────────────
