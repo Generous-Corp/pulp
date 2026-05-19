@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0172a"></a>
+## [0.172.10] - 2026-05-19
+
+- refactor(test): P5-1 extract animation API cluster from test_widget_bridge (3,862 → 3,032, -830)
+
 <a id="v01728"></a>
 ## [0.172.8] - 2026-05-19
 
