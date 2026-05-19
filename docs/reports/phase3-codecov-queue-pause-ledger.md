@@ -11348,3 +11348,19 @@ assertions / 21 cases), `./build/test/pulp-test-ump-buffer-conversion
 batch is clean, local-only, and 35 commits ahead of `origin/main`; keep #2268
 first before opening another CI-consuming coverage PR. No Namespace CI was
 used.
+
+2026-05-19 04:17 PDT: started new local-only runtime batch
+`feature/phase3-codecov-runtime-batch-754` from current `origin/main`
+`a80b97b0e` and added `87985535a` (`test(runtime): cover expression parser
+edge cases`). This touches only `test/test_runtime_utils.cpp` and covers the
+expression evaluator branches for unary plus, underscore variable names, and
+the guarded division-by-zero fallback. Focused local validation passed:
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`,
+`cmake --build build --target pulp-test-runtime-utils -j4`,
+`./build/test/pulp-test-runtime-utils "[runtime][expression]"` (43 assertions
+/ 7 test cases), and `git diff --check`. PR #2268 remains the merge priority
+at base `a80b97b0e`, head `987bd3a1a`, `mergeable: true`,
+`mergeable_state: blocked`, open and not draft; polling at 11:15Z showed
+baseline-diff, Yoga layout snapshots, and macOS local smoke completed success,
+android-build (windows-latest) in progress, remaining lanes queued, and no
+failed checks. Do not push/open #754 until #2268 is merged.
