@@ -19,6 +19,20 @@ TEST_CASE("UndoManager perform and undo", "[state][undo]") {
     REQUIRE_FALSE(um.can_undo());
 }
 
+TEST_CASE("UndoManager empty undo and redo are no-ops", "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int changes = 0;
+    um.on_state_changed = [&] { ++changes; };
+
+    REQUIRE_FALSE(um.undo());
+    REQUIRE_FALSE(um.redo());
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.undo_name().empty());
+    REQUIRE(um.redo_name().empty());
+    REQUIRE(changes == 0);
+}
+
 TEST_CASE("UndoManager redo after undo", "[state][undo]") {
     UndoManager um;
     int value = 0;
