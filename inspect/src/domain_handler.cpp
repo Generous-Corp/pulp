@@ -11,6 +11,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/view/live_constant_editor.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -40,6 +41,7 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "Audio")       return handle_audio(req);
     if (domain == "Capture")     return handle_capture(req);
     if (domain == "Motion")      return handle_motion(req);
+    if (domain == "LiveConstant") return handle_live_constant(req);
 
     return make_error(req.id, "Unknown domain: " + domain);
 }
@@ -391,6 +393,75 @@ InspectorMessage DomainHandler::handle_capture(const InspectorMessage& req) {
         return make_error(req.id, "Capture.screenshotNode not yet implemented");
     }
     return make_error(req.id, "Unknown Capture method: " + req.method);
+}
+
+// ── LiveConstant domain (Tier A Slice 13) ──────────────────────────────────
+//
+// Wires PULP_LIVE_CONSTANT(name, default, min, max) to the inspector
+// via three RPC methods. No host setter is required — the registry
+// is a static singleton, so the inspector reaches it directly.
+
+InspectorMessage DomainHandler::handle_live_constant(const InspectorMessage& req) {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+
+    if (req.method == methods::kLiveConstList) {
+        auto arr = choc::value::createEmptyArray();
+        for (const auto& c : registry.all()) {
+            auto obj = choc::value::createObject("");
+            obj.addMember("name", choc::value::createString(c.name));
+            obj.addMember("file", choc::value::createString(c.file));
+            obj.addMember("line", choc::value::createInt32(c.line));
+            obj.addMember("value", choc::value::createFloat32(c.value));
+            obj.addMember("default", choc::value::createFloat32(c.default_value));
+            obj.addMember("min", choc::value::createFloat32(c.min_value));
+            obj.addMember("max", choc::value::createFloat32(c.max_value));
+            arr.addArrayElement(obj);
+        }
+        auto out = choc::value::createObject("");
+        out.addMember("constants", arr);
+        return make_response(req.id, choc::json::toString(out, false));
+    }
+    if (req.method == methods::kLiveConstSet) {
+        std::string name;
+        float value = 0.0f;
+        try {
+            auto v = choc::json::parse(req.params_json);
+            if (v.isObject()) {
+                if (v.hasObjectMember("name")) name = v["name"].getString();
+                if (v.hasObjectMember("value")) {
+                    // JSON numbers parse to choc int / float / double
+                    // depending on literal shape; coerce via Float64 which
+                    // accepts any numeric subtype, then narrow.
+                    value = static_cast<float>(
+                        v["value"].getWithDefault(0.0));
+                }
+            }
+        } catch (...) {}
+        if (name.empty()) {
+            return make_error(req.id,
+                "LiveConstant.set: missing or invalid 'name' field");
+        }
+        registry.set(name, value);
+        auto out = choc::value::createObject("");
+        out.addMember("name", choc::value::createString(name));
+        out.addMember("value", choc::value::createFloat32(value));
+        return make_response(req.id, choc::json::toString(out, false));
+    }
+    if (req.method == methods::kLiveConstReset) {
+        std::string name;
+        try {
+            auto v = choc::json::parse(req.params_json);
+            if (v.isObject() && v.hasObjectMember("name"))
+                name = v["name"].getString();
+        } catch (...) {}
+        if (name.empty()) {
+            registry.reset_all();
+        } else {
+            registry.reset(name);
+        }
+        return make_response(req.id, R"({"ok":true})");
+    }
+    return make_error(req.id, "Unknown LiveConstant method: " + req.method);
 }
 
 } // namespace pulp::inspect

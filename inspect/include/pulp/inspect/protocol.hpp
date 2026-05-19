@@ -51,6 +51,13 @@ namespace methods {
     constexpr auto kCSSGetTheme         = "CSS.getTheme";
     constexpr auto kCSSThemeChanged     = "CSS.themeChanged";
 
+    // LiveConstant domain (Tier A Slice 13). RPC for PULP_LIVE_CONSTANT
+    // surfaces — list/set/reset the registry-tracked sliders without
+    // opening the LiveConstantEditor overlay.
+    constexpr auto kLiveConstList  = "LiveConstant.list";
+    constexpr auto kLiveConstSet   = "LiveConstant.set";
+    constexpr auto kLiveConstReset = "LiveConstant.reset";
+
     // Performance domain
     constexpr auto kPerfGetMetrics      = "Performance.getMetrics";
     constexpr auto kPerfEnableTracking  = "Performance.enableTracking";

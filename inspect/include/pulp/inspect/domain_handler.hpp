@@ -63,6 +63,7 @@ private:
     InspectorMessage handle_audio(const InspectorMessage& req);
     InspectorMessage handle_capture(const InspectorMessage& req);
     InspectorMessage handle_motion(const InspectorMessage& req);
+    InspectorMessage handle_live_constant(const InspectorMessage& req);
 };
 
 } // namespace pulp::inspect
