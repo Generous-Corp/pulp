@@ -822,6 +822,65 @@ TEST_CASE("HttpStream status_code is 0 before fetch",
     REQUIRE(stream.status_code() == 0);
 }
 
+TEST_CASE("HttpStream reads a successful local response body in chunks",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> served{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 512> request{};
+        accepted->receive(request.data(), request.size());
+        const std::string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 5\r\n"
+            "X-Pulp-Test: yes\r\n"
+            "\r\n"
+            "hello";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+        served.store(true);
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto stream = HttpStream::get("http://127.0.0.1:" + std::to_string(*port) + "/ok", 2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 200);
+    REQUIRE(stream->transport_error().empty());
+    REQUIRE(stream->headers().find("X-Pulp-Test") != stream->headers().end());
+    REQUIRE(stream->is_open());
+
+    std::array<std::uint8_t, 8> buffer{};
+    auto first = stream->read(buffer.data(), 2);
+    REQUIRE(first.ok());
+    REQUIRE(first.bytes == 2);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), first.bytes) == "he");
+    REQUIRE(stream->is_open());
+
+    auto second = stream->read(buffer.data(), 8);
+    REQUIRE(second.ok());
+    REQUIRE(second.bytes == 3);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), second.bytes) == "llo");
+    REQUIRE(stream->eof());
+    REQUIRE_FALSE(stream->is_open());
+
+    auto eof = stream->read(buffer.data(), buffer.size());
+    REQUIRE_FALSE(eof.ok());
+    REQUIRE(eof.closed());
+
+    join_server.join();
+    REQUIRE(served.load());
+}
+
 TEST_CASE("HttpStream default state supports zero reads and idempotent close",
           "[network_stream][http][coverage][phase3]") {
     HttpStream stream;
