@@ -10344,3 +10344,14 @@ and stops the listener cleanly over loopback. Focused local validation passed:
 case), `./build/test/pulp-test-ipc "[phase3]"` (4 assertions / 1 case), and
 `git diff --check`. The batch now has 21 local coverage commits plus main
 merges; continue accumulating before opening a PR.
+
+2026-05-18 23:50 PDT: added `c8fec1ecf` (`test(osc): cover channel executor
+callbacks`) to `feature/phase3-codecov-runtime-state-batch-752`. This covers
+`OscChannelOptions::executor` dispatch for both inbound OSC messages and
+`on_closed` callbacks by queueing executor tasks over a UDP loopback pair and
+draining them explicitly. Focused local validation passed: `cmake --build build
+--target pulp-test-osc-channel -j4`, `./build/test/pulp-test-osc-channel
+"OscChannel dispatches callbacks through a custom executor"` (9 assertions / 1
+case), `./build/test/pulp-test-osc-channel "[phase3]"` (9 assertions / 1
+case), and `git diff --check`. The batch now has 22 local coverage commits
+plus main merges; continue accumulating before opening a PR.
