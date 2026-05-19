@@ -545,6 +545,20 @@ TEST_CASE("DynamicLibrary move assignment closes target and transfers source",
     REQUIRE(target.find_symbol(system_library_symbol()) != nullptr);
 }
 
+TEST_CASE("DynamicLibrary self move assignment preserves open handle",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE(lib.open(system_library_path()));
+    REQUIRE(lib.is_open());
+
+    auto& same_lib = lib;
+    lib = std::move(same_lib);
+
+    REQUIRE(lib.is_open());
+    REQUIRE(lib.find_symbol(system_library_symbol()) != nullptr);
+    REQUIRE(lib.error().empty());
+}
+
 TEST_CASE("DynamicLibrary failed reopen clears a previously loaded handle",
           "[runtime][dynlib][coverage][phase3]") {
     DynamicLibrary lib;
