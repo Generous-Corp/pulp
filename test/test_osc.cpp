@@ -226,6 +226,23 @@ TEST_CASE("OSC decode skips unknown tags without consuming later argument bytes"
     REQUIRE(decoded.get_int(0) == 42);
 }
 
+TEST_CASE("OSC decode truncated typed payloads return safe defaults",
+          "[osc][codec][coverage]") {
+    std::vector<uint8_t> data;
+    append_osc_string(data, "/truncated");
+    append_osc_string(data, ",ifsb");
+    data.insert(data.end(), {0x00, 0x00});  // partial int, then no remaining payload
+
+    auto decoded = decode(data.data(), data.size());
+
+    REQUIRE(decoded.address == "/truncated");
+    REQUIRE(decoded.args.size() == 4);
+    REQUIRE(decoded.get_int(0, -1) == 0);
+    REQUIRE_THAT(decoded.get_float(1, -1.0f), WithinAbs(0.0, 0.001));
+    REQUIRE(decoded.get_string(2, "fallback").empty());
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[3]).empty());
+}
+
 TEST_CASE("OSC decode handles non-null-terminated bounded address payload",
           "[osc][codec][codecov]") {
     const std::vector<uint8_t> data{'/', 'b', 'a', 'r'};
@@ -530,6 +547,22 @@ TEST_CASE("OSC encode is deterministic for identical messages",
     REQUIRE(a == b);
 }
 
+TEST_CASE("OSC encode preserves moved string and blob arguments",
+          "[osc][codec][coverage][phase3-github]") {
+    std::string label = "moved-label";
+    std::vector<uint8_t> payload{0x10, 0x20, 0x30, 0x40};
+
+    Message msg("/move");
+    msg.add(std::move(label)).add(std::move(payload));
+
+    auto data = encode(msg);
+    auto decoded = decode(data.data(), data.size());
+    REQUIRE(decoded.address == "/move");
+    REQUIRE(decoded.get_string(0) == "moved-label");
+    REQUIRE(std::get<std::vector<uint8_t>>(decoded.args[1])
+            == std::vector<uint8_t>{0x10, 0x20, 0x30, 0x40});
+}
+
 TEST_CASE("OSC encode output stays 4-byte aligned for odd-length strings",
           "[osc][codec][alignment]") {
     // Address length 5 ("/a/bc") + null = 6, padded to 8.
@@ -628,6 +661,17 @@ TEST_CASE("OSC decode tolerates extra trailing padding bytes", "[osc][codec][iss
     REQUIRE(decoded.address == "/trail");
     REQUIRE(decoded.args.size() == 1);
     REQUIRE(decoded.get_int(0) == 123);
+}
+
+TEST_CASE("OSC decode keeps explicit defaults for out-of-range access",
+          "[osc][message][coverage][phase3-github]") {
+    Message msg("/defaults");
+    msg.add(12).add(std::string("name"));
+
+    REQUIRE(msg.get_int(4, -9) == -9);
+    REQUIRE_THAT(msg.get_float(4, -0.5f), WithinAbs(-0.5f, 1e-6f));
+    REQUIRE(msg.get_string(4, "fallback") == "fallback");
+    REQUIRE(msg.get_string(0, "wrong") == "wrong");
 }
 
 TEST_CASE("OSC Sender::send_raw without connect is rejected", "[osc][udp][sender][issue-644]") {

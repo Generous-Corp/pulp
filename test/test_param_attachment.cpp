@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/param_attachment.hpp>
 
 using namespace pulp::view;
@@ -109,6 +110,28 @@ TEST_CASE("attach_knob on_change writes to store", "[view][attachment]") {
     // Simulate user dragging knob to 0.5 normalized
     if (knob->on_change) knob->on_change(0.5f);
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.5, 0.01));
+}
+
+TEST_CASE("attach_knob formatter denormalizes values with units",
+          "[view][attachment][coverage][phase3]") {
+    StateStore store;
+    setup_store(store);
+
+    auto [knob, binding] = attach_knob(store, 1, 80.0f);
+    knob->set_bounds({0, 0, 80, 80});
+    knob->set_value(0.0f);
+
+    pulp::canvas::RecordingCanvas canvas;
+    knob->paint(canvas);
+
+    bool saw_min_hz = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text &&
+            command.text == "20.0 Hz") {
+            saw_min_hz = true;
+        }
+    }
+    REQUIRE(saw_min_hz);
 }
 
 TEST_CASE("param attachments forward fader toggle and combo edits",

@@ -125,6 +125,33 @@ TEST_CASE("json parser: nested object paths remain readable through get",
     CHECK(leaf->as_string() == "value");
 }
 
+TEST_CASE("json parser: duplicate object keys keep first-match lookup semantics",
+          "[cli][json-parser][coverage][phase3-large]") {
+    auto value = parse_json(R"({"name":"first","name":"second"})");
+    REQUIRE(value.type == json::JsonValue::Object);
+    REQUIRE(value.obj().size() == 2);
+    REQUIRE(value.get("name") != nullptr);
+    CHECK(value.get("name")->as_string() == "first");
+}
+
+TEST_CASE("json parser: unknown escapes preserve escaped byte",
+          "[cli][json-parser][coverage][phase3-large]") {
+    auto value = parse_json(R"({"path":"a\qb","slash":"c\/d"})");
+    REQUIRE(value.get("path") != nullptr);
+    REQUIRE(value.get("slash") != nullptr);
+    CHECK(value.get("path")->as_string() == "aqb");
+    CHECK(value.get("slash")->as_string() == "c/d");
+}
+
+TEST_CASE("json parser: scalar empty accessors share immutable defaults",
+          "[cli][json-parser][coverage][phase3-large]") {
+    const auto value = parse_json(R"("not an array or object")");
+    REQUIRE(value.type == json::JsonValue::String);
+    CHECK(value.arr().empty());
+    CHECK(value.obj().empty());
+    CHECK(value.as_string_array().empty());
+}
+
 TEST_CASE("json parser: whitespace is accepted around tokens",
           "[cli][json-parser][coverage][phase3-large]") {
     auto value = parse_json(" \n\t { \r\n \"k\" \t : \n [ true , false ] \n } ");

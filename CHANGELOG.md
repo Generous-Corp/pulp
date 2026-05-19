@@ -8,6 +8,49 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01710"></a>
+## [0.171.0] - 2026-05-19
+
+- refactor(test): P5-1 bundled — yoga + A4 OOS + Wave 2 cheap-wiring (6,711 → 5,483) ([#2414](https://github.com/danielraffel/pulp/pull/2414))
+- test: consolidate phase 3 codecov coverage batches ([#2268](https://github.com/danielraffel/pulp/pull/2268))
+- feat(inspect): editor URI config for source-jump (Phase 5.3) ([#2388](https://github.com/danielraffel/pulp/pull/2388))
+
+<a id="v01690"></a>
+## [0.169.0] - 2026-05-19
+
+- refactor(test): P5-1 bundled — RN style + Tier-4 OOS (7,475 → 6,711) ([#2376](https://github.com/danielraffel/pulp/pull/2376))
+- fix(ci): restrict Namespace cache action to macOS lane ([#2410](https://github.com/danielraffel/pulp/pull/2410))
+- fix(ci): brew update on Namespace macOS leg before brew install ([#2407](https://github.com/danielraffel/pulp/pull/2407))
+- feat(inspect): persist TweakStore to pulp-tweaks.json (Phase 1) ([#2389](https://github.com/danielraffel/pulp/pull/2389))
+- feat(inspect): Phase 3b — live-editable box-model fields in property panel ([#2390](https://github.com/danielraffel/pulp/pull/2390))
+
+<a id="v01670"></a>
+## [0.167.0] - 2026-05-19
+
+- fix(ci): namespace-cache gate accepts nscloud-* labels (Codex P2 on #2399) ([#2402](https://github.com/danielraffel/pulp/pull/2402))
+- refactor(test): P5-2 follow-up — extract arc fixtures (2,358 → 2,026 under 2k target) ([#2380](https://github.com/danielraffel/pulp/pull/2380))
+- ci(namespace): add nscloud-cache-action for brew + ccache + FetchContent ([#2399](https://github.com/danielraffel/pulp/pull/2399))
+- chore(ci): add tools/scripts/gates.sh — on-demand cheap-gates preflight ([#2384](https://github.com/danielraffel/pulp/pull/2384))
+- test(canvas2d): non-identity toFloat32Array order test (Codex P2 on #2387) ([#2396](https://github.com/danielraffel/pulp/pull/2396))
+- refactor(midi): extract mpe_voice_tracker.hpp impl bodies to .cpp (U-9) ([#2327](https://github.com/danielraffel/pulp/pull/2327))
+
+<a id="v01660"></a>
+## [0.166.0] - 2026-05-19
+
+- test(canvas2d): direct DOMMatrix arithmetic tests for _PulpCanvasMatrix ([#2387](https://github.com/danielraffel/pulp/pull/2387))
+
+<a id="v01610"></a>
+## [0.161.0] - 2026-05-19
+
+- test(tools): unit tests for version_consistency_check.py ([#2383](https://github.com/danielraffel/pulp/pull/2383))
+- fix(cli): cross-platform exit_status decode in pulp fmt (Windows release build) ([#2375](https://github.com/danielraffel/pulp/pull/2375))
+
+<a id="v01581"></a>
+## [0.158.1] - 2026-05-19
+
+- feat(canvas): Vulkan + D3D rendering-goldens scaffold (font v2 Slice 3.4 future-CI lanes) ([#2370](https://github.com/danielraffel/pulp/pull/2370))
+- chore(deps): bump shipyard 0.58.0 → 0.59.0 for Phase 2 watch diagnostics (#310) ([#2368](https://github.com/danielraffel/pulp/pull/2368))
+
 <a id="v01580"></a>
 ## [0.158.0] - 2026-05-19
 
@@ -2153,6 +2196,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.171.0]: https://github.com/danielraffel/pulp/releases/tag/v0.171.0
+[0.169.0]: https://github.com/danielraffel/pulp/releases/tag/v0.169.0
+[0.167.0]: https://github.com/danielraffel/pulp/releases/tag/v0.167.0
+[0.166.0]: https://github.com/danielraffel/pulp/releases/tag/v0.166.0
+[0.161.0]: https://github.com/danielraffel/pulp/releases/tag/v0.161.0
+[0.158.1]: https://github.com/danielraffel/pulp/releases/tag/v0.158.1
 [0.158.0]: https://github.com/danielraffel/pulp/releases/tag/v0.158.0
 [0.155.0]: https://github.com/danielraffel/pulp/releases/tag/v0.155.0
 [0.154.0]: https://github.com/danielraffel/pulp/releases/tag/v0.154.0

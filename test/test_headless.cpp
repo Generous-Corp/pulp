@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/editor_ui.hpp>
 #include <pulp/format/headless.hpp>
 #include <cmath>
 
@@ -101,6 +102,22 @@ TEST_CASE("HeadlessHost creates processor", "[headless]") {
     REQUIRE(host.state().param_count() == 1);
 }
 
+TEST_CASE("build_editor_ui falls back to AutoUi when no script path is configured",
+          "[format][editor_ui][codecov]") {
+    if (pulp::format::configured_ui_script_path().has_value()) {
+        SKIP("AutoUi fallback requires a build without PULP_UI_SCRIPT_PATH");
+    }
+
+    pulp::format::HeadlessHost host(create_test_gain);
+    std::string error = "preexisting";
+    auto ui = pulp::format::build_editor_ui(host.state(), false, &error);
+
+    REQUIRE(ui.root != nullptr);
+    REQUIRE(ui.scripted_ui == nullptr);
+    REQUIRE_FALSE(ui.uses_script_ui);
+    REQUIRE(error == "preexisting");
+}
+
 TEST_CASE("HeadlessHost processes audio at unity gain", "[headless]") {
     pulp::format::HeadlessHost host(create_test_gain);
     host.prepare(48000.0, 256);
@@ -153,6 +170,35 @@ TEST_CASE("HeadlessHost fills default process context",
 
     REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
     REQUIRE(last_context.num_samples == 32);
+}
+
+TEST_CASE("HeadlessHost defaults non-positive context fields",
+          "[headless][coverage][phase3]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(88200.0, 512);
+
+    pulp::audio::Buffer<float> in(1, 8), out(1, 8);
+    const float* in_ptrs[1] = {in.channel(0).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    auto out_view = out.view();
+
+    pulp::format::ProcessContext zero_ctx;
+    host.process(out_view, in_view, zero_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
+    REQUIRE(last_context.num_samples == 8);
+
+    pulp::format::ProcessContext explicit_ctx;
+    explicit_ctx.sample_rate = -1.0;
+    explicit_ctx.num_samples = -32;
+    host.process(out_view, in_view, explicit_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(88200.0, 0.001));
+    REQUIRE(last_context.num_samples == 8);
+
+    explicit_ctx.sample_rate = 44100.0;
+    explicit_ctx.num_samples = 4;
+    host.process(out_view, in_view, explicit_ctx);
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(44100.0, 0.001));
+    REQUIRE(last_context.num_samples == 4);
 }
 
 TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {

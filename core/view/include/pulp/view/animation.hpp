@@ -398,7 +398,7 @@ public:
     void set_fill_mode(FillMode f) { fill_ = f; }
     void set_easing(EasingFunction e) { ease_ = e; }
 
-    void start() { elapsed_ = 0; running_ = true; completed_iterations_ = 0; }
+    void start() { elapsed_ = 0; running_ = true; finished_ = false; completed_iterations_ = 0; }
     void stop() { running_ = false; }
     void pause() { running_ = false; }
     void resume() { running_ = true; }
@@ -418,9 +418,16 @@ public:
             iteration_progress = iterations_;
         }
 
-        // Current iteration number and progress within it
+        // Current iteration number and progress within it. When a finite
+        // animation finishes exactly on an iteration boundary, keep the
+        // terminal frame at t=1 for the final iteration instead of wrapping
+        // to t=0 of the next iteration.
         float iter_num = std::floor(iteration_progress);
         float t = iteration_progress - iter_num;
+        if (finished_ && iterations_ > 0.0f && t == 0.0f && iteration_progress > 0.0f) {
+            iter_num -= 1.0f;
+            t = 1.0f;
+        }
         completed_iterations_ = static_cast<int>(iter_num);
 
         // Direction

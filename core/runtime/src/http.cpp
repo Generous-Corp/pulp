@@ -11,6 +11,7 @@
 #include <charconv>
 #include <fstream>
 #include <regex>
+#include <algorithm>
 
 namespace pulp::runtime {
 
@@ -18,13 +19,16 @@ namespace pulp::runtime {
 static bool parse_url(std::string_view url, std::string& scheme,
                       std::string& host, int& port, std::string& path) {
     std::string url_str(url);
-    std::regex url_regex(R"(^(https?)://([^/:]+)(?::(\d+))?(/.*)?)");
+    std::regex url_regex(R"(^(https?)://([^/:]+)(?::(\d+))?(/.*)?)",
+                         std::regex::icase);
     std::smatch match;
 
     if (!std::regex_match(url_str, match, url_regex))
         return false;
 
     scheme = match[1];
+    std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     host = match[2];
     port = scheme == "https" ? 443 : 80;
     if (match[3].length() > 0) {

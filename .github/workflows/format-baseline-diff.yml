@@ -150,11 +150,15 @@ jobs:
             # free-audio/clap-validator's release workflow:
             # `tar -caf "$ARCHIVE_NAME.tar.gz" binaries/clap-validator`).
             # Extraction yields /tmp/binaries/clap-validator — NOT
-            # /tmp/clap-validator. Use --strip-components=1 so the
-            # binary lands at /tmp/clap-validator and the mv works.
+            # /tmp/clap-validator. Use --strip-components=1 and install
+            # into a repo-local bin dir so self-hosted runners do not need
+            # passwordless sudo for /usr/local/bin.
+            mkdir -p "$RUNNER_TEMP/pulp-bin"
             tar -xzf /tmp/cv.tar.gz -C /tmp --strip-components=1
-            sudo mv /tmp/clap-validator /usr/local/bin/clap-validator
-            chmod +x /usr/local/bin/clap-validator
+            mv /tmp/clap-validator "$RUNNER_TEMP/pulp-bin/clap-validator"
+            chmod +x "$RUNNER_TEMP/pulp-bin/clap-validator"
+            echo "$RUNNER_TEMP/pulp-bin" >> "$GITHUB_PATH"
+            export PATH="$RUNNER_TEMP/pulp-bin:$PATH"
             clap-validator --version || echo "::warning::clap-validator installed but --version failed"
           else
             echo "::warning::clap-validator download failed — CLAP lane will skip"

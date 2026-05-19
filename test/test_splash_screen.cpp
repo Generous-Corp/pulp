@@ -174,3 +174,23 @@ TEST_CASE("SplashScreen can be shown again after completion",
     REQUIRE_FALSE(splash.advance(0.01f));
     REQUIRE(dismissed == 2);
 }
+
+TEST_CASE("SplashScreen zero-duration phases finish deterministically",
+          "[view][splash][coverage][phase3]") {
+    SplashScreen splash;
+    splash.set_fade_in(0.0f);
+    splash.set_duration(0.0f);
+    splash.set_fade_out(0.0f);
+
+    int dismissed = 0;
+    splash.on_dismissed = [&] { ++dismissed; };
+
+    splash.show();
+    REQUIRE(splash.is_showing());
+
+    REQUIRE(splash.advance(0.0f));
+    REQUIRE(splash.advance(0.0f));
+    REQUIRE_FALSE(splash.advance(0.0f));
+    REQUIRE_FALSE(splash.is_showing());
+    REQUIRE(dismissed == 1);
+}

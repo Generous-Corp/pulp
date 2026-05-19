@@ -426,6 +426,50 @@ jobs:
             wayland-protocols \
             ccache
 
+      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
+      # Namespace cache volumes persist across runs on the same workspace,
+      # cutting brew-install latency and ccache miss rates substantially.
+      # Detection: Namespace selectors land in matrix.runs_on_json as
+      # either "namespace-profile-…" (the
+      # vars.PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON form configured today)
+      # OR direct machine labels like "nscloud-macos-tahoe-arm64-6x14"
+      # (documented in docs/guides/local-ci.md as an alternative).
+      # Codex P2 on #2399 flagged that a single "namespace" substring
+      # missed the nscloud-* form, so we check both prefixes.
+      #
+      # macOS-only restriction (fix-up to #2399 + #2402): the action
+      # hard-errors when run on a Namespace profile without cache
+      # volumes configured (observed on the Windows Namespace lane in
+      # PR #2376 — "nscloud-cache-action requires a cache volume to
+      # be configured"). Cache volumes are only configured for the
+      # macOS profile, and the cached paths here (brew, ~/Library/…)
+      # are macOS-specific anyway. Windows uses choco + a different
+      # ccache path, so it doesn't benefit from this step regardless.
+      #
+      # No-op on self-hosted Mac (already keeps caches on local disk)
+      # and github-hosted runners (have actions/cache via #420).
+      - name: Namespace cache (brew + ccache + Pulp FetchContent)
+        if: runner.os == 'macOS' && (contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud'))
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: brew
+          path: |
+            ~/Library/Caches/ccache
+            ~/Library/Caches/Pulp/fetchcontent-src
+
+      # Namespace macOS runners come up with a stale Homebrew config.
+      # Without this `brew update`, any subsequent `brew install` fails
+      # fast with: "You have disabled automatic updates and have not
+      # updated today. Do not report this issue until you've run
+      # `brew update` and tried again." (PR #2399 — unblocks #2367,
+      # #2374, #2378, #2388 which all wedged on this on 2026-05-19.)
+      # Local self-hosted Macs already keep brew warm between runs, but
+      # `brew update --quiet` is idempotent and cheap there; cheap
+      # enough to run unconditionally on every macOS leg.
+      - name: brew update (macOS)
+        if: runner.os == 'macOS'
+        run: brew update --quiet
+
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
         run: brew install ccache

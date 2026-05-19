@@ -76,6 +76,24 @@ TEST_CASE("DelayLine handles empty, wraparound, and reset edges",
     REQUIRE_THAT(dl.process(4.0f, 0.0f), WithinAbs(4.0f, 1e-6f));
 }
 
+TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
+          "[signal][delay][coverage][phase3-github]") {
+    DelayLine dl;
+    dl.prepare(0);
+
+    REQUIRE(dl.max_delay() == 0);
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(4), WithinAbs(0.0f, 1e-6f));
+
+    dl.push(0.25f);
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(dl.read(99), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(dl.process(-0.5f, 0.0f), WithinAbs(-0.5f, 1e-6f));
+
+    dl.reset();
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+}
+
 // ── Gain ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Gain dB conversion", "[signal][gain]") {
@@ -109,6 +127,36 @@ TEST_CASE("Gain linear setter and buffer processing", "[signal][gain][issue-645]
     REQUIRE_THAT(buffer[2], WithinAbs(0.125f, 1e-6f));
 }
 
+TEST_CASE("Gain dB conversion floors zero and negative linear values",
+          "[signal][gain][coverage][phase3]") {
+    REQUIRE_THAT(linear_to_db(0.0f), WithinAbs(-200.0f, 0.001f));
+    REQUIRE_THAT(linear_to_db(-1.0f), WithinAbs(-200.0f, 0.001f));
+
+    Gain g;
+    g.set_gain_linear(0.0f);
+    REQUIRE_THAT(g.gain_db(), WithinAbs(-200.0f, 0.001f));
+    REQUIRE_THAT(g.process(0.5f), WithinAbs(0.0f, 1e-6f));
+
+    float buffer[] = {1.0f, -1.0f};
+    g.process(buffer, 0);
+    REQUIRE_THAT(buffer[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-1.0f, 1e-6f));
+}
+
+TEST_CASE("Gain zero-length buffer calls leave sentinels untouched",
+          "[signal][gain][coverage][phase3-github]") {
+    Gain g;
+    g.set_gain_linear(-2.0f);
+
+    float buffer[] = {0.25f, -0.5f};
+    g.process(buffer, 0);
+
+    REQUIRE_THAT(buffer[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(g.process(0.5f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(g.gain_db(), WithinAbs(-200.0f, 1e-3f));
+}
+
 TEST_CASE("SimpleMixer", "[signal][mix]") {
     SimpleMixer mixer;
 
@@ -139,6 +187,32 @@ TEST_CASE("SimpleMixer clamps mix and processes buffers",
     REQUIRE_THAT(output[0], WithinAbs(0.75f, 1e-6f));
     REQUIRE_THAT(output[1], WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(output[2], WithinAbs(-0.5f, 1e-6f));
+}
+
+TEST_CASE("SimpleMixer zero-length buffer processing leaves output untouched",
+          "[signal][mix][coverage][phase3]") {
+    SimpleMixer mixer;
+    mixer.set_mix(0.5f);
+
+    const float dry[] = {1.0f};
+    const float wet[] = {-1.0f};
+    float output[] = {42.0f};
+    mixer.process(dry, wet, output, 0);
+
+    REQUIRE_THAT(output[0], WithinAbs(42.0f, 1e-6f));
+}
+
+TEST_CASE("SimpleMixer scalar path clamps endpoint mixes",
+          "[signal][mix][coverage][phase3-github]") {
+    SimpleMixer mixer;
+
+    mixer.set_mix(-0.25f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(mixer.process(-0.5f, 0.75f), WithinAbs(-0.5f, 1e-6f));
+
+    mixer.set_mix(1.25f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(mixer.process(-0.5f, 0.75f), WithinAbs(0.75f, 1e-6f));
 }
 
 // ── Compressor ───────────────────────────────────────────────────────────────
@@ -301,6 +375,22 @@ TEST_CASE("SmoothedValue ignores non-positive skips",
     REQUIRE_THAT(sv.next(), WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("SmoothedValue double precision path reaches targets after skip",
+          "[signal][smooth][coverage][phase3-github]") {
+    SmoothedValue<double> sv(2.0);
+    sv.set_ramp_time(0.004, 1000.0);
+    sv.set_target(6.0);
+
+    REQUIRE(sv.is_smoothing());
+    sv.skip(2);
+    REQUIRE_THAT(sv.current(), WithinAbs(4.0, 1e-12));
+
+    sv.skip(8);
+    REQUIRE_FALSE(sv.is_smoothing());
+    REQUIRE_THAT(sv.current(), WithinAbs(6.0, 1e-12));
+    REQUIRE_THAT(sv.next(), WithinAbs(6.0, 1e-12));
+}
+
 // ── ADSR ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("ADSR idle by default", "[signal][adsr]") {
@@ -413,6 +503,44 @@ TEST_CASE("ADSR retrigger continues from current release level",
     REQUIRE(retriggered > release_level);
     REQUIRE(retriggered < 1.0f);
     REQUIRE(env.is_active());
+}
+
+TEST_CASE("ADSR retrigger continues from current level",
+          "[signal][adsr][coverage][phase3-github]") {
+    Adsr env;
+    env.set_sample_rate(100.0f);
+    env.set_params({0.1f, 0.2f, 0.25f, 0.1f});
+
+    env.note_on();
+    const float first = env.next();
+    const float second = env.next();
+    REQUIRE(second > first);
+
+    env.note_on();
+    const float retriggered = env.next();
+    REQUIRE(retriggered > second);
+    REQUIRE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::attack);
+}
+
+TEST_CASE("ADSR retrigger restarts attack from a partial level",
+          "[signal][adsr][coverage]") {
+    Adsr env;
+    env.set_sample_rate(1000.0f);
+    env.set_params({0.1f, 0.1f, 0.25f, 0.1f});
+
+    env.note_on();
+    const float before = env.next();
+    REQUIRE(before > 0.0f);
+    REQUIRE(before < 1.0f);
+
+    env.note_on();
+    const float after = env.next();
+
+    REQUIRE(env.is_active());
+    REQUIRE(env.stage() == Adsr::Stage::attack);
+    REQUIRE(after > before);
+    REQUIRE(after < 1.0f);
 }
 
 // ── Biquad ───────────────────────────────────────────────────────────────────
@@ -676,6 +804,43 @@ TEST_CASE("Oscillator reset, phase wrap, and PolyBLEP edges are deterministic",
         REQUIRE(std::isfinite(triangle.next()));
     }
     REQUIRE_THAT(triangle.phase(), WithinAbs(0.2f, 1e-6f));
+}
+
+TEST_CASE("Oscillator zero frequency leaves phase fixed across waveforms",
+          "[signal][osc][coverage][phase3-github]") {
+    for (auto waveform : {
+             Oscillator::Waveform::sine,
+             Oscillator::Waveform::saw,
+             Oscillator::Waveform::square,
+             Oscillator::Waveform::triangle,
+         }) {
+        Oscillator osc;
+        osc.set_frequency(0.0f);
+        osc.set_waveform(waveform);
+
+        const float first = osc.next();
+        const float second = osc.next();
+        REQUIRE(std::isfinite(first));
+        REQUIRE_THAT(second, WithinAbs(first, 1e-6f));
+        REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("Oscillator zero frequency leaves phase stationary",
+          "[signal][osc][coverage]") {
+    Oscillator osc;
+    osc.set_sample_rate(48000.0f);
+    osc.set_frequency(0.0f);
+    osc.set_waveform(Oscillator::Waveform::square);
+
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(std::isfinite(osc.next()));
+        REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    }
+
+    osc.reset();
+    REQUIRE_THAT(osc.phase(), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(osc.frequency(), WithinAbs(0.0f, 1e-6f));
 }
 
 // ── SVF ──────────────────────────────────────────────────────────────────────
@@ -987,6 +1152,33 @@ TEST_CASE("Phaser clamps stage and feedback settings and resets",
     REQUIRE_THAT(dry.process(-0.5f), WithinAbs(-0.5f, 1e-6f));
 }
 
+TEST_CASE("Phaser zero-length block processing is a no-op",
+          "[signal][phaser][coverage][phase3-github]") {
+    Phaser phaser;
+    phaser.set_sample_rate(48000.0f);
+    phaser.set_mix(1.0f);
+
+    float samples[] = {0.125f, -0.25f};
+    phaser.process(samples, 0);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.125f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.25f, 1e-6f));
+}
+
+TEST_CASE("Phaser zero-length buffer processing is a no-op",
+          "[signal][phaser][coverage]") {
+    Phaser phaser;
+    phaser.set_sample_rate(48000.0f);
+    phaser.set_rate(1.0f);
+    phaser.set_depth(0.75f);
+    phaser.set_mix(1.0f);
+
+    std::array<float, 3> samples{{-1.0f, 0.25f, 1.0f}};
+    phaser.process(samples.data() + 1, 0);
+
+    REQUIRE(samples == std::array<float, 3>{{-1.0f, 0.25f, 1.0f}});
+}
+
 // ── Reverb ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Reverb produces decay tail", "[signal][reverb]") {
@@ -1183,6 +1375,22 @@ TEST_CASE("LinkwitzRiley cutoff boundary processing stays finite",
             REQUIRE(std::isfinite(split.low));
             REQUIRE(std::isfinite(split.high));
         }
+    }
+}
+
+TEST_CASE("LinkwitzRiley retuning after active history stays finite",
+          "[signal][lr][coverage][phase3-github]") {
+    LinkwitzRiley lr;
+    lr.set_frequency(300.0f, 48000.0f);
+    for (int i = 0; i < 32; ++i) {
+        (void)lr.process((i % 2 == 0) ? 0.5f : -0.5f);
+    }
+
+    lr.set_frequency(2400.0f, 48000.0f);
+    for (int i = 0; i < 16; ++i) {
+        auto split = lr.process(i == 0 ? 1.0f : 0.0f);
+        REQUIRE(std::isfinite(split.low));
+        REQUIRE(std::isfinite(split.high));
     }
 }
 

@@ -92,6 +92,25 @@ TEST_CASE("TextEditor text input inserts characters", "[view][text_editor]") {
     REQUIRE(editor.text() == "abc");
 }
 
+TEST_CASE("TextEditor text input replaces the active selection",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha beta");
+    editor.select_all();
+
+    TextInputEvent e;
+    e.text = "omega";
+    editor.on_text_input(e);
+
+    REQUIRE(editor.text() == "omega");
+    REQUIRE(editor.caret_pos() == 5);
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "alpha beta");
+}
+
 TEST_CASE("TextEditor numeric mode rejects non-digits", "[view][text_editor]") {
     TextEditor editor;
     editor.numeric_only = true;
@@ -109,6 +128,24 @@ TEST_CASE("TextEditor numeric mode rejects non-digits", "[view][text_editor]") {
     e.text = ".";
     editor.on_text_input(e);
     REQUIRE(editor.text() == "5.");
+}
+
+TEST_CASE("TextEditor numeric mode rejects mixed text atomically",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.numeric_only = true;
+    editor.on_focus_changed(true);
+    editor.set_text("12");
+
+    TextInputEvent e;
+    e.text = "3x";
+    editor.on_text_input(e);
+    REQUIRE(editor.text() == "12");
+    REQUIRE(editor.caret_pos() == 2);
+
+    e.text = "-4.5";
+    editor.on_text_input(e);
+    REQUIRE(editor.text() == "12-4.5");
 }
 
 TEST_CASE("TextEditor key event: Enter triggers on_return", "[view][text_editor]") {
@@ -398,6 +435,36 @@ TEST_CASE("TextEditor marked text replacement tracks the active range",
     REQUIRE(editor.text() == "base final");
 }
 
+TEST_CASE("TextEditor empty marked text clears the previous composition",
+          "[view][text_editor][ime][coverage]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("base");
+
+    editor.set_marked_text(" draft", 0, 0);
+    REQUIRE(editor.text() == "base draft");
+    REQUIRE(editor.has_marked_text());
+
+    editor.set_marked_text("", 0, 0);
+    REQUIRE(editor.text() == "base");
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(editor.marked_range() == std::pair<int, int>{4, 0});
+    REQUIRE(editor.caret_pos() == 4);
+}
+
+TEST_CASE("TextEditor caret_rect has a fallback before first paint",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 120, 24});
+    editor.set_text("abc");
+
+    auto rect = editor.caret_rect();
+    REQUIRE(rect.x >= 9.0f);
+    REQUIRE(rect.y == 2.0f);
+    REQUIRE(rect.width == 1.5f);
+    REQUIRE(rect.height >= 13.0f);
+}
+
 TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
           "[view][text_editor][paint][issue-493]") {
     TextEditor editor;
@@ -601,4 +668,45 @@ TEST_CASE("TextEditor mouse triple-click selects all", "[view][text_editor]") {
     e.is_down = true;
     editor.on_mouse_event(e);
     REQUIRE(editor.selected_text() == "hello world");
+}
+
+TEST_CASE("TextEditor ignores wheel input in single-line mode",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("abcdef");
+    REQUIRE(editor.on_key_event(key_event(KeyCode::left, main_modifier())));
+    REQUIRE(editor.caret_pos() == 0);
+
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 40.0f;
+    editor.on_mouse_event(wheel);
+
+    REQUIRE(editor.caret_pos() == 0);
+    REQUIRE_FALSE(editor.has_selection());
+}
+
+TEST_CASE("TextEditor multi-line wheel clamps scroll offset before hit testing",
+          "[view][text_editor][coverage]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.set_text("one\ntwo\nthree\nfour");
+    editor.set_bounds({0, 0, 120, 28});
+
+    RecordingCanvas canvas;
+    editor.paint(canvas);
+
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = -100.0f;
+    editor.on_mouse_event(wheel);
+    editor.paint(canvas);
+
+    MouseEvent click;
+    click.is_down = true;
+    click.position = {8.0f, 6.0f};
+    editor.on_mouse_event(click);
+    REQUIRE(editor.caret_pos() >= 0);
+    REQUIRE(editor.caret_pos() <= static_cast<int>(editor.text().size()));
 }

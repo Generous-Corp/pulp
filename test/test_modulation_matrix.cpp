@@ -41,6 +41,22 @@ TEST_CASE("remove + remove_by_destination", "[view][mod-matrix]") {
     REQUIRE(m.routes()[0].destination == 200);
 }
 
+TEST_CASE("remove out of range and clear keep matrix reusable",
+          "[view][mod-matrix]") {
+    ModulationMatrix m;
+    m.add({1, 100, 0.5f, false, ModCurve::Linear});
+    m.remove(99);
+    REQUIRE(m.size() == 1);
+    REQUIRE(m.routes()[0].source == 1);
+
+    m.clear();
+    REQUIRE(m.empty());
+
+    m.add({2, 200, -0.25f, true, ModCurve::SCurve});
+    REQUIRE(m.size() == 1);
+    REQUIRE(m.find(2, 200).has_value());
+}
+
 TEST_CASE("serialize + deserialize round-trip", "[view][mod-matrix]") {
     ModulationMatrix a;
     a.add({1, 100, 0.5f, false, ModCurve::Linear});

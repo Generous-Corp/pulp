@@ -37,6 +37,15 @@ TEST_CASE("Polynomial roots_quadratic complex roots", "[signal][poly]") {
     REQUIRE(std::abs(r1.imag()) > 0.9f);
 }
 
+TEST_CASE("Polynomial roots_quadratic reports repeated real roots",
+          "[signal][poly][coverage][phase3]") {
+    auto [r1, r2] = Polynomial::roots_quadratic(1.0f, -2.0f, 1.0f);
+    REQUIRE_THAT(r1.real(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(r2.real(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(r1.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(r2.imag(), WithinAbs(0.0f, 0.001f));
+}
+
 TEST_CASE("Polynomial roots_quadratic handles degenerate coefficients",
           "[signal][poly][issue-645]") {
     auto [linear_a, linear_b] = Polynomial::roots_quadratic(0.0f, 2.0f, -8.0f);
@@ -174,6 +183,24 @@ TEST_CASE("Mat3 determinant", "[signal][matrix]") {
     REQUIRE_THAT(id.determinant(), WithinAbs(1.0, 0.001));
 }
 
+TEST_CASE("Mat3 determinant and identity composition cover nontrivial matrices",
+          "[signal][matrix][coverage][phase3]") {
+    Mat3 a{{{2.0f, -1.0f, 0.5f},
+            {3.0f, 4.0f, -2.0f},
+            {1.0f, 0.0f, 5.0f}}};
+
+    REQUIRE_THAT(a.determinant(), WithinAbs(55.0f, 0.001f));
+
+    auto left = Mat3::identity() * a;
+    auto right = a * Mat3::identity();
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            REQUIRE_THAT(left.m[row][col], WithinAbs(a.m[row][col], 0.001f));
+            REQUIRE_THAT(right.m[row][col], WithinAbs(a.m[row][col], 0.001f));
+        }
+    }
+}
+
 TEST_CASE("Mat3 multiply composes non-identity matrices",
           "[signal][matrix][issue-645]") {
     Mat3 a{{{1.0f, 2.0f, 3.0f}, {0.0f, 1.0f, 4.0f}, {5.0f, 6.0f, 0.0f}}};
@@ -196,4 +223,72 @@ TEST_CASE("Polynomial eval_complex", "[signal][poly]") {
     auto result = Polynomial::eval_complex({1.0f, 1.0f}, {0.0f, 1.0f});
     REQUIRE_THAT(result.real(), WithinAbs(1.0, 0.001));
     REQUIRE_THAT(result.imag(), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("Polynomial eval handles higher order negative inputs",
+          "[signal][poly][codecov]") {
+    auto result = Polynomial::eval({-1.0f, 2.0f, -3.0f, 4.0f}, -2.0f);
+    REQUIRE_THAT(result, WithinAbs(-49.0f, 0.001f));
+}
+
+TEST_CASE("Polynomial multiply handles constant factors",
+          "[signal][poly][codecov]") {
+    auto result = Polynomial::multiply({2.0f}, {1.0f, -3.0f, 5.0f});
+    REQUIRE(result.size() == 3);
+    REQUIRE_THAT(result[0], WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(result[1], WithinAbs(-6.0f, 0.001f));
+    REQUIRE_THAT(result[2], WithinAbs(10.0f, 0.001f));
+}
+
+TEST_CASE("Polynomial derivative handles cubic coefficients",
+          "[signal][poly][codecov]") {
+    auto result = Polynomial::derivative({-4.0f, 3.0f, -2.0f, 5.0f});
+    REQUIRE(result.size() == 3);
+    REQUIRE_THAT(result[0], WithinAbs(3.0f, 0.001f));
+    REQUIRE_THAT(result[1], WithinAbs(-4.0f, 0.001f));
+    REQUIRE_THAT(result[2], WithinAbs(15.0f, 0.001f));
+}
+
+TEST_CASE("Mat3 determinant handles singular and scaled matrices",
+          "[signal][matrix][codecov]") {
+    Mat3 singular{{{1.0f, 2.0f, 3.0f}, {2.0f, 4.0f, 6.0f}, {0.0f, 1.0f, 0.0f}}};
+    REQUIRE_THAT(singular.determinant(), WithinAbs(0.0f, 0.001f));
+
+    Mat3 scaled{{{2.0f, 0.0f, 0.0f}, {0.0f, -3.0f, 0.0f}, {0.0f, 0.0f, 4.0f}}};
+    REQUIRE_THAT(scaled.determinant(), WithinAbs(-24.0f, 0.001f));
+}
+
+TEST_CASE("Polynomial roots handle negative leading coefficient",
+          "[signal][poly][codecov]") {
+    auto [r1, r2] = Polynomial::roots_quadratic(-1.0f, 0.0f, 4.0f);
+    REQUIRE_THAT(std::abs(r1.real()), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(std::abs(r2.real()), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(r1.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(r2.imag(), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("Mat2 inverse handles negative determinants",
+          "[signal][matrix][codecov]") {
+    Mat2 matrix{{{0.0f, 2.0f}, {3.0f, 0.0f}}};
+    REQUIRE_THAT(matrix.determinant(), WithinAbs(-6.0f, 0.001f));
+
+    auto product = matrix * matrix.inverse();
+    REQUIRE_THAT(product.m[0][0], WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(product.m[0][1], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(product.m[1][0], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(product.m[1][1], WithinAbs(1.0f, 0.001f));
+}
+
+TEST_CASE("Mat3 multiplication preserves identity on both sides",
+          "[signal][matrix][codecov]") {
+    Mat3 matrix{{{1.0f, 2.0f, 3.0f}, {4.0f, 5.0f, 6.0f}, {7.0f, 8.0f, 9.0f}}};
+    auto left = Mat3::identity() * matrix;
+    auto right = matrix * Mat3::identity();
+
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            REQUIRE_THAT(left.m[row][col], WithinAbs(matrix.m[row][col], 0.001f));
+            REQUIRE_THAT(right.m[row][col], WithinAbs(matrix.m[row][col], 0.001f));
+        }
+    }
 }

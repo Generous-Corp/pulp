@@ -5,11 +5,58 @@
 #include <pulp/signal/matrix.hpp>
 #include <pulp/signal/special_functions.hpp>
 #include <pulp/signal/compressor.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <vector>
 #include <cmath>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("FastMath clamps saturation helper boundaries",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::clamp_unit(-2.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(-0.25f), WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(0.25f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::clamp_unit(2.0f), WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("FastMath soft clip covers linear and saturated regions",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::soft_clip(-2.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(2.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(0.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(0.75f), WithinAbs(0.6875f, 1e-6f));
+    REQUIRE_THAT(FastMath::soft_clip(-0.75f), WithinAbs(-0.6875f, 1e-6f));
+}
+
+TEST_CASE("FastMath dB conversion covers silent and unity cases",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::db_to_gain(0.0f), WithinAbs(1.0f, 1e-5f));
+    REQUIRE(FastMath::gain_to_db(0.0f) == -200.0f);
+    REQUIRE(FastMath::gain_to_db(-1.0f) == -200.0f);
+    REQUIRE_THAT(FastMath::gain_to_db(1.0f), WithinAbs(0.0f, 1e-4f));
+}
+
+TEST_CASE("FastMath tanh covers clamps and odd symmetry",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::tanh(0.0f), WithinAbs(0.0f, 1e-6f));
+
+    const auto positive = FastMath::tanh(0.75f);
+    const auto negative = FastMath::tanh(-0.75f);
+    REQUIRE_THAT(negative, WithinAbs(-positive, 1e-6f));
+}
+
+TEST_CASE("FastMath pow and reciprocal helpers cover scalar edges",
+          "[dsp][fast_math][coverage][phase3-large]") {
+    REQUIRE_THAT(FastMath::pow(0.0f, 2.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::pow(-2.0f, 3.0f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(FastMath::pow(4.0f, 0.5f), WithinAbs(2.0f, 0.02f));
+
+    REQUIRE_THAT(FastMath::rcp(4.0f), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(FastMath::rsqrt(4.0f), WithinAbs(0.5f, 0.001f));
+}
 
 // ── DryWetMixer ─────────────────────────────────────────────────────────
 
@@ -137,6 +184,95 @@ TEST_CASE("DryWetMixer can enable latency after prepare and leaves unmatched wet
     REQUIRE_THAT(wet_l[1], WithinAbs(3.0f, 1e-6f));
     REQUIRE_THAT(wet_r[0], WithinAbs(20.0f, 1e-6f));
     REQUIRE_THAT(wet_r[1], WithinAbs(20.0f, 1e-6f));
+}
+
+TEST_CASE("DryWetMixer retuning latency clears stale delay history",
+          "[dsp][dry_wet][codecov]") {
+    DryWetMixer mixer;
+    mixer.set_mix(0.0f);
+    mixer.set_wet_latency(2);
+    mixer.prepare(1, 4);
+
+    float dry_a[] = {1.0f, 2.0f, 3.0f};
+    float wet_a[] = {100.0f, 100.0f, 100.0f};
+    const float* dry_a_ptrs[] = {dry_a};
+    float* wet_a_ptrs[] = {wet_a};
+    mixer.push_dry(dry_a_ptrs, 1, 3);
+    mixer.mix_wet(wet_a_ptrs, 1, 3);
+    REQUIRE_THAT(wet_a[2], WithinAbs(1.0f, 1e-6f));
+
+    mixer.set_wet_latency(1);
+
+    float dry_b[] = {9.0f, 10.0f};
+    float wet_b[] = {200.0f, 200.0f};
+    const float* dry_b_ptrs[] = {dry_b};
+    float* wet_b_ptrs[] = {wet_b};
+    mixer.push_dry(dry_b_ptrs, 1, 2);
+    mixer.mix_wet(wet_b_ptrs, 1, 2);
+
+    REQUIRE_THAT(wet_b[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_b[1], WithinAbs(9.0f, 1e-6f));
+
+    mixer.set_wet_latency(0);
+
+    float dry_c[] = {12.0f};
+    float wet_c[] = {300.0f};
+    const float* dry_c_ptrs[] = {dry_c};
+    float* wet_c_ptrs[] = {wet_c};
+    mixer.push_dry(dry_c_ptrs, 1, 1);
+    mixer.mix_wet(wet_c_ptrs, 1, 1);
+    REQUIRE_THAT(wet_c[0], WithinAbs(12.0f, 1e-6f));
+}
+
+TEST_CASE("DryWetMixer handles nonpositive and over-channel latency edges",
+          "[dsp][dry_wet][codecov]") {
+    DryWetMixer mixer;
+    mixer.set_mix(0.0f);
+    mixer.set_wet_latency(-8);
+    mixer.prepare(1, 4);
+
+    float dry_l[] = {1.0f, 2.0f};
+    float dry_r[] = {3.0f, 4.0f};
+    float wet_l[] = {10.0f, 10.0f, 10.0f};
+    float wet_r[] = {20.0f, 20.0f, 20.0f};
+    const float* dry_ptrs[] = {dry_l, dry_r};
+    float* wet_ptrs[] = {wet_l, wet_r};
+
+    mixer.push_dry(dry_ptrs, 2, 2);
+    mixer.mix_wet(wet_ptrs, 2, 3);
+    REQUIRE_THAT(wet_l[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(wet_l[1], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(wet_l[2], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[0], WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[1], WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[2], WithinAbs(20.0f, 1e-6f));
+
+    mixer.set_wet_latency(1);
+    mixer.prepare(1, 4);
+
+    float wet_l_limited[] = {30.0f, 30.0f};
+    float wet_r_limited[] = {40.0f, 40.0f};
+    float* limited_ptrs[] = {wet_l_limited, wet_r_limited};
+    mixer.push_dry(dry_ptrs, 2, 2);
+    mixer.mix_wet(limited_ptrs, 2, 2);
+
+    REQUIRE_THAT(wet_l_limited[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_l_limited[1], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(wet_r_limited[0], WithinAbs(40.0f, 1e-6f));
+    REQUIRE_THAT(wet_r_limited[1], WithinAbs(40.0f, 1e-6f));
+
+    mixer.prepare(0, 4);
+    mixer.push_dry(dry_ptrs, 1, 2);
+    float wet_zero_channels[] = {50.0f, 50.0f};
+    float* zero_channel_ptrs[] = {wet_zero_channels};
+    mixer.mix_wet(zero_channel_ptrs, 1, 2);
+    REQUIRE_THAT(wet_zero_channels[0], WithinAbs(50.0f, 1e-6f));
+    REQUIRE_THAT(wet_zero_channels[1], WithinAbs(50.0f, 1e-6f));
+
+    mixer.push_dry(nullptr, 1, 2);
+    mixer.mix_wet(zero_channel_ptrs, 1, 2);
+    REQUIRE_THAT(wet_zero_channels[0], WithinAbs(50.0f, 1e-6f));
+    REQUIRE_THAT(wet_zero_channels[1], WithinAbs(50.0f, 1e-6f));
 }
 
 // ── ProcessorDuplicator ─────────────────────────────────────────────────

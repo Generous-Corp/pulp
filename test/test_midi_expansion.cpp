@@ -176,6 +176,91 @@ TEST_CASE("RpnParser reports NRPN increment and decrement metadata",
     REQUIRE(is_rpn_flags == std::vector<bool>{false, false});
 }
 
+TEST_CASE("RpnParser reports maximum 14-bit RPN parameter and value",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    uint8_t received_ch = 255;
+    uint16_t received_param = 0;
+    uint16_t received_value = 0;
+
+    rpn.on_rpn = [&](uint8_t ch, uint16_t param, uint16_t value) {
+        received_ch = ch;
+        received_param = param;
+        received_value = value;
+    };
+
+    rpn.process(MidiEvent::cc(15, 101, 127));
+    rpn.process(MidiEvent::cc(15, 100, 127));
+    rpn.process(MidiEvent::cc(15, 6, 127));
+    rpn.process(MidiEvent::cc(15, 38, 127));
+
+    REQUIRE(received_ch == 15);
+    REQUIRE(received_param == 0x3fff);
+    REQUIRE(received_value == 0x3fff);
+}
+
+TEST_CASE("RpnParser suppresses increment while parameter is being reselected",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    std::vector<uint16_t> params;
+
+    rpn.on_increment = [&](uint8_t ch, uint16_t param, bool is_rpn) {
+        REQUIRE(ch == 4);
+        REQUIRE(is_rpn);
+        params.push_back(param);
+    };
+
+    rpn.process(MidiEvent::cc(4, 101, 1));
+    rpn.process(MidiEvent::cc(4, 100, 2));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+
+    rpn.process(MidiEvent::cc(4, 101, 3));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+    rpn.process(MidiEvent::cc(4, 100, 5));
+    rpn.process(MidiEvent::cc(4, 96, 0));
+
+    REQUIRE(params == std::vector<uint16_t>{static_cast<uint16_t>((1 << 7) | 2),
+                                            static_cast<uint16_t>((3 << 7) | 5)});
+}
+
+TEST_CASE("RpnParser reset clears selected parameters on every channel",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    int calls = 0;
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
+    rpn.on_nrpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
+
+    rpn.process(MidiEvent::cc(0, 101, 1));
+    rpn.process(MidiEvent::cc(0, 100, 2));
+    rpn.process(MidiEvent::cc(15, 99, 3));
+    rpn.process(MidiEvent::cc(15, 98, 4));
+
+    rpn.reset();
+
+    rpn.process(MidiEvent::cc(0, 6, 5));
+    rpn.process(MidiEvent::cc(0, 38, 6));
+    rpn.process(MidiEvent::cc(15, 6, 7));
+    rpn.process(MidiEvent::cc(15, 38, 8));
+
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("RpnParser combines data LSB with default zero MSB",
+          "[midi][rpn][coverage]") {
+    RpnParser rpn;
+    uint16_t received_value = 0xffff;
+
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t value) {
+        received_value = value;
+    };
+
+    rpn.process(MidiEvent::cc(0, 101, 0));
+    rpn.process(MidiEvent::cc(0, 100, 7));
+    rpn.process(MidiEvent::cc(0, 38, 64));
+
+    REQUIRE(received_value == 64);
+}
+
 // ── MidiKeyboardState ────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboardState tracks note on/off", "[midi][keyboard]") {
@@ -342,4 +427,27 @@ TEST_CASE("MidiKeyboardState retrigger updates velocity without duplicating held
     REQUIRE(keys.total_notes_held() == 1);
     REQUIRE(keys.velocity(0, 60) == 120);
     REQUIRE(on_count == 2);
+}
+
+TEST_CASE("MidiKeyboardState tracks note range boundaries",
+          "[midi][keyboard][coverage]") {
+    MidiKeyboardState keys;
+
+    keys.process(MidiEvent::note_on(15, 0, 1));
+    keys.process(MidiEvent::note_on(15, 127, 127));
+
+    REQUIRE(keys.is_note_on(15, 0));
+    REQUIRE(keys.is_note_on(15, 127));
+    REQUIRE(keys.velocity(15, 0) == 1);
+    REQUIRE(keys.velocity(15, 127) == 127);
+    REQUIRE(keys.lowest_note(15) == 0);
+    REQUIRE(keys.highest_note(15) == 127);
+    REQUIRE(keys.notes_held(15) == 2);
+
+    keys.process(MidiEvent::note_off(15, 0));
+    keys.process(MidiEvent::note_off(15, 127));
+
+    REQUIRE_FALSE(keys.any_notes_held());
+    REQUIRE(keys.lowest_note(15) == -1);
+    REQUIRE(keys.highest_note(15) == -1);
 }

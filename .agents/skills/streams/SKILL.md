@@ -52,7 +52,21 @@ fine for tests, usually wrong for UI state.
 `StreamError::Closed`. Do not write code that assumes a cancel
 "silently forgets" in-flight writes — the callback will fire.
 
-### 4. Writes and auto-reads run on separate threads
+### 4. Restarting after cancel resets the token
+
+`AsyncStream::start()` clears a previously cancelled token before launching
+workers. A stream can therefore be cancelled, stopped, and started again for
+tests or reusable transports. Do not preserve a stale cancelled token across
+restart.
+
+### 5. Null writes are invalid unless size is zero
+
+`write_async(nullptr, 0, cb)` is the normal zero-byte no-op and completes
+successfully. `write_async(nullptr, nonzero, cb)` queues the callback with
+`StreamError::Invalid` instead of dereferencing the pointer. Keep that
+distinction when adding transport wrappers.
+
+### 6. Writes and auto-reads run on separate threads
 
 When `options.auto_read = true` the reader and writer run on
 **separate** threads so a blocking `read()` on a `TcpStream` cannot

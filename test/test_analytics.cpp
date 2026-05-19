@@ -50,6 +50,17 @@ TEST_CASE("Analytics disabled doesn't log", "[runtime][analytics]") {
     a.set_enabled(true);
 }
 
+TEST_CASE("Analytics exposes enabled state toggles",
+          "[runtime][analytics][coverage][phase3-batch742]") {
+    auto& a = Analytics::instance();
+
+    a.set_enabled(false);
+    REQUIRE_FALSE(a.is_enabled());
+
+    a.set_enabled(true);
+    REQUIRE(a.is_enabled());
+}
+
 TEST_CASE("Analytics log with properties", "[runtime][analytics]") {
     auto& a = Analytics::instance();
     uint64_t before = a.event_count();
@@ -215,6 +226,33 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
     REQUIRE_FALSE(std::filesystem::exists(path));
 }
 
+TEST_CASE("FileAnalyticsDestination keeps buffered events when open fails",
+          "[runtime][analytics][coverage][phase3-batch742]") {
+    auto root = std::filesystem::temp_directory_path() / "pulp_analytics_missing_parent_742";
+    auto path = root / "events.jsonl";
+    std::filesystem::remove_all(root);
+
+    FileAnalyticsDestination dest(path.string());
+    AnalyticsEvent event;
+    event.name = "retry";
+    event.timestamp = 42.0;
+    dest.log_event(event);
+
+    dest.flush();
+    REQUIRE_FALSE(std::filesystem::exists(path));
+
+    std::filesystem::create_directories(root);
+    dest.flush();
+
+    std::ifstream f(path);
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"retry\"") != std::string::npos);
+    f.close();
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("FileAnalyticsDestination auto flushes at batch threshold", "[runtime][analytics]") {
     TemporaryFile tmp(".jsonl");
     FileAnalyticsDestination dest(tmp.path_string());
@@ -318,6 +356,33 @@ TEST_CASE("FileAnalyticsDestination second flush does not duplicate events",
     REQUIRE(lines == 1);
 }
 
+TEST_CASE("FileAnalyticsDestination retains buffered events after open failure",
+          "[runtime][analytics][coverage][phase3-large]") {
+    auto dir = std::filesystem::temp_directory_path() / "pulp_analytics_dir_dest";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directory(dir);
+
+    FileAnalyticsDestination dest(dir.string());
+    AnalyticsEvent event;
+    event.name = "queued";
+    event.timestamp = 4.0;
+    dest.log_event(event);
+    dest.flush();
+
+    REQUIRE(std::filesystem::is_directory(dir));
+
+    std::filesystem::remove_all(dir);
+    dest.flush();
+
+    std::ifstream f(dir);
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"queued\"") != std::string::npos);
+    f.close();
+
+    std::filesystem::remove(dir);
+}
+
 TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runtime][analytics][issue-641]") {
     TemporaryFile tmp(".jsonl");
     auto path = tmp.path();
@@ -327,6 +392,22 @@ TEST_CASE("FileAnalyticsDestination empty flush does not create output", "[runti
     dest.flush();
 
     REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
+TEST_CASE("FileAnalyticsDestination failed flush leaves no file at directory path",
+          "[runtime][analytics][coverage]") {
+    auto dir = std::filesystem::temp_directory_path() / "pulp-analytics-dir-dest";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    FileAnalyticsDestination dest(dir.string());
+    AnalyticsEvent event;
+    event.name = "cannot-open-directory";
+    dest.log_event(event);
+    dest.flush();
+
+    REQUIRE(std::filesystem::is_directory(dir));
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("FileAnalyticsDestination writes property map in key order", "[runtime][analytics][issue-641]") {
@@ -393,6 +474,24 @@ TEST_CASE("Analytics forwards simple log with empty property map",
     REQUIRE(events->size() == 1);
     REQUIRE(events->back().name == "plain");
     REQUIRE(events->back().properties.empty());
+}
+
+TEST_CASE("Analytics ignores null destinations",
+          "[runtime][analytics][coverage][phase3]") {
+    auto events = std::make_shared<std::vector<AnalyticsEvent>>();
+    auto flushes = std::make_shared<int>(0);
+
+    auto& a = Analytics::instance();
+    a.set_enabled(true);
+    a.add_destination(nullptr);
+    a.add_destination(std::make_unique<RecordingDestination>(events, flushes));
+
+    a.log("after_null_destination");
+    a.flush();
+
+    REQUIRE(events->size() == 1);
+    REQUIRE(events->back().name == "after_null_destination");
+    REQUIRE(*flushes == 1);
 }
 
 TEST_CASE("Analytics disabled widget tracker calls skip destinations",

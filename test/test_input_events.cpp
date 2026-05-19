@@ -64,6 +64,17 @@ TEST_CASE("KeyEvent modifier queries", "[view][input]") {
     REQUIRE_FALSE(e.isCmdDown());
 }
 
+TEST_CASE("KeyEvent combined modifier helpers stay independent",
+          "[view][input][coverage][phase3]") {
+    KeyEvent e;
+    e.modifiers = kModShift | kModCtrl | kModAlt | kModCmd;
+
+    REQUIRE(e.isShiftDown());
+    REQUIRE(e.isCtrlDown());
+    REQUIRE(e.isAltDown());
+    REQUIRE(e.isCmdDown());
+}
+
 TEST_CASE("KeyEvent defaults", "[view][input]") {
     KeyEvent e;
     REQUIRE(e.key == KeyCode::unknown);
@@ -119,6 +130,18 @@ TEST_CASE("MouseEvent pen pointer type with stylus data", "[view][input][pointer
     REQUIRE(e.pressure == 0.8f);
     REQUIRE(e.altitude_angle == 1.2f);
     REQUIRE(e.azimuth_angle == 3.14f);
+}
+
+TEST_CASE("MouseEvent unknown pointer type falls back to mouse string",
+          "[view][input][pointer][coverage][phase3]") {
+    MouseEvent e;
+    e.pointer_type = static_cast<PointerType>(99);
+    e.pointer_id = 3;
+
+    REQUIRE(std::string(e.pointerTypeString()) == "mouse");
+    REQUIRE_FALSE(e.isTouch());
+    REQUIRE_FALSE(e.isPen());
+    REQUIRE_FALSE(e.isPrimary());
 }
 
 TEST_CASE("MouseEvent is_cancelled flag", "[view][input][pointer]") {

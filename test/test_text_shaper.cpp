@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/text_run_planner.hpp>
 #include <pulp/canvas/text_layout.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 
@@ -466,4 +467,61 @@ TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is 
     bool ok = (reconstructed == canonical) || (reconstructed == with_space);
     INFO("reconstructed='" << reconstructed << "'");
     REQUIRE(ok);
+}
+
+TEST_CASE("TextRunPlanner emits UTF-8 scalar offsets and line breaks",
+          "[canvas][text_run_planner][codecov]") {
+    FontOptions options;
+    options.family_stack = {"system"};
+    options.size = 14.0f;
+
+    auto& planner = TextRunPlanner::instance();
+    planner.clear_cache();
+    auto shaped = planner.shape("A " "\xc3\xa9" "\nB", options);
+
+    REQUIRE_FALSE(shaped.empty());
+    REQUIRE(shaped.text == "A " "\xc3\xa9" "\nB");
+    REQUIRE(shaped.runs.size() == 1);
+    REQUIRE(shaped.runs[0].logical_start == 0);
+    REQUIRE(shaped.runs[0].logical_end == shaped.text.size());
+    REQUIRE(shaped.runs[0].bidi_level == 0);
+    REQUIRE(shaped.total_width >= 0.0f);
+
+    REQUIRE(shaped.index_map.scalar_count() == 5);
+    REQUIRE(shaped.index_map.scalar_offsets == std::vector<std::uint32_t>{0, 1, 2, 4, 5, 6});
+
+    REQUIRE(shaped.line_breaks.size() == 2);
+    REQUIRE(shaped.line_breaks[0].utf8_offset == 2);
+    REQUIRE(shaped.line_breaks[0].kind == LineBreakOpportunity::Kind::Soft);
+    REQUIRE(shaped.line_breaks[1].utf8_offset == 4);
+    REQUIRE(shaped.line_breaks[1].kind == LineBreakOpportunity::Kind::Hard);
+}
+
+TEST_CASE("TextRunPlanner cache clear preserves shaped output contracts",
+          "[canvas][text_run_planner][codecov]") {
+    FontOptions options;
+    options.family_stack = {"system"};
+    options.size = 18.0f;
+    options.direction = BaseDirection::RTL;
+
+    auto& planner = TextRunPlanner::instance();
+    planner.clear_cache();
+    auto first = planner.shape("abc\tdef", options);
+    auto cached = planner.shape("abc\tdef", options);
+    planner.clear_cache();
+    auto after_clear = planner.shape("abc\tdef", options);
+
+    REQUIRE(first.text == cached.text);
+    REQUIRE(first.text == after_clear.text);
+    REQUIRE(first.runs.size() == 1);
+    REQUIRE(cached.runs.size() == 1);
+    REQUIRE(after_clear.runs.size() == 1);
+    REQUIRE(first.runs[0].bidi_level == 1);
+    REQUIRE(cached.runs[0].bidi_level == 1);
+    REQUIRE(after_clear.runs[0].bidi_level == 1);
+    REQUIRE(first.line_breaks.size() == 1);
+    REQUIRE(first.line_breaks[0].utf8_offset == 4);
+    REQUIRE(first.line_breaks[0].kind == LineBreakOpportunity::Kind::Soft);
+    REQUIRE(first.index_map.scalar_offsets == after_clear.index_map.scalar_offsets);
+    REQUIRE_THAT(first.total_width, WithinAbs(after_clear.total_width, 0.001f));
 }

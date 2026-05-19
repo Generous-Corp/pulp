@@ -16,6 +16,7 @@ target_sources(pulp-inspect PRIVATE
     src/inspector_server.cpp
     src/audio_inspector.cpp
     src/domain_handler.cpp
+    src/editor_url.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
     src/tweak_store.cpp

@@ -84,6 +84,22 @@ TEST_CASE("AudioFocusRegistry: token move transfers ownership",
     REQUIRE(count == 1);  // outer now dropped → no more callbacks
 }
 
+TEST_CASE("AudioFocusRegistry: move construction empties source token",
+          "[audio][focus][coverage][phase3]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    int count = 0;
+    auto source = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++count; });
+    const int id = source.id();
+
+    AudioFocusRegistry::Token moved(std::move(source));
+    REQUIRE(source.id() == 0);
+    REQUIRE(moved.id() == id);
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(count == 1);
+}
+
 TEST_CASE("AudioFocusRegistry: move assignment replaces an existing subscription",
           "[audio][focus][issue-640]") {
     AudioFocusRegistry::instance().reset_for_test();
@@ -155,6 +171,31 @@ TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
     REQUIRE(count_a == 1);
     REQUIRE(count_b == 1);
     REQUIRE(count_c == 1);
+}
+
+TEST_CASE("AudioFocusRegistry: subscribers added during publish wait for next signal",
+          "[audio][focus][coverage][phase3]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    int first_count = 0;
+    int second_count = 0;
+    AudioFocusRegistry::Token second;
+
+    auto first = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) {
+            ++first_count;
+            if (second.id() == 0) {
+                second = AudioFocusRegistry::instance().subscribe(
+                    [&](AudioFocusState) { ++second_count; });
+            }
+        });
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(first_count == 1);
+    REQUIRE(second_count == 0);
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::gained);
+    REQUIRE(first_count == 2);
+    REQUIRE(second_count == 1);
 }
 
 TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
@@ -236,4 +277,33 @@ TEST_CASE("AudioFocusRegistry: publish with no subscribers still updates state",
 
     REQUIRE(AudioFocusRegistry::instance().current()
             == AudioFocusState::lost_transient);
+}
+
+TEST_CASE("AudioFocusRegistry: subscriber added during publish waits for next signal",
+          "[audio][focus][coverage][phase3-large]") {
+    AudioFocusRegistry::instance().reset_for_test();
+
+    std::vector<AudioFocusState> first_seen;
+    std::vector<AudioFocusState> late_seen;
+    AudioFocusRegistry::Token late_token;
+
+    auto first_token = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState state) {
+            first_seen.push_back(state);
+            if (late_token.id() == 0) {
+                late_token = AudioFocusRegistry::instance().subscribe(
+                    [&](AudioFocusState late_state) {
+                        late_seen.push_back(late_state);
+                    });
+            }
+        });
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(first_seen == std::vector<AudioFocusState>{AudioFocusState::duck});
+    REQUIRE(late_seen.empty());
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::gained);
+    REQUIRE(first_seen == std::vector<AudioFocusState>{
+        AudioFocusState::duck, AudioFocusState::gained});
+    REQUIRE(late_seen == std::vector<AudioFocusState>{AudioFocusState::gained});
 }

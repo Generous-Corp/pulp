@@ -297,6 +297,62 @@ TEST_CASE("AsyncStream zero-byte write dispatches completion without worker", "[
     REQUIRE(error.load() == StreamError::Ok);
 }
 
+TEST_CASE("AsyncStream rejects nonempty null writes via callback",
+          "[async_stream][coverage][phase3]") {
+    auto backing = std::make_unique<TestStream>();
+
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    std::atomic<int> callbacks{0};
+    std::atomic<std::size_t> bytes{99};
+    std::atomic<StreamError> error{StreamError::Ok};
+
+    REQUIRE(stream.write_async(nullptr, 3, [&](std::size_t n, StreamError err) {
+        bytes.store(n);
+        error.store(err);
+        callbacks.fetch_add(1);
+    }));
+
+    REQUIRE(callbacks.load() == 1);
+    REQUIRE(bytes.load() == 0);
+    REQUIRE(error.load() == StreamError::Invalid);
+    REQUIRE(stream.pending_write_bytes() == 0);
+}
+
+TEST_CASE("AsyncStream start after stop refreshes cancellation state",
+          "[async_stream][coverage][phase3]") {
+    auto backing = std::make_unique<TestStream>();
+    auto* raw = backing.get();
+
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    stream.start();
+    stream.stop();
+
+    std::atomic<int> callbacks{0};
+    std::atomic<std::size_t> bytes{0};
+    std::atomic<StreamError> error{StreamError::Closed};
+    const std::uint8_t payload[] = {'r', 'e', 's', 't', 'a', 'r', 't'};
+
+    stream.start();
+    REQUIRE(stream.write_async(payload, sizeof(payload),
+                               [&](std::size_t n, StreamError err) {
+                                   bytes.store(n);
+                                   error.store(err);
+                                   callbacks.fetch_add(1);
+                               }));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(bytes.load() == sizeof(payload));
+    REQUIRE(error.load() == StreamError::Ok);
+    REQUIRE(raw->captured_writes() ==
+            std::vector<std::uint8_t>{'r', 'e', 's', 't', 'a', 'r', 't'});
+}
+
 TEST_CASE("CancellationToken sharing and idempotent cancel", "[async_stream]") {
     CancellationToken token;
     CancellationToken copy = token;

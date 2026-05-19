@@ -1,6 +1,7 @@
 // domain_handler.cpp — Protocol request dispatch to inspector data sources
 
 #include <pulp/inspect/domain_handler.hpp>
+#include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/console_capture.hpp>
@@ -200,6 +201,132 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         } catch (...) {
             return make_error(req.id, "Invalid params for Inspector.clearTweaks");
         }
+    }
+    // ── Phase 1: loadTweaks / saveTweaks / setAutoSave ──
+    if (req.method == methods::kInspectorLoadTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        std::string path;
+        try {
+            if (!req.params_json.empty() && req.params_json != "{}") {
+                auto params = choc::json::parse(req.params_json);
+                if (params.isObject() && params.hasObjectMember("path") &&
+                    params["path"].isString()) {
+                    path = std::string(params["path"].getString());
+                }
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.loadTweaks");
+        }
+        auto r = tweak_store_->load_from_disk(path);
+        if (!r.ok) {
+            return make_error(req.id,
+                std::string("Inspector.loadTweaks failed: ") + r.error);
+        }
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("path", choc::value::createString(r.path));
+        resp.addMember("tweakCount",
+            choc::value::createInt64(static_cast<int64_t>(r.tweak_count)));
+        resp.addMember("bypassCount",
+            choc::value::createInt64(static_cast<int64_t>(r.bypass_count)));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+    if (req.method == methods::kInspectorSaveTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        std::string path;
+        try {
+            if (!req.params_json.empty() && req.params_json != "{}") {
+                auto params = choc::json::parse(req.params_json);
+                if (params.isObject() && params.hasObjectMember("path") &&
+                    params["path"].isString()) {
+                    path = std::string(params["path"].getString());
+                }
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.saveTweaks");
+        }
+        auto r = tweak_store_->save_to_disk(path);
+        if (!r.ok) {
+            return make_error(req.id,
+                std::string("Inspector.saveTweaks failed: ") + r.error);
+        }
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("path", choc::value::createString(r.path));
+        resp.addMember("tweakCount",
+            choc::value::createInt64(static_cast<int64_t>(r.tweak_count)));
+        resp.addMember("bypassCount",
+            choc::value::createInt64(static_cast<int64_t>(r.bypass_count)));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+    if (req.method == methods::kInspectorSetAutoSave) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        bool enabled = false;
+        std::string path;
+        try {
+            auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() || !params.hasObjectMember("enabled") ||
+                !params["enabled"].isBool()) {
+                return make_error(req.id,
+                    "Inspector.setAutoSave requires `enabled` as bool");
+            }
+            enabled = params["enabled"].getBool();
+            if (params.hasObjectMember("path") && params["path"].isString()) {
+                path = std::string(params["path"].getString());
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.setAutoSave");
+        }
+        tweak_store_->set_auto_save(enabled, path);
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("enabled", choc::value::createBool(enabled));
+        resp.addMember("path", choc::value::createString(tweak_store_->auto_save_path()));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+
+    // ── Phase 5.3: editor URI plumbing for the future source-jump ───
+    // setEditorUrlTemplate validates and stores; getEditorUrlTemplate
+    // reports the effective template and where it came from
+    // (env / config / default). No actual jumping happens yet — that's
+    // Phase 5.1 (see planning/2026-05-19-inspector-phase5-source-jump-spike.md).
+    if (req.method == methods::kInspectorSetEditorUrlTemplate) {
+        try {
+            auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() ||
+                !params.hasObjectMember("template") ||
+                !params["template"].isString()) {
+                return make_error(req.id,
+                    "Inspector.setEditorUrlTemplate requires `template` as string");
+            }
+            std::string tmpl = std::string(params["template"].getString());
+            std::string err;
+            if (!validate_editor_url_template(tmpl, &err))
+                return make_error(req.id,
+                    std::string("Inspector.setEditorUrlTemplate: ") + err);
+            config_.editor_url_template = tmpl;
+            auto resp = choc::value::createObject("");
+            resp.addMember("ok", choc::value::createBool(true));
+            resp.addMember("template", choc::value::createString(tmpl));
+            return make_response(req.id, choc::json::toString(resp, false));
+        } catch (const std::exception& e) {
+            return make_error(req.id,
+                std::string("Invalid params for Inspector.setEditorUrlTemplate: ") + e.what());
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.setEditorUrlTemplate");
+        }
+    }
+    if (req.method == methods::kInspectorGetEditorUrlTemplate) {
+        auto eff = effective_editor_url(config_);
+        auto resp = choc::value::createObject("");
+        resp.addMember("template", choc::value::createString(eff.template_str));
+        resp.addMember("source",
+            choc::value::createString(std::string(editor_url_source_name(eff.source))));
+        resp.addMember("configTemplate",
+            choc::value::createString(config_.editor_url_template));
+        if (auto env = editor_url_env_override())
+            resp.addMember("envTemplate", choc::value::createString(*env));
+        return make_response(req.id, choc::json::toString(resp, false));
     }
     if (req.method == methods::kInspectorSetBypass) {
         if (!tweak_store_) return make_error(req.id, "No tweak store attached");

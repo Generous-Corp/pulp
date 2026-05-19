@@ -76,6 +76,7 @@
         "tools/scripts/validation_profile_select.py",
         "tools/scripts/test_validation_profile_select.py",
         "tools/scripts/macos_reroute_watcher.py",
+        "tools/scripts/gates.sh",
         "tools/launchd/**",
         ".githooks/**"
       ]

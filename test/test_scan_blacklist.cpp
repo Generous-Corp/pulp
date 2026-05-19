@@ -182,6 +182,24 @@ TEST_CASE("from_text tolerates signed stamp values from old blacklist files",
     REQUIRE(entry->second.reason == "old stamp");
 }
 
+TEST_CASE("from_text rejects partially parsed numeric stamp fields",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text(
+        "/mtime-junk.vst3|10junk|20|bad mtime\n"
+        "/size-junk.vst3|10|20bytes|bad size\n"
+        "/spaced.vst3| 10 | 20 \t|ok\n"));
+
+    REQUIRE(bl.entries().count("/mtime-junk.vst3") == 0);
+    REQUIRE(bl.entries().count("/size-junk.vst3") == 0);
+
+    auto entry = bl.entries().find("/spaced.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.mtime == 10);
+    REQUIRE(entry->second.size == 20);
+    REQUIRE(entry->second.reason == "ok");
+}
+
 TEST_CASE("blacklisting a missing plugin records a durable manual block",
           "[host][blacklist][codecov]") {
     TempFile f;

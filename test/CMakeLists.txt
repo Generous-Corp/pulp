@@ -736,6 +736,10 @@ pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-modulation-matrix LIBRARIES pulp::view)
 # ModulationMatrixWidget canvas widget (workstream 07 slice B5)
 pulp_add_test_suite(pulp-test-modulation-matrix-widget LIBRARIES pulp::view)
+# Lasso selection overlay
+pulp_add_test_suite(pulp-test-lasso LIBRARIES pulp::view)
+# Split pane layout widget
+pulp_add_test_suite(pulp-test-split-view LIBRARIES pulp::view)
 # PluginDescriptor vendor_url + vendor_email (workstream 01 slice 1.8)
 pulp_add_test_suite(pulp-test-vendor-url LIBRARIES pulp::format)
 # Image cache (workstream 07 slice 7.4)
@@ -1714,6 +1718,21 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-filter-chain)
 
+# Canvas arcs / path-primitive Skia rasterization fixtures (P5-2
+# follow-up — extracted from test_canvas.cpp). pulp #1521 native
+# arc / arcTo / ellipse / roundRect cluster: RecordingCanvas captures
+# of native primitives + Skia rasterization fixtures (full / half
+# circle arc matches reference SkPath::arcTo, arc_to collinear
+# lineTos, round_rect 4-corner radii, ellipse rotation contour
+# continuity).
+add_executable(pulp-test-canvas-arcs test_canvas_arcs.cpp)
+target_link_libraries(pulp-test-canvas-arcs PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-arcs PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-arcs PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-canvas-arcs)
+
 # Emoji-parity tests — cover the segmenter + cluster-aware shaping +
 # letter-spacing + cache invalidation paths. Also writes PNGs to
 # `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
@@ -1895,6 +1914,15 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-tweak-store test_tweak_store.cpp)
     target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-tweak-store)
+
+    # Phase 5.3: editor URI plumbing for the future source-jump action.
+    # Pure config / format-helper / protocol — no overlay / GPU surface,
+    # but lives under the same PULP_ENABLE_GPU guard as the rest of
+    # pulp-inspect's tests so it links against the same library.
+    # planning/2026-05-19-inspector-phase5-source-jump-spike.md
+    add_executable(pulp-test-editor-url test_editor_url.cpp)
+    target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-editor-url)
 endif()
 
 # Widget bridge tests
@@ -1927,6 +1955,31 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 # dedicated-command routing — the five Wave 2 partial → supported
 # compat.json entries.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
+
+# Widget bridge — yoga logical-edge fan-out + A4 OOS pins (P5-1
+# follow-up). pulp #1542 yoga logical-edge (marginInline/Block +
+# paddingInline/Block + inset shorthand) + pulp #1434 A4 Bundles 2-7
+# css NOT-IMPL closure catalog hygiene.
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos LIBRARIES pulp::view)
+
+# Widget bridge — Wave 2 cheap-wiring (P5-1 follow-up). Bundles the
+# Wave 2 canvas2d cheap wiring (DIVERGE → PASS) + Wave 2 css value-
+# coverage wiring entries from compat.json's Wave 2 cleanup pass.
+pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap LIBRARIES pulp::view)
+
+# Widget bridge — RN style-prop bridge primitives (P5-1 follow-up,
+# pulp #1026). setShadow / setOpacity / setTransform RN-shaped style
+# functions flow through bridge into View's slots. Includes RN's
+# shadowOpacity-into-color-alpha composition + transform-prop
+# aggregation.
+pulp_add_test_suite(pulp-test-widget-bridge-rn-style LIBRARIES pulp::view)
+
+# Widget bridge — Tier-4 OOS / perf-hints / interaction misc pins
+# (P5-1 follow-up, pulp #1434). Pins the no-op / fallback contract
+# for properties Pulp deliberately doesn't paint: 3D transforms,
+# generated content, scroll-snap, will-change, contain, touch-action
+# secondary keywords. Catalog hygiene tests.
+pulp_add_test_suite(pulp-test-widget-bridge-tier4-oos LIBRARIES pulp::view)
 
 # Widget bridge — RN outline cluster (P5-1 follow-up, pulp #1519).
 # outlineColor / outlineOffset / outlineStyle / outlineWidth longhands
@@ -2027,6 +2080,16 @@ pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 # that drops a save/restore/setTransform/createLinearGradient method
 # (and silently aborts FilterBank-style frame renders) gets caught.
 pulp_add_test_suite(pulp-test-canvas2d-shim LIBRARIES pulp::view)
+
+# Canvas2D _PulpCanvasMatrix DOMMatrix arithmetic — direct unit tests
+# (new coverage for the matrix prelude extracted to
+# web-compat-canvas-matrix.js by #2253). Previously only exercised
+# indirectly via ctx.getTransform() round-trip tests; this binary
+# pins identity construction, mutator chain composition (not
+# last-write-wins), rotateSelf degrees-not-radians, multiplySelf
+# composition, inverse singular-matrix → NaN+is2D=false detection,
+# toJSON honoring actual is2D state (Codex P2 #1754).
+pulp_add_test_suite(pulp-test-canvas2d-dommatrix LIBRARIES pulp::view)
 
 # Canvas2D shim — post-Wave-2 coverage (P5-2 follow-up — extracted from
 # test_canvas2d_shim.cpp). Bundles #1525 (fillText / strokeText

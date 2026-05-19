@@ -49,6 +49,37 @@ TEST_CASE("running status repeats the previous status",
     REQUIRE(v[2].d1 == 0x3E);
 }
 
+TEST_CASE("running status completes messages split across feed calls",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser p;
+    std::vector<Captured> out;
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        out.push_back({m.data()[0],
+                       m.length() > 1 ? m.data()[1] : uint8_t(0),
+                       m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    std::vector<uint8_t> first = {0x90, 0x3C};
+    std::vector<uint8_t> second = {0x7F, 0x3D};
+    std::vector<uint8_t> third = {0x40};
+
+    p.feed(first.data(), first.size());
+    REQUIRE(out.empty());
+
+    p.feed(second.data(), second.size());
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].status == 0x90);
+    REQUIRE(out[0].d1 == 0x3C);
+    REQUIRE(out[0].d2 == 0x7F);
+
+    p.feed(third.data(), third.size());
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[1].status == 0x90);
+    REQUIRE(out[1].d1 == 0x3D);
+    REQUIRE(out[1].d2 == 0x40);
+}
+
 TEST_CASE("program change has a single data byte",
           "[midi][running-status]") {
     auto v = parse({0xC0, 0x05, 0x07});  // PC=5 then PC=7 under running status
@@ -106,6 +137,23 @@ TEST_CASE("running status completes channel messages across feed boundaries",
     REQUIRE(shorts[1].status == 0x90);
     REQUIRE(shorts[1].d1 == 0x3D);
     REQUIRE(shorts[1].d2 == 0x40);
+}
+
+TEST_CASE("new channel status cancels partial running-status data",
+          "[midi][running-status][coverage][phase3]") {
+    auto v = parse({
+        0x90, 0x3C, 0x7F,  // establish note-on running status
+        0x3D,              // partial running-status note, missing velocity
+        0x80, 0x3D, 0x00,  // new note-off must discard the partial note-on
+    });
+
+    REQUIRE(v.size() == 2);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[0].d2 == 0x7F);
+    REQUIRE(v[1].status == 0x80);
+    REQUIRE(v[1].d1 == 0x3D);
+    REQUIRE(v[1].d2 == 0x00);
 }
 
 TEST_CASE("system common messages use their status-specific data lengths",
@@ -204,6 +252,29 @@ TEST_CASE("real-time bytes inside sysex are emitted without ending sysex",
     REQUIRE(sx == std::vector<uint8_t>{0x01, 0x02});
 }
 
+TEST_CASE("unterminated sysex is dropped on reset",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser p;
+    std::vector<uint8_t> sx;
+    std::vector<uint8_t> shorts;
+    p.on_sysex([&](const uint8_t* d, std::size_t s) {
+        sx.assign(d, d + s);
+    });
+    p.on_short_message([&](const MidiEvent& e) {
+        shorts.push_back(e.message.data()[0]);
+    });
+
+    std::vector<uint8_t> partial = {0xF0, 0x7D, 0x01, 0x02};
+    p.feed(partial.data(), partial.size());
+    p.reset();
+
+    std::vector<uint8_t> after = {0xF7, 0x90, 0x40, 0x7F};
+    p.feed(after.data(), after.size());
+
+    REQUIRE(sx.empty());
+    REQUIRE(shorts == std::vector<uint8_t>{0x90});
+}
+
 TEST_CASE("unexpected status inside sysex restarts short-message parsing",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;
@@ -290,6 +361,58 @@ TEST_CASE("undefined system statuses cancel pending system common data",
     REQUIRE(v[0].d2 == 0x7F);
 }
 
+TEST_CASE("empty feed and reset drop partial running-status messages",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser parser;
+    std::vector<Captured> shorts;
+    parser.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    parser.feed(nullptr, 0);
+    REQUIRE(shorts.empty());
+
+    std::vector<uint8_t> partial = {0x90, 0x3C};
+    parser.feed(partial.data(), partial.size());
+    REQUIRE(shorts.empty());
+
+    parser.reset();
+    std::vector<uint8_t> trailing_data = {0x7F};
+    parser.feed(trailing_data.data(), trailing_data.size());
+    REQUIRE(shorts.empty());
+
+    std::vector<uint8_t> complete = {0x90, 0x40, 0x64};
+    parser.feed(complete.data(), complete.size());
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x40);
+    REQUIRE(shorts[0].d2 == 0x64);
+}
+
+TEST_CASE("reset drops partial sysex before the next complete sysex",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser parser;
+    std::vector<std::vector<uint8_t>> sysex;
+    parser.on_sysex([&](const uint8_t* data, std::size_t size) {
+        sysex.emplace_back(data, data + size);
+    });
+
+    std::vector<uint8_t> partial = {0xF0, 0x7D, 0x01};
+    parser.feed(partial.data(), partial.size());
+    parser.reset();
+
+    std::vector<uint8_t> stray_end = {0xF7};
+    parser.feed(stray_end.data(), stray_end.size());
+    REQUIRE(sysex.empty());
+
+    std::vector<uint8_t> complete = {0xF0, 0x7E, 0x02, 0xF7};
+    parser.feed(complete.data(), complete.size());
+    REQUIRE(sysex == std::vector<std::vector<uint8_t>>{{0x7E, 0x02}});
+}
+
 TEST_CASE("system common interruption inside sysex is reprocessed",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;
@@ -366,4 +489,64 @@ TEST_CASE("reset() clears pending system-common state",
     std::vector<uint8_t> b = {0x20};         // stray byte — must drop
     p.feed(b.data(), b.size());
     REQUIRE(shorts.empty());
+}
+
+TEST_CASE("feed preserves partial channel message across calls",
+          "[midi][running-status][coverage]") {
+    RunningStatusParser p;
+    std::vector<Captured> shorts;
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    std::vector<uint8_t> first = {0x90, 0x3c};
+    std::vector<uint8_t> second = {0x7f, 0x3d};
+    std::vector<uint8_t> third = {0x40};
+
+    p.feed(first.data(), first.size());
+    REQUIRE(shorts.empty());
+
+    p.feed(second.data(), second.size());
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x3c);
+    REQUIRE(shorts[0].d2 == 0x7f);
+
+    p.feed(third.data(), third.size());
+    REQUIRE(shorts.size() == 2);
+    REQUIRE(shorts[1].status == 0x90);
+    REQUIRE(shorts[1].d1 == 0x3d);
+    REQUIRE(shorts[1].d2 == 0x40);
+}
+
+TEST_CASE("feed preserves sysex payload across calls",
+          "[midi][running-status][coverage]") {
+    RunningStatusParser p;
+    std::vector<uint8_t> sysex;
+    std::vector<uint8_t> shorts;
+    p.on_sysex([&](const uint8_t* d, std::size_t s) {
+        sysex.assign(d, d + s);
+    });
+    p.on_short_message([&](const MidiEvent& e) {
+        shorts.push_back(e.message.data()[0]);
+    });
+
+    std::vector<uint8_t> first = {0xF0, 0x7D, 0x01};
+    std::vector<uint8_t> second = {0xF8, 0x02};
+    std::vector<uint8_t> third = {0x03, 0xF7};
+
+    p.feed(first.data(), first.size());
+    REQUIRE(sysex.empty());
+    REQUIRE(shorts.empty());
+
+    p.feed(second.data(), second.size());
+    REQUIRE(sysex.empty());
+    REQUIRE(shorts == std::vector<uint8_t>{0xF8});
+
+    p.feed(third.data(), third.size());
+    REQUIRE(sysex == std::vector<uint8_t>{0x7D, 0x01, 0x02, 0x03});
+    REQUIRE(shorts == std::vector<uint8_t>{0xF8});
 }

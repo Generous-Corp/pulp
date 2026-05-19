@@ -23,6 +23,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -364,18 +365,29 @@ inline AnimatableProperty animatable_property_from_css_name(const std::string& n
 /// seconds. Returns 0 on parse failure.
 inline float parse_css_time_seconds(const std::string& s) {
     if (s.empty()) return 0.0f;
-    try {
-        size_t pos = 0;
-        float v = std::stof(s, &pos);
-        std::string unit = s.substr(pos);
-        while (!unit.empty() && std::isspace(static_cast<unsigned char>(unit.front()))) unit.erase(0, 1);
-        while (!unit.empty() && std::isspace(static_cast<unsigned char>(unit.back()))) unit.pop_back();
-        if (unit == "ms") return v / 1000.0f;
-        if (unit == "s")  return v;
-        return v; // bare number → seconds (lenient)
-    } catch (...) {
-        return 0.0f;
+    char* end = nullptr;
+    float v = std::strtof(s.c_str(), &end);
+    if (end == s.c_str() || !std::isfinite(v)) return 0.0f;
+    std::string unit = end;
+    while (!unit.empty() && std::isspace(static_cast<unsigned char>(unit.front()))) unit.erase(0, 1);
+    while (!unit.empty() && std::isspace(static_cast<unsigned char>(unit.back()))) unit.pop_back();
+    if (unit == "ms") return v / 1000.0f;
+    if (unit == "s")  return v;
+    if (unit.empty()) return v; // bare number → seconds (lenient)
+    return 0.0f;
+}
+
+inline bool parse_css_float_token(const std::string& token, float& out) {
+    if (token.empty()) return false;
+    char* end = nullptr;
+    float v = std::strtof(token.c_str(), &end);
+    if (end == token.c_str() || !std::isfinite(v)) return false;
+    while (*end != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(*end))) return false;
+        ++end;
     }
+    out = v;
+    return true;
 }
 
 /// Parse a CSS `transition` shorthand into a list of TransitionSpecs.
@@ -452,13 +464,13 @@ inline std::vector<TransitionSpec> parse_transition_shorthand(const std::string&
             }
             // cubic-bezier(p1x, p1y, p2x, p2y)
             if (tok.rfind("cubic-bezier(", 0) == 0 && tok.back() == ')') {
-                spec.easing.kind = CssEasing::Kind::cubic_bezier;
                 std::string inner = tok.substr(13, tok.size() - 14);
                 std::vector<float> nums;
                 std::string acc;
                 auto flush = [&]() {
                     if (!acc.empty()) {
-                        try { nums.push_back(std::stof(acc)); } catch (...) {}
+                        float parsed = 0.0f;
+                        if (parse_css_float_token(acc, parsed)) nums.push_back(parsed);
                         acc.clear();
                     }
                 };
@@ -468,6 +480,7 @@ inline std::vector<TransitionSpec> parse_transition_shorthand(const std::string&
                 }
                 flush();
                 if (nums.size() == 4) {
+                    spec.easing.kind = CssEasing::Kind::cubic_bezier;
                     spec.easing.p1x = nums[0]; spec.easing.p1y = nums[1];
                     spec.easing.p2x = nums[2]; spec.easing.p2y = nums[3];
                 }
@@ -478,7 +491,19 @@ inline std::vector<TransitionSpec> parse_transition_shorthand(const std::string&
                 std::string inner = tok.substr(6, tok.size() - 7);
                 size_t comma = inner.find(',');
                 std::string n_str = comma == std::string::npos ? inner : inner.substr(0, comma);
-                try { spec.easing.steps_count = std::stoi(n_str); } catch (...) {}
+                char* end = nullptr;
+                long steps = std::strtol(n_str.c_str(), &end, 10);
+                if (end == n_str.c_str()) continue;
+                bool valid_steps = true;
+                while (*end != '\0') {
+                    if (!std::isspace(static_cast<unsigned char>(*end))) {
+                        valid_steps = false;
+                        break;
+                    }
+                    ++end;
+                }
+                if (!valid_steps) continue;
+                spec.easing.steps_count = static_cast<int>(steps);
                 spec.easing.kind = CssEasing::Kind::steps_end;
                 if (comma != std::string::npos) {
                     std::string mode = inner.substr(comma + 1);

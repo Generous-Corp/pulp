@@ -277,6 +277,16 @@ TEST_CASE("CostSample zeroes render fields when no probe is wired",
     REQUIRE(fx.samples[0].dirty_rect_count == 0);
 }
 
+TEST_CASE("Cost buffer sink tolerates a null destination",
+          "[motion-cost][coverage][phase3]") {
+    auto sink = make_cost_buffer_sink(nullptr);
+
+    CostSample s;
+    s.frame = 5;
+
+    REQUIRE_NOTHROW(sink(s));
+}
+
 // ── Bridge probe pulls real RenderPassManager + DirtyTracker stats ──
 
 TEST_CASE("make_render_cost_probe surfaces RenderPassManager + DirtyTracker",
@@ -369,6 +379,28 @@ TEST_CASE("CostSample JSONL serialization round-trips a stream", "[motion-cost]"
     REQUIRE(found_any_prov);
 
     std::remove(path.c_str());
+}
+
+TEST_CASE("load_cost_stream rejects missing or unsupported headers",
+          "[motion-cost][coverage][phase3]") {
+    REQUIRE(load_cost_stream(unique_path("missing")).empty());
+
+    const std::string no_header = unique_path("no-header");
+    {
+        std::ofstream out(no_header);
+        out << serialize_cost_sample(CostSample{}) << "\n";
+    }
+    REQUIRE(load_cost_stream(no_header).empty());
+    std::remove(no_header.c_str());
+
+    const std::string unsupported = unique_path("unsupported");
+    {
+        std::ofstream out(unsupported);
+        out << "{\"motion_cost_version\":2}\n"
+            << serialize_cost_sample(CostSample{}) << "\n";
+    }
+    REQUIRE(load_cost_stream(unsupported).empty());
+    std::remove(unsupported.c_str());
 }
 
 // ── serialize_cost_sample produces well-formed JSON ──────────────────

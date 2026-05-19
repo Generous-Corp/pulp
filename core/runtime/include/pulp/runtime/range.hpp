@@ -3,7 +3,9 @@
 // Templated Range<T> — represents a [start, end) interval with set operations.
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
+#include <type_traits>
 
 namespace pulp::runtime {
 
@@ -50,7 +52,12 @@ struct Range {
 
     /// Constrain a value to this range [start, end)
     constexpr T constrain(T value) const {
-        return std::clamp(value, start, end > start ? end - T(1) : start);
+        if (end <= start) return start;
+        if constexpr (std::is_integral_v<T>) {
+            return std::clamp(value, start, end - T(1));
+        } else {
+            return std::clamp(value, start, std::nextafter(end, start));
+        }
     }
 
     /// Expand range to include a value

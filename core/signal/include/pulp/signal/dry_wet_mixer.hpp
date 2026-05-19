@@ -26,23 +26,40 @@ public:
 
     /// Set latency in samples for the wet path (compensates dry path delay)
     void set_wet_latency(int samples) {
-        latency_ = samples;
-        if (latency_ > 0 && static_cast<int>(delay_buffer_.size()) < latency_ * max_channels_) {
-            delay_buffer_.resize(static_cast<size_t>(latency_ * max_channels_), 0.0f);
-        }
+        const int new_latency = std::max(0, samples);
+        if (new_latency == latency_)
+            return;
+
+        latency_ = new_latency;
+        delay_pos_ = 0;
+
+        if (latency_ > 0 && max_channels_ > 0)
+            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_), 0.0f);
+        else
+            delay_buffer_.clear();
+
+        for (auto& ch : dry_buffer_)
+            std::fill(ch.begin(), ch.end(), 0.0f);
     }
 
     /// Prepare for processing
     void prepare(int max_channels, int /*max_block_size*/) {
-        max_channels_ = max_channels;
-        if (latency_ > 0) {
-            delay_buffer_.resize(static_cast<size_t>(latency_ * max_channels_), 0.0f);
-            delay_pos_ = 0;
-        }
+        max_channels_ = std::max(0, max_channels);
+        delay_pos_ = 0;
+        if (latency_ > 0 && max_channels_ > 0)
+            delay_buffer_.assign(static_cast<size_t>(latency_ * max_channels_), 0.0f);
+        else
+            delay_buffer_.clear();
+        dry_buffer_.clear();
     }
 
     /// Push dry samples before processing (call before your wet processing)
     void push_dry(const float* const* channels, int num_channels, int num_samples) {
+        if (channels == nullptr || num_channels <= 0 || num_samples <= 0) {
+            dry_buffer_.clear();
+            return;
+        }
+
         if (latency_ <= 0) {
             // No latency compensation — just store the dry signal
             dry_buffer_.resize(static_cast<size_t>(num_channels));
@@ -57,12 +74,13 @@ public:
         // With latency compensation — delay the dry signal.
         // Process sample-by-sample (all channels per sample) so the delay
         // position advances once per frame, not once per channel.
-        dry_buffer_.resize(static_cast<size_t>(num_channels));
-        for (int ch = 0; ch < num_channels; ++ch)
+        const int count = std::min(num_channels, max_channels_);
+        dry_buffer_.resize(static_cast<size_t>(count));
+        for (int ch = 0; ch < count; ++ch)
             dry_buffer_[ch].resize(static_cast<size_t>(num_samples));
 
         for (int i = 0; i < num_samples; ++i) {
-            for (int ch = 0; ch < num_channels; ++ch) {
+            for (int ch = 0; ch < count; ++ch) {
                 size_t idx = static_cast<size_t>(delay_pos_ * max_channels_ + ch);
                 dry_buffer_[ch][i] = delay_buffer_[idx];
                 delay_buffer_[idx] = channels[ch][i];
@@ -77,7 +95,8 @@ public:
         compute_gains(dry_gain, wet_gain);
 
         for (int ch = 0; ch < num_channels && ch < static_cast<int>(dry_buffer_.size()); ++ch) {
-            for (int i = 0; i < num_samples; ++i) {
+            const int sample_count = std::min(num_samples, static_cast<int>(dry_buffer_[ch].size()));
+            for (int i = 0; i < sample_count; ++i) {
                 wet_channels[ch][i] = dry_buffer_[ch][i] * dry_gain +
                                       wet_channels[ch][i] * wet_gain;
             }

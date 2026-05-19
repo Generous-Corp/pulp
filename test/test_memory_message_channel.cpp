@@ -279,6 +279,23 @@ TEST_CASE("MemoryMessageChannel sender observes peer callback replacement during
     REQUIRE(second_calls == 1);
 }
 
+TEST_CASE("MemoryMessageChannel supports reentrant replies during delivery",
+          "[runtime][message_channel][coverage][phase3]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> seen;
+    left->on_message([&](const Message& message) {
+        seen.emplace_back("left:" + std::string(message.as_text()));
+    });
+    right->on_message([&](const Message& message) {
+        seen.emplace_back("right:" + std::string(message.as_text()));
+        REQUIRE(right->send_text("reply"));
+    });
+
+    REQUIRE(left->send_text("request"));
+    REQUIRE(seen == std::vector<std::string>{"right:request", "left:reply"});
+}
+
 TEST_CASE("MemoryMessageChannel self close does not invoke a late replacement callback",
           "[runtime][message_channel][coverage][phase3]") {
     auto [left, right] = MemoryMessageChannel::make_pair();

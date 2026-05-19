@@ -49,4 +49,24 @@ TEST_CASE("PluginDescriptor bus helpers follow first bus and empty bus lists",
     d.output_buses.clear();
     REQUIRE(d.default_input_channels() == 0);
     REQUIRE(d.default_output_channels() == 0);
+
+    d.input_buses = {{"Main In", 2, false}};
+    d.output_buses = {{"Main Out", 4, false}};
+    REQUIRE(d.default_input_channels() == 2);
+    REQUIRE(d.default_output_channels() == 4);
+}
+
+TEST_CASE("PluginDescriptor modern capability flags default off",
+          "[format][vendor-url][coverage][phase3-large]") {
+    PluginDescriptor d;
+    REQUIRE_FALSE(d.supports_mpe);
+    REQUIRE_FALSE(d.supports_ump);
+    REQUIRE_FALSE(d.ios_requires_background_audio);
+
+    d.supports_mpe = true;
+    d.supports_ump = true;
+    d.ios_requires_background_audio = true;
+    REQUIRE(d.supports_mpe);
+    REQUIRE(d.supports_ump);
+    REQUIRE(d.ios_requires_background_audio);
 }

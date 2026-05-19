@@ -21,6 +21,14 @@
 #endif
 #ifdef _WIN32
 #include <pulp/platform/win32_sane.hpp>
+// MSVC std::system() returns the child exit code directly, not a
+// wait(2)-encoded status, so the POSIX helpers are identity shims.
+#ifndef WIFEXITED
+#define WIFEXITED(status) (true)
+#endif
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(status) (status)
+#endif
 #endif
 
 namespace {
@@ -356,7 +364,15 @@ int cmd_fmt(const std::vector<std::string>& args) {
         }
         cmd += " \"" + f.string() + "\"";
         int rc = std::system(cmd.c_str());
+        // std::system returns the implementation-defined status. On POSIX
+        // it's a wait(2)-style word; on Windows it's the child's exit code
+        // directly. Use the platform-appropriate decoder so Windows builds
+        // (no <sys/wait.h>) compile cleanly.
+#if defined(__APPLE__) || defined(__linux__)
         const int exit_status = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+#else
+        const int exit_status = rc;
+#endif
         if (exit_status != 0) {
             if (dry_run) {
                 worst_exit = 1;  // diff detected — keep going

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -25,6 +26,60 @@ namespace {
 
 inline void grad_skip_ws(const std::string& s, size_t& i) {
     while (i < s.size() && (s[i]==' ' || s[i]=='\t' || s[i]=='\n')) ++i;
+}
+
+bool parse_grad_float(const std::string& text, float& out) {
+    const char* start = text.c_str();
+    char* end = nullptr;
+    errno = 0;
+    out = std::strtof(start, &end);
+    return end != start && static_cast<size_t>(end - start) == text.size() &&
+           errno != ERANGE && std::isfinite(out);
+}
+
+bool scan_grad_number(const std::string& text, size_t& i, float& out) {
+    const size_t start = i;
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
+
+    bool saw_digit = false;
+    while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+        saw_digit = true;
+        ++i;
+    }
+    if (i < text.size() && text[i] == '.') {
+        ++i;
+        while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) {
+            saw_digit = true;
+            ++i;
+        }
+    }
+    if (!saw_digit) {
+        i = start;
+        return false;
+    }
+
+    if (i < text.size() && (text[i] == 'e' || text[i] == 'E')) {
+        const size_t exp_start = i;
+        ++i;
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
+        const size_t exp_digits = i;
+        while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i]))) ++i;
+        if (i == exp_digits) i = exp_start;
+    }
+
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+        i = start;
+        return false;
+    }
+    if (i - start > 16) {
+        i = start;
+        return false;
+    }
+    if (!parse_grad_float(text.substr(start, i - start), out)) {
+        i = start;
+        return false;
+    }
+    return true;
 }
 
 std::optional<canvas::Color> parse_grad_color(const std::string& s, size_t& i) {
@@ -59,11 +114,7 @@ std::optional<canvas::Color> parse_grad_color(const std::string& s, size_t& i) {
         i += has_alpha ? 5 : 4;
         auto eat_num = [&](float& out) {
             grad_skip_ws(s, i);
-            size_t start = i;
-            while (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) ||
-                                    s[i]=='.' || s[i]=='-' || s[i]=='+')) ++i;
-            if (start == i) return false;
-            out = std::stof(s.substr(start, i - start));
+            if (!scan_grad_number(s, i, out)) return false;
             grad_skip_ws(s, i);
             if (i < s.size() && s[i]=='%') { out = out * 2.55f; ++i; grad_skip_ws(s, i); }
             return true;
@@ -132,10 +183,8 @@ std::optional<ParsedLinearGradient> parse_svg_linear_gradient(
     else if (starts_with("to left"))   { angle_deg = 270; k += 7; consumed_dir = true; }
     else {
         size_t numstart = k;
-        while (k < inner.size() && (std::isdigit(static_cast<unsigned char>(inner[k])) ||
-                                    inner[k] == '.' || inner[k] == '-' || inner[k] == '+')) ++k;
-        if (k > numstart) {
-            float ang = std::stof(inner.substr(numstart, k - numstart));
+        float ang = 0.0f;
+        if (scan_grad_number(inner, k, ang)) {
             grad_skip_ws(inner, k);
             if (k + 3 <= inner.size() && inner.compare(k, 3, "deg") == 0) {
                 k += 3;
@@ -158,13 +207,13 @@ std::optional<ParsedLinearGradient> parse_svg_linear_gradient(
         // Optional explicit position: `<n>%`
         if (k < inner.size() && inner[k] != ',' && inner[k] != ')') {
             size_t numstart = k;
-            while (k < inner.size() && (std::isdigit(static_cast<unsigned char>(inner[k])) ||
-                                        inner[k]=='.' || inner[k]=='-' || inner[k]=='+')) ++k;
-            if (k > numstart) {
-                float pos = std::stof(inner.substr(numstart, k - numstart));
+            float pos = 0.0f;
+            if (scan_grad_number(inner, k, pos)) {
                 if (k < inner.size() && inner[k] == '%') { ++k; pos /= 100.0f; }
+                else if (k < inner.size() && inner[k] != ',') { return std::nullopt; }
                 out.positions.push_back(pos);
             } else {
+                k = numstart;
                 out.positions.push_back(-1.0f);  // sentinel: even-distribute later
             }
         } else {

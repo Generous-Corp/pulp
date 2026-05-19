@@ -106,10 +106,12 @@ TEST_CASE("pulp run --frames rejects non-positive and non-integer values",
     REQUIRE_FALSE(parse_run_options({"--frames", "abc"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames", "12x"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames", "12.5"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames", "+5"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames=zero"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames=12x"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames=12.5"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames=+5"}).error.empty());
 
     auto partial = parse_run_options({"--frames=12x"});
     REQUIRE(partial.frames == 1);

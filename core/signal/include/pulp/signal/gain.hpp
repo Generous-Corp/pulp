@@ -1,13 +1,9 @@
 #pragma once
 
 #include <algorithm>
-#include <cmath>
+#include <pulp/signal/special_functions.hpp>
 
 namespace pulp::signal {
-
-// dB <-> linear conversion utilities
-inline float db_to_linear(float db) { return std::pow(10.0f, db / 20.0f); }
-inline float linear_to_db(float linear) { return 20.0f * std::log10(std::max(linear, 1e-10f)); }
 
 // Simple gain processor
 class Gain {

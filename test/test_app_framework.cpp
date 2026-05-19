@@ -106,6 +106,16 @@ TEST_CASE("KeyShortcut parses named keys and rejects invalid function keys",
     REQUIRE(KeyShortcut::from_string("Down").key == KeyCode::down);
 }
 
+TEST_CASE("KeyShortcut parses modifiers independent of their order",
+          "[view][keys][coverage][phase3]") {
+    auto ks = KeyShortcut::from_string("Shift+Meta+Cmd+A");
+    REQUIRE(ks.key == KeyCode::a);
+    REQUIRE((ks.modifiers & kModShift) != 0);
+    REQUIRE((ks.modifiers & kModMeta) != 0);
+    REQUIRE((ks.modifiers & kModCmd) != 0);
+    REQUIRE(ks.to_string() == "Cmd+Shift+Meta+A");
+}
+
 TEST_CASE("KeyShortcut to_string covers modifiers and named keys",
           "[view][keys]") {
     KeyShortcut ks;
@@ -125,6 +135,19 @@ TEST_CASE("KeyShortcut to_string covers modifiers and named keys",
 TEST_CASE("KeyShortcut to_string round-trips", "[view][keys]") {
     auto ks = KeyShortcut::from_string("Cmd+S");
     REQUIRE(ks.to_string() == "Cmd+S");
+}
+
+TEST_CASE("KeyShortcut parser accepts out-of-order modifiers once",
+          "[view][keys][coverage]") {
+    auto ks = KeyShortcut::from_string("Shift+Cmd+A");
+    REQUIRE(ks.key == KeyCode::a);
+    REQUIRE((ks.modifiers & kModCmd) != 0);
+    REQUIRE((ks.modifiers & kModShift) != 0);
+    REQUIRE(ks.to_string() == "Cmd+Shift+A");
+
+    auto lower = KeyShortcut::from_string("Ctrl+x");
+    REQUIRE(lower.key == KeyCode::x);
+    REQUIRE(lower.to_string() == "Ctrl+X");
 }
 
 TEST_CASE("KeyShortcut matches key event", "[view][keys]") {
@@ -273,6 +296,20 @@ TEST_CASE("KeyMapping no-op branches leave commands intact", "[view][keys]") {
     REQUIRE(km.handle_key(e));
 }
 
+TEST_CASE("KeyMapping handles commands without actions",
+          "[view][keys][coverage]") {
+    KeyMapping km;
+    km.add_command({1, "No Action", "File",
+                    KeyShortcut::from_string("Cmd+N"), {}, {}, false});
+
+    KeyEvent e;
+    e.key = KeyCode::n;
+    e.modifiers = kModCmd;
+    e.is_down = true;
+
+    REQUIRE(km.handle_key(e));
+}
+
 TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
     KeyMapping km;
     km.add_command({1, "Save", "File",
@@ -293,6 +330,23 @@ TEST_CASE("KeyMapping save/load binding edge paths", "[view][keys]") {
 
     REQUIRE(km.load_bindings(path));
     REQUIRE_FALSE(km.load_bindings(root / "missing.json"));
+    REQUIRE_FALSE(km.save_bindings(root));
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("KeyMapping save_bindings fails when parent is missing",
+          "[view][keys][coverage]") {
+    KeyMapping km;
+    km.add_command({1, "Save", "File",
+                    KeyShortcut::from_string("Cmd+S"), [] {}, {}, false});
+
+    auto root = make_temp_root("pulp-keymapping-missing-parent");
+    auto path = root / "missing" / "bindings.json";
+    REQUIRE_FALSE(std::filesystem::exists(path.parent_path()));
+
+    REQUIRE_FALSE(km.save_bindings(path));
+    REQUIRE_FALSE(std::filesystem::exists(path));
 
     std::filesystem::remove_all(root);
 }
@@ -347,6 +401,27 @@ TEST_CASE("MenuBar set_key_mapping preserves command metadata",
     REQUIRE(fired);
 }
 
+TEST_CASE("MenuBar add_menu preserves submenu and disabled item metadata",
+          "[view][menu][coverage]") {
+    MenuBar menu;
+    menu.add_menu("View", {
+        {"Zoom", {}, {}, true, false, {
+            {"Zoom In", [] {}, KeyShortcut::from_string("Cmd+="), false, false, {}},
+            {"Zoom Out", [] {}, KeyShortcut::from_string("Cmd+-"), true, false, {}},
+        }},
+        {"", {}, {}, true, true, {}},
+    });
+
+    REQUIRE(menu.menus().size() == 1);
+    const auto& view = menu.menus()[0];
+    REQUIRE(view.title == "View");
+    REQUIRE(view.items.size() == 2);
+    REQUIRE(view.items[0].submenu.size() == 2);
+    REQUIRE(view.items[0].submenu[0].title == "Zoom In");
+    REQUIRE_FALSE(view.items[0].submenu[0].enabled);
+    REQUIRE(view.items[1].is_separator);
+}
+
 // ── NativeToolbar ────────────────────────────────────────────────────────
 
 TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
@@ -358,6 +433,19 @@ TEST_CASE("NativeToolbar add items and separator", "[view][toolbar]") {
     REQUIRE(tb.items().size() == 3);
     REQUIRE(tb.items()[1].is_separator);
     tb.install_native(nullptr);
+}
+
+TEST_CASE("NativeToolbar stores callable item actions",
+          "[view][toolbar][coverage]") {
+    NativeToolbar tb;
+    int calls = 0;
+    tb.add_item({"render", "Render", "play", [&] { ++calls; }});
+
+    REQUIRE(tb.items().size() == 1);
+    REQUIRE(tb.items()[0].id == "render");
+    REQUIRE_FALSE(tb.items()[0].is_separator);
+    tb.items()[0].action();
+    REQUIRE(calls == 1);
 }
 
 // ── AppSettings ──────────────────────────────────────────────────────────
@@ -400,11 +488,26 @@ TEST_CASE("AppSettings invalid typed values return null or false",
     AppSettings settings("PulpTest");
 
     settings.set_string("bad_int", "abc");
+    settings.set_string("overflow_int", "5000000000");
+    settings.set_string("underflow_int", "-5000000000");
     settings.set_string("bad_float", "abc");
     settings.set_string("boolish", "yes");
+    settings.set_string("partial_int", "512junk");
+    settings.set_string("partial_float", "0.75oops");
+    settings.set_string("overflow_float", "1e999");
+    settings.set_string("spaced_int", "256\t");
+    settings.set_string("spaced_float", "0.5 ");
 
     REQUIRE_FALSE(settings.get_int("bad_int").has_value());
+    REQUIRE_FALSE(settings.get_int("overflow_int").has_value());
+    REQUIRE_FALSE(settings.get_int("underflow_int").has_value());
     REQUIRE_FALSE(settings.get_float("bad_float").has_value());
+    REQUIRE_FALSE(settings.get_int("partial_int").has_value());
+    REQUIRE_FALSE(settings.get_float("partial_float").has_value());
+    REQUIRE_FALSE(settings.get_float("overflow_float").has_value());
+    REQUIRE(settings.get_int("spaced_int").value() == 256);
+    REQUIRE(settings.get_float("spaced_float").value() > 0.49f);
+    REQUIRE(settings.get_float("spaced_float").value() < 0.51f);
     REQUIRE(settings.get_bool("boolish").value() == false);
     REQUIRE_FALSE(settings.load_window_state().has_value());
 }
@@ -455,6 +558,96 @@ TEST_CASE("AppSettings saves and loads from platform settings root",
     REQUIRE(window->y == 2);
     REQUIRE(window->width == 300);
     REQUIRE(window->height == 400);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load keeps parsed prefix from malformed JSON",
+          "[view][settings][coverage]") {
+    auto root = make_temp_root("pulp-app-settings-malformed");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("MalformedSettingsCoverage");
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream f(settings.settings_path());
+        f << "{\n"
+          << "  \"first\": \"kept\",\n"
+          << "  \"broken\": \n"
+          << "}\n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE(settings.get_string("first").value() == "kept");
+    REQUIRE_FALSE(settings.get_string("broken").has_value());
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load clears stale values from an empty settings file",
+          "[view][settings][coverage][phase3]") {
+    auto root = make_temp_root("pulp-app-settings-empty");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("PulpSettingsEmptyCoverage");
+    settings.set_string("stale", "value");
+    REQUIRE(settings.get_string("stale").has_value());
+
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream f(settings.settings_path());
+        f << "{}\n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE_FALSE(settings.get_string("stale").has_value());
+    REQUIRE_FALSE(settings.load_window_state().has_value());
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("AppSettings load clears stale values before partial parse",
+          "[view][settings][coverage][phase3]") {
+    auto root = make_temp_root("pulp-app-settings-partial");
+
+#if defined(_WIN32)
+    ScopedEnvVar settings_root("APPDATA", root.string());
+#elif defined(__APPLE__)
+    ScopedEnvVar settings_root("HOME", root.string());
+#else
+    ScopedEnvVar settings_root("XDG_CONFIG_HOME", root.string());
+#endif
+
+    AppSettings settings("PulpSettingsPartial");
+    settings.set_string("stale", "value");
+    settings.set_string("keep", "old");
+
+    std::filesystem::create_directories(settings.settings_path().parent_path());
+    {
+        std::ofstream out(settings.settings_path());
+        out << "{\n"
+            << "  \"keep\": \"new\",\n"
+            << "  \"dangling\": \n";
+    }
+
+    REQUIRE(settings.load());
+    REQUIRE_FALSE(settings.get_string("stale").has_value());
+    REQUIRE(settings.get_string("keep") == std::optional<std::string>{"new"});
+    REQUIRE_FALSE(settings.get_string("dangling").has_value());
 
     std::filesystem::remove_all(root);
 }

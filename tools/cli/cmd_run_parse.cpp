@@ -16,6 +16,7 @@ namespace {
 
 bool parse_frame_count(const std::string& value, int& frames) {
     if (value.empty()) return false;
+    if (value.front() == '+') return false;
     int parsed = 0;
     const char* first = value.data();
     const char* last = first + value.size();

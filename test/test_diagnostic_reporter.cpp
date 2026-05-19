@@ -192,6 +192,27 @@ TEST_CASE("DiagnosticReporter JSON reflects instrument/effect type and parameter
     REQUIRE(json.find("\"value\": 25.0000") != std::string::npos);
 }
 
+TEST_CASE("DiagnosticReporter JSON escapes string fields",
+          "[format][diagnostic][coverage][phase3]") {
+    DiagnosticReporter diag;
+    PluginDescriptor desc;
+    desc.name = R"(Quote "Synth")";
+    desc.manufacturer = R"(Back\Slash)";
+    desc.version = "1.0\nbeta";
+    desc.bundle_id = "com.test.escaped";
+
+    StateStore store;
+    store.add_parameter({.id = 5, .name = R"(Cutoff "Hz")", .unit = "Hz", .range = {20, 20000, 440}});
+    store.set_value(5, 880.0f);
+    diag.set_plugin_info(desc, store);
+
+    auto json = diag.generate_json();
+    REQUIRE(json.find("\"name\": \"Quote \\\"Synth\\\"\"") != std::string::npos);
+    REQUIRE(json.find("\"manufacturer\": \"Back\\\\Slash\"") != std::string::npos);
+    REQUIRE(json.find("\"version\": \"1.0\\nbeta\"") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"Cutoff \\\"Hz\\\"\"") != std::string::npos);
+}
+
 TEST_CASE("DiagnosticReporter replacing plugin info clears stale parameter snapshot",
           "[format][diagnostic][coverage][phase3]") {
     DiagnosticReporter diag;
@@ -239,4 +260,41 @@ TEST_CASE("HostType names and feature heuristics cover fixed-size and no-sidecha
     REQUIRE_FALSE(host_supports_sidechain(HostType::AudacityTenacity));
     REQUIRE(host_supports_sidechain(HostType::Reaper));
     REQUIRE(host_supports_sidechain(HostType::Unknown));
+}
+
+TEST_CASE("HostType names cover every declared host enum",
+          "[format][host-type][coverage][phase3]") {
+    REQUIRE(host_type_name(HostType::LogicPro) == "Logic Pro");
+    REQUIRE(host_type_name(HostType::GarageBand) == "GarageBand");
+    REQUIRE(host_type_name(HostType::AbletonLive) == "Ableton Live");
+    REQUIRE(host_type_name(HostType::Reaper) == "REAPER");
+    REQUIRE(host_type_name(HostType::ProTools) == "Pro Tools");
+    REQUIRE(host_type_name(HostType::Cubase) == "Cubase");
+    REQUIRE(host_type_name(HostType::Nuendo) == "Nuendo");
+    REQUIRE(host_type_name(HostType::StudioOne) == "Studio One");
+    REQUIRE(host_type_name(HostType::FLStudio) == "FL Studio");
+    REQUIRE(host_type_name(HostType::Bitwig) == "Bitwig Studio");
+    REQUIRE(host_type_name(HostType::Maschine) == "Maschine");
+    REQUIRE(host_type_name(HostType::AudacityTenacity) == "Audacity/Tenacity");
+    REQUIRE(host_type_name(HostType::Ardour) == "Ardour");
+    REQUIRE(host_type_name(HostType::Standalone) == "Pulp Standalone");
+}
+
+TEST_CASE("HostType feature heuristics default permissive for modern hosts",
+          "[format][host-type][coverage][phase3]") {
+    for (auto host : {HostType::LogicPro,
+                      HostType::AbletonLive,
+                      HostType::Reaper,
+                      HostType::Cubase,
+                      HostType::Nuendo,
+                      HostType::StudioOne,
+                      HostType::FLStudio,
+                      HostType::Bitwig,
+                      HostType::Maschine,
+                      HostType::Ardour,
+                      HostType::Standalone,
+                      HostType::Other}) {
+        REQUIRE(host_supports_resize(host));
+        REQUIRE(host_supports_sidechain(host));
+    }
 }

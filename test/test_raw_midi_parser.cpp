@@ -154,6 +154,88 @@ TEST_CASE("raw_midi_parser accumulates sysex across calls",
     REQUIRE_FALSE(state.sysex_in_progress);
 }
 
+TEST_CASE("raw_midi_parser does not carry partial short messages across calls",
+          "[midi][raw_midi_parser][coverage]") {
+    RawMidiParserState state;
+    Captured c;
+    auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) {
+        c.shorts.push_back({s, d1, d2});
+    };
+    auto on_sysex = [&c](const std::vector<uint8_t>& sx) {
+        c.sysex.push_back(sx);
+    };
+
+    uint8_t chunk1[] = {0x90, 0x40};
+    uint8_t chunk2[] = {0x7F, 0x80, 0x40, 0x00};
+    parse_raw_midi_bytes(chunk1, sizeof(chunk1), state, on_short, on_sysex);
+    parse_raw_midi_bytes(chunk2, sizeof(chunk2), state, on_short, on_sysex);
+
+    REQUIRE(c.shorts.size() == 1);
+    REQUIRE(c.shorts[0].status == 0x80);
+    REQUIRE(c.shorts[0].d1 == 0x40);
+    REQUIRE(c.shorts[0].d2 == 0x00);
+    REQUIRE(c.sysex.empty());
+    REQUIRE_FALSE(state.sysex_in_progress);
+}
+
+TEST_CASE("raw_midi_parser accepts null zero-length input",
+          "[midi][raw_midi_parser][coverage]") {
+    RawMidiParserState state;
+    state.sysex_in_progress = true;
+    state.sysex_buffer = {0xF0, 0x7D};
+    Captured c;
+
+    parse_raw_midi_bytes(nullptr, 0, state,
+                         [&c](uint8_t s, uint8_t d1, uint8_t d2) {
+                             c.shorts.push_back({s, d1, d2});
+                         },
+                         [&c](const std::vector<uint8_t>& sx) {
+                             c.sysex.push_back(sx);
+                         });
+
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.empty());
+    REQUIRE(state.sysex_in_progress);
+    REQUIRE((state.sysex_buffer == std::vector<uint8_t>{0xF0, 0x7D}));
+}
+
+TEST_CASE("raw_midi_parser empty reads preserve pending sysex state",
+          "[midi][raw_midi_parser][coverage][phase3]") {
+    RawMidiParserState state;
+    Captured c;
+    auto on_short = [&c](uint8_t s, uint8_t d1, uint8_t d2) {
+        c.shorts.push_back({s, d1, d2});
+    };
+    auto on_sysex = [&c](const std::vector<uint8_t>& sx) {
+        c.sysex.push_back(sx);
+    };
+
+    uint8_t start[] = {0xF0, 0x7D};
+    parse_raw_midi_bytes(start, sizeof(start), state, on_short, on_sysex);
+    REQUIRE(state.sysex_in_progress);
+
+    parse_raw_midi_bytes(nullptr, 0, state, on_short, on_sysex);
+    REQUIRE(state.sysex_in_progress);
+    REQUIRE(state.sysex_buffer == std::vector<uint8_t>{0xF0, 0x7D});
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.empty());
+
+    uint8_t finish[] = {0x01, 0xF7};
+    parse_raw_midi_bytes(finish, sizeof(finish), state, on_short, on_sysex);
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+}
+
+TEST_CASE("raw_midi_parser restarts sysex when F0 interrupts partial sysex",
+          "[midi][raw_midi_parser][coverage]") {
+    auto c = parse({0xF0, 0x7D, 0x01,
+                    0xF0, 0x7E, 0x7F, 0xF7});
+
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE((c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7E, 0x7F, 0xF7}));
+}
+
 TEST_CASE("raw_midi_parser emits realtime inside sysex without terminating",
           "[midi][raw_midi_parser][issue-239]") {
     // F0 7E <clock F8 interleaved> 05 F7
@@ -162,6 +244,18 @@ TEST_CASE("raw_midi_parser emits realtime inside sysex without terminating",
     REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7E, 0x05, 0xF7});
     REQUIRE(c.shorts.size() == 1);
     REQUIRE(c.shorts[0].status == 0xF8); // MIDI Clock
+}
+
+TEST_CASE("raw_midi_parser restarts sysex when a new F0 arrives mid-stream",
+          "[midi][raw_midi_parser][coverage][phase3]") {
+    auto c = parse({
+        0xF0, 0x7D, 0x01,  // abandoned vendor sysex
+        0xF0, 0x7E, 0x02, 0xF7,
+    });
+
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7E, 0x02, 0xF7});
 }
 
 TEST_CASE("raw_midi_parser tolerates omitted callbacks",

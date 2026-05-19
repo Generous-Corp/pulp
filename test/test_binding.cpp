@@ -427,3 +427,62 @@ TEST_CASE("Binding poll updates baseline after the first notification",
     REQUIRE_FALSE(b.poll());
     REQUIRE(call_count == 1);
 }
+
+TEST_CASE("Binding move construction preserves store and callbacks",
+          "[binding][coverage][phase3-github]") {
+    auto store = make_store();
+    Binding original(*store, 1);
+    std::vector<float> values;
+    original.on_change([&](float value) { values.push_back(value); });
+
+    Binding moved(std::move(original));
+    moved.set(-3.0f);
+
+    REQUIRE(moved.is_bound());
+    REQUIRE(moved.id() == 1);
+    REQUIRE(moved.info()->name == "Gain");
+    REQUIRE_THAT(store->get_value(1), WithinAbs(-3.0f, 1e-6f));
+    REQUIRE(values == std::vector<float>{-3.0f});
+}
+
+TEST_CASE("Binding move assignment replaces destination binding",
+          "[binding][coverage][phase3-github]") {
+    auto store = make_store();
+    Binding destination(*store, 2);
+    Binding source(*store, 1);
+    source.set_edit_history(nullptr);
+
+    destination = std::move(source);
+    destination.set(-12.0f);
+
+    REQUIRE(destination.is_bound());
+    REQUIRE(destination.id() == 1);
+    REQUIRE_THAT(store->get_value(1), WithinAbs(-12.0f, 1e-6f));
+    REQUIRE_THAT(store->get_value(2), WithinAbs(50.0f, 1e-6f));
+}
+
+TEST_CASE("Binding copies retain store identity and callback state",
+          "[binding][coverage][phase3-large]") {
+    auto store = make_store();
+    Binding original(*store, 1);
+    std::vector<float> original_values;
+    original.on_change([&](float value) {
+        original_values.push_back(value);
+    });
+
+    Binding copied = original;
+    std::vector<float> copied_values;
+    copied.on_change([&](float value) {
+        copied_values.push_back(value);
+    });
+
+    original.set(-3.0f);
+    copied.set(-6.0f);
+
+    REQUIRE(original.id() == copied.id());
+    REQUIRE(original.info() == copied.info());
+    REQUIRE_THAT(original.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE_THAT(copied.get(), WithinAbs(-6.0, 0.01));
+    REQUIRE(original_values == std::vector<float>{-3.0f, -6.0f});
+    REQUIRE(copied_values == std::vector<float>{-6.0f});
+}

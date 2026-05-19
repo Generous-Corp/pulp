@@ -2,7 +2,9 @@
 #include <pulp/audio/audio.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/channel_set.hpp>
+#include <pulp/audio/load_measurer.hpp>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <thread>
 #include <chrono>
@@ -107,6 +109,28 @@ TEST_CASE("BufferView clears external storage and supports const access",
     }
 }
 
+TEST_CASE("BufferView supports int16 external storage",
+          "[audio][buffer][coverage]") {
+    int16_t ch0[3] = {1, -2, 3};
+    int16_t ch1[3] = {4, -5, 6};
+    int16_t* ptrs[2] = {ch0, ch1};
+
+    BufferView<int16_t> view(ptrs, 2, 3);
+    REQUIRE_FALSE(view.empty());
+    REQUIRE(view.channel(0)[1] == -2);
+    REQUIRE(view.channel_ptr(1) == ch1);
+
+    view.channel(1)[2] = -12;
+    REQUIRE(ch1[2] == -12);
+
+    view.clear();
+    for (std::size_t ch = 0; ch < view.num_channels(); ++ch) {
+        for (auto sample : view.channel(ch)) {
+            REQUIRE(sample == 0);
+        }
+    }
+}
+
 TEST_CASE("Buffer resize and views expose contiguous channel storage",
           "[audio][buffer][issue-640]") {
     Buffer<float> empty;
@@ -145,6 +169,48 @@ TEST_CASE("Buffer resize and views expose contiguous channel storage",
     REQUIRE(buf.view().empty());
 }
 
+TEST_CASE("Buffer supports non-float sample storage",
+          "[audio][buffer][coverage][phase3-github]") {
+    Buffer<int16_t> buffer(2, 3);
+    buffer.channel(0)[0] = 12;
+    buffer.channel(1)[2] = -34;
+
+    auto view = buffer.view();
+    REQUIRE(view.num_channels() == 2);
+    REQUIRE(view.num_samples() == 3);
+    REQUIRE(view.channel(0)[0] == 12);
+    REQUIRE(view.channel(1)[2] == -34);
+
+    view.clear();
+    REQUIRE(buffer.channel(0)[0] == 0);
+    REQUIRE(buffer.channel(1)[2] == 0);
+}
+
+TEST_CASE("Buffer resize from empty regrows zero-filled channels",
+          "[audio][buffer][coverage]") {
+    Buffer<float> buf(2, 3);
+    buf.channel(0)[0] = 1.0f;
+    buf.channel(1)[2] = -1.0f;
+
+    buf.resize(0, 0);
+    REQUIRE(buf.num_channels() == 0);
+    REQUIRE(buf.num_samples() == 0);
+    REQUIRE(buf.view().empty());
+
+    buf.resize(2, 2);
+    REQUIRE(buf.num_channels() == 2);
+    REQUIRE(buf.num_samples() == 2);
+    REQUIRE_FALSE(buf.view().empty());
+    REQUIRE(buf.view().channel_ptr(0) == buf.channel(0).data());
+    REQUIRE(buf.view().channel_ptr(1) == buf.channel(1).data());
+
+    for (std::size_t ch = 0; ch < buf.num_channels(); ++ch) {
+        for (auto sample : buf.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+}
+
 TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
           "[audio][buffer][codecov]") {
     Buffer<float> zero_channels(0, 8);
@@ -167,6 +233,91 @@ TEST_CASE("Buffer zero-channel and zero-sample states remain well formed",
     REQUIRE(default_view.num_channels() == 0);
     REQUIRE(default_view.num_samples() == 0);
     default_view.clear();
+}
+
+TEST_CASE("Buffer can shrink to empty and grow with fresh zeroed storage",
+          "[audio][buffer][coverage][phase3-github]") {
+    Buffer<float> buffer(2, 2);
+    buffer.channel(0)[0] = 1.0f;
+    buffer.channel(1)[1] = -1.0f;
+
+    buffer.resize(0, 0);
+    REQUIRE(buffer.num_channels() == 0);
+    REQUIRE(buffer.num_samples() == 0);
+    REQUIRE(buffer.view().empty());
+
+    buffer.resize(2, 2);
+    REQUIRE_FALSE(buffer.view().empty());
+    for (std::size_t ch = 0; ch < buffer.num_channels(); ++ch) {
+        for (float sample : buffer.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+}
+
+TEST_CASE("Buffer resize to smaller shape remaps channel spans",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> buffer(3, 5);
+    buffer.channel(0)[4] = 0.25f;
+    buffer.channel(2)[4] = -0.5f;
+
+    buffer.resize(2, 3);
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+
+    auto view = buffer.view();
+    REQUIRE(view.num_channels() == 2);
+    REQUIRE(view.num_samples() == 3);
+    REQUIRE(view.channel_ptr(0) == buffer.channel(0).data());
+    REQUIRE(view.channel_ptr(1) == buffer.channel(1).data());
+    REQUIRE(buffer.channel(0).size() == 3);
+    REQUIRE(buffer.channel(1).size() == 3);
+}
+
+TEST_CASE("Buffer copy owns independent channel storage",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> original(2, 3);
+    original.channel(0)[0] = 1.0f;
+    original.channel(1)[2] = 2.0f;
+
+    Buffer<float> copied(original);
+    copied.channel(0)[0] = 10.0f;
+    copied.channel(1)[2] = 20.0f;
+
+    REQUIRE(original.channel(0)[0] == 1.0f);
+    REQUIRE(original.channel(1)[2] == 2.0f);
+    auto copied_view = copied.view();
+    auto original_view = original.view();
+    REQUIRE(copied_view.channel_ptr(0) == copied.channel(0).data());
+    REQUIRE(copied_view.channel_ptr(0) != original_view.channel_ptr(0));
+
+    Buffer<float> assigned;
+    assigned = original;
+    assigned.channel(0)[1] = 30.0f;
+    REQUIRE(original.channel(0)[1] == 0.0f);
+    REQUIRE(assigned.view().channel_ptr(1) != original.view().channel_ptr(1));
+}
+
+TEST_CASE("Buffer move refreshes channel pointers for the new owner",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> original(2, 2);
+    original.channel(0)[0] = 0.25f;
+    original.channel(1)[1] = -0.5f;
+
+    Buffer<float> moved(std::move(original));
+    REQUIRE(moved.num_channels() == 2);
+    REQUIRE(moved.num_samples() == 2);
+    REQUIRE(moved.channel(0)[0] == 0.25f);
+    REQUIRE(moved.channel(1)[1] == -0.5f);
+    REQUIRE(moved.view().channel_ptr(1) == moved.channel(1).data());
+
+    Buffer<float> assigned;
+    assigned = std::move(moved);
+    REQUIRE(assigned.num_channels() == 2);
+    REQUIRE(assigned.num_samples() == 2);
+    REQUIRE(assigned.channel(0)[0] == 0.25f);
+    REQUIRE(assigned.channel(1)[1] == -0.5f);
+    REQUIRE(assigned.view().channel_ptr(0) == assigned.channel(0).data());
 }
 
 TEST_CASE("AudioFileData reports shape from first channel",
@@ -221,6 +372,79 @@ TEST_CASE("Device metadata defaults and custom configs are stable",
     REQUIRE(config.buffer_size == 128);
     REQUIRE(config.input_channels == 2);
     REQUIRE(config.output_channels == 6);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.begin(0, 48000.0f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.begin(64, 0.0f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer rejects non-finite timing budgets",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.begin(64, std::numeric_limits<float>::infinity());
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.begin(std::numeric_limits<int>::max(), 1.0e-30f);
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+}
+
+TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and resets peak load",
+          "[audio][load][coverage][phase3]") {
+    AudioProcessLoadMeasurer measurer;
+
+    measurer.set_smoothing(-1.0f);
+    measurer.begin(64, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    measurer.end();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() > 0.0f);
+
+    measurer.reset_peak();
+    REQUIRE(measurer.peak_load() == 0.0f);
+
+    measurer.set_smoothing(2.0f);
+    measurer.begin(64, 48000.0f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    measurer.end();
+    REQUIRE(measurer.load() > 0.0f);
+    REQUIRE(measurer.peak_load() >= measurer.load());
+
+    measurer.reset();
+    REQUIRE(measurer.load() == 0.0f);
+    REQUIRE(measurer.peak_load() == 0.0f);
+}
+
+TEST_CASE("CallbackContext defaults and sample position remain explicit",
+          "[audio][device][codecov]") {
+    CallbackContext empty;
+    REQUIRE(empty.sample_rate == 0.0);
+    REQUIRE(empty.buffer_size == 0);
+    REQUIRE(empty.sample_position == 0);
+
+    CallbackContext block;
+    block.sample_rate = 44100.0;
+    block.buffer_size = 512;
+    block.sample_position = 4096;
+
+    REQUIRE(block.sample_rate == 44100.0);
+    REQUIRE(block.buffer_size == 512);
+    REQUIRE(block.sample_position == 4096);
 }
 
 TEST_CASE("ChannelSet maps standard layouts by count and name",
@@ -336,6 +560,36 @@ TEST_CASE("Buffer resize handles type changes and preserves new shape",
     REQUIRE(view.channel(0)[4] == 0.5);
 }
 
+TEST_CASE("Buffer resize through empty shapes rebuilds channel pointers",
+          "[audio][buffer][coverage]") {
+    Buffer<float> buf(2, 3);
+    buf.channel(0)[0] = 1.0f;
+    buf.channel(1)[2] = -1.0f;
+
+    buf.resize(0, 0);
+    REQUIRE(buf.num_channels() == 0);
+    REQUIRE(buf.num_samples() == 0);
+    REQUIRE(buf.view().empty());
+
+    buf.resize(2, 2);
+    REQUIRE(buf.num_channels() == 2);
+    REQUIRE(buf.num_samples() == 2);
+    REQUIRE_FALSE(buf.view().empty());
+    REQUIRE(buf.channel(0).data() != nullptr);
+    REQUIRE(buf.channel(1).data() != nullptr);
+
+    for (std::size_t ch = 0; ch < buf.num_channels(); ++ch) {
+        for (auto sample : buf.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+
+    buf.channel(0)[1] = 0.25f;
+    const Buffer<float>& const_buf = buf;
+    REQUIRE(const_buf.channel(0)[1] == 0.25f);
+    REQUIRE(const_buf.channel(1).size() == 2);
+}
+
 TEST_CASE("BufferView supports zero-sample clears without touching channel pointers",
           "[audio][buffer][coverage][phase3]") {
     float left = 1.0f;
@@ -363,6 +617,29 @@ TEST_CASE("ChannelSet discrete layouts compare by speaker map not display name",
     REQUIRE(named == renamed);
     REQUIRE(named.size() == 3);
     REQUIRE_FALSE(named == ChannelSet::lrc());
+}
+
+TEST_CASE("ChannelSet speaker names cover top and discrete positions",
+          "[audio][channel-set][coverage][phase3-github]") {
+    REQUIRE(speaker_name(Speaker::TopFrontLeft) == "Top Front Left");
+    REQUIRE(speaker_name(Speaker::TopFrontRight) == "Top Front Right");
+    REQUIRE(speaker_name(Speaker::TopBackLeft) == "Top Back Left");
+    REQUIRE(speaker_name(Speaker::TopBackRight) == "Top Back Right");
+    REQUIRE(speaker_name(Speaker::TopCenter) == "Top Center");
+    REQUIRE(speaker_name(Speaker::Discrete) == "Discrete");
+}
+
+TEST_CASE("ChannelSet unsupported surround counts fall back to discrete layouts",
+          "[audio][channel-set][coverage][phase3]") {
+    for (auto channels : {7u, 9u, 10u, 11u}) {
+        auto layout = ChannelSet::from_channel_count(channels);
+        CAPTURE(channels);
+        REQUIRE(layout.name == "Discrete " + std::to_string(channels));
+        REQUIRE(layout.size() == channels);
+        for (auto speaker : layout.speakers) {
+            REQUIRE(speaker == Speaker::Discrete);
+        }
+    }
 }
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE

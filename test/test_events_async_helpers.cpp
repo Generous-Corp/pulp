@@ -160,6 +160,79 @@ TEST_CASE("ActionBroadcaster handles empty actions and no-listener sends",
     REQUIRE(seen.size() == 2);
 }
 
+TEST_CASE("ActionBroadcaster snapshots listeners during dispatch",
+          "[events][async_updater][action_broadcaster][coverage]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+    int first_id = -1;
+
+    first_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("first:" + std::string(action));
+        broadcaster.remove_listener(first_id);
+    });
+    const auto second_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("second:" + std::string(action));
+    });
+
+    broadcaster.send_action("one");
+    REQUIRE(seen == std::vector<std::string>{"first:one", "second:one"});
+
+    broadcaster.send_action("two");
+    REQUIRE(seen == std::vector<std::string>{
+        "first:one", "second:one", "second:two"});
+
+    broadcaster.remove_listener(second_id);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 3);
+}
+
+TEST_CASE("ActionBroadcaster delays listeners added during dispatch",
+          "[events][async_updater][action_broadcaster][coverage][phase3]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+    int late_id = -1;
+
+    const auto first_id = broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("first:" + std::string(action));
+        if (late_id < 0) {
+            late_id = broadcaster.add_listener([&](std::string_view late_action) {
+                seen.emplace_back("late:" + std::string(late_action));
+            });
+        }
+    });
+    broadcaster.add_listener([&](std::string_view action) {
+        seen.emplace_back("second:" + std::string(action));
+        broadcaster.remove_listener(first_id);
+    });
+
+    broadcaster.send_action("one");
+    REQUIRE(seen == std::vector<std::string>{"first:one", "second:one"});
+
+    broadcaster.send_action("two");
+    REQUIRE(seen == std::vector<std::string>{
+        "first:one", "second:one", "second:two", "late:two"});
+
+    REQUIRE(late_id >= 0);
+}
+
+TEST_CASE("ActionBroadcaster tolerates null listeners",
+          "[events][async_updater][action_broadcaster][coverage]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+
+    const auto null_id = broadcaster.add_listener({});
+    const auto live_id = broadcaster.add_listener(
+        [&](std::string_view action) { seen.emplace_back(action); });
+
+    broadcaster.send_action("dispatch");
+    REQUIRE(seen == std::vector<std::string>{"dispatch"});
+
+    broadcaster.remove_listener(null_id);
+    broadcaster.remove_listener(live_id);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 1);
+}
+
 TEST_CASE("MultiTimer stop all permits selective restart",
           "[events][async_updater][multi_timer][issue-642]") {
     RecordingMultiTimer timers;
@@ -201,6 +274,38 @@ TEST_CASE("MultiTimer restart keeps one running entry per id",
     timers.stop_all_timers();
     timers.stop_all_timers();
     REQUIRE_FALSE(timers.is_timer_running(7));
+}
+
+TEST_CASE("MultiTimer supports zero and negative timer ids",
+          "[events][async_updater][multi_timer][coverage]") {
+    RecordingMultiTimer timers;
+
+    timers.start_timer(0, 1);
+    timers.start_timer(-4, 2);
+    REQUIRE(timers.is_timer_running(0));
+    REQUIRE(timers.is_timer_running(-4));
+    REQUIRE_FALSE(timers.is_timer_running(4));
+
+    timers.stop_timer(-4);
+    REQUIRE(timers.is_timer_running(0));
+    REQUIRE_FALSE(timers.is_timer_running(-4));
+}
+
+TEST_CASE("MultiTimer restart after stop_all works for existing entries",
+          "[events][async_updater][multi_timer][coverage]") {
+    RecordingMultiTimer timers;
+
+    timers.start_timer(3, 10);
+    timers.start_timer(4, 20);
+    timers.stop_all_timers();
+
+    timers.start_timer(4, 1);
+    REQUIRE_FALSE(timers.is_timer_running(3));
+    REQUIRE(timers.is_timer_running(4));
+
+    timers.start_timer(3, 1);
+    REQUIRE(timers.is_timer_running(3));
+    REQUIRE(timers.is_timer_running(4));
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler has no observable test-lane side effects",

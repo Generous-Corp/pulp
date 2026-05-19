@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 using pulp::runtime::FileStream;
@@ -50,6 +51,24 @@ TEST_CASE("StreamResult helper predicates classify errors",
     REQUIRE_FALSE(invalid.closed());
 }
 
+TEST_CASE("StreamResult factory preserves explicit zero-byte success",
+          "[stream][coverage][phase3]") {
+    auto result = StreamResult::make(0);
+    REQUIRE(result.ok());
+    REQUIRE_FALSE(result.would_block());
+    REQUIRE_FALSE(result.closed());
+    REQUIRE(result.bytes == 0);
+}
+
+TEST_CASE("StreamResult closed failure has no transferred bytes",
+          "[stream][coverage][phase3]") {
+    auto result = StreamResult::fail(StreamError::Closed);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE_FALSE(result.would_block());
+    REQUIRE(result.closed());
+    REQUIRE(result.bytes == 0);
+}
+
 TEST_CASE("MemoryStream round-trip", "[stream]") {
     MemoryStream s;
     const std::uint8_t msg[] = {1, 2, 3, 4, 5};
@@ -70,6 +89,19 @@ TEST_CASE("MemoryStream round-trip", "[stream]") {
     REQUIRE(eof.closed());
 }
 
+TEST_CASE("MemoryStream default starts open and empty",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream;
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    auto result = stream.read(&byte, 1);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.closed());
+}
+
 TEST_CASE("MemoryStream partial read", "[stream]") {
     MemoryStream s(std::vector<std::uint8_t>{10, 20, 30, 40});
     std::uint8_t out[2]{};
@@ -85,6 +117,97 @@ TEST_CASE("MemoryStream partial read", "[stream]") {
     REQUIRE(r2.bytes == 2);
     REQUIRE(out[0] == 30);
     REQUIRE(out[1] == 40);
+}
+
+TEST_CASE("MemoryStream read cursor remains at end after EOF",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{11, 22});
+    std::uint8_t out[4]{};
+
+    REQUIRE(stream.read(out, sizeof(out)).bytes == 2);
+    REQUIRE(stream.read_position() == 2);
+
+    auto eof = stream.read(out, 1);
+    REQUIRE_FALSE(eof.ok());
+    REQUIRE(eof.closed());
+    REQUIRE(stream.read_position() == 2);
+}
+
+TEST_CASE("MemoryStream rewind after EOF allows replay",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{4, 5, 6});
+    std::uint8_t out[3]{};
+
+    REQUIRE(stream.read(out, sizeof(out)).bytes == 3);
+    REQUIRE(stream.read(out, 1).closed());
+
+    stream.rewind();
+    REQUIRE(stream.read_position() == 0);
+    REQUIRE(stream.read(out, 2).bytes == 2);
+    REQUIRE(out[0] == 4);
+    REQUIRE(out[1] == 5);
+}
+
+TEST_CASE("MemoryStream close is idempotent",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1});
+    stream.close();
+    stream.close();
+
+    REQUIRE_FALSE(stream.is_open());
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+}
+
+TEST_CASE("MemoryStream write copies caller storage",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream;
+    std::uint8_t payload[] = {1, 2, 3};
+    REQUIRE(stream.write(payload, sizeof(payload)).bytes == sizeof(payload));
+
+    payload[0] = 9;
+    payload[1] = 9;
+    payload[2] = 9;
+
+    REQUIRE(stream.buffer() == std::vector<std::uint8_t>{1, 2, 3});
+}
+
+TEST_CASE("MemoryStream write preserves existing unread prefix",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{10, 20, 30});
+    std::uint8_t out[2]{};
+    REQUIRE(stream.read(out, 1).bytes == 1);
+
+    const std::uint8_t suffix[] = {40, 50};
+    REQUIRE(stream.write(suffix, sizeof(suffix)).bytes == sizeof(suffix));
+    REQUIRE(stream.buffer() == std::vector<std::uint8_t>{10, 20, 30, 40, 50});
+
+    REQUIRE(stream.read(out, sizeof(out)).bytes == 2);
+    REQUIRE(out[0] == 20);
+    REQUIRE(out[1] == 30);
+}
+
+TEST_CASE("MemoryStream clear is idempotent on open streams",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    stream.clear();
+    stream.clear();
+
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+}
+
+TEST_CASE("MemoryStream zero-byte write on closed stream reports closed",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream;
+    stream.close();
+
+    const std::uint8_t byte = 0;
+    auto result = stream.write(&byte, 0);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.closed());
 }
 
 TEST_CASE("MemoryStream close rejects further I/O", "[stream]") {
@@ -138,6 +261,21 @@ TEST_CASE("MemoryStream zero-size, rewind, and clear edge paths", "[stream]") {
     auto eof = s.read(out, sizeof(out));
     REQUIRE_FALSE(eof.ok());
     REQUIRE(eof.closed());
+}
+
+TEST_CASE("MemoryStream clear does not reopen a closed stream",
+          "[stream][coverage][phase3-large]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2, 3});
+    stream.close();
+    stream.clear();
+
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.size() == 0);
+    REQUIRE(stream.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
 }
 
 TEST_CASE("StreamResult helpers classify non-ok states", "[stream][coverage][issue-656]") {
@@ -424,6 +562,17 @@ TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
     REQUIRE(std::memcmp(out, fresh, sizeof(fresh)) == 0);
 }
 
+TEST_CASE("MemoryStream default construction reports open empty stream",
+          "[stream][memory][coverage][phase3-large]") {
+    MemoryStream empty;
+    REQUIRE(empty.is_open());
+    REQUIRE(empty.size() == 0);
+    REQUIRE(empty.read_position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(empty.read(&byte, 1).closed());
+}
+
 TEST_CASE("FileStream reopen closes the previous handle",
           "[stream][file][coverage][phase3]") {
     auto first = make_temp_path("pulp_stream_reopen_first");
@@ -455,6 +604,29 @@ TEST_CASE("FileStream reopen closes the previous handle",
 
     std::filesystem::remove(first);
     std::filesystem::remove(second);
+}
+
+TEST_CASE("FileStream move construction transfers open handle and closes source",
+          "[stream][file][coverage][phase3-large]") {
+    auto path = make_temp_path("pulp_stream_move_construct");
+    const std::uint8_t payload[] = {'m', 'o', 'v', 'e'};
+
+    FileStream writer(path.string(), FileStream::Mode::Write);
+    REQUIRE(writer.is_open());
+    FileStream moved(std::move(writer));
+    REQUIRE_FALSE(writer.is_open());
+    REQUIRE(moved.is_open());
+    REQUIRE(moved.write(payload, sizeof(payload)).bytes == sizeof(payload));
+    REQUIRE(moved.flush());
+    moved.close();
+
+    FileStream reader(path.string(), FileStream::Mode::Read);
+    std::uint8_t out[sizeof(payload)]{};
+    REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
+    REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+    reader.close();
+
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("FileStream move assignment handles self and closed sources",
@@ -542,6 +714,27 @@ TEST_CASE("HttpStream fetch resets a closed stream before reporting new failure"
     REQUIRE(read.error == StreamError::IoError);
 }
 
+TEST_CASE("PipeStream closed and null pipe states fail closed",
+          "[stream][pipe][coverage][phase3]") {
+    PipeStream stream;
+    std::uint8_t byte = 0;
+
+    REQUIRE_FALSE(stream.is_open());
+    REQUIRE(stream.pipe() == nullptr);
+    REQUIRE(stream.read(&byte, 1).closed());
+    REQUIRE(stream.write(&byte, 1).closed());
+
+    stream.close();
+    REQUIRE_FALSE(stream.is_open());
+
+    auto pipe = std::make_unique<NamedPipe>();
+    PipeStream wrapped(std::move(pipe));
+    REQUIRE_FALSE(wrapped.is_open());
+    REQUIRE(wrapped.pipe() != nullptr);
+    REQUIRE(wrapped.read(&byte, 1).closed());
+    REQUIRE(wrapped.write(&byte, 1).closed());
+}
+
 TEST_CASE("NamedPipe closed and missing endpoints fail closed", "[stream][named_pipe][issue-641]") {
     NamedPipe pipe;
     REQUIRE_FALSE(pipe.is_open());
@@ -585,6 +778,39 @@ TEST_CASE("PipeStream default and moved-empty streams fail closed",
 }
 
 #ifndef _WIN32
+TEST_CASE("PipeStream POSIX FIFO round-trips bytes",
+          "[stream][pipe][coverage][phase3]") {
+    auto path = make_temp_path("pulp_pipe_stream_roundtrip");
+    std::filesystem::remove(path);
+
+    auto server_pipe = std::make_unique<NamedPipe>();
+    REQUIRE(server_pipe->create_server(path.string()));
+    auto client_pipe = std::make_unique<NamedPipe>();
+    REQUIRE(client_pipe->connect_client(path.string()));
+
+    PipeStream server(std::move(server_pipe));
+    PipeStream client(std::move(client_pipe));
+    REQUIRE(server.is_open());
+    REQUIRE(client.is_open());
+
+    const std::uint8_t payload[] = {'p', 'i', 'p', 'e'};
+    auto wrote = server.write(payload, sizeof(payload));
+    REQUIRE(wrote.ok());
+    REQUIRE(wrote.bytes == sizeof(payload));
+
+    std::uint8_t received[sizeof(payload)]{};
+    auto read = client.read(received, sizeof(received));
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == sizeof(payload));
+    REQUIRE(std::memcmp(received, payload, sizeof(payload)) == 0);
+
+    client.close();
+    server.close();
+    REQUIRE_FALSE(client.is_open());
+    REQUIRE_FALSE(server.is_open());
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("NamedPipe POSIX FIFO round-trips bytes and unlinks on close",
           "[stream][named_pipe][issue-641]") {
     auto path = make_temp_path("pulp_named_pipe_roundtrip");

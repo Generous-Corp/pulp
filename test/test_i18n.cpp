@@ -72,6 +72,17 @@ TEST_CASE("i18n duplicate keys overwrite previous values", "[runtime][i18n][cove
     REQUIRE(strings.translate("mode") == "new");
 }
 
+TEST_CASE("i18n accepts empty in-memory keys", "[runtime][i18n][coverage][phase3-batch742]") {
+    LocalisedStrings strings;
+    strings.add("", "metadata");
+    strings.add("normal", "value");
+
+    REQUIRE(strings.count() == 2);
+    REQUIRE(strings.has(""));
+    REQUIRE(strings.translate("") == "metadata");
+    REQUIRE(strings.translate("normal") == "value");
+}
+
 TEST_CASE("i18n translate missing key returns key", "[runtime][i18n]") {
     LocalisedStrings strings;
     REQUIRE(strings.translate("missing_key") == "missing_key");
@@ -133,6 +144,19 @@ TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
     REQUIRE(strings.count() == 2);
     strings.clear();
     REQUIRE(strings.count() == 0);
+}
+
+TEST_CASE("i18n clear leaves selected locale intact",
+          "[runtime][i18n][coverage][phase3]") {
+    LocalisedStrings strings;
+    strings.set_locale("ja");
+    strings.add("hello", "konnichiwa");
+
+    strings.clear();
+
+    REQUIRE(strings.count() == 0);
+    REQUIRE(strings.locale() == "ja");
+    REQUIRE(strings.translate("hello") == "hello");
 }
 
 TEST_CASE("i18n locale get and set", "[runtime][i18n]") {
@@ -238,6 +262,16 @@ TEST_CASE("i18n .strings parser permits empty keys",
     REQUIRE(strings.load_strings_file(tmp.path_string()));
     REQUIRE(strings.count() == 2);
     REQUIRE(strings.translate("") == "metadata");
+}
+
+TEST_CASE("i18n .strings load failure leaves existing translations intact",
+          "[runtime][i18n][coverage][phase3-batch742]") {
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE_FALSE(strings.load_strings_file("/tmp/pulp_missing_strings_742.strings"));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
 }
 
 // ── .po file format ─────────────────────────────────────────────────────
@@ -352,6 +386,16 @@ TEST_CASE("i18n .po parser accepts empty msgid continuations",
     REQUIRE(strings.translate("prefix_suffix") == "value");
 }
 
+TEST_CASE("i18n .po load failure leaves translations intact",
+          "[runtime][i18n][coverage][phase3-batch742]") {
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE_FALSE(strings.load_po_file("/tmp/pulp_missing_po_742.po"));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
+}
+
 // ── JSON file format ────────────────────────────────────────────────────
 
 TEST_CASE("i18n load JSON file", "[runtime][i18n]") {
@@ -434,6 +478,22 @@ TEST_CASE("i18n JSON parser rejects missing object opener", "[runtime][i18n]") {
     REQUIRE(strings.count() == 0);
 }
 
+TEST_CASE("i18n JSON load failure preserves existing translations",
+          "[runtime][i18n][coverage][phase3-batch742]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "[]";
+    }
+
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE_FALSE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
+}
+
 TEST_CASE("i18n JSON parser allows duplicate keys and trailing comma",
           "[runtime][i18n][issue-641]") {
     TemporaryFile tmp(".json");
@@ -492,6 +552,23 @@ TEST_CASE("i18n JSON parser tolerates missing closing brace after entries",
     LocalisedStrings strings;
     REQUIRE(strings.load_json_file(tmp.path_string()));
     REQUIRE(strings.translate("partial") == "kept");
+}
+
+TEST_CASE("i18n JSON parser accepts whitespace separated key value pairs",
+          "[runtime][i18n][coverage]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n";
+        f << "  \"missing_colon\"   \"accepted\",\n";
+        f << "  \"normal\": \"kept\"\n";
+        f << "}\n";
+    }
+
+    LocalisedStrings strings;
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.translate("missing_colon") == "accepted");
+    REQUIRE(strings.translate("normal") == "kept");
 }
 
 // ── File load failures ──────────────────────────────────────────────────

@@ -72,14 +72,26 @@ TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
     require_contains(escaped, "\\t");
 
     const std::string payload =
-        R"JSON({"int":7,"badInt":"abc","dbl":1.25,"badDbl":"nope","yes":true,"no":false,"maybe":"??","nil":null})JSON";
+        "{"
+        "\"int\":7,\"intWs\":42  ,\"intTab\":42\t,"
+        "\"partialInt\":12junk,\"badInt\":\"abc\","
+        "\"dbl\":1.25,\"dblWs\":2.5  ,\"dblTab\":2.5\t,"
+        "\"partialDbl\":3.14oops,\"badDbl\":\"nope\","
+        "\"yes\":true,\"no\":false,\"maybe\":\"??\",\"nil\":null"
+        "}";
 
     REQUIRE(extract_int(payload, "int", 3) == 7);
+    REQUIRE(extract_int(payload, "intWs", 3) == 42);
+    REQUIRE(extract_int(payload, "intTab", 3) == 42);
+    REQUIRE(extract_int(payload, "partialInt", 3) == 3);
     REQUIRE(extract_int(payload, "badInt", 3) == 3);
     REQUIRE(extract_int(payload, "missing", 3) == 3);
     REQUIRE(extract_int(payload, "nil", 3) == 3);
 
     REQUIRE(extract_double(payload, "dbl", 2.0) == 1.25);
+    REQUIRE(extract_double(payload, "dblWs", 2.0) == 2.5);
+    REQUIRE(extract_double(payload, "dblTab", 2.0) == 2.5);
+    REQUIRE(extract_double(payload, "partialDbl", 2.0) == 2.0);
     REQUIRE(extract_double(payload, "badDbl", 2.0) == 2.0);
     REQUIRE(extract_double(payload, "missing", 2.0) == 2.0);
     REQUIRE(extract_double(payload, "nil", 2.0) == 2.0);

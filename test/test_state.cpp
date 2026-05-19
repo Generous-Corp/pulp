@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/events/event_loop.hpp>
+#include <pulp/state/binding.hpp>
 #include <pulp/state/state.hpp>
 #include <atomic>
 #include <chrono>
@@ -223,6 +224,22 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
     }
 }
 
+TEST_CASE("StateStore duplicate parameter ids resolve to latest registration",
+          "[state][store][coverage][phase3-github]") {
+    StateStore store;
+    store.add_parameter(make_param_info(7, "First", "dB", {-60.0f, 12.0f, -6.0f}));
+    store.add_parameter(make_param_info(7, "Second", "%", {0.0f, 100.0f, 25.0f}));
+
+    REQUIRE(store.param_count() == 2);
+    REQUIRE(store.all_params()[0].name == "First");
+    REQUIRE(store.all_params()[1].name == "Second");
+    REQUIRE(store.info(7)->name == "Second");
+    REQUIRE_THAT(store.get_value(7), WithinAbs(25.0f, 1e-6f));
+
+    store.set_value(7, 150.0f);
+    REQUIRE_THAT(store.get_value(7), WithinAbs(100.0f, 1e-6f));
+}
+
 TEST_CASE("StateStore serialization", "[state][serialize]") {
     StateStore store;
 
@@ -312,6 +329,24 @@ TEST_CASE("StateStore serialization records header fields and rejects future ver
     REQUIRE_THAT(target.get_value(10), WithinAbs(0.1, 0.001));
 }
 
+TEST_CASE("StateStore serialization honors explicit current schema version",
+          "[state][serialize][coverage][phase3]") {
+    StateStore source;
+    auto p = make_param_info(7, "Shape", "", {0.0f, 1.0f, 0.25f});
+    source.add_parameter(p);
+    source.set_state_version(4);
+    source.set_value(7, 0.75f);
+
+    auto data = source.serialize();
+    REQUIRE(read_u32_le(data, 4) == 4);
+
+    StateStore target;
+    target.add_parameter(p);
+    target.set_state_version(4);
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(7), WithinAbs(0.75, 0.001));
+}
+
 TEST_CASE("StateStore set_normalized clamps and quantizes via ParamRange",
           "[state][store][coverage][issue-646]") {
     StateStore store;
@@ -366,6 +401,20 @@ TEST_CASE("StateStore deserialize rejects bad magic and future versions",
     REQUIRE_THAT(store.get_value(1), WithinAbs(-12.0, 0.001));
 }
 
+TEST_CASE("StateStore deserialize rejects corrupted CRC without changing values",
+          "[state][serialize][coverage]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.set_value(1, -6.0f);
+
+    auto data = store.serialize();
+    data[data.size() - 1] ^= 0x7Fu;
+
+    store.set_value(1, -12.0f);
+    REQUIRE_FALSE(store.deserialize(data));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(-12.0, 0.001));
+}
+
 TEST_CASE("StateStore change listener", "[state][listener]") {
     StateStore store;
     store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
@@ -396,6 +445,23 @@ TEST_CASE("StateStore skips empty change listeners", "[state][listener][codecov]
 
     store.set_value(1, 0.75f);
     REQUIRE(calls == 1);
+}
+
+TEST_CASE("StateStore ignores unknown value writes without notifying listeners",
+          "[state][listener][coverage]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Known", "", {0.0f, 1.0f, 0.5f}));
+
+    int calls = 0;
+    store.add_listener([&](ParamID, float) { ++calls; });
+
+    store.set_value(999, 0.75f);
+    store.set_normalized(998, 0.25f);
+    store.set_mod_offset(997, 1.0f);
+    store.add_mod_offset(996, 1.0f);
+
+    REQUIRE(calls == 0);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.5, 0.001));
 }
 
 TEST_CASE("StateStore modulation offsets and default resets", "[state][store]") {
@@ -462,6 +528,43 @@ TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state
 
     REQUIRE(began == std::vector<ParamID>{2});
     REQUIRE(ended == std::vector<ParamID>{2});
+}
+
+TEST_CASE("StateStore preserves parameter display conversion callbacks",
+          "[state][store][coverage][phase3]") {
+    StateStore store;
+    ParamInfo info = make_param_info(7, "Frequency", "Hz", {20.0f, 20000.0f, 440.0f});
+    info.to_string = [](float value) {
+        return std::to_string(static_cast<int>(value)) + " Hz";
+    };
+    info.from_string = [](const std::string& value) {
+        return value == "concert" ? 440.0f : 20.0f;
+    };
+
+    store.add_parameter(info);
+    const auto* stored = store.info(7);
+    REQUIRE(stored != nullptr);
+    REQUIRE(stored->to_string);
+    REQUIRE(stored->from_string);
+    REQUIRE(stored->to_string(880.0f) == "880 Hz");
+    REQUIRE_THAT(stored->from_string("concert"), WithinAbs(440.0f, 0.001f));
+}
+
+TEST_CASE("StateStore unknown modulation writes are no-ops",
+          "[state][store][coverage][phase3]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {0.0f, 1.0f, 0.25f}));
+
+    store.set_mod_offset(999, 10.0f);
+    store.add_mod_offset(999, 10.0f);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(store.get_modulated(999), WithinAbs(0.0f, 0.001f));
+
+    store.set_mod_offset(1, 0.5f);
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.75f, 0.001f));
+    store.reset_all_mod();
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(0.25f, 0.001f));
 }
 
 TEST_CASE("ParamRange ignores negative step and still clamps output",
@@ -541,6 +644,152 @@ TEST_CASE("StateStore gesture callbacks can be replaced and cleared",
 
     REQUIRE(began == std::vector<ParamID>{11});
     REQUIRE(ended == std::vector<ParamID>{11});
+}
+
+TEST_CASE("Binding handles unbound and polled parameter changes",
+          "[state][binding][coverage][phase3-large]") {
+    Binding empty;
+    REQUIRE_FALSE(empty.is_bound());
+    REQUIRE(empty.id() == 0);
+    REQUIRE(empty.info() == nullptr);
+    REQUIRE(empty.get() == 0.0f);
+    REQUIRE(empty.get_normalized() == 0.0f);
+    REQUIRE_FALSE(empty.poll());
+    REQUIRE(empty.edit_history() == nullptr);
+    REQUIRE_NOTHROW(empty.set(1.0f));
+    REQUIRE_NOTHROW(empty.set_normalized(0.5f));
+    REQUIRE_NOTHROW(empty.reset());
+
+    StateStore store;
+    store.add_parameter(make_param_info(7, "Level", "dB", {-60.0f, 6.0f, -12.0f}));
+
+    Binding binding(store, 7);
+    std::vector<float> notified;
+    binding.on_change([&](float value) { notified.push_back(value); });
+
+    REQUIRE(binding.is_bound());
+    REQUIRE(binding.id() == 7);
+    REQUIRE(binding.info() != nullptr);
+    REQUIRE(binding.info()->name == "Level");
+    REQUIRE_THAT(binding.get(), WithinAbs(-12.0, 0.001));
+
+    REQUIRE(binding.poll());
+    REQUIRE_THAT(notified.back(), WithinAbs(-12.0, 0.001));
+    REQUIRE_FALSE(binding.poll());
+
+    binding.set(-6.0f);
+    REQUIRE_THAT(store.get_value(7), WithinAbs(-6.0, 0.001));
+    REQUIRE_THAT(notified.back(), WithinAbs(-6.0, 0.001));
+
+    notified.clear();
+    store.set_value(7, 3.0f);
+    REQUIRE(binding.poll());
+    REQUIRE(notified.size() == 1);
+    REQUIRE_THAT(notified[0], WithinAbs(3.0, 0.001));
+
+    binding.reset();
+    REQUIRE_THAT(store.get_value(7), WithinAbs(-12.0, 0.001));
+    REQUIRE_THAT(notified.back(), WithinAbs(-12.0, 0.001));
+}
+
+TEST_CASE("Binding gesture end records undoable parameter edits",
+          "[state][binding][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(9, "Mix", "%", {0.0f, 100.0f, 50.0f}));
+
+    Binding binding(store, 9);
+    EditHistory history;
+    binding.set_edit_history(&history);
+    REQUIRE(binding.edit_history() == &history);
+
+    binding.begin_gesture();
+    binding.set(75.0f);
+    binding.end_gesture();
+
+    REQUIRE(history.can_undo());
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo_description() == "Mix");
+    REQUIRE_THAT(store.get_value(9), WithinAbs(75.0, 0.001));
+
+    REQUIRE(history.undo());
+    REQUIRE_THAT(store.get_value(9), WithinAbs(50.0, 0.001));
+    REQUIRE(history.redo());
+    REQUIRE_THAT(store.get_value(9), WithinAbs(75.0, 0.001));
+
+    const auto before = history.undo_count();
+    binding.begin_gesture();
+    binding.set(75.0f);
+    binding.end_gesture();
+    REQUIRE(history.undo_count() == before);
+}
+
+TEST_CASE("EditHistory trims depth clears redo and toggles coalescing",
+          "[state][edit-history][coverage][phase3-large]") {
+    EditHistory history(2);
+    int value = 0;
+
+    history.perform([&] { value = 1; }, [&] { value = 0; }, "one");
+    history.perform([&] { value = 2; }, [&] { value = 1; }, "two");
+    history.perform([&] { value = 3; }, [&] { value = 2; }, "three");
+
+    REQUIRE(value == 3);
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo_description() == "three");
+    REQUIRE(history.max_depth() == 2);
+
+    REQUIRE(history.undo());
+    REQUIRE(value == 2);
+    REQUIRE(history.can_redo());
+
+    history.perform([&] { value = 4; }, [&] { value = 2; }, "four");
+    REQUIRE(value == 4);
+    REQUIRE_FALSE(history.can_redo());
+
+    history.set_coalesce(false);
+    history.perform([&] { value = 5; }, [&] { value = 4; }, "same");
+    history.perform([&] { value = 6; }, [&] { value = 5; }, "same");
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo_description() == "same");
+
+    history.clear();
+    REQUIRE_FALSE(history.can_undo());
+    REQUIRE_FALSE(history.can_redo());
+    REQUIRE(history.undo_description().empty());
+}
+
+TEST_CASE("EditHistory coalesces matching descriptions and clamps max depth",
+          "[state][edit-history][coverage][phase3-large]") {
+    EditHistory history(4);
+    int value = 0;
+
+    history.perform([&] { value = 1; }, [&] { value = 0; }, "gain");
+    history.perform([&] { value = 2; }, [&] { value = 1; }, "gain");
+    REQUIRE(value == 2);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo_description() == "gain");
+
+    REQUIRE(history.undo());
+    REQUIRE(value == 1);
+    REQUIRE(history.redo());
+    REQUIRE(value == 2);
+
+    history.set_max_depth(0);
+    REQUIRE(history.max_depth() == 0);
+    REQUIRE_FALSE(history.can_undo());
+}
+
+TEST_CASE("StateStore unknown modulation and reset calls are inert",
+          "[state][store][coverage][phase3-github]") {
+    StateStore store;
+    store.add_parameter(make_param_info(3, "Depth", "", {0.0f, 1.0f, 0.25f}));
+
+    store.set_mod_offset(404, 3.0f);
+    store.add_mod_offset(404, 2.0f);
+    REQUIRE_THAT(store.get_modulated(404), WithinAbs(0.0f, 1e-6f));
+
+    store.reset_to_default(404);
+    store.reset_all_to_defaults();
+    REQUIRE_THAT(store.get_value(3), WithinAbs(0.25f, 1e-6f));
 }
 
 TEST_CASE("StateStore deserialize keeps complete prefix on short declared count",
@@ -809,6 +1058,87 @@ TEST_CASE("Queued Main callback is cancelled by token reset (Codex P1 PR#2270)",
     REQUIRE_FALSE(callback_fired.load(std::memory_order_acquire));
 
     store.set_main_loop(nullptr);
+}
+
+TEST_CASE("StateStore reset all defaults notifies each registered parameter",
+          "[state][store][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "A", "", {0.0f, 10.0f, 1.0f}));
+    store.add_parameter(make_param_info(2, "B", "", {-1.0f, 1.0f, 0.0f}));
+
+    store.set_value(1, 5.0f);
+    store.set_value(2, 0.5f);
+
+    std::vector<ParamID> changed;
+    store.add_listener([&](ParamID id, float) { changed.push_back(id); });
+
+    store.reset_all_to_defaults();
+
+    REQUIRE(changed == std::vector<ParamID>{1, 2});
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("StateStore custom state version is serialized and accepted",
+          "[state][serialize][coverage][phase3-large]") {
+    StateStore source;
+    source.set_state_version(3);
+    source.add_parameter(make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f}));
+    source.set_value(10, 0.75f);
+
+    auto data = source.serialize();
+    REQUIRE(read_u32_le(data, 4) == 3);
+
+    StateStore target;
+    target.set_state_version(3);
+    target.add_parameter(make_param_info(10, "Drive", "", {0.0f, 1.0f, 0.25f}));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(10), WithinAbs(0.75f, 0.001f));
+}
+
+TEST_CASE("StateStore serializes custom state version",
+          "[state][serialize][coverage][phase3-large]") {
+    StateStore store;
+    store.set_state_version(7);
+    store.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    store.set_value(42, 64.0f);
+
+    auto data = store.serialize();
+
+    REQUIRE(read_u32_le(data, 4) == 7);
+    REQUIRE(read_u32_le(data, 8) == 1);
+    REQUIRE(read_u32_le(data, 12) == 42);
+
+    StateStore target;
+    target.set_state_version(7);
+    target.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(42), WithinAbs(64.0, 0.001));
+}
+
+TEST_CASE("StateStore reset_all_to_defaults notifies in registration order",
+          "[state][listener][coverage][phase3-large]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param_info(2, "Mix", "", {0.0f, 100.0f, 50.0f}));
+    store.set_value(1, -12.0f);
+    store.set_value(2, 75.0f);
+
+    std::vector<ParamID> ids;
+    std::vector<float> values;
+    store.add_listener([&](ParamID id, float value) {
+        ids.push_back(id);
+        values.push_back(value);
+    });
+
+    store.reset_all_to_defaults();
+
+    REQUIRE(ids == std::vector<ParamID>{1, 2});
+    REQUIRE(values.size() == 2);
+    REQUIRE_THAT(values[0], WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(values[1], WithinAbs(50.0, 0.001));
 }
 
 // ─── set_value_rt + pump_listeners (Slice 2) ────────────────────────────────

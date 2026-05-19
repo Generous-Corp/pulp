@@ -25,6 +25,15 @@ TEST_CASE("SHA-256 binary data", "[crypto][sha256]") {
     REQUIRE(digest.size() == 32);
 }
 
+TEST_CASE("SHA-256 pointer hex overload handles empty input",
+          "[crypto][sha256][coverage][phase3-batch742]") {
+    auto digest = sha256(nullptr, 0);
+    auto hex = sha256_hex(nullptr, 0);
+
+    REQUIRE(digest.size() == 32);
+    REQUIRE(hex == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+}
+
 TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
           "[crypto][sha256][coverage][issue-641]") {
     const std::vector<uint8_t> data = {'a', 'b', 'c', 0x00, 'd', 'e', 'f'};
@@ -41,6 +50,15 @@ TEST_CASE("SHA-256 pointer overload preserves embedded NUL bytes",
 
 // ── SHA-1 ───────────────────────────────────────────────────────────────
 
+TEST_CASE("SHA-1 empty string", "[crypto][sha1][coverage][phase3-batch742]") {
+    const std::vector<uint8_t> expected = {
+        0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
+        0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
+    };
+
+    REQUIRE(sha1("") == expected);
+}
+
 TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
     auto digest = sha1("hello");
     const std::vector<uint8_t> expected = {
@@ -49,6 +67,15 @@ TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
     };
 
     REQUIRE(digest == expected);
+}
+
+TEST_CASE("SHA-1 empty input matches known digest", "[crypto][sha1][coverage]") {
+    const std::vector<uint8_t> expected = {
+        0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
+        0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09,
+    };
+
+    REQUIRE(sha1("") == expected);
 }
 
 TEST_CASE("SHA-1 pointer overload preserves embedded NUL bytes",
@@ -74,6 +101,16 @@ TEST_CASE("MD5 known value", "[crypto][md5]") {
     REQUIRE(hex == "5d41402abc4b2a76b9719d911017c592");
 }
 
+TEST_CASE("MD5 pointer overload handles empty input",
+          "[crypto][md5][coverage][phase3-batch742]") {
+    const std::vector<uint8_t> expected = {
+        0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
+        0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e,
+    };
+
+    REQUIRE(md5(nullptr, 0) == expected);
+}
+
 TEST_CASE("MD5 binary data returns raw digest bytes",
           "[crypto][md5][coverage][issue-641]") {
     const std::vector<uint8_t> data = {0x00, 0xff, 0x10, 0x20, 0x00};
@@ -83,6 +120,16 @@ TEST_CASE("MD5 binary data returns raw digest bytes",
     };
 
     REQUIRE(md5(data.data(), data.size()) == expected);
+}
+
+TEST_CASE("MD5 hex string_view preserves embedded NUL bytes",
+          "[crypto][md5][coverage][phase3-large]") {
+    std::string payload = "abc";
+    payload.push_back('\0');
+    payload += "def";
+
+    REQUIRE(md5_hex(std::string_view(payload.data(), payload.size())) ==
+            "a5e4d5963ae44c1f4bfb37b1a3d55a3c");
 }
 
 // ── AES-256-CBC ─────────────────────────────────────────────────────────
@@ -141,6 +188,23 @@ TEST_CASE("AES binary plaintext preserves embedded zero bytes",
     REQUIRE(*decrypted == plaintext);
 }
 
+TEST_CASE("AES one-byte plaintext round-trips with padding",
+          "[crypto][aes][coverage][phase3-batch742]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+    std::memset(key, 0x11, 32);
+    std::memset(iv, 0x22, 16);
+
+    const uint8_t plaintext[] = {0x7b};
+    auto encrypted = aes_encrypt(plaintext, sizeof(plaintext), key, iv);
+    REQUIRE(encrypted.has_value());
+    REQUIRE(encrypted->size() == 16);
+
+    auto decrypted = aes_decrypt(encrypted->data(), encrypted->size(), key, iv);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(*decrypted == std::vector<uint8_t>{0x7b});
+}
+
 TEST_CASE("AES exact block plaintext adds and removes full padding block",
           "[crypto][aes][coverage][issue-641]") {
     uint8_t key[32] = {};
@@ -188,6 +252,21 @@ TEST_CASE("AES decrypt rejects empty ciphertext",
     uint8_t iv[16] = {};
 
     auto result = aes_decrypt(nullptr, 0, key, iv);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("AES decrypt rejects explicit zero padding byte",
+          "[crypto][aes][coverage][phase3-batch742]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+
+    auto encrypted = aes_encrypt(nullptr, 0, key, iv);
+    REQUIRE(encrypted.has_value());
+
+    uint8_t tampered_iv[16] = {};
+    tampered_iv[15] = 0x10;
+
+    auto result = aes_decrypt(encrypted->data(), encrypted->size(), key, tampered_iv);
     REQUIRE_FALSE(result.has_value());
 }
 

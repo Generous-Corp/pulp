@@ -135,6 +135,24 @@ TEST_CASE("MotionPreferences on_policy_changed fires on override transition",
     REQUIRE(seen.back() == prefs.policy());
 }
 
+TEST_CASE("MotionPreferences policy callback may re-enter preferences",
+          "[motion-preferences][coverage][phase3]") {
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+    prefs.set_override(MotionPolicy::Full);
+
+    std::vector<MotionPolicy> seen;
+    prefs.on_policy_changed([&](MotionPolicy p) {
+        seen.push_back(p);
+        prefs.set_duration_scale(p == MotionPolicy::Reduced ? 0.25 : 1.0);
+    });
+
+    prefs.set_override(MotionPolicy::Reduced);
+
+    REQUIRE(seen == std::vector<MotionPolicy>{MotionPolicy::Reduced});
+    REQUIRE(prefs.duration_scale() == Approx(0.25));
+}
+
 TEST_CASE("MotionPreferences poll is a no-op while override is set",
           "[motion-preferences]") {
     PrefsScope scope;
@@ -154,6 +172,27 @@ TEST_CASE("motion_policy_to_string / from_string round-trip",
     REQUIRE(motion_policy_from_string("reduced") == MotionPolicy::Reduced);
     REQUIRE(motion_policy_from_string("off") == MotionPolicy::Off);
     REQUIRE(motion_policy_from_string("bogus") == MotionPolicy::Full);
+}
+
+TEST_CASE("apply_motion_policy_to_duration follows override and scale",
+          "[motion-preferences][coverage][phase3]") {
+    using namespace pulp::view;
+    PrefsScope scope;
+    auto& prefs = MotionPreferences::instance();
+
+    prefs.set_override(MotionPolicy::Full);
+    prefs.set_duration_scale(0.25);
+    REQUIRE(apply_motion_policy_to_duration(2.0f) == Approx(2.0f));
+    REQUIRE_FALSE(motion_policy_is_off());
+
+    prefs.set_override(MotionPolicy::Reduced);
+    REQUIRE(apply_motion_policy_to_duration(2.0f) == Approx(0.5f));
+    REQUIRE(apply_motion_policy_to_duration(-2.0f) == Approx(-0.5f));
+    REQUIRE_FALSE(motion_policy_is_off());
+
+    prefs.set_override(MotionPolicy::Off);
+    REQUIRE(apply_motion_policy_to_duration(2.0f) == Approx(0.0f));
+    REQUIRE(motion_policy_is_off());
 }
 
 // ── Tween honors MotionPolicy ────────────────────────────────────────

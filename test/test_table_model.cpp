@@ -70,6 +70,35 @@ TEST_CASE("sort_by falls back to text when numeric keys are mixed",
     REQUIRE(m.cell(2, 0).text == "2");
 }
 
+TEST_CASE("sort_by preserves insertion order for equal sort keys",
+          "[ui][table-model][coverage][phase3]") {
+    TableModel m;
+    m.add_column({"Name"});
+    m.add_column({"Rank"});
+    m.add_row({{"First"}, {"A", 1.0}});
+    m.add_row({{"Second"}, {"B", 1.0}});
+    m.add_row({{"Third"}, {"C", 2.0}});
+
+    m.sort_by(1, TableSortOrder::Ascending);
+
+    REQUIRE(m.cell(0, 0).text == "First");
+    REQUIRE(m.cell(1, 0).text == "Second");
+    REQUIRE(m.cell(2, 0).text == "Third");
+}
+
+TEST_CASE("sort_by None records state without reordering rows",
+          "[ui][table-model][coverage][phase3]") {
+    auto m = make_preset_table();
+
+    m.sort_by(0, TableSortOrder::None);
+
+    REQUIRE(m.sort_column() == 0);
+    REQUIRE(m.sort_order() == TableSortOrder::None);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(2, 0).text == "Lush");
+}
+
 TEST_CASE("toggle_sort cycles ascending -> descending -> none",
           "[ui][table-model]") {
     auto m = make_preset_table();
@@ -208,4 +237,24 @@ TEST_CASE("add_column pads existing rows", "[ui][table-model][issue-493]") {
     REQUIRE(m.cell(1, 0).text == "Stab");
     REQUIRE(m.cell(0, 1).text.empty());
     REQUIRE(m.cell(1, 1).text.empty());
+}
+
+TEST_CASE("adding a column after short rows preserves padded cells",
+          "[ui][table-model][coverage][phase3]") {
+    TableModel m;
+    m.add_column({"Name"});
+    m.add_column({"Author"});
+    m.add_row({{"Dreamy Pad"}});
+    m.add_row({{"Stab"}, {"Bob"}});
+
+    m.add_column({"Rating"});
+
+    REQUIRE(m.column_count() == 3);
+    REQUIRE(m.row_count() == 2);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(0, 1).text.empty());
+    REQUIRE(m.cell(0, 2).text.empty());
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(1, 1).text == "Bob");
+    REQUIRE(m.cell(1, 2).text.empty());
 }

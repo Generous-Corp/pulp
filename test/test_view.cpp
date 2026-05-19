@@ -1279,6 +1279,10 @@ TEST_CASE("LiveConstantRegistry registers reuses clamps and resets constants",
     registry.reset("phase3.live.gain");
     REQUIRE(registry.get("phase3.live.gain") == Catch::Approx(0.25f));
 
+    registry.set("phase3.live.gain", 0.75f);
+    registry.reset_all();
+    REQUIRE(registry.get("phase3.live.gain") == Catch::Approx(0.25f));
+
     registry.reset("phase3.live.missing");
     registry.set("phase3.live.missing", 0.5f);
     REQUIRE(registry.get("phase3.live.missing") == Catch::Approx(0.0f));

@@ -115,6 +115,13 @@ TEST_CASE("Uuid parsing rejects malformed dashed layout",
     REQUIRE(parsed.is_nil());
 }
 
+TEST_CASE("Uuid parsing rejects dashed strings with empty groups",
+          "[runtime][identity][coverage][phase3-batch742]") {
+    REQUIRE(Uuid::from_string("-0112233-4455-6677-8899-aabbccddeeff").is_nil());
+    REQUIRE(Uuid::from_string("00112233--455-6677-8899-aabbccddeeff").is_nil());
+    REQUIRE(Uuid::from_string("00112233-4455-6677-8899-aabbccddee-").is_nil());
+}
+
 TEST_CASE("Uuid parsing accepts uppercase dashed and compact hex",
           "[runtime][identity][issue-641]") {
     Uuid id;
@@ -215,6 +222,14 @@ TEST_CASE("Typed identity nil and hashing are stable", "[runtime][identity][issu
     REQUIRE(objects.size() == 1);
 }
 
+TEST_CASE("Typed identity nil strings use canonical uuid format",
+          "[runtime][identity][coverage][phase3-batch742]") {
+    REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(ObjectId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(CorrelationId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+}
+
 TEST_CASE("Typed identity wrappers compare and hash deterministic values",
           "[runtime][identity][coverage][phase3]") {
     auto first = ObjectId::from_string("00000000-0000-0000-0000-000000000001");
@@ -260,6 +275,59 @@ TEST_CASE("Typed transient identity wrappers hash deterministic values",
     correlations.insert(correlation);
     correlations.insert(CorrelationId{Uuid::from_string(correlation.to_string())});
     REQUIRE(correlations.size() == 1);
+}
+
+TEST_CASE("Transient identity wrappers hash deterministic values",
+          "[runtime][identity][coverage][phase3]") {
+    const Uuid first_uuid{0x1000, 0x2000};
+    const Uuid second_uuid{0x1000, 0x2001};
+    const RunId first_run{first_uuid};
+    const RunId second_run{second_uuid};
+    const CorrelationId first_correlation{first_uuid};
+    const CorrelationId second_correlation{second_uuid};
+
+    std::unordered_set<RunId> runs;
+    runs.insert(first_run);
+    runs.insert(first_run);
+    runs.insert(second_run);
+    REQUIRE(runs.size() == 2);
+    REQUIRE(first_run != second_run);
+
+    std::unordered_set<CorrelationId> correlations;
+    correlations.insert(first_correlation);
+    correlations.insert(second_correlation);
+    correlations.insert(first_correlation);
+    REQUIRE(correlations.size() == 2);
+    REQUIRE(first_correlation != second_correlation);
+}
+
+TEST_CASE("Typed identity generated strings parse back where supported",
+          "[runtime][identity][coverage][phase3-batch742]") {
+    auto object = ObjectId::generate();
+
+    REQUIRE_FALSE(object.is_nil());
+    REQUIRE(ObjectId::from_string(object.to_string()) == object);
+}
+
+TEST_CASE("Typed transient identities hash and stringify nil values",
+          "[runtime][identity][coverage]") {
+    std::unordered_set<SessionId> sessions;
+    std::unordered_set<RunId> runs;
+    std::unordered_set<CorrelationId> correlations;
+
+    sessions.insert(SessionId::nil());
+    sessions.insert(SessionId::nil());
+    runs.insert(RunId::nil());
+    runs.insert(RunId::nil());
+    correlations.insert(CorrelationId::nil());
+    correlations.insert(CorrelationId::nil());
+
+    REQUIRE(sessions.size() == 1);
+    REQUIRE(runs.size() == 1);
+    REQUIRE(correlations.size() == 1);
+    REQUIRE(SessionId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(RunId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
+    REQUIRE(CorrelationId::nil().to_string() == "00000000-0000-0000-0000-000000000000");
 }
 
 TEST_CASE("EventEnvelope defaults are nil and empty before attribution",

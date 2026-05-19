@@ -35,6 +35,7 @@ void AsyncStream::on_drain(AsyncCloseCallback cb) { on_drain_ = std::move(cb); }
 void AsyncStream::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) return;
+    if (token_.is_cancelled()) token_ = CancellationToken();
     running_ = true;
     close_fired_ = false;
     writer_thread_ = std::thread([this] { write_loop(); });
@@ -75,6 +76,10 @@ bool AsyncStream::write_async(const std::uint8_t* data, std::size_t size,
                               AsyncWriteCallback callback) {
     if (size == 0) {
         if (callback) dispatch([cb = std::move(callback)] { cb(0, StreamError::Ok); });
+        return true;
+    }
+    if (data == nullptr) {
+        if (callback) dispatch([cb = std::move(callback)] { cb(0, StreamError::Invalid); });
         return true;
     }
 

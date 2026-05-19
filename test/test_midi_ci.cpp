@@ -368,6 +368,29 @@ TEST_CASE("CiDiscovery profile callback reports enable and disable",
     REQUIRE(ci.profiles()[0].channel_count == 4);
 }
 
+TEST_CASE("CiDiscovery profile enable and disable repeat notifications are explicit",
+          "[midi][ci][coverage]") {
+    CiDiscovery ci;
+    ProfileId profile{0x04, 0x05, 0x06, 0x07, 0x00};
+    ci.add_profile({profile, false, 2});
+
+    std::vector<bool> states;
+    ci.on_profile_changed = [&](const ProfileId& id, bool enabled) {
+        REQUIRE(id == profile);
+        states.push_back(enabled);
+    };
+
+    REQUIRE(ci.enable_profile(profile));
+    REQUIRE(ci.enable_profile(profile));
+    REQUIRE(ci.profiles()[0].enabled);
+
+    REQUIRE(ci.disable_profile(profile));
+    REQUIRE(ci.disable_profile(profile));
+    REQUIRE_FALSE(ci.profiles()[0].enabled);
+
+    REQUIRE(states == std::vector<bool>{true, true, false, false});
+}
+
 TEST_CASE("CiDiscovery property exchange", "[midi][ci]") {
     CiDiscovery ci;
 

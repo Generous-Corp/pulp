@@ -31,7 +31,15 @@ void Theme::apply_overrides(const Theme& overrides) {
 
 static Color parse_hex_color(const std::string& hex) {
     if (hex.empty() || hex[0] != '#') return {};
-    auto val = std::stoul(hex.substr(1), nullptr, 16);
+    uint32_t val = 0;
+    try {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoul(hex.substr(1), &consumed, 16);
+        if (consumed != hex.size() - 1 || parsed > 0xFFFFFFFFu) return {};
+        val = static_cast<uint32_t>(parsed);
+    } catch (...) {
+        return {};
+    }
     if (hex.size() == 7) return color_from_hex(static_cast<uint32_t>(val));
     if (hex.size() == 9) return color_from_hex_alpha(static_cast<uint32_t>(val));
     return {};

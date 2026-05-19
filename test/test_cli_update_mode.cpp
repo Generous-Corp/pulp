@@ -95,6 +95,13 @@ TEST_CASE("parse_snooze tolerates whitespace and trailing content",
     REQUIRE(um::parse_snooze("-5") == -5);
 }
 
+TEST_CASE("parse_snooze starts at the first numeric run",
+          "[cli][update-mode][coverage][phase3]") {
+    REQUIRE(um::parse_snooze("expires: 1700000000") == 1'700'000'000);
+    REQUIRE(um::parse_snooze("abc -42 trailing 99") == -42);
+    REQUIRE(um::parse_snooze("12 34") == 12);
+}
+
 TEST_CASE("parse_snooze returns 0 on malformed input (failure-open)",
           "[cli][update-mode][issue-550]") {
     REQUIRE(um::parse_snooze("") == 0);
