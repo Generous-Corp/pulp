@@ -13,10 +13,11 @@ name: Source-tree pollution check
 
 on:
   pull_request:
+    # Companion-track U-1: trigger on every PR so the root-allowlist
+    # check catches new top-level paths regardless of which files
+    # changed. The check is cheap (~5s) — no point gating it.
     paths:
-      - 'CMakeLists.txt'
-      - 'pulp.toml'
-      - 'tools/scripts/source_tree_pollution_check.py'
+      - '**'
 
 permissions:
   contents: read
@@ -45,3 +46,13 @@ jobs:
           fi
           python3 tools/scripts/source_tree_pollution_check.py \
             --mode=push --base "$base"
+
+      - name: Run root-allowlist check
+        # Companion-track U-1: catches new top-level paths that aren't
+        # in tools/scripts/source_tree_pollution_check.py's
+        # ALLOWED_ROOT_PATHS. Almost always either a stray fixture, a
+        # mis-placed module, or an intentional new entry whose
+        # allowlist update was forgotten.
+        run: |
+          python3 tools/scripts/source_tree_pollution_check.py \
+            --mode=root-allowlist --rev HEAD

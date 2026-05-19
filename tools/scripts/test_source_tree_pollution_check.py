@@ -154,5 +154,101 @@ class SourceTreePollutionTests(unittest.TestCase):
         self.assertIn("pulp.toml", result.stderr)
 
 
+class RootAllowlistTests(unittest.TestCase):
+    """Companion-track U-1 — tests for --mode=root-allowlist."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="pulp-pollution-root-test-")
+        self.cwd = os.getcwd()
+        os.chdir(self.tmpdir)
+        # Initialize a real git repo so `git ls-tree HEAD` resolves.
+        subprocess.run(["git", "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], check=True)
+
+    def tearDown(self) -> None:
+        os.chdir(self.cwd)
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _commit_allowlisted_only(self) -> None:
+        # Create a minimal allowlisted root: just CMakeLists.txt + README.md.
+        Path("CMakeLists.txt").write_text(
+            "project(Pulp VERSION 0.1.0 LANGUAGES CXX)\n"
+        )
+        Path("README.md").write_text("# Pulp\n")
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], check=True)
+
+    def _run_root_allowlist(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--mode=root-allowlist",
+             "--rev", "HEAD"],
+            capture_output=True, text=True, check=False,
+        )
+
+    def test_allowlisted_root_passes(self) -> None:
+        self._commit_allowlisted_only()
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_stray_top_level_file_blocks(self) -> None:
+        self._commit_allowlisted_only()
+        Path("screenshot.png").write_bytes(b"\x89PNG")
+        subprocess.run(["git", "add", "screenshot.png"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add stray"], check=True)
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("screenshot.png", result.stderr)
+        self.assertIn("unexpected top-level path", result.stderr)
+        self.assertIn("ALLOWED_ROOT_PATHS", result.stderr)
+
+    def test_stray_top_level_dir_blocks(self) -> None:
+        self._commit_allowlisted_only()
+        Path("misplaced_module").mkdir()
+        Path("misplaced_module/main.cpp").write_text("int main() {}\n")
+        subprocess.run(["git", "add", "misplaced_module"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add dir"], check=True)
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("misplaced_module", result.stderr)
+
+    def test_handles_missing_rev_with_block(self) -> None:
+        """git ls-tree failure → hard block (consistent with #1761 posture)."""
+        # Fresh git repo with no commits → HEAD doesn't resolve.
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("git ls-tree", result.stderr)
+
+    def test_skips_blank_lines_in_ls_tree_output(self) -> None:
+        """Empty entries in `git ls-tree` output should be ignored without
+        crashing. Exercises the `if not name: continue` branch directly —
+        git in practice doesn't emit blanks, but the script defends against
+        it because `splitlines()` on edge inputs can.
+        """
+        # Import the function and stub subprocess.run to return blank lines
+        # interleaved with one allowlisted entry. Confirms (a) blanks are
+        # skipped without error, and (b) the allowlisted entry still passes.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("stpc", str(SCRIPT))
+        stpc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stpc)
+
+        # Use a class with the subprocess.CompletedProcess shape.
+        class FakeResult:
+            returncode = 0
+            stdout = "\n\nREADME.md\n\n   \nCMakeLists.txt\n"
+            stderr = ""
+
+        orig_run = stpc.subprocess.run
+        stpc.subprocess.run = lambda *a, **kw: FakeResult()
+        try:
+            errors = stpc.check_root_allowlist("HEAD")
+        finally:
+            stpc.subprocess.run = orig_run
+        # README.md and CMakeLists.txt are allowlisted, blanks are skipped.
+        self.assertEqual(errors, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
