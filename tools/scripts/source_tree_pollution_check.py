@@ -65,6 +65,7 @@ ALLOWED_ROOT_PATHS = frozenset({
     ".agents",
     ".claude",
     ".claude-plugin",
+    ".clang-format",
     ".gitattributes",
     ".githooks",
     ".github",
