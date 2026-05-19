@@ -10456,3 +10456,15 @@ child process"` (5 assertions / 1 case), `./build/test/pulp-test-child-process
 "[phase3]"` (13 assertions / 3 cases), and `git diff --check`. The batch now
 has 25 local coverage commits plus main merges and remains current with
 `origin/main`; continue accumulating locally while #2268 runs.
+
+2026-05-19 00:09 PDT: added `bdf57cfca` (`test(platform): cover zero child
+process output cap`) to `feature/phase3-codecov-runtime-state-batch-752`. This
+covers `ProcessOptions::max_output_bytes = 0`, asserting the child-process
+pipe drains still complete successfully while stdout/stderr captures and line
+callbacks remain empty for both streams. Focused local validation passed:
+`cmake --build build --target pulp-test-child-process -j4`,
+`./build/test/pulp-test-child-process "zero max output bytes drains without
+capturing lines"` (5 assertions / 1 case), `./build/test/pulp-test-child-process
+"[phase3]"` (18 assertions / 4 cases), and `git diff --check`. The batch now
+has 26 local coverage commits plus main merges and remains current with
+`origin/main`; continue accumulating locally while #2268 runs.
