@@ -9203,3 +9203,21 @@ parser errors before registry mutation. Focused local validation passed:
 and `"[cli][shellout][projects][coverage][phase3]"` (13 assertions), plus
 `git diff --check`. Batch 748 is clean, local-only, and now 19 commits ahead;
 continue accumulating toward the 24-36 commit PR threshold.
+
+2026-05-18 17:32 PDT: rebased held batch `feature/phase3-codecov-batch-748`
+onto current `origin/main` (`c1f606ccf`) and completed the lower-bound large
+batch target at 24 local commits. Current rebased range is `1951259e4` through
+`4428353f1`, covering CLI parser/coverage fixes for inspect, validate, docs,
+macos, overflow, audio, host/scan, ship, create/sdk/upgrade, design, operator,
+dev, package, cache, misc, doctor, config, projects, loop, project pin/unpin,
+`pulp pr --native`, and `pulp build --js-engine`. Broad local validation passed
+after rebase: `cmake --build build --target pulp-cli pulp-test-cli-shellout
+pulp-test-cli-package-commands pulp-test-cli-ship-shellout`; then
+`build/test/pulp-test-cli-shellout` over the affected Phase 3 CLI filters
+(394 assertions in 20 test cases), `build/test/pulp-test-cli-package-commands
+"[cli][package-commands]"` (238 assertions in 14 test cases),
+`build/test/pulp-test-cli-ship-shellout
+"[cli][shellout][ship][coverage][phase3]"` (1 assertion), and
+`git diff --check`. Next action: submit this as a single large GitHub/Shipyard
+PR rather than splitting into smaller CI-expensive PRs, then monitor to green
+without empty rerun commits.
