@@ -336,6 +336,30 @@ TEST_CASE("line callback buffers partial stderr without trailing newline",
     REQUIRE(stderr_lines.empty());
 }
 
+TEST_CASE("move assignment transfers a running child process",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=moved & exit /b 0"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf moved"}));
+#endif
+
+    ChildProcess moved;
+    moved = std::move(cp);
+
+    auto r = moved.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+#ifdef _WIN32
+    REQUIRE(r.stdout_output.find("moved") != std::string::npos);
+#else
+    REQUIRE(r.stdout_output == "moved");
+#endif
+}
+
 TEST_CASE("wait is idempotent after process completion",
           "[child_process][edge][issue-640]") {
     ChildProcess cp;
