@@ -13,10 +13,12 @@
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/socket.hpp>
 #include <pulp/runtime/text_diff.hpp>
 #include "../external/cpp-httplib/httplib.h"
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -56,6 +58,73 @@ const char* system_library_symbol() {
 #else
     return "malloc";
 #endif
+}
+
+struct OneShotHttpResponse {
+    HttpResponse response;
+    std::string request;
+    bool accepted = false;
+};
+
+OneShotHttpResponse serve_one_http_response(std::string_view method,
+                                            std::string_view path,
+                                            std::string_view body = {}) {
+    Socket server;
+    REQUIRE(server.create(SocketType::TCP));
+    REQUIRE(server.bind("127.0.0.1", 0));
+    REQUIRE(server.listen(1));
+    const auto port = server.local_port();
+    REQUIRE(port != 0);
+
+    OneShotHttpResponse exchange;
+    std::thread worker([&] {
+        auto client = server.accept();
+        if (!client) return;
+
+        exchange.accepted = true;
+        std::array<std::uint8_t, 2048> buffer{};
+        while (true) {
+            const auto received = client->receive(buffer.data(), buffer.size());
+            if (received <= 0) break;
+            exchange.request.append(reinterpret_cast<const char*>(buffer.data()),
+                                    static_cast<std::size_t>(received));
+
+            const auto header_end = exchange.request.find("\r\n\r\n");
+            if (header_end == std::string::npos) continue;
+
+            std::size_t expected_body_size = 0;
+            const auto length_key = std::string("Content-Length: ");
+            const auto length_pos = exchange.request.find(length_key);
+            if (length_pos != std::string::npos) {
+                const auto start = length_pos + length_key.size();
+                const auto end = exchange.request.find("\r\n", start);
+                expected_body_size =
+                    static_cast<std::size_t>(std::stoul(exchange.request.substr(start, end - start)));
+            }
+
+            const auto body_size = exchange.request.size() - (header_end + 4);
+            if (body_size >= expected_body_size) break;
+        }
+
+        const std::string payload = "ok-response";
+        const std::string wire_response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "X-Pulp-Test: loopback\r\n"
+            "Content-Length: " + std::to_string(payload.size()) + "\r\n"
+            "Connection: close\r\n\r\n" + payload;
+        (void)client->send(wire_response);
+    });
+
+    const auto url = "http://127.0.0.1:" + std::to_string(port) + std::string(path);
+    if (method == "POST") {
+        exchange.response = http_post(url, body, "application/json", 2);
+    } else {
+        exchange.response = http_get(url, 2);
+    }
+
+    worker.join();
+    return exchange;
 }
 
 }  // namespace
@@ -1539,6 +1608,33 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
         std::filesystem::remove_all(blocked_path);
     });
     REQUIRE_FALSE(http_download(base + "/download", blocked_path.string(), 2));
+}
+
+TEST_CASE("HTTP helpers copy successful GET status body and headers",
+          "[runtime][http][coverage][phase3]") {
+    auto exchange = serve_one_http_response("GET", "/status?ok=1");
+
+    REQUIRE(exchange.accepted);
+    REQUIRE(exchange.request.find("GET /status?ok=1 HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.response.error.empty());
+    REQUIRE(exchange.response.status_code == 200);
+    REQUIRE(exchange.response.ok());
+    REQUIRE(exchange.response.body == "ok-response");
+    REQUIRE(exchange.response.headers.at("Content-Type") == "text/plain");
+    REQUIRE(exchange.response.headers.at("X-Pulp-Test") == "loopback");
+}
+
+TEST_CASE("HTTP helpers copy successful POST request bodies",
+          "[runtime][http][coverage][phase3]") {
+    auto exchange = serve_one_http_response("POST", "/submit", R"({"value":7})");
+
+    REQUIRE(exchange.accepted);
+    REQUIRE(exchange.request.find("POST /submit HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.request.find("Content-Type: application/json") != std::string::npos);
+    REQUIRE(exchange.request.find(R"({"value":7})") != std::string::npos);
+    REQUIRE(exchange.response.error.empty());
+    REQUIRE(exchange.response.status_code == 200);
+    REQUIRE(exchange.response.body == "ok-response");
 }
 
 TEST_CASE("local IPv4 helpers return usable fallback values",
