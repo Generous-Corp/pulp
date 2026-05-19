@@ -926,6 +926,17 @@ TEST_CASE("CachedProperty move of unbound property preserves cached value",
     REQUIRE(moved.get() == 256);
 }
 
+TEST_CASE("CachedProperty unbound refresh leaves the local cache unchanged",
+          "[state][cached][coverage][phase3]") {
+    CachedProperty<std::string> label;
+
+    REQUIRE_FALSE(label.is_bound());
+    label.set("local");
+    label.refresh();
+
+    REQUIRE(label.get() == "local");
+}
+
 TEST_CASE("CachedProperty ignores mismatched external updates",
           "[state][cached][issue-641]") {
     auto tree = StateTree::create("params");
