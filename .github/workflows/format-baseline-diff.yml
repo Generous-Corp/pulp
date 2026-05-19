@@ -145,7 +145,14 @@ jobs:
           CV_VERSION="0.3.2"
           CV_URL="https://github.com/free-audio/clap-validator/releases/download/${CV_VERSION}/clap-validator-${CV_VERSION}-macos-universal.tar.gz"
           if curl -fsSL -o /tmp/cv.tar.gz "$CV_URL"; then
-            tar -xzf /tmp/cv.tar.gz -C /tmp
+            # The universal archive's upstream build packs the binary as
+            # `binaries/clap-validator` (verified against
+            # free-audio/clap-validator's release workflow:
+            # `tar -caf "$ARCHIVE_NAME.tar.gz" binaries/clap-validator`).
+            # Extraction yields /tmp/binaries/clap-validator — NOT
+            # /tmp/clap-validator. Use --strip-components=1 so the
+            # binary lands at /tmp/clap-validator and the mv works.
+            tar -xzf /tmp/cv.tar.gz -C /tmp --strip-components=1
             sudo mv /tmp/clap-validator /usr/local/bin/clap-validator
             chmod +x /usr/local/bin/clap-validator
             clap-validator --version || echo "::warning::clap-validator installed but --version failed"
