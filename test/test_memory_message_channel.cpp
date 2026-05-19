@@ -140,6 +140,22 @@ TEST_CASE("MemoryMessageChannel rejects nonempty null binary sends",
     REQUIRE(right->is_open());
 }
 
+TEST_CASE("MemoryMessageChannel accepts empty null binary sends",
+          "[runtime][message_channel][coverage][phase3]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<Message> received;
+    right->on_message([&](const Message& message) {
+        received.push_back(message);
+    });
+
+    REQUIRE(left->send(nullptr, 0));
+
+    REQUIRE(received.size() == 1);
+    REQUIRE(received.front().kind == MessageKind::Binary);
+    REQUIRE(received.front().payload.empty());
+}
+
 TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
           "[runtime][message_channel][coverage][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
