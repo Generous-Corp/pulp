@@ -376,6 +376,21 @@ PR state: batch remains local-only, 7 commits ahead of `origin/main`;
 continue accumulating into a larger first-party coverage PR while #2268
 runs. No Namespace dispatch.
 
+2026-05-19 01:40 PDT: added eighth committed tranche to
+`feature/phase3-codecov-audio-midi-batch-753`:
+`891d0544a test(runtime): cover scoped no-alloc depth`, touching
+`test/test_runtime_utils.cpp`. Scope: deterministic runtime coverage for
+`ScopedNoAlloc` nested depth restoration and thread-local isolation,
+including the Release-build no-op contract via `NDEBUG`-aware assertions.
+Local validation passed: `cmake --build build --target
+pulp-test-runtime-utils -j4`, `./build/test/pulp-test-runtime-utils
+"[runtime][scoped-no-alloc]"`, `./build/test/pulp-test-runtime-utils
+"[runtime][base64]"`, and `git diff --check`. PR state: batch remains
+local-only, 8 commits ahead of `origin/main`; #2268 head `f15d41847`
+has `baseline-diff` completed success and the remaining required checks
+queued. Continue accumulating into a larger first-party coverage PR. No
+Namespace dispatch.
+
 2026-05-18 15:05 PDT: added tenth committed tranche to
 `feature/phase3-codecov-batch-747`:
 `a2b5ba0cf test(cli): cover run option pass-through edges`, touching
