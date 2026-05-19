@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01460"></a>
+## [0.146.0] - 2026-05-19
+
+- chore(tools): add version_consistency_check.py — catches Codex P2 #2331 drift ([#2341](https://github.com/danielraffel/pulp/pull/2341))
+- feat(cli): pulp doctor --au-cache refreshes macOS AU registrar ([#2336](https://github.com/danielraffel/pulp/pull/2336))
+- feat(runtime): generated pulp_build_info.hpp with build stamp constants ([#2335](https://github.com/danielraffel/pulp/pull/2335))
+- feat(view): macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6 macOS) ([#2307](https://github.com/danielraffel/pulp/pull/2307))
+- refactor(test): P5-1 bundled — extract RN outline + clip-path/mask (9,737 → 9,074) ([#2342](https://github.com/danielraffel/pulp/pull/2342))
+
+<a id="v01430"></a>
+## [0.143.0] - 2026-05-19
+
+- fix(harness): HtmlAdapter reads element-events split (Codex P2 on #2337) ([#2345](https://github.com/danielraffel/pulp/pull/2345))
+- feat(view): Windows UIA + Linux AccessKit a11y backends (font v2 Slice 2.6 complete) ([#2326](https://github.com/danielraffel/pulp/pull/2326))
+- refactor(view-js): P5-7 follow-up — extract Element events + pointer capture (1,689 → 1,291) ([#2337](https://github.com/danielraffel/pulp/pull/2337))
+
 <a id="v01420"></a>
 ## [0.142.0] - 2026-05-19
 
@@ -2090,6 +2106,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.146.0]: https://github.com/danielraffel/pulp/releases/tag/v0.146.0
+[0.143.0]: https://github.com/danielraffel/pulp/releases/tag/v0.143.0
 [0.142.0]: https://github.com/danielraffel/pulp/releases/tag/v0.142.0
 [0.139.0]: https://github.com/danielraffel/pulp/releases/tag/v0.139.0
 [0.137.2]: https://github.com/danielraffel/pulp/releases/tag/v0.137.2
