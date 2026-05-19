@@ -10976,3 +10976,19 @@ cases), and `git diff --check`. PR #2268 remained current at head
 Clang) — advisory` and `android-build (windows-latest)` were in progress, and
 the remaining checks were queued with no failures. The batch is clean,
 local-only, and 18 coverage commits ahead of `origin/main`.
+
+2026-05-19 02:48 PDT: rechecked PR #2268 priority path after the required
+`macos-15` check remained queued past the CI skill's 30-minute rescue
+threshold. `shipyard rescue 2268` could not run because GitHub GraphQL was
+rate-limited for the user (`graphql.remaining: 0`, reset at 2026-05-19
+03:12:15 PDT), and Shipyard resolves PR numbers through `gh pr view`.
+REST remained available and reported #2268 head
+`5f511a7338991ac5e4307931291512a6de322d7c`, base `180804ec13fd`, `mergeable:
+true`, `mergeable_state: blocked`, with no failed checks. REST check-runs
+showed `android-build (windows-latest)` green, `IWYU (Linux, Clang) —
+advisory`, `Windows MSVC release-path gate`, and `ubuntu-24.04` in progress,
+and `macos-15` still queued. A REST/repo-wide Shipyard dry-run
+(`shipyard rescue --all-stuck --repo danielraffel/pulp --dry-run --json`)
+returned `candidate_count: 0`, so no manual rescue was applied. Continue
+REST polling until GraphQL resets, then retry `shipyard rescue 2268` if
+required macOS checks are still queued.
