@@ -9347,3 +9347,22 @@ Amended the tip commit subject only; local version-bump report and
 `git diff --check` still passed. Force-with-lease pushed with
 `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1`; monitor #2298 checks on SHA
 `19abf2842`.
+
+2026-05-18 20:05 PDT: continued the held host/cache Phase 3 coverage batch in
+`feature/phase3-codecov-host-cache-batch-750` after rebasing cleanly onto
+current `origin/main`. Added three local commits without opening a PR yet:
+`5dde50e32` (`test(host): cover parameter event queue basics`) adds the new
+`pulp-test-parameter-event-queue` target and validates basic queued parameter
+events; `b0443e7a2` (`test(host): cover scan cache typed-field rejection`) keeps
+an existing scan cache intact when parsed entry fields have wrong JSON types;
+and `55b0895d0` (`test(host): cover VST3 raw CID normalization`) verifies raw
+16-byte VST3 moduleinfo CIDs normalize to lowercase hex. Focused local
+validation passed: `cmake -S . -B build`, `cmake --build build --target
+pulp-test-parameter-event-queue`, `./build/test/pulp-test-parameter-event-queue
+"[host][parameter-event-queue][coverage][phase3]"` (19 assertions / 2 cases),
+`cmake --build build --target pulp-test-scan-cache`, scan-cache typed-field and
+`[scan_cache][codecov][phase3]` filters, `cmake --build build --target
+pulp-test-host-regression`, the VST3 raw-CID single-test filter,
+`[host][scanner][regression][codecov][phase3]`, and `git diff --check`. The held
+batch now has 9 local coverage commits; continue accumulating a larger batch
+before opening a PR.
