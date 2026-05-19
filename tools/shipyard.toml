@@ -293,10 +293,18 @@
 #   metadata through the validation pipeline so the failing-job URL is
 #   actually correct (was previously overwritten by Shipyard's internal
 #   job id). Adds optional `[targets.<name>] failure_parser = "..."`
-#   config knob (ctest|catch2|pytest|go|auto). Phase 2 (`shipyard watch`
-#   enrichment) and Phase 3 (sandboxed `failure_parser_cmd` escape
-#   hatch) tracked separately. See Shipyard PR #304 / issue #303.
-version = "v0.58.0"
+#   config knob (ctest|catch2|pytest|go|auto). See Shipyard PR #304 /
+#   issue #303.
+#
+# v0.59.0 — Phase 2 watch diagnostics (Shipyard #310). Extends
+#   `shipyard watch --pr N --follow` to emit the same structured
+#   failure block (job URL + failing step + parsed test footer) on
+#   every terminal-failure transition, in both human and JSON modes.
+#   Cache keyed on (target, run_id) ensures at-most-one log fetch per
+#   transition for the lifetime of the watch invocation. Reuses Phase 1's
+#   256 KB log-tail cap. Phase 3 (sandboxed `failure_parser_cmd` escape
+#   hatch) still deferred. See Shipyard PR #310.
+version = "v0.59.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

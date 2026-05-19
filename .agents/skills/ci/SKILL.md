@@ -603,6 +603,18 @@ can act on it without parsing the human text. Source design:
 `https://github.com/danielraffel/Shipyard/issues/303` + the codex-
 vetted comment thread there.
 
+## Phase 2 watch diagnostics (>= v0.59.0)
+
+Shipyard v0.59.0 (Shipyard PR #310, 2026-05-19) extends `shipyard
+watch --pr N --follow` to surface the same structured failure block
+on every terminal-failure transition observed during the poll. The
+watch loop caches diagnostics by `(target, run_id)` so at most one
+log fetch per transition fires for the lifetime of one watch
+invocation. Reuses Phase 1's 256 KB log-tail cap. Both human and
+JSON modes carry the diagnostics. Lets you chain
+`shipyard pr && shipyard watch --pr <N>` and stop babysitting the
+GitHub UI on slow CI runs.
+
 ## Recovery + maintenance toolkit (>= v0.56.2)
 
 Three operational commands cover the prevention → recovery → maintenance
