@@ -535,6 +535,7 @@ TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
 TEST_CASE("base64 handles explicit byte pointers and exact quartet decoding",
           "[runtime][base64][coverage][issue-641]") {
     REQUIRE(base64_encode(nullptr, 0) == "");
+    REQUIRE(base64_encode(nullptr, 3) == "");
 
     const uint8_t bytes[] = {0x00, 0x10, 0x20, 0x30, 0xff};
     auto encoded = base64_encode(bytes, sizeof(bytes));

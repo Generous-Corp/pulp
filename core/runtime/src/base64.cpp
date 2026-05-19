@@ -17,6 +17,9 @@ static constexpr uint8_t kDecodeTable[] = {
 };
 
 std::string base64_encode(const uint8_t* data, size_t length) {
+    if (data == nullptr || length == 0)
+        return {};
+
     std::string result;
     result.reserve(((length + 2) / 3) * 4);
 
