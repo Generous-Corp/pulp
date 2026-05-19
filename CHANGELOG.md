@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01350"></a>
+## [0.135.0] - 2026-05-18
+
+- feat(view): Phase 0a — stable_anchor_id on IRNode (inspector round-trip foundation) ([#2295](https://github.com/danielraffel/pulp/pull/2295))
+- fix(examples): gate ui-preview --font-probe behind PULP_HAS_SKIA ([#2281](https://github.com/danielraffel/pulp/pull/2281))
+- chore(deps): bump shipyard 0.56.2 → 0.58.0 for #303 phase 1 failure diagnostics ([#2293](https://github.com/danielraffel/pulp/pull/2293))
+- refactor(events): extract socket endpoint parser; dedup IPC tests (U-8) ([#2214](https://github.com/danielraffel/pulp/pull/2214))
+- chore(ci): add format-validator baseline diff gate (U-3) ([#2218](https://github.com/danielraffel/pulp/pull/2218))
+
 <a id="v01340"></a>
 ## [0.134.0] - 2026-05-18
 
@@ -2027,6 +2036,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.135.0]: https://github.com/danielraffel/pulp/releases/tag/v0.135.0
 [0.134.0]: https://github.com/danielraffel/pulp/releases/tag/v0.134.0
 [0.133.0]: https://github.com/danielraffel/pulp/releases/tag/v0.133.0
 [0.132.0]: https://github.com/danielraffel/pulp/releases/tag/v0.132.0
