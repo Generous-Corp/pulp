@@ -314,6 +314,28 @@ TEST_CASE("line callback buffers partial stdout without trailing newline",
     REQUIRE(stdout_lines.empty());
 }
 
+TEST_CASE("line callback buffers partial stderr without trailing newline",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> stderr_lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stderr_line = [&](std::string_view line) {
+        stderr_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "<nul set /p dummy=partialerr 1>&2"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh", {"-c", "printf partialerr >&2"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output == "partialerr");
+    REQUIRE(stderr_lines.empty());
+}
+
 TEST_CASE("wait is idempotent after process completion",
           "[child_process][edge][issue-640]") {
     ChildProcess cp;
