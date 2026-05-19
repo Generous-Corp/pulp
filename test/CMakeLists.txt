@@ -751,6 +751,13 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Text-accessibility scaffold (font v2 Slice 2.6)
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
+# Windows UIA backend (font v2 Slice 2.6) — compile-gated on _WIN32 in the
+# source. The sentinel test case keeps the binary present + named
+# consistently on non-Windows hosts so ctest output stays stable.
+pulp_add_test_suite(pulp-test-text-accessibility-windows LIBRARIES pulp::view)
+# Linux AccessKit backend (font v2 Slice 2.6) — compile-gated on
+# __linux__ && !__ANDROID__; sentinel on other hosts.
+pulp_add_test_suite(pulp-test-text-accessibility-linux LIBRARIES pulp::view)
 # A/B compare (workstream 07 slice 7.2)
 pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field (workstream 07 slice 7.5b)
@@ -900,6 +907,23 @@ catch_discover_tests(pulp-test-font-axis-animation)
 add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_parallel.cpp)
 target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-run-planner-parallel)
+
+# pulp #2163 / font v2 Slice 1.2.a finish — real ICU bidi + script run
+# iterators. Verifies multi-run shaping on bidi / script boundaries and
+# UAX #29 cluster grouping (ZWJ, regional-indicator-pair, virama,
+# combining marks). Cluster-grouping cases run on every build; the
+# bidi / script cases auto-skip under non-Skia builds via SUCCEED.
+#
+# Add PULP_HAS_SKIA explicitly so the ICU-path assertions register
+# (mirrors test_canvas_fonts.cpp's pattern — pulp::canvas exports the
+# define PUBLIC but CMake's PUBLIC propagation doesn't always reach
+# sibling test targets, depending on configure ordering).
+add_executable(pulp-test-text-run-planner-icu test_text_run_planner_icu.cpp)
+target_link_libraries(pulp-test-text-run-planner-icu PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-text-run-planner-icu PRIVATE PULP_HAS_SKIA=1)
+endif()
+catch_discover_tests(pulp-test-text-run-planner-icu)
 
 # pulp #2163 / font v2 Slice 2.1 — async font lifecycle (register_font_url).
 add_executable(pulp-test-font-async-lifecycle test_font_async_lifecycle.cpp)

@@ -619,3 +619,53 @@ TEST_CASE("runtime logging wrappers accept formatted payloads",
     REQUIRE_NOTHROW(log(LogLevel::Debug, "debug {}", 4));
     REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
 }
+
+// ─── PULP_DBG_VAR (Tier A Slice 8) ──────────────────────────────────────────
+
+#include <pulp/runtime/assert.hpp>
+#include <sstream>
+
+TEST_CASE("PULP_DBG_VAR compiles and prints in debug builds",
+          "[runtime][assert][dbg-var]") {
+    // Redirect cerr so we can inspect the output without spamming the
+    // test log. In NDEBUG builds the macro is a no-op so the buffer
+    // stays empty; we only assert on the contents in debug builds.
+    std::stringstream buf;
+    auto* old = std::cerr.rdbuf(buf.rdbuf());
+
+    int answer = 42;
+    PULP_DBG_VAR(answer);
+
+    const float pi = 3.14f;
+    const char* label = "hello";
+    PULP_DBG_VAR(answer, pi, label);
+
+    std::cerr.rdbuf(old);
+
+#ifdef NDEBUG
+    REQUIRE(buf.str().empty());
+#else
+    const auto out = buf.str();
+    REQUIRE(out.find("answer = 42") != std::string::npos);
+    REQUIRE(out.find("pi = 3.14") != std::string::npos);
+    REQUIRE(out.find("label = hello") != std::string::npos);
+    REQUIRE(out.find("[pulp:DBG]") != std::string::npos);
+#endif
+}
+
+TEST_CASE("PULP_DBG_VAR handles up to eight arguments",
+          "[runtime][assert][dbg-var]") {
+    std::stringstream buf;
+    auto* old = std::cerr.rdbuf(buf.rdbuf());
+
+    int a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8;
+    PULP_DBG_VAR(a, b, c, d, e, f, g, h);
+
+    std::cerr.rdbuf(old);
+
+#ifndef NDEBUG
+    const auto out = buf.str();
+    REQUIRE(out.find("a = 1") != std::string::npos);
+    REQUIRE(out.find("h = 8") != std::string::npos);
+#endif
+}

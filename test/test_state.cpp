@@ -1276,3 +1276,77 @@ TEST_CASE("RT-queued changes are skipped when the token was reset before pump",
     REQUIRE(store.pump_listeners() == 2);
     REQUIRE(fire_count == 0);
 }
+
+// ─── snapshot() block-local helper (Slice 5) ────────────────────────────────
+
+TEST_CASE("StateStore::snapshot returns values in the requested order",
+          "[state][snapshot]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB",
+                                        {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param_info(2, "Mix", "%",
+                                        {0.0f, 100.0f, 50.0f}));
+    store.add_parameter(make_param_info(3, "Cutoff", "Hz",
+                                        {20.0f, 20000.0f, 1000.0f}));
+
+    store.set_value(1, -6.0f);
+    store.set_value(2, 75.0f);
+    store.set_value(3, 4400.0f);
+
+    constexpr std::array<ParamID, 3> ids{ 1, 2, 3 };
+    const auto snap = store.snapshot(ids);
+
+    REQUIRE_THAT(snap[0], WithinAbs(-6.0, 0.001));
+    REQUIRE_THAT(snap[1], WithinAbs(75.0, 0.001));
+    REQUIRE_THAT(snap[2], WithinAbs(4400.0, 0.001));
+}
+
+TEST_CASE("StateStore::snapshot handles unknown ids by returning 0",
+          "[state][snapshot]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
+    store.set_value(1, 0.7f);
+
+    constexpr std::array<ParamID, 3> ids{ 1, 999, 1 };
+    const auto snap = store.snapshot(ids);
+
+    REQUIRE_THAT(snap[0], WithinAbs(0.7, 0.001));
+    REQUIRE(snap[1] == 0.0f);  // unknown
+    REQUIRE_THAT(snap[2], WithinAbs(0.7, 0.001));
+}
+
+TEST_CASE("StateStore::snapshot_modulated includes mod offsets",
+          "[state][snapshot]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Pitch", "st",
+                                        {-12.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param_info(2, "Cutoff", "Hz",
+                                        {20.0f, 20000.0f, 1000.0f}));
+
+    store.set_value(1, 3.0f);
+    store.set_value(2, 2000.0f);
+    store.set_mod_offset(1, 0.5f);  // pitch +0.5 from modulation
+    store.set_mod_offset(2, 100.0f); // cutoff +100 from modulation
+
+    constexpr std::array<ParamID, 2> ids{ 1, 2 };
+
+    const auto base_snap = store.snapshot(ids);
+    REQUIRE_THAT(base_snap[0], WithinAbs(3.0, 0.001));
+    REQUIRE_THAT(base_snap[1], WithinAbs(2000.0, 0.001));
+
+    const auto mod_snap = store.snapshot_modulated(ids);
+    REQUIRE_THAT(mod_snap[0], WithinAbs(3.5, 0.001));
+    REQUIRE_THAT(mod_snap[1], WithinAbs(2100.0, 0.001));
+}
+
+TEST_CASE("StateStore::snapshot works with a single parameter",
+          "[state][snapshot]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    store.set_value(1, 0.33f);
+
+    constexpr std::array<ParamID, 1> ids{ 1 };
+    const auto snap = store.snapshot(ids);
+    REQUIRE(snap.size() == 1);
+    REQUIRE_THAT(snap[0], WithinAbs(0.33, 0.001));
+}

@@ -10,6 +10,7 @@ target_include_directories(pulp-runtime
 target_sources(pulp-runtime PRIVATE
     src/runtime.cpp
     src/identity.cpp
+    src/scoped_no_alloc.cpp
     src/simd.cpp
     src/memory_mapped_file.cpp
     src/temporary_file.cpp

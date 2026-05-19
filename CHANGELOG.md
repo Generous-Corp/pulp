@@ -9,14 +9,34 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v01390"></a>
-## [0.139.0] - 2026-05-19
+## [0.139.0] - 2026-05-18
 
-- refactor(test): P5-3 follow-up — extracted CSS mask + overflow:visible hit-test extension from test_view.cpp (-159 lines, 1,466 → 1,307)
+- feat(canvas): cross-backend rendering goldens — Skia GPU lane (font v2 Slice 3.4 GPU) ([#2306](https://github.com/danielraffel/pulp/pull/2306))
+- refactor(test): P5-3 follow-up — extract mask + overflow extension (1,466 → 1,307) ([#2333](https://github.com/danielraffel/pulp/pull/2333))
+
+<a id="v01372"></a>
+## [0.137.2] - 2026-05-18
+
+- fix(canvas): canonicalize signed zero in FontOptions hash (Codex P2 on #2169) ([#2332](https://github.com/danielraffel/pulp/pull/2332))
+
+<a id="v01371"></a>
+## [0.137.1] - 2026-05-18
+
+- refactor(test): P5-2 follow-up — extract CSS filter chain cluster (2,735 → 2,358) ([#2331](https://github.com/danielraffel/pulp/pull/2331))
+- fix(canvas): detached font worker survives register_font_file throws (Codex on #2308) ([#2323](https://github.com/danielraffel/pulp/pull/2323))
+
+<a id="v01370"></a>
+## [0.137.0] - 2026-05-18
+
+- refactor(test): P5-1 bundled — extract CSS animations + CSS Grid (10,191 → 9,737) ([#2325](https://github.com/danielraffel/pulp/pull/2325))
 
 <a id="v01360"></a>
-## [0.136.0] - 2026-05-19
+## [0.136.0] - 2026-05-18
 
-- refactor(test): P5-1 follow-up — extracted SVG widget JS bridge cluster (-802 lines) + HTML ARIA + querySelector cluster (-509 lines) from test_widget_bridge.cpp (11,502 → 10,191, -1,311 total — bundled two cuts on one PR)
+- refactor(test): P5-1 bundled — extract SVG + HTML ARIA clusters (11,502 → 10,191) ([#2322](https://github.com/danielraffel/pulp/pull/2322))
+- refactor(inspect): migrate StateInspector to ListenerToken (Slice 3) ([#2309](https://github.com/danielraffel/pulp/pull/2309))
+- build(cmake): statically link the MSVC runtime on Windows ([#2313](https://github.com/danielraffel/pulp/pull/2313))
+- fix(ci): clap-validator asset URL (macos-universal, version-prefixed) ([#2302](https://github.com/danielraffel/pulp/pull/2302))
 
 <a id="v01352"></a>
 ## [0.135.2] - 2026-05-18
@@ -2060,6 +2080,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.139.0]: https://github.com/danielraffel/pulp/releases/tag/v0.139.0
+[0.137.2]: https://github.com/danielraffel/pulp/releases/tag/v0.137.2
+[0.137.1]: https://github.com/danielraffel/pulp/releases/tag/v0.137.1
+[0.137.0]: https://github.com/danielraffel/pulp/releases/tag/v0.137.0
+[0.136.0]: https://github.com/danielraffel/pulp/releases/tag/v0.136.0
 [0.135.2]: https://github.com/danielraffel/pulp/releases/tag/v0.135.2
 [0.135.1]: https://github.com/danielraffel/pulp/releases/tag/v0.135.1
 [0.135.0]: https://github.com/danielraffel/pulp/releases/tag/v0.135.0

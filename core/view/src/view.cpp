@@ -2,6 +2,7 @@
 #include <pulp/view/motion.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
 #include <numeric>
 #include <sstream>
@@ -156,6 +157,13 @@ View::~View() {
 
 void View::paint_all(canvas::Canvas& canvas) {
     if (!visible_) return;
+
+    // Slice 4: treat paint like the audio thread. Any allocation inside
+    // this scope is a real-time-safety bug. The guard is a thread-local
+    // counter in debug builds (compiles away under NDEBUG). Pulp's
+    // sanitizer / debug-allocator hooks (opt-in, follow-up slice) read
+    // pulp::runtime::is_in_no_alloc_scope() to detect violations.
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
 
     canvas.save();
     canvas.translate(bounds_.x, bounds_.y);
