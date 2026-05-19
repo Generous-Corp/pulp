@@ -9733,3 +9733,15 @@ out-of-range strings"` (2 assertions / 1 case),
 `./build/test/pulp-test-properties "[state][properties][coverage][phase3]"`
 (2 assertions / 1 case), and `git diff --check`. The batch now has 11 local
 coverage commits; continue accumulating before opening a PR.
+
+2026-05-18 23:41 PDT: added `06c096483` (`test(state): cover missing listener
+removals`) to `feature/phase3-codecov-runtime-state-batch-751`. This covers
+`StateTree::remove_listener()`, `remove_child_added_listener()`, and
+`remove_child_removed_listener()` no-match paths, asserting missing listener IDs
+are no-ops and the active property/child callbacks still fire once. Focused
+local validation passed: `cmake --build build --target pulp-test-state-tree`,
+`./build/test/pulp-test-state-tree "StateTree removing missing listener ids is a
+no-op"` (8 assertions / 1 case), `./build/test/pulp-test-state-tree
+"[state][tree][coverage][phase3]"` (8 assertions / 1 case), and `git diff
+--check`. The batch now has 12 local coverage commits; continue accumulating
+before opening a PR.
