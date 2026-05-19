@@ -237,6 +237,26 @@ TEST_CASE("PresetManager load skips malformed parameter values", "[state][preset
     REQUIRE(load_callbacks == 1);
 }
 
+TEST_CASE("PresetManager load skips parameter keys with missing value separators",
+          "[state][preset][coverage][phase3]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-missing-separator");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -12.0f);
+    store.set_value(2, 40.0f);
+
+    const auto preset_path = sandbox.root / "MissingSeparator.json";
+    write_text_file(preset_path, R"json({"parameters":{"Gain" "bad"}})json");
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(store.get_value(1) == Catch::Approx(-12.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(40.0f));
+    REQUIRE(pm.current_preset_name() == "MissingSeparator");
+    REQUIRE_FALSE(pm.has_unsaved_changes());
+}
+
 TEST_CASE("PresetManager load clamps out-of-range parameter values",
           "[state][preset][coverage][issue-647]") {
     pulp::test::PresetTestSandbox sandbox("pulp-preset-load-clamp");
