@@ -10789,3 +10789,49 @@ partial reads and preserves valid samples"` (14 assertions / 1 case),
 7 cases), the post-rebase focused filters for all four batch 753 tests, and
 `git diff --check`. The branch is local-only and ahead of `origin/main` by 4
 coverage commits; keep it queued behind #2268.
+
+2026-05-19 02:07 PDT: reprioritized PR #2268 after `origin/main` advanced to
+`44278c5c1aa9` (`test(view): cover macOS text accessibility backend`).
+Merged current `origin/main` into `feature/phase3-codecov-rollup-746` cleanly,
+validated the source/skill sync report, and pushed new #2268 head
+`f09d96b24f1b3ecf91d38e3fcad29a245ab12844` with the known local pre-push
+diff-cover demotion (`PULP_DISABLE_PREPUSH_DIFF_COVER=1`) because the local
+FetchContent checkout still fails on `mbedtls` tag `v3.6.2`. GitHub REST then
+reported #2268 open, not draft, `mergeable: true`, `mergeable_state:
+blocked`, and compare `main...f09d96b24` at `behind_by: 0`, `ahead_by: 445`.
+All check runs on the refreshed head were still queued, including
+`baseline-diff`, `build`, `macOS local smoke`, `macos-15`, both
+`android-build` jobs, Linux/Ubuntu lanes, sandbox lanes, version/skill sync,
+dependency audit, pollution check, and yamllint/actionlint. No failures were
+present; continue monitoring #2268 first and do not open another CI-consuming
+coverage PR until it is green or non-actionably queued.
+
+2026-05-19 02:07 PDT: rebased local-only
+`feature/phase3-codecov-audio-midi-batch-753` onto current `origin/main`
+`44278c5c1aa9`. The rebase rewrote the local batch heads; current top commits
+are `ca4673795 test(state): cover exact property bool tokens`,
+`d7134af79 test(runtime): cover empty null message sends`,
+`007b5beff test(runtime): cover canonical IPv4 parsing`, `7d59e18a2
+test(runtime): cover scoped no-alloc depth`, `817c2c01b test(midi): cover
+glide detector reset guard`, `63b5c086c test(audio): cover callback context
+contract`, `71ceb7115 test(midi): cover device default hooks`, `134947e13
+test(audio): cover short-read frame fill clamps`, `a89d516f2 test(midi): cover
+MIDI-CI profile count encoding`, `60238d670 test(midi): cover reserved
+running-status realtime bytes`, and `fcbe126fc test(midi): cover MPE zone
+disabled layouts`. Post-rebase focused validation passed:
+`./build/test/pulp-test-network-stream "[network_stream][ip-address]"` (34
+assertions / 7 cases), `./build/test/pulp-test-memory-message-channel
+"[runtime][message_channel]"` (80 assertions / 17 cases), and `git diff
+--check`.
+
+2026-05-19 02:07 PDT: added `ca4673795` (`test(state): cover exact property
+bool tokens`) to local-only `feature/phase3-codecov-audio-midi-batch-753`.
+This touches only `test/test_properties_file.cpp` and pins the current
+`PropertiesFile::get_bool` exact-token contract: uppercase/titlecase `true`,
+leading-space `true`, and trailing-space `1` remain present keys but evaluate
+false. Focused local validation passed after using the actual target name:
+`cmake --build build --target pulp-test-properties -j4`,
+`./build/test/pulp-test-properties "[state][properties]"` (112 assertions /
+31 cases), and `git diff --check`. The branch is now local-only and 11
+coverage commits ahead of `origin/main`; keep accumulating deterministic
+first-party tests while #2268 remains blocked only by queued checks.
