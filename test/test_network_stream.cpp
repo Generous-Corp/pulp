@@ -883,6 +883,48 @@ TEST_CASE("HttpStream reads a successful local response body in chunks",
     REQUIRE(served.load());
 }
 
+TEST_CASE("http_get defaults missing URL path to slash",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> saw_root_path{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 512> request{};
+        const int received = accepted->receive(request.data(), request.size());
+        if (received > 0) {
+            const std::string request_text(reinterpret_cast<const char*>(request.data()),
+                                           static_cast<std::size_t>(received));
+            saw_root_path.store(request_text.find("GET / HTTP/1.1") != std::string::npos);
+        }
+
+        const std::string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 4\r\n"
+            "\r\n"
+            "root";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    const auto response = http_get("http://127.0.0.1:" + std::to_string(*port), 2);
+    REQUIRE(response.status_code == 200);
+    REQUIRE(response.body == "root");
+
+    join_server.join();
+    REQUIRE(saw_root_path.load());
+}
+
 TEST_CASE("HttpStream post factory reads a successful local response",
           "[network_stream][http][coverage][phase3]") {
     Socket listener;
