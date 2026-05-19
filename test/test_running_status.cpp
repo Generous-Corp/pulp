@@ -248,6 +248,29 @@ TEST_CASE("all realtime status bytes emit immediately",
     REQUIRE(v[7].status == 0xFF);
 }
 
+TEST_CASE("reserved real-time bytes preserve running status",
+          "[midi][running-status][codecov]") {
+    auto v = parse({
+        0x90, 0x3C, 0x7F,
+        0xF9,
+        0x3D, 0x40,
+        0xFD,
+        0x3E, 0x41,
+    });
+
+    REQUIRE(v.size() == 5);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[1].status == 0xF9);
+    REQUIRE(v[2].status == 0x90);
+    REQUIRE(v[2].d1 == 0x3D);
+    REQUIRE(v[2].d2 == 0x40);
+    REQUIRE(v[3].status == 0xFD);
+    REQUIRE(v[4].status == 0x90);
+    REQUIRE(v[4].d1 == 0x3E);
+    REQUIRE(v[4].d2 == 0x41);
+}
+
 TEST_CASE("sysex is delivered separately; cancels running status",
           "[midi][running-status]") {
     RunningStatusParser p;
