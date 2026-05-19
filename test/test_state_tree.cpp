@@ -368,9 +368,11 @@ TEST_CASE("StateTree child listener removal stops callbacks", "[state][tree]") {
     REQUIRE(removed_count == 1);
 }
 
-TEST_CASE("StateTree removing unknown listener ids is stable",
-          "[state][tree][coverage]") {
+TEST_CASE("StateTree removing missing listener ids is a no-op",
+          "[state][tree][coverage][phase3]") {
     auto root = StateTree::create("root");
+    auto child = StateTree::create("child");
+
     int property_count = 0;
     int added_count = 0;
     int removed_count = 0;
@@ -380,21 +382,34 @@ TEST_CASE("StateTree removing unknown listener ids is stable",
     root->remove_child_removed_listener(1234);
 
     auto property_id = root->add_listener(
-        [&](StateTree&, std::string_view, const PropertyValue&, const PropertyValue&) {
+        [&](StateTree&, std::string_view prop, const PropertyValue&, const PropertyValue&) {
+            REQUIRE(prop == "gain");
             ++property_count;
         });
     auto added_id = root->add_child_added_listener(
-        [&](StateTree&, StateTree&, int) { ++added_count; });
+        [&](StateTree&, StateTree& added_child, int index) {
+            REQUIRE(added_child.type_name() == "child");
+            REQUIRE(index == 0);
+            ++added_count;
+        });
     auto removed_id = root->add_child_removed_listener(
-        [&](StateTree&, StateTree&, int) { ++removed_count; });
+        [&](StateTree&, StateTree& removed_child, int index) {
+            REQUIRE(removed_child.type_name() == "child");
+            REQUIRE(index == 0);
+            ++removed_count;
+        });
 
     root->remove_listener(property_id + 100);
     root->remove_child_added_listener(added_id + 100);
     root->remove_child_removed_listener(removed_id + 100);
 
-    root->set("name", std::string("kept"));
-    root->add_child(StateTree::create("child"));
-    root->remove_child(0);
+    root->remove_listener(999);
+    root->remove_child_added_listener(999);
+    root->remove_child_removed_listener(999);
+
+    root->set("gain", 0.5);
+    root->add_child(child);
+    root->remove_child(child.get());
 
     REQUIRE(property_count == 1);
     REQUIRE(added_count == 1);
