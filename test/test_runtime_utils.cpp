@@ -275,6 +275,24 @@ TEST_CASE("MemoryMappedFile rejects empty files and close is idempotent",
     REQUIRE_FALSE(mmap.is_open());
 }
 
+TEST_CASE("MemoryMappedFile self move assignment preserves mapping",
+          "[runtime][mmap][coverage][phase3]") {
+    TemporaryFile tmp(".bin");
+    {
+        std::ofstream f(tmp.path(), std::ios::binary);
+        f << "self-move";
+    }
+
+    MemoryMappedFile mmap;
+    REQUIRE(mmap.open(tmp.path_string()));
+    auto& ref = mmap;
+    mmap = std::move(ref);
+
+    REQUIRE(mmap.is_open());
+    REQUIRE(mmap.size() == 9);
+    REQUIRE(std::string(reinterpret_cast<const char*>(mmap.data()), mmap.size()) == "self-move");
+}
+
 // ── DynamicLibrary ──────────────────────────────────────────────────────
 
 TEST_CASE("DynamicLibrary loads system library", "[runtime][dynlib]") {
