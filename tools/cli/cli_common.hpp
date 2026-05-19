@@ -308,6 +308,7 @@ int cmd_build(const std::vector<std::string>& args);
 int cmd_test(const std::vector<std::string>& args);
 int cmd_status(const std::vector<std::string>& args);
 int cmd_clean(const std::vector<std::string>& args);
+int cmd_fmt(const std::vector<std::string>& args);
 int cmd_run(const std::vector<std::string>& args);
 int cmd_validate(const std::vector<std::string>& args);
 int cmd_ship(const std::vector<std::string>& args);

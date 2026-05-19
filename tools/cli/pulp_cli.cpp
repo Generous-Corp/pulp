@@ -40,6 +40,7 @@ static const Command commands[] = {
     {"design",   "Launch the AI design tool",             cmd_design},
     {"docs",     "Browse local documentation",            cmd_docs},
     {"clean",    "Remove build directory",                cmd_clean},
+    {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},
     {"audio",    "Repo-level audio model and bundle tooling", cmd_audio},
     {"sdk",      "Manage the Pulp SDK installation",      cmd_sdk},

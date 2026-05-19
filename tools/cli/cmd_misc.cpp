@@ -6,9 +6,15 @@
 #include "cli_common.hpp"
 #include "sdk_cache_paths.hpp"
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
+
+#if defined(__APPLE__) || defined(__linux__)
+#include <sys/wait.h>
+#endif
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -229,6 +235,134 @@ int cmd_clean([[maybe_unused]] const std::vector<std::string>& args) {
         std::cout << "Nothing to clean.\n";
     }
     return 0;
+}
+
+// ── cmd_fmt ─────────────────────────────────────────────────────────────────
+//
+// Tier A Slice 10: surface clang-format against the project root's
+// .clang-format. Walks `core/`, `examples/`, `inspect/`, `test/`,
+// `tools/`, and `ship/` for .cpp / .hpp / .h / .mm files and runs
+// `clang-format -i` per file. `--dry-run` prints what would change
+// (clang-format --dry-run --Werror, exit 1 on any diff). `--check`
+// is a CI-friendly alias that doesn't rewrite.
+//
+// The .clang-format file landed with this slice (LLVM-derived,
+// 100-col, 4-space indent). See docs/guides/coming-from-juce.md or
+// `.clang-format` itself for the full rules.
+
+int cmd_fmt(const std::vector<std::string>& args) {
+    auto root = resolve_active_project_root(nullptr);
+    if (root.empty()) {
+        std::cerr << "Error: not in a Pulp project directory\n";
+        return 1;
+    }
+    if (!fs::exists(root / ".clang-format")) {
+        std::cerr << "pulp fmt: no .clang-format at project root.\n"
+                     "  Expected: " << (root / ".clang-format").string()
+                  << "\n";
+        return 1;
+    }
+
+    bool dry_run = false;
+    bool check_mode = false;  // alias for --dry-run + non-zero on diff
+    std::vector<std::string> extra_paths;
+    for (const auto& a : args) {
+        if (a == "--dry-run") dry_run = true;
+        else if (a == "--check") { dry_run = true; check_mode = true; }
+        else if (a.rfind("--", 0) == 0) {
+            std::cerr << "pulp fmt: unknown flag: " << a << "\n";
+            std::cerr << "Usage: pulp fmt [--dry-run|--check] [path...]\n";
+            return 2;
+        } else {
+            extra_paths.push_back(a);
+        }
+    }
+
+    // Default tree roots — every project layout we ship has these.
+    // The walk is forgiving: missing dirs are silently skipped so
+    // `pulp fmt` works in plugin scaffolds that don't ship every
+    // top-level directory.
+    std::vector<fs::path> roots;
+    if (extra_paths.empty()) {
+        for (const char* sub : {"core", "examples", "inspect", "test",
+                                "tools", "ship"}) {
+            auto p = root / sub;
+            if (fs::exists(p)) roots.push_back(p);
+        }
+    } else {
+        for (const auto& p : extra_paths) {
+            roots.push_back(fs::absolute(p));
+        }
+    }
+
+    auto is_cpp_source = [](const fs::path& p) {
+        auto ext = p.extension().string();
+        return ext == ".cpp" || ext == ".hpp" || ext == ".h" ||
+               ext == ".mm" || ext == ".cc" || ext == ".cxx";
+    };
+
+    std::vector<fs::path> files;
+    for (const auto& r : roots) {
+        if (!fs::is_directory(r)) {
+            if (fs::is_regular_file(r) && is_cpp_source(r)) {
+                files.push_back(r);
+            }
+            continue;
+        }
+        for (auto it = fs::recursive_directory_iterator(r);
+             it != fs::end(it); ++it) {
+            const auto& p = it->path();
+            // Skip generated / vendored / build directories.
+            auto rel = fs::relative(p, root).string();
+            if (rel.find("/build/") != std::string::npos ||
+                rel.find("/_deps/") != std::string::npos ||
+                rel.find("/generated/") != std::string::npos ||
+                rel.find("/external/") != std::string::npos) {
+                if (it->is_directory()) it.disable_recursion_pending();
+                continue;
+            }
+            if (it->is_regular_file() && is_cpp_source(p)) {
+                files.push_back(p);
+            }
+        }
+    }
+
+    if (files.empty()) {
+        std::cout << "pulp fmt: nothing to format.\n";
+        return 0;
+    }
+
+    std::cout << "pulp fmt: " << files.size()
+              << (dry_run ? " files (dry run)" : " files")
+              << "\n";
+
+    int worst_exit = 0;
+    for (const auto& f : files) {
+        std::string cmd = "clang-format -style=file";
+        if (dry_run) {
+            cmd += " --dry-run --Werror";
+        } else {
+            cmd += " -i";
+        }
+        cmd += " \"" + f.string() + "\"";
+        int rc = std::system(cmd.c_str());
+        const int exit_status = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+        if (exit_status != 0) {
+            if (dry_run) {
+                worst_exit = 1;  // diff detected — keep going
+            } else {
+                std::cerr << "pulp fmt: clang-format failed on "
+                          << f.string() << " (exit " << exit_status << ")\n";
+                worst_exit = exit_status;
+            }
+        }
+    }
+
+    if (check_mode && worst_exit != 0) {
+        std::cerr << "pulp fmt --check: formatting issues detected. "
+                     "Run `pulp fmt` to fix.\n";
+    }
+    return worst_exit;
 }
 
 // ── cmd_cache ───────────────────────────────────────────────────────────────

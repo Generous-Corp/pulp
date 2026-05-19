@@ -1,0 +1,56 @@
+# Pulp clang-format config (Tier A Slice 10).
+#
+# LLVM-derived with a 100-column line limit per
+# planning/2026-05-18-rt-safety-and-debug-dx.md. Picked LLVM over Google
+# because LLVM's brace + initializer-list formatting matches what Pulp's
+# core/ subsystems already use; Google's per-line-pragma and short-block
+# rules would force a noisy rewrite of files that have been stable for
+# months.
+#
+# Runtime: `clang-format -i path/...` rewrites in place, or
+# `pulp fmt` (added in the same slice) auto-discovers .cpp/.hpp/.h files
+# in the working tree and runs clang-format with this config.
+
+BasedOnStyle: LLVM
+
+# Pulp's house width.
+ColumnLimit: 100
+
+# 4-space indent matches Slice 1+ work and the existing C++ surface.
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# Allow tight braces for empty function bodies (lots of `= default` /
+# `: base() {}` constructors); keep one line per statement otherwise.
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Prefer C++17/20 alignment of consecutive assignments, fewer eye-jumps
+# in long parameter / value tables.
+AlignConsecutiveAssignments:
+  Enabled: false
+AlignTrailingComments: true
+
+# Pointer / reference style: `T* p`, `T& r`. Right-most has been the
+# convention since the first commits.
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+
+# Sort headers in groups: own header first, then <system>, then
+# "third-party", then "pulp/*". clang-format's default IncludeBlocks
+# behavior is fine for now; revisit if it diverges from observed
+# patterns.
+SortIncludes: CaseSensitive
+
+# Don't reflow Markdown / docs comments that already wrap at custom
+# column widths.
+ReflowComments: false
+
+# Spaces in modern C++ ranges + initializers.
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceAfterCStyleCast: false
+
+# C++20 `concept` and `requires` show up in the runtime/state layers.
+Standard: c++20
