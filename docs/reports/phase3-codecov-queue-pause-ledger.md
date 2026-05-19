@@ -9883,3 +9883,16 @@ close callback single-shot"` (2 assertions / 1 case),
 `./build/test/pulp-test-async-stream "[async_stream][coverage][phase3]"` (32
 assertions / 7 cases), and `git diff --check`. The batch now has 24 local
 coverage commits and has reached the lower bound for the next PR batch.
+
+2026-05-19 00:52 PDT: opened PR #2318 (`test(runtime): batch phase 3
+coverage hardening`) from `feature/phase3-codecov-runtime-state-batch-751` at
+rebased head `70efbacf8`. The branch was pushed with 24 local coverage commits
+after a clean rebase onto current `origin/main`. PR creation used GitHub REST
+instead of `shipyard pr` because this Phase 3 batch is explicitly avoiding
+Namespace CI. Local validation before opening passed: targeted rebuild of
+`pulp-test-async-stream`, `pulp-test-stream`, `pulp-test-crypto`,
+`pulp-test-i18n`, `pulp-test-state-tree`, `pulp-test-runtime-utils`,
+`pulp-test-preset-manager`, `pulp-test-properties`, and
+`pulp-test-undo-manager`; focused phase3 filters across those suites; and `git
+diff --check`. Next action: monitor GitHub-hosted checks for #2318 and address
+failures or review comments.
