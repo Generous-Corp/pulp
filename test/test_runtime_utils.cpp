@@ -1333,6 +1333,17 @@ TEST_CASE("Expression evaluator treats chained powers as right associative",
     REQUIRE(*negative_exponent == Catch::Approx(4.0));
 }
 
+TEST_CASE("Expression evaluator handles unary plus and division by zero",
+          "[runtime][expression][coverage][phase3]") {
+    auto positive = evaluate(" \t +e + +2 ");
+    REQUIRE(positive.has_value());
+    REQUIRE(*positive == Catch::Approx(4.718281828459045));
+
+    auto divided = evaluate("10 / (3 - 3)");
+    REQUIRE(divided.has_value());
+    REQUIRE(*divided == Catch::Approx(0.0));
+}
+
 // ── HTTP URL parsing ───────────────────────────────────────────────────
 
 TEST_CASE("HTTP helpers reject malformed URLs without transport work",
