@@ -2,6 +2,7 @@
 
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
+#include <array>
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
@@ -120,6 +121,41 @@ public:
     /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
 
+    /// Block-local snapshot of @p N parameter values.
+    ///
+    /// Loads each parameter once and returns the values in a stack-
+    /// allocated @c std::array. DSP code should call this once at the
+    /// top of @c process() and read from the returned array inside
+    /// the per-sample loop, instead of calling @c get_value() per
+    /// sample (each per-sample atomic load is a memory fence and
+    /// fans out across cores). Mirrors the "snapshot the world
+    /// before you start" pattern called out in sudara "Big List of
+    /// JUCE Tips" #29.
+    ///
+    /// @tparam N  Compile-time count of parameter IDs to read.
+    /// @param ids  Parameter IDs to snapshot, in the desired output
+    ///             order. Unknown IDs yield @c 0.0f at their slot.
+    /// @return std::array<float, N> — same order as @p ids.
+    ///
+    /// @code
+    /// constexpr std::array<ParamID, 2> kIds = { kGainId, kMixId };
+    /// auto p = store.snapshot(kIds);
+    /// for (int s = 0; s < n; ++s) {
+    ///     out[s] = in[s] * p[0] + dry[s] * (1.f - p[1]);
+    /// }
+    /// @endcode
+    template <std::size_t N>
+    [[nodiscard]] std::array<float, N> snapshot(
+        const std::array<ParamID, N>& ids) const noexcept;
+
+    /// Modulated variant of @c snapshot — returns each parameter's
+    /// base + per-buffer modulation offset (see
+    /// @c set_mod_offset). Use this from a synth that consumes
+    /// CLAP's modulated values inside the voice loop.
+    template <std::size_t N>
+    [[nodiscard]] std::array<float, N> snapshot_modulated(
+        const std::array<ParamID, N>& ids) const noexcept;
+
     /// View of all registered parameters (in registration order).
     std::span<const ParamInfo> all_params() const { return params_; }
 
@@ -234,5 +270,29 @@ public:
         on_end_gesture_ = std::move(end_fn);
     }
 };
+
+// ─── Template definitions ──────────────────────────────────────────────────
+
+template <std::size_t N>
+std::array<float, N> StateStore::snapshot(
+    const std::array<ParamID, N>& ids) const noexcept
+{
+    std::array<float, N> out{};
+    for (std::size_t i = 0; i < N; ++i) {
+        out[i] = get_value(ids[i]);
+    }
+    return out;
+}
+
+template <std::size_t N>
+std::array<float, N> StateStore::snapshot_modulated(
+    const std::array<ParamID, N>& ids) const noexcept
+{
+    std::array<float, N> out{};
+    for (std::size_t i = 0; i < N; ++i) {
+        out[i] = get_modulated(ids[i]);
+    }
+    return out;
+}
 
 } // namespace pulp::state
