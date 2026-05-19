@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01540"></a>
+## [0.154.0] - 2026-05-19
+
+- refactor(test): P5-2 follow-up — extracted Canvas2D shim post-Wave-2 cluster from test_canvas2d_shim.cpp (-1,487 lines, 3,121 → 1,634, -47.6%)
+
 <a id="v01510"></a>
 ## [0.151.0] - 2026-05-19
 

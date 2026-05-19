@@ -1954,6 +1954,15 @@ pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 # (and silently aborts FilterBank-style frame renders) gets caught.
 pulp_add_test_suite(pulp-test-canvas2d-shim LIBRARIES pulp::view)
 
+# Canvas2D shim — post-Wave-2 coverage (P5-2 follow-up — extracted from
+# test_canvas2d_shim.cpp). Bundles #1525 (fillText / strokeText
+# maxWidth + glyph cluster handling) + #1521 (arc-as-path
+# DIVERGE → PASS) + #1520 (ctx.direction / ctx.filter) + #1526
+# (catalog hygiene round-trip) + Wave 4 lineDashOffset re-flush +
+# #1527 (getTransform / resetTransform + isPointInPath /
+# isPointInStroke).
+pulp_add_test_suite(pulp-test-canvas2d-shim-late LIBRARIES pulp::view)
+
 # SvgPathWidget tests (issue-965)
 pulp_add_test_suite(pulp-test-svg-path-widget LIBRARIES pulp::view)
 
