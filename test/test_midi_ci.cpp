@@ -515,3 +515,40 @@ TEST_CASE("CiDiscovery profile reply lists enabled and disabled profiles",
     REQUIRE(reply[27] == disabled.reserved);
     REQUIRE(reply[28] == 0xF7);
 }
+
+TEST_CASE("CiDiscovery profile reply encodes multi-byte profile counts",
+          "[midi][ci][codecov]") {
+    CiDiscovery responder;
+    for (int i = 0; i < 130; ++i) {
+        responder.add_profile({
+            ProfileId{0x01, static_cast<uint8_t>(i & 0x7F), 0x00, 0x00, 0x00},
+            true,
+            0,
+        });
+    }
+    for (int i = 0; i < 129; ++i) {
+        responder.add_profile({
+            ProfileId{0x02, static_cast<uint8_t>(i & 0x7F), 0x00, 0x00, 0x00},
+            false,
+            0,
+        });
+    }
+
+    auto inquiry = make_ci_header(CiMessageType::ProfileInquiry,
+                                  MUID{0x00013579}, responder.local_muid());
+    inquiry.push_back(0xF7);
+
+    auto reply = responder.process_message(inquiry.data(), inquiry.size());
+
+    constexpr std::size_t enabled_count_offset = 14;
+    constexpr std::size_t enabled_profile_bytes = 130 * 5;
+    constexpr std::size_t disabled_count_offset =
+        enabled_count_offset + 2 + enabled_profile_bytes;
+
+    REQUIRE(reply.size() == disabled_count_offset + 2 + 129 * 5 + 1);
+    REQUIRE(reply[enabled_count_offset] == 2);
+    REQUIRE(reply[enabled_count_offset + 1] == 1);
+    REQUIRE(reply[disabled_count_offset] == 1);
+    REQUIRE(reply[disabled_count_offset + 1] == 1);
+    REQUIRE(reply.back() == 0xF7);
+}
