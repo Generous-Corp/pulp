@@ -19,11 +19,25 @@ inline std::size_t mix(std::size_t seed, std::size_t v) noexcept {
 }
 
 inline std::size_t hash_float(float f) noexcept {
-    // Hash the bit pattern so +0.0 == -0.0 collide consistently; NaN
-    // hashes are intentionally not normalised because two NaN-bearing
-    // FontOptions values that hash differently is benign for cache keys.
+    // Codex P2 on #2169: `FontOptions::operator==` is `= default`, which
+    // compares each float member with `==`. IEEE-754 says `+0.0f == -0.0f`,
+    // but their bit patterns differ (0x00000000 vs 0x80000000). Hashing
+    // the raw bits violates the hash/equality contract for
+    // `std::hash<FontOptions>` and can cause missed lookups or duplicate
+    // equivalent entries in unordered caches when signed zero appears in
+    // font option inputs. Canonicalize the sign-bit of zero BEFORE memcpy
+    // by working on the bit pattern directly — `if (f == 0.0f) f = 0.0f;`
+    // is unsafe because the compiler can optimize it away.
+    //
+    // NaN hashes are intentionally not normalised — two NaN-bearing
+    // FontOptions values that hash differently is benign (and `operator==`
+    // also reports them as non-equal under IEEE-754).
     std::uint32_t bits;
     std::memcpy(&bits, &f, sizeof(bits));
+    // 0x80000000 is the sign-only -0.0f bit pattern; collapse to +0.0f.
+    if (bits == 0x80000000u) {
+        bits = 0u;
+    }
     return std::hash<std::uint32_t>{}(bits);
 }
 
