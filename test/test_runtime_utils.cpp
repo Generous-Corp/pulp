@@ -348,6 +348,20 @@ TEST_CASE("DynamicLibrary failed reopen clears a previously loaded handle",
     REQUIRE_FALSE(lib.error().empty());
 }
 
+TEST_CASE("DynamicLibrary missing symbol records an error while staying open",
+          "[runtime][dynlib][coverage][phase3]") {
+    DynamicLibrary lib;
+    REQUIRE(lib.open(system_library_path()));
+    REQUIRE(lib.is_open());
+
+    REQUIRE(lib.find_symbol("pulp_missing_symbol_for_phase3_coverage") == nullptr);
+    REQUIRE_FALSE(lib.error().empty());
+    REQUIRE(lib.is_open());
+
+    REQUIRE(lib.find_symbol(system_library_symbol()) != nullptr);
+    REQUIRE(lib.is_open());
+}
+
 // ── InterProcessLock ────────────────────────────────────────────────────
 
 TEST_CASE("InterProcessLock acquires and releases", "[runtime][ipc_lock]") {
