@@ -10333,3 +10333,14 @@ write failures"` (5 assertions / 1 case), `./build/test/pulp-test-midi-file
 "[midi][file][coverage][phase3]"` (5 assertions / 1 case), and `git diff
 --check`. The batch now has 20 local coverage commits plus main merges;
 continue accumulating before opening a PR.
+
+2026-05-18 23:46 PDT: added `a4c783f94` (`test(events): cover ipc default
+accept path`) to `feature/phase3-codecov-runtime-state-batch-752`. This covers
+`InterprocessConnectionServer`'s default `client_connected()` ownership path
+and the socket listener form that binds from a port-only endpoint, then wakes
+and stops the listener cleanly over loopback. Focused local validation passed:
+`cmake --build build --target pulp-test-ipc -j4`, `./build/test/pulp-test-ipc
+"IPC socket server default callback owns accepted clients"` (4 assertions / 1
+case), `./build/test/pulp-test-ipc "[phase3]"` (4 assertions / 1 case), and
+`git diff --check`. The batch now has 21 local coverage commits plus main
+merges; continue accumulating before opening a PR.
