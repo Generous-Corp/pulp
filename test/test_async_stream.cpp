@@ -460,6 +460,28 @@ TEST_CASE("AsyncStream executor routes callbacks off worker", "[async_stream]") 
     REQUIRE(received.load() == 3);
 }
 
+TEST_CASE("AsyncStream repeated start and stop keep close callback single-shot",
+          "[async_stream][coverage][phase3]") {
+    auto backing = std::make_unique<TestStream>();
+
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    std::atomic<int> closes{0};
+    stream.on_close([&] { closes.fetch_add(1); });
+
+    stream.stop();
+    REQUIRE(closes.load() == 0);
+
+    stream.start();
+    stream.start();
+    stream.stop();
+    stream.stop();
+
+    REQUIRE(closes.load() == 1);
+}
+
 TEST_CASE("AsyncStream retries WouldBlock and partial writes before draining",
           "[async_stream][coverage][phase3]") {
     auto backing = std::make_unique<TestStream>();
