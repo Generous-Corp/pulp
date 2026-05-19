@@ -10948,3 +10948,17 @@ cases), and `git diff --check`. PR #2268 remained current at head
 (windows-latest)` was in progress, and the remaining checks were queued with
 no failures. The batch is clean, local-only, and 16 coverage commits ahead of
 `origin/main`.
+
+2026-05-19 02:38 PDT: added `9ce48e672` (`test(runtime): cover HTTP download
+success`) to local-only `feature/phase3-codecov-audio-midi-batch-753`. This
+extends the deterministic loopback HTTP helper in `test/test_runtime_utils.cpp`
+to cover successful `http_download` writes: the helper serves a one-shot HTTP
+200 response, `http_download` fetches it into a temporary file, and the test
+asserts the captured GET request plus persisted response body. Focused local
+validation passed: `cmake --build build --target pulp-test-runtime-utils -j4`,
+`./build/test/pulp-test-runtime-utils "[runtime][http]"` (52 assertions / 7
+cases), and `git diff --check`. PR #2268 remained current at head
+`5f511a733`; `baseline-diff`, `macOS local smoke`, and `Yoga layout snapshots`
+were green, `android-build (windows-latest)` was in progress, and the remaining
+checks were queued with no failures. The batch is clean, local-only, and 17
+coverage commits ahead of `origin/main`.
