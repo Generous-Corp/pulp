@@ -810,3 +810,139 @@ TEST_CASE("Queued Main callback is cancelled by token reset (Codex P1 PR#2270)",
 
     store.set_main_loop(nullptr);
 }
+
+// ─── set_value_rt + pump_listeners (Slice 2) ────────────────────────────────
+
+TEST_CASE("set_value_rt writes atomic value and defers Main listener",
+          "[state][listener][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int fire_count = 0;
+    float last_value = -1.0f;
+    auto token = store.add_listener(
+        [&](ParamID, float v) {
+            ++fire_count;
+            last_value = v;
+        },
+        ListenerThread::Main);
+
+    store.set_value_rt(1, 0.4f);
+
+    // Atomic value updated synchronously, but Main listener not fired yet.
+    REQUIRE_THAT(store.get_value(1), WithinAbs(0.4, 0.001));
+    REQUIRE(fire_count == 0);
+
+    const auto drained = store.pump_listeners();
+    REQUIRE(drained == 1);
+    REQUIRE(fire_count == 1);
+    REQUIRE_THAT(last_value, WithinAbs(0.4, 0.001));
+}
+
+TEST_CASE("set_value_rt fires Audio listeners inline (no pump needed)",
+          "[state][listener][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int fire_count = 0;
+    auto token = store.add_audio_listener(
+        [&](ParamID, float) { ++fire_count; });
+
+    store.set_value_rt(1, 0.7f);
+    REQUIRE(fire_count == 1);  // fired inline, no pump
+
+    const auto drained = store.pump_listeners();
+    REQUIRE(drained == 0);
+    REQUIRE(fire_count == 1);
+}
+
+TEST_CASE("pump_listeners batches multiple RT changes",
+          "[state][listener][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    std::vector<float> seen;
+    auto token = store.add_listener(
+        [&](ParamID, float v) { seen.push_back(v); },
+        ListenerThread::Main);
+
+    for (int i = 1; i <= 5; ++i) {
+        store.set_value_rt(1, static_cast<float>(i) * 0.1f);
+    }
+    REQUIRE(seen.empty());
+
+    REQUIRE(store.pump_listeners() == 5);
+    REQUIRE(seen.size() == 5);
+    REQUIRE_THAT(seen[0], WithinAbs(0.1, 0.001));
+    REQUIRE_THAT(seen[4], WithinAbs(0.5, 0.001));
+}
+
+TEST_CASE("set_normalized_rt denormalizes through the parameter range",
+          "[state][listener][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Gain", "dB",
+                                        {-60.0f, 12.0f, 0.0f}));
+
+    float seen = 0.0f;
+    auto token = store.add_listener(
+        [&](ParamID, float v) { seen = v; },
+        ListenerThread::Main);
+
+    store.set_normalized_rt(1, 0.5f);
+    REQUIRE(store.pump_listeners() == 1);
+
+    const float expected = -60.0f + 0.5f * (12.0f - (-60.0f)); // -24 dB
+    REQUIRE_THAT(seen, WithinAbs(expected, 0.1));
+    REQUIRE_THAT(store.get_value(1), WithinAbs(expected, 0.1));
+}
+
+TEST_CASE("set_value_rt clamps and the RT queue is lossy under overflow",
+          "[state][listener][rt]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int fire_count = 0;
+    auto token = store.add_listener(
+        [&](ParamID, float) { ++fire_count; },
+        ListenerThread::Main);
+
+    store.set_value_rt(1, 999.0f);
+    REQUIRE(store.pump_listeners() == 1);
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1.0, 0.001));
+
+    // Saturate the bounded SPSC queue. Exact capacity is internal; we
+    // just require: (1) no crash / no block, (2) the atomic value still
+    // reflects the latest write, (3) the listener fires exactly as many
+    // times as pump drained.
+    fire_count = 0;
+    constexpr int kOverflowN = 4096;
+    for (int i = 0; i < kOverflowN; ++i) {
+        store.set_value_rt(1, static_cast<float>(i % 100) * 0.01f);
+    }
+    const auto drained = store.pump_listeners();
+    REQUIRE(drained <= static_cast<std::size_t>(kOverflowN));
+    REQUIRE(fire_count == static_cast<int>(drained));
+    REQUIRE_THAT(store.get_value(1),
+                 WithinAbs(static_cast<float>((kOverflowN - 1) % 100) * 0.01,
+                           0.001));
+}
+
+TEST_CASE("RT-queued changes are skipped when the token was reset before pump",
+          "[state][listener][rt][token]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int fire_count = 0;
+    auto token = store.add_listener(
+        [&](ParamID, float) { ++fire_count; },
+        ListenerThread::Main);
+
+    store.set_value_rt(1, 0.2f);
+    store.set_value_rt(1, 0.3f);
+    token.reset();
+    // Events are drained from the queue (so pump returns 2), but the
+    // listener has been removed from the registry — so the callback
+    // never fires for the queued events.
+    REQUIRE(store.pump_listeners() == 2);
+    REQUIRE(fire_count == 0);
+}

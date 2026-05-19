@@ -66,6 +66,32 @@ public:
     /// @note Safe to call from any thread.
     void set_value(ParamID id, float value);
 
+    /// Real-time-safe parameter write for use from the audio thread.
+    ///
+    /// Performs the atomic value store (lock-free, no allocation) and
+    /// fires registered @c ListenerThread::Audio listeners inline. Any
+    /// @c ListenerThread::Main listeners are NOT invoked here — the
+    /// change is pushed onto a single-producer/single-reader queue and
+    /// drained by @c pump_listeners() on the main thread. This avoids
+    /// the @c EventLoop::dispatch lambda allocation that the generic
+    /// @c set_value() path performs when a Main listener exists.
+    ///
+    /// Use this from format-adapter audio callbacks (CLAP / VST3 / AU
+    /// process) for host-driven parameter writes. UI-driven writes from
+    /// the main thread should use @c set_value().
+    ///
+    /// @note The pending-changes queue is bounded; if @c pump_listeners()
+    ///       is not called fast enough the oldest queued events are
+    ///       dropped (the atomic value is still up-to-date, so the UI
+    ///       picks up the latest on its next pump).
+    void set_value_rt(ParamID id, float value);
+
+    /// Real-time-safe normalized-value write. Denormalizes through the
+    /// parameter's @c ParamRange and then dispatches through
+    /// @c set_value_rt(). Used by the VST3 adapter where the host
+    /// reports parameter changes in normalized [0, 1] form.
+    void set_normalized_rt(ParamID id, float normalized);
+
     /// Set the absolute modulation offset for a parameter.
     void set_mod_offset(ParamID id, float offset);
 
@@ -144,6 +170,14 @@ public:
     /// Remove a listener explicitly. Equivalent to letting the token
     /// fall out of scope.
     void remove_listener(ListenerToken& token);
+
+    /// Drain queued main-thread listener invocations posted by
+    /// @c set_value_rt() / @c set_normalized_rt() from the audio thread.
+    /// Call this from the main thread (e.g. the editor's per-frame
+    /// timer or the host's UI tick).
+    ///
+    /// @return Number of changes drained from the queue.
+    std::size_t pump_listeners();
 
     /// Legacy permanent-listener registration. Prefer the
     /// @c ListenerToken-returning overload above for new code.

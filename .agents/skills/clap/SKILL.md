@@ -103,10 +103,19 @@ and enumerated to the host by the `params` extension in
 During `clap_process`, the adapter routes host events into the store:
 
 ```
-CLAP_EVENT_PARAM_VALUE   → store.set_value(id, value)
+CLAP_EVENT_PARAM_VALUE   → store.set_value_rt(id, value)   ← RT-safe
 CLAP_EVENT_PARAM_MOD     → store.set_mod_offset(id, amount)
 CLAP_EVENT_PARAM_GESTURE_BEGIN / _END → store.begin_gesture / end_gesture
 ```
+
+**Use `set_value_rt`, not `set_value`, on the audio thread.** The generic
+`set_value()` path dispatches `ListenerThread::Main` listeners through
+the installed `EventLoop`, and that dispatch lambda allocates on the
+firing thread — fatal for the audio thread. `set_value_rt()` writes the
+atomic + pushes an event on a non-allocating SPSC queue; the editor's
+UI tick drains via `store.pump_listeners()`. Audio listeners still fire
+inline (caller asserts RT-safety). See Slice 2 in
+`planning/2026-05-18-rt-safety-and-debug-dx.md`.
 
 The **modulation offset is per-buffer**: `store.reset_all_mod()` runs
 at the top of every `process()` before applying new `PARAM_MOD` events.

@@ -177,11 +177,14 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
     if (!inst->processor) return;
 
-    // Read control port values into the parameter store
+    // Read control port values into the parameter store. LV2 run() is
+    // the audio thread, so use the RT-safe path — atomic store + SPSC
+    // push for Main listeners, no allocation. Editor pumps via
+    // store.pump_listeners() from its UI tick.
     for (int i = 0; i < inst->num_params; ++i) {
         if (inst->control_in_ports[i]) {
             float value = *inst->control_in_ports[i];
-            inst->store.set_value(inst->param_ids[i], value);
+            inst->store.set_value_rt(inst->param_ids[i], value);
         }
     }
 
