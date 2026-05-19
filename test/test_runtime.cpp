@@ -498,6 +498,23 @@ TEST_CASE("TemporaryFile move assignment cleans previous file", "[runtime][tempo
     REQUIRE_FALSE(std::filesystem::exists(new_path));
 }
 
+TEST_CASE("TemporaryFile self move assignment leaves file ownership intact",
+          "[runtime][temporary_file][coverage][phase3]") {
+    std::filesystem::path path;
+    {
+        TemporaryFile file(".self");
+        path = file.path();
+        REQUIRE(std::filesystem::exists(path));
+
+        TemporaryFile* same_file = &file;
+        file = std::move(*same_file);
+
+        REQUIRE(file.path() == path);
+        REQUIRE(std::filesystem::exists(path));
+    }
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("DynamicLibrary reports closed and failed lookup paths", "[runtime][dynamic_library]") {
     DynamicLibrary library;
     REQUIRE_FALSE(library.is_open());
