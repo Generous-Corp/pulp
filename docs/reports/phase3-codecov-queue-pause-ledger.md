@@ -9452,3 +9452,16 @@ pulp-test-lv2-host-discovery`, `./build/test/pulp-test-lv2-host-discovery
 `baseline-diff` failure, #2272 with no failures, #2292 dirty but with no
 failures, and #2298 pending with no failures. The held batch now has 16 local
 coverage commits; continue accumulating before opening a PR.
+
+2026-05-18 20:48 PDT: added `b72bbdf91` (`test(host): cover scanner progress
+lanes`) to the held `feature/phase3-codecov-host-cache-batch-750` batch. This
+covers `PluginScanner::scan()` progress callback behavior for hermetic
+`only_extra_paths` scans across multiple enabled format lanes, including the
+Apple-specific AU skip under hermetic mode and deterministic VST3/LV2 synthetic
+bundle discovery. Focused local validation passed: `cmake --build build
+--target pulp-test-host-regression`, `./build/test/pulp-test-host-regression
+"PluginScanner progress callback reports hermetic extra-path lanes"` (10
+assertions / 1 case), `./build/test/pulp-test-host-regression
+"[host][scanner][coverage][phase3]"` (10 assertions / 1 case), and `git diff
+--check`. The held batch now has 17 local coverage commits; continue
+accumulating before opening a PR.
