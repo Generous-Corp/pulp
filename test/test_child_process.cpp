@@ -259,6 +259,38 @@ TEST_CASE("output capture respects max byte limits",
     REQUIRE(r.stderr_output == "123");
 }
 
+TEST_CASE("zero max output bytes drains without capturing lines",
+          "[child_process][edge][coverage][phase3]") {
+    std::vector<std::string> stdout_lines;
+    std::vector<std::string> stderr_lines;
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.max_output_bytes = 0;
+    opts.on_stdout_line = [&](std::string_view line) {
+        stdout_lines.emplace_back(line);
+    };
+    opts.on_stderr_line = [&](std::string_view line) {
+        stderr_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "echo out-line& echo err-line 1>&2"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh",
+        {"-c", "printf 'out-line\\n'; printf 'err-line\\n' >&2"},
+        opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.empty());
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE(stdout_lines.empty());
+    REQUIRE(stderr_lines.empty());
+}
+
 TEST_CASE("stderr line callback fires independently",
           "[child_process][edge][issue-640]") {
     std::vector<std::string> stdout_lines;
