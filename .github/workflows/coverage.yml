@@ -138,6 +138,7 @@ jobs:
       linux_runs_on: ${{ steps.resolve.outputs.linux_runs_on }}
       macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
       windows_runs_on: ${{ steps.resolve.outputs.windows_runs_on }}
+      android_kotlin_runs_on: ${{ steps.resolve.outputs.android_kotlin_runs_on }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -149,8 +150,9 @@ jobs:
           EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           LINUX_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_LINUX_RUNS_ON_JSON }}
-          MACOS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_MACOS_RUNS_ON_JSON }}
           WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_COVERAGE_WINDOWS_RUNS_ON_JSON }}
+          ANDROID_KOTLIN_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON || vars.PULP_COVERAGE_ANDROID_KOTLIN_RUNS_ON_JSON }}
         run: |
           set -euo pipefail
           resolve() {
@@ -171,6 +173,11 @@ jobs:
             EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
             MACOS_RUNS_ON_JSON \
             macos-latest)
+          android_kotlin=$(resolve \
+            "Coverage (Android, Kotlin)" \
+            "" \
+            ANDROID_KOTLIN_RUNS_ON_JSON \
+            macos-latest)
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             # Keep PR Windows coverage on GitHub-hosted runners until the
             # Namespace Windows queue is reliably assigning jobs again.
@@ -186,6 +193,7 @@ jobs:
             echo "linux_runs_on=${linux}"
             echo "macos_runs_on=${macos}"
             echo "windows_runs_on=${windows}"
+            echo "android_kotlin_runs_on=${android_kotlin}"
           } >>"${GITHUB_OUTPUT}"
 
   coverage:
@@ -589,7 +597,8 @@ jobs:
     # This lane measures Kotlin unit-testable source only; APK build and
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
-    runs-on: macos-latest
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5

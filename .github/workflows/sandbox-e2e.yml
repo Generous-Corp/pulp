@@ -44,14 +44,39 @@ permissions:
   contents: read
 
 jobs:
+  resolve-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - id: resolve
+        env:
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          macos=$(python3 tools/scripts/resolve_runs_on.py \
+            --target-name "sandbox-e2e (macOS)" \
+            --mode default \
+            --override-env MACOS_RUNS_ON_JSON \
+            --default-label macos-latest)
+          echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+
   sandbox-e2e:
     name: sandbox-e2e (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
+          - os: ubuntu-latest
+            runs_on_json: '"ubuntu-latest"'
     steps:
       - uses: actions/checkout@v4
 
