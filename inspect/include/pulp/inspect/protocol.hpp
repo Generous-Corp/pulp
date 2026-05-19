@@ -47,6 +47,15 @@ namespace methods {
     constexpr auto kInspectorListTweaks  = "Inspector.listTweaks";
     constexpr auto kInspectorClearTweaks = "Inspector.clearTweaks";
     constexpr auto kInspectorSetBypass   = "Inspector.setBypass";
+    // Phase 1: pulp-tweaks.json disk persistence. All three require a
+    // TweakStore wired in. Path defaults to $PULP_TWEAKS_FILE or the
+    // resolved <project>/pulp-tweaks.json — see TweakStore::default_tweaks_path().
+    //   loadTweaks  — read disk -> replace in-memory state.
+    //   saveTweaks  — write current in-memory state -> disk (atomic).
+    //   setAutoSave — opt-in flush on every mutation.
+    constexpr auto kInspectorLoadTweaks  = "Inspector.loadTweaks";
+    constexpr auto kInspectorSaveTweaks  = "Inspector.saveTweaks";
+    constexpr auto kInspectorSetAutoSave = "Inspector.setAutoSave";
 
     // DOM domain
     constexpr auto kDOMGetDocument     = "DOM.getDocument";

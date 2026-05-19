@@ -1,4 +1,5 @@
 // Phase 0b PR-A: TweakStore + Inspector.applyTweak/listTweaks/clearTweaks/setBypass.
+// Phase 1: pulp-tweaks.json disk persistence + Inspector.load/save/setAutoSave.
 // Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +9,14 @@
 #include <pulp/inspect/tweak_store.hpp>
 
 #include <choc/text/choc_JSON.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 using namespace pulp::inspect;
 
@@ -23,6 +32,53 @@ struct Fixture {
     TweakStore store;
     DomainHandler handler;
     Fixture() { handler.set_tweak_store(&store); }
+};
+
+// Phase 1 helpers ────────────────────────────────────────────────────────
+//
+// Each disk test gets its own scratch directory under the system temp
+// root so the suite stays parallel-safe. The destructor removes the
+// directory (and any half-written .tmp files). PULP_TWEAKS_FILE is
+// cleared on construction so default_tweaks_path() lookups stay
+// deterministic — tests that need it should setenv/unsetenv inside
+// the test body.
+struct TempTweaksDir {
+    std::filesystem::path dir;
+    std::filesystem::path file;
+
+    TempTweaksDir() {
+        // Counter ensures uniqueness even when two TempTweaksDirs land
+        // on the same epoch-millisecond.
+        static std::atomic<uint64_t> counter{0};
+        auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        std::ostringstream name;
+        name << "pulp-tweaks-test-" << now << "-" << counter.fetch_add(1);
+        dir = std::filesystem::temp_directory_path() / name.str();
+        std::filesystem::create_directories(dir);
+        file = dir / "pulp-tweaks.json";
+#ifdef _WIN32
+        _putenv_s("PULP_TWEAKS_FILE", "");
+#else
+        ::unsetenv("PULP_TWEAKS_FILE");
+#endif
+    }
+
+    ~TempTweaksDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    std::string read() const {
+        std::ifstream in(file);
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+
+    void write(const std::string& s) const {
+        std::ofstream out(file);
+        out << s;
+    }
 };
 
 }  // namespace
@@ -352,4 +408,322 @@ TEST_CASE("Inspector.getInfo surfaces tweak_count when a store is attached",
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["tweak_count"].getInt64() == 2);
+}
+
+// ── Phase 1: disk persistence ──────────────────────────────────────────
+
+TEST_CASE("TweakStore: save -> clear -> load round-trips state",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(12), "drag");
+    s.apply_tweak("anchor:a", "paint.bg", choc::value::createString("#abcdef"), "picker");
+    s.apply_tweak("anchor:b", "layout.gap", choc::value::createInt32(4), "drag");
+    s.set_bypass("anchor:a", std::vector<std::string>{"paint.bg"});
+
+    auto saved = s.save_to_disk(tmp.file.string());
+    REQUIRE(saved.ok);
+    REQUIRE(saved.tweak_count == 3);
+    REQUIRE(std::filesystem::exists(tmp.file));
+
+    s.clear();
+    REQUIRE(s.count() == 0);
+
+    auto loaded = s.load_from_disk(tmp.file.string());
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.tweak_count == 3);
+    REQUIRE(s.count() == 3);
+
+    // Values restored. choc::json::parse normalises numeric literals
+    // to int64 / double — use getWithDefault to stay agnostic to the
+    // serialized width.
+    REQUIRE(s.lookup("anchor:a", "layout.padding")->getWithDefault<int64_t>(0) == 12);
+    REQUIRE(s.lookup("anchor:a", "paint.bg")->getString() == "#abcdef");
+    REQUIRE(s.lookup("anchor:b", "layout.gap")->getWithDefault<int64_t>(0) == 4);
+
+    // Bypass overlay restored
+    REQUIRE(s.is_bypassed("anchor:a", "paint.bg"));
+    REQUIRE_FALSE(s.is_bypassed("anchor:a", "layout.padding"));
+
+    // Sources restored via the optional sidecar map
+    auto recs = s.list_tweaks();
+    bool found_drag_source = false;
+    for (auto& r : recs) {
+        if (r.anchor_id == "anchor:a" && r.property_path == "layout.padding") {
+            REQUIRE(r.source == "drag");
+            found_drag_source = true;
+        }
+    }
+    REQUIRE(found_drag_source);
+}
+
+TEST_CASE("TweakStore: atomic write leaves no .tmp file behind after success",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.apply_tweak("a", "x", choc::value::createInt32(1), {});
+
+    auto saved = s.save_to_disk(tmp.file.string());
+    REQUIRE(saved.ok);
+    REQUIRE(std::filesystem::exists(tmp.file));
+
+    auto tmp_sidecar = tmp.file;
+    tmp_sidecar += ".tmp";
+    REQUIRE_FALSE(std::filesystem::exists(tmp_sidecar));
+}
+
+TEST_CASE("TweakStore: save_to_disk on a bad path returns error, no partial write",
+          "[inspect][tweak-store][disk]") {
+    TweakStore s;
+    s.apply_tweak("a", "x", choc::value::createInt32(1), {});
+
+    // /this/path/should/not/exist is unwritable on any sane system.
+    std::string bad = "/this/path/should/not/exist/pulp-tweaks.json";
+    auto saved = s.save_to_disk(bad);
+    REQUIRE_FALSE(saved.ok);
+    REQUIRE_FALSE(saved.error.empty());
+    REQUIRE_FALSE(std::filesystem::exists(bad));
+    REQUIRE_FALSE(std::filesystem::exists(bad + ".tmp"));
+}
+
+TEST_CASE("TweakStore: auto-save flushes after every mutation",
+          "[inspect][tweak-store][disk][auto-save]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.set_auto_save(true, tmp.file.string());
+    REQUIRE(s.auto_save_enabled());
+    REQUIRE(s.auto_save_path() == tmp.file.string());
+
+    s.apply_tweak("a", "x", choc::value::createInt32(7), "drag");
+    REQUIRE(std::filesystem::exists(tmp.file));
+
+    auto first = tmp.read();
+    REQUIRE(first.find("\"x\"") != std::string::npos);
+    REQUIRE(first.find("7") != std::string::npos);
+
+    // A second mutation overwrites with the new value.
+    s.apply_tweak("a", "x", choc::value::createInt32(99), "drag");
+    auto second = tmp.read();
+    REQUIRE(second.find("99") != std::string::npos);
+
+    // Bypass changes also flush.
+    s.set_bypass("a", true);
+    auto third = tmp.read();
+    REQUIRE(third.find("\"bypassed\"") != std::string::npos);
+
+    // Disabling auto-save stops further flushes.
+    s.set_auto_save(false);
+    REQUIRE_FALSE(s.auto_save_enabled());
+    s.apply_tweak("a", "y", choc::value::createInt32(123), {});
+    auto fourth = tmp.read();
+    // 'y' should NOT have hit disk.
+    REQUIRE(fourth.find("\"y\"") == std::string::npos);
+}
+
+TEST_CASE("TweakStore: load_from_disk on missing file returns error, leaves state intact",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.apply_tweak("a", "x", choc::value::createInt32(1), {});
+    REQUIRE(s.count() == 1);
+
+    auto loaded = s.load_from_disk(tmp.file.string());  // file doesn't exist
+    REQUIRE_FALSE(loaded.ok);
+    REQUIRE_FALSE(loaded.error.empty());
+    // In-memory state preserved.
+    REQUIRE(s.count() == 1);
+    REQUIRE(s.lookup("a", "x")->getInt32() == 1);
+}
+
+TEST_CASE("TweakStore: load rejects unsupported schema version",
+          "[inspect][tweak-store][disk][schema]") {
+    TempTweaksDir tmp;
+    tmp.write(R"({
+        "$schema": "pulp-tweaks://v999",
+        "version": 999,
+        "tweaks": { "anchor:a": { "x": 1 } }
+    })");
+    TweakStore s;
+    auto loaded = s.load_from_disk(tmp.file.string());
+    REQUIRE_FALSE(loaded.ok);
+    REQUIRE(loaded.error.find("999") != std::string::npos);
+    REQUIRE(s.count() == 0);  // no partial apply
+}
+
+TEST_CASE("TweakStore: load tolerates files written without an integer version field",
+          "[inspect][tweak-store][disk][schema]") {
+    // TS-canonical files use `$schema: pulp-tweaks://v1` and no integer
+    // `version` — we accept those as v1 for back-compat.
+    TempTweaksDir tmp;
+    tmp.write(R"({
+        "$schema": "pulp-tweaks://v1",
+        "meta": { "pulpVersion": "0.0.0", "importSession": "test" },
+        "tweaks": { "anchor:a": { "paint.bg": "#abc" } }
+    })");
+    TweakStore s;
+    auto loaded = s.load_from_disk(tmp.file.string());
+    REQUIRE(loaded.ok);
+    REQUIRE(s.lookup("anchor:a", "paint.bg")->getString() == "#abc");
+}
+
+TEST_CASE("TweakStore: load rejects malformed JSON, leaves state intact",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    tmp.write("{ not json");
+    TweakStore s;
+    s.apply_tweak("a", "x", choc::value::createInt32(1), {});
+    auto loaded = s.load_from_disk(tmp.file.string());
+    REQUIRE_FALSE(loaded.ok);
+    REQUIRE(s.count() == 1);
+}
+
+TEST_CASE("TweakStore: bypass=true round-trips through disk",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.set_bypass("anchor:a", true);
+    REQUIRE(s.save_to_disk(tmp.file.string()).ok);
+
+    TweakStore t;
+    auto loaded = t.load_from_disk(tmp.file.string());
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.bypass_count == 1);
+    REQUIRE(t.is_bypassed("anchor:a", "any.path"));
+}
+
+TEST_CASE("TweakStore: bypass=path-list round-trips through disk",
+          "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
+    TweakStore s;
+    s.set_bypass("anchor:a", std::vector<std::string>{"paint.bg", "layout.gap"});
+    REQUIRE(s.save_to_disk(tmp.file.string()).ok);
+
+    TweakStore t;
+    REQUIRE(t.load_from_disk(tmp.file.string()).ok);
+    REQUIRE(t.is_bypassed("anchor:a", "paint.bg"));
+    REQUIRE(t.is_bypassed("anchor:a", "layout.gap"));
+    REQUIRE_FALSE(t.is_bypassed("anchor:a", "paint.color"));
+}
+
+TEST_CASE("TweakStore: default_tweaks_path honors PULP_TWEAKS_FILE",
+          "[inspect][tweak-store][disk]") {
+    // Save + restore the env so other tests aren't disturbed.
+    const char* prev = std::getenv("PULP_TWEAKS_FILE");
+    std::string saved_prev = prev ? prev : "";
+#ifdef _WIN32
+    _putenv_s("PULP_TWEAKS_FILE", "/tmp/explicit-tweaks.json");
+#else
+    ::setenv("PULP_TWEAKS_FILE", "/tmp/explicit-tweaks.json", 1);
+#endif
+    REQUIRE(TweakStore::default_tweaks_path() == "/tmp/explicit-tweaks.json");
+#ifdef _WIN32
+    if (saved_prev.empty()) _putenv_s("PULP_TWEAKS_FILE", "");
+    else _putenv_s("PULP_TWEAKS_FILE", saved_prev.c_str());
+#else
+    if (saved_prev.empty()) ::unsetenv("PULP_TWEAKS_FILE");
+    else ::setenv("PULP_TWEAKS_FILE", saved_prev.c_str(), 1);
+#endif
+}
+
+TEST_CASE("TweakStore: from_json round-trips without touching disk",
+          "[inspect][tweak-store][disk]") {
+    TweakStore s;
+    s.apply_tweak("a", "p", choc::value::createInt32(5), "drag");
+    s.set_bypass("a", true);
+    auto serialized = s.to_json();
+
+    TweakStore t;
+    auto r = t.from_json(serialized);
+    REQUIRE(r.ok);
+    REQUIRE(t.lookup("a", "p")->getWithDefault<int64_t>(0) == 5);
+    REQUIRE(t.is_bypassed("a", "p"));
+}
+
+// ── Phase 1: protocol surface ──────────────────────────────────────────
+
+TEST_CASE("Inspector.saveTweaks writes the file and returns the resolved path",
+          "[inspect][protocol][saveTweaks]") {
+    TempTweaksDir tmp;
+    Fixture f;
+    f.store.apply_tweak("a", "x", choc::value::createInt32(1), "drag");
+
+    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
+    auto resp = f.handler.handle(req(methods::kInspectorSaveTweaks, params));
+    REQUIRE_FALSE(resp.is_error);
+    auto parsed = choc::json::parse(resp.params_json);
+    REQUIRE(parsed["ok"].getBool());
+    REQUIRE(parsed["path"].getString() == tmp.file.string());
+    REQUIRE(parsed["tweakCount"].getInt64() == 1);
+    REQUIRE(std::filesystem::exists(tmp.file));
+}
+
+TEST_CASE("Inspector.loadTweaks restores state from disk",
+          "[inspect][protocol][loadTweaks]") {
+    TempTweaksDir tmp;
+    // Seed disk via a separate store so the read path is exercised.
+    {
+        TweakStore writer;
+        writer.apply_tweak("a", "p", choc::value::createInt32(42), "drag");
+        REQUIRE(writer.save_to_disk(tmp.file.string()).ok);
+    }
+    Fixture f;
+    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
+    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks, params));
+    REQUIRE_FALSE(resp.is_error);
+    auto parsed = choc::json::parse(resp.params_json);
+    REQUIRE(parsed["ok"].getBool());
+    REQUIRE(parsed["tweakCount"].getInt64() == 1);
+    REQUIRE(f.store.lookup("a", "p")->getWithDefault<int64_t>(0) == 42);
+}
+
+TEST_CASE("Inspector.loadTweaks reports schema mismatch as a protocol error",
+          "[inspect][protocol][loadTweaks][schema]") {
+    TempTweaksDir tmp;
+    tmp.write(R"({"version":999,"tweaks":{}})");
+
+    Fixture f;
+    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
+    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks, params));
+    REQUIRE(resp.is_error);
+    REQUIRE(resp.params_json.find("999") != std::string::npos);
+}
+
+TEST_CASE("Inspector.setAutoSave arms and disarms the flush hook",
+          "[inspect][protocol][setAutoSave]") {
+    TempTweaksDir tmp;
+    Fixture f;
+    std::string enable = R"({"enabled":true,"path":")" + tmp.file.string() + R"("})";
+    auto resp = f.handler.handle(req(methods::kInspectorSetAutoSave, enable));
+    REQUIRE_FALSE(resp.is_error);
+    auto parsed = choc::json::parse(resp.params_json);
+    REQUIRE(parsed["enabled"].getBool());
+    REQUIRE(parsed["path"].getString() == tmp.file.string());
+    REQUIRE(f.store.auto_save_enabled());
+
+    // applyTweak now flushes through the protocol path too.
+    f.handler.handle(req(methods::kInspectorApplyTweak,
+        R"({"anchorId":"a","propertyPath":"p","value":1,"source":"drag"})"));
+    REQUIRE(std::filesystem::exists(tmp.file));
+
+    // Disable.
+    auto resp2 = f.handler.handle(req(methods::kInspectorSetAutoSave,
+        R"({"enabled":false})"));
+    REQUIRE_FALSE(resp2.is_error);
+    REQUIRE_FALSE(f.store.auto_save_enabled());
+}
+
+TEST_CASE("Inspector.setAutoSave with missing `enabled` errors cleanly",
+          "[inspect][protocol][setAutoSave]") {
+    Fixture f;
+    auto resp = f.handler.handle(req(methods::kInspectorSetAutoSave, R"({})"));
+    REQUIRE(resp.is_error);
+}
+
+TEST_CASE("Inspector.load/save/setAutoSave without a store error cleanly",
+          "[inspect][protocol][no-store][phase1]") {
+    DomainHandler h;  // no tweak store
+    REQUIRE(h.handle(req(methods::kInspectorLoadTweaks, "{}")).is_error);
+    REQUIRE(h.handle(req(methods::kInspectorSaveTweaks, "{}")).is_error);
+    REQUIRE(h.handle(req(methods::kInspectorSetAutoSave,
+        R"({"enabled":true})")).is_error);
 }

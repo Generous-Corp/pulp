@@ -201,6 +201,89 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_error(req.id, "Invalid params for Inspector.clearTweaks");
         }
     }
+    // ── Phase 1: loadTweaks / saveTweaks / setAutoSave ──
+    if (req.method == methods::kInspectorLoadTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        std::string path;
+        try {
+            if (!req.params_json.empty() && req.params_json != "{}") {
+                auto params = choc::json::parse(req.params_json);
+                if (params.isObject() && params.hasObjectMember("path") &&
+                    params["path"].isString()) {
+                    path = std::string(params["path"].getString());
+                }
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.loadTweaks");
+        }
+        auto r = tweak_store_->load_from_disk(path);
+        if (!r.ok) {
+            return make_error(req.id,
+                std::string("Inspector.loadTweaks failed: ") + r.error);
+        }
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("path", choc::value::createString(r.path));
+        resp.addMember("tweakCount",
+            choc::value::createInt64(static_cast<int64_t>(r.tweak_count)));
+        resp.addMember("bypassCount",
+            choc::value::createInt64(static_cast<int64_t>(r.bypass_count)));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+    if (req.method == methods::kInspectorSaveTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        std::string path;
+        try {
+            if (!req.params_json.empty() && req.params_json != "{}") {
+                auto params = choc::json::parse(req.params_json);
+                if (params.isObject() && params.hasObjectMember("path") &&
+                    params["path"].isString()) {
+                    path = std::string(params["path"].getString());
+                }
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.saveTweaks");
+        }
+        auto r = tweak_store_->save_to_disk(path);
+        if (!r.ok) {
+            return make_error(req.id,
+                std::string("Inspector.saveTweaks failed: ") + r.error);
+        }
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("path", choc::value::createString(r.path));
+        resp.addMember("tweakCount",
+            choc::value::createInt64(static_cast<int64_t>(r.tweak_count)));
+        resp.addMember("bypassCount",
+            choc::value::createInt64(static_cast<int64_t>(r.bypass_count)));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+    if (req.method == methods::kInspectorSetAutoSave) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        bool enabled = false;
+        std::string path;
+        try {
+            auto params = choc::json::parse(req.params_json);
+            if (!params.isObject() || !params.hasObjectMember("enabled") ||
+                !params["enabled"].isBool()) {
+                return make_error(req.id,
+                    "Inspector.setAutoSave requires `enabled` as bool");
+            }
+            enabled = params["enabled"].getBool();
+            if (params.hasObjectMember("path") && params["path"].isString()) {
+                path = std::string(params["path"].getString());
+            }
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.setAutoSave");
+        }
+        tweak_store_->set_auto_save(enabled, path);
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(true));
+        resp.addMember("enabled", choc::value::createBool(enabled));
+        resp.addMember("path", choc::value::createString(tweak_store_->auto_save_path()));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+
     if (req.method == methods::kInspectorSetBypass) {
         if (!tweak_store_) return make_error(req.id, "No tweak store attached");
         try {

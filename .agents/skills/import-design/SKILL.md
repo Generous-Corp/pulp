@@ -317,6 +317,40 @@ Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
 the native codegen has many early-return branches that need each to
 be wired). Web-compat is the default mode for imports — covered.
 
+### Phase 1 — Tweaks persistence (`pulp-tweaks.json`)
+
+`TweakStore` (`inspect/include/pulp/inspect/tweak_store.hpp`) now reads
+and writes a sidecar `pulp-tweaks.json` so inspector edits survive
+process restart.
+
+- **File location** — resolved by `TweakStore::default_tweaks_path()`:
+  1. `$PULP_TWEAKS_FILE` env var if set (verbatim — useful for tests
+     and headless CI runs).
+  2. Otherwise walks up from `cwd` looking for a directory containing
+     `package.json`; if found uses `<project_root>/pulp-tweaks.json`.
+  3. Otherwise `<cwd>/pulp-tweaks.json`.
+- **Schema** — `{ "$schema": "pulp-tweaks://v1", "version": 1,
+  "tweaks": { anchor: { dottedPath: value } }, "bypassed": { anchor:
+  true | string[] }, "sources"?: { anchor: { dottedPath: source } } }`.
+  Mirrors `packages/pulp-import-ir/src/tweaks.ts` `TweaksFile` with
+  the sibling `bypassed` overlay and `sources` sidecar Phase 1 adds.
+  Files written by `@pulp/import-ir` (no integer `version`) load as
+  v1 for back-compat; an explicit unknown `version` is a hard error
+  so we never silently drop fields we don't understand.
+- **Atomic write** — `save_to_disk()` writes `<path>.tmp` and renames
+  over the target; no partial flush ever lands at the canonical path.
+- **Auto-save** — opt-in via `TweakStore::set_auto_save(true)` or
+  `Inspector.setAutoSave { enabled, path? }` over the protocol. OFF
+  by default so unit tests don't touch disk by accident.
+- **Protocol surface** — `Inspector.loadTweaks { path? }`,
+  `Inspector.saveTweaks { path? }`, `Inspector.setAutoSave { enabled,
+  path? }`. All three default `path` to `default_tweaks_path()`.
+
+When wiring a new inspector client (web UI, CLI, MCP tool), prefer the
+protocol methods over reaching into the C++ store directly — the
+defaults + error reporting are the same and you get the resolved path
+echoed back in the response for logging.
+
 Spec + design:
 [`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
 
