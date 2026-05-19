@@ -9909,3 +9909,15 @@ before first write"` (4 assertions / 1 case),
 `./build/test/pulp-test-sync "[runtime][seqlock][coverage][phase3]"` (8
 assertions / 2 cases), and `git diff --check`. The new batch has 1 local
 coverage commit; continue accumulating before opening a PR.
+
+2026-05-19 01:15 PDT: added `f30ba3845` (`test(runtime): cover json rpc
+callback teardown`) to `feature/phase3-codecov-runtime-state-batch-752`. This
+covers `JsonRpcPeer::~JsonRpcPeer()` clearing the underlying channel's message
+callback, asserting a request receives a response while the peer is alive and
+that later messages after peer destruction are delivered to no stale handler.
+Focused local validation passed: `cmake --build build --target
+pulp-test-json-rpc`, `./build/test/pulp-test-json-rpc "JsonRpcPeer destruction
+clears the channel message callback"` (4 assertions / 1 case),
+`./build/test/pulp-test-json-rpc "[json_rpc][coverage][phase3]"` (26
+assertions / 5 cases), and `git diff --check`. The batch now has 2 local
+coverage commits; continue accumulating before opening a PR.
