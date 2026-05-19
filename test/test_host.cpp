@@ -1221,6 +1221,33 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     graph.release();
 }
 
+TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
+          "[host][graph][midi][coverage][phase3]") {
+    SignalGraph graph;
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("thru");
+
+    pulp::midi::MidiBuffer events;
+    events.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
+
+    pulp::midi::MidiBuffer out;
+    REQUIRE_FALSE(graph.inject_midi(midi_in, events));
+    REQUIRE_FALSE(graph.extract_midi(midi_out, out));
+    REQUIRE(out.empty());
+
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE_FALSE(graph.inject_midi(999, events));
+    REQUIRE_FALSE(graph.extract_midi(999, out));
+    REQUIRE(out.empty());
+
+    REQUIRE(graph.inject_midi(midi_in, events));
+    graph.release();
+
+    REQUIRE_FALSE(graph.inject_midi(midi_in, events));
+    REQUIRE_FALSE(graph.extract_midi(midi_out, out));
+    REQUIRE(out.empty());
+}
+
 // ── Phase 1E connect_automation test ────────────────────────────────────
 
 namespace {
