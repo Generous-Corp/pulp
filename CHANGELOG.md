@@ -8,18 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01380"></a>
-## [0.138.0] - 2026-05-19
+<a id="v01390"></a>
+## [0.139.0] - 2026-05-19
 
-- refactor(test): P5-2 follow-up — extracted CSS filter chain cluster from test_canvas.cpp (-377 lines, 2,735 → 2,358)
+- refactor(test): P5-3 follow-up — extracted CSS mask + overflow:visible hit-test extension from test_view.cpp (-159 lines, 1,466 → 1,307)
 
 <a id="v01360"></a>
-## [0.136.0] - 2026-05-18
+## [0.136.0] - 2026-05-19
 
-- refactor(test): P5-1 bundled — extract SVG + HTML ARIA clusters (11,502 → 10,191) ([#2322](https://github.com/danielraffel/pulp/pull/2322))
-- refactor(inspect): migrate StateInspector to ListenerToken (Slice 3) ([#2309](https://github.com/danielraffel/pulp/pull/2309))
-- build(cmake): statically link the MSVC runtime on Windows ([#2313](https://github.com/danielraffel/pulp/pull/2313))
-- fix(ci): clap-validator asset URL (macos-universal, version-prefixed) ([#2302](https://github.com/danielraffel/pulp/pull/2302))
+- refactor(test): P5-1 follow-up — extracted SVG widget JS bridge cluster (-802 lines) + HTML ARIA + querySelector cluster (-509 lines) from test_widget_bridge.cpp (11,502 → 10,191, -1,311 total — bundled two cuts on one PR)
 
 <a id="v01352"></a>
 ## [0.135.2] - 2026-05-18
@@ -2063,7 +2060,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
-[0.136.0]: https://github.com/danielraffel/pulp/releases/tag/v0.136.0
 [0.135.2]: https://github.com/danielraffel/pulp/releases/tag/v0.135.2
 [0.135.1]: https://github.com/danielraffel/pulp/releases/tag/v0.135.1
 [0.135.0]: https://github.com/danielraffel/pulp/releases/tag/v0.135.0
