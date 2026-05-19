@@ -931,6 +931,26 @@ TEST_CASE("ListenerToken is move-only and transfers ownership",
     REQUIRE(call_count == 2);
 }
 
+TEST_CASE("ListenerToken self move-assignment keeps the subscription",
+          "[state][listener][token][coverage][phase3]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int call_count = 0;
+    auto token = store.add_audio_listener(
+        [&](ParamID, float) { ++call_count; });
+    const auto original_id = token.id();
+
+    auto& same_token = token;
+    token = std::move(same_token);
+
+    REQUIRE(static_cast<bool>(token));
+    REQUIRE(token.id() == original_id);
+
+    store.set_value(1, 0.5f);
+    REQUIRE(call_count == 1);
+}
+
 TEST_CASE("remove_listener clears the token without firing the callback",
           "[state][listener][token]") {
     StateStore store;
