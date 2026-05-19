@@ -10112,3 +10112,17 @@ fragmented text frames"` (11 assertions / 1 case),
 "[websocket][frame-kind][coverage][phase3]"` (11 assertions / 1 case), and
 `git diff --check`. The batch now has 6 local coverage commits plus the main
 merge; continue accumulating before opening a PR.
+
+2026-05-18 22:45 PDT: added `173c4d8fe` (`test(runtime): cover websocket
+unknown opcodes`) to `feature/phase3-codecov-runtime-state-batch-752`, then
+merged current `origin/main` as `8c2fe9dd5`. This covers the WebSocket reader's
+reserved/unknown opcode branch by completing a raw client handshake, sending a
+masked frame with opcode `0x3`, and asserting the server reports `"unknown
+opcode"` and closes the channel. Focused local validation passed before and
+after the main merge: `cmake --build build --target pulp-test-websocket-channel
+-j4`, `./build/test/pulp-test-websocket-channel "WebSocketChannel reports
+unknown frame opcodes"` (8 assertions / 1 case),
+`./build/test/pulp-test-websocket-channel
+"[websocket][frame-kind][coverage][phase3]"` (19 assertions / 2 cases), and
+`git diff --check`. The batch now has 7 local coverage commits plus main
+merges; continue accumulating before opening a PR.
