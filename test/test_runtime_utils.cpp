@@ -826,6 +826,20 @@ TEST_CASE("text_diff handles replacement ties and empty line formatting",
             "+ new-b\n");
 }
 
+TEST_CASE("text_diff treats missing terminal newlines equivalently",
+          "[runtime][text-diff][coverage][phase3]") {
+    auto diff = text_diff("one\ntwo", "one\ntwo\n");
+
+    REQUIRE(diff.size() == 2);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "one");
+    REQUIRE(diff[1].op == DiffOp::Equal);
+    REQUIRE(diff[1].text == "two");
+    REQUIRE(format_diff(diff) ==
+            "  one\n"
+            "  two\n");
+}
+
 // ── Range ───────────────────────────────────────────────────────────────
 
 TEST_CASE("Range basic operations", "[runtime][range]") {
