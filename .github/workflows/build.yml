@@ -429,13 +429,17 @@ jobs:
       # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
       # Namespace cache volumes persist across runs on the same workspace,
       # cutting brew-install latency and ccache miss rates substantially.
-      # Gated on matrix.runs_on_json containing "namespace" — the macOS
-      # leg uses this only when Namespace overflow has activated; the
-      # primary path is the self-hosted Mac (which already keeps both
-      # caches on local disk between jobs, so no action needed there).
-      # Step is a no-op on github-hosted and self-hosted runners.
+      # Detection: Namespace selectors land in matrix.runs_on_json as
+      # either "namespace-profile-…" (the
+      # vars.PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON form configured today)
+      # OR direct machine labels like "nscloud-macos-tahoe-arm64-6x14"
+      # (documented in docs/guides/local-ci.md as an alternative).
+      # Codex P2 on #2399 flagged that a single "namespace" substring
+      # missed the nscloud-* form, so we check both prefixes.
+      # No-op on self-hosted Mac (already keeps caches on local disk)
+      # and github-hosted runners (have actions/cache via #420).
       - name: Namespace cache (brew + ccache + Pulp FetchContent)
-        if: contains(matrix.runs_on_json, 'namespace')
+        if: contains(matrix.runs_on_json, 'namespace') || contains(matrix.runs_on_json, 'nscloud')
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: brew
