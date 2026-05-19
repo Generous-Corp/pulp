@@ -21,6 +21,14 @@
 #endif
 #ifdef _WIN32
 #include <pulp/platform/win32_sane.hpp>
+// MSVC std::system() returns the child exit code directly, not a
+// wait(2)-encoded status, so the POSIX helpers are identity shims.
+#ifndef WIFEXITED
+#define WIFEXITED(status) (true)
+#endif
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(status) (status)
+#endif
 #endif
 
 namespace {
