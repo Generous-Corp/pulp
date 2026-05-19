@@ -23,6 +23,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -388,12 +389,29 @@ std::future<FontState> register_font_url(const std::string& url,
         path = url;
     }
 
-    return std::async(std::launch::async,
-        [path = std::move(path), family_override]() -> FontState {
-            return register_font_file(path, family_override)
-                ? FontState::Loaded
-                : FontState::Failed;
-        });
+    // pulp #2246 follow-up (Codex review): `std::async(std::launch::async, ...)`
+    // returns a future whose destructor BLOCKS the caller until the task
+    // completes when the future is dropped without `.get()` / `.wait()`.
+    // That contradicts the docstring above ("safe to detach"). Switch to
+    // the promise + detached-thread pattern: the caller's future is decoupled
+    // from the worker thread, so dropping it is genuinely non-blocking. If
+    // the future goes out of scope before the worker finishes, the promise's
+    // value is set into a moved-from broken-promise sink and the worker
+    // exits cleanly without touching the caller's stack.
+    auto promise = std::make_shared<std::promise<FontState>>();
+    std::future<FontState> fut = promise->get_future();
+    std::thread([promise, path = std::move(path), family_override]() mutable {
+        const FontState state = register_font_file(path, family_override)
+            ? FontState::Loaded
+            : FontState::Failed;
+        try {
+            promise->set_value(state);
+        } catch (const std::future_error&) {
+            // Promise already satisfied or abandoned — fine, we're a
+            // detached worker. The caller's future is gone.
+        }
+    }).detach();
+    return fut;
 }
 
 FontProbe probe_font_glyph(const std::string& family,

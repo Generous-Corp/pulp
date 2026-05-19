@@ -108,3 +108,62 @@ TEST_CASE("word_break_step: backward from end yields offset < end", "[font][loca
     const std::size_t out = word_break_step(s, s.size(), "en-US", /*forward=*/false);
     REQUIRE(out < s.size());
 }
+
+// pulp #2249 follow-up (Codex review P2): byte offsets that land
+// strictly inside a multi-byte UTF-8 scalar must be mapped to the
+// FLOOR UTF-16 index (the scalar that contains the offset), not the
+// next scalar's start. With the pre-fix `lower_bound` mapping a
+// mid-codepoint cursor jumped *past* the codepoint, and the off-by-
+// one cascaded through every word-break call. Verify with U+00E9 'é'
+// (UTF-8 `0xC3 0xA9`): step forward from byte offset 1 (the middle
+// of the scalar) and assert the returned position is on a cluster
+// boundary — i.e. either 0 (start of é) or 2 (end of é), never 1.
+TEST_CASE("word_break_step: mid-codepoint cursor rounds down to cluster boundary",
+          "[font][locale][issue-2249]") {
+    // "café " — the 'é' occupies bytes 3..4 (`0xC3 0xA9`), so byte
+    // offset 4 is strictly inside that scalar. Forward and backward
+    // steps from inside the scalar must return cluster-aligned
+    // offsets — never 4 (mid-codepoint).
+    const std::string s = "caf\xC3\xA9 word";
+    {
+        const std::size_t out = word_break_step(s, 4, "en-US", /*forward=*/true);
+        // Must NOT report 4 (mid-codepoint). Acceptable values are
+        // any cluster-aligned offset > 4 OR exactly 3 (the scalar
+        // start, if the implementation snaps backward first).
+        REQUIRE(out != 4u);
+        REQUIRE((out == 3u || out >= 5u));
+        REQUIRE(out <= s.size());
+    }
+    {
+        const std::size_t out = word_break_step(s, 4, "en-US", /*forward=*/false);
+        REQUIRE(out != 4u);
+        // Backward from inside é must not land deeper than the scalar
+        // start.
+        REQUIRE(out <= 3u);
+    }
+}
+
+// pulp #2249 follow-up (Codex review P2): malformed UTF-8 lead bytes
+// whose continuation bytes don't match `0b10xxxxxx` must be advanced
+// by exactly 1 byte (matching ICU's U+FFFD substitution length). A
+// pre-fix `utf8_scalar_len` that accepted `0xC2 0x41` as a 2-byte
+// scalar desynced the bridge: build_bridge advanced 2, ICU advanced
+// 1, and subsequent byte→UTF-16 lookups returned wrong offsets.
+// Verify with `"\xC2A"` — a lead byte claiming 2 bytes followed by
+// ASCII 'A'. Calling word_break_step over this input must not crash,
+// must return a valid offset in [0, text.size()], and must treat the
+// input as non-empty (forward step from 0 must move forward).
+TEST_CASE("word_break_step: malformed continuation byte does not desync bridge",
+          "[font][locale][issue-2249]") {
+    // Lead byte 0xC2 claims a 2-byte scalar, but the next byte 'A'
+    // (0x41) is not a valid continuation byte. Build the string via
+    // explicit byte concatenation to avoid C++ hex-escape ambiguity
+    // (`"\xC2A"` parses as a single 3-digit hex escape).
+    std::string s;
+    s.push_back(static_cast<char>(0xC2));
+    s.append("A bc");
+    REQUIRE_NOTHROW(word_break_step(s, 0, "en-US", /*forward=*/true));
+    const std::size_t out = word_break_step(s, 0, "en-US", /*forward=*/true);
+    REQUIRE(out > 0u);
+    REQUIRE(out <= s.size());
+}

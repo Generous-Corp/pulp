@@ -57,6 +57,8 @@
 
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_options.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -277,6 +279,31 @@ TEST_CASE("font v2 Slice 3.4 — golden Inter 14px CJK 日本語 on raster",
     // fontconfig it will paint nothing — we soft-skip in that
     // case so this test stays a useful guard on the platforms
     // that DO have a CJK fallback.
+    //
+    // pulp #2261 follow-up (Codex review P1): use a DETERMINISTIC
+    // probe instead of the post-render `opaque_pixels < 20`
+    // threshold. The threshold approach is unsound because Skia's
+    // `fill_text` paints the `.notdef` glyph (tofu boxes) when no
+    // CJK face is found — those tofu pixels easily exceed 20,
+    // bypassing the soft-skip and producing spurious golden
+    // mismatches. Ask the resolver directly: does the cascade
+    // produce a face that covers U+65E5 (日)? If not, skip.
+    {
+        FontOptions probe_opts;
+        probe_opts.family_stack.push_back("Inter");
+        probe_opts.size = 14.0f;
+        ResolvedFont primary =
+            FontResolver::instance().resolve_family_list(probe_opts);
+        ResolvedFont cjk = FontResolver::instance()
+            .resolve_character_fallback(probe_opts, primary,
+                                        /*U+65E5 日*/ 0x65E5);
+        if (!cjk.has_typeface()) {
+            SUCCEED("CJK fallback unavailable on this host — "
+                    "golden skipped (resolver probe negative).");
+            return;
+        }
+    }
+
     SkBitmap bm = render_text_bitmap("Inter", 14.0f, "日本語");
     SkPixmap pm;
     REQUIRE(bm.peekPixels(&pm));
@@ -285,11 +312,6 @@ TEST_CASE("font v2 Slice 3.4 — golden Inter 14px CJK 日本語 on raster",
     REQUIRE(d.width  == kCjkInter14.width);
     REQUIRE(d.height == kCjkInter14.height);
 
-    // Soft-skip: no CJK fallback installed (Linux-stock CI).
-    if (d.opaque_pixels < 20) {
-        SUCCEED("CJK fallback unavailable on this host — golden skipped.");
-        return;
-    }
     expect_digest_matches(d, kCjkInter14, "cjk-inter-14", bm);
 }
 
