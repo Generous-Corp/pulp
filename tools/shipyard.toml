@@ -283,7 +283,28 @@
 # Pulp-side quick-reference + Pulp-specific wedge gotchas (iOS AUv3
 # try-compile, dev-mac window popups). Authoritative reference lives
 # in Shipyard's own `skills/ci/SKILL.md`.
-version = "v0.56.2"
+#
+# v0.58.0 — Phase 1 failure diagnostics (Shipyard #303). When cloud
+#   validation fails, `shipyard pr` / `shipyard ship` now emits a
+#   structured block with the failing GitHub job, its URL, the failing
+#   step, and a bounded list of failing tests (CTest / Catch2 / pytest /
+#   Go parsers + auto-detect). Replaces the lossy single-line
+#   "Validation failed. PR #N not merged." emit. Persists GHA run/job
+#   metadata through the validation pipeline so the failing-job URL is
+#   actually correct (was previously overwritten by Shipyard's internal
+#   job id). Adds optional `[targets.<name>] failure_parser = "..."`
+#   config knob (ctest|catch2|pytest|go|auto). See Shipyard PR #304 /
+#   issue #303.
+#
+# v0.59.0 — Phase 2 watch diagnostics (Shipyard #310). Extends
+#   `shipyard watch --pr N --follow` to emit the same structured
+#   failure block (job URL + failing step + parsed test footer) on
+#   every terminal-failure transition, in both human and JSON modes.
+#   Cache keyed on (target, run_id) ensures at-most-one log fetch per
+#   transition for the lifetime of the watch invocation. Reuses Phase 1's
+#   256 KB log-tail cap. Phase 3 (sandboxed `failure_parser_cmd` escape
+#   hatch) still deferred. See Shipyard PR #310.
+version = "v0.59.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

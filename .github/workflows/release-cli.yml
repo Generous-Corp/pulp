@@ -41,7 +41,35 @@ env:
   SHIPYARD_VERSION: "0.56.2"
 
 jobs:
+  # Resolve the macOS runner for the darwin-arm64 matrix legs. When
+  # PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is set (the same repo
+  # variable build.yml uses for PR macOS routing post-2026-05-18
+  # cutover), route release-cli's macOS leg through Namespace cloud
+  # runners instead of GitHub-hosted macos-15. Falls back to macos-15
+  # when unset so reverting the cutover doesn't break releases.
+  # Background: 2026-05-18 SDK starvation — the GitHub-hosted macos-15
+  # queue backed up for hours and blocked v0.111..v0.134 release-cli
+  # runs from completing (compound with the supersede bug fixed in
+  # pulp #2238 and the Skia gate fix in pulp #2281).
+  resolve-macos-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+    steps:
+      - id: resolve
+        env:
+          NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          if [ -n "${NAMESPACE_JSON:-}" ]; then
+            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli through Namespace: ${NAMESPACE_JSON}"
+          else
+            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
+            echo "Routing macOS release-cli through GitHub-hosted macos-15"
+          fi
+
   build-cli:
+    needs: resolve-macos-runner
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +90,7 @@ jobs:
             platform: windows-arm64
             artifact: pulp.exe
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
     name: CLI ${{ matrix.platform }}
 
     steps:
@@ -390,7 +418,7 @@ jobs:
   # added in #349, but at the artifact-portability axis instead of
   # MSVC compile-time.
   smoke-cli:
-    needs: build-cli
+    needs: [build-cli, resolve-macos-runner]
     strategy:
       fail-fast: false
       matrix:
@@ -410,7 +438,7 @@ jobs:
           - os: windows-11-arm
             platform: windows-arm64
             artifact: pulp.exe
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-15' && fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) || matrix.os }}
     name: Smoke ${{ matrix.platform }}
 
     steps:

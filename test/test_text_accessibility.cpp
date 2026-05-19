@@ -9,6 +9,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/text_accessibility.hpp>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <string>
@@ -132,14 +136,32 @@ TEST_CASE("TextAccessibilityNode: unregister drops entry by id",
     REQUIRE(snapshot_accessibility_nodes().empty());
 }
 
-TEST_CASE("TextAccessibilityNode: default backend probe is stable and 'none'",
+TEST_CASE("TextAccessibilityNode: backend probe is stable across calls",
           "[view][text-a11y][issue-2255]") {
     const auto first = accessibility_backend_name();
     const auto second = accessibility_backend_name();
     REQUIRE(first == second);
-    // The scaffold ships only the default backend; per-platform overlays
-    // replace this symbol in follow-up slices.
+    // Per-platform overlays replace the default "none" symbol at link
+    // time. macOS ships the NSAccessibility overlay ("macos-ax",
+    // font v2 Slice 2.6); Windows ships the UIA overlay
+    // ("windows-uia", Slice 2.6 follow-up via PR #2326); Linux ships
+    // the AccessKit stub ("linux-accesskit-stub", same PR). iOS and
+    // any not-yet-overlaid platform still ride the default ("none").
+    // The probe value therefore depends on the platform link line,
+    // but it must be one of the recognized backend identifiers.
+    //
+    // Address for Codex P2 on PR #2326: Linux + Windows lanes
+    // previously failed this assertion because the test still
+    // hardcoded `first == "none"`.
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    REQUIRE(first == "macos-ax");
+#elif defined(_WIN32)
+    REQUIRE(first == "windows-uia");
+#elif defined(__linux__)
+    REQUIRE(first == "linux-accesskit-stub");
+#else
     REQUIRE(first == "none");
+#endif
 }
 
 TEST_CASE("TextAccessibilityNode: cluster boundary vectors round-trip",

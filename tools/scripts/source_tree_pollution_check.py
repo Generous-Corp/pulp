@@ -22,10 +22,14 @@ Patterns warned about (non-blocking):
     isn't one of the two above).
 
 Modes:
-  --mode=stage    inspect `git diff --cached` (pre-commit). Default.
-  --mode=push     inspect `BASE...HEAD` (pre-push).
-  --mode=files    inspect explicit file list passed positionally
-                  (CI workflow use — pass the PR diff file list).
+  --mode=stage           inspect `git diff --cached` (pre-commit). Default.
+  --mode=push            inspect `BASE...HEAD` (pre-push).
+  --mode=files           inspect explicit file list passed positionally
+                         (CI workflow use — pass the PR diff file list).
+  --mode=root-allowlist  inspect top-level paths on `--rev` (default HEAD)
+                         and fail if any are not in ALLOWED_ROOT_PATHS.
+                         Companion-track U-1 — see
+                         planning/2026-05-17-refactor-roadmap-final.md.
 
 Exit codes:
   0  no pollution detected
@@ -47,6 +51,72 @@ CLOCK_FIXTURE_SIGNATURE = "project(Clock VERSION 1.0.0"
 # are valid. Substring match was too strict; use a regex.
 PULP_PROJECT_PATTERN = re.compile(r"\bproject\s*\(\s*Pulp\b", re.IGNORECASE)
 TEMP_FIXTURE_PATH_HINTS = ("/private/var/folders/", "pulp-shellout-")
+
+# Companion-track U-1 (planning/2026-05-17-refactor-roadmap-final.md):
+# Allowlist of legitimate top-level repo entries. Used by
+# --mode=root-allowlist to fail when an unexpected top-level path
+# appears, which is almost always either a stray temp/test artifact
+# or a mis-placed module that should live under a subdirectory.
+#
+# To add a new top-level entry: add it here in the same PR, with a
+# brief comment if the reason isn't obvious from the name.
+ALLOWED_ROOT_PATHS = frozenset({
+    # Hidden config / metadata
+    ".agents",
+    ".claude",
+    ".claude-plugin",
+    ".clang-format",
+    ".gitattributes",
+    ".githooks",
+    ".github",
+    ".gitignore",
+    ".gitmodules",
+    ".iwyu-mappings.imp",
+    ".mcp.json",
+    ".shipyard",
+    ".shipyard.local",
+    ".status-ladder-waivers.txt",
+    # Top-level docs
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "DEPENDENCIES.md",
+    "LICENSE.md",
+    "NOTICE.md",
+    "README.md",
+    "VISION.md",
+    # Top-level build / config
+    "CMakeLists.txt",
+    "codecov.yml",
+    "compat.json",
+    "config.example.toml",
+    "mkdocs.yml",
+    "requirements-docs.txt",
+    "setup.ps1",
+    "setup.sh",
+    "validate-build.ps1",
+    "validate-build.sh",
+    # Top-level subsystem dirs
+    "android",
+    "apple",
+    "bindings",
+    "ci",
+    "core",
+    "docs",
+    "examples",
+    "experimental",
+    "external",
+    "hooks",
+    "inspect",
+    "packages",
+    "planning",
+    "scripts",
+    "ship",
+    "templates",
+    "test",
+    "tools",
+})
 
 
 # Sentinel returned by _git_diff_files when the diff itself failed.
@@ -99,6 +169,51 @@ def _read_blob(rev: str | None, path: str) -> str:
         except OSError:
             return ""
     return ""
+
+
+def check_root_allowlist(rev: str) -> list[str]:
+    """Companion-track U-1 — return error messages for any top-level path
+    on `rev` that is not in ALLOWED_ROOT_PATHS.
+
+    Threat model: a new directory or file appears at the repo root
+    unexpectedly. The most likely cause is (a) a test fixture that
+    leaked out of /tmp, (b) a stray screenshot or coverage profile not
+    covered by .gitignore, or (c) a module that should live under a
+    subdirectory but was mis-placed. PR review catches some of this;
+    this check catches the rest.
+
+    Adding a legitimate root path requires a same-PR allowlist update.
+    The allowlist is short and stable — Pulp's top-level shape rarely
+    changes — so the maintenance burden is minimal.
+    """
+    out = subprocess.run(
+        ["git", "ls-tree", "--name-only", rev],
+        capture_output=True, text=True, check=False,
+    )
+    if out.returncode != 0:
+        # Treat git failure as hard-block (same posture as _git_diff_files
+        # under Codex P1 finding on #1761 — never let the gate silently
+        # pass when the underlying git invocation fails).
+        return [
+            f"git ls-tree {rev} exited {out.returncode}: "
+            f"{(out.stderr or '').strip()[:200]}"
+        ]
+    errors: list[str] = []
+    for entry in out.stdout.splitlines():
+        name = entry.strip()
+        if not name:
+            continue
+        if name in ALLOWED_ROOT_PATHS:
+            continue
+        errors.append(
+            f"  {name}: unexpected top-level path. If this is "
+            "legitimate, add it to ALLOWED_ROOT_PATHS in "
+            "tools/scripts/source_tree_pollution_check.py in the "
+            "same PR. Otherwise, this is almost certainly a stray "
+            "fixture, screenshot, or mis-placed module — move it "
+            "under the correct subdirectory or delete it."
+        )
+    return errors
 
 
 def check(files: list[str], rev: str | None) -> tuple[list[str], list[str]]:
@@ -173,13 +288,27 @@ def check(files: list[str], rev: str | None) -> tuple[list[str], list[str]]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=("stage", "push", "files"),
+    parser.add_argument("--mode", choices=("stage", "push", "files",
+                                            "root-allowlist"),
                         default="stage")
     parser.add_argument("--base", default="origin/main",
                         help="for --mode=push, base ref (default origin/main)")
+    parser.add_argument("--rev", default="HEAD",
+                        help="for --mode=root-allowlist, ref to inspect "
+                             "(default HEAD)")
     parser.add_argument("files", nargs="*",
                         help="for --mode=files, explicit file list")
     args = parser.parse_args(argv)
+
+    # Companion-track U-1 — top-level allowlist mode.
+    if args.mode == "root-allowlist":
+        root_errors = check_root_allowlist(args.rev)
+        if root_errors:
+            sys.stderr.write("[source-tree-pollution] BLOCKED (root-allowlist):\n")
+            for e in root_errors:
+                sys.stderr.write(e + "\n")
+            return 1
+        return 0
 
     try:
         if args.mode == "stage":

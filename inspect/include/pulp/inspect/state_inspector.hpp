@@ -1,11 +1,11 @@
 // state_inspector.hpp — Parameter state monitoring and editing for the inspector
 #pragma once
 
-#include <pulp/state/store.hpp>
+#include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
+#include <pulp/state/store.hpp>
 
 #include <chrono>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -15,11 +15,17 @@ namespace pulp::inspect {
 using namespace pulp::state;
 
 /// Monitors StateStore parameters for the inspector.
-/// Uses a shared_ptr alive guard since StateStore has no remove_listener.
+///
+/// Subscribes via the @c ListenerToken API: the inspector owns the
+/// token, and the listener is removed automatically when the inspector
+/// is destroyed. No shared_ptr alive-guard required.
 class StateInspector {
 public:
     explicit StateInspector(StateStore& store);
     ~StateInspector();
+
+    StateInspector(const StateInspector&) = delete;
+    StateInspector& operator=(const StateInspector&) = delete;
 
     /// Parameter snapshot for display
     struct ParamSnapshot {
@@ -52,9 +58,9 @@ public:
 
 private:
     StateStore& store_;
-
-    struct SharedState;
-    std::shared_ptr<SharedState> shared_state_;
+    mutable std::mutex changes_mutex_;
+    std::vector<ParamChange> changes_;
+    ListenerToken listener_token_;
     static constexpr size_t kMaxChanges = 100;
 };
 

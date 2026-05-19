@@ -8,6 +8,132 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01580"></a>
+## [0.158.0] - 2026-05-19
+
+- refactor(test): P5-1 follow-up — extract Wave 5 css.5 audit (9,074 → 7,475) ([#2373](https://github.com/danielraffel/pulp/pull/2373))
+
+<a id="v01550"></a>
+## [0.155.0] - 2026-05-19
+
+- fix(tools): add .clang-format to source-tree pollution allowlist ([#2369](https://github.com/danielraffel/pulp/pull/2369))
+- refactor(test): P5-3 follow-up — extract Label cluster (2,288 → 1,716) ([#2371](https://github.com/danielraffel/pulp/pull/2371))
+
+<a id="v01540"></a>
+## [0.154.0] - 2026-05-19
+
+- refactor(test): P5-2 follow-up — extract Canvas2D shim post-Wave-2 (3,121 → 1,634) ([#2372](https://github.com/danielraffel/pulp/pull/2372))
+- refactor(render): extract texture_atlas.hpp impl bodies to .cpp (U-10) ([#2330](https://github.com/danielraffel/pulp/pull/2330))
+- chore(ci): apply Namespace macOS overflow routing on workflow_dispatch too (refs #2314) () ([#2315](https://github.com/danielraffel/pulp/pull/2315))
+
+<a id="v01510"></a>
+## [0.151.0] - 2026-05-19
+
+- feat(inspect): Phase 0b PR-C-1 — overlay gesture-tweak emission wiring ([#2363](https://github.com/danielraffel/pulp/pull/2363))
+- feat(inspect): Phase 3f — Alt-hover sibling distance lines ([#2328](https://github.com/danielraffel/pulp/pull/2328))
+- feat(view): Phase 3d — per-component paint timing ([#2338](https://github.com/danielraffel/pulp/pull/2338))
+
+<a id="v01500"></a>
+## [0.150.0] - 2026-05-19
+
+- feat(inspect): Phase 0b PR-A — Inspector.applyTweak protocol + TweakStore ([#2300](https://github.com/danielraffel/pulp/pull/2300))
+
+<a id="v01480"></a>
+## [0.148.0] - 2026-05-19
+
+- feat(cli): pulp fmt + .clang-format (Tier A Slice 10) ([#2350](https://github.com/danielraffel/pulp/pull/2350))
+- feat(inspect): LiveConstant RPC surfaces PULP_LIVE_CONSTANT in the inspector ([#2353](https://github.com/danielraffel/pulp/pull/2353))
+
+<a id="v01470"></a>
+## [0.147.0] - 2026-05-19
+
+- feat(format): Processor::suspend() / resume() virtuals (Tier B Slice 15) ([#2352](https://github.com/danielraffel/pulp/pull/2352))
+
+<a id="v01461"></a>
+## [0.146.1] - 2026-05-19
+
+- feat(inspect): Performance.setRepaintFlash toggles DirtyTracker overlay ([#2349](https://github.com/danielraffel/pulp/pull/2349))
+- fix(view): TextEditor single-line snapshot honors horizontal scroll ([#2324](https://github.com/danielraffel/pulp/pull/2324))
+
+<a id="v01460"></a>
+## [0.146.0] - 2026-05-19
+
+- chore(tools): add version_consistency_check.py — catches Codex P2 #2331 drift ([#2341](https://github.com/danielraffel/pulp/pull/2341))
+- feat(cli): pulp doctor --au-cache refreshes macOS AU registrar ([#2336](https://github.com/danielraffel/pulp/pull/2336))
+- feat(runtime): generated pulp_build_info.hpp with build stamp constants ([#2335](https://github.com/danielraffel/pulp/pull/2335))
+- feat(view): macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6 macOS) ([#2307](https://github.com/danielraffel/pulp/pull/2307))
+- refactor(test): P5-1 bundled — extract RN outline + clip-path/mask (9,737 → 9,074) ([#2342](https://github.com/danielraffel/pulp/pull/2342))
+
+<a id="v01430"></a>
+## [0.143.0] - 2026-05-19
+
+- fix(harness): HtmlAdapter reads element-events split (Codex P2 on #2337) ([#2345](https://github.com/danielraffel/pulp/pull/2345))
+- feat(view): Windows UIA + Linux AccessKit a11y backends (font v2 Slice 2.6 complete) ([#2326](https://github.com/danielraffel/pulp/pull/2326))
+- refactor(view-js): P5-7 follow-up — extract Element events + pointer capture (1,689 → 1,291) ([#2337](https://github.com/danielraffel/pulp/pull/2337))
+
+<a id="v01420"></a>
+## [0.142.0] - 2026-05-19
+
+- feat(canvas): real ICU bidi + script run iterators (font v2 Slice 1.2.a) ([#2311](https://github.com/danielraffel/pulp/pull/2311))
+- feat(runtime): PULP_DBG_VAR macro for name-printing debug inspection ([#2312](https://github.com/danielraffel/pulp/pull/2312))
+- feat(runtime): ScopedNoAlloc debug guard around audio + paint paths ([#2316](https://github.com/danielraffel/pulp/pull/2316))
+- docs: coming-from-juce migration guide (Tier A Slice 14) ([#2329](https://github.com/danielraffel/pulp/pull/2329))
+- feat(tools/debug): natvis + LLDB Python formatters for Pulp types ([#2321](https://github.com/danielraffel/pulp/pull/2321))
+- feat(state): StateStore::snapshot() block-local helper + DSP threading guide ([#2320](https://github.com/danielraffel/pulp/pull/2320))
+
+<a id="v01390"></a>
+## [0.139.0] - 2026-05-18
+
+- feat(canvas): cross-backend rendering goldens — Skia GPU lane (font v2 Slice 3.4 GPU) ([#2306](https://github.com/danielraffel/pulp/pull/2306))
+- refactor(test): P5-3 follow-up — extract mask + overflow extension (1,466 → 1,307) ([#2333](https://github.com/danielraffel/pulp/pull/2333))
+
+<a id="v01372"></a>
+## [0.137.2] - 2026-05-18
+
+- fix(canvas): canonicalize signed zero in FontOptions hash (Codex P2 on #2169) ([#2332](https://github.com/danielraffel/pulp/pull/2332))
+
+<a id="v01371"></a>
+## [0.137.1] - 2026-05-18
+
+- refactor(test): P5-2 follow-up — extract CSS filter chain cluster (2,735 → 2,358) ([#2331](https://github.com/danielraffel/pulp/pull/2331))
+- fix(canvas): detached font worker survives register_font_file throws (Codex on #2308) ([#2323](https://github.com/danielraffel/pulp/pull/2323))
+
+<a id="v01370"></a>
+## [0.137.0] - 2026-05-18
+
+- refactor(test): P5-1 bundled — extract CSS animations + CSS Grid (10,191 → 9,737) ([#2325](https://github.com/danielraffel/pulp/pull/2325))
+
+<a id="v01360"></a>
+## [0.136.0] - 2026-05-18
+
+- refactor(test): P5-1 bundled — extract SVG + HTML ARIA clusters (11,502 → 10,191) ([#2322](https://github.com/danielraffel/pulp/pull/2322))
+- refactor(inspect): migrate StateInspector to ListenerToken (Slice 3) ([#2309](https://github.com/danielraffel/pulp/pull/2309))
+- build(cmake): statically link the MSVC runtime on Windows ([#2313](https://github.com/danielraffel/pulp/pull/2313))
+- fix(ci): clap-validator asset URL (macos-universal, version-prefixed) ([#2302](https://github.com/danielraffel/pulp/pull/2302))
+
+<a id="v01352"></a>
+## [0.135.2] - 2026-05-18
+
+- fix(harness): canvas2d adapter reads split preludes (Codex P1 on #2253) ([#2317](https://github.com/danielraffel/pulp/pull/2317))
+- feat(state): RT-safe set_value path with deferred main-listener pump ([#2294](https://github.com/danielraffel/pulp/pull/2294))
+
+<a id="v01351"></a>
+## [0.135.1] - 2026-05-18
+
+- fix(canvas): address Codex review findings — async future safety, UTF-8/16 bridge, color mode strictness, golden ink probe ([#2308](https://github.com/danielraffel/pulp/pull/2308))
+- ci(release): route macOS legs through Namespace + tighten ui-preview gate ([#2301](https://github.com/danielraffel/pulp/pull/2301))
+- feat(view): Phase 0b PR-B — View::anchor_id + setAnchor bridge wiring ([#2303](https://github.com/danielraffel/pulp/pull/2303))
+- chore(tools): root-allowlist mode for source-tree pollution check (U-1) ([#2190](https://github.com/danielraffel/pulp/pull/2190))
+
+<a id="v01350"></a>
+## [0.135.0] - 2026-05-18
+
+- feat(view): Phase 0a — stable_anchor_id on IRNode (inspector round-trip foundation) ([#2295](https://github.com/danielraffel/pulp/pull/2295))
+- fix(examples): gate ui-preview --font-probe behind PULP_HAS_SKIA ([#2281](https://github.com/danielraffel/pulp/pull/2281))
+- chore(deps): bump shipyard 0.56.2 → 0.58.0 for #303 phase 1 failure diagnostics ([#2293](https://github.com/danielraffel/pulp/pull/2293))
+- refactor(events): extract socket endpoint parser; dedup IPC tests (U-8) ([#2214](https://github.com/danielraffel/pulp/pull/2214))
+- chore(ci): add format-validator baseline diff gate (U-3) ([#2218](https://github.com/danielraffel/pulp/pull/2218))
+
 <a id="v01340"></a>
 ## [0.134.0] - 2026-05-18
 
@@ -2027,6 +2153,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.158.0]: https://github.com/danielraffel/pulp/releases/tag/v0.158.0
+[0.155.0]: https://github.com/danielraffel/pulp/releases/tag/v0.155.0
+[0.154.0]: https://github.com/danielraffel/pulp/releases/tag/v0.154.0
+[0.151.0]: https://github.com/danielraffel/pulp/releases/tag/v0.151.0
+[0.150.0]: https://github.com/danielraffel/pulp/releases/tag/v0.150.0
+[0.148.0]: https://github.com/danielraffel/pulp/releases/tag/v0.148.0
+[0.147.0]: https://github.com/danielraffel/pulp/releases/tag/v0.147.0
+[0.146.1]: https://github.com/danielraffel/pulp/releases/tag/v0.146.1
+[0.146.0]: https://github.com/danielraffel/pulp/releases/tag/v0.146.0
+[0.143.0]: https://github.com/danielraffel/pulp/releases/tag/v0.143.0
+[0.142.0]: https://github.com/danielraffel/pulp/releases/tag/v0.142.0
+[0.139.0]: https://github.com/danielraffel/pulp/releases/tag/v0.139.0
+[0.137.2]: https://github.com/danielraffel/pulp/releases/tag/v0.137.2
+[0.137.1]: https://github.com/danielraffel/pulp/releases/tag/v0.137.1
+[0.137.0]: https://github.com/danielraffel/pulp/releases/tag/v0.137.0
+[0.136.0]: https://github.com/danielraffel/pulp/releases/tag/v0.136.0
+[0.135.2]: https://github.com/danielraffel/pulp/releases/tag/v0.135.2
+[0.135.1]: https://github.com/danielraffel/pulp/releases/tag/v0.135.1
+[0.135.0]: https://github.com/danielraffel/pulp/releases/tag/v0.135.0
 [0.134.0]: https://github.com/danielraffel/pulp/releases/tag/v0.134.0
 [0.133.0]: https://github.com/danielraffel/pulp/releases/tag/v0.133.0
 [0.132.0]: https://github.com/danielraffel/pulp/releases/tag/v0.132.0

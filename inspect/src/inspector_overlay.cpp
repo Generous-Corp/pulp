@@ -1,6 +1,7 @@
 // inspector_overlay.cpp — Visual inspector overlay implementation
 
 #include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/inspect/tweak_store.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/render/render_pass.hpp>
 
@@ -52,8 +53,35 @@ void InspectorOverlay::set_active(bool active) {
     if (!active) {
         selected_ = nullptr;
         hovered_ = nullptr;
+        alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
     }
+}
+
+// ── Phase 0b PR-C-1: in-process gesture-tweak emission ─────────────────────
+//
+// Routes overlay-driven direct-manipulation edits (drag handles, color
+// pick, field edit — Phase 3a builds the actual UI on top of this) to
+// the in-process TweakStore. The protocol path (Inspector.applyTweak
+// over TCP) still works for remote clients; this is the fast in-process
+// path that avoids JSON marshaling for overlay gestures.
+//
+// Returns false (silent no-op) when any precondition isn't met:
+//   - no view currently selected (selected_ == nullptr)
+//   - the selected view has no anchor_id (not imported from a design)
+//   - no TweakStore wired into the overlay
+// All three are valid runtime states (e.g. inspector active on a
+// hand-authored UI with no imports). False = "didn't apply"; the caller
+// decides whether that's noteworthy.
+bool InspectorOverlay::emit_tweak_for_selection(std::string_view property_path,
+                                                choc::value::Value value,
+                                                std::string_view source) {
+    if (!selected_) return false;
+    const auto& anchor = selected_->anchor_id();
+    if (anchor.empty()) return false;
+    if (!tweak_store_) return false;
+    tweak_store_->apply_tweak(anchor, property_path, std::move(value), source);
+    return true;
 }
 
 // ── Coordinate helpers ──────────────────────────────────────────────────────
@@ -92,6 +120,7 @@ void InspectorOverlay::rebuild_flat_tree() {
     if (!in_tree(selected_)) selected_ = nullptr;
     if (!in_tree(hovered_)) hovered_ = nullptr;
     if (!in_tree(distance_anchor_)) distance_anchor_ = nullptr;
+    if (!in_tree(alt_hover_target_)) alt_hover_target_ = nullptr;
 }
 
 // ── Input handling ──────────────────────────────────────────────────────────
@@ -143,6 +172,17 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     auto* hit = root_.hit_test(pos);
     if (hit) {
         hovered_ = hit;
+    }
+
+    // Phase 3f — Alt-hover sibling distance (Figma-style). Tracks the
+    // hovered View as an alt_hover_target_ whenever Alt is held AND a
+    // selected_ exists; clears as soon as Alt is released. The dynamic
+    // line paints from selected_ to alt_hover_target_ in
+    // paint_distance_lines().
+    if (event.isAltDown() && selected_ && hit && hit != selected_) {
+        alt_hover_target_ = hit;
+    } else {
+        alt_hover_target_ = nullptr;
     }
 
     if (event.is_down) {
@@ -225,35 +265,51 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
 }
 
 void InspectorOverlay::paint_distance_lines(Canvas& canvas) {
-    if (!distance_anchor_ || !selected_) return;
-    if (distance_anchor_ == selected_) return;
+    // Helper: paint a single distance line + center-to-center px label
+    // between two views. Returns early if either view is missing or the
+    // two are the same.
+    auto paint_one = [&](const View* a_view, const View* b_view) {
+        if (!a_view || !b_view || a_view == b_view) return;
 
-    auto a = view_bounds_in_root(distance_anchor_);
-    auto b = view_bounds_in_root(selected_);
+        auto a = view_bounds_in_root(a_view);
+        auto b = view_bounds_in_root(b_view);
 
-    float ax = a.x + a.width / 2;
-    float ay = a.y + a.height / 2;
-    float bx = b.x + b.width / 2;
-    float by = b.y + b.height / 2;
+        float ax = a.x + a.width / 2;
+        float ay = a.y + a.height / 2;
+        float bx = b.x + b.width / 2;
+        float by = b.y + b.height / 2;
 
-    canvas.set_stroke_color(kDistanceLine);
-    canvas.set_line_width(1.0f);
-    canvas.stroke_line(ax, ay, bx, by);
+        canvas.set_stroke_color(kDistanceLine);
+        canvas.set_line_width(1.0f);
+        canvas.stroke_line(ax, ay, bx, by);
 
-    // Distance label
-    float dx = bx - ax;
-    float dy = by - ay;
-    float dist = std::sqrt(dx * dx + dy * dy);
-    auto label = std::to_string(static_cast<int>(dist)) + "px";
-    float mx = (ax + bx) / 2;
-    float my = (ay + by) / 2;
+        // Distance label
+        float dx = bx - ax;
+        float dy = by - ay;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        auto label = std::to_string(static_cast<int>(dist)) + "px";
+        float mx = (ax + bx) / 2;
+        float my = (ay + by) / 2;
 
-    canvas.set_font("monospace", kFontSize);
-    canvas.set_fill_color(kDistanceLine);
-    float tw = canvas.measure_text(label);
-    canvas.fill_rounded_rect(mx - tw / 2 - 4, my - 8, tw + 8, 16, 3);
-    canvas.set_fill_color(Color::rgba(1, 1, 1, 1));
-    canvas.fill_text(label, mx - tw / 2, my + 4);
+        canvas.set_font("monospace", kFontSize);
+        canvas.set_fill_color(kDistanceLine);
+        float tw = canvas.measure_text(label);
+        canvas.fill_rounded_rect(mx - tw / 2 - 4, my - 8, tw + 8, 16, 3);
+        canvas.set_fill_color(Color::rgba(1, 1, 1, 1));
+        canvas.fill_text(label, mx - tw / 2, my + 4);
+    };
+
+    // Existing: Alt+click sticky distance-anchor mode
+    paint_one(distance_anchor_, selected_);
+
+    // Phase 3f: Alt-hover sibling distance (Figma-style spacing reveal).
+    // While Alt is held during hover, dynamically paint a line from the
+    // current selection to the view under the cursor. The two modes can
+    // coexist — sticky anchor + live hover — for richer measurement.
+    if (alt_hover_target_ && selected_ &&
+        alt_hover_target_ != distance_anchor_) {
+        paint_one(selected_, alt_hover_target_);
+    }
 }
 
 void InspectorOverlay::paint_box_model(Canvas& canvas, const View* v) {

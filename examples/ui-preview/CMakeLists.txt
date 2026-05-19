@@ -1,6 +1,14 @@
 # UI Preview — standalone app for validating the rendering pipeline.
 # Desktop-only: depends on pulp::inspect which needs the GPU stack.
-if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU AND TARGET pulp::inspect)
+# Skia is required because main.cpp's --font-probe codepath calls
+# pulp::canvas::probe_font_glyph which is only declared when
+# PULP_HAS_SKIA is defined. Without this gate, configurations with
+# PULP_ENABLE_GPU=ON but Skia binaries missing (e.g. the SDK release
+# build on a GitHub-hosted macOS image that hasn't bootstrapped Skia)
+# would attempt to build ui-preview and fail at compile time. The
+# #ifndef PULP_HAS_SKIA guard in main.cpp (pulp #2281) is a belt; this
+# is the suspenders.
+if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU AND PULP_HAS_SKIA AND TARGET pulp::inspect)
     add_executable(pulp-ui-preview main.cpp)
     target_link_libraries(pulp-ui-preview PRIVATE
         pulp::view

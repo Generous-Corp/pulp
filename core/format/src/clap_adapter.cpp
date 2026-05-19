@@ -5,6 +5,7 @@
 #include <pulp/format/ara.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <clap/ext/preset-load.h>
 #include <algorithm>
 #include <cmath>
@@ -114,7 +115,13 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
                 const auto ev = load_event<clap_event_param_value_t>(hdr);
-                self->store.set_value(
+                // RT-safe write: atomic store + non-allocating SPSC push
+                // for Main listeners. The editor calls store.pump_listeners()
+                // from its UI tick to deliver the queued notifications;
+                // Audio listeners fire inline here. Replaces set_value(),
+                // which dispatches a heap-allocated lambda through the
+                // EventLoop when a Main listener is attached.
+                self->store.set_value_rt(
                     static_cast<state::ParamID>(ev.param_id),
                     static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
@@ -463,8 +470,15 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->processor->set_ump_input(nullptr);
     }
 
-    // Process!
-    self->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+    // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
+    // hooks (operator new override, sanitizer integration) can flag
+    // a plugin that allocates on the audio thread. The guard is a
+    // thread-local counter — zero cost in NDEBUG, ~1 ns in debug.
+    // See planning/2026-05-18-rt-safety-and-debug-dx.md Slice 4.
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        self->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+    }
 
     // Emit output parameter events for any values the plugin changed,
     // so the host can record automation

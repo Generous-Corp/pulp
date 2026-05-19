@@ -128,9 +128,14 @@ Parameters flow both ways:
 
 - **Host → plugin**: every block, `process()` walks
   `data.inputParameterChanges`, takes the **last** point from each
-  `IParamValueQueue`, and calls `store_.set_normalized(id, value)`. VST3
-  values are always normalised 0..1 — `set_normalized` converts to the
-  ParamInfo's real range.
+  `IParamValueQueue`, and calls `store_.set_normalized_rt(id, value)`.
+  VST3 values are always normalised 0..1 — `set_normalized_rt`
+  denormalises through the ParamInfo range, writes the atomic, and
+  pushes an SPSC event for `ListenerThread::Main` listeners. The editor
+  drains via `store.pump_listeners()` on its UI tick. The generic
+  `set_normalized()` path would dispatch a heap-allocated lambda through
+  the EventLoop — fatal on the audio thread. See Slice 2 in
+  `planning/2026-05-18-rt-safety-and-debug-dx.md`.
 - **Plugin → host**: `param_snapshot_` is taken before `process()`;
   after, any changed param emits a point via
   `data.outputParameterChanges->addParameterData(id).addPoint(0, norm)`

@@ -235,3 +235,55 @@ TEST_CASE("TextEditor multi-line click below the last row clamps to the last row
     REQUIRE(editor.caret_pos() >= 5);
     REQUIRE(editor.caret_pos() <= 7);
 }
+
+// ── Single-line horizontal scroll: hit-test + caret_rect must honor it ──
+
+TEST_CASE("TextEditor single-line hit-test honors horizontal scroll offset",
+          "[view][text_editor][multiline]") {
+    TextEditor editor;
+    // Narrow field; long text scrolls left so the leading chars are
+    // clipped out of view.
+    editor.set_bounds({0, 0, 60, 28});
+    editor.on_focus_changed(true);
+    editor.set_text("abcdefghijklmnop");
+    // Caret at end (set_text sets caret_position_ to size when focused),
+    // so scroll_offset_ becomes non-zero on the next paint.
+    prime_layout(editor);
+    REQUIRE(editor.scroll_offset() > 0.0f);
+
+    // Click at the same x where the visible caret lives — the right
+    // edge of the visible area. Pre-fix, this collapsed to ~index 0
+    // because the snapshot's inner_x ignored scroll.
+    const float scroll = editor.scroll_offset();
+    MouseEvent click;
+    click.is_down = true;
+    click.position.x = std::max(9.0f, 2.0f) + scroll + 0.5f * kRecChar;
+    click.position.y = 14.0f;
+    editor.on_mouse_event(click);
+
+    // The clicked position is one glyph past `scroll`px from the
+    // padded inner-x, which in measured coords is index
+    // `(scroll + 0.5*char_w) / char_w`. Confirm the hit-test landed
+    // well past index 0 — bug would collapse to ≤1.
+    const int floor_idx = static_cast<int>(scroll / kRecChar);
+    REQUIRE(editor.caret_pos() >= floor_idx);
+}
+
+TEST_CASE("TextEditor::caret_rect single-line subtracts scroll_offset",
+          "[view][text_editor][multiline]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 60, 28});
+    editor.on_focus_changed(true);
+    editor.set_text("abcdefghijklmnop"); // caret at end
+    prime_layout(editor);
+
+    const float scroll = editor.scroll_offset();
+    REQUIRE(scroll > 0.0f);
+
+    auto r = editor.caret_rect();
+    // Caret must land within the visible field bounds. Pre-fix, x was
+    // off by `scroll` px (returned the unscrolled x) so it landed
+    // well beyond bounds.width.
+    REQUIRE(r.x >= 0.0f);
+    REQUIRE(r.x <= editor.bounds().width);
+}

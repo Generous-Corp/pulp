@@ -7,14 +7,18 @@
 #include <pulp/inspect/audio_inspector.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
+#include <pulp/inspect/tweak_store.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/view/live_constant_editor.hpp>
 
 #include <choc/text/choc_JSON.h>
 
 #include <sstream>
 #include <iomanip>
+#include <unordered_set>
 
 namespace pulp::inspect {
 
@@ -39,6 +43,7 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "Audio")       return handle_audio(req);
     if (domain == "Capture")     return handle_capture(req);
     if (domain == "Motion")      return handle_motion(req);
+    if (domain == "LiveConstant") return handle_live_constant(req);
 
     return make_error(req.id, "Unknown domain: " + domain);
 }
@@ -80,8 +85,150 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         if (overlay_) {
             obj.addMember("inspector_active", choc::value::createBool(overlay_->is_active()));
         }
+        if (tweak_store_) {
+            obj.addMember("tweak_count", choc::value::createInt64(
+                static_cast<int64_t>(tweak_store_->count())));
+        }
         return make_response(req.id, choc::json::toString(obj, false));
     }
+
+    // ── Phase 0b: applyTweak / listTweaks / clearTweaks / setBypass ──
+    // All four require a TweakStore wired in (set_tweak_store(...)).
+    // Schema mirrors the TS @pulp/import-ir/src/tweaks.ts TweaksFile.
+    if (req.method == methods::kInspectorApplyTweak) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        try {
+            auto params = choc::json::parse(req.params_json);
+            auto anchor = std::string(params["anchorId"].getString());
+            auto path = std::string(params["propertyPath"].getString());
+            std::string source;
+            if (params.hasObjectMember("source") && params["source"].isString())
+                source = std::string(params["source"].getString());
+            // `value` is arbitrary JSON — clone it into a value the
+            // store can own. (params is a ValueView over a temporary
+            // parsed-JSON document; addMember copies cleanly.)
+            auto value = choc::value::Value(params["value"]);
+            auto total = tweak_store_->apply_tweak(anchor, path, std::move(value), source);
+
+            auto resp = choc::value::createObject("");
+            resp.addMember("ok", choc::value::createBool(true));
+            resp.addMember("tweakCount", choc::value::createInt64(static_cast<int64_t>(total)));
+            return make_response(req.id, choc::json::toString(resp, false));
+        } catch (const std::exception& e) {
+            return make_error(req.id,
+                std::string("Invalid params for Inspector.applyTweak: ") + e.what());
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.applyTweak");
+        }
+    }
+    if (req.method == methods::kInspectorListTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        auto records = tweak_store_->list_tweaks();
+
+        // Build the response as { tweaks: { anchor: { path: value } },
+        // bypassed: { anchor: true | [paths] } } — mirrors the on-disk
+        // TweaksFile schema Phase 1 will adopt.
+        auto tweaks_obj = choc::value::createObject("");
+        std::unordered_map<std::string, choc::value::Value> anchor_objs;
+        for (auto& rec : records) {
+            auto it = anchor_objs.find(rec.anchor_id);
+            if (it == anchor_objs.end()) {
+                it = anchor_objs.emplace(rec.anchor_id,
+                                         choc::value::createObject("")).first;
+            }
+            it->second.addMember(rec.property_path, rec.value);
+        }
+        for (auto& [anchor, obj] : anchor_objs) {
+            tweaks_obj.addMember(anchor, obj);
+        }
+
+        auto bypassed_obj = choc::value::createObject("");
+        // Walk every anchor we know about (from tweaks or bypassed)
+        // and surface its bypass state if any.
+        std::unordered_set<std::string> all_anchors;
+        for (auto& rec : records) all_anchors.insert(rec.anchor_id);
+        for (auto& anchor : all_anchors) {
+            auto b = tweak_store_->bypass_for(anchor);
+            if (!b) continue;
+            std::visit([&](auto&& v) {
+                using T = std::decay_t<decltype(v)>;
+                if constexpr (std::is_same_v<T, bool>) {
+                    bypassed_obj.addMember(anchor, choc::value::createBool(v));
+                } else {
+                    auto arr = choc::value::createEmptyArray();
+                    for (auto& p : v) arr.addArrayElement(choc::value::createString(p));
+                    bypassed_obj.addMember(anchor, arr);
+                }
+            }, *b);
+        }
+
+        auto resp = choc::value::createObject("");
+        resp.addMember("tweaks", tweaks_obj);
+        resp.addMember("bypassed", bypassed_obj);
+        resp.addMember("count", choc::value::createInt64(static_cast<int64_t>(records.size())));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+    if (req.method == methods::kInspectorClearTweaks) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        try {
+            auto params = req.params_json.empty() || req.params_json == "{}"
+                ? choc::value::createObject("")
+                : choc::json::parse(req.params_json);
+            std::size_t removed = 0;
+            bool has_anchor = params.isObject() &&
+                              params.hasObjectMember("anchorId") &&
+                              params["anchorId"].isString();
+            bool has_path = params.isObject() &&
+                            params.hasObjectMember("propertyPath") &&
+                            params["propertyPath"].isString();
+            if (has_anchor && has_path) {
+                removed = tweak_store_->remove_tweak(
+                    std::string(params["anchorId"].getString()),
+                    std::string(params["propertyPath"].getString())) ? 1 : 0;
+            } else if (has_anchor) {
+                removed = tweak_store_->remove_anchor(
+                    std::string(params["anchorId"].getString()));
+            } else {
+                // No selector — wipe the whole table.
+                removed = tweak_store_->count();
+                tweak_store_->clear();
+            }
+            auto resp = choc::value::createObject("");
+            resp.addMember("ok", choc::value::createBool(true));
+            resp.addMember("removed", choc::value::createInt64(static_cast<int64_t>(removed)));
+            return make_response(req.id, choc::json::toString(resp, false));
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.clearTweaks");
+        }
+    }
+    if (req.method == methods::kInspectorSetBypass) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        try {
+            auto params = choc::json::parse(req.params_json);
+            auto anchor = std::string(params["anchorId"].getString());
+            // Value can be `true`/`false` (whole-anchor) or an array of
+            // dotted paths (path-scoped). Empty array / false clears.
+            if (params.hasObjectMember("value") && params["value"].isBool()) {
+                tweak_store_->set_bypass(anchor, params["value"].getBool());
+            } else if (params.hasObjectMember("value") && params["value"].isArray()) {
+                std::vector<std::string> paths;
+                auto arr = params["value"];
+                for (uint32_t i = 0; i < arr.size(); ++i) {
+                    if (arr[i].isString()) paths.push_back(std::string(arr[i].getString()));
+                }
+                tweak_store_->set_bypass(anchor, std::move(paths));
+            } else {
+                return make_error(req.id,
+                    "Inspector.setBypass requires `value` as bool or string[]");
+            }
+            auto resp = choc::value::createObject("");
+            resp.addMember("ok", choc::value::createBool(true));
+            return make_response(req.id, choc::json::toString(resp, false));
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.setBypass");
+        }
+    }
+
     return make_error(req.id, "Unknown Inspector method: " + req.method);
 }
 
@@ -231,6 +378,43 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
         // Tracking is always on when RenderPassManager exists
         return make_response(req.id, R"({"tracking":true})");
     }
+    // Tier A Slice 6: per-repaint "flash" overlay. Wraps
+    // DirtyTracker::set_debug_overlay(). When no tracker is wired
+    // we report the toggle as unavailable so the UI can grey it out
+    // instead of silently dropping clicks.
+    if (req.method == methods::kPerfGetRepaintFlash) {
+        auto obj = choc::value::createObject("");
+        if (dirty_) {
+            obj.addMember("available", choc::value::createBool(true));
+            obj.addMember("enabled",
+                          choc::value::createBool(dirty_->debug_overlay()));
+        } else {
+            obj.addMember("available", choc::value::createBool(false));
+            obj.addMember("enabled", choc::value::createBool(false));
+        }
+        return make_response(req.id, choc::json::toString(obj, false));
+    }
+    if (req.method == methods::kPerfSetRepaintFlash) {
+        if (!dirty_) {
+            return make_error(req.id,
+                "Performance.setRepaintFlash: no DirtyTracker attached");
+        }
+        // Parse {"enabled": true|false}. Default to true if absent so a
+        // bare invocation enables (the most common case from a UI toggle).
+        bool enabled = true;
+        try {
+            auto v = choc::json::parse(req.params_json);
+            if (v.isObject() && v.hasObjectMember("enabled")) {
+                enabled = v["enabled"].getBool();
+            }
+        } catch (...) {
+            // Malformed JSON: keep default (enabled = true).
+        }
+        dirty_->set_debug_overlay(enabled);
+        auto obj = choc::value::createObject("");
+        obj.addMember("enabled", choc::value::createBool(enabled));
+        return make_response(req.id, choc::json::toString(obj, false));
+    }
     return make_error(req.id, "Unknown Performance method: " + req.method);
 }
 
@@ -353,6 +537,75 @@ InspectorMessage DomainHandler::handle_capture(const InspectorMessage& req) {
         return make_error(req.id, "Capture.screenshotNode not yet implemented");
     }
     return make_error(req.id, "Unknown Capture method: " + req.method);
+}
+
+// ── LiveConstant domain (Tier A Slice 13) ──────────────────────────────────
+//
+// Wires PULP_LIVE_CONSTANT(name, default, min, max) to the inspector
+// via three RPC methods. No host setter is required — the registry
+// is a static singleton, so the inspector reaches it directly.
+
+InspectorMessage DomainHandler::handle_live_constant(const InspectorMessage& req) {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+
+    if (req.method == methods::kLiveConstList) {
+        auto arr = choc::value::createEmptyArray();
+        for (const auto& c : registry.all()) {
+            auto obj = choc::value::createObject("");
+            obj.addMember("name", choc::value::createString(c.name));
+            obj.addMember("file", choc::value::createString(c.file));
+            obj.addMember("line", choc::value::createInt32(c.line));
+            obj.addMember("value", choc::value::createFloat32(c.value));
+            obj.addMember("default", choc::value::createFloat32(c.default_value));
+            obj.addMember("min", choc::value::createFloat32(c.min_value));
+            obj.addMember("max", choc::value::createFloat32(c.max_value));
+            arr.addArrayElement(obj);
+        }
+        auto out = choc::value::createObject("");
+        out.addMember("constants", arr);
+        return make_response(req.id, choc::json::toString(out, false));
+    }
+    if (req.method == methods::kLiveConstSet) {
+        std::string name;
+        float value = 0.0f;
+        try {
+            auto v = choc::json::parse(req.params_json);
+            if (v.isObject()) {
+                if (v.hasObjectMember("name")) name = v["name"].getString();
+                if (v.hasObjectMember("value")) {
+                    // JSON numbers parse to choc int / float / double
+                    // depending on literal shape; coerce via Float64 which
+                    // accepts any numeric subtype, then narrow.
+                    value = static_cast<float>(
+                        v["value"].getWithDefault(0.0));
+                }
+            }
+        } catch (...) {}
+        if (name.empty()) {
+            return make_error(req.id,
+                "LiveConstant.set: missing or invalid 'name' field");
+        }
+        registry.set(name, value);
+        auto out = choc::value::createObject("");
+        out.addMember("name", choc::value::createString(name));
+        out.addMember("value", choc::value::createFloat32(value));
+        return make_response(req.id, choc::json::toString(out, false));
+    }
+    if (req.method == methods::kLiveConstReset) {
+        std::string name;
+        try {
+            auto v = choc::json::parse(req.params_json);
+            if (v.isObject() && v.hasObjectMember("name"))
+                name = v["name"].getString();
+        } catch (...) {}
+        if (name.empty()) {
+            registry.reset_all();
+        } else {
+            registry.reset(name);
+        }
+        return make_response(req.id, R"({"ok":true})");
+    }
+    return make_error(req.id, "Unknown LiveConstant method: " + req.method);
 }
 
 } // namespace pulp::inspect

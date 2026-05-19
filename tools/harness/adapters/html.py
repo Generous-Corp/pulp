@@ -78,10 +78,19 @@ class HtmlAdapter(AdapterBase):
         # second pass after element.js loads), and the legacy
         # web-compat.js bundle (still hosts a few entries). Concatenate
         # them once so the prototype-evidence regex sees the full surface.
+        # P5-7 follow-up (PR #2337) extracted Element.prototype's Event +
+        # Pointer-capture methods (addEventListener / removeEventListener /
+        # dispatchEvent / setPointerCapture / releasePointerCapture /
+        # hasPointerCapture + the synthetic event payloads) into
+        # web-compat-element-events.js. Without it in the union, the
+        # `html/Element_setPointerCapture` oracle false-classifies as
+        # NOT_IMPL (Codex P2 on PR #2337 — same class as #2253's
+        # canvas2d adapter gap fixed by #2317).
         self._element_js = "\n".join(
             self._read(p)
             for p in (
                 "core/view/js/web-compat-element.js",
+                "core/view/js/web-compat-element-events.js",
                 "core/view/js/web-compat-dom-ops.js",
                 "core/view/js/web-compat.js",
             )

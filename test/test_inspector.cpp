@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/inspect/inspector_window.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/widgets.hpp>
@@ -315,6 +316,242 @@ TEST_CASE("InspectorOverlay: mouse selection and panel tree interactions", "[ins
     alt_second.is_down = true;
     REQUIRE(overlay.handle_mouse_event(alt_second));
     REQUIRE(overlay.selected_view() == second_ptr);
+}
+
+// Phase 3f — Alt-hover sibling distance (Figma-style spacing reveal).
+// Click to select a node, then HOLD Alt while hovering another → overlay
+// renders a live distance line from selection to hovered target. Released
+// Alt clears the target. Distinct from the Alt+CLICK sticky-anchor mode
+// covered above.
+TEST_CASE("InspectorOverlay: Alt-hover reveals sibling distance line",
+          "[inspect][overlay][phase3f]") {
+    View root;
+    root.set_id("root");
+    root.set_bounds({0, 0, 500, 300});
+
+    auto a = std::make_unique<View>();
+    a->set_id("a");
+    a->set_bounds({10, 10, 60, 60});
+    auto* a_ptr = a.get();
+    root.add_child(std::move(a));
+
+    auto b = std::make_unique<View>();
+    b->set_id("b");
+    b->set_bounds({100, 10, 60, 60});
+    auto* b_ptr = b.get();
+    root.add_child(std::move(b));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    // Select a via click (no Alt).
+    MouseEvent click_a;
+    click_a.position = {20, 20};
+    click_a.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(click_a));
+    REQUIRE(overlay.selected_view() == a_ptr);
+
+    // Hover over b WITHOUT Alt — no distance reveal; selection unchanged.
+    MouseEvent hover_b;
+    hover_b.position = {130, 30};
+    hover_b.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(hover_b));
+    REQUIRE(overlay.hovered_view() == b_ptr);
+    REQUIRE(overlay.selected_view() == a_ptr);
+
+    // Paint with no Alt — single highlight, no Alt-hover line.
+    pulp::canvas::RecordingCanvas no_alt_canvas;
+    overlay.paint(no_alt_canvas);
+    auto baseline_cmd_count = no_alt_canvas.command_count();
+    REQUIRE(baseline_cmd_count > 0);
+
+    // Now hover over b WITH Alt held → alt-hover target should be b.
+    MouseEvent alt_hover_b;
+    alt_hover_b.position = {130, 30};
+    alt_hover_b.modifiers = kModAlt;
+    alt_hover_b.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(alt_hover_b));
+    REQUIRE(overlay.hovered_view() == b_ptr);
+    REQUIRE(overlay.selected_view() == a_ptr);  // selection unchanged by hover
+
+    pulp::canvas::RecordingCanvas alt_canvas;
+    overlay.paint(alt_canvas);
+    // With Alt held + selection + hover, paint_distance_lines() draws an
+    // extra line + label between selected and hovered. The exact command
+    // count depends on canvas internals, but it MUST be greater than the
+    // no-Alt baseline.
+    REQUIRE(alt_canvas.command_count() > baseline_cmd_count);
+
+    // Release Alt — alt_hover_target_ clears; render returns to baseline.
+    MouseEvent release_alt;
+    release_alt.position = {130, 30};
+    release_alt.modifiers = 0;  // Alt released
+    release_alt.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(release_alt));
+
+    pulp::canvas::RecordingCanvas after_release_canvas;
+    overlay.paint(after_release_canvas);
+    REQUIRE(after_release_canvas.command_count() == baseline_cmd_count);
+}
+
+TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
+          "[inspect][overlay][phase3f]") {
+    // Edge case: holding Alt while hovering with no selected_ should
+    // NOT set alt_hover_target_. Otherwise we'd render a line from
+    // nullptr → confused diagnostics.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 60, 60});
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    pulp::canvas::RecordingCanvas baseline;
+    overlay.paint(baseline);
+    auto baseline_count = baseline.command_count();
+
+    MouseEvent alt_hover_no_sel;
+    alt_hover_no_sel.position = {30, 30};
+    alt_hover_no_sel.modifiers = kModAlt;
+    alt_hover_no_sel.is_down = false;
+    overlay.handle_mouse_event(alt_hover_no_sel);
+
+    pulp::canvas::RecordingCanvas after_alt_hover;
+    overlay.paint(after_alt_hover);
+    // No selection → no distance line should be added → command count
+    // matches baseline.
+    REQUIRE(after_alt_hover.command_count() == baseline_count);
+}
+
+// ── Phase 0b PR-C-1: gesture-tweak emission via TweakStore ────────────────
+#include <pulp/inspect/tweak_store.hpp>
+#include <choc/containers/choc_Value.h>
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection writes to TweakStore",
+          "[inspect][overlay][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:0:42");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    // Simulate selection via the overlay's normal click path.
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    // Emit a tweak — overlay maps selected_->anchor_id() to the store.
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE(ok);
+    REQUIRE(store.count() == 1);
+    auto v = store.lookup("figma:0:42", "layout.padding");
+    REQUIRE(v.has_value());
+    REQUIRE(v->getInt32() == 12);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "without a selection",
+          "[inspect][overlay][gesture]") {
+    View root;
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    // No view selected.
+    REQUIRE(overlay.selected_view() == nullptr);
+    bool ok = overlay.emit_tweak_for_selection(
+        "paint.bg", choc::value::createString("#abc"), "color-picker");
+    REQUIRE_FALSE(ok);
+    REQUIRE(store.count() == 0);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "when selected view has no anchor",
+          "[inspect][overlay][gesture]") {
+    // Hand-authored views (not imported from a design) have no anchor.
+    // Inspector gesture-tweak emission should silently no-op rather
+    // than synthesize an anchor — those tweaks have nowhere to land
+    // safely on re-import.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    // intentionally no set_anchor_id() call
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+    REQUIRE(child_ptr->anchor_id().empty());
+
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE_FALSE(ok);
+    REQUIRE(store.count() == 0);
+}
+
+TEST_CASE("InspectorOverlay: emit_tweak_for_selection silently no-ops "
+          "without a TweakStore",
+          "[inspect][overlay][gesture]") {
+    // Inspector can run with no TweakStore wired (e.g. in tests of just
+    // the overlay, or contexts where persistence is disabled). The
+    // emission path must tolerate that.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:0:99");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    // intentionally NOT calling set_tweak_store
+
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    bool ok = overlay.emit_tweak_for_selection(
+        "layout.padding", choc::value::createInt32(12), "drag");
+    REQUIRE_FALSE(ok);
+    REQUIRE(overlay.tweak_store() == nullptr);
+}
+
+TEST_CASE("InspectorOverlay: tweak_store() round-trips set_tweak_store",
+          "[inspect][overlay][gesture]") {
+    View root;
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    REQUIRE(overlay.tweak_store() == nullptr);
+    overlay.set_tweak_store(&store);
+    REQUIRE(overlay.tweak_store() == &store);
+    overlay.set_tweak_store(nullptr);
+    REQUIRE(overlay.tweak_store() == nullptr);
 }
 
 // ── InspectorWindow ────────────────────────────────────────────────────────
@@ -912,4 +1149,176 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE_FALSE(no_perf.is_error);
     REQUIRE(no_perf.params_json.find("available") != std::string::npos);
     REQUIRE(no_perf.params_json.find("false") != std::string::npos);
+}
+
+// ─── StateInspector ListenerToken migration (Slice 3) ───────────────────────
+
+TEST_CASE("StateInspector records parameter changes after subscribing",
+          "[inspect][state][listener]") {
+    StateStore store;
+    ParamInfo info;
+    info.id = 42;
+    info.name = "Cutoff";
+    info.unit = "Hz";
+    info.range = {20.0f, 20000.0f, 1000.0f};
+    store.add_parameter(info);
+
+    StateInspector inspector(store);
+
+    REQUIRE(inspector.recent_changes().empty());
+
+    store.set_value(42, 2400.0f);
+    store.set_value(42, 4800.0f);
+
+    auto changes = inspector.recent_changes();
+    REQUIRE(changes.size() == 2);
+    REQUIRE(changes[0].id == 42);
+    REQUIRE(changes[1].value > changes[0].value);
+}
+
+TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
+          "[inspect][state][listener]") {
+    StateStore store;
+    ParamInfo info;
+    info.id = 1;
+    info.name = "Gain";
+    info.range = {0.0f, 1.0f, 0.5f};
+    store.add_parameter(info);
+
+    {
+        StateInspector inspector(store);
+        store.set_value(1, 0.25f);
+        REQUIRE(inspector.recent_changes().size() == 1);
+    } // ~StateInspector() — ListenerToken dtor unregisters
+
+    // The store no longer has a live listener pointing at the
+    // destroyed inspector. With the legacy alive-guard pattern, an
+    // entry was still in the listener list (just no-op-checking
+    // alive). With ListenerToken it's actually removed, so this
+    // set_value is a pure atomic store + a notify() that iterates
+    // an empty snapshot. No use-after-free, no leak.
+    store.set_value(1, 0.75f);
+    REQUIRE_THAT(store.get_value(1), Catch::Matchers::WithinAbs(0.75, 0.001));
+}
+
+// ─── Performance.setRepaintFlash (Tier A Slice 6) ───────────────────────────
+
+#include <pulp/render/dirty_tracker.hpp>
+
+TEST_CASE("Performance.setRepaintFlash toggles DirtyTracker::debug_overlay",
+          "[inspect][perf][repaint-flash]") {
+    pulp::render::DirtyTracker dirty;
+    REQUIRE_FALSE(dirty.debug_overlay());
+
+    DomainHandler handler;
+    handler.set_dirty_tracker(&dirty);
+
+    auto enable_req = make_request(1, methods::kPerfSetRepaintFlash,
+                                   R"({"enabled":true})");
+    auto enable_resp = handler.handle(enable_req);
+    REQUIRE_FALSE(enable_resp.is_error);
+    REQUIRE(dirty.debug_overlay());
+
+    auto get_req = make_request(2, methods::kPerfGetRepaintFlash);
+    auto get_resp = handler.handle(get_req);
+    REQUIRE_FALSE(get_resp.is_error);
+    REQUIRE(get_resp.params_json.find("\"enabled\": true")
+            != std::string::npos);
+    REQUIRE(get_resp.params_json.find("\"available\": true")
+            != std::string::npos);
+
+    auto disable_req = make_request(3, methods::kPerfSetRepaintFlash,
+                                    R"({"enabled":false})");
+    auto disable_resp = handler.handle(disable_req);
+    REQUIRE_FALSE(disable_resp.is_error);
+    REQUIRE_FALSE(dirty.debug_overlay());
+}
+
+TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
+          "[inspect][perf][repaint-flash]") {
+    DomainHandler handler;
+    // Deliberately not calling set_dirty_tracker — the inspector
+    // grew the toggle, but the host process may not have wired one
+    // yet. Behavior: get reports available=false; set returns an
+    // error so the UI can grey out the toggle.
+    auto get_resp = handler.handle(
+        make_request(1, methods::kPerfGetRepaintFlash));
+    REQUIRE_FALSE(get_resp.is_error);
+    REQUIRE(get_resp.params_json.find("\"available\": false")
+            != std::string::npos);
+
+    auto set_resp = handler.handle(
+        make_request(2, methods::kPerfSetRepaintFlash,
+                     R"({"enabled":true})"));
+    REQUIRE(set_resp.is_error);
+}
+
+// ─── LiveConstant RPC (Tier A Slice 13) ─────────────────────────────────────
+
+#include <pulp/view/live_constant_editor.hpp>
+
+TEST_CASE("LiveConstant.list returns the registry contents",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+
+    // Seed the registry. PULP_LIVE_CONSTANT macros do this implicitly,
+    // but we call register_constant directly so the test doesn't have
+    // to compile in a TU that already has them.
+    [[maybe_unused]] auto& cutoff =
+        registry.register_constant("test_cutoff", __FILE__, __LINE__,
+                                   /*default*/ 440.0f,
+                                   /*min*/ 20.0f, /*max*/ 20000.0f);
+    [[maybe_unused]] auto& gain =
+        registry.register_constant("test_gain", __FILE__, __LINE__,
+                                   0.0f, -60.0f, 12.0f);
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(1, methods::kLiveConstList));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE(resp.params_json.find("test_cutoff") != std::string::npos);
+    REQUIRE(resp.params_json.find("test_gain") != std::string::npos);
+    REQUIRE(resp.params_json.find("\"constants\"") != std::string::npos);
+}
+
+TEST_CASE("LiveConstant.set mutates the registry value",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+    [[maybe_unused]] auto& v =
+        registry.register_constant("test_setter", __FILE__, __LINE__,
+                                   1.0f, 0.0f, 10.0f);
+    registry.reset("test_setter");
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstSet,
+        R"({"name":"test_setter","value":4.5})"));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE_THAT(registry.get("test_setter"),
+                 Catch::Matchers::WithinAbs(4.5, 0.001));
+}
+
+TEST_CASE("LiveConstant.set without a name returns an error",
+          "[inspect][live-constant]") {
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstSet, R"({"value":1.0})"));
+    REQUIRE(resp.is_error);
+}
+
+TEST_CASE("LiveConstant.reset rolls a value back to its default",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+    [[maybe_unused]] auto& v =
+        registry.register_constant("test_reset", __FILE__, __LINE__,
+                                   2.0f, 0.0f, 10.0f);
+    registry.set("test_reset", 7.5f);
+    REQUIRE_THAT(registry.get("test_reset"),
+                 Catch::Matchers::WithinAbs(7.5, 0.001));
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstReset, R"({"name":"test_reset"})"));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE_THAT(registry.get("test_reset"),
+                 Catch::Matchers::WithinAbs(2.0, 0.001));
 }

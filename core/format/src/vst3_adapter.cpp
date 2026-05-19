@@ -8,6 +8,7 @@
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivsthostapplication.h>
@@ -259,8 +260,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     int32 offset;
                     queue->getPoint(point_count - 1, offset, value);
                     // VST3 uses normalized 0-1 values — sync to Pulp store
-                    store_.set_normalized(static_cast<state::ParamID>(id),
-                                         static_cast<float>(value));
+                    // via the RT-safe path so any Main listeners are
+                    // deferred to pump_listeners() instead of allocating
+                    // a dispatch lambda on the audio thread.
+                    store_.set_normalized_rt(static_cast<state::ParamID>(id),
+                                             static_cast<float>(value));
                 }
             }
         }
@@ -394,8 +398,14 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         param_snapshot_[i] = store_.get_value(all_params[i].id);
     }
 
-    // Process!
-    processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
+    // hooks (operator new override, sanitizer integration) can flag
+    // a plugin that allocates on the audio thread. See Slice 4 in
+    // planning/2026-05-18-rt-safety-and-debug-dx.md.
+    {
+        pulp::runtime::ScopedNoAlloc no_alloc_guard;
+        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+    }
 
     // Write parameter output changes — lets the host record automation
     // from parameter changes made by the plugin during process()

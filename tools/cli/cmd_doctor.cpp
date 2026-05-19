@@ -8,7 +8,12 @@
 #include "version_diag.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+
+#if defined(__APPLE__) || defined(__linux__)
+#include <sys/wait.h>
+#endif
 
 // Defined in cmd_upgrade.cpp. Forward-declared here rather than added
 // to cli_common.hpp because it's a single-callsite cross-TU helper and
@@ -65,6 +70,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
     bool validators_mode = false; // --validators: issue #743
     bool scan_parents = false;    // --scan-parents: issue #552 Slice 1b
     bool caches_mode = false;     // --caches: issue #744
+    bool au_cache_mode = false;   // --au-cache (Slice 11): refresh macOS AU registrar
     bool json_mode = false;       // --json (works with --versions and --caches)
     bool list_mode = false;       // --list / `pulp doctor list` (R2-8)
     std::string only_filter;      // --only <name> (R2-8)
@@ -77,6 +83,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
         else if (arg == "--validators") validators_mode = true;
         else if (arg == "--scan-parents") scan_parents = true;
         else if (arg == "--caches") caches_mode = true;
+        else if (arg == "--au-cache") au_cache_mode = true;
         else if (arg == "--json") json_mode = true;
         else if (arg == "--list") list_mode = true;
         else if (arg == "--only") {
@@ -90,7 +97,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
             only_filter = arg.substr(7);
         } else if (arg.rfind("--", 0) == 0) {
             std::cerr << "pulp doctor: unknown flag: " << arg << "\n";
-            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--only <name>]\n";
             return 2;
         } else if (mode.empty()) {
             mode = arg;
@@ -110,8 +117,64 @@ int cmd_doctor(const std::vector<std::string>& args) {
 
     if (!mode.empty() && mode != "android" && mode != "ios") {
         std::cerr << "pulp doctor: unknown subcommand '" << mode << "'\n";
-        std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+        std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--au-cache] [--json] [--list] [--only <name>]\n";
         return 2;
+    }
+
+    // `pulp doctor --au-cache` (Tier A Slice 11) — macOS-only.
+    //
+    // macOS's `AudioComponentRegistrar` caches Audio Unit `Info.plist`
+    // metadata aggressively. After a rebuild that changes a property
+    // (description, manufacturer, type) the cache often returns the
+    // OLD value until you SIGKILL the registrar by hand. The JUCE
+    // dev-folk reach for `killall -9 AudioComponentRegistrar`; that's
+    // exactly what we run here, with a friendly message before /
+    // after and a clean exit code so scripts can chain it.
+    //
+    // Sub-policy:
+    //   * macOS:        runs `killall -9 AudioComponentRegistrar`.
+    //                   Exits 0 if the process was running, 0 if it
+    //                   wasn't (already cold), 1 on any other error.
+    //   * non-macOS:    prints a warning and exits 0 (no-op). The
+    //                   flag exists everywhere so cross-platform
+    //                   scripts don't need OS conditionals.
+    //
+    // `--dry-run` prints the command instead of running it.
+    if (au_cache_mode) {
+#if defined(__APPLE__)
+        const char* cmd = "killall -9 AudioComponentRegistrar 2>/dev/null";
+        if (dry_run) {
+            std::cout << "[pulp doctor --au-cache] would run: " << cmd << "\n";
+            return 0;
+        }
+        std::cout << "[pulp doctor --au-cache] refreshing AU registrar...\n";
+        const int rc = std::system(cmd);
+        // killall returns 1 when no matching process is running. That's
+        // not an error in our context — the registrar will simply be
+        // re-spawned the next time a host scans AU plugins.
+        if (rc == 0) {
+            std::cout << "[pulp doctor --au-cache] AudioComponentRegistrar "
+                         "stopped. macOS will respawn it on the next AU "
+                         "host scan; pluginval / auval will see fresh "
+                         "Info.plist metadata.\n";
+            return 0;
+        }
+        const int exit_status = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+        if (exit_status == 1) {
+            std::cout << "[pulp doctor --au-cache] AudioComponentRegistrar "
+                         "wasn't running (already cold). Nothing to do.\n";
+            return 0;
+        }
+        std::cerr << "[pulp doctor --au-cache] killall returned "
+                  << exit_status << " — manual `killall -9 "
+                     "AudioComponentRegistrar` may be required.\n";
+        return 1;
+#else
+        std::cout << "[pulp doctor --au-cache] no-op on non-macOS hosts. "
+                     "AU registrar refresh only applies to macOS Audio "
+                     "Units.\n";
+        return 0;
+#endif
     }
 
     // `pulp doctor --caches` (issue #744) — discovery + healing for the

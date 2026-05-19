@@ -1192,6 +1192,25 @@ Remove the build directory.
 pulp clean
 ```
 
+### fmt
+
+**Status**: usable
+
+Run `clang-format` against Pulp source files using the project root's
+`.clang-format`. Walks `core/`, `examples/`, `inspect/`, `test/`,
+`tools/`, and `ship/` by default, or the path arguments you pass.
+
+```bash
+pulp fmt                        # rewrite all .cpp/.hpp/.h/.mm in place
+pulp fmt path/to/file.cpp ...   # restrict to specific paths
+pulp fmt --dry-run              # report diffs without rewriting
+pulp fmt --check                # CI-friendly alias for --dry-run
+```
+
+`pulp fmt` requires `clang-format` on `PATH`. Skips `build/`, `_deps/`,
+`generated/`, and `external/` so vendored / build-output code is
+untouched.
+
 ### help
 
 Print usage information.

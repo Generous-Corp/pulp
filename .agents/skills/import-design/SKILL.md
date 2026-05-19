@@ -252,6 +252,74 @@ itself lives inside a Pulp build tree. In generic PATH-installed or split repo/S
 | Variables (COLOR) | `theme.colors` |
 | Variables (FLOAT) | `theme.dimensions` |
 
+## Stable-Anchor Identity (Phase 0a — inspector round-trip prerequisite)
+
+Every tree-producing parser now stamps `IRNode::stable_anchor_id`,
+`source_node_id` (when the source has a native ID), `provenance`
+(adapter + version + source_uri), and `confidence` (PASS / DIVERGE /
+NOT_IMPL). These fields key the tweaks layer (`pulp-tweaks.json`) so
+inspector direct-manipulation edits survive re-import.
+
+**If you add a new parser, you MUST:**
+
+1. After the IR tree is built, stamp `ir.root.provenance` with the
+   adapter name (e.g. `"figma"`, `"stitch-html"`, `"pencil"`), the
+   adapter version, and the source URI.
+2. Stamp `ir.root.confidence`:
+   - `IRConfidence::pass` for a clean lowering
+   - `IRConfidence::diverge` for lossy / regex / best-effort paths
+   - `IRConfidence::not_impl` if the adapter can't lower the source yet
+3. Call `assign_anchors(ir.root, strategy, adapter_name)` with the
+   strategy that matches your source kind:
+   - **adapter** strategy when the source has native stable IDs
+     (Figma layer UUIDs, Pencil node IDs, Mitosis content-hash IDs).
+     Requires `adapter_name` (becomes the `"<name>:"` prefix) AND
+     `source_node_id` populated on each node.
+   - **content-hash** strategy when there are no native IDs
+     (Stitch HTML, v0 TSX, Claude Design HTML, raw JSX, generic HTML).
+     The hash is FNV-1a 32-bit base-36 over (tag, role, normalized
+     text, depth, sigIndex).
+   - **path** strategy for RN-style file exports / hand-edited code
+     where source position is the most stable identity.
+4. The strategy default lives in `default_anchor_strategy()` in
+   `core/view/include/pulp/view/anchor_strategy.hpp` — mirrors the TS
+   `DEFAULT_ANCHOR_STRATEGY` map in `packages/pulp-import-ir/src/anchors.ts`.
+
+**Why this matters:** Phase 1+ of the inspector roadmap writes user
+inspector edits to a sidecar `pulp-tweaks.json` keyed by
+`stable_anchor_id`. Without populated anchors the tweaks layer has
+nothing to match against on re-import — defeating the "edit anywhere,
+never lose work" principle. A parser that skips `assign_anchors` will
+silently produce a tree where inspector edits get orphaned on the
+next re-import.
+
+**Codegen contract:** `generate_pulp_js` (both web-compat and native
+modes) emits `// @pulp-anchor <id>` trail comments next to each
+element when `opts.include_comments == true`. The runtime inspector
+parses these to map generated elements back to their tweak-layer
+identity. If you write a custom codegen path, preserve this pattern
+so the inspector can still trace identity.
+
+**Phase 0b — `setAnchor()` bridge wiring:** the web-compat codegen
+path *also* emits a functional `setAnchor('<var>', '<anchor>')` call
+after each createElement, AND the call is emitted unconditionally —
+NOT gated on `opts.include_comments`. Rationale: the
+`// @pulp-anchor` trail is cosmetic (for grep / debugging), but
+`setAnchor()` is functional — the inspector cannot find a widget's
+anchor without it, so dropping it in minified codegen would silently
+break inspector tweaks in production. If you write a custom codegen
+path, emit both: the comment (gated) for debuggability and the
+setAnchor call (unconditional) for the runtime. The bridge side
+(`WidgetBridge::setAnchor`) is a silent no-op on unknown widget IDs,
+matching the rest of the bridge's tolerance for unmounted ids.
+
+Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
+the native codegen has many early-return branches that need each to
+be wired). Web-compat is the default mode for imports — covered.
+
+Spec + design:
+[`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
+
 ## Automated Validation Loop
 
 ### Freshness check (MUST run first)

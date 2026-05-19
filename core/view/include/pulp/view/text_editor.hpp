@@ -140,6 +140,11 @@ public:
     /// origin so IME hosts still get a sane (if non-precise) anchor.
     Rect caret_rect() const;
 
+    /// Current horizontal scroll offset (single-line) or vertical
+    /// scroll (multi-line). Exposed for IME hosts + tests that need to
+    /// reason about visible-vs-logical coordinates.
+    float scroll_offset() const { return scroll_offset_; }
+
 private:
     std::string text_;
     int caret_position_ = 0;     ///< Cursor position (character index)

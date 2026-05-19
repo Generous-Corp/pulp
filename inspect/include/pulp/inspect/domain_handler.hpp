@@ -4,7 +4,7 @@
 #include <pulp/inspect/protocol.hpp>
 
 namespace pulp::view { class View; }
-namespace pulp::render { class RenderPassManager; }
+namespace pulp::render { class RenderPassManager; class DirtyTracker; }
 
 namespace pulp::inspect {
 
@@ -14,6 +14,7 @@ class ConsoleCapture;
 class AudioInspector;
 class MotionInspector;
 class MotionScrubber;
+class TweakStore;
 
 /// Handles inspector protocol requests by delegating to the appropriate
 /// inspector component. All data sources are optional — missing sources
@@ -31,6 +32,13 @@ public:
     void set_motion_inspector(MotionInspector* motion) { motion_ = motion; }
     void set_motion_scrubber(MotionScrubber* scrubber) { motion_scrubber_ = scrubber; }
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
+    void set_tweak_store(TweakStore* store) { tweak_store_ = store; }
+
+    /// Tier A Slice 6: wire the per-frame dirty tracker so the inspector's
+    /// Performance tab can toggle `DirtyTracker::set_debug_overlay()` at
+    /// runtime. The host installs the tracker once during plugin / app
+    /// init; if unset, the toggle silently no-ops.
+    void set_dirty_tracker(render::DirtyTracker* dirty) { dirty_ = dirty; }
 
     /// Handle a protocol request. Returns a response message.
     InspectorMessage handle(const InspectorMessage& request);
@@ -44,6 +52,8 @@ private:
     MotionInspector* motion_ = nullptr;
     MotionScrubber* motion_scrubber_ = nullptr;
     render::RenderPassManager* rpm_ = nullptr;
+    render::DirtyTracker* dirty_ = nullptr;
+    TweakStore* tweak_store_ = nullptr;
 
     // Domain handlers
     InspectorMessage handle_inspector(const InspectorMessage& req);
@@ -56,6 +66,7 @@ private:
     InspectorMessage handle_audio(const InspectorMessage& req);
     InspectorMessage handle_capture(const InspectorMessage& req);
     InspectorMessage handle_motion(const InspectorMessage& req);
+    InspectorMessage handle_live_constant(const InspectorMessage& req);
 };
 
 } // namespace pulp::inspect

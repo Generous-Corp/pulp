@@ -630,6 +630,12 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         password_mode,
         /*placeholder_visible=*/display.empty() && !placeholder.empty() && !has_focus(),
     };
+    // Store `inner_x` in scrolled (visual) coordinates so snapshot
+    // readers (`char_index_at_point`, `caret_rect()`,
+    // `firstRectForCharacterRange`) match the painted text — which
+    // draws at `text_inner_x - scroll_offset_`. Cache key includes
+    // `scroll_offset_`, so the snapshot rebuilds when scroll changes.
+    const float visual_inner_x = text_inner_x - scroll_offset_;
     if (!(last_layout_key_ == key) || last_layout_.lines.size() != 1) {
         last_layout_.multi_line = false;
         last_layout_.fallback_char_w = canvas.measure_text("M");
@@ -640,7 +646,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         line_snap.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
         line_snap.baseline_y = text_y;
         line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : font_size_;
-        line_snap.inner_x = text_inner_x;
+        line_snap.inner_x = visual_inner_x;
         line_snap.x_offsets.resize(display.size() + 1);
         line_snap.x_offsets[0] = 0.f;
         float cum = 0.f;
@@ -654,7 +660,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         auto& dst = last_layout_.lines.front();
         dst.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
         dst.baseline_y = text_y;
-        dst.inner_x = text_inner_x;
+        dst.inner_x = visual_inner_x;
     }
     const float total_text_w = last_layout_.lines.front().x_offsets.back();
     const float caret_w = last_layout_.lines.front()
@@ -672,6 +678,13 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     float text_x = text_inner_x - scroll_offset_;
+    // After the scroll-offset update, re-write the snapshot's
+    // `inner_x` so readers (caret_rect, hit-test, IME) match the
+    // painted origin even on the first paint where scroll_offset_
+    // bumps from 0 to a non-zero value AFTER the snapshot was built.
+    if (!last_layout_.lines.empty()) {
+        last_layout_.lines.front().inner_x = text_x;
+    }
     auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
     auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
     auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));

@@ -843,6 +843,11 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);
+    // P5-7 follow-up — Events + Pointer-capture (P2b) extracted from
+    // web-compat-element.js. Must eval AFTER the parent so the Element
+    // constructor + prototype are already defined when the extracted
+    // prototype overrides install.
+    eval_or_throw(engine_, "web_compat_element_events", preludes::web_compat_element_events);
     eval_or_throw(engine_, "web_compat_canvas", preludes::web_compat_canvas);
     // P5-6 first cut — native GPU canvas helpers extracted from
     // web-compat-canvas.js. Must eval AFTER the canvas core so
@@ -3413,6 +3418,18 @@ void WidgetBridge::register_api() {
         else if (auto* t = dynamic_cast<Toggle*>(v)) t->set_label(text);
         else if (auto* tb = dynamic_cast<ToggleButton*>(v)) tb->set_label(text);
         else if (auto* l = dynamic_cast<Label*>(v)) l->set_text(text);
+        return choc::value::Value();
+    });
+
+    // Phase 0b: bind a design-import anchor (the `// @pulp-anchor`
+    // codegen trail from Phase 0a) to a live widget. The inspector
+    // (Phase 0b PR-C) reads anchor_id back to key tweaks against the
+    // originating source element. Silent no-op on unknown widget id —
+    // matches the rest of the bridge's tolerance for unmounted ids.
+    engine_.register_function("setAnchor", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto anchor = args.get<std::string>(1, "");
+        if (auto* v = widget(id)) v->set_anchor_id(std::move(anchor));
         return choc::value::Value();
     });
 

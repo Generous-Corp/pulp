@@ -17,6 +17,7 @@
     "docs": "Parent command — actual MCP surface is pulp_docs_check and pulp_docs_search sub-tools",
     "doctor": "Diagnostic CLI; output is human-shaped, not JSON-shaped (see #1997 follow-up)",
     "export-tokens": "Variant of import-design; rarely used; one-shot Bash works",
+    "fmt": "Wraps clang-format -i against .clang-format; agents shell out directly",
     "harness": "Catalog-driven verifier; agents drive via Bash",
     "host": "Long-running synthetic-block runner; not RPC-shaped",
     "import-design": "Heavy multi-step import; agents call the binary directly today (see #1997 follow-up)",

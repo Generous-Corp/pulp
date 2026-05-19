@@ -14,6 +14,7 @@ target_sources(pulp-render PRIVATE
     src/render_loop.cpp
     src/draco_decoder.cpp
     src/ktx2_decoder.cpp
+    src/texture_atlas.cpp
 )
 # SDL3 surface is desktop-only (Android uses PulpSurfaceView via JNI)
 if(NOT ANDROID)

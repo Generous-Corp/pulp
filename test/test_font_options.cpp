@@ -82,6 +82,44 @@ TEST_CASE("FontOptions hash includes full resolver cache key",
     REQUIRE(changed.hash() != base.hash());
 }
 
+TEST_CASE("FontOptions hash canonicalizes signed zero on float members",
+          "[canvas][font][options][coverage][issue-2169]") {
+    // Codex P2 on #2169 — `FontOptions::operator==` is `= default` (per-member
+    // float comparison). IEEE-754 reports `+0.0f == -0.0f` as true, so two
+    // FontOptions whose only difference is a signed-zero float field must
+    // ALSO hash equal — otherwise unordered caches keyed on FontOptions
+    // would create duplicate-equivalent entries or miss lookups.
+    //
+    // The float fields in FontOptions are: weight, width, oblique_angle,
+    // size, letter_spacing, word_spacing, and the per-axis value in
+    // variation_axes. Pin every one of them.
+    FontOptions plus;
+    plus.weight = +0.0f;
+    plus.width = +0.0f;
+    plus.oblique_angle = +0.0f;
+    plus.size = +0.0f;
+    plus.letter_spacing = +0.0f;
+    plus.word_spacing = +0.0f;
+    plus.variation_axes = {
+        {make_variation_axis_tag('w', 'g', 'h', 't'), +0.0f},
+    };
+
+    FontOptions minus = plus;
+    minus.weight = -0.0f;
+    minus.width = -0.0f;
+    minus.oblique_angle = -0.0f;
+    minus.size = -0.0f;
+    minus.letter_spacing = -0.0f;
+    minus.word_spacing = -0.0f;
+    minus.variation_axes[0].value = -0.0f;
+
+    // operator== is defaulted, so IEEE-754 semantics apply: signed zeros
+    // compare equal. The hash contract must agree.
+    REQUIRE(plus == minus);
+    REQUIRE(plus.hash() == minus.hash());
+    REQUIRE(std::hash<FontOptions>{}(plus) == std::hash<FontOptions>{}(minus));
+}
+
 TEST_CASE("Font tag helpers pack OpenType tags in byte order",
           "[canvas][font][options][coverage]") {
     REQUIRE(make_font_feature_tag('k', 'e', 'r', 'n') == 0x6B65726Eu);

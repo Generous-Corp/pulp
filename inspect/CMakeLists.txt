@@ -18,6 +18,7 @@ target_sources(pulp-inspect PRIVATE
     src/domain_handler.cpp
     src/motion_inspector.cpp
     src/motion_scrubber.cpp
+    src/tweak_store.cpp
 )
 
 target_link_libraries(pulp-inspect PUBLIC pulp::view pulp::render pulp::state pulp::events)

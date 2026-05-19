@@ -528,3 +528,30 @@ TEST_CASE("runtime logging wrappers accept formatted payloads",
     REQUIRE_NOTHROW(log(LogLevel::Debug, "debug {}", 4));
     REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
 }
+
+// ─── pulp_build_info.hpp (Tier A Slice 7) ───────────────────────────────────
+
+#include <pulp/runtime/build_info.hpp>
+
+TEST_CASE("pulp_build_info constants are populated at configure time",
+          "[runtime][build-info]") {
+    // CMake's CMAKE_BUILD_TYPE is empty for multi-config generators
+    // (Xcode, Visual Studio) but populated for Ninja/Make. We assert
+    // the field is *available*, not that it's specifically non-empty.
+    static_assert(!pulp::runtime::kSdkVersion.empty(),
+                  "SDK version must be set from PROJECT_VERSION");
+
+    // ISO 8601 timestamp uses the year-T-time-Z shape; check the T.
+    REQUIRE(pulp::runtime::kBuildIso8601.find('T') != std::string_view::npos);
+    REQUIRE(pulp::runtime::kBuildIso8601.find('Z') != std::string_view::npos);
+
+    // Stamp label always begins with the SDK version.
+    REQUIRE(pulp::runtime::kStampLabel.starts_with(
+        pulp::runtime::kSdkVersion));
+
+    // Git SHA is optional (empty when not a checkout). When present
+    // it should be the short form: 7+ hex chars.
+    if (!pulp::runtime::kGitSha.empty()) {
+        REQUIRE(pulp::runtime::kGitSha.size() >= 7);
+    }
+}

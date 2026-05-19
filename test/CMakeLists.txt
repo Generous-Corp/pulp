@@ -747,6 +747,20 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Text-accessibility scaffold (font v2 Slice 2.6)
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
+# macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6 macOS)
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
+    target_link_libraries(pulp-test-text-accessibility-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-text-accessibility-macos)
+endif()
+# Windows UIA backend (font v2 Slice 2.6) — compile-gated on _WIN32 in the
+# source. The sentinel test case keeps the binary present + named
+# consistently on non-Windows hosts so ctest output stays stable.
+pulp_add_test_suite(pulp-test-text-accessibility-windows LIBRARIES pulp::view)
+# Linux AccessKit backend (font v2 Slice 2.6) — compile-gated on
+# __linux__ && !__ANDROID__; sentinel on other hosts.
+pulp_add_test_suite(pulp-test-text-accessibility-linux LIBRARIES pulp::view)
 # A/B compare (workstream 07 slice 7.2)
 pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field (workstream 07 slice 7.5b)
@@ -897,6 +911,23 @@ add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_paralle
 target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-run-planner-parallel)
 
+# pulp #2163 / font v2 Slice 1.2.a finish — real ICU bidi + script run
+# iterators. Verifies multi-run shaping on bidi / script boundaries and
+# UAX #29 cluster grouping (ZWJ, regional-indicator-pair, virama,
+# combining marks). Cluster-grouping cases run on every build; the
+# bidi / script cases auto-skip under non-Skia builds via SUCCEED.
+#
+# Add PULP_HAS_SKIA explicitly so the ICU-path assertions register
+# (mirrors test_canvas_fonts.cpp's pattern — pulp::canvas exports the
+# define PUBLIC but CMake's PUBLIC propagation doesn't always reach
+# sibling test targets, depending on configure ordering).
+add_executable(pulp-test-text-run-planner-icu test_text_run_planner_icu.cpp)
+target_link_libraries(pulp-test-text-run-planner-icu PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-text-run-planner-icu PRIVATE PULP_HAS_SKIA=1)
+endif()
+catch_discover_tests(pulp-test-text-run-planner-icu)
+
 # pulp #2163 / font v2 Slice 2.1 — async font lifecycle (register_font_url).
 add_executable(pulp-test-font-async-lifecycle test_font_async_lifecycle.cpp)
 target_link_libraries(pulp-test-font-async-lifecycle PRIVATE pulp::canvas Catch2::Catch2WithMain)
@@ -952,6 +983,85 @@ if(PULP_HAS_SKIA)
     target_include_directories(pulp-test-font-rendering-goldens PRIVATE
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-font-rendering-goldens)
+endif()
+
+# Font v2 Slice 3.4 — Skia GPU lane (Dawn → Metal on macOS-arm64).
+# Sibling of `pulp-test-font-rendering-goldens` (raster). Same
+# three strings, same structural digest, ±15% tolerance to absorb
+# Graphite/Metal subpixel + AA drift. Gated at compile time on
+# PULP_HAS_SKIA && APPLE && PULP_ENABLE_GPU — the test soft-skips
+# at runtime when Dawn / Graphite init fails so CI lanes without a
+# working adapter don't hard-fail. Vulkan + D3D backends are
+# deferred — see the PULP_VULKAN_AVAILABLE / PULP_D3D_AVAILABLE
+# scaffold blocks immediately below.
+if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
+    add_executable(pulp-test-font-rendering-goldens-gpu
+        test_font_rendering_goldens_gpu.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens-gpu PRIVATE
+        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens-gpu PRIVATE
+        PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-font-rendering-goldens-gpu PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
+    # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
+    catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
+endif()
+
+# Font v2 Slice 3.4 — Skia GPU Vulkan lane (SCAFFOLD).
+# Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The Vulkan
+# lane is intentionally OFF by default: there is no Vulkan-capable
+# runner in Pulp's required gate set today, so building this target
+# would only burn CI roundtrips on "couldn't find <vulkan/vulkan.h>"
+# failures. Flip `PULP_VULKAN_AVAILABLE=ON` on a future Linux or
+# Windows CI lane (with Skia-Vulkan linked) to light the target up.
+# Tolerance for the raster↔Vulkan cross-backend probe is ±20 % —
+# see the test header for the rationale.
+option(PULP_VULKAN_AVAILABLE
+    "Build the Skia GPU Vulkan rendering-goldens scaffold (font v2 \
+Slice 3.4 follow-up). Requires Skia built with skia_use_vulkan=true \
+and a working Vulkan ICD on the host. OFF on every Pulp CI lane \
+today; flip ON when a Vulkan-capable runner exists."
+    OFF)
+if(PULP_HAS_SKIA AND (UNIX AND NOT APPLE OR WIN32) AND PULP_VULKAN_AVAILABLE)
+    add_executable(pulp-test-font-rendering-goldens-vulkan
+        test_font_rendering_goldens_vulkan.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_VULKAN_AVAILABLE=1)
+    target_include_directories(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-font-rendering-goldens-vulkan)
+endif()
+
+# Font v2 Slice 3.4 — Skia GPU Direct3D 12 lane (SCAFFOLD).
+# Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The D3D
+# lane is intentionally OFF by default: there is no Windows D3D
+# runner in Pulp's required gate set today, so building this target
+# would only burn CI roundtrips on "couldn't find <d3d12.h>" failures.
+# Flip `PULP_D3D_AVAILABLE=ON` on a future Windows CI lane (with
+# Skia-D3D linked) to light the target up. Tolerance for the
+# raster↔D3D cross-backend probe is ±20 % — see the test header for
+# the rationale.
+option(PULP_D3D_AVAILABLE
+    "Build the Skia GPU Direct3D 12 rendering-goldens scaffold \
+(font v2 Slice 3.4 follow-up). Requires Skia built with \
+skia_use_direct3d=true on Windows. OFF on every Pulp CI lane \
+today; flip ON when a Windows D3D runner exists."
+    OFF)
+if(PULP_HAS_SKIA AND WIN32 AND PULP_D3D_AVAILABLE)
+    add_executable(pulp-test-font-rendering-goldens-d3d
+        test_font_rendering_goldens_d3d.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens-d3d PRIVATE
+        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens-d3d PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_D3D_AVAILABLE=1)
+    target_include_directories(pulp-test-font-rendering-goldens-d3d PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-font-rendering-goldens-d3d)
 endif()
 
 # Analytics tests
@@ -1591,6 +1701,19 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
+# CSS filter chain coverage (P5-2 follow-up — extracted from
+# test_canvas.cpp). pulp #1434 Phase A2-4: Skia-only pixel readback
+# (contrast / invert / opacity ordering with drop-shadow, set_filter
+# drop-shadow parser) + portable filter-chain matrix math
+# (contrast bias, invert maps, identity, opacity alpha scaling).
+add_executable(pulp-test-canvas-filter-chain test_canvas_filter_chain.cpp)
+target_link_libraries(pulp-test-canvas-filter-chain PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-filter-chain PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-filter-chain PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-canvas-filter-chain)
+
 # Emoji-parity tests — cover the segmenter + cluster-aware shaping +
 # letter-spacing + cache invalidation paths. Also writes PNGs to
 # `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
@@ -1640,6 +1763,13 @@ pulp_add_test_suite(pulp-test-view-corner-radius LIBRARIES pulp::view)
 # overflow:visible default for absolute-positioned popovers + pulp
 # #1148 slice (a) symmetric overflow:visible hit-test extension.
 pulp_add_test_suite(pulp-test-view-zindex-overflow LIBRARIES pulp::view)
+
+# View CSS mask + overflow:visible hit-test extension (P5-3 follow-up).
+# pulp #1148 slice (a) symmetric overflow:visible hit-test extension
+# (500px in each direction so absolutely-positioned popovers protrude
+# past their parent) + pulp #1737 / #1515 CSS mask-image + mask-size
+# paint slice (save_layer_with_mask routing).
+pulp_add_test_suite(pulp-test-view-mask-overflow LIBRARIES pulp::view)
 
 # DirtyTracker, GpuGraphRenderer, and RenderLoop timer-state tests
 # are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
@@ -1710,9 +1840,13 @@ if(PULP_ENABLE_GPU)
 
 endif()
 
-# Texture atlas helpers are header-only; keep this pure test available in
-# GPU-off builds so sanitizer and local coverage lanes do not fetch GPU assets.
-add_executable(pulp-test-texture-atlas test_texture_atlas.cpp)
+# Texture atlas helpers compile cleanly without GPU deps; keep this pure
+# test available in GPU-off builds so sanitizer and local coverage lanes do
+# not fetch GPU assets. The atlas .cpp impl is compiled directly into the
+# test target rather than linking pulp::render (which would pull in Skia/Dawn).
+add_executable(pulp-test-texture-atlas
+    test_texture_atlas.cpp
+    ${CMAKE_SOURCE_DIR}/core/render/src/texture_atlas.cpp)
 target_include_directories(pulp-test-texture-atlas PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
 target_link_libraries(pulp-test-texture-atlas PRIVATE Catch2::Catch2WithMain)
@@ -1733,6 +1867,13 @@ pulp_add_test_suite(pulp-test-audio-bridge LIBRARIES pulp::view)
 # Widget tests
 pulp_add_test_suite(pulp-test-widgets LIBRARIES pulp::view)
 
+# Widget tests — Label cluster (P5-3 follow-up — extracted from
+# test_widgets.cpp). Label intrinsic_width / intrinsic_height /
+# line-height multiplier (#76) / line_clamp / measured_height under
+# bounded width / baseline_y from text metrics / vertical text
+# direction / letter_spacing glyph counting (#928 + #1407 + #76).
+pulp_add_test_suite(pulp-test-widgets-label LIBRARIES pulp::view)
+
 # Hot-reload tests
 add_executable(pulp-test-hot-reload test_hot_reload.cpp)
 target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -1748,6 +1889,12 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)
     target_link_libraries(pulp-test-inspector PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-inspector)
+
+    # Phase 0b PR-A: TweakStore + Inspector.applyTweak protocol surface.
+    # planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+    add_executable(pulp-test-tweak-store test_tweak_store.cpp)
+    target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-tweak-store)
 endif()
 
 # Widget bridge tests
@@ -1780,6 +1927,53 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 # dedicated-command routing — the five Wave 2 partial → supported
 # compat.json entries.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
+
+# Widget bridge — RN outline cluster (P5-1 follow-up, pulp #1519).
+# outlineColor / outlineOffset / outlineStyle / outlineWidth longhands
+# + `outline` shorthand decomposition through the RN style shim.
+pulp_add_test_suite(pulp-test-widget-bridge-rn-outline LIBRARIES pulp::view)
+
+# Widget bridge — clip-path + mask cluster (P5-1 follow-up, pulp #1515).
+# clip-path: inset/circle/polygon/url + shape coordinate parsing;
+# mask-image: url + linear-gradient + transforms; mask-size /
+# -position / -repeat / -origin / -clip / -composite; mask shorthand.
+pulp_add_test_suite(pulp-test-widget-bridge-clip-mask LIBRARIES pulp::view)
+
+# Widget bridge — SVG widgets (P5-1 follow-up). Three clusters:
+# pulp #965 SvgPathWidget JS bridge integration + pulp #1416
+# SvgRectWidget + SvgLineWidget JS bridge integration + compound-path
+# parser regression (Spectr PEAK / AVG / BOTH / OFF analyzer icons).
+pulp_add_test_suite(pulp-test-widget-bridge-svg LIBRARIES pulp::view)
+
+# Widget bridge — Wave 5 css.5 audit (P5-1 follow-up). Runtime-path
+# coverage for the 49 entries PR #1649 flipped from partial/DIVERGE
+# to supported: backgroundPosition / backgroundSize / textShadow /
+# border / border-side / borderRadius / per-corner radius / boxShadow
+# / opacity / outline / textOverflow / transformOrigin / zIndex /
+# backdropFilter / display / overflow / overflow per-axis / and
+# many more. 45 TEST_CASEs each exercising JS shim → bridge → View
+# slot round-trip.
+pulp_add_test_suite(pulp-test-widget-bridge-wave5-css LIBRARIES pulp::view)
+
+# Widget bridge — HTML ARIA + querySelector (P5-1 follow-up, Wave 3
+# html bundle). aria-label / role flow into View accessibility slots;
+# document.querySelector accepts attribute selectors + combinators +
+# :hover / :disabled / :checked / :enabled / :not / :first-child /
+# :nth-child / :empty pseudo-classes.
+pulp_add_test_suite(pulp-test-widget-bridge-html-aria LIBRARIES pulp::view)
+
+# Widget bridge — CSS animations + transitions (P5-1 follow-up,
+# pulp #1434 Phase A2-1). animation-* longhands + shorthand
+# decomposition; transition-* longhands + shorthand round-trip
+# through the CSS shim and bridge.
+pulp_add_test_suite(pulp-test-widget-bridge-css-animations LIBRARIES pulp::view)
+
+# Widget bridge — CSS Grid extended surface (P5-1 follow-up, pulp #1434
+# Phase A2-2). grid-template-columns / -rows / -areas, grid-column /
+# -row / -area placement shorthand, gap longhands + shorthand,
+# justify-* / align-* / place-* alignment, repeat() + minmax() +
+# fr-unit + auto sizing tokens round-trip through the bridge.
+pulp_add_test_suite(pulp-test-widget-bridge-css-grid LIBRARIES pulp::view)
 
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
@@ -1834,6 +2028,15 @@ pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 # (and silently aborts FilterBank-style frame renders) gets caught.
 pulp_add_test_suite(pulp-test-canvas2d-shim LIBRARIES pulp::view)
 
+# Canvas2D shim — post-Wave-2 coverage (P5-2 follow-up — extracted from
+# test_canvas2d_shim.cpp). Bundles #1525 (fillText / strokeText
+# maxWidth + glyph cluster handling) + #1521 (arc-as-path
+# DIVERGE → PASS) + #1520 (ctx.direction / ctx.filter) + #1526
+# (catalog hygiene round-trip) + Wave 4 lineDashOffset re-flush +
+# #1527 (getTransform / resetTransform + isPointInPath /
+# isPointInStroke).
+pulp_add_test_suite(pulp-test-canvas2d-shim-late LIBRARIES pulp::view)
+
 # SvgPathWidget tests (issue-965)
 pulp_add_test_suite(pulp-test-svg-path-widget LIBRARIES pulp::view)
 
@@ -1882,6 +2085,13 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import
+    PROPERTIES LABELS "parser-import")
+
+# Phase 0a: stable_anchor_id assignment per
+# planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+add_executable(pulp-test-design-import-anchors test_design_import_anchors.cpp)
+target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-anchors
     PROPERTIES LABELS "parser-import")
 
 # DESIGN.md import (Google design.md, Apache-2.0 — pulp #1434 follow-up)

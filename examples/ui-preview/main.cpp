@@ -527,6 +527,11 @@ int main(int argc, char* argv[]) {
             // Prints one JSON line per (family, codepoint) and exits with
             // status 0 iff every probe was OK (family resolved AND glyph
             // present). Used by import-design validation, not human eyes.
+#ifndef PULP_HAS_SKIA
+            std::cerr << "[ui-preview] --font-probe requires Skia "
+                         "(built without PULP_HAS_SKIA)\n";
+            return 2;
+#else
             std::string spec = argv[i] + 13;
             auto colon = spec.find(':');
             if (colon == std::string::npos || colon == 0 || colon + 1 == spec.size()) {
@@ -567,6 +572,7 @@ int main(int argc, char* argv[]) {
                 if (!pr.family_resolved || !pr.glyph_present) all_ok = false;
             }
             return all_ok ? 0 : 1;
+#endif // PULP_HAS_SKIA
         } else if (starts_with(argv[i], "--font-dir=")) {
             // pulp #2163 — `--font-dir=/path/to/fonts` walks a directory and
             // registers every .ttf / .otf under it. The font family name

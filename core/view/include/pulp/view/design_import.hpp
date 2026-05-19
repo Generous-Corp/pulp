@@ -101,6 +101,38 @@ enum class AudioWidgetType {
     spectrum
 };
 
+// ── Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
+// additive identity fields on IRNode. The TS-side @pulp/import-ir package
+// already defines the canonical shape; the C++ IR lags. Phase 0a is
+// deliberately additive — IRStyle/IRLayout migration to TS-style
+// paint/text/layout is a separate ~1-month effort tracked elsewhere.
+//
+// stable_anchor_id is the key the tweaks layer (pulp-tweaks.json) uses to
+// match user edits back to nodes across re-imports. Computed by the
+// anchor strategies in <pulp/view/anchor_strategy.hpp> (mirror of
+// packages/pulp-import-ir/src/anchors.ts).
+//
+// provenance + confidence let the inspector (and downstream tooling) know
+// where a node came from and how confident the adapter was — critical
+// for surfacing "this was sampled from an image, not a literal" in the
+// future Lock-to-source UI.
+
+/// Confidence the adapter has that a node was lowered correctly. Maps to
+/// the TS Confidence enum (`PASS` | `DIVERGE` | `NOT_IMPL`). Drives the
+/// `pulp ui validate` exit code in CI.
+enum class IRConfidence {
+    pass,        // Adapter fully understood the source node
+    diverge,     // Adapter produced something close-but-not-equivalent
+    not_impl     // Adapter does not know how to lower this node yet
+};
+
+/// Adapter-side provenance: who lowered this node, from what source.
+struct IRProvenance {
+    std::string adapter;     // e.g. "figma", "stitch-html", "claude-design-html"
+    std::string version;     // adapter version string ("1.0.0" or schema rev)
+    std::string source_uri;  // source identifier (file path, URL, MCP handle)
+};
+
 /// A single node in the normalized design IR.
 struct IRNode {
     std::string type;   // "frame", "text", "image", "button", "input", "slider"
@@ -115,6 +147,21 @@ struct IRNode {
     float audio_default = 0.5f;
     std::vector<IRNode> children;
     std::unordered_map<std::string, std::string> attributes;  // Extra metadata
+
+    // ── Phase 0a additive identity fields ────────────────────────────────
+    /// Stable anchor for the tweaks layer. Empty until an anchor strategy
+    /// has populated it (call assign_anchors() in anchor_strategy.hpp).
+    std::optional<std::string> stable_anchor_id;
+    /// Source-side native ID (e.g. Figma layer UUID, Pencil node ID).
+    /// Only populated for sources that have native IDs.
+    std::optional<std::string> source_node_id;
+    /// Adapter provenance — typically set on the root node by each parser.
+    std::optional<IRProvenance> provenance;
+    /// Adapter's confidence in this node's lowering.
+    std::optional<IRConfidence> confidence;
+    /// Verbatim source slice for this node (debugging + AST-patch fallback).
+    /// Optional; adapters may leave empty when the source is binary or large.
+    std::optional<std::string> raw_source;
 };
 
 /// Design token collection (W3C-compatible).
