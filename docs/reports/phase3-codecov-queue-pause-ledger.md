@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-19 01:52 PDT
+Last updated: 2026-05-19 01:56 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -405,6 +405,37 @@ invalid reference: v3.6.2`), so the push used
 `PULP_DISABLE_PREPUSH_DIFF_COVER=1` to demote only that local diff-cover
 gate. GitHub REST then reported #2268 base `8b723618f`, head
 `f98933cd2`, `behind_by: 0`, `mergeable: true`, `mergeable_state:
+blocked`, with required checks freshly queued on the refreshed head. No
+Namespace dispatch.
+
+2026-05-19 01:56 PDT: rebased
+`feature/phase3-codecov-audio-midi-batch-753` onto current `origin/main`
+`037e24a00` and added the ninth committed tranche:
+`aa45cd729 test(runtime): cover canonical IPv4 parsing`, touching
+`test/test_network_stream.cpp`. Scope: deterministic runtime IP helper
+coverage for canonical public IPv4 examples and rejection of non-canonical
+numeric forms (`127.1`, octal-looking, hex-looking, and single-integer
+forms). Local validation passed: `cmake --build build --target
+pulp-test-network-stream -j4`, `./build/test/pulp-test-network-stream
+"[network_stream][ip-address]"` (34 assertions in 7 test cases),
+`./build/test/pulp-test-network-stream "[network_stream]"` (191
+assertions in 36 test cases), and `git diff --check`. PR state: batch
+remains local-only, 9 commits ahead of `origin/main`. No Namespace
+dispatch.
+
+2026-05-19 01:56 PDT: reprioritized #2268 after `origin/main` advanced
+again from `8b723618f` to `037e24a00`. GitHub reported refreshed head
+`f98933cd2` was `behind_by: 1`, so merged current `origin/main` into
+`feature/phase3-codecov-rollup-746`. The merge was clean and touched only
+`CHANGELOG.md`, producing PR head `3535a80a`. Local validation passed
+`python3 tools/scripts/skill_sync_check.py --base origin/main --config
+tools/scripts/versioning.json --mode=report`; the push hook also passed
+skill/version and source-contract checks. The local diff-coverage
+pre-push setup again failed while fetching mbedTLS (`fatal: invalid
+reference: v3.6.2`), so the push used
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` to demote only that local diff-cover
+gate. GitHub REST then reported #2268 base `037e24a00`, head
+`3535a80a`, `behind_by: 0`, `mergeable: true`, `mergeable_state:
 blocked`, with required checks freshly queued on the refreshed head. No
 Namespace dispatch.
 
