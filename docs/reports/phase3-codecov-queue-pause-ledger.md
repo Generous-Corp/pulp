@@ -9338,3 +9338,12 @@ as `e07bbdbb0`. Focused validation after rebase passed:
 tools/scripts/versioning.json --mode=report --require-bump-for-fix-feat`, and
 `git diff --check`. Force-with-lease pushed with `PULP_SKIP_PREPUSH=1
 PULP_VIA_SHIPYARD=1`; monitor #2298 checks on SHA `e07bbdbb0`.
+
+2026-05-18 19:55 PDT: fixed #2298 enforcement on rebased head. The CI
+version-bump check accepted the numeric SDK bump but rejected commit subject
+`chore: bump SDK version for runtime coverage batch` because the fix/feat guard
+requires a canonical subject exactly `chore: bump versions` in the PR diff.
+Amended the tip commit subject only; local version-bump report and
+`git diff --check` still passed. Force-with-lease pushed with
+`PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1`; monitor #2298 checks on SHA
+`19abf2842`.
