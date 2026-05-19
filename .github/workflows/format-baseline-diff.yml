@@ -133,9 +133,17 @@ jobs:
         # tagged release; bump deliberately if the validator's
         # behavior changes (and re-capture the baseline at the same
         # commit).
+        #
+        # 2026-05-18: the upstream asset name carries the version and
+        # uses `macos-universal`, not `macos-aarch64` —
+        # `clap-validator-0.3.2-macos-universal.tar.gz`. The previous
+        # `clap-validator-macos-aarch64.tar.gz` URL 404'd silently and
+        # the validator never installed, so every PR's baseline-diff
+        # job exited 1 with "All validator(s) failed — no captured
+        # output." Pinning the correct asset name fixes that.
         run: |
           CV_VERSION="0.3.2"
-          CV_URL="https://github.com/free-audio/clap-validator/releases/download/${CV_VERSION}/clap-validator-macos-aarch64.tar.gz"
+          CV_URL="https://github.com/free-audio/clap-validator/releases/download/${CV_VERSION}/clap-validator-${CV_VERSION}-macos-universal.tar.gz"
           if curl -fsSL -o /tmp/cv.tar.gz "$CV_URL"; then
             tar -xzf /tmp/cv.tar.gz -C /tmp
             sudo mv /tmp/clap-validator /usr/local/bin/clap-validator
