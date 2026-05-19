@@ -9301,3 +9301,15 @@ cases). Force-with-lease pushed #2268 with `PULP_SKIP_PREPUSH=1
 PULP_VIA_SHIPYARD=1`. REST check polling on `30123a752` immediately after push
 showed no failed checks, 5 successful, and 21 pending; GraphQL quota was
 exhausted, so continue monitoring via REST only.
+
+2026-05-18 19:45 PDT: fixed #2298 Windows failure. The failed Windows job on
+`705eb83e0` was cleanup-only in `FileStream rejects null buffers for non-empty
+I/O`: all assertions passed, but Windows refused `std::filesystem::remove(path)`
+while `reader` still held the file open. Added `0642a6535`
+(`test(runtime): close file before Windows cleanup`) to close the reader before
+removing the temp file. Focused local validation passed: `cmake --build build
+--target pulp-test-stream`, `build/test/pulp-test-stream "FileStream rejects null
+buffers for non-empty I/O"` (13 assertions), `build/test/pulp-test-stream
+"[stream][file][coverage][phase3]"` (30 assertions in 3 test cases), and
+`git diff --check`. Pushed with `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1`; monitor
+#2298 checks on SHA `0642a6535`.
