@@ -158,6 +158,22 @@ TEST_CASE("IPv4 validation accepts private network examples",
     REQUIRE(is_valid_ipv4("169.254.10.20"));
 }
 
+TEST_CASE("IPv4 validation rejects non-canonical numeric address forms",
+          "[network_stream][ip-address][coverage][phase3]") {
+    REQUIRE_FALSE(is_valid_ipv4("127.1"));
+    REQUIRE_FALSE(is_valid_ipv4("127.0.1"));
+    REQUIRE_FALSE(is_valid_ipv4("0300.0250.0001.0001"));
+    REQUIRE_FALSE(is_valid_ipv4("0xc0.0xa8.0x01.0x01"));
+    REQUIRE_FALSE(is_valid_ipv4("3232235777"));
+}
+
+TEST_CASE("IPv4 validation accepts canonical public resolver examples",
+          "[network_stream][ip-address][coverage][phase3]") {
+    REQUIRE(is_valid_ipv4("1.1.1.1"));
+    REQUIRE(is_valid_ipv4("8.8.8.8"));
+    REQUIRE(is_valid_ipv4("9.9.9.9"));
+}
+
 TEST_CASE("local IPv4 helpers return valid fallback or interface addresses",
           "[network_stream][ip-address][issue-641]") {
     auto addresses = local_ipv4_addresses();
