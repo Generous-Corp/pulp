@@ -10521,3 +10521,30 @@ capturing lines"` (5 assertions / 1 case), `./build/test/pulp-test-child-process
 "[phase3]"` (18 assertions / 4 cases), and `git diff --check`. The batch now
 has 26 local coverage commits plus main merges and remains current with
 `origin/main`; continue accumulating locally while #2268 runs.
+
+2026-05-19 00:46 PDT: started
+`feature/phase3-codecov-audio-midi-batch-753` from current `origin/main`,
+fast-forwarded through `2644adbb3` (`docs: regenerate changelog for v0.137.0
+[skip ci]`), and added `9417253ab` (`test(midi): cover MPE zone disabled
+layouts`). This covers `MpeZone::contains_channel` for disabled lower/upper
+zones and non-standard manager layouts without changing production code.
+Focused local validation passed in the fresh worktree after configure:
+`cmake --build build --target pulp-test-mpe-buffer -j4`,
+`./build/test/pulp-test-mpe-buffer "MpeZone rejects disabled and non-standard
+manager layouts"` (8 assertions / 1 case),
+`./build/test/pulp-test-mpe-buffer "[midi][mpe]"` (94 assertions / 12 cases),
+and `git diff --check`. The branch is local-only, ahead of its upstream base
+by 1 commit and behind latest `origin/main` by 5 commits; do not push/open it
+while #2268 is still blocked.
+
+2026-05-19 00:46 PDT: rechecked PR #2268. Head remains
+`585544b09dfbb0345522e2f8713a59d185bd4624`; REST reports the PR open and not
+draft, with mergeability temporarily `unknown` while GitHub recomputes. The
+current head still has only `baseline-diff`, `macOS local smoke`, and `Yoga
+layout snapshots` successful; `IWYU (Linux, Clang) — advisory` is now in
+progress, while `macos-15` and most required jobs remain queued from 07:04 UTC.
+Earlier obsolete queued/pending workflow runs on previous #2268 SHAs were
+cancelled with `gh api -X POST .../cancel`. Runner inventory at 07:46 UTC
+showed no `namespace-profile-generouscorp-macos` runner online and only
+`Daniels-MacBook-Pro` online/busy, so this matches the operator-escalation
+condition described in the Namespace hygiene handoff.
