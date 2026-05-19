@@ -9277,3 +9277,5 @@ then the affected Catch2 filters across those binaries, including
 `[json_rpc]`, `[runtime][message_channel]`, plus `git diff --check`. Next
 action: submit as one large Shipyard/GitHub PR and monitor alongside #2268,
 #2272, and #2292; no empty rerun commits.
+
+2026-05-18 18:48 PDT: submitted `feature/phase3-codecov-batch-749` as #2298 (`fix(runtime): batch phase 3 coverage hardening`). Shipyard PR flow passed skill-sync after adding the streams skip trailer and prepared the canonical version bump, then failed during local pre-push diff-cover because FetchContent could not checkout `mbedtls` tag `v3.6.2`, matching the known local pre-push dependency failure seen on #2292. After the broad focused validation recorded above, pushed with `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1` and created the GitHub PR with label `codecov`. Monitor #2298 to green with #2268, #2272, and #2292; do not push empty rerun commits.
