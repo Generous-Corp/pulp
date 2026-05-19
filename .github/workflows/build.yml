@@ -247,7 +247,17 @@ jobs:
           if workflow_dispatch_selector:
               macos_route = "operator-override"
               chosen_macos_selector = workflow_dispatch_selector
-          elif namespace_macos_selector and EVENT_NAME == "pull_request":
+          elif namespace_macos_selector and EVENT_NAME in ("pull_request", "workflow_dispatch"):
+              # 2026-05-19: Namespace overflow logic now also applies to
+              # workflow_dispatch (Codex post-merge P2 on PR #2269).
+              # Before: condition was `EVENT_NAME == "pull_request"` only,
+              # which silently routed `shipyard pr` (which uses
+              # workflow_dispatch via the Shipyard `[targets.mac]
+              # backend = "cloud"` path) back to the local self-hosted
+              # Mac — defeating the cutover for ship cycles. The
+              # explicit-override path above (workflow_dispatch_selector)
+              # still wins; this branch only fires when the operator
+              # didn't supply an explicit selector.
               busy = _count_busy_local_mac_runners()
               if busy >= overflow_threshold:
                   macos_route = f"overflow (BUSY={busy} >= {overflow_threshold})"
@@ -256,7 +266,6 @@ jobs:
                   macos_route = f"local (BUSY={busy} < {overflow_threshold})"
                   chosen_macos_selector = local_macos_selector
           else:
-              # workflow_dispatch without an explicit override, or
               # Namespace not configured. Stay local.
               macos_route = "local (default)"
               chosen_macos_selector = local_macos_selector

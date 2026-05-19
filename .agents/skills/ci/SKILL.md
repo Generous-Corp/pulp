@@ -1760,3 +1760,16 @@ Wiring:
 Adding a new top-level entry requires the same-PR allowlist update — the gate's error message points contributors to the exact line in the script. See the new "Repo-root hygiene" section in `CONTRIBUTING.md` for the contributor-facing explanation.
 
 Companion-track item U-1 in `planning/2026-05-17-refactor-roadmap-final.md`.
+
+## Namespace macOS overflow on `workflow_dispatch`
+
+`resolve-provider` in `.github/workflows/build.yml` applies the Namespace macOS overflow logic on both `pull_request` AND `workflow_dispatch` events (since 2026-05-19, closes #2314).
+
+Pre-2026-05-19 behavior gated overflow on `EVENT_NAME == "pull_request"` only, which silently routed `shipyard pr` ship cycles (`workflow_dispatch`-triggered) back to the local self-hosted Mac. That defeated the 2026-05-18 cloud cutover for the path most contributors hit.
+
+Precedence on `workflow_dispatch`:
+1. `inputs.macos_runner_selector_json` (operator override) — always wins.
+2. Namespace overflow when local Mac BUSY ≥ threshold.
+3. Local default (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
+
+Manual `workflow_dispatch` with an explicit selector input still overrides; the fix only changes behavior for dispatches that arrive without one (which is the `shipyard pr` shape).
