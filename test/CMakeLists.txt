@@ -2079,6 +2079,19 @@ pulp_add_test_suite(pulp-test-widget-bridge-css-per-edge LIBRARIES pulp::view)
 # CSS-subset, and other RN-side OOS catalog hygiene checks.
 pulp_add_test_suite(pulp-test-widget-bridge-rn-oos-fixup LIBRARIES pulp::view)
 
+# Widget bridge — Canvas2D bridge-fn cluster (P5-1 follow-up). pulp
+# #1434 canvasSetFontFull + pulp #1522 fillRule + pulp #1520
+# canvasSetDirection / canvasSetFilter — three closely related
+# bridge entry-points that thread JS-side Canvas2D semantics through
+# WidgetBridge into the native canvas pipeline.
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-bridge-fns LIBRARIES pulp::view)
+
+# Widget bridge — pulp #1543 Yoga borderWidth wiring (P5-1 follow-up).
+# Pins YGNodeStyleSetBorder integration with Yoga 3.x default box-sizing
+# (border-box); the companion content-box test lives in #1516 once
+# setBoxSizing is wired.
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-border LIBRARIES pulp::view)
+
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
