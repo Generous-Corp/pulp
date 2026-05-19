@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-19 00:28 PDT
+Last updated: 2026-05-19 01:16 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -258,6 +258,36 @@ binary: `pulp-test-async-stream`, `pulp-test-audio-focus`,
 plus `git diff --check`. PR state: not pushed/opened yet; next action is
 to coordinate with the still-running #2268 rollup before spending
 another hosted CI lane. No Namespace dispatch.
+
+2026-05-19 01:16 PDT: prioritized Codecov rollup PR #2268 after it
+became merge-blocked by stale base. Merged current `origin/main`
+`baeaf64d0` into `feature/phase3-codecov-rollup-746` and pushed new PR
+head `9cae7b993`. Local validation before push passed
+`python3 tools/scripts/skill_sync_check.py --base origin/main --config
+tools/scripts/versioning.json --mode=report`; GitHub REST then reported
+`behind_by: 0`, `mergeable: true`, `mergeable_state: blocked`, with all
+new head checks freshly queued. The push hook re-ran skill/version and
+source-contract checks successfully. The local diff-coverage pre-push
+setup failed in its temporary coverage build while fetching mbedTLS
+(`fatal: invalid reference: v3.6.2`), so the second push used
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` to demote only that local
+diff-cover gate and unblock the branch refresh. PR state: current with
+`main`; monitor the newly queued required checks to green/merge. No
+Namespace dispatch.
+
+2026-05-19 01:16 PDT: added fifth committed tranche to
+`feature/phase3-codecov-audio-midi-batch-753`:
+`e45e21d88 test(midi): cover device default hooks`, touching
+`test/test_midi.cpp`. Scope: deterministic MIDI device API coverage for
+`MidiPortInfo` defaults, base `MidiInput::set_sysex_callback` no-op
+registration, and base `MidiSystem::set_port_change_callback` no-op
+registration using local fake input/output/system implementations.
+Local validation passed: `cmake --build build --target pulp-test-midi`,
+`./build/test/pulp-test-midi "MIDI device defaults expose safe no-op
+extension hooks"`, `./build/test/pulp-test-midi "[midi][device]"`, and
+`git diff --check`. PR state: not pushed/opened; current local branch is
+ahead of its base but needs rebase after `origin/main` advanced. Keep
+accumulating only after #2268 is clear or waiting on non-actionable CI.
 
 2026-05-18 15:05 PDT: added tenth committed tranche to
 `feature/phase3-codecov-batch-747`:
