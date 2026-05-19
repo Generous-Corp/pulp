@@ -451,7 +451,11 @@ jobs:
 
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
-        run: brew install ccache
+        run: |
+          brew install ccache || {
+            brew update
+            brew install ccache
+          }
 
       - name: Install ccache (Windows)
         if: runner.os == 'Windows'

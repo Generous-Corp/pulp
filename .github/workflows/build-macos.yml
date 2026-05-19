@@ -97,7 +97,11 @@ jobs:
         uses: ./.github/actions/setup-namespace-macos-cache
 
       - name: Install ccache
-        run: brew install ccache
+        run: |
+          brew install ccache || {
+            brew update
+            brew install ccache
+          }
 
       - name: Restore FetchContent sources (GitHub-hosted)
         if: runner.environment == 'github-hosted'
