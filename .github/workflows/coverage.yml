@@ -221,6 +221,10 @@ jobs:
           # tries to install its own pre-push hook in the reused workspace.
           lfs: false
 
+      - name: Set up Namespace macOS cache
+        if: matrix.os == 'macos' && contains(matrix.runs_on_json, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
+
       - name: Install Linux dependencies + Clang tooling
         if: matrix.os == 'linux'
         run: |

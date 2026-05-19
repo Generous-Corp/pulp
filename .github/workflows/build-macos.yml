@@ -92,6 +92,10 @@ jobs:
           # FetchContent / CMake configure persist between PRs.
           clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
 
+      - name: Set up Namespace macOS cache
+        if: contains(needs.resolve-runner.outputs.runs_on_json, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
+
       - name: Install ccache
         run: brew install ccache
 

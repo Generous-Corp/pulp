@@ -103,6 +103,10 @@ jobs:
           # See pulp #1962 for the backfill safety rationale.
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
 
+      - name: Set up Namespace macOS cache
+        if: matrix.os == 'macos-15' && contains(needs.resolve-macos-runner.outputs.runs_on_json, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         # libfontconfig1-dev added in #1970: chrome/m144 Skia exposes

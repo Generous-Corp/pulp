@@ -1,0 +1,14 @@
+name: Set up Namespace macOS cache
+description: Wire Namespace cache volumes for Homebrew, ccache, Pulp FetchContent sources, and Gradle state.
+runs:
+  using: composite
+  steps:
+    - name: Set up Namespace cache
+      uses: namespacelabs/nscloud-cache-action@v1
+      with:
+        cache: brew
+        path: |
+          ~/Library/Caches/ccache
+          ~/Library/Caches/Pulp/fetchcontent-src
+          ~/.gradle/caches
+          ~/.gradle/wrapper

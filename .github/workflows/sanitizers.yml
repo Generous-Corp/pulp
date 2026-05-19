@@ -153,6 +153,10 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Set up Namespace macOS cache
+        if: contains(needs.resolve-runners.outputs.asan_runs_on, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
+
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
 
@@ -191,6 +195,10 @@ jobs:
         with:
           submodules: false
           lfs: false
+
+      - name: Set up Namespace macOS cache
+        if: contains(needs.resolve-runners.outputs.tsan_runs_on, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -240,6 +248,10 @@ jobs:
         with:
           submodules: false
           lfs: false
+
+      - name: Set up Namespace macOS cache
+        if: contains(needs.resolve-runners.outputs.ubsan_runs_on, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only

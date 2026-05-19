@@ -366,7 +366,7 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    name: ${{ matrix.name }} [${{ matrix.provider }}]
+    name: ${{ matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -393,6 +393,10 @@ jobs:
           # the intent obvious. Net win: 5-10× faster on local mac on the
           # 2nd+ run of any PR (cache + build dir stay warm).
           clean: ${{ contains(matrix.runs_on_json, 'self-hosted') == false }}
+
+      - name: Set up Namespace macOS cache
+        if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')
+        uses: ./.github/actions/setup-namespace-macos-cache
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -636,55 +640,12 @@ jobs:
           }
           python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
 
-  # ── Stable-name status aliases for branch protection ──────────────────────
-  # Branch-protection on `main` requires contexts literally named
-  # `macos`, `linux`, `windows`. The real build jobs above are matrix
-  # entries with provider-suffixed names (e.g. "macOS (ARM64) [namespace]")
-  # that change whenever the runner provider flips — breaking the
-  # required-contexts match. These three alias jobs expose stable
-  # names that carry the build matrix's result forward.
-  #
-  # Each alias reads `needs.build.result` (the aggregate matrix
-  # conclusion) and fails if the matrix didn't succeed. Per-platform
-  # filtering at this layer would need matrix outputs plumbing; for
-  # branch-protection purposes "all-build-matrix-green" is the gate
-  # we actually want (no PR should merge with any platform red).
-  #
-  # Discovered in #401 admin-merge: without these aliases every PR
-  # stays BLOCKED forever even when all checks pass.
-
-  # Per-OS alias gates resolve to the per-matrix-leg conclusion via the
-  # GitHub API (Build and Test run -> jobs[] filtered by name prefix).
-  # Previously these checked needs.build.result which is the AGGREGATE
-  # matrix outcome — so a Linux failure failed the macOS alias too, which
-  # is the wrong shape for the operator's macOS-focus policy (Linux +
-  # Windows are advisory; only macOS blocks merge).
-  #
-  # The aliases still exist to satisfy branch-protection's required-
-  # context names (`macos`, `linux`, `windows`) which are stable across
-  # provider/runner-name flips. Each alias now gates on its own platform
-  # leg independently.
-
-  macos:
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Gate on macOS matrix leg only
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | startswith("macOS")) | .conclusion' | head -1)
-          echo "macOS leg conclusion: ${conclusion:-unknown}"
-          if [ "$conclusion" = "success" ]; then
-            echo "macOS leg green — macos gate ✓"
-            exit 0
-          else
-            echo "macOS leg ${conclusion:-not found} — blocking macOS gate"
-            exit 1
-          fi
+  # ── Stable-name status aliases for advisory platforms ─────────────────────
+  # Branch protection requires a context literally named `macos`. Put that
+  # name directly on the macOS matrix leg above so it completes as soon as
+  # macOS finishes, instead of waiting for the Linux/Windows advisory legs
+  # to leave their queues. Linux and Windows keep stable advisory aliases
+  # for visibility only.
 
   linux:
     needs: build
