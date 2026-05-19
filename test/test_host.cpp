@@ -857,6 +857,29 @@ TEST_CASE("SignalGraph prepare failure leaves process output silent",
     }
 }
 
+TEST_CASE("SignalGraph process silences oversized blocks",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples(8, 1.0f);
+    std::vector<float> output_samples(8, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 8);
+
+    graph.process(out_view, in_view, 8);
+
+    for (float sample : output_samples) {
+        REQUIRE(sample == 0.0f);
+    }
+    graph.release();
+}
+
 TEST_CASE("SignalGraph PDC aligns parallel branches", "[host][graph][pdc]") {
     // in → A(latency=32) → mix
     // in → B(latency=0)  → mix   (should be delayed by 32 so A and B align)
