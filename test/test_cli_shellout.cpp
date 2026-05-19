@@ -2070,6 +2070,29 @@ TEST_CASE("pulp project bump rejects missing --to values before project lookup",
     fs::current_path(cwd_saver);
 }
 
+TEST_CASE("pulp project validates stray parser arguments before project lookup",
+          "[cli][shellout][project][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(fs::temp_directory_path());
+
+    for (const auto& c : std::vector<std::pair<std::vector<std::string>, std::string>>{
+             {{"project", "bump", "--bogus"}, "unknown argument '--bogus'"},
+             {{"project", "pin", "1.2.3", "2.3.4"}, "unexpected extra version argument '2.3.4'"},
+             {{"project", "unpin", "--bogus"}, "unknown argument '--bogus'"},
+         }) {
+        auto r = exec(bin.string(), c.first, 10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.second) != std::string::npos);
+        REQUIRE(r.stderr_output.find("not inside") == std::string::npos);
+    }
+
+    fs::current_path(cwd_saver);
+}
+
 TEST_CASE("pulp pr without shipyard prints install guidance",
           "[cli][shellout][pr][issue-643]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
