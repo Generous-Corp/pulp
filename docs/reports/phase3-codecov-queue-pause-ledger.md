@@ -11076,3 +11076,18 @@ head `5f511a733`; `Validate docs consistency` joined the green checks,
 `macOS (ARM64) [github-hosted]` and `sandbox-e2e (ubuntu-latest)` were in
 progress, and no failures were present. The batch is clean, local-only, and 23
 coverage commits ahead of `origin/main`.
+
+2026-05-19 03:12 PDT: added `53f44ebeb` (`test(runtime): cover child
+process cwd failures`) to local-only
+`feature/phase3-codecov-audio-midi-batch-753`. This touches only
+`test/test_runtime_utils.cpp` and covers the `run_process` missing working
+directory failure path, asserting the helper returns `nullopt` rather than
+silently running in an unintended directory. Focused local validation passed:
+`cmake --build build --target pulp-test-runtime-utils -j4`,
+`./build/test/pulp-test-runtime-utils "[runtime][child_process]"` (21
+assertions / 8 cases), and `git diff --check`. PR #2268 remained current at
+head `5f511a733`; there were no failed checks, Windows/macOS/sandbox lanes
+were still active or queued, and GraphQL had reset. Retried
+`shipyard rescue 2268` from the PR worktree after the reset; Shipyard reported
+no stuck queued runs older than 30 minutes, so no manual rescue was applied.
+The batch is clean, local-only, and 24 coverage commits ahead of `origin/main`.
