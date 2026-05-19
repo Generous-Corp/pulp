@@ -10890,3 +10890,18 @@ assertions / 31 cases), `./build/test/pulp-test-network-stream
 `./build/test/pulp-test-memory-message-channel "[runtime][message_channel]"`
 (80 assertions / 17 cases), and `git diff --check`. The branch is clean,
 local-only, and 12 commits ahead of `origin/main`.
+
+2026-05-19 02:19 PDT: added `4ee9da554` (`test(state): cover trailing state
+payloads`) to local-only `feature/phase3-codecov-audio-midi-batch-753`. This
+touches only `test/test_state.cpp` and covers the current
+`StateStore::deserialize` forward-extension behavior: when the declared
+parameter count is satisfied and the CRC is valid, trailing payload bytes
+before the CRC are ignored while known parameter values are still loaded.
+Focused local validation passed:
+`cmake --build build --target pulp-test-state -j4`,
+`./build/test/pulp-test-state "[state][serialize]"` (37 assertions / 6
+cases), `./build/test/pulp-test-state "[state]"` (189 assertions / 42 cases),
+and `git diff --check`. PR #2268 remained current at head `5f511a733`,
+`mergeable: true`, `mergeable_state: blocked`; `baseline-diff` was in
+progress and all other refreshed checks were queued with no failures. The
+batch is clean, local-only, and 13 coverage commits ahead of `origin/main`.
