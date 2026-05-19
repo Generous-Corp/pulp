@@ -9281,3 +9281,23 @@ action: submit as one large Shipyard/GitHub PR and monitor alongside #2268,
 2026-05-18 18:48 PDT: submitted `feature/phase3-codecov-batch-749` as #2298 (`fix(runtime): batch phase 3 coverage hardening`). Shipyard PR flow passed skill-sync after adding the streams skip trailer and prepared the canonical version bump, then failed during local pre-push diff-cover because FetchContent could not checkout `mbedtls` tag `v3.6.2`, matching the known local pre-push dependency failure seen on #2292. After the broad focused validation recorded above, pushed with `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1` and created the GitHub PR with label `codecov`. Monitor #2298 to green with #2268, #2272, and #2292; do not push empty rerun commits.
 
 2026-05-18 19:06 PDT: fixed #2292 CI failure. Linux and macOS both failed only `cmd_project bump option parser accepts flags and reports ignored arguments`; the parser now deliberately rejects stray args from commit `2ddb501e8`, while the older unit test still expected an ignored-argument warning. Added `151b496c6` (`test(cli): align project bump parser expectation`) to assert `opts.error` contains `unknown argument --surprise` and stderr stays empty. Focused local validation passed: `cmake --build build --target pulp-test-cli-project-command`; `build/test/pulp-test-cli-project-command "cmd_project bump option parser accepts flags and rejects unknown arguments"` (12 assertions); `build/test/pulp-test-cli-project-command "[cli][project-command][issue-643]"` (138 assertions in 11 test cases); and `git diff --check`. Pushed with `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1` due the same local FetchContent/pre-push mbedtls checkout failure previously recorded; monitor new #2292 checks on SHA `151b496c6`.
+
+2026-05-18 19:38 PDT: completed the #2268 rebase of
+`feature/phase3-codecov-rollup-746` onto current `origin/main`, resolving the
+remaining conflicts in `tools/import-validation/source-contracts.json`,
+`core/view/src/widget_bridge.cpp`, and `test/test_widgets.cpp`. The rebase
+finished cleanly at head `30123a752`; exact conflict-marker scan, JSON
+validation for `tools/import-validation/source-contracts.json`, and
+`git diff --check` passed. Focused local validation passed after the rebase:
+`cmake --build build --target pulp-test-widgets
+pulp-test-widget-bridge-runtime-import pulp-test-design-import-jsx-runtime
+pulp-test-json-rpc pulp-test-runtime-utils pulp-test-svg
+pulp-test-view-bridge`, followed by direct execution of those seven test
+binaries: widgets (386 assertions / 86 cases), widget bridge runtime import
+(36 assertions / 12 cases), JSX runtime import (2 assertions / 2 cases),
+JSON-RPC (168 assertions / 30 cases), runtime utils (528 assertions / 120
+cases), SVG (58 assertions / 14 cases), and view bridge (128 assertions / 11
+cases). Force-with-lease pushed #2268 with `PULP_SKIP_PREPUSH=1
+PULP_VIA_SHIPYARD=1`. REST check polling on `30123a752` immediately after push
+showed no failed checks, 5 successful, and 21 pending; GraphQL quota was
+exhausted, so continue monitoring via REST only.
