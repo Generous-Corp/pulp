@@ -169,6 +169,14 @@ bool address_matches(std::string_view pattern, std::string_view address) {
                 while (close < pattern.size() && pattern[close] != '}') ++close;
                 if (close == pattern.size()) return false;
 
+                size_t scan = pi;
+                while (scan < close) {
+                    size_t start = scan;
+                    while (scan < close && pattern[scan] != ',') ++scan;
+                    if (scan == start) return false;
+                    if (scan < close && pattern[scan] == ',') ++scan;
+                }
+
                 while (pi < pattern.size() && pattern[pi] != '}') {
                     size_t start = pi;
                     while (pi < pattern.size() && pattern[pi] != ',' && pattern[pi] != '}') ++pi;
