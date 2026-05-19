@@ -1852,6 +1852,12 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 # + `outline` shorthand decomposition through the RN style shim.
 pulp_add_test_suite(pulp-test-widget-bridge-rn-outline LIBRARIES pulp::view)
 
+# Widget bridge — clip-path + mask cluster (P5-1 follow-up, pulp #1515).
+# clip-path: inset/circle/polygon/url + shape coordinate parsing;
+# mask-image: url + linear-gradient + transforms; mask-size /
+# -position / -repeat / -origin / -clip / -composite; mask shorthand.
+pulp_add_test_suite(pulp-test-widget-bridge-clip-mask LIBRARIES pulp::view)
+
 # Widget bridge — SVG widgets (P5-1 follow-up). Three clusters:
 # pulp #965 SvgPathWidget JS bridge integration + pulp #1416
 # SvgRectWidget + SvgLineWidget JS bridge integration + compound-path
