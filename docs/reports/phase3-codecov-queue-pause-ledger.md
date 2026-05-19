@@ -9550,6 +9550,25 @@ pulp-test-host-regression`, `./build/test/pulp-test-host-regression
 "PluginScanner VST3 moduleinfo skips unusable class records"` (5 assertions / 1
 case), `./build/test/pulp-test-host-regression
 "[host][scanner][regression][codecov][phase3]"` (10 assertions / 2 cases), and
-`git diff --check`. The held batch now has 24 local coverage commits and is at
+ `git diff --check`. The held batch now has 24 local coverage commits and is at
 the lower bound for the planned PR batch size; next action is a final readiness
 check and then open a batched PR if main remains current.
+
+2026-05-18 22:04 PDT: opened the held
+`feature/phase3-codecov-host-cache-batch-750` batch as PR #2310
+(`test(host): cover VST3 unusable moduleinfo classes`),
+https://github.com/danielraffel/pulp/pull/2310. Head SHA is `1db18d834`,
+with 24 Phase 3 host/cache coverage commits and 827 insertions across 9 test
+files. Final readiness checks passed before shipping: `git diff --check
+origin/main..HEAD`, `tools/scripts/version_bump_check.py --mode=report`
+reported no SDK/plugin bump needed, and the CLI skew check returned clean.
+`shipyard pr` first stopped before opening the PR because the operator-local
+`ubuntu` and `windows` SSH lanes were unreachable; rerunning with
+`--skip-target ubuntu --skip-target windows` opened #2310. Shipyard then
+reported a mac validation failure while trying to inspect a workflow named
+`build` (`could not find any workflows named build`), so no code/test failure
+has been observed from that Shipyard error. REST check-run polling after PR
+creation showed #2310 open, `mergeable_state=blocked`, 0 failing checks, 15
+pending checks, 7 successful checks, and 23 total check runs. GitHub GraphQL
+was rate-limited during the handoff, so continue monitoring #2310 via REST
+until the GraphQL limit resets; do not push an empty rerun commit.
