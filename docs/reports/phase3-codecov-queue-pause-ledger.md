@@ -10383,3 +10383,43 @@ callback buffers partial stderr without trailing newline"` (3 assertions / 1
 case), `./build/test/pulp-test-child-process "[phase3]"` (3 assertions / 1
 case), and `git diff --check`. The batch now has 23 local coverage commits plus
 main merges; continue accumulating before opening a PR.
+
+2026-05-18 23:59 PDT: added `4f2d81d5a` (`test(platform): cover child process
+move assignment`) to `feature/phase3-codecov-runtime-state-batch-752`. This
+covers `ChildProcess` move-assignment after a process has already started,
+asserting the moved-to owner can still wait, collect stdout, and preserve the
+non-timeout/non-cancelled result while the moved-from destructor remains safe.
+Focused local validation passed: `cmake --build build --target
+pulp-test-child-process -j4`, `./build/test/pulp-test-child-process "move
+assignment transfers a running child process"` (5 assertions / 1 case),
+`./build/test/pulp-test-child-process "[phase3]"` (8 assertions / 2 cases),
+and `git diff --check`. The batch now has 24 local coverage commits plus main
+merges.
+
+2026-05-18 23:59 PDT: merged current `origin/main` twice into
+`feature/phase3-codecov-runtime-state-batch-752`: `dcb0ee842` picked up
+`789369822` (`refactor(test): P5-3 follow-up — extract mask + overflow
+extension`) and `a7e453544` picked up `7ebdf354a` (`feat(canvas):
+cross-backend rendering goldens — Skia GPU lane`). Both merges were clean.
+Focused validation after the merges passed: `cmake --build build --target
+pulp-test-view-mask-overflow -j4`, `./build/test/pulp-test-view-mask-overflow`
+(14 assertions / 8 cases), `cmake --build build --target
+pulp-test-child-process -j4`, `./build/test/pulp-test-child-process "move
+assignment transfers a running child process"` (5 assertions / 1 case),
+`./build/test/pulp-test-child-process "[phase3]"` (8 assertions / 2 cases),
+and `git diff --check`. The Skia GPU golden target is CMake-gated on
+`PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU`, so it is absent in this local
+Skia-less build as expected. The branch is current with `origin/main` and ahead
+by 39 local commits; continue holding locally until the rollup path is clear.
+
+2026-05-18 23:59 PDT: checked PR #2268 (`test: consolidate phase 3 codecov
+coverage batches`) via REST because GraphQL is exhausted. Head remains
+`4e02bfdf953c9b2ab1f57e4a13b274a72925bb94` on
+`feature/phase3-codecov-rollup-746`; the PR is open and not draft. Current
+checks show movement rather than a hard outage: `baseline-diff`, `macOS local
+smoke`, and `Yoga layout snapshots` are successful; `ubuntu-24.04`,
+`android-build (windows-latest)`, and `IWYU (Linux, Clang) — advisory` are in
+progress; several jobs including `macos-15` remain queued from 06:24 UTC.
+Runner health at 06:59 UTC showed four
+`namespace-profile-generouscorp-macos` runners online and busy, so no
+cancel/rerun or operator escalation was taken.
