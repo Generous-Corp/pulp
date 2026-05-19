@@ -16,6 +16,14 @@
 #import <Metal/Metal.h>
 #endif
 
+// Forward declaration for the macOS NSAccessibility bridge defined in
+// text_accessibility_macos.mm. Lets PulpPluginView merge text-a11y
+// elements into -accessibilityChildren without pulling the whole
+// scaffold header transitively.
+namespace pulp::view {
+NSArray* pulp_text_accessibility_all_elements_macos();
+}
+
 // ── PulpPluginView: NSView subclass for DAW embedding ────────────────────────
 
 @interface PulpPluginView : NSView
@@ -71,9 +79,22 @@
 - (NSString*)accessibilityLabel { return @"Plugin UI"; }
 
 - (NSArray*)accessibilityChildren {
-    if (!self.rootView) return @[];
     NSMutableArray* children = [NSMutableArray array];
-    [self collectAccessibleChildren:self.rootView into:children];
+    if (self.rootView) {
+        [self collectAccessibleChildren:self.rootView into:children];
+    }
+    // pulp #2255 (font v2 Slice 2.6 macOS) — merge in any
+    // TextAccessibilityNodes registered through the cross-platform
+    // text-a11y scaffold. The Pulp-View-role tree above and the text
+    // registry are independent surfaces; without this merge the
+    // registry would be a private map and VoiceOver would never
+    // discover painted text registered via
+    // register_text_accessibility_node().
+    NSArray* text_elements = pulp::view::pulp_text_accessibility_all_elements_macos();
+    for (NSAccessibilityElement* el in text_elements) {
+        [el setAccessibilityParent:self];
+        [children addObject:el];
+    }
     return children;
 }
 

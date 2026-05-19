@@ -16,7 +16,9 @@
 #import <AppKit/AppKit.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/text_accessibility.hpp>
+#include <pulp/view/view.hpp>
 
 #include <string>
 
@@ -193,6 +195,52 @@ TEST_CASE("macOS text-a11y: unregister drops the NSAccessibilityElement",
     // C++ shadow snapshot must also drop the entry — cross-platform
     // contract still holds on the macOS overlay.
     REQUIRE(snapshot_accessibility_nodes().empty());
+}
+
+TEST_CASE("macOS text-a11y: PulpPluginView::accessibilityChildren surfaces "
+          "registered text elements to VoiceOver",
+          "[view][text-a11y][macos][issue-2255]") {
+    clear_registry();
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+
+        View root;
+        PluginViewHost::Options opts;
+        opts.size = {200, 100};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+
+        TextAccessibilityNode node;
+        node.id = "macos-discoverable";
+        node.text = "Hi VoiceOver";
+        node.role = TextAccessibilityRole::Label;
+        register_text_accessibility_node(node);
+
+        auto* nsview = (__bridge NSView*)host->native_handle();
+        REQUIRE(nsview != nil);
+
+        NSArray* children = [nsview accessibilityChildren];
+        REQUIRE(children != nil);
+
+        // The merged children array must contain a node whose label
+        // matches the registered text. Pre-fix, the AX tree ignored the
+        // text registry entirely and Codex's P1 review (#2307) flagged
+        // that VoiceOver could never reach painted text registered
+        // through the scaffold.
+        BOOL found = NO;
+        for (id child in children) {
+            if ([child respondsToSelector:@selector(accessibilityLabel)]) {
+                NSString* label = [child accessibilityLabel];
+                if ([label isEqualToString:@"Hi VoiceOver"]) {
+                    found = YES;
+                    break;
+                }
+            }
+        }
+        REQUIRE(found);
+    }
+    clear_registry();
 }
 
 TEST_CASE("macOS text-a11y: same-id re-register replaces label/role/selection "

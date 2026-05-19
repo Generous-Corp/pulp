@@ -300,6 +300,26 @@ extern "C" void* pulp_text_accessibility_lookup_macos(const char* id_utf8) {
     [nsId release];
     return (__bridge void*)el;
 }
+
+// Snapshot the registered NSAccessibilityElements as an autoreleased
+// NSArray. Host views (PulpPluginView, PulpView) call this from
+// -accessibilityChildren so VoiceOver can actually reach the elements;
+// without it the registry would just be a private map and assistive
+// tech would never see the painted text. Returns an empty array when
+// no nodes are registered.
+//
+// The array contains strong refs to the live elements — VoiceOver may
+// hold pointers across multiple -accessibilityChildren calls, and the
+// registry's NSMutableDictionary keeps each element retained for its
+// lifetime, so the pointers stay valid until the corresponding id is
+// unregistered.
+NSArray* pulp_text_accessibility_all_elements_macos() {
+    auto& r = registry();
+    std::lock_guard<std::mutex> lock(r.mu);
+    // -allValues is documented to return an autoreleased array
+    // containing the dictionary's current value objects.
+    return [r.elements allValues];
+}
 #endif
 
 }  // namespace pulp::view
