@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <csignal>
@@ -66,6 +67,26 @@ std::string receive_http_headers(Socket& socket) {
         }
     }
     return out;
+}
+
+bool send_masked_client_frame(Socket& socket,
+                              bool fin,
+                              std::uint8_t opcode,
+                              std::string_view payload) {
+    if (payload.size() >= 126) return false;
+
+    const std::array<std::uint8_t, 4> mask{0x11, 0x22, 0x33, 0x44};
+    std::vector<std::uint8_t> frame;
+    frame.reserve(2 + mask.size() + payload.size());
+    frame.push_back(static_cast<std::uint8_t>((fin ? 0x80 : 0x00) | opcode));
+    frame.push_back(static_cast<std::uint8_t>(0x80 | payload.size()));
+    frame.insert(frame.end(), mask.begin(), mask.end());
+    for (std::size_t i = 0; i < payload.size(); ++i) {
+        frame.push_back(static_cast<std::uint8_t>(
+            static_cast<std::uint8_t>(payload[i]) ^ mask[i & 0x3]));
+    }
+
+    return socket.send(frame.data(), frame.size()) == static_cast<int>(frame.size());
 }
 
 }  // namespace
@@ -418,6 +439,69 @@ TEST_CASE("WebSocketChannel delivers binary send as binary message",
     }
 
     client->close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel assembles fragmented text frames",
+          "[websocket][frame-kind][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47701);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::unique_ptr<WebSocketChannel> server_ws;
+    std::mutex mu;
+    std::vector<std::string> seen;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        server_ws = WebSocketChannel::accept(std::move(server_tcp));
+        if (!server_ws) return;
+        server_ws->on_message([&](const Message& m) {
+            std::lock_guard<std::mutex> lock(mu);
+            seen.emplace_back(m.as_text());
+        });
+        server_accept_done.store(true);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", *port));
+    const std::string key = "dGhlIHNhbXBsZSBub25jZQ==";
+    const std::string request =
+        "GET /fragmented HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: " + key + "\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n";
+    REQUIRE(client.send(request) == static_cast<int>(request.size()));
+    auto response = receive_http_headers(client);
+    REQUIRE(response.find("101") != std::string::npos);
+    REQUIRE(response.find(WebSocketChannel::compute_accept_key(key)) != std::string::npos);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    REQUIRE(send_masked_client_frame(client, false, 0x1, "frag"));
+    REQUIRE(send_masked_client_frame(client, true, 0x0, "ment"));
+
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return !seen.empty();
+    }));
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        REQUIRE(seen == std::vector<std::string>{"fragment"});
+    }
+
+    client.close();
     if (server_ws) server_ws->close();
     server_thread.join();
 }
