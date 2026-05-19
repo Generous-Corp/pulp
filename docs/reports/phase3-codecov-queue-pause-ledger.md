@@ -9848,3 +9848,15 @@ stream completes without queueing"` (5 assertions / 1 case),
 `./build/test/pulp-test-async-stream "[async_stream][coverage][phase3]"` (24
 assertions / 5 cases), and `git diff --check`. The batch now has 21 local
 coverage commits; continue accumulating before opening a PR.
+
+2026-05-19 00:33 PDT: added `9913bc2e1` (`test(runtime): cover null async
+stream writes`) to `feature/phase3-codecov-runtime-state-batch-751`. This
+covers `AsyncStream::write_async()` when constructed without a backing stream,
+asserting the callback completes immediately with `StreamError::Closed`, the
+advanced `stream()` accessor reports null, and no pending bytes are queued.
+Focused local validation passed: `cmake --build build --target
+pulp-test-async-stream`, `./build/test/pulp-test-async-stream "AsyncStream
+write without a backing stream completes as closed"` (6 assertions / 1 case),
+`./build/test/pulp-test-async-stream "[async_stream][coverage][phase3]"` (30
+assertions / 6 cases), and `git diff --check`. The batch now has 22 local
+coverage commits; continue accumulating before opening a PR.
