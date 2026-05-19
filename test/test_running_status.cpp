@@ -553,6 +553,35 @@ TEST_CASE("reset() clears pending system-common state",
     REQUIRE(shorts.empty());
 }
 
+TEST_CASE("reset clears pending sysex payload",
+          "[midi][running-status][coverage][phase3]") {
+    RunningStatusParser p;
+    int sysex_count = 0;
+    std::vector<Captured> shorts;
+    p.on_sysex([&](const uint8_t*, std::size_t) {
+        ++sysex_count;
+    });
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    const uint8_t start_sysex[] = {0xF0, 0x7E, 0x7F};
+    p.feed(start_sysex, sizeof(start_sysex));
+    p.reset();
+
+    const uint8_t tail_and_note[] = {0x06, 0x01, 0xF7, 0x90, 0x3C, 0x7F};
+    p.feed(tail_and_note, sizeof(tail_and_note));
+
+    REQUIRE(sysex_count == 0);
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0x90);
+    REQUIRE(shorts[0].d1 == 0x3C);
+    REQUIRE(shorts[0].d2 == 0x7F);
+}
+
 TEST_CASE("feed preserves partial channel message across calls",
           "[midi][running-status][coverage]") {
     RunningStatusParser p;
