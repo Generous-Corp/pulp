@@ -8,15 +8,37 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01450"></a>
-## [0.145.0] - 2026-05-19
+<a id="v01420"></a>
+## [0.142.0] - 2026-05-19
 
-- refactor(test): P5-1 follow-up — extracted RN outline cluster (#1519, -178 lines) + clip-path + mask cluster (#1515, -485 lines) from test_widget_bridge.cpp (9,737 → 9,074, -663 total — fourth bundled-cuts PR)
+- feat(canvas): real ICU bidi + script run iterators (font v2 Slice 1.2.a) ([#2311](https://github.com/danielraffel/pulp/pull/2311))
+- feat(runtime): PULP_DBG_VAR macro for name-printing debug inspection ([#2312](https://github.com/danielraffel/pulp/pull/2312))
+- feat(runtime): ScopedNoAlloc debug guard around audio + paint paths ([#2316](https://github.com/danielraffel/pulp/pull/2316))
+- docs: coming-from-juce migration guide (Tier A Slice 14) ([#2329](https://github.com/danielraffel/pulp/pull/2329))
+- feat(tools/debug): natvis + LLDB Python formatters for Pulp types ([#2321](https://github.com/danielraffel/pulp/pull/2321))
+- feat(state): StateStore::snapshot() block-local helper + DSP threading guide ([#2320](https://github.com/danielraffel/pulp/pull/2320))
 
-<a id="v01380"></a>
-## [0.138.0] - 2026-05-19
+<a id="v01390"></a>
+## [0.139.0] - 2026-05-18
 
-- refactor(test): P5-2 follow-up — extracted CSS filter chain cluster from test_canvas.cpp (-377 lines, 2,735 → 2,358)
+- feat(canvas): cross-backend rendering goldens — Skia GPU lane (font v2 Slice 3.4 GPU) ([#2306](https://github.com/danielraffel/pulp/pull/2306))
+- refactor(test): P5-3 follow-up — extract mask + overflow extension (1,466 → 1,307) ([#2333](https://github.com/danielraffel/pulp/pull/2333))
+
+<a id="v01372"></a>
+## [0.137.2] - 2026-05-18
+
+- fix(canvas): canonicalize signed zero in FontOptions hash (Codex P2 on #2169) ([#2332](https://github.com/danielraffel/pulp/pull/2332))
+
+<a id="v01371"></a>
+## [0.137.1] - 2026-05-18
+
+- refactor(test): P5-2 follow-up — extract CSS filter chain cluster (2,735 → 2,358) ([#2331](https://github.com/danielraffel/pulp/pull/2331))
+- fix(canvas): detached font worker survives register_font_file throws (Codex on #2308) ([#2323](https://github.com/danielraffel/pulp/pull/2323))
+
+<a id="v01370"></a>
+## [0.137.0] - 2026-05-18
+
+- refactor(test): P5-1 bundled — extract CSS animations + CSS Grid (10,191 → 9,737) ([#2325](https://github.com/danielraffel/pulp/pull/2325))
 
 <a id="v01360"></a>
 ## [0.136.0] - 2026-05-18
@@ -2068,6 +2090,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.142.0]: https://github.com/danielraffel/pulp/releases/tag/v0.142.0
+[0.139.0]: https://github.com/danielraffel/pulp/releases/tag/v0.139.0
+[0.137.2]: https://github.com/danielraffel/pulp/releases/tag/v0.137.2
+[0.137.1]: https://github.com/danielraffel/pulp/releases/tag/v0.137.1
+[0.137.0]: https://github.com/danielraffel/pulp/releases/tag/v0.137.0
 [0.136.0]: https://github.com/danielraffel/pulp/releases/tag/v0.136.0
 [0.135.2]: https://github.com/danielraffel/pulp/releases/tag/v0.135.2
 [0.135.1]: https://github.com/danielraffel/pulp/releases/tag/v0.135.1
