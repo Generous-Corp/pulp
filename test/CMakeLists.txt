@@ -1958,6 +1958,11 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 # css NOT-IMPL closure catalog hygiene.
 pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos LIBRARIES pulp::view)
 
+# Widget bridge — Wave 2 cheap-wiring (P5-1 follow-up). Bundles the
+# Wave 2 canvas2d cheap wiring (DIVERGE → PASS) + Wave 2 css value-
+# coverage wiring entries from compat.json's Wave 2 cleanup pass.
+pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap LIBRARIES pulp::view)
+
 # Widget bridge — RN style-prop bridge primitives (P5-1 follow-up,
 # pulp #1026). setShadow / setOpacity / setTransform RN-shaped style
 # functions flow through bridge into View's slots. Includes RN's
