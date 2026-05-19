@@ -1016,3 +1016,73 @@ TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
                      R"({"enabled":true})"));
     REQUIRE(set_resp.is_error);
 }
+
+// ─── LiveConstant RPC (Tier A Slice 13) ─────────────────────────────────────
+
+#include <pulp/view/live_constant_editor.hpp>
+
+TEST_CASE("LiveConstant.list returns the registry contents",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+
+    // Seed the registry. PULP_LIVE_CONSTANT macros do this implicitly,
+    // but we call register_constant directly so the test doesn't have
+    // to compile in a TU that already has them.
+    [[maybe_unused]] auto& cutoff =
+        registry.register_constant("test_cutoff", __FILE__, __LINE__,
+                                   /*default*/ 440.0f,
+                                   /*min*/ 20.0f, /*max*/ 20000.0f);
+    [[maybe_unused]] auto& gain =
+        registry.register_constant("test_gain", __FILE__, __LINE__,
+                                   0.0f, -60.0f, 12.0f);
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(1, methods::kLiveConstList));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE(resp.params_json.find("test_cutoff") != std::string::npos);
+    REQUIRE(resp.params_json.find("test_gain") != std::string::npos);
+    REQUIRE(resp.params_json.find("\"constants\"") != std::string::npos);
+}
+
+TEST_CASE("LiveConstant.set mutates the registry value",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+    [[maybe_unused]] auto& v =
+        registry.register_constant("test_setter", __FILE__, __LINE__,
+                                   1.0f, 0.0f, 10.0f);
+    registry.reset("test_setter");
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstSet,
+        R"({"name":"test_setter","value":4.5})"));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE_THAT(registry.get("test_setter"),
+                 Catch::Matchers::WithinAbs(4.5, 0.001));
+}
+
+TEST_CASE("LiveConstant.set without a name returns an error",
+          "[inspect][live-constant]") {
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstSet, R"({"value":1.0})"));
+    REQUIRE(resp.is_error);
+}
+
+TEST_CASE("LiveConstant.reset rolls a value back to its default",
+          "[inspect][live-constant]") {
+    auto& registry = pulp::view::LiveConstantRegistry::instance();
+    [[maybe_unused]] auto& v =
+        registry.register_constant("test_reset", __FILE__, __LINE__,
+                                   2.0f, 0.0f, 10.0f);
+    registry.set("test_reset", 7.5f);
+    REQUIRE_THAT(registry.get("test_reset"),
+                 Catch::Matchers::WithinAbs(7.5, 0.001));
+
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kLiveConstReset, R"({"name":"test_reset"})"));
+    REQUIRE_FALSE(resp.is_error);
+    REQUIRE_THAT(registry.get("test_reset"),
+                 Catch::Matchers::WithinAbs(2.0, 0.001));
+}
