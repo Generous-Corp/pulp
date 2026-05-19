@@ -11385,3 +11385,22 @@ baseline-diff, android-build (windows-latest), macOS local smoke, Yoga layout
 snapshots, source-tree pollution check, and docs-consistency resolve-provider
 completed success, with IWYU advisory, ubuntu-24.04, and sandbox-e2e
 (ubuntu-latest) in progress, remaining lanes queued, and no failed checks.
+
+2026-05-19 04:27 PDT: added `e426c8387` (`test(runtime): cover json rpc send
+guards`) to local-only `feature/phase3-codecov-runtime-batch-754`. This
+touches only `test/test_memory_message_channel.cpp` and covers `JsonRpcPeer`
+closed-channel `notify()` / `send_request()` guards, notification unregister,
+custom error `data` envelopes, and ignored non-numeric response ids before the
+matching numeric response resolves the pending callback. Focused local
+validation passed: `cmake --build build --target
+pulp-test-memory-message-channel -j4`,
+`./build/test/pulp-test-memory-message-channel "[runtime][json_rpc]"` (60
+assertions / 4 test cases), full
+`./build/test/pulp-test-memory-message-channel` (133 assertions / 20 test
+cases), and `git diff --check`. The #754 batch is clean, local-only, and 3
+commits ahead of `origin/main`. PR #2268 remains the merge priority at base
+`a80b97b0e`, head `987bd3a1a`, `mergeable: true`,
+`mergeable_state: blocked`, open and not draft; polling at 11:27Z showed the
+same green set as 11:23Z, IWYU advisory, ubuntu-24.04, and sandbox-e2e
+(ubuntu-latest) still in progress, remaining lanes queued, and no failed
+checks. Queued macOS lanes were still under the 30-minute rescue threshold.
