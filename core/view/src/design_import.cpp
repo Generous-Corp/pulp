@@ -1,4 +1,5 @@
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/zip.hpp>
@@ -69,6 +70,13 @@ DesignIR parse_claude_html(const std::string& html) {
     // exported HTML over directly — no Anthropic API integration.
     auto ir = parse_stitch_html(html);
     ir.source = DesignSource::claude;
+    // Phase 0a: re-tag provenance after the Stitch parser stamped it.
+    // Anchors were already assigned by parse_stitch_html with the
+    // content-hash strategy — same strategy claude-design-html uses
+    // (see DEFAULT_ANCHOR_STRATEGY in anchors.ts), so we don't reassign.
+    // parse_stitch_html always populates provenance on both its JSON and
+    // regex-fallback paths, so the optional is always set here.
+    if (ir.root.provenance) ir.root.provenance->adapter = "claude-design-html";
     return ir;
 }
 
@@ -2662,6 +2670,16 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
 
         // Clear error_out on success.
         if (opts.error_out) opts.error_out->clear();
+
+        // Phase 0a: stamp provenance and assign anchors on the
+        // runtime-walked DOM tree. The runtime walker doesn't have
+        // native IDs (DOM `id` attrs are author-supplied and not
+        // guaranteed unique across re-imports), so content-hash is the
+        // right strategy — matches DEFAULT_ANCHOR_STRATEGY for
+        // claude-design-html.
+        ir.root.provenance = IRProvenance{"claude-design-html", "1", {}};
+        ir.root.confidence = IRConfidence::pass;  // walker ran successfully
+        assign_anchors(ir.root, AnchorStrategy::content_hash);
         return ir;
     } catch (const std::exception& e) {
         return static_fallback(std::string("harness boot failed: ") + e.what());
@@ -2953,6 +2971,22 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
 
+    // Phase 0a (planning/2026-05-18-inspector-direct-manipulation-roadmap.md):
+    // capture the source-native ID so the `adapter` anchor strategy can use
+    // it as its anchor. Figma + Pencil + Mitosis-style exports all carry an
+    // ID under one of these field names; first non-empty wins. Sources
+    // without native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this
+    // empty and fall through to the content-hash strategy.
+    for (const char* k : {"id", "nodeId", "node_id", "source_node_id"}) {
+        if (!obj.hasObjectMember(k)) continue;
+        auto v = obj[k];
+        if (!v.isString()) continue;
+        auto s = std::string(v.toString());
+        if (s.empty()) continue;
+        node.source_node_id = std::move(s);
+        break;
+    }
+
     if (obj.hasObjectMember("style"))
         node.style = parse_ir_style(obj["style"]);
     if (obj.hasObjectMember("layout"))
@@ -3196,6 +3230,16 @@ DesignIR parse_figma_json(const std::string& json) {
     if (root.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(root["tokens"]);
 
+    // Phase 0a: tag the root with adapter provenance + confidence, then
+    // assign stable_anchor_id values via the adapter strategy. Figma
+    // exports carry native layer UUIDs that parse_ir_node populates into
+    // source_node_id; the adapter strategy prefixes those with "figma:".
+    // Nodes that don't have a native ID (rare in Figma) silently fall
+    // through to the content-hash branch inside compute_anchor_id.
+    ir.root.provenance = IRProvenance{"figma", "1", /*source_uri=*/{}};
+    ir.root.confidence = IRConfidence::pass;
+    assign_anchors(ir.root, AnchorStrategy::adapter, "figma");
+
     return ir;
 }
 
@@ -3209,6 +3253,9 @@ DesignIR parse_stitch_html(const std::string& html) {
         ir.root = parse_ir_node(root);
         if (root.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(root["tokens"]);
+        ir.root.provenance = IRProvenance{"stitch-html", "1", {}};
+        ir.root.confidence = IRConfidence::pass;
+        assign_anchors(ir.root, AnchorStrategy::content_hash);
         return ir;
     } catch (...) {
         // Not JSON — minimal HTML extraction
@@ -3237,6 +3284,10 @@ DesignIR parse_stitch_html(const std::string& html) {
         ir.root.children.push_back(std::move(child));
     }
 
+    // Phase 0a: assign anchors to the regex-extracted tree.
+    ir.root.provenance = IRProvenance{"stitch-html", "1", {}};
+    ir.root.confidence = IRConfidence::diverge;  // regex fallback is lossy
+    assign_anchors(ir.root, AnchorStrategy::content_hash);
     return ir;
 }
 
@@ -3250,6 +3301,9 @@ DesignIR parse_v0_tsx(const std::string& tsx) {
         ir.root = parse_ir_node(root);
         if (root.hasObjectMember("tokens"))
             ir.tokens = parse_ir_tokens(root["tokens"]);
+        ir.root.provenance = IRProvenance{"v0-tsx", "1", {}};
+        ir.root.confidence = IRConfidence::pass;
+        assign_anchors(ir.root, AnchorStrategy::content_hash);
         return ir;
     } catch (...) {
         // Not JSON — TSX source
@@ -3279,6 +3333,10 @@ DesignIR parse_v0_tsx(const std::string& tsx) {
         ir.root.children.push_back(std::move(child));
     }
 
+    // Phase 0a: anchor the regex-extracted Tailwind tree.
+    ir.root.provenance = IRProvenance{"v0-tsx", "1", {}};
+    ir.root.confidence = IRConfidence::diverge;  // regex extraction is lossy
+    assign_anchors(ir.root, AnchorStrategy::content_hash);
     return ir;
 }
 
@@ -3295,6 +3353,12 @@ DesignIR parse_pencil_json(const std::string& json) {
         ir.tokens = parse_ir_tokens(root["tokens"]);
     if (root.hasObjectMember("variables"))
         ir.tokens = parse_ir_tokens(root["variables"]);
+
+    // Phase 0a: Pencil MCP nodes carry a stable `id` that parse_ir_node
+    // populates into source_node_id; the adapter strategy uses it directly.
+    ir.root.provenance = IRProvenance{"pencil", "1", {}};
+    ir.root.confidence = IRConfidence::pass;
+    assign_anchors(ir.root, AnchorStrategy::adapter, "pencil");
 
     return ir;
 }
@@ -3359,6 +3423,15 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     else var = opts.root_variable;
 
     std::string ind = indent(depth, opts.indent_spaces);
+
+    // Phase 0a: anchor trail comment so the runtime inspector can map
+    // a generated element back to its stable_anchor_id (tweaks-layer key).
+    // Comments are gated on opts.include_comments so minified codegen
+    // strips them automatically.
+    if (opts.include_comments && node.stable_anchor_id &&
+        !node.stable_anchor_id->empty()) {
+        ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
+    }
 
     // Audio widgets get special treatment
     if (node.audio_widget != AudioWidgetType::none) {
@@ -3589,6 +3662,15 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
     std::string ind = indent(depth, opts.indent_spaces);
     std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
+
+    // Phase 0a: emit the anchor trail in native-mode codegen too. Same
+    // gate + format as generate_node(), so downstream tooling has one
+    // pattern to grep for regardless of which codegen mode produced
+    // the JS.
+    if (opts.include_comments && node.stable_anchor_id &&
+        !node.stable_anchor_id->empty()) {
+        ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
+    }
 
     // Audio widgets use native widget API
     if (node.audio_widget != AudioWidgetType::none) {

@@ -215,6 +215,7 @@ target_sources(pulp-view PRIVATE
     src/auto_ui.cpp
     src/text_editor.cpp
     src/ui_components.cpp
+    src/anchor_strategy.cpp
     src/design_export.cpp
     src/design_import.cpp
     src/design_import_shortcuts.cpp

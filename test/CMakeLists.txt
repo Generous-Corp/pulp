@@ -1884,6 +1884,13 @@ target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMA
 catch_discover_tests(pulp-test-design-import
     PROPERTIES LABELS "parser-import")
 
+# Phase 0a: stable_anchor_id assignment per
+# planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+add_executable(pulp-test-design-import-anchors test_design_import_anchors.cpp)
+target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-anchors
+    PROPERTIES LABELS "parser-import")
+
 # DESIGN.md import (Google design.md, Apache-2.0 — pulp #1434 follow-up)
 # Compiles import_detect.cpp directly into the test target so the
 # detector tests do not require linking the whole pulp-import-design CLI.
