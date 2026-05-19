@@ -142,6 +142,26 @@ TEST_CASE("UndoManager max_history trims oldest", "[state][undo]") {
     REQUIRE(um.undo_count() == 3); // only last 3 kept
 }
 
+TEST_CASE("UndoManager zero max history performs without retaining undo",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    um.set_max_history(0);
+    int state_changes = 0;
+    int value = 0;
+    um.on_state_changed = [&] { ++state_changes; };
+
+    um.perform(UndoAction::create("Transient",
+        [&] { value = 0; },
+        [&] { value = 5; }));
+
+    REQUIRE(value == 5);
+    REQUIRE(um.max_history() == 0);
+    REQUIRE(um.undo_count() == 0);
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE_FALSE(um.undo());
+    REQUIRE(state_changes == 1);
+}
+
 TEST_CASE("UndoManager clear removes all history", "[state][undo]") {
     UndoManager um;
     int v = 0;
