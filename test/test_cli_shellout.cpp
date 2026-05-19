@@ -2134,6 +2134,30 @@ TEST_CASE("pulp pr native help stays available without shipyard",
     REQUIRE(r.stdout_output.find("--dry-run") != std::string::npos);
 }
 
+TEST_CASE("pulp pr native validates option values before checkout lookup",
+          "[cli][shellout][pr][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(fs::temp_directory_path());
+
+    for (const auto& c : std::vector<std::pair<std::vector<std::string>, std::string>>{
+             {{"pr", "--native", "--base"}, "--base requires a value"},
+             {{"pr", "--native", "--base", "--dry-run"}, "--base requires a value"},
+             {{"pr", "--native", "--title"}, "--title requires a value"},
+             {{"pr", "--native", "--title", "--no-push"}, "--title requires a value"},
+         }) {
+        auto r = exec(bin.string(), c.first, 10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.second) != std::string::npos);
+        REQUIRE(r.stderr_output.find("not inside a pulp project") == std::string::npos);
+    }
+
+    fs::current_path(cwd_saver);
+}
+
 TEST_CASE("pulp pr native mode refuses to run outside a project",
           "[cli][shellout][pr][issue-643]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
