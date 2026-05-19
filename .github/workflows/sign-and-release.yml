@@ -18,8 +18,35 @@ env:
   BUILD_TYPE: Release
 
 jobs:
+  # Resolve the macOS runner. When PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON
+  # is set (the same repo variable build.yml uses for PR macOS routing
+  # post-2026-05-18 cutover), route the release build through Namespace
+  # cloud runners instead of the GitHub-hosted macos-14 pool. Falls back
+  # to macos-14 when unset so reverting the cutover doesn't break releases.
+  # Background: 2026-05-18 SDK starvation — GitHub-hosted macos-14 queue
+  # backed up for hours and blocked v0.111..v0.134 from publishing
+  # (compound with the supersede bug fixed in pulp #2238 and the Skia
+  # gate fix in pulp #2281).
+  resolve-macos-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+    steps:
+      - id: resolve
+        env:
+          NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          if [ -n "${NAMESPACE_JSON:-}" ]; then
+            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            echo "Routing macOS sign-and-release through Namespace: ${NAMESPACE_JSON}"
+          else
+            echo 'runs_on_json=["macos-14"]' >> "$GITHUB_OUTPUT"
+            echo "Routing macOS sign-and-release through GitHub-hosted macos-14"
+          fi
+
   build-and-sign-macos:
-    runs-on: macos-14
+    needs: resolve-macos-runner
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
     name: Build, Sign, Notarize (macOS)
     # pulp #724: without `contents: write`, the final `Create GitHub Release`
     # step fails with "Resource not accessible by integration" because
