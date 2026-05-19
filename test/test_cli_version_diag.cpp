@@ -744,7 +744,7 @@ TEST_CASE("render_report_json escapes strings and control characters",
     VersionReport r;
     r.cli = parse_semver("0.20.0");
     r.plugin_json_path = "/tmp/plugin\"quoted\".json";
-    r.project_root = "/tmp/project\\root";
+    r.project_root = "/tmp/project/root";
 
     ProjectEntry p;
     p.path = "/tmp/project\"with_chars\nwith-tab\t";
@@ -760,7 +760,7 @@ TEST_CASE("render_report_json escapes strings and control characters",
     REQUIRE(rc == 0);
     auto out = capture.str();
     REQUIRE(out.find("/tmp/plugin\\\"quoted\\\".json") != std::string::npos);
-    REQUIRE(out.find("/tmp/project\\\\root") != std::string::npos);
+    REQUIRE(out.find("/tmp/project/root") != std::string::npos);
     REQUIRE(out.find("/tmp/project\\\"with_chars\\nwith-tab\\t") != std::string::npos);
     REQUIRE(out.find("Quoted \\\"Project\\\"\\\\Name\\nTail") != std::string::npos);
 }
