@@ -80,6 +80,16 @@ TEST_CASE("PropertiesFile numeric getters reject trailing text",
     REQUIRE_FALSE(props.get_double("gain").has_value());
 }
 
+TEST_CASE("PropertiesFile numeric getters reject out-of-range strings",
+          "[state][properties][coverage][phase3]") {
+    PropertiesFile props;
+    props.set_string("count", "999999999999999999999999999999999999");
+    props.set_string("gain", "1e9999");
+
+    REQUIRE_FALSE(props.get_int("count").has_value());
+    REQUIRE_FALSE(props.get_double("gain").has_value());
+}
+
 TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
           "[state][properties][issue-641]") {
     PropertiesFile props;
