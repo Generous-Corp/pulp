@@ -304,6 +304,31 @@ TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
     REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
 }
 
+TEST_CASE("ScanCache from_json keeps existing cache when entry fields have wrong types",
+          "[scan_cache][codecov][phase3]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": [{
+            "path": "/tmp/wrong-type.vst3",
+            "mtime": "not-an-integer",
+            "size": 2,
+            "name": "WrongType",
+            "manufacturer": "Pulp",
+            "version": "1.0",
+            "plugin_path": "/tmp/wrong-type.vst3",
+            "unique_id": "wrong-type-id",
+            "format": "vst3"
+        }]
+    })"));
+
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+    REQUIRE(cache.entries().count("/tmp/wrong-type.vst3") == 0);
+}
+
 TEST_CASE("ScanCache loaded stale entry does not satisfy get", "[scan_cache]") {
     TempFile plugin;
     plugin.write("plugin payload");
