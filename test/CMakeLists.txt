@@ -747,6 +747,13 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Text-accessibility scaffold (font v2 Slice 2.6)
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
+# Windows UIA backend (font v2 Slice 2.6) — compile-gated on _WIN32 in the
+# source. The sentinel test case keeps the binary present + named
+# consistently on non-Windows hosts so ctest output stays stable.
+pulp_add_test_suite(pulp-test-text-accessibility-windows LIBRARIES pulp::view)
+# Linux AccessKit backend (font v2 Slice 2.6) — compile-gated on
+# __linux__ && !__ANDROID__; sentinel on other hosts.
+pulp_add_test_suite(pulp-test-text-accessibility-linux LIBRARIES pulp::view)
 # A/B compare (workstream 07 slice 7.2)
 pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field (workstream 07 slice 7.5b)

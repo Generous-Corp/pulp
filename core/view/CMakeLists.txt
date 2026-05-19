@@ -187,10 +187,29 @@ elseif(PULP_JS_ENGINE STREQUAL "v8" AND PULP_HAS_V8_ACTUAL)
 endif()
 # auto → QuickJS default (backward compatible with all existing code)
 
+# Slice 2.6: per-platform TextAccessibilityNode backend selection.
+# Each platform leg overrides the cross-platform "none" default at link
+# time by compiling a platform-specific TU INSTEAD of the default
+# src/text_accessibility.cpp. The platform TUs export the same symbols
+# (register_text_accessibility_node etc.) so callers don't need to
+# branch on the build target.
+#
+# Apple platforms keep the default for now — the macOS NSAccessibility
+# backend lives on a sibling branch (PR #2307) and is layered on top
+# when that lands; this file deliberately doesn't reference it so the
+# two PRs stay independent.
+if(WIN32)
+    set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/win/text_accessibility_windows.cpp)
+elseif(UNIX AND NOT APPLE AND NOT ANDROID)
+    set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/linux/text_accessibility_linux.cpp)
+else()
+    set(PULP_TEXT_ACCESSIBILITY_SOURCE src/text_accessibility.cpp)
+endif()
+
 target_sources(pulp-view PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
     src/accessibility.cpp
-    src/text_accessibility.cpp
+    ${PULP_TEXT_ACCESSIBILITY_SOURCE}
     src/table_model.cpp
     src/modulation_matrix.cpp
     src/modulation_matrix_widget.cpp
