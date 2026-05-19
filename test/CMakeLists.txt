@@ -2028,6 +2028,18 @@ pulp_add_test_suite(pulp-test-widget-bridge-css-animations LIBRARIES pulp::view)
 # fr-unit + auto sizing tokens round-trip through the bridge.
 pulp_add_test_suite(pulp-test-widget-bridge-css-grid LIBRARIES pulp::view)
 
+# Widget bridge — pulp #1434 (cross-surface mega-batch) per-edge margin
+# / padding (P5-1 follow-up). marginTop / marginRight / marginBottom /
+# marginLeft (and padding counterparts) each route to their own Yoga
+# edge enum without cross-contamination through the bridge.
+pulp_add_test_suite(pulp-test-widget-bridge-css-per-edge LIBRARIES pulp::view)
+
+# Widget bridge — pulp #1737 RN-OOS-fixup catalog audit tail (P5-1
+# follow-up). Material elevation shim, includeFontPadding round-trip,
+# pulp #1812 borderCurve squircle paint dispatch, isolation honest
+# CSS-subset, and other RN-side OOS catalog hygiene checks.
+pulp_add_test_suite(pulp-test-widget-bridge-rn-oos-fixup LIBRARIES pulp::view)
+
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
