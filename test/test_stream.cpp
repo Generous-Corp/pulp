@@ -424,6 +424,29 @@ TEST_CASE("MemoryStream clear allows fresh writes from the beginning",
     REQUIRE(std::memcmp(out, fresh, sizeof(fresh)) == 0);
 }
 
+TEST_CASE("MemoryStream rejects null buffers for non-empty I/O",
+          "[stream][memory][coverage][phase3]") {
+    MemoryStream stream(std::vector<std::uint8_t>{1, 2});
+    std::uint8_t byte = 9;
+
+    auto null_read = stream.read(nullptr, 1);
+    REQUIRE_FALSE(null_read.ok());
+    REQUIRE(null_read.error == StreamError::Invalid);
+    REQUIRE(stream.read_position() == 0);
+
+    REQUIRE(stream.read(&byte, 0).ok());
+    REQUIRE(stream.write(nullptr, 0).ok());
+
+    auto null_write = stream.write(nullptr, 1);
+    REQUIRE_FALSE(null_write.ok());
+    REQUIRE(null_write.error == StreamError::Invalid);
+    REQUIRE(stream.size() == 2);
+
+    auto read = stream.read(&byte, 1);
+    REQUIRE(read.ok());
+    REQUIRE(byte == 1);
+}
+
 TEST_CASE("FileStream reopen closes the previous handle",
           "[stream][file][coverage][phase3]") {
     auto first = make_temp_path("pulp_stream_reopen_first");
@@ -481,6 +504,38 @@ TEST_CASE("FileStream move assignment handles self and closed sources",
         REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
         REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
     }
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("FileStream rejects null buffers for non-empty I/O",
+          "[stream][file][coverage][phase3]") {
+    auto path = make_temp_path("pulp_stream_null_buffers");
+    const std::uint8_t payload[] = {'o', 'k'};
+
+    FileStream stream(path.string(), FileStream::Mode::ReadWrite);
+    REQUIRE(stream.is_open());
+
+    auto null_write = stream.write(nullptr, 1);
+    REQUIRE_FALSE(null_write.ok());
+    REQUIRE(null_write.error == StreamError::Invalid);
+    REQUIRE(stream.position() == 0);
+
+    REQUIRE(stream.write(payload, sizeof(payload)).bytes == sizeof(payload));
+    REQUIRE(stream.flush());
+    stream.close();
+
+    FileStream reader(path.string(), FileStream::Mode::Read);
+    REQUIRE(reader.is_open());
+    auto null_read = reader.read(nullptr, 1);
+    REQUIRE_FALSE(null_read.ok());
+    REQUIRE(null_read.error == StreamError::Invalid);
+    REQUIRE(reader.position() == 0);
+
+    std::uint8_t byte = 0;
+    REQUIRE(reader.read(&byte, 0).ok());
+    REQUIRE(reader.read(&byte, 1).bytes == 1);
+    REQUIRE(byte == 'o');
 
     std::filesystem::remove(path);
 }
@@ -582,6 +637,14 @@ TEST_CASE("PipeStream default and moved-empty streams fail closed",
     REQUIRE_FALSE(assigned.is_open());
     assigned.close();
     REQUIRE_FALSE(assigned.is_open());
+}
+
+TEST_CASE("PipeStream closed streams still report closed before null-buffer checks",
+          "[stream][pipe][coverage][phase3]") {
+    PipeStream stream;
+
+    REQUIRE(stream.read(nullptr, 1).closed());
+    REQUIRE(stream.write(nullptr, 1).closed());
 }
 
 #ifndef _WIN32

@@ -54,6 +54,7 @@ bool FileStream::open(std::string_view path, Mode mode) {
 StreamResult FileStream::read(std::uint8_t* buffer, std::size_t size) {
     if (!handle_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     auto* fp = static_cast<std::FILE*>(handle_);
     std::size_t n = std::fread(buffer, 1, size, fp);
@@ -67,6 +68,7 @@ StreamResult FileStream::read(std::uint8_t* buffer, std::size_t size) {
 StreamResult FileStream::write(const std::uint8_t* buffer, std::size_t size) {
     if (!handle_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     auto* fp = static_cast<std::FILE*>(handle_);
     std::size_t n = std::fwrite(buffer, 1, size, fp);
@@ -103,6 +105,7 @@ MemoryStream::MemoryStream(std::vector<std::uint8_t> initial)
 StreamResult MemoryStream::read(std::uint8_t* buffer, std::size_t size) {
     if (!open_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
     if (read_pos_ >= buffer_.size()) return StreamResult::fail(StreamError::Closed);
 
     std::size_t available = buffer_.size() - read_pos_;
@@ -115,6 +118,7 @@ StreamResult MemoryStream::read(std::uint8_t* buffer, std::size_t size) {
 StreamResult MemoryStream::write(const std::uint8_t* buffer, std::size_t size) {
     if (!open_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
     buffer_.insert(buffer_.end(), buffer, buffer + size);
     return StreamResult::make(size);
 }
@@ -139,6 +143,7 @@ PipeStream& PipeStream::operator=(PipeStream&& other) noexcept {
 StreamResult PipeStream::read(std::uint8_t* buffer, std::size_t size) {
     if (!pipe_ || !pipe_->is_open()) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     int n = pipe_->read(buffer, size);
     if (n < 0) return StreamResult::fail(StreamError::IoError);
@@ -149,6 +154,7 @@ StreamResult PipeStream::read(std::uint8_t* buffer, std::size_t size) {
 StreamResult PipeStream::write(const std::uint8_t* buffer, std::size_t size) {
     if (!pipe_ || !pipe_->is_open()) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     int n = pipe_->write(buffer, size);
     if (n < 0) return StreamResult::fail(StreamError::IoError);
