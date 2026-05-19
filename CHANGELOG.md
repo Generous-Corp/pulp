@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01371"></a>
+## [0.137.1] - 2026-05-19
+
+- fix(canvas): detached font worker survives `register_font_file` throws — Codex P2 follow-up on #2308 (exception escape now resolves to `FontState::Failed` via the promise instead of calling `std::terminate`)
+
 <a id="v01370"></a>
 ## [0.137.0] - 2026-05-19
 
