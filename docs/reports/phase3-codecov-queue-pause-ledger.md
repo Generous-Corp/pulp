@@ -11008,3 +11008,18 @@ cases), and `git diff --check`. PR #2268 remained current at head
 sync` were green, `Windows MSVC release-path gate` and `ubuntu-24.04` were in
 progress, and the macOS-required checks were still queued with no failures.
 The batch is clean, local-only, and 19 coverage commits ahead of `origin/main`.
+
+2026-05-19 02:56 PDT: added `0df1c9925` (`test(runtime): cover online
+activation HTTP failures`) to local-only
+`feature/phase3-codecov-audio-midi-batch-753`. This touches only
+`test/test_license.cpp` and extends the loopback OnlineActivation fixture to
+cover non-2xx HTTP responses after transport succeeds: `/activate` returns
+`nullopt`, `/deactivate` returns false, and `/status` maps to `NotFound`.
+Focused local validation passed: `cmake --build build --target
+pulp-test-license -j4`, `./build/test/pulp-test-license "[crypto][license]"`
+(111 assertions / 29 cases), and `git diff --check`. PR #2268 remained
+current at head `5f511a733`; `Audit dependency and boundaries` joined the
+green checks, `Windows MSVC release-path gate` and `ubuntu-24.04` were in
+progress, sanitizer/doc checks were queued, and the macOS-required checks were
+still queued with no failures. The batch is clean, local-only, and 20 coverage
+commits ahead of `origin/main`.
