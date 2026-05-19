@@ -227,7 +227,11 @@ struct AUBridge {
     tree.implementorValueObserver = ^(AUParameter *param, AUValue value) {
         PulpAudioUnit* strongSelf = weakSelf;
         if (!strongSelf) return;
-        strongSelf->_bridge.store.set_value(
+        // AUv3 may call implementorValueObserver from any thread,
+        // including the render thread. Use the RT-safe path so a Main
+        // listener attached to this store doesn't trigger an EventLoop
+        // dispatch lambda allocation on a possibly-audio thread.
+        strongSelf->_bridge.store.set_value_rt(
             static_cast<pulp::state::ParamID>(param.address), value);
     };
 

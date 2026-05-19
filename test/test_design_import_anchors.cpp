@@ -398,3 +398,83 @@ TEST_CASE("generate_pulp_js native mode emits @pulp-anchor comments",
 
     REQUIRE(js.find("// @pulp-anchor figma:0:1") != std::string::npos);
 }
+
+// ── Phase 0b: setAnchor() codegen — binds anchor to the live widget ─────
+
+TEST_CASE("web-compat codegen emits setAnchor calls per node",
+          "[view][import][anchors][setAnchor]") {
+    const std::string json = R"({
+        "type": "frame",
+        "id": "0:1",
+        "children": [{ "type": "text", "content": "X", "id": "0:42" }]
+    })";
+
+    auto ir = parse_figma_json(json);
+
+    CodeGenOptions opts;
+    opts.include_comments = true;
+    opts.mode = CodeGenMode::web_compat;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Both anchors should appear in setAnchor() calls — the inspector
+    // needs this to map live widgets back to their tweak-layer key.
+    REQUIRE(js.find("setAnchor(") != std::string::npos);
+    REQUIRE(js.find("'figma:0:1'") != std::string::npos);
+    REQUIRE(js.find("'figma:0:42'") != std::string::npos);
+}
+
+TEST_CASE("web-compat codegen emits setAnchor even when include_comments=false",
+          "[view][import][anchors][setAnchor]") {
+    const std::string json = R"({
+        "type": "frame",
+        "id": "0:1"
+    })";
+
+    auto ir = parse_figma_json(json);
+
+    CodeGenOptions opts;
+    opts.include_comments = false;
+    opts.mode = CodeGenMode::web_compat;
+    auto js = generate_pulp_js(ir, opts);
+
+    // include_comments=false strips the // @pulp-anchor trail (cosmetic)
+    // but setAnchor() is FUNCTIONAL — the inspector cannot find a
+    // widget's anchor without it. Must survive minified codegen.
+    REQUIRE(js.find("@pulp-anchor") == std::string::npos);
+    REQUIRE(js.find("setAnchor(") != std::string::npos);
+    REQUIRE(js.find("'figma:0:1'") != std::string::npos);
+}
+
+TEST_CASE("setAnchor escapes single quotes in anchor strings",
+          "[view][import][anchors][setAnchor]") {
+    // Synthesize an IR where the anchor contains a single-quote (rare
+    // but possible if an adapter ever produces one). The codegen helper
+    // js_single_quote_escape() must handle it so the emitted JS still
+    // parses cleanly.
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.stable_anchor_id = "weird'anchor";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setAnchor(") != std::string::npos);
+    // The escaped form should be `weird\'anchor`.
+    REQUIRE(js.find(R"(weird\'anchor)") != std::string::npos);
+}
+
+TEST_CASE("nodes without stable_anchor_id emit no setAnchor call",
+          "[view][import][anchors][setAnchor]") {
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    // intentionally no stable_anchor_id — like a manually constructed IR
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setAnchor(") == std::string::npos);
+}

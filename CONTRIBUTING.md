@@ -54,3 +54,24 @@ Before adding any dependency:
 1. Check its license (MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0 only)
 2. Add it to `DEPENDENCIES.md` (alphabetical order)
 3. Add its license text to `NOTICE.md` (alphabetical order)
+
+## Repo-root hygiene
+
+The set of files and directories at the repo root is small and stable
+on purpose. New top-level paths are blocked by
+`tools/scripts/source_tree_pollution_check.py --mode=root-allowlist`,
+which runs in the pre-push hook and in the `Source-tree pollution check`
+CI workflow.
+
+When you genuinely need to add a new top-level path:
+
+1. Make sure it actually belongs at the root and not under
+   `core/`, `tools/`, `examples/`, `docs/`, etc. — almost everything
+   belongs in a subdirectory.
+2. Add the path to `ALLOWED_ROOT_PATHS` in
+   `tools/scripts/source_tree_pollution_check.py` in the same commit.
+3. Note in the PR description why the new top-level entry is justified.
+
+For local-only stray artifacts (screenshots, coverage profiles,
+disabled config files), prefer adding the pattern to `.gitignore`
+rather than committing them.

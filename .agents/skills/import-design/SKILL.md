@@ -306,6 +306,23 @@ parses these to map generated elements back to their tweak-layer
 identity. If you write a custom codegen path, preserve this pattern
 so the inspector can still trace identity.
 
+**Phase 0b — `setAnchor()` bridge wiring:** the web-compat codegen
+path *also* emits a functional `setAnchor('<var>', '<anchor>')` call
+after each createElement, AND the call is emitted unconditionally —
+NOT gated on `opts.include_comments`. Rationale: the
+`// @pulp-anchor` trail is cosmetic (for grep / debugging), but
+`setAnchor()` is functional — the inspector cannot find a widget's
+anchor without it, so dropping it in minified codegen would silently
+break inspector tweaks in production. If you write a custom codegen
+path, emit both: the comment (gated) for debuggability and the
+setAnchor call (unconditional) for the runtime. The bridge side
+(`WidgetBridge::setAnchor`) is a silent no-op on unknown widget IDs,
+matching the rest of the bridge's tolerance for unmounted ids.
+
+Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
+the native codegen has many early-return branches that need each to
+be wired). Web-compat is the default mode for imports — covered.
+
 Spec + design:
 [`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
 

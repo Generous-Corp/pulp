@@ -112,6 +112,14 @@ if [ -f "$SOURCE_TREE_POLLUTION_PY" ]; then
         echo "[pre-push] (this gate has no env-var bypass — there is no legitimate reason to commit a Clock fixture.)" >&2
         exit 1
     fi
+    # Companion-track U-1 — top-level allowlist gate. Catches new
+    # root paths not in ALLOWED_ROOT_PATHS (almost always a stray
+    # fixture, mis-placed module, or an intentional addition whose
+    # allowlist update was forgotten).
+    if ! "$PYTHON" "$SOURCE_TREE_POLLUTION_PY" --mode=root-allowlist --rev HEAD; then
+        echo "[pre-push] root-allowlist gate: BLOCKED. Either move the file(s) under the correct subdirectory or add them to ALLOWED_ROOT_PATHS in tools/scripts/source_tree_pollution_check.py in the same commit." >&2
+        exit 1
+    fi
 fi
 
 # Skill-sync first — it fails fast and the output is the most actionable.

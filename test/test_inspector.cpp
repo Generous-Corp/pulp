@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/inspect/inspector_window.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/widgets.hpp>
@@ -912,4 +913,54 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
     REQUIRE_FALSE(no_perf.is_error);
     REQUIRE(no_perf.params_json.find("available") != std::string::npos);
     REQUIRE(no_perf.params_json.find("false") != std::string::npos);
+}
+
+// ─── StateInspector ListenerToken migration (Slice 3) ───────────────────────
+
+TEST_CASE("StateInspector records parameter changes after subscribing",
+          "[inspect][state][listener]") {
+    StateStore store;
+    ParamInfo info;
+    info.id = 42;
+    info.name = "Cutoff";
+    info.unit = "Hz";
+    info.range = {20.0f, 20000.0f, 1000.0f};
+    store.add_parameter(info);
+
+    StateInspector inspector(store);
+
+    REQUIRE(inspector.recent_changes().empty());
+
+    store.set_value(42, 2400.0f);
+    store.set_value(42, 4800.0f);
+
+    auto changes = inspector.recent_changes();
+    REQUIRE(changes.size() == 2);
+    REQUIRE(changes[0].id == 42);
+    REQUIRE(changes[1].value > changes[0].value);
+}
+
+TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
+          "[inspect][state][listener]") {
+    StateStore store;
+    ParamInfo info;
+    info.id = 1;
+    info.name = "Gain";
+    info.range = {0.0f, 1.0f, 0.5f};
+    store.add_parameter(info);
+
+    {
+        StateInspector inspector(store);
+        store.set_value(1, 0.25f);
+        REQUIRE(inspector.recent_changes().size() == 1);
+    } // ~StateInspector() — ListenerToken dtor unregisters
+
+    // The store no longer has a live listener pointing at the
+    // destroyed inspector. With the legacy alive-guard pattern, an
+    // entry was still in the listener list (just no-op-checking
+    // alive). With ListenerToken it's actually removed, so this
+    // set_value is a pure atomic store + a notify() that iterates
+    // an empty snapshot. No use-after-free, no leak.
+    store.set_value(1, 0.75f);
+    REQUIRE_THAT(store.get_value(1), Catch::Matchers::WithinAbs(0.75, 0.001));
 }

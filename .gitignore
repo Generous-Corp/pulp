@@ -39,6 +39,11 @@ Thumbs.db
 /pulp
 /tokens.json
 /examples/design-tool/.design-tool-*.tmp.js
+# Companion-track U-1 — stray top-level artifacts observed in 2026-05-17
+# audit. Already blocked from landing by --mode=root-allowlist but
+# ignoring them here keeps `git status` quiet too.
+/screenshot.png
+/.mcp.json.disabled-*
 
 
 # Dependencies (fetched at build time)

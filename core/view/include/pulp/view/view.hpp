@@ -326,6 +326,17 @@ public:
     void set_id(std::string id) { id_ = std::move(id); }
     const std::string& id() const { return id_; }
 
+    /// Phase 0b: stable anchor identity from the design-import IR (the
+    /// `// @pulp-anchor <id>` codegen trail from Phase 0a). The
+    /// inspector (Phase 0b PR-C) uses this to key tweaks against the
+    /// originating source element so they survive re-import.
+    ///
+    /// Empty by default. Populated by the JS bridge's setAnchor() call
+    /// for views constructed from imported designs; user-authored
+    /// views that aren't part of an imported tree leave it empty.
+    void set_anchor_id(std::string anchor) { anchor_id_ = std::move(anchor); }
+    const std::string& anchor_id() const { return anchor_id_; }
+
     // ── Visual properties (CSS Box Model) ────────────────────────────────
 
     /// Opacity (0.0 = transparent, 1.0 = opaque). Applied as layer alpha.
@@ -1247,6 +1258,9 @@ private:
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
+    // Phase 0b: design-import anchor identity. Empty for views not
+    // constructed from an imported tree. See set_anchor_id().
+    std::string anchor_id_;
     AccessRole access_role_ = AccessRole::none;
     std::string access_label_;
     std::string access_value_;

@@ -8,6 +8,25 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01360"></a>
+## [0.136.0] - 2026-05-19
+
+- refactor(test): P5-1 follow-up — extracted SVG widget JS bridge cluster (-802 lines) + HTML ARIA + querySelector cluster (-509 lines) from test_widget_bridge.cpp (11,502 → 10,191, -1,311 total — bundled two cuts on one PR)
+
+<a id="v01352"></a>
+## [0.135.2] - 2026-05-18
+
+- fix(harness): canvas2d adapter reads split preludes (Codex P1 on #2253) ([#2317](https://github.com/danielraffel/pulp/pull/2317))
+- feat(state): RT-safe set_value path with deferred main-listener pump ([#2294](https://github.com/danielraffel/pulp/pull/2294))
+
+<a id="v01351"></a>
+## [0.135.1] - 2026-05-18
+
+- fix(canvas): address Codex review findings — async future safety, UTF-8/16 bridge, color mode strictness, golden ink probe ([#2308](https://github.com/danielraffel/pulp/pull/2308))
+- ci(release): route macOS legs through Namespace + tighten ui-preview gate ([#2301](https://github.com/danielraffel/pulp/pull/2301))
+- feat(view): Phase 0b PR-B — View::anchor_id + setAnchor bridge wiring ([#2303](https://github.com/danielraffel/pulp/pull/2303))
+- chore(tools): root-allowlist mode for source-tree pollution check (U-1) ([#2190](https://github.com/danielraffel/pulp/pull/2190))
+
 <a id="v01350"></a>
 ## [0.135.0] - 2026-05-18
 
@@ -2036,6 +2055,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.135.2]: https://github.com/danielraffel/pulp/releases/tag/v0.135.2
+[0.135.1]: https://github.com/danielraffel/pulp/releases/tag/v0.135.1
 [0.135.0]: https://github.com/danielraffel/pulp/releases/tag/v0.135.0
 [0.134.0]: https://github.com/danielraffel/pulp/releases/tag/v0.134.0
 [0.133.0]: https://github.com/danielraffel/pulp/releases/tag/v0.133.0

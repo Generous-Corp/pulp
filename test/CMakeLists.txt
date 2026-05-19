@@ -1785,6 +1785,19 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 # compat.json entries.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
 
+# Widget bridge — SVG widgets (P5-1 follow-up). Three clusters:
+# pulp #965 SvgPathWidget JS bridge integration + pulp #1416
+# SvgRectWidget + SvgLineWidget JS bridge integration + compound-path
+# parser regression (Spectr PEAK / AVG / BOTH / OFF analyzer icons).
+pulp_add_test_suite(pulp-test-widget-bridge-svg LIBRARIES pulp::view)
+
+# Widget bridge — HTML ARIA + querySelector (P5-1 follow-up, Wave 3
+# html bundle). aria-label / role flow into View accessibility slots;
+# document.querySelector accepts attribute selectors + combinators +
+# :hover / :disabled / :checked / :enabled / :not / :first-child /
+# :nth-child / :empty pseudo-classes.
+pulp_add_test_suite(pulp-test-widget-bridge-html-aria LIBRARIES pulp::view)
+
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future

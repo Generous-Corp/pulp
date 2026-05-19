@@ -323,6 +323,35 @@ Plan source: `planning/2026-05-13-namespace-overflow-implementation.md`
 (reviewed by `/codex` 2026-05-13). Full operator docs:
 `docs/guides/local-ci.md` § "macOS overflow routing".
 
+### Release workflows: Namespace routing (post-2026-05-18 incident)
+
+`.github/workflows/sign-and-release.yml` and `.github/workflows/release-cli.yml`
+also route their macOS legs through Namespace when
+`PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set. Unlike `build.yml` (which
+has the full overflow logic above), release workflows take a simpler
+"namespace if configured, GitHub-hosted otherwise" approach via a tiny
+`resolve-macos-runner` job at the top of each file.
+
+**Why this matters:** during the 2026-05-18 SDK starvation incident,
+the GitHub-hosted `macos-14` / `macos-15` queue backed up for hours and
+blocked every release-cli darwin-arm64 leg and every sign-and-release
+build from v0.111.0 through v0.134.0 (25 tags piled up). PR work was
+already routing through Namespace post-cutover; releases were still
+hitting the GitHub-hosted pool because release-cli.yml and
+sign-and-release.yml had hardcoded `runs-on: macos-14` / `macos-15`.
+
+**Fall-back behavior:** when `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON`
+is unset, both workflows revert to the previous GitHub-hosted runners —
+so removing the variable doesn't break releases.
+
+**Caveat:** this does NOT include the `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD`
+logic from build.yml. Releases are infrequent enough that overflow isn't
+the bottleneck; sending all release macOS legs to Namespace directly is
+simpler and matches what the user has already configured.
+
+See pulp #2238 (supersede cascade fix), pulp #2281 (Skia gate fix),
+and the post-mortem-driven follow-up that introduced this routing.
+
 ### Per-PR macOS retargeting: `pulp macos`
 
 The matrix in `build.yml` couples Linux/Windows/macOS into a single
@@ -1716,3 +1745,18 @@ tools/scripts/format_baseline_capture.sh --build --plugin PulpEffect
 Commit the updated `test/fixtures/format-baseline/*.txt` files in the same PR. No exception path — intentional behavior changes update the baseline; unintentional regressions get fixed at the source.
 
 Companion-track item U-3 in `planning/2026-05-17-refactor-roadmap-final.md`.
+
+## Source-tree pollution: root-allowlist mode
+
+`tools/scripts/source_tree_pollution_check.py` now has a fourth mode beyond `stage` / `push` / `files`: **`--mode=root-allowlist`**.
+
+The root-allowlist mode reads `git ls-tree --name-only <rev>` and fails if any top-level entry is not in `ALLOWED_ROOT_PATHS` (a frozenset declared at the top of the script — ~51 entries covering hidden config, root docs, root build/config files, and subsystem directories).
+
+Wiring:
+
+- `.githooks/pre-push` invokes `--mode=root-allowlist --rev HEAD` right after the existing `--mode=push` check. Hard-fail; no env-var bypass.
+- `.github/workflows/source-tree-pollution-check.yml` runs the same mode in CI. Triggers on `paths: ['**']` (the check is ~5s — no point gating). Catches direct REST / admin merges that skip the pre-push hook.
+
+Adding a new top-level entry requires the same-PR allowlist update — the gate's error message points contributors to the exact line in the script. See the new "Repo-root hygiene" section in `CONTRIBUTING.md` for the contributor-facing explanation.
+
+Companion-track item U-1 in `planning/2026-05-17-refactor-roadmap-final.md`.

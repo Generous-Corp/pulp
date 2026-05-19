@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.135.0
+    VERSION 0.136.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -83,6 +83,24 @@ if(MSVC)
     add_compile_options(/W4 /wd4100)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+# ── Windows runtime library (Tier A Slice 12) ──────────────────────────────
+# Statically link the MSVC runtime so redistributed Pulp binaries don't
+# require the user to have the matching Visual C++ Redistributable
+# installed. Without this, the default is the dynamic /MD runtime and
+# end users see "vcruntime140.dll not found" when launching the plugin.
+#
+# `MultiThreaded` selects /MT (release) or /MTd (debug) via the
+# generator expression — these are the static-link variants. CMake
+# 3.15+ honors this via CMP0091 (set automatically by our minimum
+# version 3.24).
+#
+# Per sudara "Big List of JUCE Tips and Tricks" #27.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        CACHE STRING "MSVC runtime library variant (static)" FORCE)
 endif()
 
 if(WIN32)

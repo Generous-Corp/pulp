@@ -259,8 +259,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     int32 offset;
                     queue->getPoint(point_count - 1, offset, value);
                     // VST3 uses normalized 0-1 values — sync to Pulp store
-                    store_.set_normalized(static_cast<state::ParamID>(id),
-                                         static_cast<float>(value));
+                    // via the RT-safe path so any Main listeners are
+                    // deferred to pump_listeners() instead of allocating
+                    // a dispatch lambda on the audio thread.
+                    store_.set_normalized_rt(static_cast<state::ParamID>(id),
+                                             static_cast<float>(value));
                 }
             }
         }

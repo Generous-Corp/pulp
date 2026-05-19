@@ -3412,6 +3412,18 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // Phase 0b: bind a design-import anchor (the `// @pulp-anchor`
+    // codegen trail from Phase 0a) to a live widget. The inspector
+    // (Phase 0b PR-C) reads anchor_id back to key tweaks against the
+    // originating source element. Silent no-op on unknown widget id —
+    // matches the rest of the bridge's tolerance for unmounted ids.
+    engine_.register_function("setAnchor", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto anchor = args.get<std::string>(1, "");
+        if (auto* v = widget(id)) v->set_anchor_id(std::move(anchor));
+        return choc::value::Value();
+    });
+
     // setStyle — placeholder until KnobStyle/ToggleStyle enums added to main widgets
     engine_.register_function("setStyle", [](choc::javascript::ArgumentList) {
         return choc::value::Value();

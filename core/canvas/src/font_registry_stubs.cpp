@@ -310,14 +310,38 @@ struct Utf8Utf16Bridge {
 // Inline UTF-8 scalar decode used by the bridge. The anonymous-
 // namespace helper above is not reachable here (different TU scope);
 // keep this duplicate trivially small.
+//
+// pulp #2249 follow-up (Codex review P2): validate continuation bytes
+// match `0b10xxxxxx`. Without this, a malformed lead byte followed by
+// an ASCII byte (e.g. `0xC2 0x41`) would be parsed as a 2-byte scalar,
+// while ICU's `fromUTF8` substitutes U+FFFD and advances 1 byte —
+// desyncing the bridge. Match ICU's substitution length (1 byte) by
+// returning 1 for any sequence where the trailing bytes are not valid
+// UTF-8 continuation bytes.
+inline bool is_utf8_continuation(unsigned char b) {
+    return (b & 0xC0) == 0x80;
+}
+
 inline std::size_t utf8_scalar_len(const std::string& s, std::size_t i) {
     if (i >= s.size()) return 0;
     unsigned char c = static_cast<unsigned char>(s[i]);
     if (c < 0x80) return 1;
-    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) return 2;
-    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) return 3;
-    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) return 4;
-    return 1; // malformed: advance by 1 byte
+    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 1]))) {
+        return 2;
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 1]))
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 2]))) {
+        return 3;
+    }
+    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 1]))
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 2]))
+        && is_utf8_continuation(static_cast<unsigned char>(s[i + 3]))) {
+        return 4;
+    }
+    return 1; // malformed: advance by 1 byte (matches ICU U+FFFD length)
 }
 
 inline Utf8Utf16Bridge build_bridge(const std::string& text) {
@@ -353,15 +377,25 @@ inline Utf8Utf16Bridge build_bridge(const std::string& text) {
 
 inline std::size_t utf16_for_utf8(const Utf8Utf16Bridge& b,
                                   std::size_t utf8_offset) {
-    // Binary search via std::lower_bound on the sorted (monotonic
-    // non-decreasing) utf8_for_utf16 vector.
-    auto it = std::lower_bound(b.utf8_for_utf16.begin(),
+    // pulp #2249 follow-up (Codex review P2): clamp byte offsets that
+    // land STRICTLY INSIDE a multi-byte UTF-8 scalar to the FLOOR
+    // UTF-16 index (the scalar that *contains* the offset), not the
+    // next scalar's start. ICU's `BreakIterator::following`/`preceding`
+    // are strictly after/before, so rounding up would cascade an
+    // off-by-one through every word-break call whose caller hands us
+    // a mid-codepoint cursor.
+    //
+    // Use upper_bound: the iterator points to the first scalar whose
+    // UTF-8 start is *greater than* `utf8_offset`. Stepping back one
+    // gives the scalar that contains `utf8_offset` (or matches it
+    // exactly when the offset lands on a scalar boundary).
+    auto it = std::upper_bound(b.utf8_for_utf16.begin(),
                                b.utf8_for_utf16.end(),
                                utf8_offset);
-    if (it == b.utf8_for_utf16.end()) {
-        return b.utf8_for_utf16.size() - 1;
+    if (it == b.utf8_for_utf16.begin()) {
+        return 0;
     }
-    return static_cast<std::size_t>(it - b.utf8_for_utf16.begin());
+    return static_cast<std::size_t>((it - 1) - b.utf8_for_utf16.begin());
 }
 
 } // namespace

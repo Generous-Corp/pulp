@@ -127,7 +127,13 @@ see commit `8a960d51 auv3: sidechain input bus + render-block routing
   `_Percent`, boolean-shaped ranges → `_Boolean`, everything else →
   `_Generic`).
 - `implementorValueObserver` writes host param changes into
-  `store.set_value(id, value)`.
+  `store.set_value_rt(id, value)`. **AUv3 hosts may invoke the observer
+  from arbitrary threads, including the render thread** — use
+  `set_value_rt`, not the generic `set_value`. The RT path writes the
+  atomic and pushes an SPSC event for `ListenerThread::Main` listeners;
+  the editor drains via `store.pump_listeners()`. The generic path
+  would heap-allocate the dispatch lambda on a possibly-audio thread.
+  See Slice 2 in `planning/2026-05-18-rt-safety-and-debug-dx.md`.
 - `implementorValueProvider` reads current values back from the store.
 - `implementorStringFromValueCallback` delegates to
   `ParamInfo::to_string` when provided, otherwise a `%.2f` fallback.

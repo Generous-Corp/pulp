@@ -124,3 +124,40 @@ TEST_CASE("register_font_url: unsupported schemes are treated as plain paths",
     REQUIRE(fut.wait_for(5s) == std::future_status::ready);
     REQUIRE(fut.get() == FontState::Failed);
 }
+
+// pulp #2246 follow-up (Codex review P1): the docstring on
+// register_font_url promises "the future is safe to detach", but the
+// pre-fix implementation used `std::async(std::launch::async, ...)`
+// whose returned future's destructor BLOCKS the caller until the
+// task completes if dropped without `.get()` / `.wait()`. That made
+// the docstring a lie. Verify the post-fix behavior: scheduling a
+// long-running registration and then dropping the future must NOT
+// block the caller — the test must complete promptly even though
+// the worker thread is still running in the background.
+TEST_CASE("register_font_url: dropping the future does not block the caller",
+          "[font][async][issue-2246]") {
+    namespace fs = std::filesystem;
+    std::string path = write_temp_dummy_font_bytes();
+
+    const auto t0 = std::chrono::steady_clock::now();
+    {
+        // Scope the future so its destructor runs before we measure
+        // elapsed time below.
+        auto fut = register_font_url(path);
+        (void)fut;
+        // Deliberately do NOT call wait()/get(). With std::async-based
+        // implementation, the future's destructor at scope exit would
+        // join the worker (~ms-to-seconds on a real font). With the
+        // promise + detached-thread fix, the destructor is a no-op.
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+
+    // A reasonable bound: even on a slow CI host, decoupling from the
+    // worker thread should take well under 100ms. Pre-fix, this would
+    // have blocked for the full register_font_file duration.
+    REQUIRE(elapsed.count() < 100);
+
+    std::remove(path.c_str());
+}

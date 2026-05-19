@@ -475,29 +475,55 @@ ResolvedFont FontResolver::resolve_character_fallback(const FontOptions& options
 
 // Color-font predicates — Skia-conditional method bodies that compile
 // in both Skia and non-Skia builds. (Slice 3.1)
-bool ResolvedFont::supports_color_font() const noexcept {
+
 #ifdef PULP_HAS_SKIA
-    if (!typeface) return false;
+namespace {
+
+// pulp #2243 follow-up (Codex review P2): enumerate which specific
+// color tables a typeface carries so `color_font_active()` can honor
+// explicit `ColorFontMode` requests strictly (Bitmap / COLR / SVG must
+// match the requested table, not just *some* color table).
+//
+// Tags packed big-endian:
+constexpr SkFontTableTag kCOLR = 0x434F4C52u;
+constexpr SkFontTableTag kCPAL = 0x4350414Cu;
+constexpr SkFontTableTag kCBDT = 0x43424454u;
+constexpr SkFontTableTag kCBLC = 0x43424C43u;
+constexpr SkFontTableTag kSBIX = 0x73626978u;
+constexpr SkFontTableTag kSVG  = 0x53564720u;  // 'SVG '
+
+struct ColorTablePresence {
+    bool any_color = false;  // Any of the six tags below.
+    bool colr = false;       // COLR or CPAL.
+    bool bitmap = false;     // CBDT/CBLC or sbix.
+    bool svg = false;        // SVG table.
+};
+
+ColorTablePresence scan_color_tables(const SkTypeface* typeface) {
+    ColorTablePresence p;
+    if (!typeface) return p;
     const int count = typeface->countTables();
-    if (count <= 0) return false;
+    if (count <= 0) return p;
     std::vector<SkFontTableTag> tags(static_cast<std::size_t>(count));
     // `readTableTags` is the canonical span-based API in this Skia
     // version; `getTableTags(tags[])` is gated behind a legacy macro.
     typeface->readTableTags({tags.data(), tags.size()});
-    // Tags packed big-endian: 'COLR' = 0x434F4C52, etc.
-    constexpr SkFontTableTag kCOLR = 0x434F4C52u;
-    constexpr SkFontTableTag kCPAL = 0x4350414Cu;
-    constexpr SkFontTableTag kCBDT = 0x43424454u;
-    constexpr SkFontTableTag kCBLC = 0x43424C43u;
-    constexpr SkFontTableTag kSBIX = 0x73626978u;
-    constexpr SkFontTableTag kSVG  = 0x53564720u;  // 'SVG '
     for (SkFontTableTag t : tags) {
-        if (t == kCOLR || t == kCPAL || t == kCBDT || t == kCBLC
-            || t == kSBIX || t == kSVG) {
-            return true;
+        if (t == kCOLR || t == kCPAL) { p.colr = true; p.any_color = true; }
+        else if (t == kCBDT || t == kCBLC || t == kSBIX) {
+            p.bitmap = true; p.any_color = true;
         }
+        else if (t == kSVG) { p.svg = true; p.any_color = true; }
     }
-    return false;
+    return p;
+}
+
+} // namespace
+#endif // PULP_HAS_SKIA
+
+bool ResolvedFont::supports_color_font() const noexcept {
+#ifdef PULP_HAS_SKIA
+    return scan_color_tables(typeface.get()).any_color;
 #else
     return false;
 #endif
@@ -506,7 +532,21 @@ bool ResolvedFont::supports_color_font() const noexcept {
 bool ResolvedFont::color_font_active() const noexcept {
 #ifdef PULP_HAS_SKIA
     if (color_font_mode == ColorFontMode::ForceMonochrome) return false;
-    return supports_color_font();
+    if (!typeface) return false;
+    const ColorTablePresence p = scan_color_tables(typeface.get());
+    // pulp #2243 follow-up (Codex review P2): explicit modes are
+    // STRICT — they request a specific color format, so the typeface
+    // must carry that specific table. Treating explicit modes as
+    // Auto-equivalent silently degrades to "any color table will do",
+    // which contradicts the ColorFontMode contract.
+    switch (color_font_mode) {
+        case ColorFontMode::Auto:           return p.any_color;
+        case ColorFontMode::Bitmap:         return p.bitmap;
+        case ColorFontMode::COLR:           return p.colr;
+        case ColorFontMode::SVG:            return p.svg;
+        case ColorFontMode::ForceMonochrome: return false;
+    }
+    return false;
 #else
     return false;
 #endif

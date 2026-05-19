@@ -106,7 +106,20 @@ class Canvas2dAdapter(AdapterBase):
         super().__init__(repo_root)
         self._oracle = self._load_oracle()
         self._bridge_text = self._read("core/view/src/widget_bridge.cpp")
-        self._shim_text = self._read("core/view/js/web-compat-canvas.js")
+        # P5-6 + P5-6 follow-up extracted prelude content out of the original
+        # web-compat-canvas.js into sibling files (matrix helper, image API,
+        # native-GPU helpers). The shim text the adapter reasons about is the
+        # union of all three so prototype methods + ctx attributes that moved
+        # don't get mis-classified as NOT-IMPL.
+        self._shim_text = "\n".join(
+            self._read(f"core/view/js/{name}")
+            for name in (
+                "web-compat-canvas.js",
+                "web-compat-canvas-gpu.js",
+                "web-compat-canvas-matrix.js",
+                "web-compat-canvas-image.js",
+            )
+        )
         self._bridge_fns = self._extract_bridge_fns()
         self._shim_methods = self._extract_shim_methods()
         self._shim_attrs = self._extract_shim_attrs()

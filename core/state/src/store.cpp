@@ -2,6 +2,7 @@
 #include <atomic>
 #include <mutex>
 #include <pulp/events/event_loop.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <choc/memory/choc_Endianness.h>
@@ -29,6 +30,18 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
     SharedEntries entries;
     std::atomic<std::uint64_t> next_id{1};
     std::atomic<pulp::events::EventLoop*> main_loop{nullptr};
+
+    // RT → main pending changes. set_value_rt() pushes here (single
+    // producer = audio thread); pump_listeners() pops (single consumer
+    // = main thread). Capacity is chosen for a few hundred milliseconds
+    // of dense automation at 60 Hz UI pump cadence; bigger queues just
+    // waste memory while the UI is always close to the head.
+    struct RtChange {
+        ParamID param_id = 0;
+        float value = 0.0f;
+    };
+    static constexpr std::size_t kRtQueueCapacity = 1024;
+    pulp::runtime::SpscQueue<RtChange, kRtQueueCapacity> pending_rt;
 
     SharedEntries load_snapshot() const {
         std::lock_guard lock(entries_mutex);
@@ -94,10 +107,9 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
                 // The shared_ptr<ParamChangeCallback> copy that the lambda
                 // would otherwise capture allocates on the firing thread;
                 // capturing a weak_ptr is also non-trivial, so this path
-                // stays unsafe on the audio thread. Format adapters MUST
-                // avoid calling set_value() with Main listeners attached
-                // from the audio thread — Slice 2 fixes the adapters to
-                // route UI notification through a separate enqueue path.
+                // stays unsafe on the audio thread. Use notify_rt() from
+                // format-adapter audio callbacks — see Slice 2 in
+                // planning/2026-05-18-rt-safety-and-debug-dx.md.
                 std::weak_ptr<ListenerRegistry> weak_self = weak_from_this();
                 const auto entry_id = entry.id;
                 loop->dispatch([weak_self, entry_id, param_id, value]() {
@@ -107,6 +119,48 @@ struct ListenerRegistry : std::enable_shared_from_this<ListenerRegistry> {
                 });
             }
         }
+    }
+
+    // Audio-thread fan-out: Audio listeners fire inline (caller asserts
+    // RT-safety), Main listeners are deferred via the SPSC queue and
+    // drained by pump_listeners() on the main thread. No EventLoop
+    // dispatch lambda is allocated on the audio thread.
+    void notify_rt(ParamID param_id, float value) {
+        auto snap = load_snapshot();
+        bool any_main = false;
+        if (snap && !snap->empty()) {
+            for (const auto& entry : *snap) {
+                if (!entry.callback) continue;
+                if (entry.thread == ListenerThread::Audio) {
+                    entry.callback(param_id, value);
+                } else {
+                    any_main = true;
+                }
+            }
+        }
+        if (any_main) {
+            // Lossy push: if the UI hasn't pumped in a while and the
+            // queue is saturated, we drop the queued notification. The
+            // atomic value store already happened so the UI will pick
+            // up the latest on the next pump anyway; only intermediate
+            // animation frames are skipped.
+            (void) pending_rt.try_push(RtChange{param_id, value});
+        }
+    }
+
+    std::size_t drain_main_listeners() {
+        std::size_t drained = 0;
+        while (auto change = pending_rt.try_pop()) {
+            ++drained;
+            auto snap = load_snapshot();
+            if (!snap || snap->empty()) continue;
+            for (const auto& entry : *snap) {
+                if (entry.callback && entry.thread == ListenerThread::Main) {
+                    entry.callback(change->param_id, change->value);
+                }
+            }
+        }
+        return drained;
     }
 };
 
@@ -169,8 +223,30 @@ void StateStore::set_value(ParamID id, float value) {
 
     // Wait-free fan-out: notify() does a single atomic-shared_ptr load and
     // iterates the const snapshot. Audio listeners run inline; Main
-    // listeners route through the installed EventLoop.
+    // listeners route through the installed EventLoop (which allocates;
+    // audio-thread callers must use set_value_rt() instead).
     if (registry_) registry_->notify(id, clamped);
+}
+
+void StateStore::set_value_rt(ParamID id, float value) {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return;
+    auto& param = params_[it->second];
+    float clamped = std::clamp(value, param.range.min, param.range.max);
+    values_[it->second].set(clamped);
+    if (registry_) registry_->notify_rt(id, clamped);
+}
+
+void StateStore::set_normalized_rt(ParamID id, float normalized) {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return;
+    auto value = params_[it->second].range.denormalize(normalized);
+    set_value_rt(id, value);
+}
+
+std::size_t StateStore::pump_listeners() {
+    if (!registry_) return 0;
+    return registry_->drain_main_listeners();
 }
 
 float StateStore::get_normalized(ParamID id) const {

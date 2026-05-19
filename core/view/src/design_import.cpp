@@ -3563,6 +3563,17 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     if (!parent_var.empty())
         ss << ind << parent_var << ".appendChild(" << var << ");\n";
 
+    // Phase 0b: bind the anchor to the live widget so the inspector
+    // can key tweaks against it. Emitted unconditionally (NOT gated on
+    // include_comments) — the inspector needs the anchor to function
+    // even in minified bundles. js_single_quote_escape() is defensive;
+    // anchors are typically [a-z0-9:/-] but adapters can supply
+    // anything.
+    if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
+        ss << ind << "setAnchor('" << var << "', '"
+           << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
+    }
+
     ss << "\n";
 
     // Recurse into children
@@ -3671,6 +3682,14 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         !node.stable_anchor_id->empty()) {
         ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
     }
+    // Phase 0b: TODO — emit `setAnchor(id, anchor)` calls in this
+    // native-mode codegen path too. The web-compat path
+    // (generate_node) is wired; native mode has many early returns
+    // and several create call sites, so a small follow-up PR will
+    // factor that out cleanly. For now, native-mode imports do not
+    // bind anchors to live widgets — affects inspector tweaks for
+    // imports that opted into native codegen. Web-compat is the
+    // default mode, so most imports are unaffected.
 
     // Audio widgets use native widget API
     if (node.audio_widget != AudioWidgetType::none) {
