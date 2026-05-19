@@ -1591,6 +1591,19 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
+# CSS filter chain coverage (P5-2 follow-up — extracted from
+# test_canvas.cpp). pulp #1434 Phase A2-4: Skia-only pixel readback
+# (contrast / invert / opacity ordering with drop-shadow, set_filter
+# drop-shadow parser) + portable filter-chain matrix math
+# (contrast bias, invert maps, identity, opacity alpha scaling).
+add_executable(pulp-test-canvas-filter-chain test_canvas_filter_chain.cpp)
+target_link_libraries(pulp-test-canvas-filter-chain PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-canvas-filter-chain PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-canvas-filter-chain PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+catch_discover_tests(pulp-test-canvas-filter-chain)
+
 # Emoji-parity tests — cover the segmenter + cluster-aware shaping +
 # letter-spacing + cache invalidation paths. Also writes PNGs to
 # `$PULP_EMOJI_TEST_PNG_DIR` (default /tmp/pulp-emoji-validation/) for
