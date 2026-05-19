@@ -1310,6 +1310,26 @@ TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
     REQUIRE(r.stdout_output.find("CLI:") != std::string::npos);
 }
 
+// Tier A Slice 11: `pulp doctor --au-cache` refreshes the macOS AU
+// registrar. We test --dry-run for determinism (running real killall
+// in CI would race with other tests on the same runner).
+TEST_CASE("pulp doctor --au-cache --dry-run reports the command and exits 0",
+          "[cli][shellout][doctor][au-cache]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto r = run_pulp({"doctor", "--au-cache", "--dry-run"}, 10000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+#if defined(__APPLE__)
+    REQUIRE(r.stdout_output.find("AudioComponentRegistrar")
+            != std::string::npos);
+    REQUIRE(r.stdout_output.find("would run") != std::string::npos);
+#else
+    // Off-macOS, the flag is a documented no-op.
+    REQUIRE(r.stdout_output.find("non-macOS") != std::string::npos);
+#endif
+}
+
 // Issue #548 Slice 3: `pulp upgrade --notes` prints migration notes
 // for the hop without downloading anything. `--from`/`--to` overrides
 // let us exercise the filter deterministically regardless of the
