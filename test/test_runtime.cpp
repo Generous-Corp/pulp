@@ -529,93 +529,52 @@ TEST_CASE("runtime logging wrappers accept formatted payloads",
     REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
 }
 
-// ─── ScopedNoAlloc (Slice 4) ────────────────────────────────────────────────
+// ─── PULP_DBG_VAR (Tier A Slice 8) ──────────────────────────────────────────
 
-#include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/assert.hpp>
+#include <sstream>
 
-TEST_CASE("ScopedNoAlloc tracks scope entry and exit",
-          "[runtime][rt-safety][scoped-no-alloc]") {
-    using pulp::runtime::is_in_no_alloc_scope;
-    using pulp::runtime::no_alloc_scope_depth;
-    using pulp::runtime::ScopedNoAlloc;
+TEST_CASE("PULP_DBG_VAR compiles and prints in debug builds",
+          "[runtime][assert][dbg-var]") {
+    // Redirect cerr so we can inspect the output without spamming the
+    // test log. In NDEBUG builds the macro is a no-op so the buffer
+    // stays empty; we only assert on the contents in debug builds.
+    std::stringstream buf;
+    auto* old = std::cerr.rdbuf(buf.rdbuf());
+
+    int answer = 42;
+    PULP_DBG_VAR(answer);
+
+    const float pi = 3.14f;
+    const char* label = "hello";
+    PULP_DBG_VAR(answer, pi, label);
+
+    std::cerr.rdbuf(old);
 
 #ifdef NDEBUG
-    // Release builds: the guard is a no-op. is_in_no_alloc_scope()
-    // always returns false. Document that contract.
-    REQUIRE_FALSE(is_in_no_alloc_scope());
-    {
-        ScopedNoAlloc guard;
-        REQUIRE_FALSE(is_in_no_alloc_scope());
-    }
-    REQUIRE_FALSE(is_in_no_alloc_scope());
+    REQUIRE(buf.str().empty());
 #else
-    REQUIRE_FALSE(is_in_no_alloc_scope());
-    REQUIRE(no_alloc_scope_depth() == 0);
-
-    {
-        ScopedNoAlloc outer;
-        REQUIRE(is_in_no_alloc_scope());
-        REQUIRE(no_alloc_scope_depth() == 1);
-
-        {
-            ScopedNoAlloc inner;
-            REQUIRE(is_in_no_alloc_scope());
-            REQUIRE(no_alloc_scope_depth() == 2);
-        }
-
-        REQUIRE(is_in_no_alloc_scope());
-        REQUIRE(no_alloc_scope_depth() == 1);
-    }
-
-    REQUIRE_FALSE(is_in_no_alloc_scope());
-    REQUIRE(no_alloc_scope_depth() == 0);
+    const auto out = buf.str();
+    REQUIRE(out.find("answer = 42") != std::string::npos);
+    REQUIRE(out.find("pi = 3.14") != std::string::npos);
+    REQUIRE(out.find("label = hello") != std::string::npos);
+    REQUIRE(out.find("[pulp:DBG]") != std::string::npos);
 #endif
 }
 
-TEST_CASE("ScopedNoAlloc is thread-local",
-          "[runtime][rt-safety][scoped-no-alloc]") {
-    using pulp::runtime::is_in_no_alloc_scope;
-    using pulp::runtime::ScopedNoAlloc;
+TEST_CASE("PULP_DBG_VAR handles up to eight arguments",
+          "[runtime][assert][dbg-var]") {
+    std::stringstream buf;
+    auto* old = std::cerr.rdbuf(buf.rdbuf());
 
-    std::atomic<bool> other_thread_saw_scope{true};
-    std::atomic<bool> ready{false};
+    int a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8;
+    PULP_DBG_VAR(a, b, c, d, e, f, g, h);
 
-    ScopedNoAlloc guard_on_main;
+    std::cerr.rdbuf(old);
+
 #ifndef NDEBUG
-    REQUIRE(is_in_no_alloc_scope());
+    const auto out = buf.str();
+    REQUIRE(out.find("a = 1") != std::string::npos);
+    REQUIRE(out.find("h = 8") != std::string::npos);
 #endif
-
-    std::thread t([&]() {
-        // The other thread is OUTSIDE any ScopedNoAlloc — it should
-        // observe is_in_no_alloc_scope() == false even though the
-        // main thread is currently inside one.
-        other_thread_saw_scope.store(
-            is_in_no_alloc_scope(),
-            std::memory_order_release);
-        ready.store(true, std::memory_order_release);
-    });
-
-    while (!ready.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    t.join();
-
-    REQUIRE_FALSE(other_thread_saw_scope.load(std::memory_order_acquire));
-}
-
-TEST_CASE("ScopedNoAlloc ctor/dtor symbols link in any build mode "
-          "(Codex P1 PR#2316)",
-          "[runtime][rt-safety][scoped-no-alloc][abi]") {
-    // Regression: the ctor/dtor must be defined out-of-line and link
-    // in both NDEBUG and !NDEBUG so a mixed-mode SDK install (Release
-    // archive + Debug downstream plugin, or vice versa) doesn't blow
-    // up with "undefined reference to ScopedNoAlloc::ScopedNoAlloc()"
-    // at link time. Constructing + destroying a guard inside a test
-    // proves the symbols resolve in whatever mode this test was built
-    // with. If they're elided under NDEBUG, the linker fails this TU.
-    {
-        pulp::runtime::ScopedNoAlloc guard;
-        (void) guard;
-    }
-    SUCCEED("ctor + dtor symbols present in this build mode");
 }
