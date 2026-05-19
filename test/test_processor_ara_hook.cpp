@@ -117,3 +117,38 @@ TEST_CASE("AraRole enum encodes role bitmask as expected by hosts",
              | static_cast<int>(AraRole::EditorView);
     REQUIRE(mask == 7);
 }
+
+// ─── Processor::suspend()/resume() (Tier B Slice 15) ────────────────────────
+
+namespace {
+
+class CountingProcessor : public PlainProcessor {
+public:
+    int suspends = 0;
+    int resumes = 0;
+    void suspend() override { ++suspends; }
+    void resume() override { ++resumes; }
+};
+
+} // namespace
+
+TEST_CASE("Processor::suspend() / resume() default to no-op",
+          "[format][processor][suspend]") {
+    // The base virtuals must compile and run as no-op so plug-ins that
+    // don't need the heavy-op pause pattern pay nothing.
+    PlainProcessor p;
+    REQUIRE_NOTHROW(p.suspend());
+    REQUIRE_NOTHROW(p.resume());
+}
+
+TEST_CASE("Processor::suspend() / resume() override dispatches via virtual",
+          "[format][processor][suspend]") {
+    CountingProcessor p;
+    REQUIRE(p.suspends == 0);
+    REQUIRE(p.resumes == 0);
+    p.suspend();
+    p.suspend();
+    p.resume();
+    REQUIRE(p.suspends == 2);
+    REQUIRE(p.resumes == 1);
+}

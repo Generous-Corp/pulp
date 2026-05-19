@@ -208,6 +208,38 @@ public:
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
 
+    /// Tier B Slice 15 of planning/2026-05-18-rt-safety-and-debug-dx.md.
+    ///
+    /// Pause processing for a heavy main-thread operation (preset load,
+    /// convolution kernel reallocation, sample-rate change) that would
+    /// otherwise need to either block in @c process() — fatal — or run
+    /// in lock-step with @c process(), which is hard to get right. The
+    /// host calls @c suspend() before the heavy op and @c resume()
+    /// after; while suspended, @c process() is expected to output
+    /// silence and skip the heavy state.
+    ///
+    /// Default no-op so the contract is opt-in: plug-ins that don't
+    /// need it pay nothing. Plug-ins that override @c suspend() should
+    /// flush their voices / set an internal "suspended" flag, and
+    /// override @c resume() to clear it; @c process() then early-
+    /// returns or zero-fills while the flag is set.
+    ///
+    /// Threading: both hooks run on the host / main thread, never
+    /// from @c process(). Format adapters do not currently call these
+    /// hooks automatically — that comes in a follow-up slice once the
+    /// canonical "suspend-then-load-preset" surface for each adapter
+    /// is settled. Today the hooks exist so a plug-in can wire its
+    /// own UI-thread "loading…" workflow against them and the adapter
+    /// integration is purely additive.
+    ///
+    /// Mirrors JUCE's @c AudioProcessor::suspendProcessing per
+    /// sudara "Big List of JUCE Tips" #30.
+    virtual void suspend() {}
+
+    /// Resume processing after a prior @c suspend(). Default no-op;
+    /// the symmetric counterpart of @c suspend() above.
+    virtual void resume() {}
+
     /// Serialize plugin-owned state that is not part of StateStore.
     ///
     /// Use this for opaque state that must survive host/session recall but
