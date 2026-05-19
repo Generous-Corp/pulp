@@ -9624,3 +9624,12 @@ destination preserves existing preset"` (9 assertions / 1 case),
 (9 assertions / 1 case), and `git diff --check`. `origin/main` advanced during
 this tranche, leaving the batch ahead 4 / behind 2; next action is to rebase
 onto fresh main before continuing.
+
+2026-05-18 22:47 PDT: rebased
+`feature/phase3-codecov-runtime-state-batch-751` onto current `origin/main`.
+The batch remains 4 local commits and is no longer behind main. Rebased commit
+SHAs are: `cb3f951d7` (`test(state): cover sync decode malformed framing`),
+`9d40d1eee` (`test(state): cover listener token self move`), `0c029b6f0`
+(`test(state): cover empty store serialization`), and `7399e23fe`
+(`test(state): cover duplicate preset imports`). Next action remains to keep
+accumulating related runtime/state coverage before opening a PR.
