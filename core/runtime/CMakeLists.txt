@@ -1,9 +1,84 @@
 add_library(pulp-runtime)
 add_library(pulp::runtime ALIAS pulp-runtime)
 
+# ── pulp/runtime/build_info.hpp (Tier A Slice 7) ───────────────────────────
+# Generated at configure time so the running binary can stamp itself with
+# the CMake build type, an ISO 8601 configure timestamp, and the short git
+# SHA (plus a dirty-tree flag). Per sudara "Big List of JUCE Tips" #9 —
+# the cheapest "which build is this?" tool is a label in your editor or
+# log header. Header lands under <build>/generated/pulp/runtime/build_info.hpp
+# and is exposed on the PUBLIC include path of pulp-runtime so any
+# consumer can `#include <pulp/runtime/build_info.hpp>`.
+set(_pulp_build_info_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_pulp_build_info_path
+    "${_pulp_build_info_dir}/pulp/runtime/build_info.hpp")
+
+string(TIMESTAMP PULP_BUILD_ISO8601 "%Y-%m-%dT%H:%M:%SZ" UTC)
+set(PULP_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+set(PULP_VERSION "${PROJECT_VERSION}")
+
+# Best-effort git short SHA + dirty-tree probe. Empty when the source
+# tree isn't a git checkout (distribution tarball) — the generated
+# header documents that case.
+set(PULP_GIT_SHA "")
+set(PULP_GIT_DIRTY "false")
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+        OUTPUT_VARIABLE PULP_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" status --porcelain
+        OUTPUT_VARIABLE _pulp_git_porcelain
+        ERROR_QUIET)
+    if(NOT "${_pulp_git_porcelain}" STREQUAL "")
+        set(PULP_GIT_DIRTY "true")
+    endif()
+endif()
+
+# Compose a single ready-to-display label so the running app can just
+# print kStampLabel without re-formatting.
+#
+# Multi-config generators (Xcode, Visual Studio) leave CMAKE_BUILD_TYPE
+# empty at configure time — the config is chosen per build invocation.
+# Stamp label composition must still produce a useful value in that
+# case: it falls back to "config@build" with the SHA + ISO timestamp
+# still appearing, so the inspector / About dialog never renders an
+# information-free label. Codex P2 on PR #2335.
+set(PULP_BUILD_STAMP "${PULP_VERSION}")
+set(_pulp_build_label "${PULP_BUILD_TYPE}")
+if(NOT _pulp_build_label)
+    set(_pulp_build_label "config@build")
+endif()
+string(APPEND PULP_BUILD_STAMP " (${_pulp_build_label}")
+if(PULP_GIT_SHA)
+    string(APPEND PULP_BUILD_STAMP ", ${PULP_GIT_SHA}")
+    if(PULP_GIT_DIRTY STREQUAL "true")
+        string(APPEND PULP_BUILD_STAMP "+dirty")
+    endif()
+endif()
+string(APPEND PULP_BUILD_STAMP ", ${PULP_BUILD_ISO8601})")
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/pulp/runtime/build_info.hpp.in"
+    "${_pulp_build_info_path}"
+    @ONLY)
+
+# Install the generated header so consumers using `find_package(Pulp)`
+# after `cmake --install` can `#include <pulp/runtime/build_info.hpp>`
+# the same way they do during a source-tree build. PulpInstallRules.cmake
+# only globs core/*/include for the canonical headers; the build-time-
+# generated header has to be installed explicitly. Codex P2 on PR #2335.
+install(
+    FILES "${_pulp_build_info_path}"
+    DESTINATION include/pulp/runtime)
+
 target_include_directories(pulp-runtime
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${_pulp_build_info_dir}>
         $<INSTALL_INTERFACE:include>
 )
 
