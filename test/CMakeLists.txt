@@ -2028,6 +2028,16 @@ pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 # (and silently aborts FilterBank-style frame renders) gets caught.
 pulp_add_test_suite(pulp-test-canvas2d-shim LIBRARIES pulp::view)
 
+# Canvas2D _PulpCanvasMatrix DOMMatrix arithmetic — direct unit tests
+# (new coverage for the matrix prelude extracted to
+# web-compat-canvas-matrix.js by #2253). Previously only exercised
+# indirectly via ctx.getTransform() round-trip tests; this binary
+# pins identity construction, mutator chain composition (not
+# last-write-wins), rotateSelf degrees-not-radians, multiplySelf
+# composition, inverse singular-matrix → NaN+is2D=false detection,
+# toJSON honoring actual is2D state (Codex P2 #1754).
+pulp_add_test_suite(pulp-test-canvas2d-dommatrix LIBRARIES pulp::view)
+
 # Canvas2D shim — post-Wave-2 coverage (P5-2 follow-up — extracted from
 # test_canvas2d_shim.cpp). Bundles #1525 (fillText / strokeText
 # maxWidth + glyph cluster handling) + #1521 (arc-as-path

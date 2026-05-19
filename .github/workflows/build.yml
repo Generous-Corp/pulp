@@ -426,6 +426,25 @@ jobs:
             wayland-protocols \
             ccache
 
+      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
+      # Namespace cache volumes persist across runs on the same workspace,
+      # cutting brew-install latency and ccache miss rates substantially.
+      # Gated on matrix.runs_on_json containing "namespace" — the macOS
+      # leg uses this only when Namespace overflow has activated; the
+      # primary path is the self-hosted Mac (which already keeps both
+      # caches on local disk between jobs, so no action needed there).
+      # Step is a no-op on github-hosted and self-hosted runners.
+      - name: Namespace cache (brew + ccache + Pulp FetchContent)
+        if: contains(matrix.runs_on_json, 'namespace')
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: brew
+          path: |
+            ~/Library/Caches/ccache
+            ~/.cache/ccache
+            ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cache/Pulp/fetchcontent-src
+
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
         run: brew install ccache

@@ -166,3 +166,9 @@ still works if you extract per-note data from `MidiBuffer` yourself.
   plan, not here.
 - Hosting MPE plugins (MPE output, dispatching MPE into a loaded
   plugin) — covered by the SignalGraph hosting work, not this skill.
+
+## Implementation note: where MpeVoiceTracker bodies live
+
+As of companion-track U-9 (2026-05-19), `MpeVoiceTracker`'s method bodies live in `core/midi/src/mpe_voice_tracker.cpp`, not inline in `core/midi/include/pulp/midi/mpe_voice_tracker.hpp`. The header keeps the class declaration + trivial inline getters; non-trivial methods (`process`, `set_config`, `reset`, `add_note`, `remove_note`, etc.) link from the .cpp.
+
+Practical effect: editing `MpeVoiceTracker` impl no longer recompiles every TU that includes the MPE header. If you're adding a new method, put trivial getters inline; put anything with branches/loops in the .cpp.
