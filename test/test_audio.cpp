@@ -575,6 +575,57 @@ TEST_CASE("CallbackContext defaults and sample position remain explicit",
     REQUIRE(block.sample_position == 4096);
 }
 
+TEST_CASE("AudioCallback receives stable context and writable output views",
+          "[audio][device][codecov]") {
+    CallbackContext defaults;
+    REQUIRE(defaults.sample_rate == 0.0);
+    REQUIRE(defaults.buffer_size == 0);
+    REQUIRE(defaults.sample_position == 0);
+
+    float in_left[3] = {0.25f, -0.5f, 1.0f};
+    float in_right[3] = {1.0f, 0.5f, -0.25f};
+    const float* input_channels[2] = {in_left, in_right};
+    float out_left[3] = {};
+    float out_right[3] = {};
+    float* output_channels[2] = {out_left, out_right};
+
+    BufferView<const float> input(input_channels, 2, 3);
+    BufferView<float> output(output_channels, 2, 3);
+    CallbackContext context;
+    context.sample_rate = 96000.0;
+    context.buffer_size = 3;
+    context.sample_position = 1024;
+
+    bool called = false;
+    AudioCallback callback = [&](const BufferView<const float>& in,
+                                 BufferView<float>& out,
+                                 const CallbackContext& ctx) {
+        called = true;
+        REQUIRE(ctx.sample_rate == 96000.0);
+        REQUIRE(ctx.buffer_size == 3);
+        REQUIRE(ctx.sample_position == 1024);
+        REQUIRE(in.num_channels() == 2);
+        REQUIRE(out.num_channels() == 2);
+        REQUIRE(in.num_samples() == 3);
+        REQUIRE(out.num_samples() == 3);
+
+        for (std::size_t sample = 0; sample < out.num_samples(); ++sample) {
+            out.channel(0)[sample] = in.channel(0)[sample] + in.channel(1)[sample];
+            out.channel(1)[sample] = in.channel(0)[sample] - in.channel(1)[sample];
+        }
+    };
+
+    callback(input, output, context);
+
+    REQUIRE(called);
+    REQUIRE(out_left[0] == 1.25f);
+    REQUIRE(out_left[1] == 0.0f);
+    REQUIRE(out_left[2] == 0.75f);
+    REQUIRE(out_right[0] == -0.75f);
+    REQUIRE(out_right[1] == -1.0f);
+    REQUIRE(out_right[2] == 1.25f);
+}
+
 TEST_CASE("ChannelSet maps standard layouts by count and name",
           "[audio][channel-set][issue-640]") {
     REQUIRE(ChannelSet::from_channel_count(0).name == "Discrete 0");
