@@ -9836,3 +9836,15 @@ assertion / 1 case), `./build/test/pulp-test-crypto
 "[crypto][sha1][coverage][phase3]"` (1 assertion / 1 case), and `git diff
 --check`. The batch now has 20 local coverage commits; continue accumulating
 before opening a PR.
+
+2026-05-19 00:28 PDT: added `4894acd9c` (`test(runtime): cover closed async
+stream writes`) to `feature/phase3-codecov-runtime-state-batch-751`. This
+covers `AsyncStream::write_async()` when the backing stream is already closed,
+asserting the write callback completes immediately with `StreamError::Closed`
+and no pending bytes are queued. Focused local validation passed: `cmake
+--build build --target pulp-test-async-stream`,
+`./build/test/pulp-test-async-stream "AsyncStream write on a closed backing
+stream completes without queueing"` (5 assertions / 1 case),
+`./build/test/pulp-test-async-stream "[async_stream][coverage][phase3]"` (24
+assertions / 5 cases), and `git diff --check`. The batch now has 21 local
+coverage commits; continue accumulating before opening a PR.
