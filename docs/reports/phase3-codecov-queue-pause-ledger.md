@@ -11151,3 +11151,33 @@ several macOS lanes had been queued beyond the CI-skill threshold, retried
 `shipyard rescue 2268`; Shipyard reported no stuck queued runs, so no manual
 runner action was applied. The batch is clean, local-only, and 28 coverage
 commits ahead of `origin/main`.
+
+2026-05-19 03:31 PDT: rebased local-only
+`feature/phase3-codecov-audio-midi-batch-753` onto current `origin/main`
+`d63b1374b` after main advanced by two commits. Rebase completed cleanly and
+rewrote the 28 local coverage commits; current top commits are `bcfb9501f
+test(midi): cover nested sysex restart`, `e5effa954 test(runtime): cover
+async cancellation token`, `592e47b04 test(runtime): cover async closed
+writes`, `974e68ac8 test(runtime): cover malformed deflate streams`,
+`3cb8a6ec1 test(runtime): cover child process cwd failures`, `c7121a67f
+test(runtime): cover launch process failures`, `fa0c2f12a test(runtime):
+cover launched child pids`, `c5d07813a test(runtime): cover child process
+working dir`, `b76f43c46 test(runtime): cover online activation HTTP
+failures`, and `c32c7f45e test(runtime): cover online activation success`.
+Post-rebase focused validation passed:
+`./build/test/pulp-test-runtime-utils "[runtime][http],[runtime][child_process]"`
+(80 assertions / 16 cases), `./build/test/pulp-test-license
+"[crypto][license]"` (111 assertions / 29 cases), `./build/test/pulp-test-json-rpc
+"[json_rpc]"` (100 assertions / 18 cases), `./build/test/pulp-test-state
+"[state]"` (189 assertions / 42 cases), `./build/test/pulp-test-preset-manager
+"[state][preset]"` (165 assertions / 27 cases), `./build/test/pulp-test-properties
+"[state][properties]"` (112 assertions / 31 cases), `./build/test/pulp-test-network-stream
+"[network_stream][ip-address]"` (34 assertions / 7 cases),
+`./build/test/pulp-test-memory-message-channel "[runtime][message_channel]"`
+(80 assertions / 17 cases), `./build/test/pulp-test-xml-zip "[runtime][zip]"`
+(68 assertions / 20 cases), `./build/test/pulp-test-async-stream
+"[async_stream]"` (63 assertions / 14 cases),
+`./build/test/pulp-test-raw-midi-parser "[midi][raw_midi_parser]"` (73
+assertions / 12 cases), and `git diff --check`. PR #2268 remained current at
+head `5f511a733`, `mergeable_state: blocked`, with no failed checks. The
+batch is clean, local-only, and 28 coverage commits ahead of `origin/main`.
