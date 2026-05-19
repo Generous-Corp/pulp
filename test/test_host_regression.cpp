@@ -332,6 +332,43 @@ TEST_CASE("PluginScanner VST3 bundle with well-formed moduleinfo.json yields FUI
     REQUIRE(found);
 }
 
+TEST_CASE("PluginScanner VST3 moduleinfo raw CID bytes normalize to lowercase hex",
+          "[host][scanner][regression][codecov][phase3]") {
+    ScratchDir scratch("vst3-raw-cid");
+
+    const std::string body = R"({
+  "Classes": [
+    {
+      "Category": "Audio Module Class",
+      "CID": "\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000a\u000b\u000c\u000d\u000e\u000f\u0010",
+      "Name": "RawCidEffect"
+    }
+  ]
+})";
+    auto bundle = make_vst3_bundle(scratch.path, "RawCID", body);
+
+    ScanOptions opts;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_vst3 = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(scratch.path.string());
+
+    PluginScanner scanner;
+    auto plugins = scanner.scan(opts);
+
+    bool found = false;
+    for (const auto& p : plugins) {
+        if (p.path != bundle.string()) continue;
+        found = true;
+        REQUIRE(p.format == PluginFormat::VST3);
+        REQUIRE(p.unique_id == "0102030405060708090a0b0c0d0e0f10");
+        REQUIRE(p.unique_id != p.name);
+    }
+    REQUIRE(found);
+}
+
 // ── Scanner regression: malformed moduleinfo.json falls back cleanly ──────
 
 TEST_CASE("PluginScanner VST3 bundle with malformed moduleinfo.json falls back to stem",
