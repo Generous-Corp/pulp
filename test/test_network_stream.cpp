@@ -881,6 +881,57 @@ TEST_CASE("HttpStream reads a successful local response body in chunks",
     REQUIRE(served.load());
 }
 
+TEST_CASE("HttpStream post factory reads a successful local response",
+          "[network_stream][http][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(port);
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> saw_post{false};
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+
+        std::array<std::uint8_t, 1024> request{};
+        const int received = accepted->receive(request.data(), request.size());
+        if (received > 0) {
+            const std::string request_text(reinterpret_cast<const char*>(request.data()),
+                                           static_cast<std::size_t>(received));
+            saw_post.store(request_text.find("POST /submit HTTP/1.1") != std::string::npos &&
+                           request_text.find("application/json") != std::string::npos);
+        }
+        const std::string response =
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Length: 6\r\n"
+            "\r\n"
+            "stored";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response.data()),
+                       response.size());
+        accepted->close();
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto stream = HttpStream::post("http://127.0.0.1:" + std::to_string(*port) + "/submit",
+                                   R"({"ok":true})", "application/json", 2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 201);
+    REQUIRE(stream->transport_error().empty());
+
+    std::array<std::uint8_t, 8> buffer{};
+    auto read = stream->read(buffer.data(), buffer.size());
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == 6);
+    REQUIRE(std::string(reinterpret_cast<const char*>(buffer.data()), read.bytes) == "stored");
+    REQUIRE(stream->eof());
+
+    join_server.join();
+    REQUIRE(saw_post.load());
+}
+
 TEST_CASE("HttpStream default state supports zero reads and idempotent close",
           "[network_stream][http][coverage][phase3]") {
     HttpStream stream;
