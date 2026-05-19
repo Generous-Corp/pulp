@@ -3,8 +3,21 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <cctype>
 
 namespace pulp::state {
+
+namespace {
+
+bool only_trailing_space(const std::string& text, std::size_t pos) {
+    while (pos < text.size()) {
+        if (!std::isspace(static_cast<unsigned char>(text[pos]))) return false;
+        ++pos;
+    }
+    return true;
+}
+
+}  // namespace
 
 // ── PropertiesFile ──────────────────────────────────────────────────────
 
@@ -91,7 +104,10 @@ std::optional<int64_t> PropertiesFile::get_int(std::string_view key) const {
     auto it = values_.find(key);
     if (it == values_.end()) return std::nullopt;
     try {
-        return std::stoll(it->second);
+        std::size_t consumed = 0;
+        auto value = std::stoll(it->second, &consumed);
+        if (!only_trailing_space(it->second, consumed)) return std::nullopt;
+        return value;
     } catch (...) {
         return std::nullopt;
     }
@@ -105,7 +121,10 @@ std::optional<double> PropertiesFile::get_double(std::string_view key) const {
     auto it = values_.find(key);
     if (it == values_.end()) return std::nullopt;
     try {
-        return std::stod(it->second);
+        std::size_t consumed = 0;
+        auto value = std::stod(it->second, &consumed);
+        if (!only_trailing_space(it->second, consumed)) return std::nullopt;
+        return value;
     } catch (...) {
         return std::nullopt;
     }

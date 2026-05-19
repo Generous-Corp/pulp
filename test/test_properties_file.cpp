@@ -38,6 +38,16 @@ TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[stat
     REQUIRE_FALSE(props.get_double("gain").has_value());
 }
 
+TEST_CASE("PropertiesFile numeric getters reject trailing text",
+          "[state][properties][coverage][phase3]") {
+    PropertiesFile props;
+    props.set_string("count", "12abc");
+    props.set_string("gain", "3.5ms");
+
+    REQUIRE_FALSE(props.get_int("count").has_value());
+    REQUIRE_FALSE(props.get_double("gain").has_value());
+}
+
 TEST_CASE("PropertiesFile bool getter treats stored false-like values as false",
           "[state][properties][issue-641]") {
     PropertiesFile props;
