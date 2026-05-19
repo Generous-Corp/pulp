@@ -89,6 +89,32 @@ bool send_masked_client_frame(Socket& socket,
     return socket.send(frame.data(), frame.size()) == static_cast<int>(frame.size());
 }
 
+std::optional<std::vector<std::uint8_t>> receive_unmasked_server_frame(Socket& socket,
+                                                                       std::uint8_t& opcode) {
+    std::uint8_t hdr[2]{};
+    if (socket.receive(hdr, 2) != 2) return std::nullopt;
+    opcode = hdr[0] & 0x0f;
+    if ((hdr[1] & 0x80) != 0) return std::nullopt;
+
+    std::uint64_t len = hdr[1] & 0x7f;
+    if (len == 126) {
+        std::uint8_t ext[2]{};
+        if (socket.receive(ext, 2) != 2) return std::nullopt;
+        len = (std::uint64_t(ext[0]) << 8) | ext[1];
+    } else if (len == 127) {
+        return std::nullopt;
+    }
+
+    std::vector<std::uint8_t> payload(static_cast<std::size_t>(len));
+    std::size_t off = 0;
+    while (off < payload.size()) {
+        auto n = socket.receive(payload.data() + off, payload.size() - off);
+        if (n <= 0) return std::nullopt;
+        off += static_cast<std::size_t>(n);
+    }
+    return payload;
+}
+
 }  // namespace
 
 TEST_CASE("WebSocket accept_key follows RFC 6455 section 4.2.2", "[websocket]") {
@@ -557,6 +583,55 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
         std::lock_guard<std::mutex> lock(mu);
         return error == "unknown opcode" && closed.load();
     }));
+
+    client.close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel replies to ping frames with pong",
+          "[websocket][frame-kind][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47901);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::unique_ptr<WebSocketChannel> server_ws;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        server_ws = WebSocketChannel::accept(std::move(server_tcp));
+        server_accept_done.store(server_ws != nullptr);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", *port));
+    const std::string key = "dGhlIHNhbXBsZSBub25jZQ==";
+    const std::string request =
+        "GET /ping HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: " + key + "\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n";
+    REQUIRE(client.send(request) == static_cast<int>(request.size()));
+    auto response = receive_http_headers(client);
+    REQUIRE(response.find("101") != std::string::npos);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    REQUIRE(send_masked_client_frame(client, true, 0x9, "ok"));
+    std::uint8_t opcode = 0;
+    auto payload = receive_unmasked_server_frame(client, opcode);
+    REQUIRE(payload.has_value());
+    REQUIRE(opcode == 0xA);
+    REQUIRE(*payload == std::vector<std::uint8_t>{'o', 'k'});
 
     client.close();
     if (server_ws) server_ws->close();
