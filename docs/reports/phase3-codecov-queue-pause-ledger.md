@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-19 01:16 PDT
+Last updated: 2026-05-19 01:21 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -288,6 +288,36 @@ extension hooks"`, `./build/test/pulp-test-midi "[midi][device]"`, and
 `git diff --check`. PR state: not pushed/opened; current local branch is
 ahead of its base but needs rebase after `origin/main` advanced. Keep
 accumulating only after #2268 is clear or waiting on non-actionable CI.
+
+2026-05-19 01:21 PDT: rebased
+`feature/phase3-codecov-audio-midi-batch-753` onto current
+`origin/main` `baeaf64d0`; the five existing tranche commits now have
+post-rebase SHAs `745f9daa3`, `5c7778dd4`, `c1a2afd21`, `af8c15805`,
+and `7e121f9ff`. Rebase validation passed all five focused tests:
+`./build/test/pulp-test-mpe-buffer "MpeZone rejects disabled and
+non-standard manager layouts"`, `./build/test/pulp-test-running-status
+"reserved real-time bytes preserve running status"`,
+`./build/test/pulp-test-midi-ci "CiDiscovery profile reply encodes
+multi-byte profile counts"`, `./build/test/pulp-test-audio-edge-cases
+"Audio frame fill clamps partial reads and preserves valid samples"`,
+`./build/test/pulp-test-midi "MIDI device defaults expose safe no-op
+extension hooks"`, plus `git diff --check`. PR #2268 remained
+current/mergeable with checks queued and no actionable failures, so local
+batch accumulation continued. No Namespace dispatch.
+
+2026-05-19 01:21 PDT: added sixth committed tranche to
+`feature/phase3-codecov-audio-midi-batch-753`:
+`018a35696 test(audio): cover callback context contract`, touching
+`test/test_audio.cpp`. Scope: deterministic audio callback contract
+coverage for `CallbackContext` defaults and propagation through
+`AudioCallback`, plus writable output `BufferView` behavior using local
+stack buffers. Local validation passed:
+`cmake --build build --target pulp-test-audio`,
+`./build/test/pulp-test-audio "AudioCallback receives stable context
+and writable output views"`, `./build/test/pulp-test-audio
+"[audio][device]"`, and `git diff --check`. PR state: not pushed/opened;
+batch has 6 local commits and should keep accumulating toward a larger
+audio/MIDI coverage PR while #2268 checks run. No Namespace dispatch.
 
 2026-05-18 15:05 PDT: added tenth committed tranche to
 `feature/phase3-codecov-batch-747`:
