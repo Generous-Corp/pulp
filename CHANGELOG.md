@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01722"></a>
+## [0.172.2] - 2026-05-19
+
+- refactor(test): P5-1 bundled — pulp #1434 per-edge margin/padding (-538) + pulp #1737 RN-OOS-fixup catalog tail (-501) from test_widget_bridge.cpp (5,483 → 4,444, -1,039 total)
+
 <a id="v01720"></a>
 ## [0.172.0] - 2026-05-19
 
