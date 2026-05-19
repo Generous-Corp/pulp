@@ -9502,3 +9502,15 @@ assertions / 1 case), `./build/test/pulp-test-host
 "[host][graph][midi][coverage][phase3]"` (11 assertions / 1 case), and
 `git diff --check`. The held batch now has 20 local coverage commits; continue
 accumulating before opening a PR.
+
+2026-05-18 21:21 PDT: added `2ec07cd09` (`test(host): cover automation add
+clamp`) to the held `feature/phase3-codecov-host-cache-batch-750` batch. This
+covers `SignalGraph::connect_automation()` normalization of negative
+`smoothing_ms` to zero and the process-time Add-mode clamp when multiple
+automation sources sum beyond the target range. Focused local validation passed:
+`cmake --build build --target pulp-test-host`, `./build/test/pulp-test-host
+"SignalGraph automation clamps add-mode and stored smoothing"` (13 assertions /
+1 case), `./build/test/pulp-test-host
+"[host][graph][automation][coverage][phase3]"` (19 assertions / 2 cases), and
+`git diff --check`. The held batch now has 21 local coverage commits; continue
+accumulating before opening a PR.
