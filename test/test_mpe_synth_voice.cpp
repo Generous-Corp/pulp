@@ -286,6 +286,25 @@ TEST_CASE("MpeGlideDetector flags overlap on same channel", "[midi][mpe]") {
     REQUIRE_FALSE(glide.channel_held(1));
 }
 
+TEST_CASE("MpeGlideDetector ignores unmatched releases and reset clears channels",
+          "[midi][mpe][codecov]") {
+    MpeGlideDetector glide;
+    MpeNoteState note;
+    note.channel = 9;
+    note.note = 72;
+    note.note_id = 90;
+
+    glide.observe_note_off(note);
+    REQUIRE_FALSE(glide.channel_held(9));
+
+    REQUIRE_FALSE(glide.observe_note_on(note));
+    REQUIRE(glide.channel_held(9));
+
+    glide.reset();
+    REQUIRE_FALSE(glide.channel_held(9));
+    REQUIRE_FALSE(glide.observe_note_on(note));
+}
+
 TEST_CASE("MpeVoiceAllocator reports last_was_glide", "[midi][mpe]") {
     MpeVoiceAllocator<TestVoice> alloc{4};
     alloc.dispatch(note_on_event(1, 60, 100, 1));
