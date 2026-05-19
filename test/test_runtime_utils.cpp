@@ -866,6 +866,27 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
     REQUIRE(result->stdout_output.find("value with spaces") != std::string::npos);
 }
 
+TEST_CASE("run_process rejects missing working directories",
+          "[runtime][child_process][coverage][phase3]") {
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+    const auto missing_dir =
+        (std::filesystem::temp_directory_path()
+         / "pulp-run-process-missing-working-dir").string();
+    REQUIRE_FALSE(std::filesystem::exists(missing_dir));
+
+#ifdef _WIN32
+    auto result = run_process("powershell",
+                              {"-NoProfile", "-Command", "Write-Output ignored"},
+                              missing_dir);
+#else
+    auto result = run_process("/bin/pwd", {}, missing_dir);
+#endif
+    REQUIRE_FALSE(result.has_value());
+#else
+    SUCCEED("This platform ignores run_process working_dir in the runtime helper.");
+#endif
+}
+
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
 #ifdef _WIN32
     auto result = run_process("C:\\nonexistent_binary_12345.exe");
