@@ -506,6 +506,22 @@ TEST_CASE("i18n JSON load failure preserves existing translations",
     REQUIRE(strings.translate("existing") == "kept");
 }
 
+TEST_CASE("i18n JSON parser accepts empty objects",
+          "[runtime][i18n][coverage][phase3]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+        f << "{\n}\n";
+    }
+
+    LocalisedStrings strings;
+    strings.add("existing", "kept");
+
+    REQUIRE(strings.load_json_file(tmp.path_string()));
+    REQUIRE(strings.count() == 1);
+    REQUIRE(strings.translate("existing") == "kept");
+}
+
 TEST_CASE("i18n JSON parser allows duplicate keys and trailing comma",
           "[runtime][i18n][issue-641]") {
     TemporaryFile tmp(".json");
