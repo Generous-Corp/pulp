@@ -9526,3 +9526,16 @@ cleanly for invalid dispatch inputs"` (3 assertions / 1 case),
 1 case; expected loader error logs for invalid inputs), and `git diff --check`.
 The held batch now has 22 local coverage commits; continue accumulating before
 opening a PR.
+
+2026-05-18 21:35 PDT: added `836d3dc5c` (`test(host): cover scanner
+completion elision`) to the held `feature/phase3-codecov-host-cache-batch-750`
+batch. This covers `BackgroundScanner::start()` when a worker and progress
+callback are present but the completion callback is null, asserting the worker
+runs, progress fires, join completes, and `is_running()` clears. Focused local
+validation passed: `cmake --build build --target pulp-test-background-scanner`,
+`./build/test/pulp-test-background-scanner "BackgroundScanner: worker may
+finish without completion callback"` (7 assertions / 1 case),
+`./build/test/pulp-test-background-scanner
+"[host][bg-scan][coverage][phase3]"` (14 assertions / 2 cases), and `git diff
+--check`. The held batch now has 23 local coverage commits; add at least one
+more focused slice before opening a PR.
