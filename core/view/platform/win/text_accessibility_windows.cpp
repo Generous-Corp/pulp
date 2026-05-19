@@ -152,9 +152,21 @@ public:
         if (!pRetVal) return E_POINTER;
         VariantInit(pRetVal);
 
+        // Snapshot node_ under node_mu_ so a concurrent same-id
+        // re-register (which calls update_node()) cannot mutate the
+        // backing strings / role while we read them. Holding the lock
+        // for the snapshot copy keeps the critical section bounded;
+        // BSTR allocation runs against the local snapshot outside it.
+        // (Codex P2 on PR #2326.)
+        TextAccessibilityNode snap;
+        {
+            std::lock_guard<std::mutex> lock(node_mu_);
+            snap = node_;
+        }
+
         switch (propertyId) {
             case UIA_NamePropertyId: {
-                BSTR bs = make_bstr(node_.text);
+                BSTR bs = make_bstr(snap.text);
                 if (bs) {
                     pRetVal->vt = VT_BSTR;
                     pRetVal->bstrVal = bs;
@@ -162,7 +174,7 @@ public:
                 break;
             }
             case UIA_AutomationIdPropertyId: {
-                BSTR bs = make_bstr(node_.id);
+                BSTR bs = make_bstr(snap.id);
                 if (bs) {
                     pRetVal->vt = VT_BSTR;
                     pRetVal->bstrVal = bs;
@@ -171,7 +183,7 @@ public:
             }
             case UIA_ControlTypePropertyId: {
                 pRetVal->vt = VT_I4;
-                pRetVal->lVal = control_type_for(node_.role);
+                pRetVal->lVal = control_type_for(snap.role);
                 break;
             }
             case UIA_IsControlElementPropertyId:
@@ -209,20 +221,43 @@ public:
 
     // Test hook: expose the long control-type without going through a
     // VARIANT round-trip. Lets unit tests assert the role mapping
-    // directly. Not part of the COM surface.
-    long control_type() const { return control_type_for(node_.role); }
+    // directly. Not part of the COM surface. Snapshots node_.role
+    // under node_mu_ to stay race-safe against concurrent
+    // update_node() calls.
+    long control_type() const {
+        std::lock_guard<std::mutex> lock(node_mu_);
+        return control_type_for(node_.role);
+    }
 
-    const TextAccessibilityNode& node() const { return node_; }
+    // Test hook: returns a COPY of the backing node — never a reference
+    // to node_ — so callers can't observe a partial update_node() and
+    // can hold the snapshot indefinitely without keeping node_mu_
+    // locked.
+    TextAccessibilityNode node() const {
+        std::lock_guard<std::mutex> lock(node_mu_);
+        return node_;
+    }
 
     // Replace the backing node in-place (same id) so a re-register with
     // the same key doesn't churn the COM object identity. Assistive
     // tech caches provider pointers; preserving identity across updates
-    // keeps client-side state coherent.
-    void update_node(const TextAccessibilityNode& node) { node_ = node; }
+    // keeps client-side state coherent. node_mu_ serialises this with
+    // concurrent GetPropertyValue() / control_type() / node() calls
+    // that may be running on UIA callback threads (Codex P2 on
+    // PR #2326).
+    void update_node(const TextAccessibilityNode& node) {
+        std::lock_guard<std::mutex> lock(node_mu_);
+        node_ = node;
+    }
 
 private:
     ~PulpTextAccessibilityProvider() = default;
 
+    // Guards every access to node_. The registry's own mutex serialises
+    // register / unregister, but UIA may call GetPropertyValue on
+    // separate threads (and the registry releases its mutex before
+    // returning), so node_ needs its own lock for the read path.
+    mutable std::mutex node_mu_;
     TextAccessibilityNode node_;
     std::atomic<LONG> refs_{1};
 };

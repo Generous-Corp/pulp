@@ -992,7 +992,8 @@ endif()
 # PULP_HAS_SKIA && APPLE && PULP_ENABLE_GPU — the test soft-skips
 # at runtime when Dawn / Graphite init fails so CI lanes without a
 # working adapter don't hard-fail. Vulkan + D3D backends are
-# deferred (out-of-scope for Slice 3.4 GPU).
+# deferred — see the PULP_VULKAN_AVAILABLE / PULP_D3D_AVAILABLE
+# scaffold blocks immediately below.
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     add_executable(pulp-test-font-rendering-goldens-gpu
         test_font_rendering_goldens_gpu.cpp)
@@ -1005,6 +1006,62 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
     catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
+endif()
+
+# Font v2 Slice 3.4 — Skia GPU Vulkan lane (SCAFFOLD).
+# Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The Vulkan
+# lane is intentionally OFF by default: there is no Vulkan-capable
+# runner in Pulp's required gate set today, so building this target
+# would only burn CI roundtrips on "couldn't find <vulkan/vulkan.h>"
+# failures. Flip `PULP_VULKAN_AVAILABLE=ON` on a future Linux or
+# Windows CI lane (with Skia-Vulkan linked) to light the target up.
+# Tolerance for the raster↔Vulkan cross-backend probe is ±20 % —
+# see the test header for the rationale.
+option(PULP_VULKAN_AVAILABLE
+    "Build the Skia GPU Vulkan rendering-goldens scaffold (font v2 \
+Slice 3.4 follow-up). Requires Skia built with skia_use_vulkan=true \
+and a working Vulkan ICD on the host. OFF on every Pulp CI lane \
+today; flip ON when a Vulkan-capable runner exists."
+    OFF)
+if(PULP_HAS_SKIA AND (UNIX AND NOT APPLE OR WIN32) AND PULP_VULKAN_AVAILABLE)
+    add_executable(pulp-test-font-rendering-goldens-vulkan
+        test_font_rendering_goldens_vulkan.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_VULKAN_AVAILABLE=1)
+    target_include_directories(pulp-test-font-rendering-goldens-vulkan PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-font-rendering-goldens-vulkan)
+endif()
+
+# Font v2 Slice 3.4 — Skia GPU Direct3D 12 lane (SCAFFOLD).
+# Sibling of `pulp-test-font-rendering-goldens-gpu` (Metal). The D3D
+# lane is intentionally OFF by default: there is no Windows D3D
+# runner in Pulp's required gate set today, so building this target
+# would only burn CI roundtrips on "couldn't find <d3d12.h>" failures.
+# Flip `PULP_D3D_AVAILABLE=ON` on a future Windows CI lane (with
+# Skia-D3D linked) to light the target up. Tolerance for the
+# raster↔D3D cross-backend probe is ±20 % — see the test header for
+# the rationale.
+option(PULP_D3D_AVAILABLE
+    "Build the Skia GPU Direct3D 12 rendering-goldens scaffold \
+(font v2 Slice 3.4 follow-up). Requires Skia built with \
+skia_use_direct3d=true on Windows. OFF on every Pulp CI lane \
+today; flip ON when a Windows D3D runner exists."
+    OFF)
+if(PULP_HAS_SKIA AND WIN32 AND PULP_D3D_AVAILABLE)
+    add_executable(pulp-test-font-rendering-goldens-d3d
+        test_font_rendering_goldens_d3d.cpp)
+    target_link_libraries(pulp-test-font-rendering-goldens-d3d PRIVATE
+        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
+    target_compile_definitions(pulp-test-font-rendering-goldens-d3d PRIVATE
+        PULP_HAS_SKIA=1
+        PULP_D3D_AVAILABLE=1)
+    target_include_directories(pulp-test-font-rendering-goldens-d3d PRIVATE
+        ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-font-rendering-goldens-d3d)
 endif()
 
 # Analytics tests
