@@ -151,6 +151,8 @@ void JsonRpcPeer::handle_object(std::string_view obj_json) {
         dispatch_request(obj_json);
     } else if (has_method && !has_id) {
         // Notification
+        if (!root["method"].isString())
+            return;
         auto method = root["method"].getWithDefault<std::string>("");
         JsonRpcNotificationHandler handler;
         {
@@ -175,6 +177,14 @@ void JsonRpcPeer::dispatch_request(std::string_view request_json) {
     try {
         root = choc::json::parse(std::string(request_json));
     } catch (...) {
+        return;
+    }
+
+    if (!root.hasObjectMember("method") || !root["method"].isString()) {
+        channel_->send_text(make_error(
+            root.hasObjectMember("id") ? choc::json::toString(root["id"])
+                                       : std::string("null"),
+            JsonRpcError::invalid_request()));
         return;
     }
 

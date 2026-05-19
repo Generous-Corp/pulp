@@ -421,6 +421,53 @@ TEST_CASE("JsonRpcPeer replies to null id requests and notification gaps",
     REQUIRE(replies.size() == 1);
 }
 
+TEST_CASE("JsonRpcPeer rejects requests with non-string method names",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    bool empty_method_called = false;
+    server.register_method("", [&](std::string_view) {
+        empty_method_called = true;
+        return JsonRpcResult::ok("true");
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":7,"method":123,"params":[]})json"));
+
+    REQUIRE_FALSE(empty_method_called);
+    REQUIRE(replies.size() == 1);
+    REQUIRE(replies.back().find(R"("id":7)") != std::string::npos);
+    REQUIRE(replies.back().find(R"("code":-32600)") != std::string::npos);
+}
+
+TEST_CASE("JsonRpcPeer ignores notifications with non-string method names",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    bool empty_notification_called = false;
+    server.on_notification("", [&](std::string_view) {
+        empty_notification_called = true;
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","method":false,"params":{"ignored":true}})json"));
+
+    REQUIRE_FALSE(empty_notification_called);
+    REQUIRE(replies.empty());
+}
+
 TEST_CASE("JsonRpcPeer unregisters a replacement handler cleanly",
           "[json_rpc][coverage][phase3]") {
     auto pair = MemoryMessageChannel::make_pair();
