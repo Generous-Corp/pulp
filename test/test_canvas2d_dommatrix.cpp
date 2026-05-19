@@ -247,16 +247,33 @@ TEST_CASE("Canvas2D _PulpCanvasMatrix toJSON honors actual is2D state (Codex P2 
     REQUIRE(out == "false,false");
 }
 
-TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array yields 16 numbers in row-major order",
+TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array length is 16",
           "[canvas2d][dommatrix][issue-1527]") {
     auto out = eval_in_bridge(ctx_and_matrix_setup() + R"(
-        var arr = m.toFloat32Array();
-        // 16 entries (4x4 3D-padded). Identity layout:
-        // row1: m11/m12/m13/m14 = 1,0,0,0
-        // row2: m21/m22/m23/m24 = 0,1,0,0
-        // row3: m31/m32/m33/m34 = 0,0,1,0
-        // row4: m41/m42/m43/m44 = 0,0,0,1
-        return arr.length + ':' + arr.join(',');
+        return String(m.toFloat32Array().length);
     )");
-    REQUIRE(out == "16:1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1");
+    REQUIRE(out == "16");
+}
+
+TEST_CASE("Canvas2D _PulpCanvasMatrix toFloat32Array serialization order "
+          "(non-identity matrix detects transposition — Codex P2 on #2387)",
+          "[canvas2d][dommatrix][issue-1527]") {
+    // Codex P2: the identity matrix is symmetric, so row-major vs
+    // column-major output looks identical. To make ordering bugs
+    // observable we use a translate(10,20) × scale(2,3) where the
+    // translation lives in m41/m42 and the scale on the diagonal.
+    // DOMMatrix uses column-major (WebGL / CSS convention): the
+    // expected layout is
+    //   col 1: m11=2, m12=0, m13=0, m14=0
+    //   col 2: m21=0, m22=3, m23=0, m24=0
+    //   col 3: m31=0, m32=0, m33=1, m34=0   (3D padding identity)
+    //   col 4: m41=10, m42=20, m43=0, m44=1 (translation)
+    // If somebody accidentally outputs row-major, position 3 would be
+    // 10 (not 0) and the test fails.
+    auto out = eval_in_bridge(ctx_and_matrix_setup() + R"(
+        ctx.setTransform(2, 0, 0, 3, 10, 20);
+        var n = ctx.getTransform();
+        return n.toFloat32Array().join(',');
+    )");
+    REQUIRE(out == "2,0,0,0,0,3,0,0,0,0,1,0,10,20,0,1");
 }
