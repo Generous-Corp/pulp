@@ -229,6 +229,19 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("ScopeGuard move preserves dismissed state",
+          "[runtime][scope_guard][coverage][phase3]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        guard.dismiss();
+        auto moved = std::move(guard);
+        static_cast<void>(moved);
+    }
+
+    REQUIRE(calls == 0);
+}
+
 TEST_CASE("Logging does not crash", "[runtime][log]") {
     // Just verify these don't crash — output goes to stderr
     REQUIRE_NOTHROW(log_info("test message: {}", 42));
