@@ -603,10 +603,12 @@ TEST_CASE("PresetManager import of duplicate destination preserves existing pres
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
 
+    store.set_value(1, -6.0f);
+    store.set_value(2, 80.0f);
     REQUIRE(pm.save("Imported"));
 
     const auto external = sandbox.root / "external" / "Imported.json";
-    write_text_file(external, R"json({"parameters":{"Gain":-9}})json");
+    write_text_file(external, R"json({"parameters":{"Gain":-30,"Mix":20}})json");
 
     int list_changes = 0;
     pm.on_list_changed = [&] { ++list_changes; };
@@ -615,13 +617,15 @@ TEST_CASE("PresetManager import of duplicate destination preserves existing pres
 
     REQUIRE(imported.has_value());
     REQUIRE(imported->name == "Imported");
+    REQUIRE(imported->path == pm.user_presets_dir() / "Imported.json");
     REQUIRE(list_changes == 1);
     REQUIRE(pm.user_presets().size() == 1);
 
     store.set_value(1, 0.0f);
-    auto listed = require_user_preset(pm, "Imported");
-    REQUIRE(pm.load(listed));
-    REQUIRE(store.get_value(1) == Catch::Approx(0.0f));
+    store.set_value(2, 0.0f);
+    REQUIRE(pm.load(*imported));
+    REQUIRE(store.get_value(1) == Catch::Approx(-6.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(80.0f));
 }
 
 TEST_CASE("PresetManager rename failure leaves current preset unchanged",
