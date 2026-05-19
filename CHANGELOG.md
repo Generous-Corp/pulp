@@ -8,50 +8,20 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01670"></a>
-## [0.167.0] - 2026-05-19
+<a id="v01690"></a>
+## [0.169.0] - 2026-05-19
 
-- fix(ci): namespace-cache gate accepts nscloud-* labels (Codex P2 on #2399) ([#2402](https://github.com/danielraffel/pulp/pull/2402))
-- refactor(test): P5-2 follow-up — extract arc fixtures (2,358 → 2,026 under 2k target) ([#2380](https://github.com/danielraffel/pulp/pull/2380))
-- ci(namespace): add nscloud-cache-action for brew + ccache + FetchContent ([#2399](https://github.com/danielraffel/pulp/pull/2399))
-- chore(ci): add tools/scripts/gates.sh — on-demand cheap-gates preflight ([#2384](https://github.com/danielraffel/pulp/pull/2384))
-- test(canvas2d): non-identity toFloat32Array order test (Codex P2 on #2387) ([#2396](https://github.com/danielraffel/pulp/pull/2396))
-- refactor(midi): extract mpe_voice_tracker.hpp impl bodies to .cpp (U-9) ([#2327](https://github.com/danielraffel/pulp/pull/2327))
-
-<a id="v01660"></a>
-## [0.166.0] - 2026-05-19
-
-- test(canvas2d): direct DOMMatrix arithmetic tests for _PulpCanvasMatrix ([#2387](https://github.com/danielraffel/pulp/pull/2387))
-
-<a id="v01610"></a>
-## [0.161.0] - 2026-05-19
-
-- test(tools): unit tests for version_consistency_check.py ([#2383](https://github.com/danielraffel/pulp/pull/2383))
-- fix(cli): cross-platform exit_status decode in pulp fmt (Windows release build) ([#2375](https://github.com/danielraffel/pulp/pull/2375))
-
-<a id="v01581"></a>
-## [0.158.1] - 2026-05-19
-
-- feat(canvas): Vulkan + D3D rendering-goldens scaffold (font v2 Slice 3.4 future-CI lanes) ([#2370](https://github.com/danielraffel/pulp/pull/2370))
-- chore(deps): bump shipyard 0.58.0 → 0.59.0 for Phase 2 watch diagnostics (#310) ([#2368](https://github.com/danielraffel/pulp/pull/2368))
+- refactor(test): P5-1 follow-up — extracted RN style-prop bridge primitives (-626 lines, pulp #1026) + Tier-4 OOS/perf-hints pins (-138 lines, pulp #1434) from test_widget_bridge.cpp (7,475 → 6,711, -764 total)
 
 <a id="v01580"></a>
 ## [0.158.0] - 2026-05-19
 
-- refactor(test): P5-1 follow-up — extract Wave 5 css.5 audit (9,074 → 7,475) ([#2373](https://github.com/danielraffel/pulp/pull/2373))
+- refactor(test): P5-1 follow-up — extracted Wave 5 css.5 audit cluster from test_widget_bridge.cpp (-1,599 lines, 9,074 → 7,475)
 
 <a id="v01550"></a>
 ## [0.155.0] - 2026-05-19
 
-- fix(tools): add .clang-format to source-tree pollution allowlist ([#2369](https://github.com/danielraffel/pulp/pull/2369))
-- refactor(test): P5-3 follow-up — extract Label cluster (2,288 → 1,716) ([#2371](https://github.com/danielraffel/pulp/pull/2371))
-
-<a id="v01540"></a>
-## [0.154.0] - 2026-05-19
-
-- refactor(test): P5-2 follow-up — extract Canvas2D shim post-Wave-2 (3,121 → 1,634) ([#2372](https://github.com/danielraffel/pulp/pull/2372))
-- refactor(render): extract texture_atlas.hpp impl bodies to .cpp (U-10) ([#2330](https://github.com/danielraffel/pulp/pull/2330))
-- chore(ci): apply Namespace macOS overflow routing on workflow_dispatch too (refs #2314) () ([#2315](https://github.com/danielraffel/pulp/pull/2315))
+- refactor(test): P5-3 follow-up — extracted Label cluster from test_widgets.cpp (-572 lines, 2,288 → 1,716)
 
 <a id="v01510"></a>
 ## [0.151.0] - 2026-05-19
@@ -2180,13 +2150,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
-[0.167.0]: https://github.com/danielraffel/pulp/releases/tag/v0.167.0
-[0.166.0]: https://github.com/danielraffel/pulp/releases/tag/v0.166.0
-[0.161.0]: https://github.com/danielraffel/pulp/releases/tag/v0.161.0
-[0.158.1]: https://github.com/danielraffel/pulp/releases/tag/v0.158.1
-[0.158.0]: https://github.com/danielraffel/pulp/releases/tag/v0.158.0
-[0.155.0]: https://github.com/danielraffel/pulp/releases/tag/v0.155.0
-[0.154.0]: https://github.com/danielraffel/pulp/releases/tag/v0.154.0
 [0.151.0]: https://github.com/danielraffel/pulp/releases/tag/v0.151.0
 [0.150.0]: https://github.com/danielraffel/pulp/releases/tag/v0.150.0
 [0.148.0]: https://github.com/danielraffel/pulp/releases/tag/v0.148.0
