@@ -9682,3 +9682,16 @@ assertions / 1 case), `./build/test/pulp-test-runtime-utils
 "[runtime][mmap][coverage][phase3]"` (5 assertions / 1 case), and `git diff
 --check`. `origin/main` advanced during this tranche, leaving the batch ahead 8
 / behind 1; next action is to rebase before continuing.
+
+2026-05-18 23:14 PDT: rebased
+`feature/phase3-codecov-runtime-state-batch-751` onto current `origin/main`.
+The batch remains 8 local commits and is no longer behind main. Rebased commit
+SHAs are: `5c961849d` (`test(state): cover sync decode malformed framing`),
+`e783b6010` (`test(state): cover listener token self move`), `d5e5ef599`
+(`test(state): cover empty store serialization`), `f31f477e9` (`test(state):
+cover duplicate preset imports`), `7325b5215` (`test(state): cover malformed
+preset parameter keys`), `0379ee0f6` (`test(state): cover undo transaction
+pre-applied actions`), `ec078d0da` (`test(state): cover undo zero history
+depth`), and `a8f4e7b51` (`test(runtime): cover mmap self move assignment`).
+Next action remains to keep accumulating related runtime/state coverage before
+opening a PR.
