@@ -148,6 +148,17 @@ TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
     REQUIRE(value.mod_pow(BigInteger(0), BigInteger(17)).to_string() == "1");
 }
 
+TEST_CASE("BigInteger parses case-insensitive hex and decimal leading zeroes",
+          "[crypto][bigint][coverage][phase3]") {
+    auto hex = BigInteger::from_hex("00ff");
+    REQUIRE(hex.to_string() == "255");
+    REQUIRE(hex.to_hex() == "FF");
+
+    auto decimal = BigInteger::from_string("000123");
+    REQUIRE(decimal.to_string() == "123");
+    REQUIRE(decimal.bit_count() == 7);
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
