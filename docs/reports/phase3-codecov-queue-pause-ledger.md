@@ -9757,3 +9757,15 @@ pulp-test-runtime-utils`, `./build/test/pulp-test-runtime-utils
 "[runtime][child_process][coverage][phase3]"` (4 assertions / 2 cases), and
 `git diff --check`. The batch now has 13 local coverage commits; continue
 accumulating before opening a PR.
+
+2026-05-18 23:53 PDT: added `d8347c765` (`test(state): cover observable
+missing listener removal`) to `feature/phase3-codecov-runtime-state-batch-751`.
+This covers the no-match path in `ObservableValue::remove_listener()`, asserting
+removing an unknown listener ID leaves active listeners installed and they still
+receive the next value transition. Focused local validation passed: `cmake
+--build build --target pulp-test-state-tree`, `./build/test/pulp-test-state-tree
+"ObservableValue removing a missing listener keeps active listeners"` (3
+assertions / 1 case), `./build/test/pulp-test-state-tree
+"[state][observable][coverage][phase3]"` (3 assertions / 1 case), and `git
+diff --check`. The batch now has 14 local coverage commits; continue
+accumulating before opening a PR.
