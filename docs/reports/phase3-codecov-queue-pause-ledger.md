@@ -1,6 +1,6 @@
 # Phase 3 Codecov Queue Pause Ledger
 
-Last updated: 2026-05-18 22:08 PDT
+Last updated: 2026-05-18 22:10 PDT
 
 This local ledger records the open `codecov` PR validation runs paused to free Namespace capacity for higher-priority work, plus the small-batch resume queue. Branches, PRs, commits, labels, and tracker comments stay intact; queued GitHub Actions validation attempts are cancellable and replaceable.
 
@@ -87,7 +87,7 @@ the existing PR without an empty commit. No Namespace dispatch.
 
 2026-05-18 22:02 PDT: added fifth committed tranche to
 `feature/phase3-codecov-runtime-state-batch-752`:
-`b5f829cf6 test(runtime): cover dismissed moved scope guard`, touching
+`ce2122dd3 test(runtime): cover dismissed moved scope guard`, touching
 `test/test_runtime.cpp`. Scope: deterministic scope-guard coverage for
 dismissing the moved-to guard after ownership transfer, confirming the
 cleanup remains suppressed. Local validation passed:
@@ -100,7 +100,7 @@ the larger batch. No Namespace dispatch.
 
 2026-05-18 22:08 PDT: added sixth committed tranche to
 `feature/phase3-codecov-runtime-state-batch-752`:
-`dfc1c3cd2 test(runtime): cover temporary file self move`, touching
+`244fdb8a7 test(runtime): cover temporary file self move`, touching
 `test/test_runtime.cpp`. Scope: deterministic `TemporaryFile` coverage
 for self move-assignment preserving the owned path and still cleaning it
 up at scope exit. Local validation passed:
@@ -9942,7 +9942,7 @@ diff --check`. Next action: monitor GitHub-hosted checks for #2318 and address
 failures or review comments.
 
 2026-05-19 01:09 PDT: started `feature/phase3-codecov-runtime-state-batch-752`
-from current `origin/main` (`8f4674828`) and added `222fb3229`
+from current `origin/main` (`8f4674828`) and added `bd4081873`
 (`test(runtime): cover default seqlock snapshot`). This covers the default
 `SeqLock<T>` storage path before any writer publishes a value, asserting a
 reader receives the default-constructed `TransportState` coherently. Focused
@@ -9954,7 +9954,7 @@ before first write"` (4 assertions / 1 case),
 assertions / 2 cases), and `git diff --check`. The new batch has 1 local
 coverage commit; continue accumulating before opening a PR.
 
-2026-05-19 01:15 PDT: added `f30ba3845` (`test(runtime): cover json rpc
+2026-05-19 01:15 PDT: added `04bfc0805` (`test(runtime): cover json rpc
 callback teardown`) to `feature/phase3-codecov-runtime-state-batch-752`. This
 covers `JsonRpcPeer::~JsonRpcPeer()` clearing the underlying channel's message
 callback, asserting a request receives a response while the peer is alive and
@@ -9966,7 +9966,7 @@ clears the channel message callback"` (4 assertions / 1 case),
 assertions / 5 cases), and `git diff --check`. The batch now has 2 local
 coverage commits; continue accumulating before opening a PR.
 
-2026-05-19 01:20 PDT: added `92b5e7f08` (`test(runtime): cover default
+2026-05-19 01:20 PDT: added `43825083a` (`test(runtime): cover default
 message channel text send`) to `feature/phase3-codecov-runtime-state-batch-752`.
 This covers the base `MessageChannel::send(std::string_view)` / default
 `send_text()` path for transports that do not distinguish text from binary,
@@ -9980,7 +9980,7 @@ send uses binary send"` (3 assertions / 1 case),
 and `git diff --check`. The batch now has 3 local coverage commits; continue
 accumulating before opening a PR.
 
-2026-05-19 01:25 PDT: added `0fccbcea1` (`test(runtime): cover json rpc
+2026-05-19 01:25 PDT: added `da27325a4` (`test(runtime): cover json rpc
 empty response callbacks`) to `feature/phase3-codecov-runtime-state-batch-752`.
 This covers `JsonRpcPeer::dispatch_response()` when a pending request has an
 empty response callback, asserting the response is consumed cleanly and a later
