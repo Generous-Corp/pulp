@@ -267,6 +267,33 @@ TEST_CASE("ScanCache from_json skips malformed entries while loading valid entri
     REQUIRE(c.entries().count("/tmp/valid.vst3") == 1);
 }
 
+TEST_CASE("ScanCache from_json skips entries missing required fields",
+          "[scan_cache][codecov]") {
+    HostScanCache c;
+    REQUIRE(c.from_json(R"({
+        "schema_version": 1,
+        "entries": [
+            {"path": "/tmp/missing-format.vst3"},
+            {"format": "vst3"},
+            {
+                "path": "/tmp/valid.vst3",
+                "mtime": 1,
+                "size": 2,
+                "name": "Valid",
+                "manufacturer": "Pulp",
+                "version": "1.0",
+                "plugin_path": "/tmp/valid.vst3",
+                "unique_id": "valid-id",
+                "format": "vst3"
+            }
+        ]
+    })"));
+
+    REQUIRE(c.size() == 1);
+    REQUIRE(c.entries().count("/tmp/valid.vst3") == 1);
+    REQUIRE(c.entries().count("/tmp/missing-format.vst3") == 0);
+}
+
 TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
           "[scan_cache]") {
     HostScanCache cache;
