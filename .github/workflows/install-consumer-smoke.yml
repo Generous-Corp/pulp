@@ -33,12 +33,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+      - id: resolve
+        env:
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          macos=$(python3 tools/scripts/resolve_runs_on.py \
+            --target-name "Install consumer smoke (macOS)" \
+            --mode default \
+            --override-env MACOS_RUNS_ON_JSON \
+            --default-label macos-15)
+          echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+
   smoke:
+    needs: resolve-runners
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: macos-15
+            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
+          - os: ubuntu-24.04
+            runs_on_json: '"ubuntu-24.04"'
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     name: ${{ matrix.os }}
 
     steps:
