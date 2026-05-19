@@ -9720,3 +9720,16 @@ values that end at EOF"` (6 assertions / 1 case),
 `./build/test/pulp-test-preset-manager "[state][preset][coverage][phase3]"`
 (21 assertions / 3 cases), and `git diff --check`. The batch now has 10 local
 coverage commits; continue accumulating before opening a PR.
+
+2026-05-18 23:34 PDT: added `75541b3e8` (`test(state): cover properties
+numeric overflow`) to `feature/phase3-codecov-runtime-state-batch-751`. This
+covers `PropertiesFile::get_int()` and `PropertiesFile::get_double()` exception
+paths for out-of-range stored numeric strings, asserting corrupted integer and
+double settings return `nullopt` instead of an accepted wrapped/clamped value.
+Focused local validation passed after correcting the local target name to
+`pulp-test-properties`: `cmake --build build --target pulp-test-properties`,
+`./build/test/pulp-test-properties "PropertiesFile numeric getters reject
+out-of-range strings"` (2 assertions / 1 case),
+`./build/test/pulp-test-properties "[state][properties][coverage][phase3]"`
+(2 assertions / 1 case), and `git diff --check`. The batch now has 11 local
+coverage commits; continue accumulating before opening a PR.
