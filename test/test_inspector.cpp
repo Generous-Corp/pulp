@@ -318,6 +318,114 @@ TEST_CASE("InspectorOverlay: mouse selection and panel tree interactions", "[ins
     REQUIRE(overlay.selected_view() == second_ptr);
 }
 
+// Phase 3f — Alt-hover sibling distance (Figma-style spacing reveal).
+// Click to select a node, then HOLD Alt while hovering another → overlay
+// renders a live distance line from selection to hovered target. Released
+// Alt clears the target. Distinct from the Alt+CLICK sticky-anchor mode
+// covered above.
+TEST_CASE("InspectorOverlay: Alt-hover reveals sibling distance line",
+          "[inspect][overlay][phase3f]") {
+    View root;
+    root.set_id("root");
+    root.set_bounds({0, 0, 500, 300});
+
+    auto a = std::make_unique<View>();
+    a->set_id("a");
+    a->set_bounds({10, 10, 60, 60});
+    auto* a_ptr = a.get();
+    root.add_child(std::move(a));
+
+    auto b = std::make_unique<View>();
+    b->set_id("b");
+    b->set_bounds({100, 10, 60, 60});
+    auto* b_ptr = b.get();
+    root.add_child(std::move(b));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    // Select a via click (no Alt).
+    MouseEvent click_a;
+    click_a.position = {20, 20};
+    click_a.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(click_a));
+    REQUIRE(overlay.selected_view() == a_ptr);
+
+    // Hover over b WITHOUT Alt — no distance reveal; selection unchanged.
+    MouseEvent hover_b;
+    hover_b.position = {130, 30};
+    hover_b.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(hover_b));
+    REQUIRE(overlay.hovered_view() == b_ptr);
+    REQUIRE(overlay.selected_view() == a_ptr);
+
+    // Paint with no Alt — single highlight, no Alt-hover line.
+    pulp::canvas::RecordingCanvas no_alt_canvas;
+    overlay.paint(no_alt_canvas);
+    auto baseline_cmd_count = no_alt_canvas.command_count();
+    REQUIRE(baseline_cmd_count > 0);
+
+    // Now hover over b WITH Alt held → alt-hover target should be b.
+    MouseEvent alt_hover_b;
+    alt_hover_b.position = {130, 30};
+    alt_hover_b.modifiers = kModAlt;
+    alt_hover_b.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(alt_hover_b));
+    REQUIRE(overlay.hovered_view() == b_ptr);
+    REQUIRE(overlay.selected_view() == a_ptr);  // selection unchanged by hover
+
+    pulp::canvas::RecordingCanvas alt_canvas;
+    overlay.paint(alt_canvas);
+    // With Alt held + selection + hover, paint_distance_lines() draws an
+    // extra line + label between selected and hovered. The exact command
+    // count depends on canvas internals, but it MUST be greater than the
+    // no-Alt baseline.
+    REQUIRE(alt_canvas.command_count() > baseline_cmd_count);
+
+    // Release Alt — alt_hover_target_ clears; render returns to baseline.
+    MouseEvent release_alt;
+    release_alt.position = {130, 30};
+    release_alt.modifiers = 0;  // Alt released
+    release_alt.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(release_alt));
+
+    pulp::canvas::RecordingCanvas after_release_canvas;
+    overlay.paint(after_release_canvas);
+    REQUIRE(after_release_canvas.command_count() == baseline_cmd_count);
+}
+
+TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
+          "[inspect][overlay][phase3f]") {
+    // Edge case: holding Alt while hovering with no selected_ should
+    // NOT set alt_hover_target_. Otherwise we'd render a line from
+    // nullptr → confused diagnostics.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 60, 60});
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    pulp::canvas::RecordingCanvas baseline;
+    overlay.paint(baseline);
+    auto baseline_count = baseline.command_count();
+
+    MouseEvent alt_hover_no_sel;
+    alt_hover_no_sel.position = {30, 30};
+    alt_hover_no_sel.modifiers = kModAlt;
+    alt_hover_no_sel.is_down = false;
+    overlay.handle_mouse_event(alt_hover_no_sel);
+
+    pulp::canvas::RecordingCanvas after_alt_hover;
+    overlay.paint(after_alt_hover);
+    // No selection → no distance line should be added → command count
+    // matches baseline.
+    REQUIRE(after_alt_hover.command_count() == baseline_count);
+}
+
 // ── InspectorWindow ────────────────────────────────────────────────────────
 
 TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][window][issue-641]") {

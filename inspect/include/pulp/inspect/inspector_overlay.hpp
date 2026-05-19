@@ -55,6 +55,12 @@ private:
     // Distance measurement mode
     View* distance_anchor_ = nullptr;
 
+    // Phase 3f — Alt-hover sibling distance (Figma-style spacing reveal).
+    // Tracks the View under the cursor while Alt is held; cleared as soon
+    // as Alt is released or the cursor leaves the view area. Distinct from
+    // distance_anchor_ (which is Alt+click sticky-anchor mode).
+    View* alt_hover_target_ = nullptr;
+
     // Panel layout
     float panel_width_ = 300.0f;
     float tree_scroll_y_ = 0.0f;
