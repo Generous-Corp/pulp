@@ -723,6 +723,105 @@ retrigger a slow macOS check — the queue is paced by Namespace concurrency
 limits, not stuck. If macOS is queued >45 min, check
 `gh api repos/danielraffel/pulp/actions/runners` first.
 
+## Pre-push rebase hygiene (Namespace cutover lesson)
+
+After 2026-05-18 every macOS PR leg runs on Namespace's cloud image.
+That image's environment is NOT identical to the operator's local Mac:
+the bundled Skia archive (`external/skia-build/`) is absent there, so
+`PULP_HAS_SKIA` is undefined and Skia-only test contracts (any test
+that asserts `FontResolver::cache_size()`, paragraph layout pixel
+positions, SkParagraph behavior, etc.) only hold when gated on the
+macro. A test that passes locally and fails on Namespace is almost
+always a missing `#ifdef PULP_HAS_SKIA` gate, not a runner problem.
+
+Before pushing ANY branch whose CI touches a macOS leg
+(`Build and Test`, `Sanitizer Tests`, `Coverage`, `Visual Harness`,
+`Release-path PR gate`, `macos-15`, the `macos` alias, etc.):
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD \
+  || echo "AT RISK — your branch is behind main; rebase before push"
+```
+
+If you're behind, prefer rebase over cherry-pick — main moves fast
+during cutovers, and a rebase picks up all relevant invariant fixes
+(not just one):
+
+```bash
+git fetch origin main
+git rebase origin/main
+PULP_SKIP_PREPUSH=1 git push --force-with-lease
+```
+
+If a rebase conflicts and you can't resolve quickly, cherry-pick the
+specific test gate(s) you need from main:
+
+```bash
+git fetch origin main
+git checkout origin/main -- test/<the-file>.cpp
+git commit -m "test(...): pull cross-environment gate from main"
+PULP_SKIP_PREPUSH=1 git push
+```
+
+### Don't retrigger via empty commit
+
+`.github/workflows/build.yml` runs with `concurrency.cancel-in-progress:
+true`. An empty `git commit --allow-empty && git push` cancels whatever
+work the previous SHA was doing — including macOS legs that were 80%
+through — and slots the new SHA to the BACK of the Namespace concurrency
+queue. The correct re-run pattern when CI hit transient breakage is:
+
+```bash
+gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun
+# or to rerun only failed jobs:
+gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun-failed-jobs
+```
+
+That keeps your SHA + queue position, only re-fires the failed legs.
+
+### Display-name vs runner-name gotcha
+
+The macOS matrix job is named `macOS (ARM64) [github-hosted]` even
+though, post-cutover, the actual runner is `nsc-runner-*` from
+Namespace. Branch protection gates on the `macos` alias job, not the
+display name, so do NOT propose renaming the display name to match
+reality — the alias coupling is fragile. Mention the gotcha when
+explaining the routing to a new contributor.
+
+### Verifying your branch isn't burning Namespace cycles
+
+Two-runner pool: each failed macOS leg consumes ~10–20 min of
+Namespace compute AND queues every other PR behind your run. Before
+broadcasting "my CI is stuck", confirm:
+
+```bash
+# Are there Namespace runners online?
+gh api repos/danielraffel/pulp/actions/runners --jq \
+  '.runners[] | select(.labels[].name | contains("namespace-profile"))
+   | "\(.name) status=\(.status) busy=\(.busy)"'
+
+# What's the queue look like across all PRs?
+nsc github jobs list --repository danielraffel/pulp --since 1h \
+  --running --output plain
+```
+
+If your branch's macOS leg is the only thing failing, rebase. If
+multiple branches are failing on the same test, file an issue — that's
+a real bug in main, not your branch.
+
+### Cancel stuck previous-SHA runs to free the queue
+
+When you rebase + force-push, the prior SHA's matrix runs are
+cancelled by `concurrency.cancel-in-progress: true` automatically. But
+if you HAD also kicked off rerun-failed-jobs on the previous SHA,
+those rerun attempts can still consume runner minutes. Cancel them
+explicitly:
+
+```bash
+gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/cancel
+```
+
 The default chain (`.github/workflows/build.yml` `resolve-provider` job):
 
 ```yaml

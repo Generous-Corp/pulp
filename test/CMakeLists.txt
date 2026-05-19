@@ -1139,7 +1139,7 @@ pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)
 pulp_add_test_suite(pulp-test-midi-file LIBRARIES pulp::midi)
 
 # State tests
-pulp_add_test_suite(pulp-test-state LIBRARIES pulp::state)
+pulp_add_test_suite(pulp-test-state LIBRARIES pulp::state pulp::events)
 
 # Binding tests
 pulp_add_test_suite(pulp-test-binding LIBRARIES pulp::state)

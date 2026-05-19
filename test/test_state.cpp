@@ -1,9 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/events/event_loop.hpp>
 #include <pulp/state/state.hpp>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 using namespace pulp::state;
@@ -554,4 +560,253 @@ TEST_CASE("StateStore deserialize keeps complete prefix on short declared count"
 
     REQUIRE(target.deserialize(data));
     REQUIRE_THAT(target.get_value(1), WithinAbs(0.75, 0.001));
+}
+
+// ─── ListenerToken / thread routing (Slice 1) ───────────────────────────────
+
+TEST_CASE("ListenerToken removes its listener on destruction",
+          "[state][listener][token]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int call_count = 0;
+    {
+        auto token = store.add_audio_listener(
+            [&](ParamID, float) { ++call_count; });
+        REQUIRE(static_cast<bool>(token));
+        REQUIRE(token.id() != 0);
+
+        store.set_value(1, 0.5f);
+        REQUIRE(call_count == 1);
+    } // token destroyed → listener removed
+
+    store.set_value(1, 0.75f);
+    REQUIRE(call_count == 1); // unchanged
+}
+
+TEST_CASE("ListenerToken reset() removes the subscription early",
+          "[state][listener][token]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int call_count = 0;
+    auto token = store.add_audio_listener(
+        [&](ParamID, float) { ++call_count; });
+
+    store.set_value(1, 0.25f);
+    REQUIRE(call_count == 1);
+
+    token.reset();
+    REQUIRE_FALSE(static_cast<bool>(token));
+    REQUIRE(token.id() == 0);
+
+    store.set_value(1, 0.5f);
+    REQUIRE(call_count == 1);
+
+    // reset() is idempotent.
+    token.reset();
+    REQUIRE_FALSE(static_cast<bool>(token));
+}
+
+TEST_CASE("ListenerToken is move-only and transfers ownership",
+          "[state][listener][token]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int call_count = 0;
+    auto token1 = store.add_audio_listener(
+        [&](ParamID, float) { ++call_count; });
+    const auto original_id = token1.id();
+    REQUIRE(original_id != 0);
+
+    ListenerToken token2(std::move(token1));
+    REQUIRE(token2.id() == original_id);
+    REQUIRE_FALSE(static_cast<bool>(token1));
+
+    store.set_value(1, 0.5f);
+    REQUIRE(call_count == 1);
+
+    // move-assignment removes the previous subscription
+    auto token3 = store.add_audio_listener(
+        [&](ParamID, float) { ++call_count; });
+    const auto third_id = token3.id();
+    token2 = std::move(token3);
+    REQUIRE(token2.id() == third_id);
+
+    store.set_value(1, 0.75f);
+    // Only token2's listener fires; token1 was moved-from earlier and
+    // its subscription was transferred and then overwritten by token2.
+    REQUIRE(call_count == 2);
+}
+
+TEST_CASE("remove_listener clears the token without firing the callback",
+          "[state][listener][token]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    int call_count = 0;
+    auto token = store.add_audio_listener(
+        [&](ParamID, float) { ++call_count; });
+
+    store.remove_listener(token);
+    REQUIRE_FALSE(static_cast<bool>(token));
+
+    store.set_value(1, 0.4f);
+    REQUIRE(call_count == 0);
+}
+
+TEST_CASE("Main listeners run inline when no EventLoop is installed",
+          "[state][listener][thread]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+
+    float seen = -1.0f;
+    auto token = store.add_listener(
+        [&](ParamID, float v) { seen = v; },
+        ListenerThread::Main);
+
+    store.set_value(1, 0.3f);
+    REQUIRE_THAT(seen, WithinAbs(0.3, 0.001));
+}
+
+TEST_CASE("Main listeners are marshalled through the installed EventLoop",
+          "[state][listener][thread]") {
+    pulp::events::EventLoop loop;
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    store.set_main_loop(&loop);
+
+    std::atomic<std::thread::id> firing_thread{std::this_thread::get_id()};
+    std::atomic<bool> done{false};
+    auto token = store.add_listener(
+        [&](ParamID, float) {
+            firing_thread.store(std::this_thread::get_id(),
+                                std::memory_order_release);
+            done.store(true, std::memory_order_release);
+        },
+        ListenerThread::Main);
+
+    const auto caller_thread = std::this_thread::get_id();
+    store.set_value(1, 0.6f);
+
+    // Spin-wait briefly for the dispatched task to run.
+    const auto deadline = std::chrono::steady_clock::now()
+                          + std::chrono::seconds(2);
+    while (!done.load(std::memory_order_acquire)
+           && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(done.load(std::memory_order_acquire));
+    REQUIRE(firing_thread.load(std::memory_order_acquire) != caller_thread);
+
+    // Detach the loop before either side goes out of scope, so the
+    // store doesn't try to dispatch onto a destroyed loop.
+    token.reset();
+    store.set_main_loop(nullptr);
+}
+
+TEST_CASE("Audio listeners run inline even with an EventLoop installed",
+          "[state][listener][thread]") {
+    pulp::events::EventLoop loop;
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    store.set_main_loop(&loop);
+
+    std::thread::id firing_thread;
+    auto token = store.add_audio_listener(
+        [&](ParamID, float) {
+            firing_thread = std::this_thread::get_id();
+        });
+
+    store.set_value(1, 0.2f);
+    REQUIRE(firing_thread == std::this_thread::get_id());
+
+    token.reset();
+    store.set_main_loop(nullptr);
+}
+
+TEST_CASE("Tokens survive StateStore destruction without crashing",
+          "[state][listener][token]") {
+    ListenerToken orphan;
+    {
+        StateStore store;
+        store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+        orphan = store.add_audio_listener([](ParamID, float) {});
+        REQUIRE(static_cast<bool>(orphan));
+    }
+    // Store is gone; the weak_ptr in the token has expired. reset()
+    // (and the destructor at end of test) must not crash.
+    orphan.reset();
+    REQUIRE_FALSE(static_cast<bool>(orphan));
+}
+
+TEST_CASE("Queued Main callback is cancelled by token reset (Codex P1 PR#2270)",
+          "[state][listener][token][thread]") {
+    // Regression for the race Codex flagged on PR #2270: a Main listener
+    // dispatched through the EventLoop must NOT fire if the token is
+    // destroyed/reset between enqueue and drain. The dispatch lambda
+    // re-looks-up the entry by id at drain time, so removal cancels it.
+    pulp::events::EventLoop loop;
+    StateStore store;
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.0f}));
+    store.set_main_loop(&loop);
+
+    std::atomic<bool> callback_fired{false};
+    auto token = store.add_listener(
+        [&](ParamID, float) {
+            callback_fired.store(true, std::memory_order_release);
+        },
+        ListenerThread::Main);
+
+    // Park the loop with a blocking task so we can deterministically
+    // interleave set_value() and token.reset() before the listener
+    // dispatch runs.
+    std::mutex release_mu;
+    std::condition_variable release_cv;
+    bool released = false;
+    std::atomic<bool> blocker_running{false};
+
+    loop.dispatch([&]() {
+        blocker_running.store(true, std::memory_order_release);
+        std::unique_lock lk(release_mu);
+        release_cv.wait(lk, [&]() { return released; });
+    });
+
+    const auto blocker_deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::seconds(2);
+    while (!blocker_running.load(std::memory_order_acquire)
+           && std::chrono::steady_clock::now() < blocker_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(blocker_running.load(std::memory_order_acquire));
+
+    // Loop is parked. Enqueue the listener dispatch, then remove the
+    // listener BEFORE the loop drains.
+    store.set_value(1, 0.5f);
+    token.reset();
+
+    {
+        std::lock_guard lk(release_mu);
+        released = true;
+    }
+    release_cv.notify_all();
+
+    // Drain barrier: enqueue a sentinel and wait. By the time it runs,
+    // the listener dispatch has already had its chance — and should
+    // have observed the removed entry and dropped the call.
+    std::atomic<bool> sentinel_done{false};
+    loop.dispatch([&]() {
+        sentinel_done.store(true, std::memory_order_release);
+    });
+    const auto drain_deadline = std::chrono::steady_clock::now()
+                                + std::chrono::seconds(2);
+    while (!sentinel_done.load(std::memory_order_acquire)
+           && std::chrono::steady_clock::now() < drain_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(sentinel_done.load(std::memory_order_acquire));
+
+    REQUIRE_FALSE(callback_fired.load(std::memory_order_acquire));
+
+    store.set_main_loop(nullptr);
 }
