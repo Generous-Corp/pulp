@@ -92,6 +92,19 @@ jobs:
           # FetchContent / CMake configure persist between PRs.
           clean: ${{ contains(needs.resolve-runner.outputs.runs_on_json, 'self-hosted') == false }}
 
+      # ── Namespace cache (per Namespace team telemetry, 2026-05-19) ──
+      # Persist brew + ccache + Pulp FetchContent across runs on the
+      # same workspace. Gated on the resolved runner selector containing
+      # "namespace"; no-op on self-hosted and github-hosted.
+      - name: Namespace cache (brew + ccache + Pulp FetchContent)
+        if: contains(needs.resolve-runner.outputs.runs_on_json, 'namespace')
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: brew
+          path: |
+            ~/Library/Caches/ccache
+            ~/Library/Caches/Pulp/fetchcontent-src
+
       - name: Install ccache
         run: brew install ccache
 
