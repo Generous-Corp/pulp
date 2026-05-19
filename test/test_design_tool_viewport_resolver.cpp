@@ -122,6 +122,59 @@ TEST_CASE("intrinsic_height alone returns 0 for grid middle band",
     REQUIRE_THAT(cell->local_bounds().height, WithinAbs(200.0f, 1e-3f));
 }
 
+TEST_CASE("probe-scan binary-search finds the layout's settling width",
+          "[view][design-viewport][issue-pulp-internal-70]") {
+    // Build a Chainer-style responsive tree: parent uses flex-wrap and
+    // children declare minWidth. The natural width is where all
+    // children fit on the designed number of rows; below that, height
+    // grows because content wraps into more rows.
+    auto root = std::make_unique<View>();
+    root->flex().direction = FlexDirection::column;
+
+    auto wrap_parent = std::make_unique<View>();
+    wrap_parent->flex().direction = FlexDirection::row;
+    wrap_parent->flex().flex_wrap = pulp::view::FlexWrap::wrap;
+    wrap_parent->flex().gap = 8.0f;
+
+    // 4 cells, each min-width 200, height 100 → total min row width
+    // = 4*200 + 3*8 = 824. Below 824 they wrap; at >= 824 they fit.
+    for (int i = 0; i < 4; ++i) {
+        auto cell = std::make_unique<View>();
+        cell->flex().min_width = 200.0f;
+        cell->flex().preferred_height = 100.0f;
+        wrap_parent->add_child(std::move(cell));
+    }
+    root->add_child(std::move(wrap_parent));
+
+    // Replicate the resolver's probe helper inline so the test
+    // verifies the same arithmetic the design-tool uses.
+    auto probe = [&](float w) -> float {
+        root->set_bounds({0, 0, w, 99999.0f});
+        root->layout_children();
+        return root->child_at(0)->local_bounds().height;
+    };
+
+    const float h_wide = probe(4000.0f);
+    const float h_narrow = probe(200.0f);
+
+    INFO("h_wide=" << h_wide << " h_narrow=" << h_narrow);
+    // Wide: one row → height 100.
+    // Narrow (200): one cell per row → 4 rows × 100 + 3*8 gaps = 424.
+    REQUIRE(h_narrow > h_wide + 50.0f);  // responsive: clearly wraps
+
+    // Binary-search settling width — same loop as the resolver.
+    float lo = 200.0f, hi = 4000.0f;
+    while (hi - lo > 16.0f) {
+        float mid = (lo + hi) * 0.5f;
+        if (probe(mid) > h_wide + 4.0f) lo = mid;
+        else                            hi = mid;
+    }
+    INFO("settling width = " << hi);
+    // Should converge near 824 (4 cells * 200 + 3 gaps * 8).
+    REQUIRE(hi >= 820.0f);
+    REQUIRE(hi <= 880.0f);
+}
+
 TEST_CASE("probe-layout returns sensible width when no preferred_width set",
           "[view][design-viewport][issue-pulp-internal-70]") {
     // For trees where the outer child has no preferred_width, the

@@ -319,6 +319,30 @@ against that locked cache or skip with a clear "locked raster dependency not
 installed" reason; they should not replace the Skia render proof with a fake
 or unrelated renderer.
 
+**GPU-host gotcha** (added 2026-05-19 after burning ~3h debugging it):
+when `PULP_HAS_SKIA` is FALSE, `WindowHost::create()` on macOS returns the
+CPU-only `MacWindowHost` instead of `MacGpuWindowHost`. The CPU host does
+NOT override `set_design_viewport()` / `set_fixed_aspect_ratio()` — both
+become base-class no-ops. The design-tool example and any runtime-import
+host that depends on viewport-pin + aspect-locked uniform paint scale
+becomes silently broken: content renders at native size, dark fill is
+visible past the design surface, drag-resize feels weird. Before tuning
+*anything* in `set_design_viewport`, `windowWillResize:toSize:`, or
+`compute_design_viewport_transform`, verify the binary actually contains
+`MacGpuWindowHost`:
+
+```bash
+nm build/examples/design-tool/pulp-design-tool 2>/dev/null \
+  | grep -q MacGpuWindowHost && echo OK || echo "FAIL: CPU-only build"
+strings /tmp/MyApp.app/Contents/MacOS/MyApp-Bin \
+  | grep -F "[gpu-host]" && echo "OK" || echo "FAIL: CPU-only build"
+```
+
+The `pulp-design-tool` example hard-fails CMake configure without Skia
+and refuses to run at startup (`EX_CONFIG`, code 78) as belt-and-
+suspenders. See `.agents/skills/import-design/SKILL.md` for the recovery
+recipe.
+
 For the visual-harness Docker smoke, prefer
 `tools/harness/visual/docker-build.sh` over a raw `docker build`. The wrapper
 uses the pinned `linux/amd64` Skia archive and a reusable local buildx cache

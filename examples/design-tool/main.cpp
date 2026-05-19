@@ -135,6 +135,26 @@ static void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
+    // pulp-internal #70 — defense-in-depth GPU host check. The CMake
+    // build gate at examples/design-tool/CMakeLists.txt should refuse
+    // to configure without PULP_HAS_SKIA, but the same check repeated
+    // here at startup catches the case where someone built with
+    // -DPULP_ENABLE_GPU=OFF or hand-edited the example out of the
+    // mandatory list. Without Skia/Dawn the design-viewport and
+    // aspect-lock are no-ops (set_design_viewport / set_fixed_aspect_
+    // ratio are base-class no-ops) and the user gets a broken UX with
+    // no obvious cause — burned ~3h of session in 2026-05.
+#ifndef PULP_HAS_SKIA
+    std::cerr <<
+        "FATAL: pulp-design-tool was built without PULP_HAS_SKIA. The GPU "
+        "host (MacGpuWindowHost) is required for the design-viewport pin "
+        "and aspect-locked resize that this tool's UX depends on. Without "
+        "it, content does not scale and the dark fill is exposed past the "
+        "design surface. Rebuild with Skia linked. See "
+        "planning/2026-05-19-gpu-host-fallback.md for the recovery recipe.\n";
+    return 78;  // EX_CONFIG
+#endif
+
     fs::path js_path;
     AutomationOptions automation;
     uint64_t exit_after_ms = 0;     // pulp-internal #71 — 0 = disabled (normal interactive use)
@@ -360,6 +380,12 @@ int main(int argc, char* argv[]) {
 
     float design_w = 0.0f, design_h = 0.0f;
     const char* viewport_source = "fallback";
+    // Set to true when probe-scan detects flex-wrap / reflow-capable
+    // layouts. Responsive designs skip the design-viewport pin and
+    // aspect-lock so the JSX can re-wrap naturally as the user
+    // resizes; non-responsive (fixed-size) designs keep the pin so
+    // resize stays proportional and centered.
+    bool is_responsive = false;
 
     // 1. CLI flag override.
     if (cli_design_w > 0.0f && cli_design_h > 0.0f) {
@@ -411,41 +437,92 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 4. Probe-layout from the view tree built by the JS script. Run a
-    //    real Yoga pass at (kFallbackDesignWidth, 99999) and read the
-    //    first laid-out child's actual measured height. This is more
-    //    reliable than root.intrinsic_height() (which returns 0 for
-    //    flex:row and display:grid containers) because Yoga's real
-    //    layout algorithm correctly accounts for grid track sizing,
-    //    absolute-positioned children, and nested column/row mixes.
-    //    The probe is cheap (single yoga pass, no paint) and only runs
+    // 4. Probe-layout from the view tree built by the JS script.
+    //    Strategy: find the narrowest width at which the layout
+    //    "settles" (height stops shrinking) — that's the design's
+    //    natural max-content width. For flex-wrap layouts (the common
+    //    case), this is where all bands fit on their designed number
+    //    of rows without further reflow. Running a single probe at
+    //    kFallbackDesignWidth would always pick that fallback as the
+    //    width because flex children with flex-grow stretch to fill;
+    //    the binary search finds the actual content boundary.
+    //
+    //    Yoga's real layout algorithm is more reliable than
+    //    root.intrinsic_height() (which returns 0 for flex:row and
+    //    display:grid containers) because it accounts for grid track
+    //    sizing, absolute-positioned children, and nested column/row
+    //    mixes. The probes are cheap (yoga only, no paint) and run
     //    once at startup before the window is created.
-    if (design_w <= 0.0f && root.child_count() > 0) {
-        constexpr float kProbeHeight = 99999.0f;
-        root.set_bounds({0.0f, 0.0f, kFallbackDesignWidth, kProbeHeight});
+    auto probe_child_height = [&root](float probe_w) -> float {
+        root.set_bounds({0.0f, 0.0f, probe_w, 99999.0f});
         root.layout_children();
-        // The JSX root mounts as root.child_at(0); its measured height
-        // is the natural content height. Width may stretch to fill the
-        // probe width — fall back to the probe width if the child
-        // didn't declare a narrower preferred width.
-        float measured_h = 0.0f;
-        float measured_w = 0.0f;
+        float h = 0.0f;
         for (size_t i = 0; i < root.child_count(); ++i) {
             const auto* c = root.child_at(i);
             if (!c || !c->visible()) continue;
             float ch = c->local_bounds().height;
-            float cw = c->local_bounds().width;
-            if (ch > measured_h) measured_h = ch;
-            if (cw > measured_w) measured_w = cw;
+            if (ch > h) h = ch;
         }
-        if (measured_w < kMinSensibleDim) measured_w = kFallbackDesignWidth;
-        if (in_range(measured_w) && in_range(measured_h)) {
-            design_w = measured_w;
-            design_h = measured_h;
-            viewport_source = "probe-layout (yoga-measured child bounds)";
+        return h;
+    };
+    if (design_w <= 0.0f && root.child_count() > 0) {
+        constexpr float kWideProbe = 4000.0f;
+        constexpr float kNarrowProbe = 200.0f;
+        constexpr float kSettlingTolerance = 4.0f;  // px slack vs h_wide
+        constexpr float kBinarySearchEpsilon = 16.0f;
+
+        const float h_wide = probe_child_height(kWideProbe);
+        const float h_narrow = probe_child_height(kNarrowProbe);
+
+        // If narrow == wide, the design is non-responsive (no
+        // flex-wrap / no reflow); just use the wide probe's settled
+        // width by measuring the rightmost child edge instead.
+        float settled_w = kFallbackDesignWidth;
+        is_responsive = (h_narrow > h_wide + kSettlingTolerance);
+        if (!is_responsive) {
+            // Non-responsive: probe at fallback width and use child's
+            // declared/measured width (or fallback).
+            root.set_bounds({0.0f, 0.0f, kFallbackDesignWidth, 99999.0f});
+            root.layout_children();
+            float cw = 0.0f;
+            for (size_t i = 0; i < root.child_count(); ++i) {
+                const auto* c = root.child_at(i);
+                if (!c || !c->visible()) continue;
+                if (c->local_bounds().width > cw) cw = c->local_bounds().width;
+            }
+            settled_w = (cw >= kMinSensibleDim) ? cw : kFallbackDesignWidth;
+        } else {
+            // Responsive: binary-search for smallest width where
+            // height stays ~ h_wide (layout has fully settled, no
+            // more reflow rows).
+            float lo = kNarrowProbe, hi = kWideProbe;
+            while (hi - lo > kBinarySearchEpsilon) {
+                const float mid = (lo + hi) * 0.5f;
+                const float h_mid = probe_child_height(mid);
+                if (h_mid > h_wide + kSettlingTolerance) lo = mid;
+                else                                     hi = mid;
+            }
+            settled_w = hi;
+        }
+
+        // Re-run the final layout at settled_w to read the matching
+        // height (binary search may have left root in an intermediate
+        // state).
+        const float settled_h = probe_child_height(settled_w);
+
+        if (std::getenv("PULP_DESIGN_VIEWPORT_DEBUG")) {
+            std::cerr << "[design-viewport] probe-scan: h_wide=" << h_wide
+                      << " h_narrow=" << h_narrow
+                      << " settled=" << settled_w << "x" << settled_h << "\n";
+        }
+
+        if (in_range(settled_w) && in_range(settled_h)) {
+            design_w = settled_w;
+            design_h = settled_h;
+            viewport_source = "probe-layout (yoga-measured settling width)";
         } else if (std::getenv("PULP_DESIGN_VIEWPORT_DEBUG")) {
             std::cerr << "[design-viewport] probe-layout rejected: w="
-                      << measured_w << " h=" << measured_h
+                      << settled_w << " h=" << settled_h
                       << " (need both in [" << kMinSensibleDim
                       << ", " << kMaxSensibleDim << "])\n";
         }
@@ -485,8 +562,18 @@ int main(int argc, char* argv[]) {
 
     opts.width  = static_cast<uint32_t>(kDesignWidth);
     opts.height = static_cast<uint32_t>(kDesignHeight);
-    opts.min_width  = static_cast<uint32_t>(kDesignWidth  * 0.5f);
-    opts.min_height = static_cast<uint32_t>(kDesignHeight * 0.5f);
+    // pulp-internal #70 — min size = settled size. The probe-scan
+    // settled width is the smallest window where the JSX renders
+    // without column-overlap. Going below that (which the previous
+    // 0.5x min-floor allowed) shrunk the viewport's uniform scale
+    // below 1.0 and produced unusably-tiny knob sizes, AND on some
+    // drag paths macOS's aspect-lock would slip and the bands could
+    // overlap. Pinning min to settled size + windowWillResize aspect-
+    // snap together guarantee the window can only grow proportionally
+    // above the natural authoring size, never shrink into the bad
+    // zone.
+    opts.min_width  = static_cast<uint32_t>(kDesignWidth);
+    opts.min_height = static_cast<uint32_t>(kDesignHeight);
     opts.resizable = true;
     opts.use_gpu = true;
     opts.initially_hidden = no_show_window;  // pulp-internal #71
@@ -508,9 +595,10 @@ int main(int argc, char* argv[]) {
     // the loaded ui.js fires without an explicit on_global_key lambda.
 
     auto window = WindowHost::create(root, opts);
-    // Design viewport: pins root at design size, paint scales/letterboxes
-    // to fit. Aspect-lock makes macOS enforce the aspect on user drag so
-    // letterbox bars only appear as a brief in-flight backstop.
+    // Pin root at the probe-measured natural size and let paint
+    // scale + letterbox to fit. Aspect-lock makes macOS enforce the
+    // aspect on user drag — content always scales proportionally as
+    // the user resizes, never reflows.
     window->set_design_viewport(kDesignWidth, kDesignHeight);
     window->set_fixed_aspect_ratio(kDesignWidth / kDesignHeight);
     bridge->set_repaint_callback([&window] {
