@@ -528,3 +528,77 @@ TEST_CASE("runtime logging wrappers accept formatted payloads",
     REQUIRE_NOTHROW(log(LogLevel::Debug, "debug {}", 4));
     REQUIRE_NOTHROW(log_debug("debug-wrapper {}", 5));
 }
+
+// ─── ScopedNoAlloc (Slice 4) ────────────────────────────────────────────────
+
+#include <pulp/runtime/scoped_no_alloc.hpp>
+
+TEST_CASE("ScopedNoAlloc tracks scope entry and exit",
+          "[runtime][rt-safety][scoped-no-alloc]") {
+    using pulp::runtime::is_in_no_alloc_scope;
+    using pulp::runtime::no_alloc_scope_depth;
+    using pulp::runtime::ScopedNoAlloc;
+
+#ifdef NDEBUG
+    // Release builds: the guard is a no-op. is_in_no_alloc_scope()
+    // always returns false. Document that contract.
+    REQUIRE_FALSE(is_in_no_alloc_scope());
+    {
+        ScopedNoAlloc guard;
+        REQUIRE_FALSE(is_in_no_alloc_scope());
+    }
+    REQUIRE_FALSE(is_in_no_alloc_scope());
+#else
+    REQUIRE_FALSE(is_in_no_alloc_scope());
+    REQUIRE(no_alloc_scope_depth() == 0);
+
+    {
+        ScopedNoAlloc outer;
+        REQUIRE(is_in_no_alloc_scope());
+        REQUIRE(no_alloc_scope_depth() == 1);
+
+        {
+            ScopedNoAlloc inner;
+            REQUIRE(is_in_no_alloc_scope());
+            REQUIRE(no_alloc_scope_depth() == 2);
+        }
+
+        REQUIRE(is_in_no_alloc_scope());
+        REQUIRE(no_alloc_scope_depth() == 1);
+    }
+
+    REQUIRE_FALSE(is_in_no_alloc_scope());
+    REQUIRE(no_alloc_scope_depth() == 0);
+#endif
+}
+
+TEST_CASE("ScopedNoAlloc is thread-local",
+          "[runtime][rt-safety][scoped-no-alloc]") {
+    using pulp::runtime::is_in_no_alloc_scope;
+    using pulp::runtime::ScopedNoAlloc;
+
+    std::atomic<bool> other_thread_saw_scope{true};
+    std::atomic<bool> ready{false};
+
+    ScopedNoAlloc guard_on_main;
+#ifndef NDEBUG
+    REQUIRE(is_in_no_alloc_scope());
+#endif
+
+    std::thread t([&]() {
+        // The other thread is OUTSIDE any ScopedNoAlloc — it should
+        // observe is_in_no_alloc_scope() == false even though the
+        // main thread is currently inside one.
+        other_thread_saw_scope.store(
+            is_in_no_alloc_scope(),
+            std::memory_order_release);
+        ready.store(true, std::memory_order_release);
+    });
+
+    while (!ready.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    t.join();
+
+    REQUIRE_FALSE(other_thread_saw_scope.load(std::memory_order_acquire));
+}
