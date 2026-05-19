@@ -751,6 +751,13 @@ pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
 # Text-accessibility scaffold (font v2 Slice 2.6)
 pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
+# macOS NSAccessibility backend for TextAccessibilityNode (font v2 Slice 2.6 macOS)
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
+    target_link_libraries(pulp-test-text-accessibility-macos
+        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-text-accessibility-macos)
+endif()
 # Windows UIA backend (font v2 Slice 2.6) — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.

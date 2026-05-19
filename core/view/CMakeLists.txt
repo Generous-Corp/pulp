@@ -194,11 +194,13 @@ endif()
 # (register_text_accessibility_node etc.) so callers don't need to
 # branch on the build target.
 #
-# Apple platforms keep the default for now — the macOS NSAccessibility
-# backend lives on a sibling branch (PR #2307) and is layered on top
-# when that lands; this file deliberately doesn't reference it so the
-# two PRs stay independent.
-if(WIN32)
+# macOS: NSAccessibility-backed (.mm, "macos-ax").
+# Windows: UIA IRawElementProviderSimple ("windows-uia").
+# Linux: AccessKit stub ("linux-accesskit-stub").
+# Other platforms: default C++ "none" backend.
+if(APPLE)
+    set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/mac/text_accessibility_macos.mm)
+elseif(WIN32)
     set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/win/text_accessibility_windows.cpp)
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     set(PULP_TEXT_ACCESSIBILITY_SOURCE platform/linux/text_accessibility_linux.cpp)
