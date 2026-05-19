@@ -518,6 +518,54 @@ TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
     }
 }
 
+TEST_CASE("ScanCache round-trips Audio Unit format identifiers",
+          "[scan_cache][codecov]") {
+    HostScanCache a;
+
+    auto au = sample_info();
+    au.name = "UnitV2";
+    au.path = "/tmp/UnitV2.component";
+    au.unique_id = "com.pulp.unit.v2";
+    au.format = PluginFormat::AudioUnit;
+    a.put(au.path, au);
+
+    auto auv3 = sample_info();
+    auv3.name = "UnitV3";
+    auv3.path = "/tmp/UnitV3.component";
+    auv3.unique_id = "com.pulp.unit.v3";
+    auv3.format = PluginFormat::AudioUnitV3;
+    a.put(auv3.path, auv3);
+
+    HostScanCache b;
+    REQUIRE(b.from_json(a.to_json()));
+    REQUIRE(b.size() == 2);
+    REQUIRE(b.entries().at(au.path).info.format == PluginFormat::AudioUnit);
+    REQUIRE(b.entries().at(auv3.path).info.format == PluginFormat::AudioUnitV3);
+}
+
+TEST_CASE("ScanCache from_json leaves features empty when features is not an array",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    REQUIRE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": [{
+            "path": "/tmp/not-array.clap",
+            "mtime": 1,
+            "size": 2,
+            "name": "NotArray",
+            "manufacturer": "Pulp",
+            "version": "1.0",
+            "plugin_path": "/tmp/not-array.clap",
+            "unique_id": "not-array-id",
+            "format": "clap",
+            "features": "audio-effect"
+        }]
+    })"));
+
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().at("/tmp/not-array.clap").info.features.empty());
+}
+
 TEST_CASE("ScanCache save_to creates nested parent directories",
           "[scan_cache][codecov]") {
     TempFile f;
