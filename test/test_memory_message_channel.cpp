@@ -188,6 +188,9 @@ TEST_CASE("MemoryMessageChannel accepts empty null binary sends",
     REQUIRE(received.size() == 1);
     REQUIRE(received.front().kind == MessageKind::Binary);
     REQUIRE(received.front().payload.empty());
+    REQUIRE(received.front().as_text().empty());
+    REQUIRE(left->is_open());
+    REQUIRE(right->is_open());
 }
 
 TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
