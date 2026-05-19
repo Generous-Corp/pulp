@@ -13,7 +13,7 @@
       "name": "pulp",
       "source": "./",
       "description": "Claude Code plugin for the Pulp audio framework \u2014 build, test, design, and ship audio plugins and apps",
-      "version": "0.95.1",
+      "version": "0.95.2",
       "min_cli_version": "0.31.0",
       "author": {
         "name": "Dan Raffel"
@@ -35,5 +35,5 @@
       ]
     }
   ],
-  "version": "0.95.1"
+  "version": "0.95.2"
 }

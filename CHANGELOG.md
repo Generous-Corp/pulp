@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01728"></a>
+## [0.172.8] - 2026-05-19
+
+- refactor(test): P5-1 extract Canvas2D bridge-fns + Yoga borderWidth (4,444 → 3,862, -582)
+
 <a id="v01727"></a>
 ## [0.172.7] - 2026-05-19
 
