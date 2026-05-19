@@ -530,11 +530,38 @@ TEST_CASE("search, list, suggest, and audit commands cover empty and error modes
     REQUIRE(suggest_missing_description.stderr_text.find("--description requires a value") !=
             std::string::npos);
 
+    auto suggest_missing_analyze = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--analyze"});
+    });
+    REQUIRE(suggest_missing_analyze.exit_code == 2);
+    REQUIRE(suggest_missing_analyze.stderr_text.find("--analyze requires a value") !=
+            std::string::npos);
+
+    auto suggest_missing_alternative_value = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--alternative"});
+    });
+    REQUIRE(suggest_missing_alternative_value.exit_code == 2);
+    REQUIRE(suggest_missing_alternative_value.stderr_text.find("--alternative requires a value") !=
+            std::string::npos);
+
+    auto suggest_missing_format_value = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "filter", "--format"});
+    });
+    REQUIRE(suggest_missing_format_value.exit_code == 2);
+    REQUIRE(suggest_missing_format_value.stderr_text.find("--format requires a value") !=
+            std::string::npos);
+
     auto suggest_bad_format = run_in_project(tmp.path, [&] {
         return cmd_suggest({"--description", "filter", "--format", "text"});
     });
     REQUIRE(suggest_bad_format.exit_code == 2);
     REQUIRE(suggest_bad_format.stderr_text.find("--format must be json") != std::string::npos);
+
+    auto suggest_unknown_option = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--verbose"});
+    });
+    REQUIRE(suggest_unknown_option.exit_code == 2);
+    REQUIRE(suggest_unknown_option.stderr_text.find("Unknown suggest option") != std::string::npos);
 
     auto suggest_unexpected_arg = run_in_project(tmp.path, [&] {
         return cmd_suggest({"filter"});
@@ -634,6 +661,18 @@ TEST_CASE("cmd_update reports no-op and missing-registry states",
     });
     REQUIRE(unknown_update_flag.exit_code == 2);
     REQUIRE(unknown_update_flag.stderr_text.find("Unknown update option") != std::string::npos);
+
+    auto update_apply = run_in_project(tmp.path, [&] {
+        return cmd_update({"--apply"});
+    });
+    REQUIRE(update_apply.exit_code == 1);
+    REQUIRE(update_apply.stderr_text.find("Package registry not found") != std::string::npos);
+
+    auto update_unexpected_arg = run_in_project(tmp.path, [&] {
+        return cmd_update({"now"});
+    });
+    REQUIRE(update_unexpected_arg.exit_code == 2);
+    REQUIRE(update_unexpected_arg.stderr_text.find("Unexpected update argument") != std::string::npos);
 }
 
 TEST_CASE("cmd_add and cmd_remove stay local on failure and success paths",
@@ -750,12 +789,25 @@ TEST_CASE("cmd_add covers guarded installs and installed-version guards",
     REQUIRE(missing_license_value.stderr_text.find("--accept-license requires a value") !=
             std::string::npos);
 
+    auto missing_license_override_value = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--license-override"});
+    });
+    REQUIRE(missing_license_override_value.exit_code == 2);
+    REQUIRE(missing_license_override_value.stderr_text.find("--license-override requires a value") !=
+            std::string::npos);
+
     auto bad_license_override = run_in_project(tmp.path, [&] {
         return cmd_add({"gpl-filter", "--license-override", "internal"});
     });
     REQUIRE(bad_license_override.exit_code == 2);
     REQUIRE(bad_license_override.stderr_text.find("--license-override must be commercial") !=
             std::string::npos);
+
+    auto unexpected_add_arg = run_in_project(tmp.path, [&] {
+        return cmd_add({"signalsmith-dsp", "extra"});
+    });
+    REQUIRE(unexpected_add_arg.exit_code == 2);
+    REQUIRE(unexpected_add_arg.stderr_text.find("Unexpected add argument") != std::string::npos);
 
     auto unknown_add_flag = run_in_project(tmp.path, [&] {
         return cmd_add({"signalsmith-dsp", "--verbose"});
