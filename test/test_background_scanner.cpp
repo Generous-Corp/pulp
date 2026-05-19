@@ -88,6 +88,32 @@ TEST_CASE("BackgroundScanner: empty worker still completes",
     REQUIRE(final_results.empty());
 }
 
+TEST_CASE("BackgroundScanner: worker may finish without completion callback",
+          "[host][bg-scan][coverage][phase3]") {
+    BackgroundScanner bs;
+    std::atomic<bool> worker_ran{false};
+    std::atomic<int> progress_calls{0};
+
+    REQUIRE(bs.start(
+        [&](const CancelToken& token, const ScanProgressCallback& progress) {
+            REQUIRE_FALSE(token.requested());
+            worker_ran.store(true, std::memory_order_release);
+            if (progress) progress("/fake/no-completion", 1, 1);
+            return std::vector<PluginInfo>{fake_info("NoCompletion", PluginFormat::LV2)};
+        },
+        [&](const std::string&, int scanned, int total) {
+            REQUIRE(scanned == 1);
+            REQUIRE(total == 1);
+            progress_calls.fetch_add(1, std::memory_order_relaxed);
+        },
+        nullptr));
+
+    bs.join();
+    REQUIRE(worker_ran.load(std::memory_order_acquire));
+    REQUIRE(progress_calls.load(std::memory_order_relaxed) == 1);
+    REQUIRE_FALSE(bs.is_running());
+}
+
 TEST_CASE("BackgroundScanner: idle cancel and join are no-ops",
           "[host][bg-scan][coverage]") {
     BackgroundScanner bs;
