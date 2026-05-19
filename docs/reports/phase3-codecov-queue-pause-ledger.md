@@ -11235,3 +11235,38 @@ current at head `5f511a733`, `mergeable: true`, `mergeable_state: blocked`,
 with no failed checks; Linux and Windows hosted lanes remained in progress and
 the macOS sanitizer/local-runner/sandbox plus Android macOS lanes remained
 queued. The batch is clean, local-only, and 32 commits ahead of `origin/main`.
+
+2026-05-19 03:54 PDT: reprioritized PR #2268 after `origin/main` advanced to
+`f51fd8ca4` (`docs: regenerate changelog for v0.146.0 [skip ci]`) and the PR
+base became stale. Merged current `origin/main` into
+`feature/phase3-codecov-rollup-746` cleanly, producing new rollup head
+`a2dba7534`, then validated `git diff --check` and
+`python3 tools/scripts/skill_sync_check.py --mode report`. Pushed the refreshed
+rollup with `PULP_SKIP_PREPUSH=1 PULP_VIA_SHIPYARD=1`; REST now reports #2268
+base `f51fd8ca4`, head `a2dba7534`, `mergeable: true`,
+`mergeable_state: blocked`, open and not draft. New check set started at
+10:53Z; macOS local smoke already completed success, Yoga snapshots are in
+progress, and the remaining lanes are queued. No Namespace CI was used.
+
+2026-05-19 03:54 PDT: rebased local-only
+`feature/phase3-codecov-audio-midi-batch-753` onto current `origin/main`
+`f51fd8ca4` after the #2268 refresh. Rebase completed cleanly and rewrote the
+32 local commits; current top commits are `14a95fee9 test(audio): cover focus
+token self move`, `a13809f71 fix(audio): rebind copied buffer channel
+pointers`, `926beb015 test(runtime): cover empty simd extrema reductions`,
+`0843983cd test(runtime): cover spsc full queue preserves item`, `aed5c4da8
+test(midi): cover nested sysex restart`, `c11b524a2 test(runtime): cover async
+cancellation token`, `ab49e3329 test(runtime): cover async closed writes`,
+`f12671507 test(runtime): cover malformed deflate streams`, `e861e6929
+test(runtime): cover child process cwd failures`, and `1379ed686
+test(runtime): cover launch process failures`. Post-rebase focused validation
+passed: `cmake --build build --target pulp-test-audio-focus pulp-test-audio
+pulp-test-simd pulp-test-sync pulp-test-raw-midi-parser -j4`,
+`./build/test/pulp-test-audio-focus "[audio][focus]"` (37 assertions / 15
+cases), `./build/test/pulp-test-audio "[audio][buffer]"` (593 assertions / 8
+cases), `./build/test/pulp-test-simd "[simd]"` (2929 assertions / 24 cases),
+`./build/test/pulp-test-sync "[runtime][spsc]"` (10 assertions / 1 case),
+`./build/test/pulp-test-raw-midi-parser "[midi][raw_midi_parser]"` (73
+assertions / 12 cases), and `git diff --check`. The batch is clean,
+local-only, and 32 commits ahead of `origin/main`; keep monitoring #2268 first
+before opening another CI-consuming PR.
