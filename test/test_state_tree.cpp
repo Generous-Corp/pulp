@@ -265,6 +265,27 @@ TEST_CASE("StateTree insert reparents children at the requested new index",
     REQUIRE(moved->parent() == new_parent.get());
 }
 
+TEST_CASE("StateTree child insertion listeners observe clamped indexes",
+          "[state][tree][coverage][phase3]") {
+    auto root = StateTree::create("root");
+    std::vector<int> indexes;
+    std::vector<std::string> names;
+
+    root->add_child_added_listener(
+        [&](StateTree&, StateTree& child, int index) {
+            indexes.push_back(index);
+            names.push_back(child.type_name());
+        });
+
+    root->insert_child(-10, StateTree::create("first"));
+    root->insert_child(99, StateTree::create("last"));
+
+    REQUIRE(indexes == std::vector<int>{0, 1});
+    REQUIRE(names == std::vector<std::string>{"first", "last"});
+    REQUIRE(root->child(0)->type_name() == "first");
+    REQUIRE(root->child(1)->type_name() == "last");
+}
+
 // ── Listeners ───────────────────────────────────────────────────────────
 
 TEST_CASE("StateTree property change listener", "[state][tree]") {
