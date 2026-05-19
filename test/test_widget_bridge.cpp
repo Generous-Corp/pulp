@@ -86,6 +86,53 @@ TEST_CASE("WidgetBridge creates knob from JS", "[view][bridge]") {
     REQUIRE(dynamic_cast<Knob*>(w) != nullptr);
 }
 
+// Phase 0b: setAnchor() bridge call binds an anchor to a live widget so
+// the inspector can key tweaks back to the originating source element.
+TEST_CASE("WidgetBridge setAnchor binds the anchor to the live widget",
+          "[view][bridge][anchor]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(
+        "createKnob('gain', 10, 10, 48, 48);"
+        "setAnchor('gain', 'figma:0:42');"
+    );
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->anchor_id() == "figma:0:42");
+}
+
+TEST_CASE("WidgetBridge setAnchor is a silent no-op on unknown widget id",
+          "[view][bridge][anchor]") {
+    // Mirror the pattern used by every other property setter — silent
+    // no-op on unmounted ids. Avoids load-order coupling between
+    // setAnchor() and createX().
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Should not throw / crash. No assertion required beyond the
+    // absence of exceptions; the run finishing cleanly is the test.
+    bridge.load_script("setAnchor('nope', 'figma:0:1');");
+    REQUIRE(bridge.widget("nope") == nullptr);
+}
+
+TEST_CASE("View::anchor_id() defaults to empty for non-imported views",
+          "[view][anchor]") {
+    View v;
+    REQUIRE(v.anchor_id().empty());
+    v.set_anchor_id("figma:0:99");
+    REQUIRE(v.anchor_id() == "figma:0:99");
+    v.set_anchor_id("");
+    REQUIRE(v.anchor_id().empty());
+}
+
 TEST_CASE("WidgetBridge creates fader from JS", "[view][bridge]") {
     ScriptEngine engine;
     View root;
