@@ -162,7 +162,12 @@ build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE 
 # or by raising the threshold back to 1.
 backend  = "cloud"
 platform = "macos-arm64"
-workflow = "build"
+# Must be the workflow filename, not display name. `gh run list
+# --workflow build` returns no matches (gh requires `.yml` suffix or
+# the workflow's display name). Discovered when shipping PR #2295 —
+# `shipyard ship` failed with "could not find any workflows named
+# build" until this was changed from "build" to "build.yml".
+workflow = "build.yml"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
 # git history for context. Kept at 1h because Namespace cold-start
 # + cache-miss cases still run long.
@@ -187,7 +192,9 @@ timeout_secs = 3600
 
 [cloud]
 provider   = "namespace"
-workflow   = "build"
+# Same gh-CLI lookup requirement as [targets.mac].workflow above —
+# filename, not display name.
+workflow   = "build.yml"
 repository = "danielraffel/pulp"
 
 # ── Merge gating ───────────────────────────────────────────────────────────
