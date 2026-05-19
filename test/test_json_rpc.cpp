@@ -946,3 +946,37 @@ TEST_CASE("JsonRpcPeer consumes responses for requests without callbacks",
     REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
     REQUIRE(result == R"("ok")");
 }
+
+TEST_CASE("JsonRpcPeer escapes outbound method and notification names",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    const std::string request_name = R"(quote"slash\method)";
+    const std::string notification_name = R"(notify"slash\event)";
+
+    server.register_method(request_name, [](std::string_view params) {
+        REQUIRE(params.find(R"("ok")") != std::string_view::npos);
+        REQUIRE(params.find("true") != std::string_view::npos);
+        return JsonRpcResult::ok(R"("escaped")");
+    });
+
+    std::string notification_params = "unset";
+    server.on_notification(notification_name, [&](std::string_view params) {
+        notification_params = std::string(params);
+    });
+
+    std::atomic<int> callbacks{0};
+    std::string result;
+    REQUIRE(client.send_request(request_name, R"({"ok":true})",
+                                [&](const JsonRpcResult& response) {
+        result = response.result_json;
+        callbacks.fetch_add(1);
+    }));
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(result == R"("escaped")");
+
+    REQUIRE(client.notify(notification_name, R"([1])"));
+    REQUIRE(wait_until([&] { return notification_params == "[1]"; }));
+}
