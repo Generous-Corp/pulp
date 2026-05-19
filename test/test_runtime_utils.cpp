@@ -738,6 +738,22 @@ TEST_CASE("run_process captures stderr separately",
     REQUIRE(result->stderr_output.find("bad-news") != std::string::npos);
 }
 
+TEST_CASE("run_process captures stdout and stderr from one child",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    auto result = run_process("powershell",
+        {"-NoProfile", "-Command",
+         "Write-Output 'out-line'; [Console]::Error.WriteLine('err-line'); exit 3"});
+#else
+    auto result = run_process("/bin/sh",
+        {"-c", "printf out-line; printf err-line >&2; exit 3"});
+#endif
+    REQUIRE(result.has_value());
+    REQUIRE(result->exit_code == 3);
+    REQUIRE(result->stdout_output.find("out-line") != std::string::npos);
+    REQUIRE(result->stderr_output.find("err-line") != std::string::npos);
+}
+
 TEST_CASE("run_process honors working directory and preserves spaced arguments",
           "[runtime][child_process][coverage][phase3]") {
     const auto dir = std::filesystem::temp_directory_path()
