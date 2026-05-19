@@ -269,6 +269,32 @@ TEST_CASE("JsonRpcPeer preserves string request ids and omits missing params",
     REQUIRE(captured_params.empty());
 }
 
+TEST_CASE("JsonRpcPeer destruction clears the channel message callback",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string reply;
+    pair.first->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    {
+        JsonRpcPeer server(*pair.second);
+        server.register_method("ping", [](std::string_view) {
+            return JsonRpcResult::ok(R"("pong")");
+        });
+
+        REQUIRE(pair.first->send_text(
+            R"json({"jsonrpc":"2.0","id":1,"method":"ping"})json"));
+        REQUIRE(reply.find("pong") != std::string::npos);
+    }
+
+    reply.clear();
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":2,"method":"ping"})json"));
+    REQUIRE(reply.empty());
+}
+
 TEST_CASE("JsonRpcPeer serializes handler errors and exceptions", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
