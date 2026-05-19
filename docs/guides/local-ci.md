@@ -296,8 +296,9 @@ The watcher is **safe to run alongside the overflow probe in `build.yml`** — t
 ### Self-hosted runner operations: prevent, recover, maintain
 
 Shipyard v0.55.0+ is the minimum pin for the full self-hosted-runner
-operational toolkit, and Pulp pins v0.56.2+ so rescue, update, and
-`shipyard wait pr` have REST fallback paths when GraphQL is rate-limited. The
+operational toolkit, and Pulp pins v0.57.0+ so rescue, update, and
+`shipyard wait pr` have REST fallback paths when GraphQL is rate-limited,
+plus the `#266` env-var handoff fix and sha-gated 405 merge retry. The
 commands are discoverable from `shipyard --help` and replace the legacy
 `planning/scripts/runner-watchdog.sh` + manual reinstall workflow.
 
@@ -315,11 +316,12 @@ shipyard runner watch --kill-hung-workers # implies --fix; pair with launchd/sys
 # Keep the installed Shipyard CLI current
 shipyard update --check --json            # report installed vs available
 shipyard update                           # apply latest stable
-shipyard update --to v0.56.2              # pin or roll back to Pulp's minimum
+shipyard update --to v0.57.0              # pin or roll back to Pulp's minimum
 shipyard update --dry-run                 # plan only
 
 # Wait after handoff/rescue without depending solely on GraphQL
-shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
+shipyard wait pr <PR> --state green       # REST fallback (added v0.56.2,
+                                          # hardened in v0.57.0 PR #302)
 ```
 
 ### GraphQL quota fallback for PR sweeps
