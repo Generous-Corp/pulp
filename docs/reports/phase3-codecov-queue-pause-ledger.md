@@ -9246,3 +9246,34 @@ build/project/pr Phase 3 filters (50 assertions in 4 test cases); and
 `git diff --check`. Pushed #2292 fixup with `PULP_SKIP_PREPUSH=1
 PULP_VIA_SHIPYARD=1` because the local pre-push diff-cover path still fails
 on the fresh FetchContent `mbedtls` `v3.6.2` checkout.
+
+2026-05-18 18:35 PDT: completed the next large held coverage batch
+`feature/phase3-codecov-batch-749` at 24 local commits ahead of
+`origin/main` (`4ddea4399`). Scope covers runtime/state/events hardening and
+coverage: range endpoint clamping, custom expression arity, JSON-RPC method
+validation, null message-channel memory sends, action broadcaster mutation,
+dynamic-library missing symbols, empty C-string copies, undo no-op/preapplied
+transactions, SPSC move ordering, moved scope guards, null base64 inputs,
+mapped-file self move, empty action callbacks, async stream null writes,
+stream/network-stream null buffers, cached property listener cleanup,
+StateTreeSynchroniser negative child indexes, BigInteger leading-zero parsing,
+license leading whitespace, properties numeric trailing text rejection, i18n
+multi-digit placeholders, and text-diff terminal-newline parity. Broad focused
+local validation passed after rebase and final commits: `cmake --build build
+--target pulp-test-stream pulp-test-network-stream pulp-test-state-tree
+pulp-test-license pulp-test-properties pulp-test-i18n pulp-test-runtime-utils
+pulp-test-runtime pulp-test-undo-manager pulp-test-events-async-helpers
+pulp-test-async-stream pulp-test-json-rpc pulp-test-memory-message-channel`;
+then the affected Catch2 filters across those binaries, including
+`[stream][coverage][phase3]`, `[network_stream][coverage][phase3]`,
+`[state][cached][coverage][phase3]`, `[state][sync][coverage][phase3]`,
+`[crypto][bigint][coverage][phase3]`, `[crypto][license][coverage][phase3]`,
+`[state][properties]`, `[runtime][i18n][coverage][phase3]`,
+`[runtime][text-diff][coverage][phase3]`, `[runtime][range]`,
+`[runtime][expression]`, `[runtime][base64]`, `[runtime][mmap]`,
+`[runtime][dynlib]`, `[runtime][spsc]`, `[runtime][scope_guard]`,
+`[runtime][system]`, `[state][undo]`,
+`[events][async_updater][action_broadcaster]`, `[async_stream]`,
+`[json_rpc]`, `[runtime][message_channel]`, plus `git diff --check`. Next
+action: submit as one large Shipyard/GitHub PR and monitor alongside #2268,
+#2272, and #2292; no empty rerun commits.
