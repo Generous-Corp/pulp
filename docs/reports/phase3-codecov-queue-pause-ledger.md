@@ -9599,3 +9599,14 @@ move-assignment keeps the subscription"` (3 assertions / 1 case),
 `./build/test/pulp-test-state "[state][listener][token][coverage][phase3]"`
 (3 assertions / 1 case), and `git diff --check`. The new batch now has 2
 local coverage commits; continue accumulating before opening a PR.
+
+2026-05-18 22:39 PDT: added `430ef07b4` (`test(state): cover empty store
+serialization`) to `feature/phase3-codecov-runtime-state-batch-751`. This
+covers the minimum valid `StateStore::serialize()` frame for a store with zero
+parameters, successful deserialization of that 16-byte frame, and rejection of
+the one-byte-short variant. Focused local validation passed: `cmake --build
+build --target pulp-test-state`, `./build/test/pulp-test-state "StateStore
+empty serialization round-trips as a minimum frame"` (6 assertions / 1 case),
+`./build/test/pulp-test-state "[state][serialize][coverage][phase3]"`
+(6 assertions / 1 case), and `git diff --check`. The new batch now has 3
+local coverage commits; continue accumulating before opening a PR.
