@@ -314,6 +314,18 @@ TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone"
     REQUIRE(padded[5] == '?');
 }
 
+TEST_CASE("Runtime C string copy writes terminator for empty sources",
+          "[runtime][system][coverage][phase3]") {
+    std::array<char, 4> buffer{'x', 'y', 'z', 'w'};
+
+    copy_c_string(buffer.data(), buffer.size(), "");
+
+    REQUIRE(buffer[0] == '\0');
+    REQUIRE(buffer[1] == 'y');
+    REQUIRE(buffer[2] == 'z');
+    REQUIRE(buffer[3] == 'w');
+}
+
 TEST_CASE("Runtime C string copy respects string_view length with embedded nulls",
           "[runtime][system][codecov]") {
     std::array<char, 5> buffer{'?', '?', '?', '?', '?'};
