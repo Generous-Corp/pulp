@@ -700,6 +700,39 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+### Pre-Push Gates Check
+
+`tools/scripts/gates.sh` is the on-demand runner for the cheap
+sub-second gates the pre-push hook also runs (skill-sync,
+version-bump, compat-sync, deps-audit). It does NOT run the slow
+diff-cover lane. Use it before `git push` when you want a fast safety
+net independent of the git hook. Named to align with Shipyard's
+planned `shipyard gates` subcommand
+(planning/2026-05-19-shipyard-preflight-upstream-proposal.md).
+
+```bash
+tools/scripts/gates.sh                 # uses origin/main as base
+tools/scripts/gates.sh main            # custom base
+```
+
+**Bypass priority — reach for the surgical knob first.** The 2026-05-18
+PR #2374 lesson: `PULP_SKIP_PREPUSH=1` on a brand-new commit (not a
+rebase) skipped skill-sync, the missed SKILL.md update caught the PR
+in CI ~20 minutes later, and burned a roundtrip. Pick the bypass that
+maps to the one gate you genuinely need to skip, not the nuclear
+"skip everything" knob:
+
+| When you need to                          | Use (surgical)                                  | Avoid (nuclear)                  |
+|-------------------------------------------|-------------------------------------------------|----------------------------------|
+| Skip only diff-coverage (slow, flaky)     | `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push`    | `PULP_SKIP_PREPUSH=1 git push`   |
+| Demote all gates to advisory              | `PULP_DISABLE_PREPUSH_GATES=1 git push`         | `PULP_SKIP_PREPUSH=1 git push`   |
+| Skip skill-sync for a single commit       | `Skill-Update: skip skill=<name> reason="…"` trailer | `PULP_SKIP_PREPUSH=1 git push`   |
+| Skip version-bump for a single commit     | `Version-Bump: skip reason="…"` trailer         | `PULP_SKIP_PREPUSH=1 git push`   |
+| Force-push after rebase (gates ran cleanly on pre-rebase content) | `PULP_SKIP_PREPUSH=1 git push --force-with-lease` (legitimate nuclear use) | — |
+
+If `gates.sh` fails, fix the listed gate and re-run — don't reach
+for `PULP_SKIP_PREPUSH=1` unless you're in the rebase case above.
+
 ---
 
 ## RepoPrompt Usage

@@ -1326,6 +1326,18 @@ use `CMAKE_CURRENT_LIST_DIR`. The two existing helpers paths
 Locally:
 
 - `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs all three scripts advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `tools/scripts/gates.sh` — on-demand runner for JUST the cheap gates (skill-sync + version-bump + compat-sync + deps-audit). Runs in ~1 second, exits non-zero on any failure with a one-liner pointing at the right surgical bypass. Use it before `git push` when you've made changes that might touch mapped paths but you don't want to wait for the pre-push hook OR the 20-minute CI roundtrip. Independent of the git hook (no install step needed). Named to align with Shipyard's planned `shipyard gates` subcommand (see `planning/2026-05-19-shipyard-preflight-upstream-proposal.md`); avoids collision with Shipyard's existing `preflight` namespace (SSH backend reachability probes).
+
+**Bypass-priority cheat sheet** — reach for the surgical knob first; the nuclear one masks fast checks too:
+
+| Symptom                                  | Surgical bypass                              | Nuclear bypass (avoid)        |
+|------------------------------------------|----------------------------------------------|-------------------------------|
+| `diff-cover` is the only failing gate    | `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push` | `PULP_SKIP_PREPUSH=1 git push` |
+| skill-sync / version-bump / compat-sync  | fix the gate, OR add the documented trailer (`Skill-Update: skip …`, `Version-Bump: skip …`, `Compat-Update: skip …`) on the tip commit | `PULP_SKIP_PREPUSH=1 git push` |
+| Rebase race after force-push (gates already ran cleanly on the pre-rebase tip) | `PULP_SKIP_PREPUSH=1 git push --force-with-lease` (the legitimate use of the nuclear bypass — gates already passed on the same content) | — |
+| All gates advisory, don't fail my push   | `PULP_DISABLE_PREPUSH_GATES=1 git push`      | `PULP_SKIP_PREPUSH=1 git push` |
+
+The 2026-05-18 Pulp #2374 lesson: `PULP_SKIP_PREPUSH=1` on a NEW commit (not a rebase) skipped skill-sync, the missed SKILL.md update caught the PR in CI ~20 minutes later, and burned a CI roundtrip. Running `tools/scripts/gates.sh` before `git push` would have surfaced it in ~200ms.
 
 **Gotcha:** changing anything under `.github/workflows/**`, `tools/shipyard.toml`, `.shipyard/**`, `.githooks/**`, `tools/install-shipyard.sh`, or `tools/scripts/install-githooks.sh` triggers the skill-sync gate for the `ci` skill — keep this file in sync when those paths move. The map lives at `tools/scripts/skill_path_map.json`.
 
