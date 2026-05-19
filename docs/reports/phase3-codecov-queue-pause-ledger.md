@@ -11107,3 +11107,18 @@ was green, Windows/macOS hosted lanes were still running or queued, and
 were still queued. Keep #2268 first and continue local-only accumulation until
 that PR is actionable or green. The batch is clean, local-only, and 25
 coverage commits ahead of `origin/main`.
+
+2026-05-19 03:22 PDT: added `e7c458f01` (`test(runtime): cover async closed
+writes`) to local-only `feature/phase3-codecov-audio-midi-batch-753`. This
+touches only `test/test_async_stream.cpp` and covers the `AsyncStream::write_async`
+path where the underlying stream is already closed before the worker starts:
+the write completes immediately with `StreamError::Closed` and leaves no
+pending bytes. Focused local validation passed:
+`cmake --build build --target pulp-test-async-stream -j4`,
+`./build/test/pulp-test-async-stream "[async_stream]"` (59 assertions / 13
+cases), and `git diff --check`. PR #2268 remained current at head
+`5f511a733`, `mergeable_state: blocked`, with no failed checks; `macOS
+(ARM64) [github-hosted]` completed green and `Linux (x64) [github-hosted]`
+started, while macOS sanitizer/local-runner lanes and the macOS sandbox/android
+lanes remained queued. The batch is clean, local-only, and 26 coverage commits
+ahead of `origin/main`.
