@@ -790,6 +790,27 @@ TEST_CASE("ObservableValue remove listener", "[state][observable]") {
     REQUIRE(count == 1);  // Listener removed
 }
 
+TEST_CASE("ObservableValue removing a missing listener keeps active listeners",
+          "[state][observable][coverage][phase3]") {
+    ObservableValue<int> val(1);
+    int old_value = 0;
+    int new_value = 0;
+    int count = 0;
+
+    val.add_listener([&](const int& old_val, const int& next_val) {
+        old_value = old_val;
+        new_value = next_val;
+        ++count;
+    });
+
+    val.remove_listener(999);
+    val.set(2);
+
+    REQUIRE(old_value == 1);
+    REQUIRE(new_value == 2);
+    REQUIRE(count == 1);
+}
+
 TEST_CASE("ObservableValue assignment operator emits one change",
           "[state][observable][issue-641]") {
     ObservableValue<int> val(1);
