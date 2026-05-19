@@ -10232,3 +10232,24 @@ fields"` (7 assertions / 1 case), `./build/test/pulp-test-json-rpc
 "[json_rpc][coverage][phase3]"` (46 assertions / 8 cases), and `git diff
 --check`. The batch now has 14 local coverage commits plus main merges;
 continue accumulating before opening a PR.
+
+2026-05-18 23:09 PDT: resolved the two outstanding GitHub review threads on PR
+#2268 after confirming both findings were addressed by `f939845d3` and replied
+to in-thread. The branch already contains the Namespace/macOS Skia guard from
+`d81c071` (`git merge-base --is-ancestor d81c071 HEAD` returned 0), and
+`examples/ui-preview/main.cpp` already gates `--font-probe` and
+`probe_font_glyph()` behind `PULP_HAS_SKIA`, so no release-build patch was
+needed on #2268. REST showed head
+`1c37adf456e0e80457f2e8292bfb1ace98c05ab8`; checks were queued, not failing.
+
+2026-05-18 23:09 PDT: added `d9f5b3813` (`test(runtime): cover child process
+dual output`) to `feature/phase3-codecov-runtime-state-batch-752`. This covers
+the runtime child-process poll loop when one child writes both stdout and
+stderr, asserting the two pipe outputs and non-zero exit code are captured from
+the same invocation. Focused local validation passed: `cmake --build build
+--target pulp-test-runtime-utils -j4`, `./build/test/pulp-test-runtime-utils
+"run_process captures stdout and stderr from one child"` (4 assertions / 1
+case), `./build/test/pulp-test-runtime-utils
+"[runtime][child_process][coverage][phase3]"` (14 assertions / 6 cases), and
+`git diff --check`. The batch now has 15 local coverage commits plus main
+merges; continue accumulating before opening a PR.
