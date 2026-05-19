@@ -9792,3 +9792,14 @@ null properties"` (5 assertions / 1 case), `./build/test/pulp-test-state-tree
 "[state][tree][json][coverage][phase3]"` (5 assertions / 1 case), and `git
 diff --check`. The batch now has 16 local coverage commits; continue
 accumulating before opening a PR.
+
+2026-05-19 00:07 PDT: added `c9afb5618` (`test(state): cover clamped child
+insertion callbacks`) to `feature/phase3-codecov-runtime-state-batch-751`.
+This covers `StateTree::insert_child()` listener notification after out-of-range
+indexes are clamped, asserting child-added listeners receive the final insertion
+indexes and child names. Focused local validation passed: `cmake --build build
+--target pulp-test-state-tree`, `./build/test/pulp-test-state-tree "StateTree
+child insertion listeners observe clamped indexes"` (4 assertions / 1 case),
+`./build/test/pulp-test-state-tree "[state][tree][coverage][phase3]"` (17
+assertions / 3 cases), and `git diff --check`. The batch now has 17 local
+coverage commits; continue accumulating before opening a PR.
