@@ -126,6 +126,18 @@ TEST_CASE("i18n argument substitution applies later indexes after earlier replac
     REQUIRE(strings.translate("nested", {"{1}", "done"}) == "done done");
 }
 
+TEST_CASE("i18n argument substitution handles multi-digit indexes literally",
+          "[runtime][i18n][coverage][phase3]") {
+    LocalisedStrings strings;
+    strings.add("many", "{9}:{10}:{0}");
+    std::vector<std::string> args = {
+        "zero", "one", "two", "three", "four", "five",
+        "six", "seven", "eight", "nine", "ten",
+    };
+
+    REQUIRE(strings.translate("many", args) == "nine:ten:zero");
+}
+
 TEST_CASE("i18n clear removes all translations", "[runtime][i18n]") {
     LocalisedStrings strings;
     strings.add("a", "1");
