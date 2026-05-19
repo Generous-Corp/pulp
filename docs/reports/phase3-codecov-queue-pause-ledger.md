@@ -10525,16 +10525,15 @@ has 26 local coverage commits plus main merges and remains current with
 2026-05-19 00:46 PDT: started
 `feature/phase3-codecov-audio-midi-batch-753` from current `origin/main`,
 fast-forwarded through `2644adbb3` (`docs: regenerate changelog for v0.137.0
-[skip ci]`), and added `9417253ab` (`test(midi): cover MPE zone disabled
-layouts`). This covers `MpeZone::contains_channel` for disabled lower/upper
-zones and non-standard manager layouts without changing production code.
-Focused local validation passed in the fresh worktree after configure:
-`cmake --build build --target pulp-test-mpe-buffer -j4`,
-`./build/test/pulp-test-mpe-buffer "MpeZone rejects disabled and non-standard
-manager layouts"` (8 assertions / 1 case),
-`./build/test/pulp-test-mpe-buffer "[midi][mpe]"` (94 assertions / 12 cases),
-and `git diff --check`. The branch is local-only, ahead of its upstream base
-by 1 commit and behind latest `origin/main` by 5 commits; do not push/open it
+[skip ci]`), and added `5eedec1f3` (`test(midi): cover MPE zone disabled
+layouts`; originally `9417253ab` before rebasing onto `cbb56045e`). This
+covers `MpeZone::contains_channel` for disabled lower/upper zones and
+non-standard manager layouts without changing production code. Focused local
+validation passed in the fresh worktree after configure: `cmake --build build
+--target pulp-test-mpe-buffer -j4`, `./build/test/pulp-test-mpe-buffer
+"MpeZone rejects disabled and non-standard manager layouts"` (8 assertions / 1
+case), `./build/test/pulp-test-mpe-buffer "[midi][mpe]"` (94 assertions / 12
+cases), and `git diff --check`. The branch is local-only; do not push/open it
 while #2268 is still blocked.
 
 2026-05-19 00:46 PDT: rechecked PR #2268. Head remains
@@ -10548,3 +10547,17 @@ cancelled with `gh api -X POST .../cancel`. Runner inventory at 07:46 UTC
 showed no `namespace-profile-generouscorp-macos` runner online and only
 `Daniels-MacBook-Pro` online/busy, so this matches the operator-escalation
 condition described in the Namespace hygiene handoff.
+
+2026-05-19 00:52 PDT: rebased local-only
+`feature/phase3-codecov-audio-midi-batch-753` onto current `origin/main`
+(`cbb56045e`) and added `0807028a8` (`test(midi): cover reserved
+running-status realtime bytes`). This covers the `RunningStatusParser`
+real-time pass-through branch for reserved `0xF9` and `0xFD` bytes, asserting
+they are emitted while preserving the active note-on running status for the
+following data bytes. Focused local validation passed:
+`cmake --build build --target pulp-test-running-status -j4`,
+`./build/test/pulp-test-running-status "reserved real-time bytes preserve
+running status"` (11 assertions / 1 case),
+`./build/test/pulp-test-running-status "[midi][running-status]"` (93
+assertions / 20 cases), and `git diff --check`. The branch is local-only and
+ahead of `origin/main` by 2 coverage commits; keep it queued behind #2268.
