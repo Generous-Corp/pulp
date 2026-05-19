@@ -1910,6 +1910,15 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-tweak-store test_tweak_store.cpp)
     target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-tweak-store)
+
+    # Phase 5.3: editor URI plumbing for the future source-jump action.
+    # Pure config / format-helper / protocol — no overlay / GPU surface,
+    # but lives under the same PULP_ENABLE_GPU guard as the rest of
+    # pulp-inspect's tests so it links against the same library.
+    # planning/2026-05-19-inspector-phase5-source-jump-spike.md
+    add_executable(pulp-test-editor-url test_editor_url.cpp)
+    target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-editor-url)
 endif()
 
 # Widget bridge tests

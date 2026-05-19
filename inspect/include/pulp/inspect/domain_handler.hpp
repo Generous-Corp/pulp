@@ -1,6 +1,7 @@
 // domain_handler.hpp — Dispatches inspector protocol requests to data sources
 #pragma once
 
+#include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
 
 namespace pulp::view { class View; }
@@ -40,6 +41,14 @@ public:
     /// init; if unset, the toggle silently no-ops.
     void set_dirty_tracker(render::DirtyTracker* dirty) { dirty_ = dirty; }
 
+    // ── Inspector-wide config ───────────────────────────────────────
+    /// Replace the runtime config (Phase 5.3: editor_url_template).
+    /// Mutating accessors below (e.g. Inspector.setEditorUrlTemplate)
+    /// update this in place.
+    void set_config(InspectorConfig config) { config_ = std::move(config); }
+    const InspectorConfig& config() const { return config_; }
+    InspectorConfig& mutable_config() { return config_; }
+
     /// Handle a protocol request. Returns a response message.
     InspectorMessage handle(const InspectorMessage& request);
 
@@ -54,6 +63,7 @@ private:
     render::RenderPassManager* rpm_ = nullptr;
     render::DirtyTracker* dirty_ = nullptr;
     TweakStore* tweak_store_ = nullptr;
+    InspectorConfig config_{};
 
     // Domain handlers
     InspectorMessage handle_inspector(const InspectorMessage& req);

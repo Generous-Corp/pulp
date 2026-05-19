@@ -56,6 +56,12 @@ namespace methods {
     constexpr auto kInspectorLoadTweaks  = "Inspector.loadTweaks";
     constexpr auto kInspectorSaveTweaks  = "Inspector.saveTweaks";
     constexpr auto kInspectorSetAutoSave = "Inspector.setAutoSave";
+    // Phase 5.3: editor URI plumbing for the future source-jump action.
+    // setEditorUrlTemplate validates and stores the template; getEditorUrlTemplate
+    // returns the current effective template plus where it came from
+    // (env / config / default). See pulp/inspect/editor_url.hpp.
+    constexpr auto kInspectorSetEditorUrlTemplate = "Inspector.setEditorUrlTemplate";
+    constexpr auto kInspectorGetEditorUrlTemplate = "Inspector.getEditorUrlTemplate";
 
     // DOM domain
     constexpr auto kDOMGetDocument     = "DOM.getDocument";
