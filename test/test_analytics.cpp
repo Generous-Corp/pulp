@@ -248,6 +248,7 @@ TEST_CASE("FileAnalyticsDestination keeps buffered events when open fails",
     std::string line;
     REQUIRE(std::getline(f, line));
     REQUIRE(line.find("\"event\":\"retry\"") != std::string::npos);
+    f.close();
 
     std::filesystem::remove_all(root);
 }
@@ -377,6 +378,7 @@ TEST_CASE("FileAnalyticsDestination retains buffered events after open failure",
     std::string line;
     REQUIRE(std::getline(f, line));
     REQUIRE(line.find("\"event\":\"queued\"") != std::string::npos);
+    f.close();
 
     std::filesystem::remove(dir);
 }

@@ -631,8 +631,8 @@ TEST_CASE("render_report_json escapes project fields",
     r.cli = parse_semver("0.31.0");
 
     ProjectEntry p;
-    p.path = "/tmp/project\"with\\chars";
-    p.name = "Quoted \"Project\"\nName";
+    p.path = fs::path("project\"with_chars");
+    p.name = "Quoted \"Project\"\\Name\nTail";
     p.sdk = parse_semver("0.31.0");
     r.projects.push_back(p);
 
@@ -643,6 +643,6 @@ TEST_CASE("render_report_json escapes project fields",
 
     REQUIRE(rc == 0);
     auto out = capture.str();
-    REQUIRE(out.find("\"path\": \"/tmp/project\\\"with\\\\chars\"") != std::string::npos);
-    REQUIRE(out.find("\"name\": \"Quoted \\\"Project\\\"\\nName\"") != std::string::npos);
+    REQUIRE(out.find("\"path\": \"project\\\"with_chars\"") != std::string::npos);
+    REQUIRE(out.find("\"name\": \"Quoted \\\"Project\\\"\\\\Name\\nTail\"") != std::string::npos);
 }

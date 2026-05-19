@@ -624,6 +624,7 @@ TEST_CASE("FileStream move construction transfers open handle and closes source"
     std::uint8_t out[sizeof(payload)]{};
     REQUIRE(reader.read(out, sizeof(out)).bytes == sizeof(payload));
     REQUIRE(std::memcmp(out, payload, sizeof(payload)) == 0);
+    reader.close();
 
     std::filesystem::remove(path);
 }

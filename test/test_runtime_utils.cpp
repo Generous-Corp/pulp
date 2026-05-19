@@ -536,10 +536,8 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
 
 #ifdef _WIN32
     auto result = run_process(
-        "powershell",
-        {"-NoProfile", "-Command",
-         "Set-Content -Path marker.txt -Value ok; Write-Output $args[0]",
-         "value with spaces"},
+        "cmd.exe",
+        {"/C", "echo ok> marker.txt && echo value with spaces"},
         dir.string());
 #else
     auto result = run_process(
