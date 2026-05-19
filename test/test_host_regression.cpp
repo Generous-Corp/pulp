@@ -590,6 +590,55 @@ TEST_CASE("ScanOptions progress callback fires at least once per format lane",
     REQUIRE(calls.load() >= 1);
 }
 
+TEST_CASE("PluginScanner progress callback reports hermetic extra-path lanes",
+          "[host][scanner][coverage][phase3]") {
+    ScratchDir scratch("scan-progress-hermetic");
+
+    const std::string ttl_body =
+        "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+        "<http://example.org/hermetic-lv2> a lv2:Plugin .\n";
+    auto lv2 = make_lv2_bundle(scratch.path, "HermeticLv2", ttl_body);
+    auto vst = make_vst3_bundle(scratch.path, "HermeticVst3", "");
+
+    struct ProgressCall {
+        std::string path;
+        int scanned = -1;
+        int total = -1;
+    };
+    std::vector<ProgressCall> calls;
+
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_clap = false;
+    opts.scan_au = true;
+    opts.scan_lv2 = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(scratch.path.string());
+    opts.on_progress = [&](const std::string& path, int scanned, int total) {
+        calls.push_back({path, scanned, total});
+    };
+
+    PluginScanner scanner;
+    auto plugins = scanner.scan(opts);
+
+    REQUIRE(calls.size() == 2);
+    REQUIRE(calls[0].path == scratch.path.string());
+    REQUIRE(calls[0].scanned == 0);
+    REQUIRE(calls[0].total == 0);
+    REQUIRE(calls[1].path == scratch.path.string());
+    REQUIRE(calls[1].scanned == 1);
+    REQUIRE(calls[1].total == 0);
+
+    bool saw_lv2 = false;
+    bool saw_vst = false;
+    for (const auto& p : plugins) {
+        if (p.path == lv2.string()) saw_lv2 = true;
+        if (p.path == vst.string()) saw_vst = true;
+    }
+    REQUIRE(saw_lv2);
+    REQUIRE(saw_vst);
+}
+
 // ── Lifecycle: prepare → process → release on a mock slot ─────────────────
 
 TEST_CASE("PluginSlot lifecycle: prepare toggles prepared, release flips it back",
