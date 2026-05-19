@@ -30,6 +30,12 @@
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace pulp::runtime;
 
 namespace {
@@ -824,6 +830,17 @@ TEST_CASE("launch_process reports failed starts and missing pids",
     SUCCEED("Android reports exec failures via child exit status, not launch failure");
 #endif
     REQUIRE_FALSE(is_process_running(99999999));
+}
+
+TEST_CASE("is_process_running recognizes the current process",
+          "[runtime][child_process][coverage][phase3]") {
+#ifdef _WIN32
+    const int pid = _getpid();
+#else
+    const int pid = static_cast<int>(getpid());
+#endif
+    REQUIRE(pid > 0);
+    REQUIRE(is_process_running(pid));
 }
 
 // ── Base64 ──────────────────────────────────────────────────────────────
