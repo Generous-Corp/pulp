@@ -8,6 +8,11 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
+    # P5-7 follow-up — Events + Pointer-capture (P2b) extracted from
+    # web-compat-element.js. Loaded AFTER the parent so the Element
+    # constructor + prototype are already defined when the extracted
+    # prototype overrides install.
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element-events.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
     # P5-6 first cut — native GPU helpers extracted from
     # web-compat-canvas.js. Loaded AFTER the parent so the
@@ -73,6 +78,7 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element-events.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-gpu.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js

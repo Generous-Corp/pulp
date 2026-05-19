@@ -843,6 +843,11 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);
+    // P5-7 follow-up — Events + Pointer-capture (P2b) extracted from
+    // web-compat-element.js. Must eval AFTER the parent so the Element
+    // constructor + prototype are already defined when the extracted
+    // prototype overrides install.
+    eval_or_throw(engine_, "web_compat_element_events", preludes::web_compat_element_events);
     eval_or_throw(engine_, "web_compat_canvas", preludes::web_compat_canvas);
     // P5-6 first cut — native GPU canvas helpers extracted from
     // web-compat-canvas.js. Must eval AFTER the canvas core so
