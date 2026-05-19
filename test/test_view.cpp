@@ -1305,3 +1305,92 @@ TEST_CASE("LiveConstantEditor toggles visibility and ignores header drags",
     editor.on_mouse_drag({200.0f, 40.0f});
     REQUIRE(registry.get("phase3.live.editor") == Catch::Approx(5.0f));
 }
+
+// Phase 3d (inspector roadmap) — per-component paint timing.
+// View::paint_all() now records nanoseconds spent inside paint() (self)
+// and the recursive children walk (with_children) so the inspector can
+// show per-view cost without adding new instrumentation per query.
+
+// A View subclass whose paint() override does a fixed amount of work
+// so we can assert non-zero timing.
+namespace {
+class CountingPaintView : public pulp::view::View {
+public:
+    void paint(pulp::canvas::Canvas&) override {
+        // A small CPU-bound loop so the steady_clock delta is non-zero
+        // even on fast hardware. ~10k iterations is far below any frame
+        // budget but well above the steady_clock resolution.
+        volatile std::uint32_t acc = 0;
+        for (int i = 0; i < 10000; ++i) acc += static_cast<std::uint32_t>(i);
+        last_acc_ = acc;
+    }
+    std::uint32_t last_acc_ = 0;
+};
+}  // namespace
+
+TEST_CASE("View::last_paint_self_ns reports non-zero after a paint cycle",
+          "[view][paint-timing][phase3d]") {
+    auto v = std::make_unique<CountingPaintView>();
+    v->set_bounds({0, 0, 100, 100});
+
+    REQUIRE(v->last_paint_self_ns() == 0u);
+    REQUIRE(v->last_paint_with_children_ns() == 0u);
+
+    pulp::canvas::RecordingCanvas canvas;
+    v->paint_all(canvas);
+
+    // With work in paint(), both timers must record > 0.
+    REQUIRE(v->last_paint_self_ns() > 0u);
+    REQUIRE(v->last_paint_with_children_ns() >= v->last_paint_self_ns());
+}
+
+TEST_CASE("View::last_paint_with_children_ns covers child cost too",
+          "[view][paint-timing][phase3d]") {
+    // Parent with two CountingPaintView children — parent's
+    // with_children must be >= sum of children's self timings.
+    auto parent = std::make_unique<pulp::view::View>();
+    parent->set_bounds({0, 0, 200, 200});
+
+    auto child_a = std::make_unique<CountingPaintView>();
+    child_a->set_bounds({0, 0, 100, 100});
+    auto* a_ptr = child_a.get();
+    parent->add_child(std::move(child_a));
+
+    auto child_b = std::make_unique<CountingPaintView>();
+    child_b->set_bounds({0, 100, 100, 100});
+    auto* b_ptr = child_b.get();
+    parent->add_child(std::move(child_b));
+
+    pulp::canvas::RecordingCanvas canvas;
+    parent->paint_all(canvas);
+
+    // Parent's own paint() is the no-op base class — self timing is
+    // effectively zero, but it's allowed to be a tiny non-zero blip.
+    // The key invariant: with_children covers the child timing chain.
+    REQUIRE(parent->last_paint_with_children_ns() > 0u);
+    REQUIRE(parent->last_paint_with_children_ns() >=
+            (a_ptr->last_paint_self_ns() + b_ptr->last_paint_self_ns()));
+
+    // And every child must have recorded its own self time too.
+    REQUIRE(a_ptr->last_paint_self_ns() > 0u);
+    REQUIRE(b_ptr->last_paint_self_ns() > 0u);
+}
+
+TEST_CASE("View::last_paint_*_ns updates on every paint cycle",
+          "[view][paint-timing][phase3d]") {
+    // Two paint cycles should produce two recorded samples (the second
+    // overwrites the first — we don't keep history).
+    auto v = std::make_unique<CountingPaintView>();
+    v->set_bounds({0, 0, 100, 100});
+
+    pulp::canvas::RecordingCanvas canvas;
+    v->paint_all(canvas);
+    auto first = v->last_paint_self_ns();
+    REQUIRE(first > 0u);
+
+    v->paint_all(canvas);
+    // Second sample exists and is non-zero. Exact equality with first
+    // is not asserted because steady_clock jitter on fast hardware can
+    // produce different values frame-to-frame.
+    REQUIRE(v->last_paint_self_ns() > 0u);
+}

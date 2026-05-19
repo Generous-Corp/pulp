@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
@@ -142,6 +143,26 @@ public:
 
     // Paint this view and all children into a canvas
     virtual void paint_all(canvas::Canvas& canvas);
+
+    // Phase 3d (inspector roadmap) — last paint cycle's wall-clock cost.
+    // Updated by paint_all() at the end of each paint pass. Exposed so
+    // the inspector property panel can show per-view timing without
+    // adding new instrumentation per query.
+    //
+    //   last_paint_self_ns()         — time spent INSIDE this view's
+    //                                  paint(canvas) override only.
+    //   last_paint_with_children_ns() — time spent INSIDE paint(canvas)
+    //                                  PLUS time recursively painting
+    //                                  every descendant. The
+    //                                  difference (with_children - self)
+    //                                  attributes child cost cleanly.
+    //
+    // Both are 0 until the view has been painted at least once. Updated
+    // every frame; readers see the most recent sample. Storage is two
+    // uint32_t fields per view (cap at ~4s of paint time which is far
+    // beyond any realistic frame budget).
+    std::uint32_t last_paint_self_ns() const { return last_paint_self_ns_; }
+    std::uint32_t last_paint_with_children_ns() const { return last_paint_with_children_ns_; }
 
     // ── Lifecycle (override in subclasses) ────────────────────────────────
 
@@ -1261,6 +1282,10 @@ private:
     // Phase 0b: design-import anchor identity. Empty for views not
     // constructed from an imported tree. See set_anchor_id().
     std::string anchor_id_;
+    // Phase 3d (inspector roadmap): last-paint-cycle timing. Both 0
+    // until paint_all() has executed at least once.
+    std::uint32_t last_paint_self_ns_ = 0;
+    std::uint32_t last_paint_with_children_ns_ = 0;
     AccessRole access_role_ = AccessRole::none;
     std::string access_label_;
     std::string access_value_;

@@ -4,6 +4,8 @@
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <algorithm>
+#include <chrono>
+#include <limits>
 #include <numeric>
 #include <sstream>
 
@@ -465,8 +467,13 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // Widget-specific painting
+    // Widget-specific painting — timed for the inspector property
+    // panel (Phase 3d). Records nanoseconds spent INSIDE this view's
+    // own paint(canvas) override only; the children's recursive cost
+    // is timed separately below so the inspector can attribute cleanly.
+    auto self_t0 = std::chrono::steady_clock::now();
     paint(canvas);
+    auto self_dt = std::chrono::steady_clock::now() - self_t0;
 
     // Paint children — pulp #972. CSS z-index ordering: stable-sort
     // ascending by z_index() so siblings with equal z keep insertion
@@ -476,9 +483,21 @@ void View::paint_all(canvas::Canvas& canvas) {
     // change for legacy plugins. setZIndex() on the JS bridge has
     // existed as a no-op until now; this hooks it up.
     auto paint_order = sorted_children_by_z_index();
+    auto children_t0 = std::chrono::steady_clock::now();
     for (View* child : paint_order) {
         child->paint_all(canvas);
     }
+    auto children_dt = std::chrono::steady_clock::now() - children_t0;
+
+    // Write back the timing samples — saturating at uint32_t max so a
+    // pathological frame doesn't wrap. ~4.29s ceiling, far past any
+    // realistic per-view paint budget.
+    auto self_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(self_dt).count();
+    auto total_ns = self_ns + std::chrono::duration_cast<std::chrono::nanoseconds>(children_dt).count();
+    last_paint_self_ns_ = static_cast<std::uint32_t>(
+        std::min<std::int64_t>(self_ns, std::numeric_limits<std::uint32_t>::max()));
+    last_paint_with_children_ns_ = static_cast<std::uint32_t>(
+        std::min<std::int64_t>(total_ns, std::numeric_limits<std::uint32_t>::max()));
 
     // Inset box shadows paint over the content so the inner darkening
     // shows through children (CSS spec: inset shadows are above the
