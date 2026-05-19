@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01510"></a>
+## [0.151.0] - 2026-05-19
+
+- feat(inspect): Phase 0b PR-C-1 — overlay gesture-tweak emission wiring ([#2363](https://github.com/danielraffel/pulp/pull/2363))
+- feat(inspect): Phase 3f — Alt-hover sibling distance lines ([#2328](https://github.com/danielraffel/pulp/pull/2328))
+- feat(view): Phase 3d — per-component paint timing ([#2338](https://github.com/danielraffel/pulp/pull/2338))
+
 <a id="v01500"></a>
 ## [0.150.0] - 2026-05-19
 
@@ -2128,6 +2135,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.151.0]: https://github.com/danielraffel/pulp/releases/tag/v0.151.0
 [0.150.0]: https://github.com/danielraffel/pulp/releases/tag/v0.150.0
 [0.148.0]: https://github.com/danielraffel/pulp/releases/tag/v0.148.0
 [0.147.0]: https://github.com/danielraffel/pulp/releases/tag/v0.147.0
