@@ -11220,3 +11220,18 @@ and `git diff --check`. PR #2268 remained current at head `5f511a733`,
 and Windows hosted lanes remained in progress while the macOS sanitizer,
 macOS local-runner, macOS sandbox, and Android macOS lanes remained queued.
 The batch is clean, local-only, and 31 commits ahead of `origin/main`.
+
+2026-05-19 03:49 PDT: added `825312ad3` (`test(audio): cover focus token self
+move`) to local-only `feature/phase3-codecov-audio-midi-batch-753`. This
+touches only `test/test_audio_focus.cpp` and covers the move-assignment
+self-guard for `AudioFocusRegistry::Token`, verifying that self move preserves
+the subscription id and keeps callback delivery active until reset. Focused
+local validation passed: `cmake --build build --target pulp-test-audio-focus
+-j4`, `./build/test/pulp-test-audio-focus "[audio][focus]"` (37 assertions /
+15 cases), and `git diff --check`. `shipyard rescue 2268` was attempted first
+because required macOS lanes were queued beyond the CI-skill threshold, but
+GitHub GraphQL was rate-limited; REST polling still worked. PR #2268 remained
+current at head `5f511a733`, `mergeable: true`, `mergeable_state: blocked`,
+with no failed checks; Linux and Windows hosted lanes remained in progress and
+the macOS sanitizer/local-runner/sandbox plus Android macOS lanes remained
+queued. The batch is clean, local-only, and 32 commits ahead of `origin/main`.
