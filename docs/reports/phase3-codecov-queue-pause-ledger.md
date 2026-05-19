@@ -9707,3 +9707,16 @@ pre-applied actions`), `ec078d0da` (`test(state): cover undo zero history
 depth`), and `a8f4e7b51` (`test(runtime): cover mmap self move assignment`).
 Next action remains to keep accumulating related runtime/state coverage before
 opening a PR.
+
+2026-05-18 23:29 PDT: added `d4499966f` (`test(state): cover terminal preset
+parameter values`) to `feature/phase3-codecov-runtime-state-batch-751`. This
+covers the `PresetManager::load()` parser branch where a numeric parameter
+value reaches EOF without a comma, closing brace, or newline delimiter,
+asserting the terminal value is still parsed, other parameters remain
+unchanged, and the preset name/dirty state are updated normally. Focused local
+validation passed: `cmake --build build --target pulp-test-preset-manager`,
+`./build/test/pulp-test-preset-manager "PresetManager load accepts parameter
+values that end at EOF"` (6 assertions / 1 case),
+`./build/test/pulp-test-preset-manager "[state][preset][coverage][phase3]"`
+(21 assertions / 3 cases), and `git diff --check`. The batch now has 10 local
+coverage commits; continue accumulating before opening a PR.
