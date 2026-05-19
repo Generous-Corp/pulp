@@ -10126,3 +10126,16 @@ unknown frame opcodes"` (8 assertions / 1 case),
 "[websocket][frame-kind][coverage][phase3]"` (19 assertions / 2 cases), and
 `git diff --check`. The batch now has 7 local coverage commits plus main
 merges; continue accumulating before opening a PR.
+
+2026-05-18 22:49 PDT: added `206c241ca` (`test(runtime): cover websocket ping
+pong`) to `feature/phase3-codecov-runtime-state-batch-752`. This covers the
+WebSocket reader's ping-control-frame branch by completing a raw client
+handshake, sending a masked ping payload, and asserting the server replies with
+an unmasked pong carrying the same payload. Focused local validation passed:
+`cmake --build build --target pulp-test-websocket-channel -j4`,
+`./build/test/pulp-test-websocket-channel "WebSocketChannel replies to ping
+frames with pong"` (10 assertions / 1 case),
+`./build/test/pulp-test-websocket-channel
+"[websocket][frame-kind][coverage][phase3]"` (29 assertions / 3 cases), and
+`git diff --check`. The batch now has 8 local coverage commits plus main
+merges; continue accumulating before opening a PR.
