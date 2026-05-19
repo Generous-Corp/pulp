@@ -25,6 +25,37 @@ std::optional<uint16_t> parse_port(std::string_view text) {
     return static_cast<uint16_t>(value);
 }
 
+// Companion-track U-8 (planning/2026-05-17-refactor-roadmap-final.md).
+// Consolidates host:port parsing previously duplicated across
+// connect(), create_server(), server.start(), and server.stop().
+//
+// Behavior:
+// - "host:port"  → {host, port}
+// - "port"       → {"", port} (caller supplies the host default)
+// - Returns nullopt on empty input, empty/malformed port, port > 65535,
+//   or trailing garbage in the port (consistent with the prior
+//   parse_port behavior).
+struct SocketEndpoint {
+    std::string host;
+    uint16_t port = 0;
+};
+
+std::optional<SocketEndpoint> parse_socket_endpoint(std::string_view text) {
+    if (text.empty()) return std::nullopt;
+    auto colon = text.find(':');
+    std::optional<uint16_t> port;
+    SocketEndpoint ep;
+    if (colon != std::string_view::npos) {
+        ep.host = std::string(text.substr(0, colon));
+        port = parse_port(text.substr(colon + 1));
+    } else {
+        port = parse_port(text);
+    }
+    if (!port) return std::nullopt;
+    ep.port = *port;
+    return ep;
+}
+
 }  // namespace
 
 // ── Impl ────────────────────────────────────────────────────────────────
@@ -73,20 +104,15 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
     if (transport == IpcTransport::NamedPipe) {
         ok = impl_->pipe.connect_client(name);
     } else {
-        // Parse host:port
-        auto colon = name.find(':');
-        if (colon == std::string_view::npos) {
-            state_.store(IpcState::Error);
-            return false;
-        }
-        std::string host(name.substr(0, colon));
-        auto port = parse_port(name.substr(colon + 1));
-        if (!port) {
+        // connect() requires "host:port" — host alone is meaningless
+        // for a client (no default), so reject endpoints that omit it.
+        auto endpoint = parse_socket_endpoint(name);
+        if (!endpoint || endpoint->host.empty()) {
             state_.store(IpcState::Error);
             return false;
         }
         impl_->socket.create(SocketType::TCP);
-        ok = impl_->socket.connect(host, *port);
+        ok = impl_->socket.connect(endpoint->host, endpoint->port);
     }
 
     if (ok) {
@@ -110,21 +136,18 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
     if (transport == IpcTransport::NamedPipe) {
         ok = impl_->pipe.create_server(name);
     } else {
-        auto colon = name.find(':');
-        std::optional<uint16_t> port;
-        std::string host = "0.0.0.0";
-        if (colon != std::string_view::npos) {
-            host = std::string(name.substr(0, colon));
-            port = parse_port(name.substr(colon + 1));
-        } else {
-            port = parse_port(name);
-        }
-        if (!port) {
+        // Single-client server: host may be omitted, in which case
+        // we bind on all interfaces.
+        auto endpoint = parse_socket_endpoint(name);
+        if (!endpoint) {
             state_.store(IpcState::Error);
             return false;
         }
+        const std::string& host = endpoint->host.empty()
+                                      ? std::string{"0.0.0.0"}
+                                      : endpoint->host;
         impl_->socket.create(SocketType::TCP);
-        if (impl_->socket.bind(host, *port) && impl_->socket.listen(1)) {
+        if (impl_->socket.bind(host, endpoint->port) && impl_->socket.listen(1)) {
             auto client = impl_->socket.accept();
             if (client) {
                 impl_->socket = std::move(*client);
@@ -266,19 +289,15 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
     server_impl_->name = std::string(name);
 
     if (transport == IpcTransport::Socket) {
-        auto colon = name.find(':');
-        std::string host = "0.0.0.0";
-        std::optional<uint16_t> port;
-        if (colon != std::string_view::npos) {
-            host = std::string(name.substr(0, colon));
-            port = parse_port(name.substr(colon + 1));
-        } else {
-            port = parse_port(name);
-        }
-        if (!port) return false;
-
+        // Multi-client listener: host may be omitted, in which case
+        // we bind on all interfaces.
+        auto endpoint = parse_socket_endpoint(name);
+        if (!endpoint) return false;
+        const std::string& host = endpoint->host.empty()
+                                      ? std::string{"0.0.0.0"}
+                                      : endpoint->host;
         server_impl_->listen_socket.create(SocketType::TCP);
-        if (!server_impl_->listen_socket.bind(host, *port)) return false;
+        if (!server_impl_->listen_socket.bind(host, endpoint->port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;
     }
 
@@ -324,21 +343,17 @@ void InterprocessConnectionServer::stop() {
     const bool was_running = running_.exchange(false);
     if (was_running && server_impl_->transport == IpcTransport::Socket &&
         server_impl_->listen_socket.is_open()) {
-        std::string host = "127.0.0.1";
-        std::optional<uint16_t> port;
-        std::string_view name(server_impl_->name);
-        auto colon = name.find(':');
-        if (colon != std::string_view::npos) {
-            host = std::string(name.substr(0, colon));
-            port = parse_port(name.substr(colon + 1));
-        } else {
-            port = parse_port(name);
-        }
-        if (host.empty() || host == "0.0.0.0") host = "127.0.0.1";
-        if (port) {
+        // Wake the accept() blocked in the accept thread by making a
+        // dummy connection to ourselves. The "0.0.0.0" bind address
+        // isn't connectable directly — fall back to loopback.
+        auto endpoint = parse_socket_endpoint(std::string_view(server_impl_->name));
+        if (endpoint) {
+            std::string host = (endpoint->host.empty() || endpoint->host == "0.0.0.0")
+                                   ? std::string{"127.0.0.1"}
+                                   : endpoint->host;
             Socket wake;
             if (wake.create(SocketType::TCP)) {
-                (void)wake.connect(host, *port);
+                (void)wake.connect(host, endpoint->port);
             }
         }
     }
