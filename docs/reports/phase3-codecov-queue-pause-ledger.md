@@ -10253,3 +10253,12 @@ case), `./build/test/pulp-test-runtime-utils
 "[runtime][child_process][coverage][phase3]"` (14 assertions / 6 cases), and
 `git diff --check`. The batch now has 15 local coverage commits plus main
 merges; continue accumulating before opening a PR.
+
+2026-05-18 23:12 PDT: merged current `origin/main` into
+`feature/phase3-codecov-runtime-state-batch-752` with `8bd6e264b` after one
+new main commit landed. The merge was clean and picked up main's canvas filter
+chain test extraction (`test/test_canvas_filter_chain.cpp`). Validation passed:
+`cmake --build build --target pulp-test-canvas -j4`,
+`cmake --build build --target pulp-test-canvas-filter-chain -j4`,
+`./build/test/pulp-test-canvas-filter-chain` (25 assertions / 4 cases), and
+`git diff --check`. No #752 coverage changes were modified by the merge.
