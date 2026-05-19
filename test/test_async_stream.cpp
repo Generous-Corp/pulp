@@ -449,6 +449,23 @@ TEST_CASE("CancellationToken sharing and idempotent cancel", "[async_stream]") {
     REQUIRE_FALSE(other.is_cancelled());
 }
 
+TEST_CASE("AsyncStream cancellation token mirrors stream cancellation",
+          "[async_stream][coverage][phase3]") {
+    auto backing = std::make_unique<TestStream>();
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    auto before = stream.cancellation_token();
+    auto again = stream.cancellation_token();
+    REQUIRE(before.shares(again));
+    REQUIRE_FALSE(before.is_cancelled());
+
+    stream.cancel();
+    REQUIRE(before.is_cancelled());
+    REQUIRE(stream.cancellation_token().is_cancelled());
+}
+
 TEST_CASE("AsyncStream executor routes callbacks off worker", "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
