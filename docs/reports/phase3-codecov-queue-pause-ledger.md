@@ -9921,3 +9921,17 @@ clears the channel message callback"` (4 assertions / 1 case),
 `./build/test/pulp-test-json-rpc "[json_rpc][coverage][phase3]"` (26
 assertions / 5 cases), and `git diff --check`. The batch now has 2 local
 coverage commits; continue accumulating before opening a PR.
+
+2026-05-19 01:20 PDT: added `92b5e7f08` (`test(runtime): cover default
+message channel text send`) to `feature/phase3-codecov-runtime-state-batch-752`.
+This covers the base `MessageChannel::send(std::string_view)` / default
+`send_text()` path for transports that do not distinguish text from binary,
+asserting text bytes delegate through `send(const uint8_t*, size_t)` and return
+that backend's acceptance status. Focused local validation passed: `cmake
+--build build --target pulp-test-memory-message-channel`,
+`./build/test/pulp-test-memory-message-channel "MessageChannel default text
+send uses binary send"` (3 assertions / 1 case),
+`./build/test/pulp-test-memory-message-channel
+"[runtime][message_channel][coverage][phase3]"` (16 assertions / 5 cases),
+and `git diff --check`. The batch now has 3 local coverage commits; continue
+accumulating before opening a PR.
