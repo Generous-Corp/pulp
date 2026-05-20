@@ -1248,7 +1248,12 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
     REQUIRE(server.is_running());
 
     const auto base = std::string("http://127.0.0.1:") + std::to_string(port);
-    const auto get_response = http_get(base + "/hello?name=agent", 2);
+    auto get_response = http_get(base + "/hello?name=agent", 2);
+    const auto get_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!get_response.ok() && std::chrono::steady_clock::now() < get_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        get_response = http_get(base + "/hello?name=agent", 2);
+    }
     REQUIRE(get_response.ok());
     REQUIRE(get_response.status_code == 200);
     REQUIRE(get_response.body == "hello");

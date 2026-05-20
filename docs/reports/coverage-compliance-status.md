@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-30 02:20 EDT
+Last reviewed: 2026-05-20 04:26 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -105,11 +105,20 @@ Use `shipyard pr` as the PR orchestrator. As of 2026-05-20, Namespace
 macOS routing is disabled for cost control; macOS CI runs on the
 self-hosted `pulp-build` runners, while Linux/Windows advisory legs use
 GitHub-hosted runners unless repo variables say otherwise. Do not pass
-`runner_provider=namespace` for Phase 3 coverage PRs.
+`runner_provider=namespace` for Phase 3 coverage PRs, and do not re-run
+stale pre-cutover Namespace jobs. Rebase or push a fresh branch SHA so
+the current workflow and runner labels apply.
 
 Subagents are useful for this loop when their write scopes are
 disjoint. One agent can monitor merge/failure state while other agents
 prepare non-overlapping coverage tranches in separate worktrees.
+
+## Recent Phase 3 Tranches
+
+| Date | Branch | SHA | Scope | Local validation | PR state | Next action |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-05-20 | `feature/phase3-codecov-batch-756` | `35c20f5e0` | Signal helper edges: DelayLine fractional wraparound; LadderFilter reset equivalence and nonpositive buffer no-ops; SVF, WaveShaper, and NoiseGate nonpositive buffer no-ops; Panner equal-power sign/energy invariant. | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`; `cmake --build build --target pulp-test-signal -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-signal "[coverage][phase3-batch756]"`; skill-sync report; version-bump report; `git diff --check`. | Local commit pending PR. | Ship after rebase validation. |
+| 2026-05-20 | `feature/phase3-codecov-batch-755` | `d035c202` merge | Runtime `ScopedNoAlloc` nested-depth and thread-local guard coverage in `pulp-test-runtime-utils`; Shipyard mac target restored to local validation after the Namespace cutover. | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`; `cmake --build build --target pulp-test-runtime-utils -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-runtime-utils "[runtime][scoped_no_alloc]"`; skill-sync report; version-bump report; `git diff --check`. | PR #2473 merged. | None. |
 
 ## Phase 3 Finish Line
 
@@ -148,12 +157,6 @@ remaining misses are concentrated in:
   `widget_bridge.cpp`, and macOS view-host surfaces.
 - `#643`: `cli` / `tools`, especially large command modules and
   low-coverage Python helpers.
-
-## Recent Phase 3 Tranches
-
-| Date | Branch | SHA | Scope | Local validation | PR state | Next action |
-| --- | --- | --- | --- | --- | --- | --- |
-| 2026-05-20 | `feature/phase3-codecov-batch-755` | `062de20e0` | Runtime `ScopedNoAlloc` nested-depth and thread-local guard coverage in `pulp-test-runtime-utils`; Shipyard mac target restored to local validation after the Namespace cutover. | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`; `cmake --build build --target pulp-test-runtime-utils -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-runtime-utils "[runtime][scoped_no_alloc]"`; skill-sync report; version-bump report; `git diff --check`. | PR #2473 opened; pending GitHub queue. | Monitor #2473 required checks and merge on green. |
 - `#645`: `midi` / `signal`, with `signal` close to the 80% tier and
   `midi` still led by platform MIDI shims and MPE tracker paths.
 - `#646`: `render`, now close to the 70% tier and best handled through

@@ -94,6 +94,24 @@ TEST_CASE("DelayLine zero max delay uses a stable single-sample buffer",
     REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
 }
 
+TEST_CASE("DelayLine fractional reads interpolate across wrapped write positions",
+          "[signal][delay][coverage][phase3-batch756]") {
+    DelayLine dl;
+    dl.prepare(3);
+
+    dl.push(10.0f);
+    dl.push(20.0f);
+    dl.push(30.0f);
+    dl.push(40.0f);
+    dl.push(50.0f);
+
+    REQUIRE_THAT(dl.read(0), WithinAbs(50.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(0.5f), WithinAbs(45.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(1.0f), WithinAbs(40.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(1.5f), WithinAbs(35.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(2.0f), WithinAbs(30.0f, 1e-6f));
+}
+
 // ── Gain ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Gain dB conversion", "[signal][gain]") {
@@ -906,6 +924,22 @@ TEST_CASE("SVF covers bandpass notch buffer and reset paths",
     REQUIRE_THAT(after_reset, WithinAbs(0.0f, 1e-6f));
 }
 
+TEST_CASE("SVF ignores nonpositive buffer lengths",
+          "[signal][svf][coverage][phase3-batch756]") {
+    Svf filter;
+    filter.set_sample_rate(48000.0f);
+    filter.set_frequency(1000.0f);
+    filter.set_mode(Svf::Mode::bandpass);
+
+    float samples[] = {0.25f, -0.5f, 0.75f};
+    filter.process(samples, 0);
+    filter.process(samples, -3);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.75f, 1e-6f));
+}
+
 // ── WaveShaper ───────────────────────────────────────────────────────────────
 
 TEST_CASE("WaveShaper tanh clips", "[signal][waveshaper]") {
@@ -935,6 +969,21 @@ TEST_CASE("WaveShaper fold", "[signal][waveshaper]") {
     float out = ws.process(0.75f); // 0.75 * 2 = 1.5, folds to 0.5
     REQUIRE(out > -1.0f);
     REQUIRE(out < 1.0f);
+}
+
+TEST_CASE("WaveShaper handles zero and negative length buffers",
+          "[signal][waveshaper][coverage][phase3-batch756]") {
+    WaveShaper ws;
+    ws.set_curve(WaveShaper::Curve::hard_clip);
+    ws.set_drive(8.0f);
+
+    float samples[] = {0.125f, -0.25f, 0.5f};
+    ws.process(samples, 0);
+    ws.process(samples, -4);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.125f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.25f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.5f, 1e-6f));
 }
 
 // ── NoiseGate ────────────────────────────────────────────────────────────────
@@ -992,6 +1041,21 @@ TEST_CASE("NoiseGate clamps range, instant timing, reset, and buffers",
     REQUIRE_THAT(held.process(1.0f), WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("NoiseGate ignores nonpositive buffer lengths",
+          "[signal][gate][coverage][phase3-batch756]") {
+    NoiseGate gate;
+    gate.set_sample_rate(1000.0f);
+    gate.set_params({-20.0f, 20.0f, 0.0f, 0.0f, -24.0f});
+
+    float samples[] = {0.001f, 1.0f, -0.001f};
+    gate.process(samples, 0);
+    gate.process(samples, -2);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.001f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(-0.001f, 1e-6f));
+}
+
 // ── Panner ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Panner center", "[signal][panner]") {
@@ -1038,6 +1102,27 @@ TEST_CASE("Panner clamps and processes stereo in place",
 
     REQUIRE_THAT(left, WithinAbs(std::sqrt(2.0f), 1e-5f));
     REQUIRE_THAT(right, WithinAbs(-std::sqrt(2.0f), 1e-5f));
+}
+
+TEST_CASE("Panner preserves equal-power mono energy and input sign",
+          "[signal][panner][coverage][phase3-batch756]") {
+    Panner pan;
+    pan.set_pan(-0.25f);
+
+    const auto positive = pan.process(0.8f);
+    const auto negative = pan.process(-0.8f);
+
+    REQUIRE(positive.left > 0.0f);
+    REQUIRE(positive.right > 0.0f);
+    REQUIRE(negative.left < 0.0f);
+    REQUIRE(negative.right < 0.0f);
+
+    const float positive_energy =
+        positive.left * positive.left + positive.right * positive.right;
+    const float negative_energy =
+        negative.left * negative.left + negative.right * negative.right;
+    REQUIRE_THAT(positive_energy, WithinAbs(0.64f, 1e-5f));
+    REQUIRE_THAT(negative_energy, WithinAbs(0.64f, 1e-5f));
 }
 
 // ── Chorus ───────────────────────────────────────────────────────────────────
@@ -1295,6 +1380,53 @@ TEST_CASE("LadderFilter resets buffer state and clamps resonance inputs",
     ladder.process(unchanged, 0);
     REQUIRE_THAT(unchanged[0], WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(unchanged[1], WithinAbs(-0.25f, 1e-6f));
+}
+
+TEST_CASE("LadderFilter reset restores fresh-filter impulse response",
+          "[signal][ladder][coverage][phase3-batch756]") {
+    auto impulse_response = [] {
+        LadderFilter filter;
+        filter.set_sample_rate(48000.0f);
+        filter.set_frequency(1600.0f);
+        filter.set_resonance(0.65f);
+
+        std::array<float, 6> response{};
+        response[0] = filter.process(1.0f);
+        for (std::size_t i = 1; i < response.size(); ++i)
+            response[i] = filter.process(0.0f);
+        return response;
+    };
+
+    const auto fresh = impulse_response();
+
+    LadderFilter reused;
+    reused.set_sample_rate(48000.0f);
+    reused.set_frequency(1600.0f);
+    reused.set_resonance(0.65f);
+    for (int i = 0; i < 16; ++i)
+        reused.process(0.25f);
+
+    reused.reset();
+    REQUIRE_THAT(reused.process(1.0f), WithinAbs(fresh[0], 1e-6f));
+    for (std::size_t i = 1; i < fresh.size(); ++i) {
+        INFO("impulse sample " << i);
+        REQUIRE_THAT(reused.process(0.0f), WithinAbs(fresh[i], 1e-6f));
+    }
+}
+
+TEST_CASE("LadderFilter ignores nonpositive buffer lengths",
+          "[signal][ladder][coverage][phase3-batch756]") {
+    LadderFilter ladder;
+    ladder.set_sample_rate(44100.0f);
+    ladder.set_frequency(1200.0f);
+
+    float samples[] = {0.25f, -0.5f, 0.75f};
+    ladder.process(samples, 0);
+    ladder.process(samples, -8);
+
+    REQUIRE_THAT(samples[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(samples[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(samples[2], WithinAbs(0.75f, 1e-6f));
 }
 
 // ── LinkwitzRiley ────────────────────────────────────────────────────────────
