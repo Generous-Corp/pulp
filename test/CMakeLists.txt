@@ -319,6 +319,7 @@ catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 add_executable(pulp-test-cli-shell-quote
     test_cli_shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
@@ -588,6 +589,7 @@ configure_file(
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
