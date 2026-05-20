@@ -301,6 +301,18 @@ TEST_CASE("register_font_file resolves a custom family through Skia (#1150)",
     auto bold_miss = pulp::canvas::match_registered_typeface(family,
                                                               bold_normal);
     REQUIRE(bold_miss == nullptr);
+
+    // Same guard on the slant axis: the registered face is Upright, so an
+    // Italic request must also miss the registry and let the cascade walk
+    // on to a real system Italic. match_registered_typeface requires the
+    // slant to match exactly — a faux-italic Upright face must never be
+    // returned for an Italic query.
+    SkFontStyle italic_normal{SkFontStyle::kNormal_Weight,
+                              SkFontStyle::kNormal_Width,
+                              SkFontStyle::kItalic_Slant};
+    auto italic_miss = pulp::canvas::match_registered_typeface(family,
+                                                                italic_normal);
+    REQUIRE(italic_miss == nullptr);
 }
 
 TEST_CASE("register_font is idempotent — re-registering the same family is "

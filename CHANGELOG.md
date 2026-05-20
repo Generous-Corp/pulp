@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v017313"></a>
+## [0.173.13] - 2026-05-20
+
+- fix(canvas): match_registered_typeface must miss on off-style requests ([#2471](https://github.com/danielraffel/pulp/pull/2471))
+
 <a id="v017312"></a>
 ## [0.173.12] - 2026-05-20
 

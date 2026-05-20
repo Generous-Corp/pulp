@@ -19,8 +19,10 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cstdlib>
 #include <future>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -241,24 +243,43 @@ sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
         }
     }
 
-    // pulp #2163 — pass 2: best-effort closest match. The pre-#2163
-    // contract returned nullptr here so skia_canvas's cascade could
-    // walk on to matchFamilyStyle (which synthesizes faux bold). That
-    // contract was fine when the registry held one face per family,
-    // but with multi-face registration we now have e.g. Light + Bold +
-    // SemiBold for the same family and refusing to return any of them
-    // for a Regular request would force a system-default fallback that
-    // breaks Unicode coverage (the original tofu symptom). Closest-by-
-    // weight, prefer-matching-slant heuristic — same rule CSS engines
-    // apply in `font-style: italic` selection.
+    // pulp #2163 — pass 2: best-effort closest match, BUT only within a
+    // tight tolerance. The pre-#2163 contract returned nullptr here so
+    // skia_canvas's cascade could walk on to matchFamilyStyle (which
+    // synthesizes faux bold / picks a system Bold). That contract was
+    // fine when the registry held one face per family; #2163 then
+    // loosened it for multi-face registration (e.g. Light + Bold +
+    // SemiBold of the same family) so a Regular request would still
+    // land on a near-neighbour instead of forcing a system-default
+    // fallback that breaks Unicode coverage (the original tofu symptom).
+    //
+    // But an UNBOUNDED closest match overcorrects: a family registered
+    // with ONLY a Regular/Upright face would still satisfy a Bold or
+    // Italic request, hijacking every weight/slant variant of the family
+    // and masking the real system Bold/Italic. That is exactly the
+    // regression the bundled-font matcher above guards against — see the
+    // Codex P2 review on PR #956 and the style-miss assertions in
+    // test_canvas_fonts.cpp ("register_font_file resolves a custom family
+    // through Skia (#1150)").
+    //
+    // The fix keeps the multi-face heuristic but bounds it: a registered
+    // face only substitutes for the requested style when the slant
+    // matches exactly AND the weight gap is within one ~CSS weight step
+    // (200 units — Regular↔SemiBold, Light↔Regular, etc. count as a
+    // genuine match; Regular↔Bold, a 400-unit gap, does not). A request
+    // whose slant or weight is genuinely off-style returns nullptr so the
+    // skia_canvas cascade keeps walking to match_bundled_typeface /
+    // SkFontMgr::matchFamilyStyle.
+    constexpr int kMaxWeightGap = 200;
     sk_sp<SkTypeface> best;
-    int best_score = std::numeric_limits<int>::min();
+    int best_gap = std::numeric_limits<int>::max();
     for (const auto& f : it->second.faces) {
         if (!f) continue;
         SkFontStyle have = f->fontStyle();
-        int score = -std::abs(have.weight() - style.weight())
-                    - (have.slant() == style.slant() ? 0 : 50);
-        if (score > best_score) { best_score = score; best = f; }
+        if (have.slant() != style.slant()) continue;  // slant must match exactly
+        int gap = std::abs(have.weight() - style.weight());
+        if (gap > kMaxWeightGap) continue;             // weight too far off-style
+        if (gap < best_gap) { best_gap = gap; best = f; }
     }
     return best;
 }
