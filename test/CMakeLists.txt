@@ -1500,9 +1500,21 @@ if(PULP_ENABLE_GPU)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
-    # Skia surface test
+    # Skia surface test — also covers SkPicture (.skp) serialization on the
+    # Graphite backend (Phase 6.4 spike). The .skp round-trip cases include
+    # Skia headers directly (SkPicture, SkPictureRecorder, SkSerialProcs,
+    # SkPngEncoder), so this target needs SKIA_INCLUDE_DIRS even though
+    # pulp::render carries Skia privately.
     add_executable(pulp-test-skia-surface test_skia_surface.cpp)
     target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render Catch2::Catch2WithMain)
+    if(PULP_HAS_SKIA)
+        target_compile_definitions(pulp-test-skia-surface PRIVATE PULP_HAS_SKIA=1)
+        target_include_directories(pulp-test-skia-surface PRIVATE ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-test-skia-surface PRIVATE
+                "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+    endif()
     catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # GPU compute tests (Phase 11 feasibility)
