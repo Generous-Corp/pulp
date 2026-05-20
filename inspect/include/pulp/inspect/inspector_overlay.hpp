@@ -6,6 +6,8 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/inspect/editor_url.hpp>
+#include <pulp/inspect/source_jump.hpp>
 
 #include <choc/containers/choc_Value.h>
 
@@ -150,6 +152,22 @@ public:
     // ── Selection ───────────────────────────────────────────────────
     View* selected_view() const { return selected_; }
     View* hovered_view() const { return hovered_; }
+
+    // ── Phase 5.1 — source-jump ─────────────────────────────────────
+    /// The editor-URL config used to format source-jump URLs. The host
+    /// sets this once (mirroring the DomainHandler's config); the `J`
+    /// hotkey and `jump_to_selection_source()` read it. Defaults to the
+    /// built-in VS Code template — see pulp/inspect/editor_url.hpp.
+    void set_config(InspectorConfig config) { config_ = std::move(config); }
+    const InspectorConfig& config() const { return config_; }
+
+    /// Resolve the selected view's authored source location and (unless
+    /// `dry_run`) open the user's editor at that file:line. Returns the
+    /// full result so callers / tests can inspect the formatted URL.
+    /// A graceful no-op (ok == false) when there is no selection or the
+    /// selected view carries no source provenance — the inspector never
+    /// throws or spawns a process for a non-imported view.
+    SourceJumpResult jump_to_selection_source(bool dry_run = false);
 
     // ── Phase 3b — live-editable box-model fields ──────────────────
     //
@@ -304,6 +322,11 @@ private:
     // Phase 0b PR-C-1: optional in-process gesture-tweak persistence.
     // When null, emit_tweak_for_selection() is a no-op.
     TweakStore* tweak_store_ = nullptr;
+
+    // Phase 5.1: editor-URL config for the `J` source-jump hotkey.
+    // Defaults to the built-in VS Code template; the env override
+    // (PULP_INSPECTOR_EDITOR_URL) still applies at jump time.
+    InspectorConfig config_{};
 
     // Phase 3a — drag-handles state. Off by default so the inspector
     // behaves identically to the pre-3a build until the user opts in

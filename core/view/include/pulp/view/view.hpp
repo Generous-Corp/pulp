@@ -358,6 +358,34 @@ public:
     void set_anchor_id(std::string anchor) { anchor_id_ = std::move(anchor); }
     const std::string& anchor_id() const { return anchor_id_; }
 
+    /// Phase 5.1 (inspector source-jump): authored-source location for
+    /// this view. Populated from React's `__source` prop (file name +
+    /// line + column) by the JS bridge's `setSource()` call when the
+    /// view was created by the `@pulp/react` reconciler from a JSX
+    /// element. Empty for user-authored / non-imported views.
+    ///
+    /// `line` / `col` are 1-based when present, mirroring the editor
+    /// URI convention; `0` means "not recorded". The inspector reads
+    /// this to open the user's editor at the originating file:line via
+    /// `Inspector.jumpToSource`.
+    struct SourceLocation {
+        std::string file;   ///< Source file path (as authored).
+        int line = 0;       ///< 1-based line; 0 = unknown.
+        int col = 0;        ///< 1-based column; 0 = unknown.
+
+        bool valid() const { return !file.empty(); }
+    };
+
+    void set_source_loc(SourceLocation loc) { source_loc_ = std::move(loc); }
+    void clear_source_loc() { source_loc_.reset(); }
+    bool has_source_loc() const { return source_loc_.has_value(); }
+    /// Returns the recorded source location, or an empty (`!valid()`)
+    /// SourceLocation when none has been set.
+    const SourceLocation& source_loc() const {
+        static const SourceLocation kEmpty{};
+        return source_loc_ ? *source_loc_ : kEmpty;
+    }
+
     // ── Visual properties (CSS Box Model) ────────────────────────────────
 
     /// Opacity (0.0 = transparent, 1.0 = opaque). Applied as layer alpha.
@@ -1282,6 +1310,9 @@ private:
     // Phase 0b: design-import anchor identity. Empty for views not
     // constructed from an imported tree. See set_anchor_id().
     std::string anchor_id_;
+    // Phase 5.1: authored-source location (JSX file:line:col) from the
+    // React reconciler's `__source` prop. Unset for non-imported views.
+    std::optional<SourceLocation> source_loc_;
     // Phase 3d (inspector roadmap): last-paint-cycle timing. Both 0
     // until paint_all() has executed at least once.
     std::uint32_t last_paint_self_ns_ = 0;

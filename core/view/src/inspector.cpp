@@ -74,6 +74,19 @@ View* ViewInspector::find_by_id(View& root, const std::string& id) {
     return nullptr;
 }
 
+View* ViewInspector::find_by_anchor(View& root, const std::string& anchor) {
+    // An empty anchor never matches — views without a design-import
+    // anchor leave anchor_id() empty, and "" should not resolve to the
+    // first such view. The inspector's source-jump path relies on this.
+    if (anchor.empty()) return nullptr;
+    if (root.anchor_id() == anchor) return &root;
+    for (size_t i = 0; i < root.child_count(); ++i) {
+        if (auto* found = find_by_anchor(*root.child_at(i), anchor))
+            return found;
+    }
+    return nullptr;
+}
+
 size_t ViewInspector::count_views(const View& root) {
     size_t count = 1;
     for (size_t i = 0; i < root.child_count(); ++i)

@@ -2,6 +2,7 @@
 
 #include <pulp/inspect/domain_handler.hpp>
 #include <pulp/inspect/editor_url.hpp>
+#include <pulp/inspect/source_jump.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/inspect/console_capture.hpp>
@@ -24,6 +25,20 @@
 namespace pulp::inspect {
 
 using namespace pulp::view;
+
+// ── Config / wiring ─────────────────────────────────────────────────────────
+
+void DomainHandler::set_config(InspectorConfig config) {
+    config_ = std::move(config);
+    // Keep the overlay's `J`-hotkey config in lockstep with the
+    // protocol path so both resolve source-jumps identically.
+    if (overlay_) overlay_->set_config(config_);
+}
+
+void DomainHandler::set_overlay(InspectorOverlay* overlay) {
+    overlay_ = overlay;
+    if (overlay_) overlay_->set_config(config_);
+}
 
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
@@ -320,6 +335,9 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
                 return make_error(req.id,
                     std::string("Inspector.setEditorUrlTemplate: ") + err);
             config_.editor_url_template = tmpl;
+            // Phase 5.1 — keep the overlay's `J`-hotkey config in sync
+            // so a runtime template change reaches both jump paths.
+            if (overlay_) overlay_->set_config(config_);
             auto resp = choc::value::createObject("");
             resp.addMember("ok", choc::value::createBool(true));
             resp.addMember("template", choc::value::createString(tmpl));
@@ -341,6 +359,72 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             choc::value::createString(config_.editor_url_template));
         if (auto env = editor_url_env_override())
             resp.addMember("envTemplate", choc::value::createString(*env));
+        return make_response(req.id, choc::json::toString(resp, false));
+    }
+
+    // ── Phase 5.1: Inspector.jumpToSource ───────────────────────────
+    // Resolve a view's authored source location and open the user's
+    // editor at file:line. Params (all optional):
+    //   anchorId : design-import anchor of the target view. When
+    //              omitted, falls back to the overlay's selected view.
+    //   dryRun   : when true, resolve + format only — never spawn a
+    //              process. Used by headless tests and agent callers
+    //              that just want the URL.
+    // Returns {ok, url, path, line, col, launched} on a resolvable
+    // target; {ok:false, error} when the view has no provenance or no
+    // target could be found. Note `ok:false` here is a structured
+    // response, NOT a protocol error — a no-provenance view is a
+    // normal, expected case (the overlay treats it as a graceful
+    // no-op), so callers can branch on `ok` without exception handling.
+    if (req.method == methods::kInspectorJumpToSource) {
+        bool dry_run = false;
+        std::string anchor_id;
+        if (!req.params_json.empty()) {
+            try {
+                auto params = choc::json::parse(req.params_json);
+                if (params.isObject()) {
+                    if (params.hasObjectMember("dryRun") &&
+                        params["dryRun"].isBool())
+                        dry_run = params["dryRun"].getBool();
+                    if (params.hasObjectMember("anchorId") &&
+                        params["anchorId"].isString())
+                        anchor_id = std::string(params["anchorId"].getString());
+                }
+            } catch (...) {
+                return make_error(req.id,
+                    "Invalid params for Inspector.jumpToSource");
+            }
+        }
+
+        // Resolve the target view: explicit anchor wins; otherwise the
+        // overlay's current selection.
+        view::View* target = nullptr;
+        if (!anchor_id.empty()) {
+            if (root_)
+                target = ViewInspector::find_by_anchor(*root_, anchor_id);
+        } else if (overlay_) {
+            target = overlay_->selected_view();
+        }
+
+        auto result = jump_to_source(config_, target, dry_run);
+
+        auto resp = choc::value::createObject("");
+        resp.addMember("ok", choc::value::createBool(result.ok));
+        if (result.ok) {
+            resp.addMember("url", choc::value::createString(result.url));
+            resp.addMember("path", choc::value::createString(result.path));
+            resp.addMember("line",
+                choc::value::createInt64(static_cast<int64_t>(result.line)));
+            resp.addMember("col",
+                choc::value::createInt64(static_cast<int64_t>(result.col)));
+            resp.addMember("launched", choc::value::createBool(result.launched));
+            resp.addMember("dryRun", choc::value::createBool(dry_run));
+        } else {
+            resp.addMember("error", choc::value::createString(
+                anchor_id.empty() && !overlay_
+                    ? std::string("no overlay attached and no anchorId given")
+                    : result.error));
+        }
         return make_response(req.id, choc::json::toString(resp, false));
     }
     if (req.method == methods::kInspectorSetBypass) {

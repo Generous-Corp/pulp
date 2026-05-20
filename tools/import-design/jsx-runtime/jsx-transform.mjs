@@ -251,7 +251,16 @@ async function main() {
             platform: 'browser',
             globalName: 'PulpJsxApp',
             write: false,
-            sourcemap: false,
+            // Phase 5.1 (inspector source-jump) — emit an inline source
+            // map when PULP_JSX_SOURCEMAP=1 so the inspector / debuggers
+            // can map the bundled IIFE back to authored JSX. Off by
+            // default to keep production bundles lean (source maps add
+            // ~10-30%); dev builds opt in per-shell. The reconciler's
+            // `__source`-prop forwarding (host-config bindSourceLocation)
+            // is the other half of source-jump and is independent of
+            // this map — see the spike doc for the automatic-runtime
+            // `__source` follow-up.
+            sourcemap: process.env.PULP_JSX_SOURCEMAP === '1' ? 'inline' : false,
             minify: false,
             jsx: 'transform',
             jsxFactory: 'React.createElement',

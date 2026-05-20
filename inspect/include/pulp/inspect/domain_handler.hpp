@@ -26,7 +26,11 @@ public:
 
     // ── Data sources (all optional) ─────────────────────────────────
     void set_root_view(view::View* root) { root_ = root; }
-    void set_overlay(InspectorOverlay* overlay) { overlay_ = overlay; }
+    /// Attach the overlay. Phase 5.1: also seeds the overlay's
+    /// source-jump config with the handler's current config so the `J`
+    /// hotkey matches `Inspector.jumpToSource`. Out-of-line for the
+    /// same reason as set_config().
+    void set_overlay(InspectorOverlay* overlay);
     void set_state_inspector(StateInspector* state) { state_ = state; }
     void set_console_capture(ConsoleCapture* console) { console_ = console; }
     void set_audio_inspector(AudioInspector* audio) { audio_ = audio; }
@@ -44,8 +48,11 @@ public:
     // ── Inspector-wide config ───────────────────────────────────────
     /// Replace the runtime config (Phase 5.3: editor_url_template).
     /// Mutating accessors below (e.g. Inspector.setEditorUrlTemplate)
-    /// update this in place.
-    void set_config(InspectorConfig config) { config_ = std::move(config); }
+    /// update this in place. Phase 5.1: also pushes the config to the
+    /// attached overlay (if any) so the `J` source-jump hotkey and the
+    /// protocol `Inspector.jumpToSource` share one template. Defined
+    /// out-of-line so the header doesn't need the overlay's definition.
+    void set_config(InspectorConfig config);
     const InspectorConfig& config() const { return config_; }
     InspectorConfig& mutable_config() { return config_; }
 

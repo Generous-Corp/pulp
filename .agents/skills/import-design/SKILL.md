@@ -384,6 +384,33 @@ Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
 the native codegen has many early-return branches that need each to
 be wired). Web-compat is the default mode for imports — covered.
 
+**Phase 5.1 — `setSource()` source-jump wiring:** alongside `setAnchor`,
+the `@pulp/react` reconciler now forwards React's dev-mode `__source`
+prop ({fileName, lineNumber, columnNumber}) through a `setSource(id,
+file, line, col)` bridge call (`materializeUnder` →
+`bindSourceLocation` in `packages/pulp-react/src/host-config.ts`). This
+lands a `View::SourceLocation` on the live widget so the inspector's
+`J` hotkey / `Inspector.jumpToSource` protocol method can open the
+authoring JSX file:line in the user's editor. Gotchas:
+
+- **`__source` is Babel-classic / automatic-dev-runtime only.** esbuild's
+  `jsx: 'transform'` mode (current `jsx-transform.mjs` setting) does
+  **not** inline `__source` props — only Babel's
+  `@babel/plugin-transform-react-jsx-development` or esbuild's
+  `jsx: 'automatic'` + `jsxDev: true` do. So today `bindSourceLocation`
+  is a silent no-op for transform-mode bundles; it activates the moment
+  the JSX runtime emits `__source`. Migrating `jsx-transform.mjs` to the
+  automatic dev runtime is the remaining Phase 5.1 follow-up — do it as
+  a deliberate, separately-validated change because it shifts
+  `jsxFactory` semantics across every existing import fixture.
+- **Source maps gate behind `PULP_JSX_SOURCEMAP=1`.** `jsx-transform.mjs`
+  emits an inline source map only when that env var is set — off by
+  default to keep production bundles lean (~10-30% size add). It is
+  independent of the `__source` prop path.
+- **`setSource` no-ops on an empty file path and unknown widget id** —
+  same tolerance as `setAnchor`. A custom codegen / shim that wants
+  source-jump must pass the same bridge-keyed `_id` as `setAnchor`.
+
 ### Phase 1 — Tweaks persistence (`pulp-tweaks.json`)
 
 `TweakStore` (`inspect/include/pulp/inspect/tweak_store.hpp`) now reads

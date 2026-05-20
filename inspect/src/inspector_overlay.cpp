@@ -208,7 +208,28 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
+    // Phase 5.1 — J jumps to the selected view's authored JSX source
+    // (no modifier; inspector-active only — same collision-avoidance
+    // discipline as the D drag toggle). Graceful no-op when there is
+    // no selection or the selection has no source provenance.
+    if (active_ && event.key == KeyCode::j && event.is_down &&
+        event.modifiers == 0) {
+        jump_to_selection_source(/*dry_run=*/false);
+        // Consume the key regardless — even a no-op jump (no
+        // provenance) should not fall through to the view tree.
+        return true;
+    }
+
     return false;
+}
+
+SourceJumpResult InspectorOverlay::jump_to_selection_source(bool dry_run) {
+    // selected_ may be null (no selection) or carry no source_loc
+    // (view authored outside the JSX-import path). jump_to_source()
+    // handles both as a structured ok==false result — no throw, no
+    // process spawn — so the caller (J hotkey / protocol) can branch
+    // cleanly.
+    return jump_to_source(config_, selected_, dry_run);
 }
 
 bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
@@ -866,6 +887,21 @@ void InspectorOverlay::paint_props_section(Canvas& canvas, float x, float y, flo
     // Type and ID
     auto type = ViewInspector::type_name(*selected_);
     draw_heading(type + (selected_->id().empty() ? "" : " #" + selected_->id()));
+
+    // Phase 5.1 — authored-source row. When the selected view carries a
+    // `__source` provenance record (set via the JS bridge's setSource()
+    // for JSX-imported views), show "file:line" and a hint that the J
+    // hotkey jumps to it. Hidden entirely for non-imported views so the
+    // panel stays uncluttered.
+    if (selected_->has_source_loc()) {
+        const auto& loc = selected_->source_loc();
+        std::string where = loc.file;
+        if (loc.line > 0) where += ":" + std::to_string(loc.line);
+        draw_label("source", where);
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("(press J to open in editor)", x, line_y + 11);
+        line_y += line_h;
+    }
 
     // Bounds (informational — bounds is layout OUTPUT, not editable.
     // Edits go through flex inputs below.)

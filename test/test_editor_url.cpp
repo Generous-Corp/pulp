@@ -9,6 +9,8 @@
 #include <pulp/inspect/domain_handler.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/source_jump.hpp>
+#include <pulp/view/view.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -251,4 +253,186 @@ TEST_CASE("DomainHandler::set_config swaps the template without touching env",
     REQUIRE(std::string(obj["source"].getString()) == "config");
     REQUIRE(std::string(obj["template"].getString())
             == "cursor://file/{path}:{line}");
+}
+
+// ── Phase 5.1: source-jump resolution ──────────────────────────────────────
+
+TEST_CASE("resolve_source_jump formats the URL for a view with provenance",
+          "[inspect][source-jump]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+
+    pulp::view::View view;
+    view.set_source_loc({"src/Synth.jsx", 42, 7});
+
+    InspectorConfig cfg;  // default vscode template (no {col})
+    auto result = resolve_source_jump(cfg, &view);
+    REQUIRE(result.ok);
+    REQUIRE(result.path == "src/Synth.jsx");
+    REQUIRE(result.line == 42);
+    REQUIRE(result.col == 7);
+    REQUIRE(result.url == "vscode://file/src/Synth.jsx:42");
+    REQUIRE_FALSE(result.launched);  // resolve never launches
+}
+
+TEST_CASE("resolve_source_jump honors a {col}-bearing editor template",
+          "[inspect][source-jump]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+
+    pulp::view::View view;
+    view.set_source_loc({"app/Knob.tsx", 13, 4});
+
+    InspectorConfig cfg;
+    cfg.editor_url_template = "zed://file/{path}:{line}:{col}";
+    auto result = resolve_source_jump(cfg, &view);
+    REQUIRE(result.ok);
+    REQUIRE(result.url == "zed://file/app/Knob.tsx:13:4");
+}
+
+TEST_CASE("resolve_source_jump uses the env-override template",
+          "[inspect][source-jump]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.set("cursor://file/{path}:{line}");
+
+    pulp::view::View view;
+    view.set_source_loc({"x.jsx", 9, 0});
+
+    InspectorConfig cfg;  // config says vscode; env wins
+    auto result = resolve_source_jump(cfg, &view);
+    REQUIRE(result.ok);
+    REQUIRE(result.url == "cursor://file/x.jsx:9");
+}
+
+TEST_CASE("resolve_source_jump treats a 0-line as file-top (line 1)",
+          "[inspect][source-jump]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+
+    pulp::view::View view;
+    view.set_source_loc({"top.jsx", 0, 0});  // unknown line
+
+    InspectorConfig cfg;
+    auto result = resolve_source_jump(cfg, &view);
+    REQUIRE(result.ok);
+    // line/col in the result echo the recorded values...
+    REQUIRE(result.line == 0);
+    // ...but the formatted URL substitutes 1 so the editor opens cleanly.
+    REQUIRE(result.url == "vscode://file/top.jsx:1");
+}
+
+TEST_CASE("resolve_source_jump is a graceful no-op for a null view",
+          "[inspect][source-jump]") {
+    InspectorConfig cfg;
+    auto result = resolve_source_jump(cfg, nullptr);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.url.empty());
+    REQUIRE_FALSE(result.error.empty());
+}
+
+TEST_CASE("resolve_source_jump is a graceful no-op for a view without provenance",
+          "[inspect][source-jump]") {
+    pulp::view::View view;  // no set_source_loc — non-imported view
+    REQUIRE_FALSE(view.has_source_loc());
+
+    InspectorConfig cfg;
+    auto result = resolve_source_jump(cfg, &view);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.url.empty());
+    REQUIRE(result.error.find("no source location") != std::string::npos);
+}
+
+TEST_CASE("jump_to_source with dry_run resolves but never launches",
+          "[inspect][source-jump]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+
+    pulp::view::View view;
+    view.set_source_loc({"src/Main.jsx", 100, 0});
+
+    InspectorConfig cfg;
+    auto result = jump_to_source(cfg, &view, /*dry_run=*/true);
+    REQUIRE(result.ok);
+    REQUIRE(result.url == "vscode://file/src/Main.jsx:100");
+    REQUIRE_FALSE(result.launched);
+}
+
+TEST_CASE("launch_editor_url rejects an empty URL", "[inspect][source-jump]") {
+    REQUIRE_FALSE(launch_editor_url(""));
+}
+
+// ── Phase 5.1: Inspector.jumpToSource protocol round-trip ──────────────────
+
+TEST_CASE("Inspector.jumpToSource resolves an anchored view in dryRun",
+          "[inspect][source-jump][protocol]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+
+    pulp::view::View root;
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_anchor_id("figma:node-7");
+    child->set_source_loc({"src/Panel.jsx", 24, 3});
+    root.add_child(std::move(child));
+
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource,
+        R"({"anchorId":"figma:node-7","dryRun":true})"));
+    REQUIRE_FALSE(resp.is_error);
+
+    auto obj = choc::json::parse(resp.params_json);
+    REQUIRE(obj["ok"].getBool());
+    REQUIRE(std::string(obj["url"].getString())
+            == "vscode://file/src/Panel.jsx:24");
+    REQUIRE(std::string(obj["path"].getString()) == "src/Panel.jsx");
+    REQUIRE(obj["line"].getInt64() == 24);
+    REQUIRE_FALSE(obj["launched"].getBool());
+    REQUIRE(obj["dryRun"].getBool());
+}
+
+TEST_CASE("Inspector.jumpToSource returns ok:false for an unknown anchor",
+          "[inspect][source-jump][protocol]") {
+    pulp::view::View root;
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource,
+        R"({"anchorId":"does-not-exist","dryRun":true})"));
+    // Not a protocol error — a structured ok:false response.
+    REQUIRE_FALSE(resp.is_error);
+    auto obj = choc::json::parse(resp.params_json);
+    REQUIRE_FALSE(obj["ok"].getBool());
+    REQUIRE(obj.hasObjectMember("error"));
+}
+
+TEST_CASE("Inspector.jumpToSource returns ok:false when the view lacks provenance",
+          "[inspect][source-jump][protocol]") {
+    pulp::view::View root;
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_anchor_id("anchor-no-source");
+    // deliberately NO set_source_loc
+    root.add_child(std::move(child));
+
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource,
+        R"({"anchorId":"anchor-no-source","dryRun":true})"));
+    REQUIRE_FALSE(resp.is_error);
+    auto obj = choc::json::parse(resp.params_json);
+    REQUIRE_FALSE(obj["ok"].getBool());
+    REQUIRE(std::string(obj["error"].getString()).find("no source location")
+            != std::string::npos);
+}
+
+TEST_CASE("Inspector.jumpToSource rejects malformed params",
+          "[inspect][source-jump][protocol]") {
+    DomainHandler handler;
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource, "{not json"));
+    REQUIRE(resp.is_error);
 }

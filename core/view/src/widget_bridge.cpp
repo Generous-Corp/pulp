@@ -3441,6 +3441,25 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // Phase 5.1 (inspector source-jump): bind the authored-source
+    // location for a widget. The `@pulp/react` reconciler reads React's
+    // `__source` prop ({fileName, lineNumber, columnNumber}) inside
+    // `createInstance` and forwards it here. The inspector later reads
+    // this back via `Inspector.jumpToSource` to open the user's editor
+    // at the originating JSX file:line. Silent no-op on unknown widget
+    // id and on an empty file path — matches setAnchor's tolerance for
+    // unmounted ids and views authored outside the JSX path.
+    engine_.register_function("setSource", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto file = args.get<std::string>(1, "");
+        auto line = static_cast<int>(args.get<double>(2, 0.0));
+        auto col = static_cast<int>(args.get<double>(3, 0.0));
+        if (file.empty()) return choc::value::Value();
+        if (auto* v = widget(id))
+            v->set_source_loc({std::move(file), line, col});
+        return choc::value::Value();
+    });
+
     // setStyle — placeholder until KnobStyle/ToggleStyle enums added to main widgets
     engine_.register_function("setStyle", [](choc::javascript::ArgumentList) {
         return choc::value::Value();

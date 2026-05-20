@@ -19,6 +19,12 @@ public:
     // Find a view by ID in the tree
     static View* find_by_id(View& root, const std::string& id);
 
+    // Find a view by its design-import anchor id (Phase 0b
+    // `set_anchor_id`). Returns nullptr for an empty anchor or when no
+    // view in the tree carries it. Used by the inspector's source-jump
+    // resolver (Phase 5.1) to map an anchor back to a live View*.
+    static View* find_by_anchor(View& root, const std::string& anchor);
+
     // Count total views in the tree
     static size_t count_views(const View& root);
 

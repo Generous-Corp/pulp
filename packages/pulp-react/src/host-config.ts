@@ -733,10 +733,32 @@ function materialize(parent: Instance, child: Instance): void {
     materializeUnder(parent.id, child);
 }
 
+/// Phase 5.1 (inspector source-jump) — forward React's dev-mode
+/// `__source` prop ({ fileName, lineNumber, columnNumber }) to the
+/// native `setSource` bridge so the inspector can jump to the authoring
+/// JSX file:line. `__source` is inlined by Babel's automatic-runtime
+/// JSX dev transform; it is absent in production bundles, so this is a
+/// silent no-op there. `setSource` itself no-ops on an unknown widget
+/// id and an empty file path (see widget_bridge.cpp), so the guard here
+/// only avoids a needless bridge round-trip.
+function bindSourceLocation(child: Instance): void {
+    const src = child.props.__source as
+        | { fileName?: unknown; lineNumber?: unknown; columnNumber?: unknown }
+        | undefined;
+    if (!src || typeof src.fileName !== 'string' || src.fileName.length === 0) {
+        return;
+    }
+    if (typeof g.setSource !== 'function') return;  // older runtime
+    const line = typeof src.lineNumber === 'number' ? src.lineNumber : 0;
+    const col = typeof src.columnNumber === 'number' ? src.columnNumber : 0;
+    call('setSource', child.id, src.fileName, line, col);
+}
+
 function materializeUnder(parentId: string, child: Instance): void {
     if (child.onBridge) return;
     createWidget(child.type, child.id, parentId, child.props);
     applyAllProps(child);
+    bindSourceLocation(child);
     child.onBridge = true;
     // Drain any pending grand-children that were queued before this
     // descriptor reached the bridge.
