@@ -43,6 +43,17 @@ def _build_workflow_runner_provider_default() -> str:
     return default.group(1)
 
 
+def _build_workflow_requested_provider_fallback() -> str:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(
+        r"REQUESTED_PROVIDER:\s*\$\{\{\s*inputs\.runner_provider\s*\|\|\s*"
+        r"vars\.PULP_DEFAULT_RUNNER_PROVIDER\s*\|\|\s*'([^']+)'\s*\}\}",
+        text,
+    )
+    _assert(match is not None, "build.yml missing REQUESTED_PROVIDER fallback")
+    return match.group(1)
+
+
 def _run(args: list[str], env_extra: dict[str, str] | None = None,
          expect_error: bool = False) -> tuple[int, str, str]:
     env = os.environ.copy()
@@ -106,6 +117,24 @@ def test_build_workflow_dispatch_default_does_not_require_namespace() -> None:
     ], env_extra={"REQUESTED_PROVIDER": provider})
     _assert(json.loads(out) == "ubuntu-latest",
             f"dispatch default unexpectedly required Namespace: {out!r}")
+
+
+def test_build_workflow_pull_request_fallback_does_not_require_namespace() -> None:
+    """pull_request has no workflow_dispatch input, so the env fallback matters."""
+    provider = _build_workflow_requested_provider_fallback()
+    _assert(provider == "github-hosted",
+            f"pull_request fallback must avoid Namespace, got {provider!r}")
+    _, out, _ = _run([
+        "--target-name", "Linux (x64)",
+        "--mode", "provider",
+        "--github-hosted-label", "ubuntu-latest",
+        "--explicit-env", "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
+        "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
+        "--namespace-setting-name",
+        "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
+    ], env_extra={"REQUESTED_PROVIDER": provider})
+    _assert(json.loads(out) == "ubuntu-latest",
+            f"pull_request fallback unexpectedly required Namespace: {out!r}")
 
 
 def test_provider_namespace_with_env() -> None:

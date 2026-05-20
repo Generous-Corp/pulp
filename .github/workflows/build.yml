@@ -56,7 +56,7 @@ jobs:
           lfs: false
       - id: resolve
         env:
-          REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'namespace' }}
+          REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           # macOS routing has three layers, evaluated in order (highest
