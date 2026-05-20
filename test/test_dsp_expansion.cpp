@@ -156,6 +156,29 @@ TEST_CASE("Oscillator waveforms produce finite bounded startup samples",
     }
 }
 
+TEST_CASE("Oscillator polyBLEP handles late-cycle discontinuities",
+          "[signal][oscillator][coverage][phase3]") {
+    Oscillator osc;
+    osc.set_sample_rate(10.0f);
+    osc.set_frequency(3.0f);
+
+    for (auto waveform : {
+             Oscillator::Waveform::saw,
+             Oscillator::Waveform::square,
+             Oscillator::Waveform::triangle,
+         }) {
+        osc.reset();
+        osc.set_waveform(waveform);
+        float last = 0.0f;
+        for (int i = 0; i < 5; ++i)
+            last = osc.next();
+
+        REQUIRE(std::isfinite(last));
+        REQUIRE(osc.phase() >= 0.0f);
+        REQUIRE(osc.phase() < 1.0f);
+    }
+}
+
 // ── FirFilter ────────────────────────────────────────────────────────────
 
 TEST_CASE("FirFilter identity with single-tap", "[signal][fir]") {
@@ -423,6 +446,30 @@ TEST_CASE("SmoothedValue supports double ramps and terminal skips",
     REQUIRE_THAT(value.target(), WithinAbs(10.0, 1e-12));
 }
 
+TEST_CASE("SmoothedValue handles immediate ramps and inert skips",
+          "[signal][smooth][coverage][phase3]") {
+    SmoothedValue<float> immediate(1.0f);
+    immediate.set_ramp_time(0.0f, 48000.0f);
+    immediate.set_target(4.0f);
+    REQUIRE_FALSE(immediate.is_smoothing());
+    REQUIRE_THAT(immediate.current(), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(immediate.next(), WithinAbs(4.0f, 1e-6f));
+
+    SmoothedValue<float> ramp(0.0f);
+    ramp.set_ramp_time(0.004f, 1000.0f);
+    ramp.set_target(8.0f);
+    ramp.skip(0);
+    ramp.skip(-8);
+    REQUIRE(ramp.is_smoothing());
+    REQUIRE_THAT(ramp.current(), WithinAbs(0.0f, 1e-6f));
+
+    ramp.skip(4);
+    REQUIRE_FALSE(ramp.is_smoothing());
+    REQUIRE_THAT(ramp.current(), WithinAbs(8.0f, 1e-6f));
+    ramp.skip(1);
+    REQUIRE_THAT(ramp.current(), WithinAbs(8.0f, 1e-6f));
+}
+
 TEST_CASE("LogRampedValue jumps for non-positive endpoints",
           "[signal][log_ramp][issue-645]") {
     LogRampedValue zero_start;
@@ -506,6 +553,15 @@ TEST_CASE("WaveShaper processes buffers in-place", "[signal][waveshaper][issue-6
     REQUIRE_THAT(buffer[1], WithinAbs(0.0f, 1e-6f));
     REQUIRE_THAT(buffer[2], WithinAbs(0.75f, 1e-6f));
     REQUIRE_THAT(buffer[3], WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("WaveShaper invalid curve falls back to driven input",
+          "[signal][waveshaper][coverage][phase3]") {
+    WaveShaper shaper;
+    shaper.set_drive(1.5f);
+    shaper.set_curve(static_cast<WaveShaper::Curve>(99));
+
+    REQUIRE_THAT(shaper.process(0.25f), WithinAbs(0.375f, 1e-6f));
 }
 
 // ── ProcessorChain ───────────────────────────────────────────────────────
@@ -823,6 +879,28 @@ TEST_CASE("FrequencyAxis maps linear logarithmic and mel scales",
     REQUIRE(axis.display_to_bin(mel_pos) == axis.hz_to_bin(1000.0f));
 }
 
+TEST_CASE("Spectrogram helpers cover fallback ramps scales and zero-bin columns",
+          "[signal][spectrogram][coverage][phase3]") {
+    ColorMapper mapper(static_cast<ColorRamp>(99));
+    auto gray = mapper.map(0.5f);
+    REQUIRE(gray.r == gray.g);
+    REQUIRE(gray.g == gray.b);
+    REQUIRE(gray.a == 255);
+
+    FrequencyAxis axis;
+    axis.configure(1024, 48000.0f, static_cast<FrequencyScale>(99));
+    REQUIRE_THAT(axis.hz_to_display(12000.0f), WithinAbs(0.5f, 1e-5f));
+    REQUIRE_THAT(axis.display_to_hz(0.5f), WithinAbs(12000.0f, 1e-5f));
+
+    SpectrogramBuffer buffer;
+    buffer.configure(2, 1);
+    const float fallback_bin[] = {-40.0f};
+    buffer.push_column(fallback_bin, 0, mapper, -80.0f, 0.0f);
+    REQUIRE(buffer.frames_written() == 1);
+    REQUIRE(buffer.write_column() == 1);
+    REQUIRE(buffer.pixels()[0].a == 255);
+}
+
 TEST_CASE("SpectrogramBuffer scrolls columns and maps dB ranges",
           "[signal][spectrogram][codecov]") {
     SpectrogramBuffer buffer;
@@ -949,6 +1027,36 @@ TEST_CASE("AlignedBuffer resize to same size preserves allocation contents",
     REQUIRE(buffer.data() == before);
     REQUIRE_THAT(buffer[0], WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(buffer[1], WithinAbs(-0.5f, 1e-6f));
+}
+
+TEST_CASE("AlignedBuffer exposes const iteration and self move assignment",
+          "[signal][simd][coverage][phase3]") {
+    AlignedBuffer empty;
+    empty.clear();
+    REQUIRE(empty.empty());
+
+    AlignedBuffer buffer(3);
+    buffer[0] = 1.0f;
+    buffer[1] = 2.0f;
+    buffer[2] = 3.0f;
+
+    auto& alias = buffer;
+    buffer = std::move(alias);
+    REQUIRE(buffer.size() == 3);
+
+    float sum = 0.0f;
+    for (float& value : buffer)
+        sum += value;
+    REQUIRE_THAT(sum, WithinAbs(6.0f, 1e-6f));
+
+    const AlignedBuffer& const_buffer = buffer;
+    REQUIRE(const_buffer.data() == buffer.data());
+    REQUIRE_THAT(const_buffer[1], WithinAbs(2.0f, 1e-6f));
+
+    float const_sum = 0.0f;
+    for (const float value : const_buffer)
+        const_sum += value;
+    REQUIRE_THAT(const_sum, WithinAbs(6.0f, 1e-6f));
 }
 
 TEST_CASE("Interpolator kernels hit exact endpoints and smooth midpoints",
