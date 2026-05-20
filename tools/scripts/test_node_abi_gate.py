@@ -63,7 +63,9 @@ class NodeAbiGateTests(unittest.TestCase):
     def header(class_name: str, methods: list[str]) -> str:
         decls: list[str] = []
         for method in methods:
-            if method.startswith("~"):
+            if method.startswith("virtual "):
+                decls.append(f"    {method}")
+            elif method.startswith("~"):
                 decls.append(f"    virtual {method}() = default;")
             else:
                 decls.append(f"    virtual void {method}() {{}}")
@@ -97,6 +99,33 @@ class NodeAbiGateTests(unittest.TestCase):
         code, out = self.gate()
         self.assertEqual(code, 1)
         self.assertIn("current order removed virtual method", out)
+
+    def test_signature_change_fails(self) -> None:
+        self.write_headers(
+            ["~Processor", "descriptor", "virtual void prepare(double samples) {}"],
+            ["~PluginSlot", "info", "process"],
+        )
+        code, out = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("do not re-signature existing virtuals", out)
+        self.assertIn("void prepare()", out)
+        self.assertIn("void prepare(double)", out)
+
+    def test_parameter_name_only_change_passes(self) -> None:
+        self.write_headers(
+            ["~Processor", "descriptor", "virtual void prepare(int samples) {}"],
+            ["~PluginSlot", "info", "process"],
+        )
+        git(self.tmp, "add", ".")
+        git(self.tmp, "commit", "-q", "-m", "named parameter baseline")
+        git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+        self.write_headers(
+            ["~Processor", "descriptor", "virtual void prepare(int block_size) {}"],
+            ["~PluginSlot", "info", "process"],
+        )
+        code, out = self.gate()
+        self.assertEqual(code, 0, out)
 
 
 if __name__ == "__main__":

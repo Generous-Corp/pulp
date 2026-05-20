@@ -31,8 +31,8 @@ are append-only:
 - add new virtual methods only after the current virtual-method tail
 
 `tools/scripts/node_abi_gate.py` enforces this in CI by comparing the current
-virtual declaration order against the PR base. A middle insert, removal, or
-reorder fails; appending at the tail passes.
+virtual declarations against the PR base. A middle insert, removal, reorder, or
+signature change fails; appending at the tail passes.
 
 ## Optional Capabilities
 

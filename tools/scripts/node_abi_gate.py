@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Node ABI virtual-order gate.
+"""Node ABI virtual declaration gate.
 
 Processor and PluginSlot are SDK-facing polymorphic surfaces. Within a major
 node ABI version, new virtual methods must be appended at the end of the class
-vtable. Inserting, removing, or reordering existing virtuals changes already
-compiled consumer binaries.
+vtable. Inserting, removing, reordering, or re-signaturing existing virtuals
+changes the node contract.
 
 The gate compares the current working tree against a git base and requires the
-base virtual-method order to remain a prefix of the current order.
+base virtual-method declarations to remain a prefix of the current order.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import re
 import subprocess
 import sys
@@ -29,6 +30,12 @@ SURFACES = (
         "core/host/include/pulp/host/plugin_slot.hpp",
     ),
 )
+
+
+@dataclass(frozen=True)
+class VirtualDecl:
+    name: str
+    signature: str
 
 
 def repo_root() -> Path | None:
@@ -77,31 +84,136 @@ def class_body(text: str, class_name: str) -> str:
     return text[start:i - 1]
 
 
-def virtual_order(text: str, class_name: str) -> list[str]:
-    body = strip_comments(class_body(text, class_name))
-    names: list[str] = []
-    for match in re.finditer(r"\bvirtual\b(?P<decl>[^;{]*?)\(", body, re.DOTALL):
-        before_paren = match.group("decl").strip()
-        name_match = re.search(r"([~A-Za-z_]\w*)\s*$", before_paren)
-        if not name_match:
+def _matching_paren(text: str, open_index: int) -> int:
+    depth = 1
+    i = open_index + 1
+    while i < len(text) and depth > 0:
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        raise ValueError("virtual method declaration has unbalanced parentheses")
+    return i - 1
+
+
+def _split_params(params: str) -> list[str]:
+    if not params.strip():
+        return []
+    out: list[str] = []
+    start = 0
+    angle_depth = 0
+    paren_depth = 0
+    for i, ch in enumerate(params):
+        if ch == "<":
+            angle_depth += 1
+        elif ch == ">" and angle_depth > 0:
+            angle_depth -= 1
+        elif ch == "(":
+            paren_depth += 1
+        elif ch == ")" and paren_depth > 0:
+            paren_depth -= 1
+        elif ch == "," and angle_depth == 0 and paren_depth == 0:
+            out.append(params[start:i])
+            start = i + 1
+    out.append(params[start:])
+    return out
+
+
+def _strip_default_arg(param: str) -> str:
+    angle_depth = 0
+    paren_depth = 0
+    for i, ch in enumerate(param):
+        if ch == "<":
+            angle_depth += 1
+        elif ch == ">" and angle_depth > 0:
+            angle_depth -= 1
+        elif ch == "(":
+            paren_depth += 1
+        elif ch == ")" and paren_depth > 0:
+            paren_depth -= 1
+        elif ch == "=" and angle_depth == 0 and paren_depth == 0:
+            return param[:i]
+    return param
+
+
+def _normalize_type(text: str) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s*([<>,()&*])\s*", r"\1", text)
+    text = re.sub(r"\s*=\s*", "=", text)
+    return text
+
+
+def _normalize_param(param: str) -> str:
+    param = _strip_default_arg(param)
+    param = re.sub(r"\s+", " ", param).strip()
+    # Parameter names are not part of the ABI signature; remove the common
+    # named-parameter shape while preserving unnamed type-only declarations.
+    name_match = re.match(r"(?P<type>.+\S)\s+[A-Za-z_]\w*$", param)
+    if name_match:
+        param = name_match.group("type")
+    return _normalize_type(param)
+
+
+def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
+    decl = re.sub(r"^\s*virtual\b", "", raw_decl, count=1).strip()
+    open_paren = decl.find("(")
+    if open_paren < 0:
+        raise ValueError("virtual method declaration missing parameter list")
+    close_paren = _matching_paren(decl, open_paren)
+
+    before_paren = decl[:open_paren].strip()
+    params = decl[open_paren + 1:close_paren]
+    after_paren = decl[close_paren + 1:].strip()
+
+    name_match = re.search(r"([~A-Za-z_]\w*)\s*$", before_paren)
+    if not name_match:
+        raise ValueError("virtual method declaration missing method name")
+    name = name_match.group(1)
+
+    canonical_params = ",".join(_normalize_param(p) for p in _split_params(params))
+    signature = (
+        f"{_normalize_type(before_paren)}"
+        f"({canonical_params})"
+        f"{_normalize_type(after_paren)}"
+    )
+    return name, signature
+
+
+def virtual_order(text: str, class_name: str) -> list[VirtualDecl]:
+    body = class_body(strip_comments(text), class_name)
+    decls: list[VirtualDecl] = []
+    for match in re.finditer(r"\bvirtual\b(?P<decl>.*?)(?:;|{)", body, re.DOTALL):
+        raw_decl = match.group("decl").strip()
+        try:
+            name, signature = _canonical_virtual_signature(f"virtual {raw_decl}")
+        except ValueError:
             continue
-        names.append(name_match.group(1))
-    return names
+        decls.append(VirtualDecl(name=name, signature=signature))
+    return decls
 
 
-def render_mismatch(surface: str, old: list[str], new: list[str]) -> str:
+def render_mismatch(surface: str, old: list[VirtualDecl], new: list[VirtualDecl]) -> str:
     lines = [f"{surface}: virtual order is not additive-only"]
     common = min(len(old), len(new))
-    first_bad = next((i for i in range(common) if old[i] != new[i]), common)
+    first_bad = next(
+        (i for i in range(common) if old[i].signature != new[i].signature),
+        common,
+    )
     if first_bad < len(old):
         lines.append(f"  first mismatch at index {first_bad}:")
-        lines.append(f"    base:    {old[first_bad]}")
+        lines.append(f"    base:    {old[first_bad].signature}")
         lines.append(
-            f"    current: {new[first_bad] if first_bad < len(new) else '<missing>'}"
+            "    current: "
+            f"{new[first_bad].signature if first_bad < len(new) else '<missing>'}"
         )
     if len(new) < len(old):
         lines.append("  current order removed virtual method(s)")
-    lines.append("  allowed change: append new virtual methods after all existing ones")
+    lines.append(
+        "  allowed change: append new virtual methods after all existing ones; "
+        "do not re-signature existing virtuals"
+    )
     return "\n".join(lines)
 
 
@@ -120,7 +232,7 @@ def check_surface(root: Path, base: str, class_name: str, rel_path: str) -> str 
     except ValueError as exc:
         return f"{class_name}: {exc}"
 
-    if new[:len(old)] != old:
+    if [v.signature for v in new[:len(old)]] != [v.signature for v in old]:
         return render_mismatch(class_name, old, new)
     return None
 
