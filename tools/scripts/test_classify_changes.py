@@ -42,6 +42,14 @@ class SkipSafeTests(unittest.TestCase):
         for path in (".gitignore", ".gitattributes", "CODEOWNERS"):
             self.assertTrue(classify.is_skip_safe(path), path)
 
+    def test_docs_migrations_md_is_NOT_skip_safe(self) -> None:
+        # docs/migrations/*.md is globbed with CONFIGURE_DEPENDS into the
+        # generated migration_index.cpp by tools/cli/CMakeLists.txt — the
+        # deny-list must override the .md and docs/ skip-safe rules.
+        for path in ("docs/migrations/2026-05-01-release.md",
+                     "docs/migrations/v2-upgrade.md"):
+            self.assertFalse(classify.is_skip_safe(path), path)
+
     def test_build_inputs_are_NOT_skip_safe(self) -> None:
         for path in ("core/signal/src/fft.cpp",
                      "core/view/include/pulp/view/view.hpp",
@@ -68,6 +76,17 @@ class NativeBuildRequiredTests(unittest.TestCase):
     def test_all_docs_skips_build(self) -> None:
         self.assertFalse(classify.native_build_required(
             ["README.md", "docs/guide.md", "CHANGELOG.md"]))
+
+    def test_migration_doc_forces_build(self) -> None:
+        # A migrations-only PR changes generated C++ — must build.
+        self.assertTrue(classify.native_build_required(
+            ["docs/migrations/2026-05-19-foo.md"]))
+
+    def test_migration_doc_among_plain_docs_forces_build(self) -> None:
+        # One migration doc among ordinary docs still forces the build.
+        self.assertTrue(classify.native_build_required(
+            ["README.md", "docs/guide.md",
+             "docs/migrations/2026-05-19-foo.md"]))
 
     def test_any_code_file_forces_build(self) -> None:
         # One code file among many docs still forces the build.

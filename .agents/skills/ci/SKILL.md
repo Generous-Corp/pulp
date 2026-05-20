@@ -1858,11 +1858,22 @@ Key facts:
   `CMakeLists.txt`, `tools/cmake/**`, `tools/scripts/**`,
   `.github/workflows/**`, and the classifier itself — forces the
   native build.
+- **Deny-list exception: `docs/migrations/*.md` forces the build.**
+  Those `.md` files are globbed with `CONFIGURE_DEPENDS` into the
+  generated `migration_index.cpp` by `tools/cli/CMakeLists.txt`, so
+  `FORCE_BUILD_PREFIXES` overrides the `.md`/`docs/` skip-safe rules.
+  Any future doc path that feeds codegen must be added there too.
+- Diffs are collected with `git diff --no-renames` so a code→docs
+  rename can't hide the old code path and wrongly classify skip-safe.
 - The required `macos` check is now produced by a dedicated `macos`
   alias job (`if: always()`), NOT by the build matrix leg. The matrix
   leg is named `macOS (ARM64) [<provider>]` uniformly with linux/windows.
+- The alias jobs are **fail-closed on a `classify`-job failure**: if
+  `needs.classify.result != 'success'` the `macos` gate fails RED
+  rather than trusting an unwritten/empty `native_build_required`.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
-  `SKIP_SAFE_EXACT` in `classify_changes.py` and add a case to
-  `test_classify_changes.py`. Never widen the allowlist without a test.
+  `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
+  and add a case to `test_classify_changes.py`. Never widen the
+  allowlist without a test.
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.

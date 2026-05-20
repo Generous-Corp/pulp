@@ -733,6 +733,9 @@ jobs:
   # reports — never left pending. On a skip-safe PR (classify said no native
   # build) it reports a fast green from Ubuntu without touching the macOS
   # runner. On a code PR it mirrors the macOS matrix leg's conclusion.
+  # Fail-closed: if the `classify` job itself did not succeed, the
+  # native_build_required output is untrusted — this gate fails RED rather
+  # than letting a PR merge on an unverified classification.
   macos:
     needs: [build, classify]
     runs-on: ubuntu-latest
@@ -743,6 +746,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          classify_result="${{ needs.classify.result }}"
+          if [ "$classify_result" != "success" ]; then
+            echo "classify job did not succeed (result=$classify_result) — failing macos gate closed (required)"
+            exit 1
+          fi
           if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
             echo "Skip-safe PR — no C++/Swift build input changed. macos gate ✓ (no native build)"
             exit 0
@@ -767,6 +775,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          classify_result="${{ needs.classify.result }}"
+          if [ "$classify_result" != "success" ]; then
+            echo "classify job did not succeed (result=$classify_result) — failing linux alias closed"
+            exit 1
+          fi
           if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
             echo "Skip-safe PR — no C++/Swift build input changed. linux gate ✓ (no native build)"
             exit 0
@@ -798,6 +811,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          classify_result="${{ needs.classify.result }}"
+          if [ "$classify_result" != "success" ]; then
+            echo "classify job did not succeed (result=$classify_result) — failing windows alias closed"
+            exit 1
+          fi
           if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
             echo "Skip-safe PR — no C++/Swift build input changed. windows gate ✓ (no native build)"
             exit 0

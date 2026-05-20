@@ -28,7 +28,10 @@ EVERYTHING ELSE forces the native build — including `core/**`,
 `apple/**`, `examples/**`, `test/**`, every `CMakeLists.txt`,
 `tools/cmake/**`, `.github/workflows/**` (a `build.yml` change MUST get
 a real run to validate itself), `tools/scripts/**` (some are
-build-coupled), `*.toml`/`*.json` config, and this classifier itself.
+build-coupled), `*.toml`/`*.json` config, this classifier itself, and
+`docs/migrations/*.md` (globbed with CONFIGURE_DEPENDS into the
+generated `migration_index.cpp` by `tools/cli/CMakeLists.txt` — a
+deny-list exception that overrides the `.md`/`docs/` skip-safe rules).
 That is intentional: the conservative allowlist IS the fail-closed
 mechanism — anything we did not explicitly reason about runs the build.
 
@@ -68,10 +71,22 @@ SKIP_SAFE_EXACT = {
     "CODEOWNERS",
 }
 
+# Paths that LOOK skip-safe (e.g. a `.md` file under `docs/`) but are in
+# fact native build inputs. Checked FIRST so they override every
+# skip-safe rule below. `docs/migrations/*.md` is globbed with
+# CONFIGURE_DEPENDS by tools/cli/CMakeLists.txt and compiled into pulp-cli
+# as `migration_index.cpp` — editing one genuinely changes compiled C++.
+FORCE_BUILD_PREFIXES = (
+    "docs/migrations/",
+)
+
 
 def is_skip_safe(path: str) -> bool:
     """True if this single file provably does not affect the native build."""
     if not path:
+        return False
+    # Deny-list wins over every skip-safe rule: some docs feed codegen.
+    if any(path.startswith(prefix) for prefix in FORCE_BUILD_PREFIXES):
         return False
     # Markdown anywhere — docs, never compiled, never embedded.
     if path.endswith(".md"):
@@ -93,8 +108,13 @@ def native_build_required(files: list[str]) -> bool:
 
 def _changed_files_from_diff(base: str) -> list[str] | None:
     """Return changed files for `<base>...HEAD`, or None if git fails."""
+    # `--no-renames`: with rename detection on, a rename such as
+    # `core/x.cpp -> docs/x.md` collapses to only the new path and would
+    # wrongly classify skip-safe. Disabling it reports the rename as a
+    # delete of the old path + an add of the new — so `core/x.cpp`
+    # surfaces and forces the native build (fail-closed).
     proc = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}...HEAD"],
         capture_output=True,
         text=True,
         check=False,
