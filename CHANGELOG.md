@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01737"></a>
+## [0.173.7] - 2026-05-19
+
+- refactor(mcp): P6-B4 third cut — extract mcp_tools + mcp_shell (pulp_mcp.cpp 597 → 451)
+
 <a id="v01736"></a>
 ## [0.173.6] - 2026-05-19
 
