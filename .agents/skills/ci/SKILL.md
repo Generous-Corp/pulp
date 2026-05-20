@@ -684,6 +684,37 @@ which is why this section exists). The pin and a developer's local
 install can drift — `pulp doctor` surfaces that, and `shipyard
 --version` is the local source of truth.
 
+## Nightly full build (`nightly-full-build.yml`)
+
+`.github/workflows/nightly-full-build.yml` is a scheduled coverage net
+for a gap in per-PR CI: **`build.yml` does NOT `make all`.** It builds a
+curated target set, and most `test/*.cpp` executables are only compiled
+on demand by `ctest`. So a refactor that breaks a test file (a stale
+include, a moved helper, an undeclared identifier) passes its own PR CI
+and rots on `main` undetected until the next full build. Two such
+breakages already slipped through this way — `test_mcp_server.cpp` and
+`test_canvas_widget_shadow.cpp` (issue #2462, the systemic fix).
+
+What it does:
+
+- Triggers on a nightly `schedule:` cron (`13 9 * * *`, off-peak UTC)
+  plus `workflow_dispatch:` for manual runs.
+- Runs on GitHub-hosted `macos-15` — **deliberately not** the
+  self-hosted M1 runners: a nightly must not compete with PR CI for the
+  M1's 2 runners, and overnight latency is irrelevant for a sweep.
+- Configures the **full tree** (`examples ON`, tests ON — no
+  `-DPULP_BUILD_EXAMPLES=OFF`) and builds **everything** with
+  `cmake --build --keep-going`, so one broken target does not mask the
+  rest. The whole `--keep-going` log is uploaded as an artifact.
+- On build/test failure, opens or updates a single de-duplicated
+  tracking issue and auto-closes it on the next green run — the same
+  watchdog pattern as `auto-release-watchdog.yml` and
+  `release-cadence-check.yml` (`permissions: issues: write`).
+
+If you see the "Nightly full build is broken" tracker, a refactor broke
+a test target PR CI never compiles. Download the `nightly-full-build-logs`
+artifact for the full failure list.
+
 ## Prerequisites Check
 
 Before running any CI command, verify the required tooling AND provider config exists:

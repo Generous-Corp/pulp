@@ -1,0 +1,219 @@
+name: Nightly full build
+
+# Per-PR build.yml does NOT do a full `make all` — it builds a curated
+# target set, and most test executables are only compiled on demand by
+# `ctest`. A refactor that breaks a `test/*.cpp` file (a stale include,
+# a moved helper, an undeclared identifier) therefore passes its own PR
+# CI and rots on `main` undetected until something later does a full
+# build. Two such breakages already slipped through this way:
+# test_mcp_server.cpp and test_canvas_widget_shadow.cpp (issue #2462).
+#
+# This workflow closes that gap: every night it configures the FULL
+# tree (examples ON, tests ON) and builds EVERYTHING with --keep-going,
+# so a single broken target cannot mask the rest. On failure it
+# opens/updates a single de-duplicated tracking issue (watchdog
+# pattern, modeled on auto-release-watchdog.yml and
+# release-cadence-check.yml); on the next green run it auto-closes it.
+#
+# Runner: GitHub-hosted macos-15 — free for public repos and
+# deliberately NOT the self-hosted M1 runners. A nightly must not
+# compete with PR CI for the M1's 2 runners, and overnight latency is
+# irrelevant for a scheduled coverage sweep.
+
+on:
+  schedule:
+    # 09:13 UTC — off-peak (early morning UTC, overnight in the
+    # Americas). Odd minute avoids the top-of-hour scheduler stampede.
+    - cron: '13 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-full-build
+  cancel-in-progress: false
+
+jobs:
+  full-build:
+    name: Full build (examples + all tests)
+    runs-on: macos-15
+
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+
+    env:
+      BUILD_DIR: build-nightly
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install ccache
+        run: |
+          brew install ccache || {
+            brew update
+            brew install ccache
+          }
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch prebuilt Skia (macOS)
+        # FindSkia.cmake needs
+        # external/skia-build/build/mac-gpu/lib/Release/libskia.a. The
+        # LFS-declared Skia binaries are not committed, so a fresh
+        # checkout has only headers/pointers and Configure fails the
+        # PULP_HAS_SKIA gate (examples-ON / GPU builds — e.g.
+        # examples/design-tool). fetch_skia_for_release.py pulls the
+        # pinned, sha256-verified asset from tools/deps/manifest.json.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+
+      - name: Configure (full tree — examples ON, tests ON)
+        # Deliberately NO -DPULP_BUILD_EXAMPLES=OFF: the whole point of
+        # this workflow is the full build that PR CI skips.
+        run: cmake -S . -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build everything (--keep-going)
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          # --keep-going so one broken target does not mask the rest;
+          # tee the full output to a log for the failure report.
+          if cmake --build "${BUILD_DIR}" --keep-going 2>&1 | tee build-nightly.log; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run test suite
+        id: test
+        shell: bash
+        run: |
+          set -o pipefail
+          if ctest --test-dir "${BUILD_DIR}" --output-on-failure 2>&1 | tee ctest-nightly.log; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload build + test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-full-build-logs
+          path: |
+            build-nightly.log
+            ctest-nightly.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Compute result
+        id: report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build='${{ steps.build.outputs.status }}'
+          test='${{ steps.test.outputs.status }}'
+          if [ "$build" = "pass" ] && [ "$test" = "pass" ]; then
+            result="success"
+          else
+            result="failure"
+          fi
+          echo "result=${result}"          >> "$GITHUB_OUTPUT"
+          echo "Build=${build:-skipped} Test=${test:-skipped} -> ${result}"
+
+      - name: Maintain tracking issue
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRACKING_TITLE: 'Nightly full build is broken — test targets rotting on main'
+          RESULT: ${{ steps.report.outputs.result }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+          TEST_STATUS: ${{ steps.test.outputs.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Look up the tracker in both OPEN and CLOSED state so a green
+          # run only closes an OPEN tracker — de-duplicated so a broken
+          # main does not spawn a fresh issue every night (mirror of the
+          # auto-release-watchdog.yml / release-cadence-check.yml pattern).
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$RESULT" = "success" ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Nightly full build recovered — closing tracker #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Nightly full build returned to green on ${RUN_URL} (sha ${RUN_SHA}). Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "Nightly full build is green and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          # Build the failure body.
+          {
+            echo "_Auto-generated by \`.github/workflows/nightly-full-build.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            echo "The nightly full build (\`examples ON\`, all test targets) failed."
+            echo "Per-PR \`build.yml\` does **not** \`make all\` — most \`test/*.cpp\`"
+            echo "executables are only compiled on demand — so a refactor can break a"
+            echo "test target that PR CI never compiles. See #2462 for the systemic"
+            echo "background."
+            echo
+            echo "**Build step:** ${BUILD_STATUS:-skipped}"
+            echo "**Test step:** ${TEST_STATUS:-skipped}"
+            echo "**Run:** ${RUN_URL}"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo
+            echo "Download the \`nightly-full-build-logs\` artifact from the run for the"
+            echo "full \`cmake --build --keep-going\` and \`ctest\` output — \`--keep-going\`"
+            echo "means every broken target is listed, not just the first."
+            echo
+            echo "_This tracker is de-duplicated (one issue, edited in place) and closes"
+            echo "automatically on the next green nightly run._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label bug,ci 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Fail the run on broken build or tests
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.report.outputs.result }}" != "success" ]; then
+            echo "Nightly full build failed — see the tracking issue."
+            exit 1
+          fi
+          echo "Nightly full build green."
