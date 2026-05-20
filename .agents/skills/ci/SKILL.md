@@ -929,10 +929,16 @@ self-hosted macOS workspaces can mask the bug.
 
 ### Overrides when you need them
 
-- **Dispatch a specific run on github-hosted** (normal Linux/Windows path, or comparing hosted macOS behaviour):
+- **Dispatch a build manually**: `runner_provider` defaults to
+  `github-hosted` (Namespace is drained — `default: namespace` was the
+  stale value that made every plain `workflow_dispatch` fail fast in
+  `resolve-provider`). A plain dispatch routes Linux/Windows to
+  GitHub-hosted runners; no `-f runner_provider` is needed:
   ```bash
-  gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=github-hosted
+  gh workflow run build.yml --repo danielraffel/pulp --ref <branch>
   ```
+  Passing `-f runner_provider=namespace` will fail until the
+  `PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON` repo variables are restored.
 - **Pin macOS to a local runner selector**: set `PULP_LOCAL_MACOS_RUNS_ON_JSON` at the repo level, or pass `macos_runner_selector_json` on a manual dispatch. Keep the selector compatible with the runner labels (`self-hosted`, `sanitizer`).
 - **Do not use Namespace overrides**: any remaining Namespace variable or mode is stale configuration and should be removed rather than worked around.
 

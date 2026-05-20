@@ -6,13 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       runner_provider:
-        description: "Runner provider to use for Linux and Windows build legs"
+        # Default is github-hosted: Namespace is drained and no
+        # PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON repo variables are set, so
+        # resolve-provider fails fast on the `namespace` route. The
+        # option is retained only for a future re-enable.
+        description: "Runner provider for Linux/Windows build legs (Namespace is drained — keep github-hosted)"
         required: false
-        default: namespace
+        default: github-hosted
         type: choice
         options:
-          - namespace
           - github-hosted
+          - namespace
       linux_runner_selector_json:
         description: "Optional JSON string/array for Linux runs-on when routing through Namespace"
         required: false
