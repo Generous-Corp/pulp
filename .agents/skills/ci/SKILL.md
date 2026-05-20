@@ -153,6 +153,9 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   `.github/workflows/build.yml`: the local self-hosted macOS runner may not
   have the pinned Skia archive, while pull_request validation already disables
   example bundles and release workflows own GPU/SDK coverage.
+  When adding optional shell arguments in `build.yml` (for example macOS-only
+  `-G Ninja`), use bash arrays and expand them as `"${args[@]}"`; scalar
+  `$args` trips actionlint/shellcheck word-splitting checks.
 - **Heartbeat line during long validation** (Shipyard v0.29.0). A
   20-minute lane now prints periodic progress instead of leaving a
   silent terminal. Helpful when watching `shipyard ship` interactively.

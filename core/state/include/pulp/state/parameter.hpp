@@ -72,6 +72,7 @@ struct ParamInfo {
     std::function<float(const std::string&)> from_string;
 
     ParamRate rate = ParamRate::ControlRate;
+    float smoothing_ramp_seconds = 0.0f; ///< 0 = off / immediate control-rate updates.
 };
 
 /// Thread-safe atomic parameter value for lock-free audio/UI communication.

@@ -38,21 +38,33 @@ public:
         , num_samples_(num_samples)
     {}
 
+    /// Create a non-owning slice over this view.
+    ///
+    /// The returned view references the same channel-pointer array and is
+    /// valid for no longer than the source view. @p start and @p length are
+    /// clamped to this view's sample range.
+    BufferView slice(std::size_t start, std::size_t length) const {
+        if (start > num_samples_) start = num_samples_;
+        const auto available = num_samples_ - start;
+        if (length > available) length = available;
+        return BufferView(channels_, num_channels_, length, sample_offset_ + start);
+    }
+
     /// Get a span over all samples in one channel.
     /// @param index  Zero-based channel index.
     std::span<SampleType> channel(std::size_t index) {
-        return {channels_[index], num_samples_};
+        return {channels_[index] + sample_offset_, num_samples_};
     }
 
     /// @copydoc channel(std::size_t)
     std::span<const SampleType> channel(std::size_t index) const {
-        return {channels_[index], num_samples_};
+        return {channels_[index] + sample_offset_, num_samples_};
     }
 
     /// Raw pointer to one channel's sample data.
-    SampleType* channel_ptr(std::size_t index) { return channels_[index]; }
+    SampleType* channel_ptr(std::size_t index) { return channels_[index] + sample_offset_; }
     /// @copydoc channel_ptr(std::size_t)
-    const SampleType* channel_ptr(std::size_t index) const { return channels_[index]; }
+    const SampleType* channel_ptr(std::size_t index) const { return channels_[index] + sample_offset_; }
 
     std::size_t num_channels() const { return num_channels_; }
     std::size_t num_samples() const { return num_samples_; }
@@ -68,9 +80,18 @@ public:
     }
 
 private:
+    BufferView(SampleType* const* channel_ptrs, std::size_t num_channels,
+               std::size_t num_samples, std::size_t sample_offset)
+        : channels_(channel_ptrs)
+        , num_channels_(num_channels)
+        , num_samples_(num_samples)
+        , sample_offset_(sample_offset)
+    {}
+
     SampleType* const* channels_ = nullptr;
     std::size_t num_channels_ = 0;
     std::size_t num_samples_ = 0;
+    std::size_t sample_offset_ = 0;
 };
 
 /// Owning multi-channel audio buffer with contiguous storage.

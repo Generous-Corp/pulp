@@ -159,8 +159,10 @@ public:
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
     mutable std::vector<midi::UmpEvent> captured_ump;
+    mutable std::vector<state::ParameterEvent> captured_param_events;
     mutable bool had_mpe_input = false;
     mutable bool had_ump_input = false;
+    mutable bool had_param_events = false;
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -193,6 +195,11 @@ public:
         }
         had_mpe_input = (mpe_input() != nullptr);
         had_ump_input = (ump_input() != nullptr);
+        had_param_events = (param_events() != nullptr);
+        captured_param_events.clear();
+        if (auto* events = param_events()) {
+            for (const auto& event : *events) captured_param_events.push_back(event);
+        }
         captured_ump.clear();
         if (auto* ump = ump_input()) {
             for (const auto& e : *ump) captured_ump.push_back(e);
@@ -351,6 +358,16 @@ TEST_CASE("CLAP param automation preserves all sample offsets while dual-writing
     events.push(p2);
 
     REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
+
+    REQUIRE(g_capturing->had_param_events);
+    REQUIRE(g_capturing->captured_param_events.size() == 3);
+    REQUIRE(g_capturing->captured_param_events[0].param_id == CapturingProcessor::kParamId);
+    REQUIRE(g_capturing->captured_param_events[0].sample_offset == 0);
+    REQUIRE(g_capturing->captured_param_events[0].value == 0.25f);
+    REQUIRE(g_capturing->captured_param_events[1].sample_offset == 16);
+    REQUIRE(g_capturing->captured_param_events[1].value == 0.50f);
+    REQUIRE(g_capturing->captured_param_events[2].sample_offset == 48);
+    REQUIRE(g_capturing->captured_param_events[2].value == 0.75f);
 
     const auto& param_events = h.plugin.param_events.events();
     REQUIRE(param_events.size() == 3);

@@ -88,16 +88,19 @@ TEST_CASE("ParamInfo defaults to control rate and preserves audio-rate metadata"
           "[state][params][rate]") {
     ParamInfo default_info;
     REQUIRE(default_info.rate == ParamRate::ControlRate);
+    REQUIRE(default_info.smoothing_ramp_seconds == 0.0f);
 
     StateStore source;
     ParamInfo audio_info = make_param_info(
         42, "Cutoff CV", "Hz", {20.0f, 20000.0f, 440.0f, 1.0f});
     audio_info.rate = ParamRate::AudioRate;
+    audio_info.smoothing_ramp_seconds = 0.005f;
     source.add_parameter(audio_info);
     source.set_value(42, 880.0f);
 
     REQUIRE(source.info(42) != nullptr);
     REQUIRE(source.info(42)->rate == ParamRate::AudioRate);
+    REQUIRE(source.info(42)->smoothing_ramp_seconds == 0.005f);
 
     auto blob = source.serialize();
 
@@ -106,6 +109,7 @@ TEST_CASE("ParamInfo defaults to control rate and preserves audio-rate metadata"
     REQUIRE(restored.deserialize(blob));
     REQUIRE(restored.info(42) != nullptr);
     REQUIRE(restored.info(42)->rate == ParamRate::AudioRate);
+    REQUIRE(restored.info(42)->smoothing_ramp_seconds == 0.005f);
     REQUIRE_THAT(restored.get_value(42), WithinAbs(880.0f, 1e-6f));
 }
 

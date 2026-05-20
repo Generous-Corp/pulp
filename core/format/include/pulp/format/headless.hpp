@@ -6,6 +6,7 @@
 /// tests, benchmarks.
 
 #include <pulp/format/processor.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 
 namespace pulp::format {
 
@@ -55,12 +56,25 @@ public:
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out);
 
+    /// Process a block with explicit sample-accurate parameter events.
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 const state::ParameterEventQueue& param_events);
+
     /// Process a block of audio with MIDI and explicit transport/timeline
     /// context. This is the low-level seam for deterministic offline stepping.
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out,
+                 ProcessContext context);
+
+    /// Low-level process call with MIDI, context, and parameter events.
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 const state::ParameterEventQueue& param_events,
                  ProcessContext context);
 
     /// Release processing resources. Safe to call multiple times.

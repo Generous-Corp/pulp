@@ -50,6 +50,8 @@ Fields:
 - `group_id` — for hierarchical organization (0 = ungrouped)
 - `to_string` — optional display formatter
 - `from_string` — optional string parser
+- `rate` — `ControlRate` by default; `AudioRate` opts into future audio-rate graph edges
+- `smoothing_ramp_seconds` — optional control-rate smoothing time; `0` means off
 
 ### ParamValue
 
@@ -125,6 +127,49 @@ float cutoff = state().get_modulated(kCutoff);  // base + offset
 ```
 
 The CLAP adapter handles `CLAP_EVENT_PARAM_MOD` events and calls `set_mod_offset()` / `add_mod_offset()` before each process block.
+
+## Sample-Accurate Automation
+
+Format adapters preserve host automation points in a per-block
+`ParameterEventQueue` and expose it during `Processor::process()`:
+
+```cpp
+void process(audio::BufferView<float>& output,
+             const audio::BufferView<const float>& input,
+             midi::MidiBuffer&,
+             midi::MidiBuffer&,
+             const format::ProcessContext&) override {
+    if (const auto* events = param_events()) {
+        for (const auto& event : *events) {
+            // event.param_id, event.sample_offset, event.value
+        }
+    }
+}
+```
+
+Adapters still dual-write `StateStore` before `process()` so old processors
+continue to see the block-end value from `state().get_value(id)`. Processors
+that split a block should seed a `ParamCursor` with their own pre-automation
+snapshot:
+
+```cpp
+std::array<format::ParamSnapshotEntry, 1> initial{{
+    {kGain, previous_gain_},
+}};
+
+format::for_each_subblock(output, input, state(), param_events(), initial,
+    [&](auto& out, const auto& in, const format::ParamCursor& params) {
+        const float gain = params.value(kGain);
+        // Process this sub-block with a coherent gain value.
+    });
+
+previous_gain_ = state().get_value(kGain);
+```
+
+`for_each_subblock` never mutates `StateStore`; it advances a block-local
+cursor as event offsets are crossed. `ParamInfo::smoothing_ramp_seconds` and
+`format::ControlRateParamSmoother` provide an opt-in ramp for processors that
+want click-free block-rate changes without splitting into sub-blocks.
 
 ## Binding (UI Integration)
 
@@ -235,17 +280,20 @@ empty input as "reset persisted plugin-owned state to defaults".
 
 | Thread | Can Read | Can Write | Mechanism |
 |--------|----------|-----------|-----------|
-| Audio thread | `get_value()`, `get_modulated()` | `set_value()` (for output params) | `std::atomic` relaxed |
+| Audio thread | `get_value()`, `get_modulated()` | `set_value_rt()` for host-driven writes | `std::atomic` relaxed + SPSC listener queue |
 | UI thread | `Binding::get()`, `poll()` | `Binding::set()` | `std::atomic` relaxed |
 | Host thread | `serialize()` | `deserialize()`, `set_value()` | `std::atomic` relaxed, mutex for listeners |
 
-The listener mutex in StateStore is only held when calling change listeners — not during atomic reads/writes. If the host calls `set_value()` from the audio thread, listeners may briefly block. For production use, consider draining listener notifications on the UI thread via a lock-free queue.
+The generic listener path can allocate when main-thread listeners are
+marshalled through an event loop. Format adapters use `set_value_rt()` on the
+audio thread, which writes the atomic value and defers main-thread listener
+callbacks through a bounded SPSC queue drained by the UI tick.
 
 ## Format Adapter Integration
 
 Format adapters sync parameters bidirectionally:
 
-- **Host → Plugin**: adapters read host parameter changes and call `store.set_value()` before `process()`
+- **Host → Plugin**: adapters read host parameter changes, preserve sample offsets in `ParameterEventQueue`, attach the queue via `Processor::param_events()`, and call `store.set_value_rt()` before `process()` for legacy block-end reads
 - **Plugin → Host**: adapters snapshot values before `process()`, then emit output events for any changes after
 - **UI → Host**: `Binding::begin_gesture()` / `end_gesture()` forward to host undo system
 - **CLAP modulation**: adapter handles `CLAP_EVENT_PARAM_MOD` and calls `set_mod_offset()` / `add_mod_offset()`

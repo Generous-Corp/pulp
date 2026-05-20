@@ -126,6 +126,9 @@ Do not collapse inbound CLAP parameter automation to a single last point.
 `PulpClapPlugin::param_events`, sorts by sample offset, and still calls
 `store.set_value_rt(...)` for the same events so legacy block-level reads
 observe the final value.
+Before calling `Processor::process()`, the adapter attaches that queue via
+`processor->set_param_events(&param_events)`, so sample-accurate processors
+read the same sorted events through `Processor::param_events()`.
 
 The **modulation offset is per-buffer**: `store.reset_all_mod()` runs
 at the top of every `process()` before applying new `PARAM_MOD` events.

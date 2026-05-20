@@ -4,6 +4,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
 #include <memory>
@@ -395,6 +396,12 @@ public:
     /// and the host/format adapter populated it.
     const midi::UmpBuffer* ump_input() const { return ump_input_; }
 
+    /// Access sample-accurate parameter automation for this block. Returns
+    /// nullptr when the current host path did not provide a parameter-event
+    /// queue; an empty queue means the adapter participated but the block had
+    /// no parameter events.
+    const state::ParameterEventQueue* param_events() const { return param_events_; }
+
     /// @internal Framework sets these during initialization / processing.
     void set_state_store(state::StateStore* store) { state_store_ = store; }
     /// @internal
@@ -403,12 +410,15 @@ public:
     void set_mpe_input(const midi::MpeBuffer* mpe) { mpe_input_ = mpe; }
     /// @internal Called by format adapters before process() when UMP is on.
     void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
+    /// @internal Called by format adapters before process().
+    void set_param_events(const state::ParameterEventQueue* events) { param_events_ = events; }
 
 private:
     state::StateStore* state_store_ = nullptr;
     const audio::BufferView<const float>* sidechain_ = nullptr;
     const midi::MpeBuffer* mpe_input_ = nullptr;
     const midi::UmpBuffer* ump_input_ = nullptr;
+    const state::ParameterEventQueue* param_events_ = nullptr;
 };
 
 /// Factory function type — plugins provide this to create processor instances.

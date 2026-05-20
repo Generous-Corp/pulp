@@ -97,6 +97,8 @@ public:
     std::size_t last_midi_in_size = 0;
     std::size_t last_sysex_size = 0;
     std::vector<uint8_t> last_sysex_payload;
+    std::vector<pulp::state::ParameterEvent> last_param_events;
+    bool had_param_events = false;
     float gain_seen_in_process = 0.0f;
     static TestVst3Processor* g_last_processor;
     static TestVst3Config g_next_config;
@@ -128,6 +130,11 @@ void TestVst3Processor::process(
     last_sysex_size = midi_in.sysex_size();
     if (last_sysex_size > 0) {
         last_sysex_payload = midi_in.sysex()[0].data;
+    }
+    had_param_events = (param_events() != nullptr);
+    last_param_events.clear();
+    if (auto* events = param_events()) {
+        for (const auto& event : *events) last_param_events.push_back(event);
     }
     gain_seen_in_process = state().get_value(kGainParamId);
 
@@ -461,6 +468,15 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(test_processor->last_context.position_samples == 12345);
     REQUIRE(test_processor->last_context.time_sig_numerator == 7);
     REQUIRE(test_processor->last_context.time_sig_denominator == 8);
+    REQUIRE(test_processor->had_param_events);
+    REQUIRE(test_processor->last_param_events.size() == 3);
+    REQUIRE(test_processor->last_param_events[0].param_id == kGainParamId);
+    REQUIRE(test_processor->last_param_events[0].sample_offset == 0);
+    REQUIRE_THAT(test_processor->last_param_events[0].value, WithinAbs(-60.0f, 1e-5f));
+    REQUIRE(test_processor->last_param_events[1].sample_offset == 2);
+    REQUIRE_THAT(test_processor->last_param_events[1].value, WithinAbs(-18.0f, 1e-5f));
+    REQUIRE(test_processor->last_param_events[2].sample_offset == 4);
+    REQUIRE_THAT(test_processor->last_param_events[2].value, WithinAbs(24.0f, 1e-5f));
 
     const auto& param_events = processor.last_input_param_events().events();
     REQUIRE(param_events.size() == 3);

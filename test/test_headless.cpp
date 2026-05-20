@@ -55,6 +55,11 @@ public:
             if (event.is_note_on()) ++midi_note_ons;
             ++midi_in_events;
         }
+        had_param_events = (param_events() != nullptr);
+        last_param_events.clear();
+        if (auto* events = param_events()) {
+            for (const auto& event : *events) last_param_events.push_back(event);
+        }
 
         float db = state().get_value(1);
         float gain = std::pow(10.0f, db / 20.0f);
@@ -82,6 +87,8 @@ public:
     int process_calls = 0;
     int midi_in_events = 0;
     int midi_note_ons = 0;
+    bool had_param_events = false;
+    std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
@@ -273,6 +280,36 @@ TEST_CASE("HeadlessHost forwards explicit MIDI buffers",
     REQUIRE(processor->process_calls == 1);
     REQUIRE(processor->midi_in_events == 1);
     REQUIRE(processor->midi_note_ons == 1);
+}
+
+TEST_CASE("HeadlessHost forwards explicit parameter-event queues",
+          "[headless][params][coverage]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(48000.0, 256);
+    REQUIRE(last_processor != nullptr);
+    auto* processor = last_processor;
+
+    pulp::audio::Buffer<float> in(2, 16), out(2, 16);
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 16);
+    auto out_view = out.view();
+
+    pulp::state::ParameterEventQueue events;
+    events.push({1, 12, -3.0f});
+    events.push({1, 4, -12.0f});
+    events.sort();
+
+    host.process(out_view, in_view, events);
+
+    REQUIRE(processor->had_param_events);
+    REQUIRE(processor->last_param_events.size() == 2);
+    REQUIRE(processor->last_param_events[0].sample_offset == 4);
+    REQUIRE(processor->last_param_events[0].value == -12.0f);
+    REQUIRE(processor->last_param_events[1].sample_offset == 12);
+    REQUIRE(processor->last_param_events[1].value == -3.0f);
+
+    host.process(out_view, in_view);
+    REQUIRE_FALSE(processor->had_param_events);
 }
 
 TEST_CASE("HeadlessHost null processor process and release are no-ops",

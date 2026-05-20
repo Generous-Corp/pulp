@@ -51,6 +51,14 @@ void HeadlessHost::process(audio::BufferView<float>& output,
 
 void HeadlessHost::process(audio::BufferView<float>& output,
                             const audio::BufferView<const float>& input,
+                            const state::ParameterEventQueue& param_events) {
+    midi::MidiBuffer midi_in, midi_out;
+    ProcessContext ctx;
+    process(output, input, midi_in, midi_out, param_events, std::move(ctx));
+}
+
+void HeadlessHost::process(audio::BufferView<float>& output,
+                            const audio::BufferView<const float>& input,
                             midi::MidiBuffer& midi_in,
                             midi::MidiBuffer& midi_out,
                             ProcessContext context) {
@@ -60,6 +68,23 @@ void HeadlessHost::process(audio::BufferView<float>& output,
     if (context.num_samples <= 0) {
         context.num_samples = static_cast<int>(output.num_samples());
     }
+    processor_->set_param_events(nullptr);
+    processor_->process(output, input, midi_in, midi_out, context);
+}
+
+void HeadlessHost::process(audio::BufferView<float>& output,
+                            const audio::BufferView<const float>& input,
+                            midi::MidiBuffer& midi_in,
+                            midi::MidiBuffer& midi_out,
+                            const state::ParameterEventQueue& param_events,
+                            ProcessContext context) {
+    if (!processor_) return;
+
+    if (context.sample_rate <= 0.0) context.sample_rate = sample_rate_;
+    if (context.num_samples <= 0) {
+        context.num_samples = static_cast<int>(output.num_samples());
+    }
+    processor_->set_param_events(&param_events);
     processor_->process(output, input, midi_in, midi_out, context);
 }
 

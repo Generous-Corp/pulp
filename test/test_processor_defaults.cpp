@@ -7,7 +7,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/ara.hpp>
+#include <pulp/format/param_processing.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
+
+#include <array>
 
 using namespace pulp::format;
 
@@ -328,28 +332,34 @@ TEST_CASE("Processor sidechain, MPE, and UMP sidecar pointers can be set and cle
     REQUIRE(p.sidechain_input() == nullptr);
     REQUIRE(p.mpe_input() == nullptr);
     REQUIRE(p.ump_input() == nullptr);
+    REQUIRE(p.param_events() == nullptr);
 
     const float sidechain_samples[4] = {0.1f, 0.2f, 0.3f, 0.4f};
     const float* sidechain_channels[1] = {sidechain_samples};
     pulp::audio::BufferView<const float> sidechain(sidechain_channels, 1, 4);
     pulp::midi::MpeBuffer mpe;
     pulp::midi::UmpBuffer ump;
+    pulp::state::ParameterEventQueue param_events;
 
     p.set_sidechain(&sidechain);
     p.set_mpe_input(&mpe);
     p.set_ump_input(&ump);
+    p.set_param_events(&param_events);
 
     REQUIRE(p.sidechain_input() == &sidechain);
     REQUIRE(p.mpe_input() == &mpe);
     REQUIRE(p.ump_input() == &ump);
+    REQUIRE(p.param_events() == &param_events);
 
     p.set_sidechain(nullptr);
     p.set_mpe_input(nullptr);
     p.set_ump_input(nullptr);
+    p.set_param_events(nullptr);
 
     REQUIRE(p.sidechain_input() == nullptr);
     REQUIRE(p.mpe_input() == nullptr);
     REQUIRE(p.ump_input() == nullptr);
+    REQUIRE(p.param_events() == nullptr);
 }
 
 TEST_CASE("Processor sidecar pointers replace independently between blocks",
@@ -366,23 +376,156 @@ TEST_CASE("Processor sidecar pointers replace independently between blocks",
     pulp::midi::MpeBuffer second_mpe;
     pulp::midi::UmpBuffer first_ump;
     pulp::midi::UmpBuffer second_ump;
+    pulp::state::ParameterEventQueue first_param_events;
+    pulp::state::ParameterEventQueue second_param_events;
 
     p.set_sidechain(&first_sidechain);
     p.set_mpe_input(&first_mpe);
     p.set_ump_input(&first_ump);
+    p.set_param_events(&first_param_events);
     REQUIRE(p.sidechain_input() == &first_sidechain);
     REQUIRE(p.mpe_input() == &first_mpe);
     REQUIRE(p.ump_input() == &first_ump);
+    REQUIRE(p.param_events() == &first_param_events);
 
     p.set_sidechain(&second_sidechain);
     p.set_mpe_input(&second_mpe);
     p.set_ump_input(&second_ump);
+    p.set_param_events(&second_param_events);
     REQUIRE(p.sidechain_input() == &second_sidechain);
     REQUIRE(p.mpe_input() == &second_mpe);
     REQUIRE(p.ump_input() == &second_ump);
+    REQUIRE(p.param_events() == &second_param_events);
 
     p.set_mpe_input(nullptr);
+    p.set_param_events(nullptr);
     REQUIRE(p.sidechain_input() == &second_sidechain);
     REQUIRE(p.mpe_input() == nullptr);
     REQUIRE(p.ump_input() == &second_ump);
+    REQUIRE(p.param_events() == nullptr);
+}
+
+TEST_CASE("ParamCursor uses explicit snapshots without mutating StateStore",
+          "[format][params][subblock][rt]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.25f, 0.0f},
+    });
+    store.set_value(1, 0.95f);
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push({1, 0, 0.10f}));
+    REQUIRE(events.push({1, 256, 0.50f}));
+    REQUIRE(events.push({1, 256, 0.75f}));
+    REQUIRE(events.push({1, 512, 0.90f}));
+    events.sort();
+
+    std::array<pulp::state::ParamSnapshotEntry, 1> initial{{
+        {1, 0.25f},
+    }};
+
+    float in_samples[512] = {};
+    float out_samples[512] = {};
+    const float* in_channels[1] = {in_samples};
+    float* out_channels[1] = {out_samples};
+    pulp::audio::BufferView<const float> input(in_channels, 1, 512);
+    pulp::audio::BufferView<float> output(out_channels, 1, 512);
+
+    std::array<std::size_t, 4> starts{};
+    std::array<std::size_t, 4> lengths{};
+    std::array<float, 4> values{};
+    int calls = 0;
+
+    {
+        pulp::runtime::ScopedNoAlloc guard;
+        pulp::state::ParamCursor cursor(store, &events, initial);
+        pulp::format::for_each_subblock(
+            output, input, &events, cursor,
+            [&](pulp::audio::BufferView<float>& out,
+                const pulp::audio::BufferView<const float>&,
+                const pulp::state::ParamCursor& params) {
+                starts[static_cast<std::size_t>(calls)] =
+                    static_cast<std::size_t>(out.channel_ptr(0) - out_samples);
+                lengths[static_cast<std::size_t>(calls)] = out.num_samples();
+                values[static_cast<std::size_t>(calls)] = params.value(1);
+                ++calls;
+            });
+    }
+
+    REQUIRE(calls == 2);
+    REQUIRE(starts[0] == 0);
+    REQUIRE(lengths[0] == 256);
+    REQUIRE(values[0] == 0.10f);
+    REQUIRE(starts[1] == 256);
+    REQUIRE(lengths[1] == 256);
+    REQUIRE(values[1] == 0.75f);
+    REQUIRE(store.get_value(1) == 0.95f);
+}
+
+TEST_CASE("for_each_subblock invokes one full block for null or empty queues",
+          "[format][params][subblock]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 7,
+        .name = "Mix",
+        .range = {0.0f, 1.0f, 0.5f, 0.0f},
+    });
+
+    float out_samples[8] = {};
+    float* out_channels[1] = {out_samples};
+    pulp::audio::BufferView<float> output(out_channels, 1, 8);
+    pulp::audio::BufferView<const float> input;
+
+    int calls = 0;
+    pulp::format::for_each_subblock(
+        output, input, store, nullptr,
+        [&](pulp::audio::BufferView<float>& out,
+            const pulp::audio::BufferView<const float>& in,
+            const pulp::state::ParamCursor& params) {
+            ++calls;
+            REQUIRE(out.num_samples() == 8);
+            REQUIRE(in.num_samples() == 0);
+            REQUIRE(params.value(7) == 0.5f);
+        });
+
+    REQUIRE(calls == 1);
+
+    pulp::state::ParameterEventQueue empty;
+    calls = 0;
+    pulp::format::for_each_subblock(
+        output, input, store, &empty,
+        [&](pulp::audio::BufferView<float>& out,
+            const pulp::audio::BufferView<const float>&,
+            const pulp::state::ParamCursor&) {
+            ++calls;
+            REQUIRE(out.num_samples() == 8);
+        });
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("ControlRateParamSmoother is bit-exact off and ramps when opted in",
+          "[format][params][smoothing]") {
+    pulp::state::ParamInfo info;
+    pulp::format::ControlRateParamSmoother smoother;
+
+    smoother.prepare(info, 1000.0, 0.0f);
+    REQUIRE_FALSE(smoother.smoothing_enabled());
+    smoother.set_target(1.0f);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(smoother.next() == 1.0f);
+    }
+
+    info.smoothing_ramp_seconds = 0.004f;
+    smoother.prepare(info, 1000.0, 0.0f);
+    REQUIRE(smoother.smoothing_enabled());
+    smoother.set_target(1.0f);
+
+    REQUIRE(smoother.next() == 0.25f);
+    REQUIRE(smoother.next() == 0.50f);
+    REQUIRE(smoother.next() == 0.75f);
+    REQUIRE(smoother.next() == 1.00f);
+    REQUIRE_FALSE(smoother.is_smoothing());
+    REQUIRE(smoother.next() == 1.00f);
 }

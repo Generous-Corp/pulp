@@ -57,6 +57,11 @@ public:
                  const pulp::format::ProcessContext&) override {
         ++process_count;
         gain_seen_in_process = state().get_value(1);
+        had_param_events = (param_events() != nullptr);
+        last_param_events.clear();
+        if (auto* events = param_events()) {
+            for (const auto& event : *events) last_param_events.push_back(event);
+        }
     }
 
     std::vector<uint8_t> serialize_plugin_state() const override {
@@ -71,6 +76,8 @@ public:
     std::string plugin_state;
     int process_count = 0;
     float gain_seen_in_process = 0.0f;
+    bool had_param_events = false;
+    std::vector<pulp::state::ParameterEvent> last_param_events;
 };
 
 class TestAUInstrumentProcessor : public pulp::format::Processor {
@@ -341,6 +348,16 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
 
         REQUIRE(processor->process_count == 1);
         REQUIRE_THAT(processor->gain_seen_in_process, WithinAbs(-12.0f, 1e-6f));
+        REQUIRE(processor->had_param_events);
+        REQUIRE(processor->last_param_events.size() == 2);
+        REQUIRE(processor->last_param_events[0].param_id == 1);
+        REQUIRE(processor->last_param_events[0].sample_offset == 1);
+        REQUIRE(processor->last_param_events[0].ramp_duration_sample_frames == 0);
+        REQUIRE_THAT(processor->last_param_events[0].value, WithinAbs(-6.0f, 1e-6f));
+        REQUIRE(processor->last_param_events[1].param_id == 1);
+        REQUIRE(processor->last_param_events[1].sample_offset == 5);
+        REQUIRE(processor->last_param_events[1].ramp_duration_sample_frames == 2);
+        REQUIRE_THAT(processor->last_param_events[1].value, WithinAbs(-12.0f, 1e-6f));
         REQUIRE_THAT(processor->state().get_value(1), WithinAbs(-12.0f, 1e-6f));
 
         REQUIRE([unit pulpLastParameterEventCount] == 2);
