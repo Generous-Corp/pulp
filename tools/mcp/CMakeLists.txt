@@ -10,7 +10,8 @@ configure_file(
 
 add_executable(pulp-mcp
     pulp_mcp.cpp
-    mcp_compat.cpp)
+    mcp_compat.cpp
+    mcp_tools.cpp)
 set_target_properties(pulp-mcp PROPERTIES OUTPUT_NAME "pulp-mcp")
 target_compile_features(pulp-mcp PRIVATE cxx_std_20)
 target_include_directories(pulp-mcp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

@@ -21,6 +21,8 @@
 #include "pulp_mcp_version.h"
 #include "mcp_json.hpp"
 #include "mcp_compat.hpp"
+#include "mcp_shell.hpp"
+#include "mcp_tools.hpp"
 
 namespace fs = std::filesystem;
 
@@ -42,175 +44,20 @@ using pulp_mcp::resolve_project_sdk_version;
 using pulp_mcp::compare_semver;
 using pulp_mcp::compat_error_payload;
 using pulp_mcp::handle_compat;
+// Shell-execution + tool handlers extracted to mcp_shell.hpp /
+// mcp_tools.{hpp,cpp} in the Phase 6 (B4) refactor.
+using pulp_mcp::exec;
+using pulp_mcp::find_project_root;
+using pulp_mcp::handle_build;
+using pulp_mcp::handle_test;
+using pulp_mcp::handle_status;
+using pulp_mcp::handle_validate;
+using pulp_mcp::handle_audio_model_status;
+using pulp_mcp::handle_audio_model_list;
+using pulp_mcp::handle_audio_model_activate;
+using pulp_mcp::handle_audio_read_bundle;
+using pulp_mcp::handle_audio_excerpt_find;
 
-#if defined(_WIN32)
-#define PULP_POPEN _popen
-#define PULP_PCLOSE _pclose
-#else
-#define PULP_POPEN popen
-#define PULP_PCLOSE pclose
-#endif
-
-
-// ── Shell execution ──────────────────────────────────────────────────────────
-
-static std::string exec(const std::string& cmd) {
-    std::string result;
-    FILE* pipe = PULP_POPEN(cmd.c_str(), "r");
-    if (!pipe) return "Error: failed to run command";
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe))
-        result += buffer;
-    int status = PULP_PCLOSE(pipe);
-    if (status != 0 && result.empty())
-        result = "Command failed with status " + std::to_string(status);
-    return result;
-}
-
-static fs::path find_project_root() {
-    auto dir = fs::current_path();
-    while (!dir.empty()) {
-        if (fs::exists(dir / "CMakeLists.txt") && fs::exists(dir / "core"))
-            return dir;
-        auto parent = dir.parent_path();
-        if (parent == dir) break;
-        dir = parent;
-    }
-    return {};
-}
-
-// ── MCP Tool Handlers ────────────────────────────────────────────────────────
-
-static std::string handle_build(const std::string& /*params_json*/) {
-    auto root = find_project_root();
-    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
-
-    auto build_dir = root / "build";
-    std::string output;
-
-    if (!fs::exists(build_dir / "CMakeCache.txt")) {
-        output += exec("cmake -B " + build_dir.string() + " -S " + root.string() + " 2>&1");
-    }
-    output += exec("cmake --build " + build_dir.string() + " 2>&1");
-
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
-}
-
-static std::string handle_test(const std::string& params_json) {
-    auto root = find_project_root();
-    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
-
-    auto build_dir = root / "build";
-    std::string cmd = "ctest --test-dir " + build_dir.string() + " --output-on-failure";
-
-    auto filter = extract_string(params_json, "filter");
-    if (!filter.empty()) cmd += " -R " + filter;
-
-    auto output = exec(cmd + " 2>&1");
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
-}
-
-static std::string handle_status(const std::string& /*params_json*/) {
-    auto root = find_project_root();
-    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
-
-    std::ostringstream out;
-    out << "Pulp Project: " << root.string() << "\n";
-
-    auto branch = exec("git -C " + root.string() + " branch --show-current 2>/dev/null");
-    if (!branch.empty()) {
-        while (!branch.empty() && branch.back() == '\n') branch.pop_back();
-        out << "Branch: " << branch << "\n";
-    }
-
-    auto build_dir = root / "build";
-    out << "Build: " << (fs::exists(build_dir / "CMakeCache.txt") ? "configured" : "not configured") << "\n";
-
-    int src = 0, hdr = 0, tests = 0;
-    for (auto& e : fs::recursive_directory_iterator(root / "core")) {
-        auto ext = e.path().extension().string();
-        if (ext == ".cpp" || ext == ".mm") ++src;
-        if (ext == ".hpp" || ext == ".h") ++hdr;
-    }
-    if (fs::exists(root / "test")) {
-        for (auto& e : fs::directory_iterator(root / "test")) {
-            if (e.path().extension() == ".cpp") ++tests;
-        }
-    }
-    out << "Sources: " << src << " impl, " << hdr << " headers, " << tests << " test files\n";
-
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(out.str()) + "}]}";
-}
-
-static std::string handle_validate(const std::string& params_json) {
-    auto root = find_project_root();
-    if (root.empty()) return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
-
-    std::string cmd = root.string() + "/build/tools/cli/pulp validate --json";
-    if (params_json.find("\"all\"") != std::string::npos &&
-        params_json.find("true") != std::string::npos) {
-        cmd += " --all";
-    }
-    cmd += " 2>&1";
-
-    auto output = exec(cmd);
-    return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
-}
-
-static std::string handle_audio_model_status(const std::string& /*params_json*/) {
-    auto status = pulp::tools::audio::query_model_status();
-    return json_tool_payload(pulp::tools::audio::to_json(status));
-}
-
-static std::string handle_audio_model_list(const std::string& /*params_json*/) {
-    auto result = pulp::tools::audio::list_models();
-    return json_tool_payload(pulp::tools::audio::to_json(result));
-}
-
-static std::string handle_audio_model_activate(const std::string& params_json) {
-    auto model_id = extract_string(params_json, "model_id");
-    if (model_id.empty()) {
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: model_id is required\"}]}";
-    }
-
-    auto result = pulp::tools::audio::activate_model(model_id);
-    return json_tool_payload(pulp::tools::audio::to_json(result));
-}
-
-static std::string handle_audio_read_bundle(const std::string& params_json) {
-    auto bundle_path = extract_string(params_json, "bundle_path");
-    if (bundle_path.empty()) {
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: bundle_path is required\"}]}";
-    }
-
-    auto bundle = pulp::tools::audio::read_excerpt_bundle(bundle_path);
-    return json_tool_payload(pulp::tools::audio::to_json(bundle));
-}
-
-
-static std::string handle_audio_excerpt_find(const std::string& params_json) {
-    auto text = extract_string(params_json, "text");
-    auto input_path = extract_string(params_json, "input_path");
-    if (text.empty() || input_path.empty()) {
-        return "{\"content\":[{\"type\":\"text\",\"text\":\"Error: text and input_path are required\"}]}";
-    }
-
-    pulp::tools::audio::ExcerptFindRequest request;
-    request.text = text;
-    request.input_path = input_path;
-    request.model_id = extract_string(params_json, "model_id");
-    request.recursive = extract_bool(params_json, "recursive", false);
-    request.top_k = static_cast<std::size_t>(extract_int(params_json, "top", 5));
-    request.window_ms = static_cast<uint64_t>(extract_int(params_json, "window_ms", 1500));
-    request.hop_ms = static_cast<uint64_t>(extract_int(params_json, "hop_ms", 250));
-    request.min_score = extract_double(params_json, "min_score", 0.0);
-    request.max_candidates_per_file =
-        static_cast<std::size_t>(extract_int(params_json, "max_candidates_per_file", 3));
-    request.bundle_out = extract_string(params_json, "bundle_out");
-
-    auto result = pulp::tools::audio::run_excerpt_find(request);
-    return json_tool_payload(pulp::tools::audio::to_json(result));
-}
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
