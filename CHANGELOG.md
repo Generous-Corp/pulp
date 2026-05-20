@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01738"></a>
+## [0.173.8] - 2026-05-19
+
+- refactor(view): P6-A3 final cut — extract claude_bundle.cpp; design_import.cpp 4,691 → 913 (-80%) across all three A3 cuts
+
 <a id="v01737"></a>
 ## [0.173.7] - 2026-05-19
 
