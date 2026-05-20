@@ -45,7 +45,11 @@ TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",
             seen_sizes.push_back({width, height});
         });
 
-        host->show();
+        // Headless: do NOT call host->show(). makeKeyAndOrderFront would
+        // pop a real window in the top-left of the screen for the lifetime
+        // of the test. AppKit posts windowDidResize: from setContentSize:
+        // regardless of on-screen visibility, so the resize-callback
+        // assertions below are unaffected.
         auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
         REQUIRE(nswindow != nil);
         [nswindow setContentSize:NSMakeSize(360.0, 280.0)];
@@ -158,13 +162,15 @@ TEST_CASE("PulpView mouseUp survives mouseDown handler that unmounts the target"
         auto* child_ptr = child.get();
         root.add_child(std::move(child));
 
-        host->show();
+        // Headless: no host->show(). Events are dispatched directly to
+        // the contentView below, so the window need not be on-screen;
+        // showing it would just flash a real window in the corner.
         auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
         REQUIRE(nswindow != nil);
         auto* contentView = nswindow.contentView;
         REQUIRE(contentView != nil);
 
-        // Pump the run loop so the window finishes coming up.
+        // Pump the run loop so the content view finishes settling.
         for (int i = 0; i < 20; ++i) {
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
         }
@@ -263,7 +269,8 @@ TEST_CASE("PulpView NSEvent click dispatches JS on(id,'click') subscriber",
         auto* child_ptr = bridge.widget("clear");
         REQUIRE(child_ptr != nullptr);
 
-        host->show();
+        // Headless: no host->show() — events go straight to the
+        // contentView, so the window stays off-screen.
         auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
         REQUIRE(nswindow != nil);
         auto* contentView = nswindow.contentView;
@@ -382,7 +389,8 @@ TEST_CASE("PulpView NSEvent click bubbles up to ancestor on_click handler",
         // The label has no handler of its own — that's the point.
         REQUIRE_FALSE(static_cast<bool>(label->on_click));
 
-        host->show();
+        // Headless: no host->show() — events go straight to the
+        // contentView, so the window stays off-screen.
         auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
         REQUIRE(nswindow != nil);
         auto* contentView = nswindow.contentView;
