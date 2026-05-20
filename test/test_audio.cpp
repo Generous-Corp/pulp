@@ -8,6 +8,7 @@
 #include <numbers>
 #include <thread>
 #include <chrono>
+#include <utility>
 
 using namespace pulp::audio;
 
@@ -369,6 +370,33 @@ TEST_CASE("BufferView clear only zeros sliced sample range",
     REQUIRE(buffer.channel(1)[3] == 0.0f);
     REQUIRE(buffer.channel(1)[4] == 0.0f);
     REQUIRE(buffer.channel(1)[5] == 15.0f);
+}
+
+TEST_CASE("Buffer self assignment preserves storage and channel pointers",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> buffer(2, 3);
+    buffer.channel(0)[1] = 0.125f;
+    buffer.channel(1)[2] = -0.25f;
+    auto* left = buffer.channel(0).data();
+    auto* right = buffer.channel(1).data();
+
+    auto& copy_ref = buffer;
+    buffer = copy_ref;
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+    REQUIRE(buffer.channel(0)[1] == 0.125f);
+    REQUIRE(buffer.channel(1)[2] == -0.25f);
+    REQUIRE(buffer.view().channel_ptr(0) == left);
+    REQUIRE(buffer.view().channel_ptr(1) == right);
+
+    auto& move_ref = buffer;
+    buffer = std::move(move_ref);
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+    REQUIRE(buffer.channel(0)[1] == 0.125f);
+    REQUIRE(buffer.channel(1)[2] == -0.25f);
+    REQUIRE(buffer.view().channel_ptr(0) == left);
+    REQUIRE(buffer.view().channel_ptr(1) == right);
 }
 
 TEST_CASE("AudioFileData reports shape from first channel",
