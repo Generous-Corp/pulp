@@ -1348,6 +1348,15 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 @interface PulpWindowDelegate : NSObject <NSWindowDelegate>
 @property (nonatomic, copy) void (^onClose)(void);
 @property (nonatomic, copy) void (^onResize)(float, float);
+/// pulp-internal #70 — real-time aspect-lock snap during user drag.
+/// macOS `setContentAspectRatio:` is unreliable in practice (it does
+/// not engage during edge-drag on every monitor configuration, and is
+/// bypassed entirely by the green zoom button / programmatic resize).
+/// Implementing `windowWillResize:toSize:` constrains every proposed
+/// resize before AppKit commits it, so the live drag is locked to the
+/// design aspect regardless of drag handle or zoom path. When 0, no
+/// constraint is applied.
+@property (nonatomic, assign) CGFloat aspectRatio;
 @end
 
 @implementation PulpWindowDelegate
@@ -1365,6 +1374,63 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
         NSSize size = window.contentView.bounds.size;
         self.onResize(static_cast<float>(size.width), static_cast<float>(size.height));
     }
+}
+
+- (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize {
+    // DEBUG: write to /tmp/pulp-aspect.log unconditionally
+    {
+        FILE* f = fopen("/tmp/pulp-aspect.log", "a");
+        if (f) {
+            fprintf(f, "ENTRY aspectRatio=%.3f frame=%.0fx%.0f\n",
+                    self.aspectRatio, frameSize.width, frameSize.height);
+            fclose(f);
+        }
+    }
+    // No-op when aspect-lock isn't requested.
+    if (self.aspectRatio <= 0) return frameSize;
+
+    // Convert frame size → content size (NSWindow gives us frame; we
+    // want to constrain the *content* aspect, since the design viewport
+    // and our paint math are in content coordinates).
+    NSRect frameRect  = NSMakeRect(0, 0, frameSize.width, frameSize.height);
+    NSRect contentRect = [sender contentRectForFrameRect:frameRect];
+    CGFloat targetW = contentRect.size.width;
+    CGFloat targetH = contentRect.size.height;
+    if (targetW <= 0 || targetH <= 0) return frameSize;
+
+    NSSize currentContent = sender.contentView.bounds.size;
+    CGFloat dw = std::fabs(targetW - currentContent.width);
+    CGFloat dh = std::fabs(targetH - currentContent.height);
+
+    // DEBUG: write to /tmp/pulp-aspect.log
+    FILE* f = fopen("/tmp/pulp-aspect.log", "a");
+    if (f) {
+        fprintf(f, "willResize frame=%.0fx%.0f content=%.0fx%.0f cur=%.0fx%.0f dw=%.0f dh=%.0f ar=%.3f",
+                frameSize.width, frameSize.height,
+                targetW, targetH,
+                currentContent.width, currentContent.height,
+                dw, dh, self.aspectRatio);
+    }
+
+    // Snap to aspect by picking the dominant drag axis: whichever
+    // dimension changed more from the current size drives the other.
+    // This lets the user grow OR shrink by dragging any edge or
+    // corner; the perpendicular dimension follows proportionally.
+    if (dw >= dh) {
+        targetH = targetW / self.aspectRatio;
+    } else {
+        targetW = targetH * self.aspectRatio;
+    }
+
+    // Convert back content → frame so AppKit gets a frame size.
+    NSRect newContent = NSMakeRect(0, 0, targetW, targetH);
+    NSRect newFrame   = [sender frameRectForContentRect:newContent];
+    if (f) {
+        fprintf(f, " -> content=%.0fx%.0f frame=%.0fx%.0f\n",
+                targetW, targetH, newFrame.size.width, newFrame.size.height);
+        fclose(f);
+    }
+    return newFrame.size;
 }
 
 @end
@@ -1979,8 +2045,33 @@ public:
     }
 
     void set_fixed_aspect_ratio(float ratio) override {
-        if (window_ && ratio > 0)
+        {
+            FILE* f = fopen("/tmp/pulp-aspect.log", "a");
+            if (f) {
+                fprintf(f, "GPU::set_fixed_aspect_ratio(%.3f) win=%p delegate=%p wDeleg=%p\n",
+                        ratio, (void*)window_, (void*)delegate_,
+                        window_ ? (void*)[window_ delegate] : nullptr);
+                fclose(f);
+            }
+        }
+        if (!window_) return;
+        if (ratio > 0) {
             [window_ setContentAspectRatio:NSMakeSize(ratio, 1.0)];
+            if (delegate_) delegate_.aspectRatio = ratio;
+        } else {
+            // Clear: reset to "no aspect lock" by setting resize
+            // increments equal to (0, 0) — macOS treats that as free.
+            [window_ setResizeIncrements:NSMakeSize(1, 1)];
+            if (delegate_) delegate_.aspectRatio = 0;
+        }
+        {
+            FILE* f = fopen("/tmp/pulp-aspect.log", "a");
+            if (f) {
+                fprintf(f, "GPU::set_fixed_aspect_ratio AFTER: delegate.aspectRatio=%.3f\n",
+                        delegate_ ? (double)delegate_.aspectRatio : -1.0);
+                fclose(f);
+            }
+        }
     }
 
     void set_design_viewport(float design_w, float design_h) override {

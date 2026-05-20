@@ -161,11 +161,13 @@
         "roundtrip_script": "tools/import-validation/stitch-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -328,11 +330,13 @@
         "roundtrip_script": "tools/import-validation/pencil-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -424,11 +428,13 @@
         "roundtrip_script": "tools/import-validation/figma-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -513,11 +519,13 @@
         "roundtrip_script": "tools/import-validation/v0-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -671,11 +679,13 @@
         "roundtrip_script": "tools/import-validation/rn-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -716,7 +726,7 @@
         {
           "url": "planning/2026-05-17-jsx-instrument-import.md",
           "kind": "spec",
-          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) — defines fixture shape, transform pipeline, and round-trip contract.",
+          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) \u2014 defines fixture shape, transform pipeline, and round-trip contract.",
           "last_verified": "2026-05-18",
           "recheck_interval_days": null
         },

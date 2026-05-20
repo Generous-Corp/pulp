@@ -144,10 +144,18 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
         }
 
         auto bypassed_obj = choc::value::createObject("");
-        // Walk every anchor we know about (from tweaks or bypassed)
-        // and surface its bypass state if any.
+        // Codex P2 follow-up on #2300: include bypass-only anchors.
+        // Previously `all_anchors` was populated solely from `records`,
+        // so a setBypass call on an anchor that had no active tweaks
+        // (or whose tweaks were later cleared via Inspector.clearTweaks
+        // without clearing the bypass) never surfaced in the response.
+        // Walk both the tweak-record anchors AND the TweakStore's
+        // bypassed anchors so the protocol can round-trip every bypass
+        // state — critical for the Phase 1 disk-persistence path.
         std::unordered_set<std::string> all_anchors;
         for (auto& rec : records) all_anchors.insert(rec.anchor_id);
+        for (auto& anchor : tweak_store_->bypassed_anchors())
+            all_anchors.insert(std::move(anchor));
         for (auto& anchor : all_anchors) {
             auto b = tweak_store_->bypass_for(anchor);
             if (!b) continue;

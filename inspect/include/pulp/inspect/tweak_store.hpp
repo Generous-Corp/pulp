@@ -120,6 +120,16 @@ public:
     std::optional<BypassValue>
     bypass_for(std::string_view anchor_id) const;
 
+    /// Return every anchor id that currently has a bypass entry,
+    /// regardless of whether it also has tweak records. Used by
+    /// Inspector.listTweaks to surface bypass-only anchors (Codex P2
+    /// follow-up on #2300: a setBypass call on an anchor with no
+    /// active tweaks, or one whose tweaks were later cleared, must
+    /// still show up in the protocol response's `bypassed` map so
+    /// clients and the disk-persistence path (Phase 1) can
+    /// round-trip the bypass state.
+    std::vector<std::string> bypassed_anchors() const;
+
     // ── Phase 1: disk persistence ───────────────────────────────────
 
     /// On-disk schema version. Bumped if/when we ever break the format.

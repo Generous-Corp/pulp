@@ -7,6 +7,41 @@ description: Import designs from Figma, Stitch, v0, Pencil, React Native, or Cla
 
 Import a design from an external tool (Figma, Stitch, v0, Pencil, React Native, Claude Design, or the experimental JSX runtime lane) into this Pulp project.
 
+## CRITICAL: pulp-design-tool requires the GPU host (PULP_HAS_SKIA)
+
+Before debugging *any* runtime-import resize / sizing / layout issue in `pulp-design-tool` or `/tmp/<App>.app`, verify the binary is using `MacGpuWindowHost`, not the CPU `MacWindowHost`. The design viewport pin, aspect-lock, and uniform paint-scale all live in `MacGpuWindowHost` (gated by `#ifdef PULP_HAS_SKIA` in `core/view/platform/mac/window_host_mac.mm`). When Skia isn't linked, `WindowHost::create()` returns `MacWindowHost`, where `set_design_viewport()` and `set_fixed_aspect_ratio()` are base-class no-ops — the example still builds and runs, but resize behaves as if every fix you've shipped is missing.
+
+**One-shot verification:**
+
+```bash
+# In the worktree
+nm build/examples/design-tool/pulp-design-tool 2>/dev/null | grep -q MacGpuWindowHost \
+  && echo "OK: GPU host present" || echo "FAIL: CPU-only build"
+
+# In a packaged .app
+strings /tmp/MyApp.app/Contents/MacOS/MyApp-Bin | grep -F "[gpu-host]" \
+  && echo "OK: GPU host present" || echo "FAIL: CPU-only build"
+```
+
+**Recovery when Skia is missing** (e.g. fresh worktree with `external/skia-build/` containing only headers):
+
+1. Reuse the primary checkout's populated cache:
+   ```bash
+   rm -rf external/skia-build
+   ln -s /Users/<you>/Code/pulp/external/skia-build external/skia-build
+   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release   # should print "Skia: found at ..."
+   ```
+2. Or run `tools/build-skia.sh` to rebuild Skia binaries from scratch (~30 min).
+3. Or pass `-DSKIA_DIR=/abs/path/to/external/skia-builder/build/<plat>-gpu`.
+
+**Defenses already shipped** (don't bypass without reading the comments):
+
+- `examples/design-tool/CMakeLists.txt` issues `FATAL_ERROR` at configure if `PULP_HAS_SKIA` is FALSE — design-tool is intentionally a GPU-only example.
+- `examples/design-tool/main.cpp` checks `#ifndef PULP_HAS_SKIA` at startup and exits with EX_CONFIG (78) + a loud stderr message.
+- `tools/cmake/PulpDependencies.cmake` already prints a screaming WARNING banner when `PULP_ENABLE_GPU=ON` but Skia isn't found; the release lane (`PULP_REQUIRE_GPU_FOR_SDK=ON` in `release-cli.yml`) escalates to FATAL_ERROR.
+
+**If your runtime-import test produces a window where content doesn't scale, the dark fill is visible past the design surface, or aspect-lock doesn't engage during drag, the FIRST thing to check is `nm | grep MacGpuWindowHost`.** Don't tune `set_design_viewport` / `windowWillResize:` / `setContentAspectRatio:` until you've confirmed the GPU host is actually linked.
+
 Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
@@ -307,7 +342,7 @@ identity. If you write a custom codegen path, preserve this pattern
 so the inspector can still trace identity.
 
 **Phase 0b — `setAnchor()` bridge wiring:** the web-compat codegen
-path *also* emits a functional `setAnchor('<var>', '<anchor>')` call
+path *also* emits a functional `setAnchor(<var>._id, '<anchor>')` call
 after each createElement, AND the call is emitted unconditionally —
 NOT gated on `opts.include_comments`. Rationale: the
 `// @pulp-anchor` trail is cosmetic (for grep / debugging), but
@@ -318,6 +353,18 @@ path, emit both: the comment (gated) for debuggability and the
 setAnchor call (unconditional) for the runtime. The bridge side
 (`WidgetBridge::setAnchor`) is a silent no-op on unknown widget IDs,
 matching the rest of the bridge's tolerance for unmounted ids.
+
+<!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
+**Codex P1 follow-up (#2303):** The first argument to `setAnchor` <!-- docs-noise-lint: skip — retained: pins guidance to the PR that introduced the _id contract -->
+MUST be the element's internal `_id` (the auto-generated `__el_N__`
+that `document.createElement` assigns in `core/view/js/web-compat.js`),
+NOT the generated JS variable name. The bridge keys `widget()` lookup
+on `_id`; passing the var name silently no-ops and breaks the entire
+anchor wiring chain for web-compat imports. Pre-fix codegen emitted
+`setAnchor('var', ...)` (broken); post-fix emits `setAnchor(var._id, ...)`
+(correct). If you write a new codegen variant or a non-web-compat
+shim, ensure whatever id you pass matches the bridge's widget()
+lookup key — not the JS-local variable name.
 
 Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
 the native codegen has many early-return branches that need each to

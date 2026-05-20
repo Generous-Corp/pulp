@@ -3569,8 +3569,17 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // even in minified bundles. js_single_quote_escape() is defensive;
     // anchors are typically [a-z0-9:/-] but adapters can supply
     // anything.
+    //
+    // Codex P1 (#2303 follow-up): in web-compat codegen the JS variable
+    // name is NOT the bridge widget id — `document.createElement` (web-
+    // compat.js) auto-generates an internal `__el_N__` id and exposes
+    // it as `<var>._id`. setAnchor must receive that id, not the JS
+    // variable name, otherwise the bridge's `widget(id)` lookup misses
+    // and the anchor wiring silently no-ops. Pass `<var>._id` so the
+    // bridge finds the right widget regardless of whether the user
+    // also called setId() on the element.
     if (node.stable_anchor_id && !node.stable_anchor_id->empty()) {
-        ss << ind << "setAnchor('" << var << "', '"
+        ss << ind << "setAnchor(" << var << "._id, '"
            << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
     }
 

@@ -8,8 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0172g"></a>
-## [0.172.16] - 2026-05-19
+<a id="v0172i"></a>
+## [0.172.18] - 2026-05-19
+
+- fix(harness): wire pulp-test-design-import-react-runtime into roundtrip scripts (Codex P2 follow-up to #2422)
 
 - refactor(test): P5-4 extract pulp pr shell-out tests (2,646 → 2,314, -332)
 
