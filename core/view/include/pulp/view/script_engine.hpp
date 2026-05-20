@@ -19,7 +19,7 @@ namespace pulp::view {
 // selected JsEngine backend.
 class ScriptEngine {
 public:
-    // Create with the platform default engine
+    // Create with the build default engine.
     ScriptEngine();
 
     // Create with a specific engine type

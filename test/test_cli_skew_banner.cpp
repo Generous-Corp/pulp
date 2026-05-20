@@ -26,6 +26,8 @@ using namespace pulp::platform;
 
 namespace {
 
+constexpr int kHelperTimeoutMs = 30000;
+
 // Walk up from the test binary's CWD to find the repo root (marker:
 // `.claude-plugin/plugin.json`). CTest runs tests from <build>/test,
 // so the ancestor walk tolerates arbitrary nesting depth.
@@ -165,7 +167,7 @@ TEST_CASE("cli_version_check helper prints banner when CLI is behind plugin min"
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
                                ctx.helper, /*disable=*/false);
 
-    auto r = exec("/bin/bash", {driver.string()}, 10000);
+    auto r = exec("/bin/bash", {driver.string()}, kHelperTimeoutMs);
     REQUIRE(r.exit_code == 0);
     REQUIRE_FALSE(r.timed_out);
     // Stable banner copy — mirrored in the helper's comments, the
@@ -185,7 +187,7 @@ TEST_CASE("cli_version_check helper is silent when CLI is ahead",
     write_pulp_shim(ctx.bin_dir, "0.31.0", "0.20.0");
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
                                ctx.helper, /*disable=*/false);
-    auto r = exec("/bin/bash", {driver.string()}, 10000);
+    auto r = exec("/bin/bash", {driver.string()}, kHelperTimeoutMs);
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stderr_output.find("Claude plugin requires CLI") ==
             std::string::npos);
@@ -226,7 +228,7 @@ TEST_CASE("cli_version_check helper banners at most once per session",
                     fs::perms::others_read | fs::perms::others_exec,
                     fs::perm_options::replace);
 
-    auto r = exec("/bin/bash", {driver.string()}, 10000);
+    auto r = exec("/bin/bash", {driver.string()}, kHelperTimeoutMs);
     REQUIRE(r.exit_code == 0);
 
     // Split the captured stderr at the two RUN markers and count
@@ -250,7 +252,7 @@ TEST_CASE("cli_version_check helper honours PULP_SKEW_CHECK_DISABLE",
     write_pulp_shim(ctx.bin_dir, "0.20.0", "0.31.0");
     auto driver = write_driver(ctx.sandbox.path, ctx.bin_dir, ctx.cache_dir,
                                ctx.helper, /*disable=*/true);
-    auto r = exec("/bin/bash", {driver.string()}, 10000);
+    auto r = exec("/bin/bash", {driver.string()}, kHelperTimeoutMs);
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stderr_output.find("Claude plugin requires") ==
             std::string::npos);

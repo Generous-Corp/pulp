@@ -228,7 +228,7 @@ TEST_CASE("modifier_strings_to_mask combines bits + 'meta' maps to kModCmd", "[d
 
 TEST_CASE("generate_pulp_js emits registerShortcut + handler thunk per shortcut", "[design-import][shortcuts][v2]") {
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
 
     DetectedShortcut esc;
@@ -263,7 +263,7 @@ TEST_CASE("generate_pulp_js emits registerShortcut + handler thunk per shortcut"
 
 TEST_CASE("generate_pulp_js skips shortcuts whose key doesn't resolve", "[design-import][shortcuts][v2]") {
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
 
     DetectedShortcut weird;
@@ -281,7 +281,7 @@ TEST_CASE("generate_pulp_js skips shortcuts whose key doesn't resolve", "[design
 
 TEST_CASE("generate_pulp_js with empty shortcuts emits no shortcut block", "[design-import][shortcuts][v2]") {
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     // opts.shortcuts is default-empty.
 
@@ -349,7 +349,7 @@ TEST_CASE("generate_pulp_js emits two bindings for meta+ctrl cross-platform shor
     // matches the physical chord, so the source handler's
     // `e.metaKey || e.ctrlKey` check sees the right flag.
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
 
     DetectedShortcut save;
@@ -388,7 +388,7 @@ TEST_CASE("generate_pulp_js Ctrl-only emits ctrlKey:true synthetic event", "[des
     // handler must receive `ctrlKey: true` in the synthetic event so the
     // source check passes.
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
 
     DetectedShortcut save;
@@ -453,7 +453,7 @@ TEST_CASE("E2E roundtrip: extract -> codegen -> WidgetBridge -> React-style hand
     // 2. Hand the extracted shortcuts to the codegen.  Empty DesignIR is
     //    fine — we only want the shortcut block.
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     opts.shortcuts = shortcuts;
 
@@ -783,7 +783,7 @@ TEST_CASE("default shortcuts: E2E — codegen emits default thunks too",
     REQUIRE(scan.accepted.size() == 1);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     opts.shortcuts = apply_default_shortcuts(scan.accepted, TargetPlatform::macos);
 
@@ -804,7 +804,7 @@ TEST_CASE("default shortcuts: emitted JS escapes single-quote + backslash (Codex
     // the generated `key: '...'` literal becomes syntactically invalid
     // JS and the whole script fails to load. Pin the escape.
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
 
     DetectedShortcut quote;  quote.key = "'";  // single-quote literal

@@ -348,8 +348,8 @@ never lose work" principle. A parser that skips `assign_anchors` will
 silently produce a tree where inspector edits get orphaned on the
 next re-import.
 
-**Codegen contract:** `generate_pulp_js` (both web-compat and native
-modes) emits `// @pulp-anchor <id>` trail comments next to each
+**Codegen contract:** `generate_pulp_js` (both web-compat and
+`bridge_native_js` modes) emits `// @pulp-anchor <id>` trail comments next to each
 element when `opts.include_comments == true`. The runtime inspector
 parses these to map generated elements back to their tweak-layer
 identity. If you write a custom codegen path, preserve this pattern
@@ -380,9 +380,11 @@ anchor wiring chain for web-compat imports. Pre-fix codegen emitted
 shim, ensure whatever id you pass matches the bridge's widget()
 lookup key — not the JS-local variable name.
 
-Native-mode codegen does NOT yet emit `setAnchor` (small follow-up;
-the native codegen has many early-return branches that need each to
-be wired). Web-compat is the default mode for imports — covered.
+`bridge_native_js` codegen does NOT yet emit `setAnchor` (small
+follow-up; the native-bridge JS codegen has many early-return branches
+that need each to be wired). `bridge_native_js` is the default codegen
+mode for imports; pass `--web-compat` only when the DOM-compatible JS
+lane is required.
 
 **Phase 5.1 — `setSource()` source-jump wiring:** alongside `setAnchor`,
 the `@pulp/react` reconciler now forwards React's dev-mode `__source`

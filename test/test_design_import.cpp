@@ -595,7 +595,7 @@ TEST_CASE("generate_pulp_js escapes text containing newlines / quotes / backslas
     ir.root.children.push_back(multiline);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     auto js = generate_pulp_js(ir, opts);
 
@@ -630,7 +630,7 @@ TEST_CASE("generate_pulp_js escapes text containing newlines / quotes / backslas
     }
 }
 
-TEST_CASE("generate_pulp_js native mode produces Pulp API", "[view][import]") {
+TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root.type = "frame";
@@ -652,7 +652,7 @@ TEST_CASE("generate_pulp_js native mode produces Pulp API", "[view][import]") {
     ir.tokens.colors["bg.primary"] = "#1a1a2e";
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     auto js = generate_pulp_js(ir, opts);
 
@@ -671,7 +671,7 @@ TEST_CASE("generate_pulp_js native mode produces Pulp API", "[view][import]") {
     REQUIRE(js.find("void 0;") != std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js native mode handles audio widgets with Yoga constraints", "[view][import]") {
+TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yoga constraints", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root.type = "frame";
@@ -702,7 +702,7 @@ TEST_CASE("generate_pulp_js native mode handles audio widgets with Yoga constrai
     ir.root.children.push_back(meter);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     auto js = generate_pulp_js(ir, opts);
 
     // Knob with wrapper column and proper sizing (IDs get numeric suffixes)
@@ -767,7 +767,7 @@ TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
     REQUIRE(no_comments.find("// Generated") == std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js native mode covers layout and audio widget edge branches",
+TEST_CASE("generate_pulp_js bridge_native_js mode covers layout and audio widget edge branches",
           "[view][import][coverage]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
@@ -851,7 +851,7 @@ TEST_CASE("generate_pulp_js native mode covers layout and audio widget edge bran
     ir.root.children.push_back(spacer);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     opts.preview_mode = true;
     auto js = generate_pulp_js(ir, opts);
@@ -1182,9 +1182,9 @@ TEST_CASE("E2E: Figma IR -> code gen -> tokens -> round-trip", "[view][import][e
     REQUIRE(controls.children[1].audio_widget == AudioWidgetType::fader);
     REQUIRE(controls.children[2].audio_widget == AudioWidgetType::meter);
 
-    // Step 3: Generate native code
+    // Step 3: Generate native-bridge JS
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     auto js = generate_pulp_js(ir, opts);
     REQUIRE(!js.empty());
@@ -1331,7 +1331,7 @@ TEST_CASE("parse_pencil_json covers sizing layout padding and widget metadata ed
     REQUIRE(knob_row.layout.direction == LayoutDirection::row);
 }
 
-TEST_CASE("generate_pulp_js native mode covers fill-height and leaf fallback branches",
+TEST_CASE("generate_pulp_js bridge_native_js mode covers fill-height and leaf fallback branches",
           "[view][import][coverage]") {
     DesignIR ir;
     ir.source = DesignSource::pencil;
@@ -1345,7 +1345,7 @@ TEST_CASE("generate_pulp_js native mode covers fill-height and leaf fallback bra
     ir.root.children.push_back(leaf);
 
     CodeGenOptions opts;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     opts.include_comments = false;
     auto js = generate_pulp_js(ir, opts);
 

@@ -412,9 +412,10 @@ struct ClaudeRuntimeOptions {
     /// app.bundle combo (~4.3 MB) with headroom.
     size_t max_total_js_bytes = 6 * 1024 * 1024;
 
-    /// Override the JS engine backend. nullopt -> platform default
-    /// (auto: JSC on Apple, QuickJS elsewhere). Useful for tests that
-    /// want deterministic engine choice.
+    /// Override the JS engine backend. nullopt -> build default
+    /// (QuickJS unless a PULP_DEFAULT_ENGINE_* compile option selects
+    /// another backend). Useful for tests that want deterministic
+    /// engine choice.
     std::optional<int> engine_override;  // pulp::view::JsEngineType opaque to header
 
     /// If non-null, populated with a human-readable explanation when the
@@ -655,13 +656,17 @@ AudioWidgetType detect_audio_widget(const std::string& name);
 
 /// Code generation output mode.
 enum class CodeGenMode {
-    web_compat,   // document.createElement + el.style (web-compat layer)
-    native        // createCol/createRow/createKnob + setFlex (native Pulp API)
+    web_compat,        // document.createElement + el.style (web-compat layer)
+    bridge_native_js,  // JS that calls createCol/createRow/createKnob + setFlex
+                       // through the native widget bridge; not direct C++.
+    native
+        [[deprecated("Use CodeGenMode::bridge_native_js; CodeGenMode::native emits bridge JS, not direct C++.")]]
+        = bridge_native_js
 };
 
 /// Options for code generation.
 struct CodeGenOptions {
-    CodeGenMode mode = CodeGenMode::native;  // Native by default (better Yoga compat)
+    CodeGenMode mode = CodeGenMode::bridge_native_js;  // Native-bridge JS by default (better Yoga compat)
     bool include_tokens = true;       // Generate token assignments
     bool include_comments = true;     // Generate inline comments
     bool preview_mode = false;        // Use minimal widget style (design preview)

@@ -382,7 +382,7 @@ TEST_CASE("generate_pulp_js elides @pulp-anchor comments when include_comments=f
     REQUIRE(js.find("@pulp-anchor") == std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js native mode emits @pulp-anchor comments",
+TEST_CASE("generate_pulp_js bridge_native_js mode emits @pulp-anchor comments",
           "[view][import][anchors]") {
     const std::string json = R"({
         "type": "frame",
@@ -393,7 +393,7 @@ TEST_CASE("generate_pulp_js native mode emits @pulp-anchor comments",
 
     CodeGenOptions opts;
     opts.include_comments = true;
-    opts.mode = CodeGenMode::native;
+    opts.mode = CodeGenMode::bridge_native_js;
     auto js = generate_pulp_js(ir, opts);
 
     REQUIRE(js.find("// @pulp-anchor figma:0:1") != std::string::npos);

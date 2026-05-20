@@ -163,7 +163,10 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 
 ## Engine Selection Semantics
 
-- `auto` (default): QuickJS everywhere. Backward compatible. Safe.
+- `auto` (default): QuickJS everywhere unless the build explicitly
+  sets a `PULP_DEFAULT_ENGINE_*` compile option. Backward compatible.
+  Safe. Do not describe this as "Apple defaults to JSC"; that was an
+  old header comment, not the implementation.
 - `quickjs`: Explicit QuickJS. Same as auto today.
 - `jsc`: JavaScriptCore on Apple. Build fails on non-Apple.
 - `v8`: V8 on desktop. Requires V8 headers/libs. Build fails without them.

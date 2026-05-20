@@ -288,7 +288,7 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
         generate_node(ss, child, opts, depth + 1, var_counter, var);
 }
 
-// ── Native Pulp API code generator ──────────────────────────────────────
+// ── Native-bridge JS code generator ─────────────────────────────────────
 // Uses createCol/createRow/createKnob/setFlex — the native widget bridge API.
 // Encodes Yoga layout constraints learned from testing:
 //   - Every container MUST have explicit height, min_height, or flex_grow
@@ -381,7 +381,7 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     std::string ind = indent(depth, opts.indent_spaces);
     std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
 
-    // Phase 0a: emit the anchor trail in native-mode codegen too. Same
+    // Phase 0a: emit the anchor trail in bridge-native-JS codegen too. Same
     // gate + format as generate_node(), so downstream tooling has one
     // pattern to grep for regardless of which codegen mode produced
     // the JS.
@@ -390,10 +390,10 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         ss << ind << "// @pulp-anchor " << *node.stable_anchor_id << "\n";
     }
     // Phase 0b: TODO — emit `setAnchor(id, anchor)` calls in this
-    // native-mode codegen path too. The web-compat path
-    // (generate_node) is wired; native mode has many early returns
+    // bridge-native-JS codegen path too. The web-compat path
+    // (generate_node) is wired; bridge-native-JS has many early returns
     // and several create call sites, so a small follow-up PR will
-    // factor that out cleanly. For now, native-mode imports do not
+    // factor that out cleanly. For now, bridge-native-JS imports do not
     // bind anchors to live widgets — affects inspector tweaks for
     // imports that opted into native codegen. Web-compat is the
     // default mode, so most imports are unaffected.
@@ -725,7 +725,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         if (opts.include_comments)
             ss << "// Design tokens\n";
 
-        if (opts.mode == CodeGenMode::native) {
+        if (opts.mode == CodeGenMode::bridge_native_js) {
             for (auto& [name, value] : ir.tokens.colors)
                 ss << "setColorToken('" << name << "', '" << value << "');\n";
             for (auto& [name, value] : ir.tokens.dimensions)
@@ -841,8 +841,8 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         ss << "\n";
     }
 
-    if (opts.mode == CodeGenMode::native) {
-        // Native Pulp API
+    if (opts.mode == CodeGenMode::bridge_native_js) {
+        // Native-bridge JS API
         int var_counter = 0;
         generate_native_node(ss, ir.root, opts, 0, var_counter, "");
         ss << "void 0;\n";

@@ -188,8 +188,9 @@ protected:
 // Throws std::runtime_error if the requested engine is not available on this platform/build.
 std::unique_ptr<JsEngine> create_js_engine(JsEngineType type);
 
-// Create a JS engine using the platform default:
-//   Apple → JSC, others → QuickJS (V8 if PULP_HAS_V8)
+// Create a JS engine using the build default. QuickJS remains the
+// compatibility default unless a PULP_DEFAULT_ENGINE_* option selects
+// JavaScriptCore or V8 at compile time.
 std::unique_ptr<JsEngine> create_default_js_engine();
 
 // Query which engines are available in this build
