@@ -15,12 +15,19 @@
 //     "version": 1,
 //     "tweaks":   Record<anchor, Record<dottedPath, value>>,
 //     "bypassed": Record<anchor, true | string[]>,
+//     "locked":   string[]                                     // optional
 //     "sources":  Record<anchor, Record<dottedPath, string>>   // optional
 //   }
 //
 // Per Codex Phase 0b review: bypass IS a SIBLING overlay, not
 // `applied:false` mixed into the dotted-path tweak map. That preserves
 // v1 backwards compatibility — old files with only `tweaks` still load.
+//
+// Phase 2.5: `locked` is a third sibling overlay — a flat list of
+// anchor ids the user has marked as protected from bulk-clear /
+// reimport. It mirrors the bypass overlay shape (anchor-keyed,
+// additive, omitted entirely when empty) so old v1 files still load
+// and a build that doesn't understand `locked` simply ignores it.
 //
 // Atomic-write contract: save_to_disk() writes to `<path>.tmp` then
 // renames over the target so a crash mid-write never leaves a
@@ -36,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -83,7 +91,7 @@ public:
     /// removed.
     std::size_t remove_anchor(std::string_view anchor_id);
 
-    /// Clear the entire table (tweaks + bypass overlay).
+    /// Clear the entire table (tweaks + bypass overlay + lock set).
     void clear();
 
     /// Set the bypass state for an anchor.
@@ -95,6 +103,18 @@ public:
     /// Convenience: clear the bypass for an anchor (equivalent to
     /// set_bypass(id, false)).
     void clear_bypass(std::string_view anchor_id);
+
+    /// Set the lock state for an anchor (Phase 2.5 — tweak management
+    /// panel). A locked anchor is protected from being cleared by a
+    /// bulk operation or by re-import. `locked=true` adds the anchor
+    /// to the lock set; `locked=false` removes it. Lock is a sibling
+    /// overlay — it never affects whether a tweak is applied, only
+    /// whether destructive bulk operations may remove it.
+    void set_locked(std::string_view anchor_id, bool locked);
+
+    /// Convenience: clear the lock for an anchor (equivalent to
+    /// set_locked(id, false)).
+    void clear_lock(std::string_view anchor_id);
 
     // ── Inspection ──────────────────────────────────────────────────
 
@@ -130,6 +150,15 @@ public:
     /// round-trip the bypass state.
     std::vector<std::string> bypassed_anchors() const;
 
+    /// Whether `anchor_id` is currently locked (Phase 2.5).
+    bool is_locked(std::string_view anchor_id) const;
+
+    /// Return every anchor id that currently carries a lock, in
+    /// unspecified order. Mirrors bypassed_anchors() — used by the
+    /// management panel and the disk-persistence path so lock state
+    /// round-trips even for anchors with no active tweaks.
+    std::vector<std::string> locked_anchors() const;
+
     // ── Phase 1: disk persistence ───────────────────────────────────
 
     /// On-disk schema version. Bumped if/when we ever break the format.
@@ -161,9 +190,9 @@ public:
 
     /// Enable / disable post-mutation auto-save. When enabled, every
     /// successful apply_tweak / remove_tweak / remove_anchor / clear /
-    /// set_bypass / clear_bypass call flushes the table to disk at
-    /// `path` (or default_tweaks_path() if empty). Default OFF so unit
-    /// tests don't write to disk by accident.
+    /// set_bypass / clear_bypass / set_locked / clear_lock call flushes
+    /// the table to disk at `path` (or default_tweaks_path() if empty).
+    /// Default OFF so unit tests don't write to disk by accident.
     ///
     /// Set `enabled=false` to disable. The `path` is ignored when
     /// disabling.
@@ -205,6 +234,9 @@ private:
     std::unordered_map<std::string,
                        std::unordered_map<std::string, Entry>> tweaks_;
     std::unordered_map<std::string, BypassValue> bypassed_;
+    // Phase 2.5: anchor ids the user has marked as locked. A flat set
+    // (lock has no per-path granularity — it protects a whole anchor).
+    std::unordered_set<std::string> locked_;
 
     // Auto-save state. When `auto_save_` is true, every successful
     // mutation re-flushes the table to `auto_save_path_` after the

@@ -171,9 +171,16 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             }, *b);
         }
 
+        // Phase 2.5: surface the `locked` overlay so the management
+        // panel and disk-persistence path can round-trip lock state.
+        auto locked_arr = choc::value::createEmptyArray();
+        for (auto& anchor : tweak_store_->locked_anchors())
+            locked_arr.addArrayElement(choc::value::createString(anchor));
+
         auto resp = choc::value::createObject("");
         resp.addMember("tweaks", tweaks_obj);
         resp.addMember("bypassed", bypassed_obj);
+        resp.addMember("locked", locked_arr);
         resp.addMember("count", choc::value::createInt64(static_cast<int64_t>(records.size())));
         return make_response(req.id, choc::json::toString(resp, false));
     }
@@ -361,6 +368,26 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
             return make_response(req.id, choc::json::toString(resp, false));
         } catch (...) {
             return make_error(req.id, "Invalid params for Inspector.setBypass");
+        }
+    }
+    // ── Phase 2.5: setLocked — mirrors setBypass for the lock overlay ──
+    if (req.method == methods::kInspectorSetLocked) {
+        if (!tweak_store_) return make_error(req.id, "No tweak store attached");
+        try {
+            auto params = choc::json::parse(req.params_json);
+            auto anchor = std::string(params["anchorId"].getString());
+            if (!params.hasObjectMember("value") || !params["value"].isBool()) {
+                return make_error(req.id,
+                    "Inspector.setLocked requires `value` as bool");
+            }
+            tweak_store_->set_locked(anchor, params["value"].getBool());
+            auto resp = choc::value::createObject("");
+            resp.addMember("ok", choc::value::createBool(true));
+            resp.addMember("locked", choc::value::createBool(
+                tweak_store_->is_locked(anchor)));
+            return make_response(req.id, choc::json::toString(resp, false));
+        } catch (...) {
+            return make_error(req.id, "Invalid params for Inspector.setLocked");
         }
     }
 

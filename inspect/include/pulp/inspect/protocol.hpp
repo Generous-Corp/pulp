@@ -47,6 +47,10 @@ namespace methods {
     constexpr auto kInspectorListTweaks  = "Inspector.listTweaks";
     constexpr auto kInspectorClearTweaks = "Inspector.clearTweaks";
     constexpr auto kInspectorSetBypass   = "Inspector.setBypass";
+    // Phase 2.5: setLocked toggles the sibling `locked` overlay for an
+    // anchor — a locked anchor is protected from bulk-clear / reimport.
+    // Mirrors setBypass; the management panel surfaces this state.
+    constexpr auto kInspectorSetLocked   = "Inspector.setLocked";
     // Phase 1: pulp-tweaks.json disk persistence. All three require a
     // TweakStore wired in. Path defaults to $PULP_TWEAKS_FILE or the
     // resolved <project>/pulp-tweaks.json — see TweakStore::default_tweaks_path().

@@ -5,6 +5,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include <cstddef>
+#include <functional>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -610,6 +611,192 @@ TEST_CASE("InspectorOverlay: tweak_store() round-trips set_tweak_store",
     REQUIRE(overlay.tweak_store() == &store);
     overlay.set_tweak_store(nullptr);
     REQUIRE(overlay.tweak_store() == nullptr);
+}
+
+// ── Phase 2.5 — tweak management panel (Photoshop-layers style) ───────────
+//
+// A panel listing every tweak in the attached TweakStore, with three
+// per-tweak icon controls: bypass / lock / delete. Toggled with `T`.
+// The panel lays out row hit-rects during paint(); tests paint first
+// (RecordingCanvas, headless) to populate them, then click an icon
+// rect to exercise the action.
+
+namespace {
+
+// Build a scene with two anchored views and seed the store with
+// tweaks so the management panel has rows to lay out. Root is large
+// enough (600×600) that the bottom-third tweaks section has room.
+struct TweakPanelScene {
+    View root;
+    TweakStore store;
+    InspectorOverlay overlay{root};
+
+    TweakPanelScene() {
+        root.set_bounds({0, 0, 600, 600});
+        overlay.set_active(true);
+        overlay.set_tweak_store(&store);
+        // Two anchors; one with two property tweaks (grouping case).
+        store.apply_tweak("figma:0:a", "layout.padding",
+                          choc::value::createInt32(12), "drag");
+        store.apply_tweak("figma:0:a", "paint.backgroundColor",
+                          choc::value::createString("#abcdef"), "picker");
+        store.apply_tweak("figma:0:b", "layout.gap",
+                          choc::value::createInt32(4), "drag");
+    }
+};
+
+}  // namespace
+
+TEST_CASE("InspectorOverlay Phase 2.5: T toggles the tweak management panel",
+          "[inspect][overlay][phase2.5]") {
+    View root;
+    root.set_bounds({0, 0, 600, 600});
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    REQUIRE_FALSE(overlay.tweaks_panel_visible());
+
+    KeyEvent t;
+    t.key = KeyCode::t;
+    t.is_down = true;
+    REQUIRE(overlay.handle_key_event(t));
+    REQUIRE(overlay.tweaks_panel_visible());
+
+    REQUIRE(overlay.handle_key_event(t));
+    REQUIRE_FALSE(overlay.tweaks_panel_visible());
+}
+
+TEST_CASE("InspectorOverlay Phase 2.5: panel lays out a row per tweak",
+          "[inspect][overlay][phase2.5]") {
+    TweakPanelScene scene;
+    scene.overlay.toggle_tweaks_panel();
+    REQUIRE(scene.overlay.tweaks_panel_visible());
+
+    pulp::canvas::RecordingCanvas canvas;
+    scene.overlay.paint(canvas);
+    REQUIRE(canvas.command_count() > 0);
+
+    // Three tweaks seeded → three rows laid out.
+    REQUIRE(scene.overlay.tweak_row_count() == 3);
+
+    // With the panel hidden, no rows are laid out.
+    scene.overlay.toggle_tweaks_panel();
+    pulp::canvas::RecordingCanvas hidden_canvas;
+    scene.overlay.paint(hidden_canvas);
+    REQUIRE(scene.overlay.tweak_row_count() == 0);
+}
+
+TEST_CASE("InspectorOverlay Phase 2.5: panel renders cleanly with no tweaks",
+          "[inspect][overlay][phase2.5]") {
+    View root;
+    root.set_bounds({0, 0, 600, 600});
+    TweakStore store;  // empty
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.toggle_tweaks_panel();
+
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);  // must not crash / must produce commands
+    REQUIRE(canvas.command_count() > 0);
+    REQUIRE(overlay.tweak_row_count() == 0);
+}
+
+// Helper: paint the panel, then return the center of a chosen icon
+// rect for a chosen row. Walking icon centers via clicks would
+// require knowing the layout; instead we sweep candidate y positions
+// in the bottom-third panel region. Simpler: drive clicks by sweeping
+// the known icon column. We sweep the panel and click each row icon.
+namespace {
+
+// Click every row's icon of a given kind until `predicate` flips,
+// returning whether it ever flipped. The icon rects live at fixed
+// offsets that we don't know exactly from the test, so we sweep the
+// panel's bottom-third region row by row.
+bool sweep_click_icon(InspectorOverlay& overlay, View& root,
+                      int icon_index /*0=bypass,1=lock,2=delete*/,
+                      const std::function<bool()>& predicate) {
+    // Re-paint so tweak_rows_ is fresh, then sweep candidate points.
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);
+
+    float root_w = root.bounds().width;
+    float root_h = root.bounds().height;
+    float panel_x = root_w - 300.0f;          // panel_width_ default 300
+    float x = panel_x + 8.0f;
+    float w = 300.0f - 16.0f;
+    constexpr float kIconSize = 14.0f, kIconGap = 4.0f;
+    float icons_w = 3.0f * kIconSize + 2.0f * kIconGap;
+    float icons_x = x + w - icons_w;
+    float icon_cx = icons_x + icon_index * (kIconSize + kIconGap)
+                    + kIconSize / 2.0f;
+
+    // Sweep y across the bottom-third panel region at 2px steps.
+    for (float y = root_h * 0.55f; y < root_h - 24.0f; y += 2.0f) {
+        MouseEvent click;
+        click.position = {icon_cx, y};
+        click.is_down = true;
+        overlay.handle_mouse_event(click);
+        if (predicate()) return true;
+        // Re-paint between attempts: a delete mutates the row list.
+        pulp::canvas::RecordingCanvas c2;
+        overlay.paint(c2);
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("InspectorOverlay Phase 2.5: clicking the bypass icon toggles bypass",
+          "[inspect][overlay][phase2.5]") {
+    TweakPanelScene scene;
+    scene.overlay.toggle_tweaks_panel();
+
+    REQUIRE_FALSE(scene.store.is_bypassed("figma:0:a", "layout.padding"));
+    bool flipped = sweep_click_icon(scene.overlay, scene.root, /*bypass=*/0,
+        [&] { return scene.store.is_bypassed("figma:0:a", "layout.padding") ||
+                     scene.store.is_bypassed("figma:0:b", "layout.gap"); });
+    REQUIRE(flipped);
+}
+
+TEST_CASE("InspectorOverlay Phase 2.5: clicking the lock icon toggles lock",
+          "[inspect][overlay][phase2.5]") {
+    TweakPanelScene scene;
+    scene.overlay.toggle_tweaks_panel();
+
+    REQUIRE(scene.store.locked_anchors().empty());
+    bool flipped = sweep_click_icon(scene.overlay, scene.root, /*lock=*/1,
+        [&] { return !scene.store.locked_anchors().empty(); });
+    REQUIRE(flipped);
+}
+
+TEST_CASE("InspectorOverlay Phase 2.5: clicking the delete icon removes a tweak",
+          "[inspect][overlay][phase2.5]") {
+    TweakPanelScene scene;
+    scene.overlay.toggle_tweaks_panel();
+
+    REQUIRE(scene.store.count() == 3);
+    bool removed = sweep_click_icon(scene.overlay, scene.root, /*delete=*/2,
+        [&] { return scene.store.count() < 3; });
+    REQUIRE(removed);
+}
+
+TEST_CASE("InspectorOverlay Phase 2.5: panel icon clicks are ignored when "
+          "the panel is hidden",
+          "[inspect][overlay][phase2.5]") {
+    TweakPanelScene scene;
+    // Panel stays hidden — paint to clear any stale rows.
+    pulp::canvas::RecordingCanvas canvas;
+    scene.overlay.paint(canvas);
+    REQUIRE(scene.overlay.tweak_row_count() == 0);
+
+    // A click anywhere in the panel column should not mutate the store.
+    MouseEvent click;
+    click.position = {450, 500};
+    click.is_down = true;
+    scene.overlay.handle_mouse_event(click);
+    REQUIRE(scene.store.count() == 3);
+    REQUIRE(scene.store.locked_anchors().empty());
 }
 
 // ── Phase 3b — live-editable box-model fields ─────────────────────────────

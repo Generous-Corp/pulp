@@ -199,6 +199,15 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
+    // Phase 2.5 — T toggles the tweak management panel (no modifier;
+    // only while the inspector is active). Guarded behind not-editing
+    // so typing a 't' into a field-edit buffer doesn't flip the panel.
+    if (active_ && editing_field_.empty() && event.key == KeyCode::t &&
+        event.is_down && event.modifiers == 0) {
+        toggle_tweaks_panel();
+        return true;
+    }
+
     return false;
 }
 
@@ -303,6 +312,44 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         alt_hover_target_ = nullptr;
 
         if (event.is_down) {
+            // Phase 2.5 — clicks on a tweak-row icon (bypass / lock /
+            // delete) in the management panel. Checked first so an
+            // icon click never falls through to tree selection or
+            // field-edit. The hit list (tweak_rows_) is populated by
+            // the most recent paint_tweaks_section() call.
+            if (tweaks_panel_visible_ && tweak_store_) {
+                std::size_t row_idx = 0;
+                auto action = tweak_action_at(pos, row_idx);
+                if (action != TweakAction::none) {
+                    const auto& row = tweak_rows_[row_idx];
+                    switch (action) {
+                        case TweakAction::bypass: {
+                            // Toggle whole-anchor bypass. A path-list
+                            // bypass collapses to whole-anchor here —
+                            // the panel's bypass control is anchor-
+                            // scoped (the row just surfaces it).
+                            bool now =
+                                tweak_store_->is_bypassed(row.anchor_id,
+                                                          row.property_path);
+                            tweak_store_->set_bypass(row.anchor_id, !now);
+                            break;
+                        }
+                        case TweakAction::lock: {
+                            bool now = tweak_store_->is_locked(row.anchor_id);
+                            tweak_store_->set_locked(row.anchor_id, !now);
+                            break;
+                        }
+                        case TweakAction::remove:
+                            tweak_store_->remove_tweak(row.anchor_id,
+                                                       row.property_path);
+                            break;
+                        case TweakAction::none:
+                            break;
+                    }
+                    return true;
+                }
+            }
+
             // Phase 3b — clicks on numeric values in the property
             // panel enter edit mode. The hit list is populated by the
             // most recent paint_props_section() call; we check it
@@ -593,29 +640,53 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
     canvas.set_line_width(1.0f);
     canvas.stroke_line(panel_x, 0, panel_x, root_h);
 
-    // Tree section (top half)
-    float tree_height = root_h * 0.5f;
-    float cursor_y = 4.0f;
-    paint_tree_section(canvas, panel_x + 8, 4, panel_width_ - 16, cursor_y);
-
-    // Divider
-    float props_y = tree_height;
-    canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
-    canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
-
-    // Props section (middle). Phase 6.1 — when the per-pass attribution
-    // viewer is toggled on (P-key), it takes over this region instead
-    // of the property panel; the tree section above is untouched so the
-    // user keeps navigation context.
     float stats_y = root_h - kStatsBarHeight;
-    float section_x = panel_x + 8;
-    float section_y = props_y + 4;
-    float section_w = panel_width_ - 16;
-    float section_h = stats_y - props_y - 8;
-    if (pass_viewer_enabled_) {
-        paint_pass_attribution(canvas, section_x, section_y, section_w, section_h);
+
+    // Helper: paint the middle "props" region. Phase 6.1 — when the
+    // per-pass attribution viewer is toggled on (P-key), it takes over
+    // this region instead of the property panel; the tree section above
+    // is untouched so the user keeps navigation context.
+    auto paint_middle = [&](float x, float y, float w, float h) {
+        if (pass_viewer_enabled_) {
+            paint_pass_attribution(canvas, x, y, w, h);
+        } else {
+            paint_props_section(canvas, x, y, w, h);
+        }
+    };
+
+    if (tweaks_panel_visible_) {
+        // Phase 2.5 layout: tree (top third), props (middle third),
+        // tweaks management panel (bottom third). When the panel is
+        // hidden the legacy two-section layout is used (below).
+        float section_h = (stats_y) / 3.0f;
+
+        float cursor_y = 4.0f;
+        paint_tree_section(canvas, panel_x + 8, 4, panel_width_ - 16, cursor_y);
+
+        float props_y = section_h;
+        canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
+        canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
+        paint_middle(panel_x + 8, props_y + 4,
+                     panel_width_ - 16, section_h - 8);
+
+        float tweaks_y = section_h * 2.0f;
+        canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
+        canvas.stroke_line(panel_x + 8, tweaks_y, root_w - 8, tweaks_y);
+        paint_tweaks_section(canvas, panel_x + 8, tweaks_y + 4,
+                             panel_width_ - 16, stats_y - tweaks_y - 8);
     } else {
-        paint_props_section(canvas, section_x, section_y, section_w, section_h);
+        // Legacy two-section layout (pre-2.5).
+        tweak_rows_.clear();
+        float tree_height = root_h * 0.5f;
+        float cursor_y = 4.0f;
+        paint_tree_section(canvas, panel_x + 8, 4, panel_width_ - 16, cursor_y);
+
+        float props_y = tree_height;
+        canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
+        canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
+
+        paint_middle(panel_x + 8, props_y + 4,
+                     panel_width_ - 16, stats_y - props_y - 8);
     }
 
     // Stats bar (bottom)
@@ -1159,6 +1230,236 @@ void InspectorOverlay::paint_pass_attribution(Canvas& canvas, float x, float y,
         canvas.set_fill_color(kPanelDim);
         canvas.fill_text("Awaiting render frames\xe2\x80\xa6", x, line_y + 11);
     }
+}
+
+// ── Phase 2.5 — Tweak management panel (Photoshop-layers style) ─────────────
+//
+// Lists every tweak in the attached TweakStore, grouped by anchor.
+// Each tweak is a "layer" with three per-tweak controls:
+//   eye   — bypass toggle (filled when active, hollow when bypassed)
+//   lock  — protect from bulk-clear / reimport
+//   trash — delete the tweak
+// The row hit-rects are stashed in tweak_rows_ so the same-frame mouse
+// handler can resolve a click. Anchor headers carry an abbreviated id;
+// each row shows the dotted property path + a compact value preview.
+
+namespace {
+
+// Compact value preview for a tweak — keeps the row narrow. Numbers
+// print without trailing-zero noise; strings clip to 16 chars.
+std::string preview_value(const choc::value::Value& v) {
+    if (v.isString()) {
+        auto s = std::string(v.getString());
+        if (s.size() > 16) s = s.substr(0, 15) + "\xe2\x80\xa6";
+        return "\"" + s + "\"";
+    }
+    if (v.isBool()) return v.getBool() ? "true" : "false";
+    if (v.isInt32() || v.isInt64())
+        return std::to_string(v.getWithDefault<int64_t>(0));
+    if (v.isFloat32() || v.isFloat64()) {
+        std::ostringstream oss;
+        oss << v.getWithDefault<double>(0.0);
+        return oss.str();
+    }
+    if (v.isObject()) return "{\xe2\x80\xa6}";
+    if (v.isArray()) return "[\xe2\x80\xa6]";
+    return "?";
+}
+
+// Abbreviate an anchor id for the header — keep the tail (most
+// distinctive) but cap total width so the header never overflows.
+std::string abbreviate_anchor(const std::string& id) {
+    constexpr std::size_t kMax = 22;
+    if (id.size() <= kMax) return id;
+    return "\xe2\x80\xa6" + id.substr(id.size() - (kMax - 1));
+}
+
+}  // namespace
+
+void InspectorOverlay::paint_tweaks_section(Canvas& canvas, float x, float y,
+                                            float w, float h) {
+    // Repopulated every frame — the mouse handler reads it on the same
+    // frame the user clicked (paint runs before input dispatch).
+    tweak_rows_.clear();
+
+    canvas.set_font("monospace", kFontSize);
+
+    // Section heading.
+    canvas.set_fill_color(kHighlightStroke);
+    canvas.fill_text("Tweaks", x, y + 11);
+
+    if (!tweak_store_) {
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("No tweak store attached", x, y + 11 + kRowHeight);
+        return;
+    }
+
+    auto records = tweak_store_->list_tweaks();
+    {
+        std::ostringstream count_oss;
+        count_oss << records.size() << (records.size() == 1 ? " tweak" : " tweaks");
+        canvas.set_fill_color(kPanelDim);
+        float cw = canvas.measure_text(count_oss.str());
+        canvas.fill_text(count_oss.str(), x + w - cw, y + 11);
+    }
+
+    if (records.empty()) {
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("No tweaks recorded", x, y + 11 + kRowHeight);
+        return;
+    }
+
+    // Group records by anchor — stable insertion order within an
+    // anchor (list_tweaks() preserves it), anchors sorted so the panel
+    // doesn't reshuffle across frames.
+    std::vector<std::string> anchor_order;
+    std::unordered_map<std::string, std::vector<const TweakStore::Record*>> grouped;
+    for (auto& rec : records) {
+        auto it = grouped.find(rec.anchor_id);
+        if (it == grouped.end()) {
+            grouped.emplace(rec.anchor_id,
+                            std::vector<const TweakStore::Record*>{&rec});
+            anchor_order.push_back(rec.anchor_id);
+        } else {
+            it->second.push_back(&rec);
+        }
+    }
+    std::sort(anchor_order.begin(), anchor_order.end());
+
+    // Clip the scroll region so rows don't bleed into the stats bar.
+    canvas.save();
+    float list_top = y + kRowHeight;
+    canvas.clip_rect(x, list_top, w, h - kRowHeight);
+
+    float row_y = list_top - tweaks_scroll_y_;
+    constexpr float kIconSize = 14.0f;
+    constexpr float kIconGap = 4.0f;
+    // Three icons stacked at the right edge of the row.
+    float icons_w = 3.0f * kIconSize + 2.0f * kIconGap;
+
+    for (auto& anchor : anchor_order) {
+        bool anchor_locked = tweak_store_->is_locked(anchor);
+
+        // Anchor header row.
+        if (row_y > list_top - kRowHeight && row_y < y + h) {
+            canvas.set_fill_color(kPanelHighlight);
+            canvas.fill_rect(x, row_y, w, kRowHeight);
+            canvas.set_fill_color(kHighlightStroke);
+            std::string hdr = abbreviate_anchor(anchor);
+            if (anchor_locked) hdr = "\xf0\x9f\x94\x92 " + hdr;  // 🔒
+            canvas.fill_text(hdr, x + 2, row_y + 14);
+        }
+        row_y += kRowHeight;
+
+        for (const auto* rec : grouped[anchor]) {
+            bool visible = row_y > list_top - kRowHeight && row_y < y + h;
+            bool bypassed = tweak_store_->is_bypassed(rec->anchor_id,
+                                                      rec->property_path);
+
+            // Always record the hit-rects, even off-screen rows, so
+            // tweak_row_count() is the true total; off-screen rects
+            // simply never get clicked.
+            float icons_x = x + w - icons_w;
+            TweakRow hr;
+            hr.anchor_id = rec->anchor_id;
+            hr.property_path = rec->property_path;
+            hr.bypass_icon = {icons_x, row_y + 3, kIconSize, kIconSize};
+            hr.lock_icon   = {icons_x + kIconSize + kIconGap, row_y + 3,
+                              kIconSize, kIconSize};
+            hr.delete_icon = {icons_x + 2 * (kIconSize + kIconGap), row_y + 3,
+                              kIconSize, kIconSize};
+            tweak_rows_.push_back(hr);
+
+            if (visible) {
+                // Bypassed rows render dimmed to read like a hidden
+                // Photoshop layer.
+                const Color& path_col = bypassed ? kPanelDim : kPanelText;
+
+                // Property path (indented under the anchor header).
+                std::string label = rec->property_path;
+                float max_label_w = (icons_x - kIconGap) - (x + kIndent);
+                while (label.size() > 4 &&
+                       canvas.measure_text(label + " = ") > max_label_w)
+                    label = label.substr(0, label.size() - 1);
+                canvas.set_fill_color(path_col);
+                canvas.fill_text(label, x + kIndent, row_y + 14);
+
+                // Value preview.
+                std::string val = preview_value(rec->value);
+                canvas.set_fill_color(kPanelDim);
+                float label_w = canvas.measure_text(label + " ");
+                canvas.fill_text("= " + val, x + kIndent + label_w, row_y + 14);
+
+                // ── Icon: bypass (eye) ──────────────────────────────
+                // Filled circle = visible/applied; hollow = bypassed.
+                {
+                    auto& r = hr.bypass_icon;
+                    float cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+                    if (bypassed) {
+                        canvas.set_stroke_color(kPanelDim);
+                        canvas.set_line_width(1.5f);
+                        canvas.stroke_line(r.x, r.y + r.height,
+                                           r.x + r.width, r.y);
+                        canvas.set_stroke_color(kPanelDim);
+                        canvas.stroke_rect(r.x, r.y, r.width, r.height);
+                    } else {
+                        canvas.set_fill_color(kHighlightStroke);
+                        canvas.fill_circle(cx, cy, r.width / 2 - 1);
+                    }
+                }
+                // ── Icon: lock ──────────────────────────────────────
+                {
+                    auto& r = hr.lock_icon;
+                    Color lock_col = anchor_locked
+                        ? Color::rgba(1.0f, 0.78f, 0.2f, 1.0f)
+                        : kPanelDim;
+                    // Shackle (arc approximated by a rounded rect) +
+                    // body box.
+                    canvas.set_stroke_color(lock_col);
+                    canvas.set_line_width(1.5f);
+                    canvas.stroke_rect(r.x + 3, r.y + 1, r.width - 6,
+                                       r.height / 2);
+                    canvas.set_fill_color(lock_col);
+                    canvas.fill_rounded_rect(r.x + 1, r.y + r.height / 2 - 1,
+                                             r.width - 2, r.height / 2, 2);
+                }
+                // ── Icon: delete (trash) ────────────────────────────
+                {
+                    auto& r = hr.delete_icon;
+                    canvas.set_stroke_color(
+                        Color::rgba(1.0f, 0.4f, 0.35f, 1.0f));
+                    canvas.set_line_width(1.5f);
+                    // Lid.
+                    canvas.stroke_line(r.x + 1, r.y + 3,
+                                       r.x + r.width - 1, r.y + 3);
+                    // Body box.
+                    canvas.stroke_rect(r.x + 2, r.y + 3, r.width - 4,
+                                       r.height - 4);
+                    // Handle.
+                    canvas.stroke_line(r.x + r.width / 2 - 2, r.y + 1,
+                                       r.x + r.width / 2 + 2, r.y + 1);
+                }
+            }
+            row_y += kRowHeight;
+        }
+    }
+
+    canvas.restore();
+}
+
+InspectorOverlay::TweakAction
+InspectorOverlay::tweak_action_at(Point p, std::size_t& out_row) const {
+    auto hit = [&](const Rect& r) {
+        return p.x >= r.x && p.x <= r.x + r.width &&
+               p.y >= r.y && p.y <= r.y + r.height;
+    };
+    for (std::size_t i = 0; i < tweak_rows_.size(); ++i) {
+        const auto& row = tweak_rows_[i];
+        if (hit(row.bypass_icon)) { out_row = i; return TweakAction::bypass; }
+        if (hit(row.lock_icon))   { out_row = i; return TweakAction::lock; }
+        if (hit(row.delete_icon)) { out_row = i; return TweakAction::remove; }
+    }
+    return TweakAction::none;
 }
 
 // ── Phase 3b — Live-editable box-model fields ───────────────────────────────

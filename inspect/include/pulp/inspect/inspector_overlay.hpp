@@ -189,6 +189,23 @@ public:
     /// optimistically (none yet — Phase 3b commits only on Enter).
     void cancel_field_edit();
 
+    // ── Phase 2.5 — tweak management panel (Photoshop-layers style) ─
+    //
+    // A scrollable panel listing every tweak in the attached
+    // TweakStore, grouped by anchor. Each tweak row carries three
+    // per-tweak controls: bypass (eye), lock, and delete. Toggled with
+    // the `T` key while the inspector is active. Default OFF so the
+    // pre-2.5 inspector layout is unchanged until the user opts in.
+    void set_tweaks_panel_visible(bool visible) { tweaks_panel_visible_ = visible; }
+    bool tweaks_panel_visible() const { return tweaks_panel_visible_; }
+    void toggle_tweaks_panel() { tweaks_panel_visible_ = !tweaks_panel_visible_; }
+
+    /// Number of tweak rows currently laid out in the management panel
+    /// (populated by the most recent paint() while the panel is
+    /// visible). Visible for tests so they can assert the panel
+    /// rendered the expected number of rows without scraping pixels.
+    std::size_t tweak_row_count() const { return tweak_rows_.size(); }
+
 private:
     View& root_;
     bool active_ = false;
@@ -232,6 +249,24 @@ private:
         float value;        ///< Current numeric value (for display + edit-begin)
     };
     std::vector<EditableField> editable_fields_;
+
+    // ── Phase 2.5 — tweak management panel state ────────────────────
+    //
+    // The panel is laid out during paint_tweaks_section(); the row
+    // hit-rects are stashed in tweak_rows_ so the SAME-frame mouse
+    // handler can resolve a click to a (anchor, path, action). Each
+    // row carries three 16×16 icon hit-rects: bypass / lock / delete.
+    bool tweaks_panel_visible_ = false;
+    float tweaks_scroll_y_ = 0.0f;
+    enum class TweakAction : std::uint8_t { none, bypass, lock, remove };
+    struct TweakRow {
+        std::string anchor_id;     ///< Owning anchor
+        std::string property_path; ///< Dotted path of this tweak
+        Rect bypass_icon;          ///< Hit-rect, root coords
+        Rect lock_icon;
+        Rect delete_icon;
+    };
+    std::vector<TweakRow> tweak_rows_;
 
     // Tree expansion: collapsed nodes
     std::unordered_set<const View*> collapsed_;
@@ -311,9 +346,19 @@ private:
     /// draw-call counts, and a 60-frame sparkline trend.
     void paint_pass_attribution(Canvas& canvas, float x, float y, float w, float h);
 
+    // Phase 2.5 — render the tweak management panel into the given
+    // rect. Repopulates tweak_rows_ with this frame's hit-rects.
+    void paint_tweaks_section(Canvas& canvas, float x, float y, float w, float h);
+
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;
     const TreeItem* tree_item_at_y(float panel_y) const;
+
+    // Phase 2.5 — resolve a root-coord point to a tweak-row icon hit.
+    // Sets `out_row` to the matching row index and returns the action;
+    // returns TweakAction::none (out_row untouched) on a miss. Called
+    // by handle_mouse_event() before the tree-selection fallthrough.
+    TweakAction tweak_action_at(Point p, std::size_t& out_row) const;
 
     // ── Phase 3b — editable-field helpers ───────────────────────────
     /// Returns the index in editable_fields_ at the given root-coord

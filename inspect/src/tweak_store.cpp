@@ -140,8 +140,16 @@ std::size_t TweakStore::remove_anchor(std::string_view anchor_id) {
 void TweakStore::clear() {
     {
         std::lock_guard lock(mtx_);
-        tweaks_.clear();
-        bypassed_.clear();
+        decltype(tweaks_) kept_tweaks;
+        decltype(bypassed_) kept_bypassed;
+        for (const auto& anchor : locked_) {
+            if (auto it = tweaks_.find(anchor); it != tweaks_.end())
+                kept_tweaks.emplace(anchor, it->second);
+            if (auto it = bypassed_.find(anchor); it != bypassed_.end())
+                kept_bypassed.emplace(anchor, it->second);
+        }
+        tweaks_ = std::move(kept_tweaks);
+        bypassed_ = std::move(kept_bypassed);
     }
     maybe_auto_save_unlocked();
 }
@@ -167,6 +175,26 @@ void TweakStore::clear_bypass(std::string_view anchor_id) {
     {
         std::lock_guard lock(mtx_);
         bypassed_.erase(std::string(anchor_id));
+    }
+    maybe_auto_save_unlocked();
+}
+
+void TweakStore::set_locked(std::string_view anchor_id, bool locked) {
+    {
+        std::lock_guard lock(mtx_);
+        if (locked) {
+            locked_.insert(std::string(anchor_id));
+        } else {
+            locked_.erase(std::string(anchor_id));
+        }
+    }
+    maybe_auto_save_unlocked();
+}
+
+void TweakStore::clear_lock(std::string_view anchor_id) {
+    {
+        std::lock_guard lock(mtx_);
+        locked_.erase(std::string(anchor_id));
     }
     maybe_auto_save_unlocked();
 }
@@ -235,6 +263,19 @@ std::vector<std::string> TweakStore::bypassed_anchors() const {
     return out;
 }
 
+bool TweakStore::is_locked(std::string_view anchor_id) const {
+    std::lock_guard lock(mtx_);
+    return locked_.find(std::string(anchor_id)) != locked_.end();
+}
+
+std::vector<std::string> TweakStore::locked_anchors() const {
+    std::lock_guard lock(mtx_);
+    std::vector<std::string> out;
+    out.reserve(locked_.size());
+    for (auto& anchor : locked_) out.push_back(anchor);
+    return out;
+}
+
 // ── Disk persistence (Phase 1) ──────────────────────────────────────────
 
 std::string TweakStore::default_tweaks_path() {
@@ -295,6 +336,19 @@ std::string TweakStore::to_json_locked() const {
     }
     obj.addMember("bypassed", bypassed_obj);
 
+    // locked: string[] — flat list of anchor ids the user marked as
+    // protected (Phase 2.5). Only emitted when non-empty so trivial
+    // files stay small and v1 readers that don't know about `locked`
+    // simply never see the key. Sorted for deterministic round-trips.
+    if (!locked_.empty()) {
+        std::vector<std::string> sorted(locked_.begin(), locked_.end());
+        std::sort(sorted.begin(), sorted.end());
+        auto locked_arr = choc::value::createEmptyArray();
+        for (auto& a : sorted)
+            locked_arr.addArrayElement(choc::value::createString(a));
+        obj.addMember("locked", locked_arr);
+    }
+
     // sources: Record<anchor, Record<path, source>> — only when at
     // least one entry has a non-empty source tag. Keeps trivial files
     // small and matches the TS canonical schema (which doesn't define
@@ -349,6 +403,7 @@ TweakStore::from_json_locked(std::string_view json) {
     // Stage the new state in locals; only commit if everything parses.
     decltype(tweaks_) new_tweaks;
     decltype(bypassed_) new_bypassed;
+    decltype(locked_) new_locked;
 
     if (parsed.hasObjectMember("tweaks") && parsed["tweaks"].isObject()) {
         auto tweaks_obj = parsed["tweaks"];
@@ -410,9 +465,37 @@ TweakStore::from_json_locked(std::string_view json) {
         }
     }
 
+    // locked: string[] — Phase 2.5. Missing key is fine (v1 files
+    // without lock state). Non-string array elements are skipped.
+    if (parsed.hasObjectMember("locked") && parsed["locked"].isArray()) {
+        auto locked_arr = parsed["locked"];
+        for (uint32_t i = 0; i < locked_arr.size(); ++i) {
+            if (locked_arr[i].isString())
+                new_locked.insert(std::string(locked_arr[i].getString()));
+        }
+    }
+
+    // Existing locked anchors are protected against bulk import. A
+    // missing or stale file must not erase local protected tweaks, bypass
+    // overlays, or lock metadata.
+    for (const auto& anchor : locked_) {
+        if (auto it = tweaks_.find(anchor); it != tweaks_.end()) {
+            new_tweaks[anchor] = it->second;
+        } else {
+            new_tweaks.erase(anchor);
+        }
+        if (auto it = bypassed_.find(anchor); it != bypassed_.end()) {
+            new_bypassed[anchor] = it->second;
+        } else {
+            new_bypassed.erase(anchor);
+        }
+        new_locked.insert(anchor);
+    }
+
     // All-or-nothing commit.
     tweaks_ = std::move(new_tweaks);
     bypassed_ = std::move(new_bypassed);
+    locked_ = std::move(new_locked);
 
     for (auto& [_, m] : tweaks_) result.tweak_count += m.size();
     result.bypass_count = bypassed_.size();
