@@ -165,6 +165,9 @@ not apply — `_bridge` is a C++ struct). The block:
    `param_events` and call `store.set_value_rt`, short MIDI arrives via
    `AURenderEventMIDI`, and long / sysex arrives via
    `AURenderEventMIDIEventList`. See gotchas below.
+   The sorted `param_events` queue is attached to the processor via
+   `set_param_events(&param_events)` before render, so
+   `Processor::param_events()` exposes the same sample offsets.
 6. Calls `processor->process(output_view, input_view, midi_in,
    midi_out, ctx)`.
 7. Forwards any `midi_out` events back to the host via

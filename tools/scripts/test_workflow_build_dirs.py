@@ -90,9 +90,10 @@ class MacosNinjaGeneratorTests(unittest.TestCase):
     def test_macos_configure_uses_ninja(self) -> None:
         # The generator is scoped to macOS and passed to cmake configure.
         self.assertIn('if [ "${RUNNER_OS}" = "macOS" ]; then', self.text)
-        self.assertIn('gen="-G Ninja"', self.text)
+        self.assertIn("gen=()", self.text)
+        self.assertIn("gen=(-G Ninja)", self.text)
         self.assertIn(
-            'cmake -S . -B "$PULP_BUILD_DIR" $gen -DCMAKE_BUILD_TYPE=Release',
+            'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release',
             self.text,
         )
 

@@ -7,7 +7,6 @@
 // sort() before passing the queue on.
 
 #include <pulp/state/parameter.hpp>
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -40,10 +39,15 @@ public:
     constexpr std::size_t capacity() const { return kCapacity; }
 
     void sort() {
-        std::sort(begin(), end(),
-            [](const ParameterEvent& a, const ParameterEvent& b) {
-                return a.sample_offset < b.sample_offset;
-            });
+        for (std::size_t i = 1; i < size_; ++i) {
+            auto current = events_[i];
+            auto j = i;
+            while (j > 0 && events_[j - 1].sample_offset > current.sample_offset) {
+                events_[j] = events_[j - 1];
+                --j;
+            }
+            events_[j] = current;
+        }
     }
 
     using iterator = std::array<ParameterEvent, kCapacity>::iterator;

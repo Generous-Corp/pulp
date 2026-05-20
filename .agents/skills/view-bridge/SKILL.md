@@ -100,6 +100,12 @@ AU v3 does the same thing via the ObjC accessors
 **If you add another AU-like adapter, expose the same pair.** Never
 spin up a second Processor for the UI.
 
+AU v3 render automation also attaches its block-local
+`ParameterEventQueue` to the existing audio `Processor` immediately
+before `process()` via `set_param_events(...)`. Treat that pointer like
+the MIDI/MPE sidecars: it is valid only during the current process call
+and must not be captured by editor/view code.
+
 ## Secondary views
 
 ```cpp

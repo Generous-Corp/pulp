@@ -413,6 +413,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         param_snapshot_[i] = store_.get_value(all_params[i].id);
     }
+    processor_->set_param_events(&param_events_);
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag

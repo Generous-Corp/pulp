@@ -476,6 +476,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     } else {
         self->processor->set_ump_input(nullptr);
     }
+    self->processor->set_param_events(&self->param_events);
 
     // Process! Wrap the plugin call in a ScopedNoAlloc so any debug
     // hooks (operator new override, sanitizer integration) can flag

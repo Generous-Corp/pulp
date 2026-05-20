@@ -630,10 +630,10 @@ jobs:
           # build dir is recreated when its cached generator no longer
           # matches (one-time cost on the first Ninja run per runner;
           # the shared ccache stays warm regardless).
-          gen=""
+          gen=()
           if [ "${RUNNER_OS}" = "macOS" ]; then
             command -v ninja >/dev/null 2>&1 || brew install ninja
-            gen="-G Ninja"
+            gen=(-G Ninja)
             cache="$PULP_BUILD_DIR/CMakeCache.txt"
             if [ -f "$cache" ] && ! grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja$' "$cache"; then
               echo "macOS Configure: build-dir generator changed → recreating $PULP_BUILD_DIR"
@@ -641,9 +641,9 @@ jobs:
             fi
           fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cmake -S . -B "$PULP_BUILD_DIR" $gen -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
           else
-            cmake -S . -B "$PULP_BUILD_DIR" $gen -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
+            cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=OFF
           fi
         shell: bash
 

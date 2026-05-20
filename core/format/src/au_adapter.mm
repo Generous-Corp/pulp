@@ -583,6 +583,7 @@ static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
         pulp::format::ProcessContext ctx;
         ctx.sample_rate = bridge->sample_rate;
         ctx.num_samples = static_cast<int>(frameCount);
+        bridge->processor->set_param_events(&bridge->param_events);
         bridge->processor->process(output_view, input_view, midi_in, midi_out, ctx);
 
         // Forward any MIDI the Processor emitted to the host via the

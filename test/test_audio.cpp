@@ -320,6 +320,32 @@ TEST_CASE("Buffer move refreshes channel pointers for the new owner",
     REQUIRE(assigned.view().channel_ptr(0) == assigned.channel(0).data());
 }
 
+TEST_CASE("BufferView slice offsets channel pointers and clamps length",
+          "[audio][buffer][slice]") {
+    Buffer<float> buffer(2, 6);
+    for (std::size_t i = 0; i < 6; ++i) {
+        buffer.channel(0)[i] = static_cast<float>(i);
+        buffer.channel(1)[i] = static_cast<float>(10 + i);
+    }
+
+    auto view = buffer.view();
+    auto slice = view.slice(2, 3);
+
+    REQUIRE(slice.num_channels() == 2);
+    REQUIRE(slice.num_samples() == 3);
+    REQUIRE(slice.channel_ptr(0) == buffer.channel(0).data() + 2);
+    REQUIRE(slice.channel_ptr(1) == buffer.channel(1).data() + 2);
+
+    slice.channel(0)[0] = 100.0f;
+    slice.channel(1)[2] = 200.0f;
+    REQUIRE(buffer.channel(0)[2] == 100.0f);
+    REQUIRE(buffer.channel(1)[4] == 200.0f);
+
+    auto clamped = view.slice(4, 16);
+    REQUIRE(clamped.num_samples() == 2);
+    REQUIRE(clamped.channel_ptr(0) == buffer.channel(0).data() + 4);
+}
+
 TEST_CASE("AudioFileData reports shape from first channel",
           "[audio][file][codecov]") {
     AudioFileData empty;

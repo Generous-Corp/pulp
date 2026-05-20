@@ -137,7 +137,10 @@ Parameters flow both ways:
   drains via `store.pump_listeners()` on its UI tick. The generic
   `set_normalized()` path would dispatch a heap-allocated lambda through
   the EventLoop — fatal on the audio thread. See Slice 2 in
-  `planning/2026-05-18-rt-safety-and-debug-dx.md`.
+  `planning/2026-05-18-rt-safety-and-debug-dx.md`. Before
+  `Processor::process()`, `param_events_` is attached through
+  `processor_->set_param_events(&param_events_)` so processors that opt
+  into `Processor::param_events()` see the same sorted event stream.
 - **Plugin → host**: `param_snapshot_` is taken before `process()`;
   after, any changed param emits a point via
   `data.outputParameterChanges->addParameterData(id).addPoint(0, norm)`
