@@ -8,10 +8,21 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0173b"></a>
-## [0.173.11] - 2026-05-19
+<a id="v01738"></a>
+## [0.173.8] - 2026-05-19
 
-- refactor(canvas): R2-3 — extract skia_canvas_text.cpp (skia_canvas.cpp 2,873 → 1,879)
+- refactor(view): P6-A3 final cut — extract claude_bundle.cpp (design_import.cpp -80%) ([#2438](https://github.com/danielraffel/pulp/pull/2438))
+
+<a id="v01737"></a>
+## [0.173.7] - 2026-05-19
+
+- refactor(mcp): P6-B4 third cut — extract mcp_tools + mcp_shell (597 → 451) ([#2436](https://github.com/danielraffel/pulp/pull/2436))
+- refactor(mcp): P6-B4 second cut — extract mcp_compat (844 → 597) ([#2435](https://github.com/danielraffel/pulp/pull/2435))
+- refactor(view): P6-A3 second cut — extract design_codegen.cpp (4,155 → 3,324) ([#2433](https://github.com/danielraffel/pulp/pull/2433))
+- refactor(view): P6-A3 first cut — extract design_tokens.cpp (4,691 → 4,155) ([#2428](https://github.com/danielraffel/pulp/pull/2428))
+- feat(inspect): Phase 0b PR-C-2 — property panel dot indicators for tweaks ([#2367](https://github.com/danielraffel/pulp/pull/2367))
+- ci: cache Namespace macOS toolchain state ([#2400](https://github.com/danielraffel/pulp/pull/2400))
+- refactor(mcp): P6-B4 first cut — JSON-RPC framing to mcp_json.hpp ([#2427](https://github.com/danielraffel/pulp/pull/2427))
 
 <a id="v01731"></a>
 ## [0.173.1] - 2026-05-19
@@ -2236,6 +2247,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.173.8]: https://github.com/danielraffel/pulp/releases/tag/v0.173.8
+[0.173.7]: https://github.com/danielraffel/pulp/releases/tag/v0.173.7
 [0.173.1]: https://github.com/danielraffel/pulp/releases/tag/v0.173.1
 [0.173.0]: https://github.com/danielraffel/pulp/releases/tag/v0.173.0
 [0.172.6]: https://github.com/danielraffel/pulp/releases/tag/v0.172.6
