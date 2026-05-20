@@ -8,10 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01734"></a>
-## [0.173.4] - 2026-05-19
+<a id="v01735"></a>
+## [0.173.5] - 2026-05-19
 
-- refactor(view): P6-A3 first cut — extract design_tokens.cpp from design_import.cpp (4,691 → 4,155)
+- refactor(view): P6-A3 second cut — extract design_codegen.cpp from design_import.cpp (4,155 → 3,324)
 
 <a id="v01730"></a>
 ## [0.173.0] - 2026-05-19
