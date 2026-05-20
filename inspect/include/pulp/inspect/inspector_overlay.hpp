@@ -309,6 +309,94 @@ public:
         return drifted_;
     }
 
+    // ── Phase 5.2 — reconciliation tab ──────────────────────────────
+    //
+    // Spec: planning/2026-05-19-inspector-phase5-source-jump-spike.md
+    // § Phase 5.2 + planning/2026-05-18-inspector-direct-manipulation-
+    // roadmap.md "Lock to source" / "Drift".
+    //
+    // The reconciliation tab answers one question per tweak: "will this
+    // edit survive a re-import?" It builds on Phase 4a (lock-to-source)
+    // and Phase 5.1 (source-jump) — it is a *read-only* report over the
+    // existing TweakStore + live view tree, inventing no parallel data
+    // model. Every stored tweak is classified into exactly one of three
+    // reconciliation states:
+    //
+    //   * locked-to-source — the tweak's anchor is in the TweakStore
+    //     lock set AND still resolves to a live view. It has been (or
+    //     will be) promoted into the authored source, so it survives a
+    //     fresh re-import. This is the "reconciled" state.
+    //   * drifted — the tweak's anchor resolves to a live view but the
+    //     anchor is NOT locked. The edit lives only in the runtime
+    //     tweak layer (`pulp-tweaks.json`); a re-import that regenerates
+    //     the element would not carry it. "Live-only, not written back."
+    //   * unresolvable — no live view carries the tweak's anchor_id
+    //     (orphaned, per TweakStore::DriftReason::anchor_not_found). The
+    //     inspector cannot tell where this edit belongs; locking it is
+    //     impossible until the anchor is re-established. Conservative
+    //     fallback — never crash, never guess.
+    //
+    // The tab toggles with the `R` key (reconcile) and, when on, takes
+    // over the property-panel region exactly like the Phase 6.1 pass
+    // viewer does — the tree section above stays put.
+
+    /// Reconciliation state of a single stored tweak.
+    enum class ReconcileStatus : std::uint8_t {
+        locked_to_source,  ///< Anchor locked + resolves — survives re-import.
+        drifted,           ///< Resolves but unlocked — runtime-layer only.
+        unresolvable,      ///< Anchor not found in the live tree (orphaned).
+    };
+
+    /// Stringify a ReconcileStatus for the panel + tests.
+    static const char* reconcile_status_str(ReconcileStatus status);
+
+    /// One classified tweak row in the reconciliation report.
+    struct ReconcileRow {
+        std::string anchor_id;
+        std::string property_path;
+        ReconcileStatus status = ReconcileStatus::unresolvable;
+    };
+
+    /// Aggregate reconciliation report over every tweak in the attached
+    /// TweakStore, classified against the current live view tree. The
+    /// per-status counts are convenience totals over `rows`.
+    struct ReconcileReport {
+        std::vector<ReconcileRow> rows;
+        std::size_t locked_count = 0;
+        std::size_t drifted_count = 0;
+        std::size_t unresolvable_count = 0;
+
+        std::size_t total() const { return rows.size(); }
+    };
+
+    /// Recompute the reconciliation report by classifying every stored
+    /// tweak against the live view tree's anchor + lock state. A no-op
+    /// returning an empty report when no TweakStore is wired. Pure
+    /// computation — safe for tests, never spawns a process, never
+    /// throws. Called automatically on first paint while the tab is
+    /// open; callers may invoke it directly after a re-import.
+    ReconcileReport reconcile_report() const;
+
+    /// Toggle the reconciliation tab. Off by default so the inspector
+    /// panel layout is unchanged until the user opts in (`R` key in
+    /// handle_key_event). When on, the tab replaces the property
+    /// section, mirroring the Phase 6.1 pass viewer.
+    void set_reconcile_tab_visible(bool visible) {
+        reconcile_tab_visible_ = visible;
+    }
+    bool reconcile_tab_visible() const { return reconcile_tab_visible_; }
+    void toggle_reconcile_tab() {
+        reconcile_tab_visible_ = !reconcile_tab_visible_;
+    }
+
+    /// Number of tweak rows the reconciliation tab laid out on the most
+    /// recent paint() while it was visible. Visible for tests so they
+    /// can assert the tab rendered the expected rows without scraping
+    /// pixels. Zero when the tab is hidden or no TweakStore is wired.
+    std::size_t reconcile_row_count() const {
+        return reconcile_rows_.size();
+    }
+
     // ── Phase 3e — 20× zoom loupe ───────────────────────────────────
     //
     // A magnified-pixel preview panel ("loupe") that shows the region
@@ -468,6 +556,17 @@ private:
     // drawer. width==0 means "not painted this frame".
     Rect drift_header_hit_{};
 
+    // ── Phase 5.2 — reconciliation-tab state ────────────────────────
+    //
+    // reconcile_tab_visible_ tracks the R-key toggle; off by default so
+    // the panel layout is unchanged until the user opts in.
+    // reconcile_rows_ caches the rows the tab laid out on the last
+    // paint so reconcile_row_count() can report them to tests and the
+    // tab scroll stays stable across frames.
+    bool reconcile_tab_visible_ = false;
+    float reconcile_scroll_y_ = 0.0f;
+    std::vector<ReconcileRow> reconcile_rows_;
+
     // Phase 3a — drag-handles state. Off by default so the inspector
     // behaves identically to the pre-3a build until the user opts in
     // (D-key toggle in handle_key_event).
@@ -562,6 +661,13 @@ private:
     // Phase 2.5 — render the tweak management panel into the given
     // rect. Repopulates tweak_rows_ with this frame's hit-rects.
     void paint_tweaks_section(Canvas& canvas, float x, float y, float w, float h);
+
+    /// Phase 5.2 — render the reconciliation tab into the panel region
+    /// normally occupied by the property section. Each stored tweak
+    /// gets a row showing its anchor, property path, and a color-coded
+    /// reconciliation-status badge (locked / drift / unresolvable).
+    /// Repopulates reconcile_rows_ with this frame's classified rows.
+    void paint_reconcile_tab(Canvas& canvas, float x, float y, float w, float h);
 
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;

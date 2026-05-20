@@ -110,6 +110,11 @@ void InspectorOverlay::set_active(bool active) {
         // Phase 3e — the loupe is a transient inspect tool; dismissing
         // the whole inspector also closes it so re-opening starts clean.
         zoom_active_ = false;
+        // Phase 5.2 — drop the reconciliation tab's laid-out rows so
+        // reconcile_row_count() reports 0 while the inspector is shut.
+        // The R-key toggle state itself is left intact (mirrors how
+        // the tweaks panel keeps tweaks_panel_visible_ across opens).
+        reconcile_rows_.clear();
     }
 }
 
@@ -249,6 +254,78 @@ void InspectorOverlay::refresh_drift() {
         drift_drawer_open_ = true;
     }
     drifted_ = std::move(next);
+}
+
+// ── Phase 5.2 — reconciliation tab ──────────────────────────────────────────
+//
+// Classifies every stored tweak into one of three reconciliation
+// states (locked-to-source / drifted / unresolvable). The classifier
+// is purely a *read* over the existing TweakStore + live view tree —
+// it never mutates either, never spawns a process, and never throws.
+// It deliberately reuses the drift machinery's "anchor present in the
+// live tree" notion (TweakStore::DriftReason::anchor_not_found) so the
+// reconciliation tab and the Phase 2 drift drawer agree on what counts
+// as orphaned.
+
+const char* InspectorOverlay::reconcile_status_str(ReconcileStatus status) {
+    switch (status) {
+        case ReconcileStatus::locked_to_source: return "locked-to-source";
+        case ReconcileStatus::drifted:          return "drifted";
+        case ReconcileStatus::unresolvable:     return "unresolvable";
+    }
+    return "unknown";
+}
+
+InspectorOverlay::ReconcileReport InspectorOverlay::reconcile_report() const {
+    ReconcileReport report;
+    if (!tweak_store_) return report;
+
+    // Snapshot the live tree's anchor set once — O(tree) — so the
+    // per-tweak classification below is an O(1) hash lookup rather
+    // than an O(tree) walk per tweak.
+    std::vector<std::string> live;
+    collect_anchor_ids(root_, live);
+    std::unordered_set<std::string> live_anchors(live.begin(), live.end());
+
+    auto records = tweak_store_->list_tweaks();
+    // Stable ordering so the tab doesn't reshuffle across frames:
+    // group by anchor, anchors sorted, insertion order within an
+    // anchor (list_tweaks() preserves it).
+    std::sort(records.begin(), records.end(),
+              [](const TweakStore::Record& a, const TweakStore::Record& b) {
+                  return a.anchor_id < b.anchor_id;
+              });
+
+    report.rows.reserve(records.size());
+    for (const auto& rec : records) {
+        ReconcileRow row;
+        row.anchor_id = rec.anchor_id;
+        row.property_path = rec.property_path;
+
+        const bool resolves = live_anchors.count(rec.anchor_id) != 0;
+        if (!resolves) {
+            // Conservative fallback — the anchor is gone from the live
+            // tree, so the inspector cannot tell where this edit
+            // belongs. Locking it is impossible until the anchor is
+            // re-established; show it as unresolvable rather than guess.
+            row.status = ReconcileStatus::unresolvable;
+            ++report.unresolvable_count;
+        } else if (tweak_store_->is_locked(rec.anchor_id)) {
+            // The anchor resolves AND the user has locked it — the
+            // tweak is (or will be) promoted into the authored source,
+            // so it survives a fresh re-import. This is "reconciled".
+            row.status = ReconcileStatus::locked_to_source;
+            ++report.locked_count;
+        } else {
+            // The anchor resolves but is unlocked — the edit lives
+            // only in the runtime tweak layer. A re-import that
+            // regenerates the element would drop it.
+            row.status = ReconcileStatus::drifted;
+            ++report.drifted_count;
+        }
+        report.rows.push_back(std::move(row));
+    }
+    return report;
 }
 
 // ── Coordinate helpers ──────────────────────────────────────────────────────
@@ -393,6 +470,17 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
     if (active_ && event.key == KeyCode::z && event.is_down &&
         event.modifiers == 0) {
         toggle_zoom();
+        return true;
+    }
+
+    // Phase 5.2 — R toggles the reconciliation tab (no modifier; only
+    // while the inspector is active, same opt-in discipline as the D /
+    // E / P / Z toggles). Guarded behind not-editing so typing an 'r'
+    // into a field-edit buffer can't flip the tab. D/E/T/J/P/Z are
+    // already claimed, so R ("reconcile") is the natural free letter.
+    if (active_ && editing_field_.empty() && event.key == KeyCode::r &&
+        event.is_down && event.modifiers == 0) {
+        toggle_reconcile_tab();
         return true;
     }
 
@@ -998,11 +1086,19 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
     // Helper: paint the middle "props" region. Phase 6.1 — when the
     // per-pass attribution viewer is toggled on (P-key), it takes over
     // this region instead of the property panel; the tree section above
-    // is untouched so the user keeps navigation context.
+    // is untouched so the user keeps navigation context. Phase 5.2 —
+    // the reconciliation tab (R-key) takes over the same region with
+    // the same discipline. The pass viewer wins when both are toggled
+    // (it is the older surface), and reconcile_rows_ is cleared so
+    // reconcile_row_count() never reports a stale layout.
     auto paint_middle = [&](float x, float y, float w, float h) {
         if (pass_viewer_enabled_) {
+            reconcile_rows_.clear();
             paint_pass_attribution(canvas, x, y, w, h);
+        } else if (reconcile_tab_visible_) {
+            paint_reconcile_tab(canvas, x, y, w, h);
         } else {
+            reconcile_rows_.clear();
             paint_props_section(canvas, x, y, w, h);
         }
     };
@@ -1851,6 +1947,113 @@ InspectorOverlay::tweak_action_at(Point p, std::size_t& out_row) const {
         if (hit(row.delete_icon)) { out_row = i; return TweakAction::remove; }
     }
     return TweakAction::none;
+}
+
+// ── Phase 5.2 — Reconciliation tab ──────────────────────────────────────────
+//
+// A read-only report tab (R-key) showing, per tweak, whether the edit
+// will survive a fresh design re-import. It classifies every stored
+// tweak via reconcile_report() and renders one row each with a
+// color-coded status badge. Like the Phase 6.1 pass viewer it takes
+// over the property-panel region; unlike the tweak management panel it
+// has no interactive controls — it is purely informational, so there
+// are no hit-rects to record.
+
+void InspectorOverlay::paint_reconcile_tab(Canvas& canvas, float x, float y,
+                                           float w, float h) {
+    // Status badge colors — green = reconciled (safe), amber = drift
+    // (runtime-only), red = unresolvable (orphaned). The amber/red pair
+    // matches the Phase 2 drift drawer so the two surfaces read
+    // consistently.
+    const Color kLockedColor = Color::rgba(0.35f, 0.85f, 0.45f, 1.0f);
+    const Color kDriftColor  = Color::rgba(0.95f, 0.65f, 0.25f, 1.0f);
+    const Color kUnresColor  = Color::rgba(0.95f, 0.40f, 0.38f, 1.0f);
+
+    canvas.set_font("monospace", kFontSize);
+
+    // Section heading.
+    canvas.set_fill_color(kHighlightStroke);
+    canvas.fill_text("Reconcile", x, y + 11);
+
+    // Recompute the report fresh every frame — it is a cheap O(tweaks)
+    // pass and the live tree / lock state may have changed since the
+    // last paint. reconcile_rows_ caches the result for the row count.
+    auto report = reconcile_report();
+    reconcile_rows_ = report.rows;
+
+    if (!tweak_store_) {
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("No tweak store attached", x, y + 11 + kRowHeight);
+        return;
+    }
+
+    // Summary line: per-status counts, right-aligned in the header.
+    {
+        std::ostringstream summary;
+        summary << report.locked_count << " locked  "
+                << report.drifted_count << " drift  "
+                << report.unresolvable_count << " unresolved";
+        canvas.set_fill_color(kPanelDim);
+        float sw = canvas.measure_text(summary.str());
+        canvas.fill_text(summary.str(), x + w - sw, y + 11);
+    }
+
+    if (report.rows.empty()) {
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("No tweaks to reconcile", x, y + 11 + kRowHeight);
+        return;
+    }
+
+    // Clip the scroll region so rows don't bleed past the section.
+    canvas.save();
+    float list_top = y + kRowHeight;
+    canvas.clip_rect(x, list_top, w, h - kRowHeight);
+
+    constexpr float kBadgeW = 16.0f;  // status pip diameter
+    float row_y = list_top - reconcile_scroll_y_;
+
+    for (const auto& row : report.rows) {
+        const bool visible = row_y > list_top - kRowHeight && row_y < y + h;
+        if (visible) {
+            Color badge;
+            const char* tag;
+            switch (row.status) {
+                case ReconcileStatus::locked_to_source:
+                    badge = kLockedColor; tag = "lock"; break;
+                case ReconcileStatus::drifted:
+                    badge = kDriftColor;  tag = "drift"; break;
+                case ReconcileStatus::unresolvable:
+                default:
+                    badge = kUnresColor;  tag = "orphan"; break;
+            }
+
+            // Status pip at the left edge.
+            canvas.set_fill_color(badge);
+            canvas.fill_circle(x + 5.0f, row_y + kRowHeight / 2.0f, 4.0f);
+
+            // Anchor + property path, dimmed for unresolvable rows so
+            // an orphaned tweak reads as "inactive" at a glance.
+            const bool orphan = row.status == ReconcileStatus::unresolvable;
+            std::string label = abbreviate_anchor(row.anchor_id) + "  " +
+                                 row.property_path;
+            float text_x = x + kBadgeW;
+            float tag_w = canvas.measure_text(tag) + 6.0f;
+            float max_label_w = (x + w - tag_w) - text_x;
+            while (label.size() > 4 &&
+                   canvas.measure_text(label) > max_label_w)
+                label = label.substr(0, label.size() - 1);
+            canvas.set_fill_color(orphan ? kPanelDim : kPanelText);
+            canvas.fill_text(label, text_x, row_y + 14);
+
+            // Status tag, right-aligned, in the badge color.
+            canvas.set_fill_color(badge);
+            canvas.fill_text(tag, x + w - canvas.measure_text(tag),
+                             row_y + 14);
+        }
+        row_y += kRowHeight;
+    }
+
+    canvas.restore();
 }
 
 // ── Phase 2 — Drift drawer ──────────────────────────────────────────────────
