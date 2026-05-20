@@ -223,6 +223,9 @@ main() {
   if [ "$RUNNERS" -gt 0 ]; then register_runners; fi
   step "Done"
   ok "host provisioned"
-  [ "$RUNNERS" = "0" ] && note "runner registration skipped — re-run with --with-runners=N"
+  if [ "$RUNNERS" = "0" ]; then
+    note "runner registration skipped — re-run with --with-runners=N"
+  fi
 }
 main
+exit 0
