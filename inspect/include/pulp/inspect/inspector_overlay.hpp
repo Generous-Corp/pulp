@@ -309,6 +309,44 @@ public:
         return drifted_;
     }
 
+    // ── Phase 3e — 20× zoom loupe ───────────────────────────────────
+    //
+    // A magnified-pixel preview panel ("loupe") that shows the region
+    // under the cursor blown up by `zoom_factor_`. It complements the
+    // Phase 3c eyedropper: where the eyedropper grabs a single pixel,
+    // the loupe shows a grid of surrounding pixels with a center
+    // crosshair so the user can align edges + verify color boundaries.
+    //
+    // Toggled with the `Z` key (drag=D, eyedropper=E, panel=T are
+    // already taken). When active, mouse-move re-centers the sampled
+    // region on the cursor; paint() draws paint_zoom_panel() last so
+    // the loupe sits on top of everything, including the props panel.
+    //
+    // Pixel source mirrors the eyedropper's dual path:
+    //   - Skia raster surface  → Canvas::read_pixels() gives true RGBA
+    //   - non-Skia / headless  → graceful degradation: the loupe still
+    //     paints its frame + readout, filling the grid with the
+    //     resolved background color of the View under the cursor (or a
+    //     neutral checkerboard when that View has no background).
+    bool zoom_active() const { return zoom_active_; }
+    void set_zoom_active(bool active);
+    void toggle_zoom() { set_zoom_active(!zoom_active_); }
+
+    /// Magnification factor — how many panel pixels per source pixel.
+    /// Defaults to 20× per the roadmap; clamped to [4, 40] so the grid
+    /// neither degenerates into a single cell nor overflows the panel.
+    int zoom_factor() const { return zoom_factor_; }
+    void set_zoom_factor(int factor);
+
+    /// Last cursor position the loupe sampled around, in root (window)
+    /// coordinates. The loupe centers its grid on this pixel.
+    Point zoom_sample_center() const { return zoom_sample_center_; }
+
+    /// Resolved color of the center (sample) pixel — what the loupe
+    /// readout reports as a hex string. Comes from read_pixels() when
+    /// available, else the fallback resolved-view-color path.
+    Color zoom_center_color() const { return zoom_center_color_; }
+
 private:
     View& root_;
     bool active_ = false;
@@ -466,6 +504,26 @@ private:
     // eyedropper mode is active and at least one sample has landed.
     void paint_eyedropper_cursor(Canvas& canvas);
 
+    // ── Phase 3e — zoom loupe state ─────────────────────────────────
+    // Off by default; the inspector behaves identically to the
+    // pre-3e build until the user opts in via the Z-key toggle.
+    bool zoom_active_ = false;
+    int zoom_factor_ = 20;                    ///< panel px per source px
+    Point zoom_sample_center_{};              ///< cursor pos last sampled
+    Color zoom_center_color_{};               ///< resolved center-pixel color
+    bool zoom_center_from_readback_ = false;   ///< true = real read_pixels()
+
+    // Recompute zoom_center_color_ for the current zoom_sample_center_,
+    // sampling `canvas` via read_pixels() when the surface supports it
+    // and falling back to the resolved View color otherwise. Sets
+    // zoom_center_from_readback_ to record which path was taken.
+    void update_zoom_sample(Canvas& canvas);
+    // Resolve the on-screen color at root-coord point `p` WITHOUT a
+    // pixel readback — walks the view tree top-most-first and returns
+    // the deepest hit View's background color. Returns false (and
+    // leaves `out` untouched) when no background-bearing view is hit.
+    bool resolve_view_color_at(Point p, Color& out) const;
+
     // ── Flat tree for rendering ─────────────────────────────────────
     struct TreeItem {
         const View* view;
@@ -495,6 +553,11 @@ private:
     /// the props section below it. Paints nothing and returns 0 when
     /// there is no drift.
     float paint_drift_drawer(Canvas& canvas, float x, float y, float w);
+    // Phase 3e — magnified-pixel loupe. Draws a fixed-corner panel with
+    // a grid of `zoom_factor_`-scaled pixels sampled around the cursor,
+    // a center crosshair marking the sample pixel, and a coordinate +
+    // hex color readout strip beneath the grid.
+    void paint_zoom_panel(Canvas& canvas);
 
     // Phase 2.5 — render the tweak management panel into the given
     // rect. Repopulates tweak_rows_ with this frame's hit-rects.
@@ -533,6 +596,16 @@ private:
     static constexpr float kIndent = 16.0f;
     static constexpr float kFontSize = 11.0f;
     static constexpr float kStatsBarHeight = 24.0f;
+
+    // Phase 3e — zoom loupe layout. The loupe samples a square grid of
+    // kZoomGridCells × kZoomGridCells source pixels (odd so there's an
+    // exact center pixel) and renders each at zoom_factor_ scale. The
+    // panel sits in a fixed corner with a readout strip beneath.
+    static constexpr int   kZoomGridCells   = 11;   ///< odd → exact center
+    static constexpr int   kZoomFactorMin   = 4;
+    static constexpr int   kZoomFactorMax   = 40;
+    static constexpr float kZoomReadoutH    = 36.0f;
+    static constexpr float kZoomPanelMargin = 12.0f;
 };
 
 /// Global inspector instance for the current window.
