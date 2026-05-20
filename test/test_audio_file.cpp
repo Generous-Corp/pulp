@@ -376,6 +376,37 @@ TEST_CASE("sample conversion no-ops leave sentinel outputs untouched",
     REQUIRE(int32_out == 23);
 }
 
+TEST_CASE("int24 to float preserves sign-extension boundaries",
+          "[audio][convert][coverage][phase3]") {
+    const uint8_t packed[] = {
+        0x01, 0x00, 0x00, // +1
+        0xFE, 0xFF, 0xFF, // -2
+        0x00, 0x00, 0x40, // +0.5
+        0x00, 0x00, 0xC0, // -0.5
+    };
+
+    float dst[4] = {};
+    int24_to_float(packed, dst, 4);
+
+    REQUIRE_THAT(dst[0], WithinAbs(1.0f / 8388608.0f, 0.0000001f));
+    REQUIRE_THAT(dst[1], WithinAbs(-2.0f / 8388608.0f, 0.0000001f));
+    REQUIRE_THAT(dst[2], WithinAbs(0.5f, 0.0000001f));
+    REQUIRE_THAT(dst[3], WithinAbs(-0.5f, 0.0000001f));
+}
+
+TEST_CASE("float to int32 scales fractional values symmetrically",
+          "[audio][convert][coverage][phase3]") {
+    const float src[] = {-0.75f, -0.25f, 0.25f, 0.75f};
+    int32_t dst[4] = {};
+
+    float_to_int32(src, dst, 4);
+
+    REQUIRE(std::abs(dst[0] - static_cast<int32_t>(-0.75 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[1] - static_cast<int32_t>(-0.25 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[2] - static_cast<int32_t>(0.25 * 2147483647.0)) <= 1);
+    REQUIRE(std::abs(dst[3] - static_cast<int32_t>(0.75 * 2147483647.0)) <= 1);
+}
+
 // ── WAV file I/O ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Write and read WAV file", "[audio][file]") {
@@ -423,6 +454,43 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
 
     auto info = read_audio_file_info("/nonexistent/path.wav");
     REQUIRE_FALSE(info.has_value());
+}
+
+TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
+          "[audio][file][coverage]") {
+    auto path = unique_temp_audio_path("_zero_frames.wav");
+    std::filesystem::remove(path);
+
+    const std::vector<uint8_t> wav = {
+        'R', 'I', 'F', 'F',
+        36, 0, 0, 0,
+        'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ',
+        16, 0, 0, 0,
+        1, 0,
+        1, 0,
+        0x44, 0xAC, 0, 0,
+        0x88, 0x58, 0x01, 0,
+        2, 0,
+        16, 0,
+        'd', 'a', 't', 'a',
+        0, 0, 0, 0,
+    };
+    {
+        std::ofstream f(path, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(wav.data()),
+                static_cast<std::streamsize>(wav.size()));
+    }
+
+    auto info = read_audio_file_info(path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->sample_rate == 44100);
+    REQUIRE(info->num_channels == 1);
+    REQUIRE(info->num_frames == 0);
+    REQUIRE(info->duration_seconds == 0.0);
+
+    REQUIRE_FALSE(read_audio_file(path.string()).has_value());
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empties",
@@ -894,6 +962,22 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(contains_extension(write_extensions, ".aif"));
 }
 
+TEST_CASE("FormatRegistry rejects missing and extension-only paths",
+          "[audio][file][registry][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    REQUIRE(registry.find_reader("") == nullptr);
+    REQUIRE(registry.find_writer("") == nullptr);
+    REQUIRE_FALSE(registry.read_info("pulp_audio_without_extension").has_value());
+    REQUIRE_FALSE(registry.read("pulp_audio_without_extension").has_value());
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.0f, 0.25f}};
+    REQUIRE_FALSE(registry.write("pulp_audio_without_extension", data));
+    REQUIRE_FALSE(registry.write(".wav", data));
+}
+
 TEST_CASE("FormatRegistry rejects malformed compressed files through built-in readers",
           "[audio][file][registry][issue-640]") {
     auto flac_path = unique_temp_audio_path("_invalid.FLAC");
@@ -930,6 +1014,44 @@ TEST_CASE("FormatRegistry rejects malformed compressed files through built-in re
 
     std::filesystem::remove(flac_path);
     std::filesystem::remove(mp3_path);
+}
+
+TEST_CASE("FormatRegistry rejects paths without dispatchable extensions",
+          "[audio][file][registry][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    REQUIRE(registry.find_reader("") == nullptr);
+    REQUIRE(registry.find_writer("") == nullptr);
+    REQUIRE(registry.find_reader(".") == nullptr);
+    REQUIRE(registry.find_writer(".") == nullptr);
+
+    auto no_extension = unique_temp_audio_path("");
+    {
+        std::ofstream file(no_extension, std::ios::binary);
+        file << "RIFF";
+        REQUIRE(file.good());
+    }
+
+    REQUIRE_FALSE(registry.read_info(no_extension.string()).has_value());
+    REQUIRE_FALSE(registry.read(no_extension.string()).has_value());
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.0f, 0.25f}};
+    REQUIRE_FALSE(registry.write(no_extension.string(), data));
+
+    auto hidden_name = std::filesystem::temp_directory_path() / ".pulp_audio_hidden";
+    {
+        std::ofstream file(hidden_name, std::ios::binary);
+        file << "not audio";
+        REQUIRE(file.good());
+    }
+
+    REQUIRE_FALSE(registry.read_info(hidden_name.string()).has_value());
+    REQUIRE_FALSE(registry.read(hidden_name.string()).has_value());
+
+    std::filesystem::remove(no_extension);
+    std::filesystem::remove(hidden_name);
 }
 
 #ifdef __APPLE__

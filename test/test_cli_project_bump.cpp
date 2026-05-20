@@ -201,6 +201,10 @@ TEST_CASE("refuse_dynamic_pin rejects branch names and SHAs",
     site.current_pin = "abc1234";
     REQUIRE(pb::refuse_dynamic_pin(site));
 
+    // Uppercase hex is still a SHA-like pin.
+    site.current_pin = "ABCDEF0";
+    REQUIRE(pb::refuse_dynamic_pin(site));
+
     // Semver is safe.
     site.current_pin = "0.23.0";
     REQUIRE_FALSE(pb::refuse_dynamic_pin(site));

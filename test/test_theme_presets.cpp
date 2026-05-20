@@ -200,6 +200,24 @@ TEST_CASE("derive_theme maps semantic colors to alpha and blend tokens",
     REQUIRE_THAT(theme.dimension("control.knob_size").value(),
                  Catch::Matchers::WithinAbs(48.0f, 0.0001f));
     REQUIRE(theme.string_token("font.family").value() == "Inter");
+
+    REQUIRE(theme.color("control.track").value() == colors.muted);
+    REQUIRE(theme.color("control.fill").value() == colors.primary);
+    REQUIRE(theme.color("control.thumb").value() == colors.foreground);
+    REQUIRE(theme.color("control.border").value() == colors.border);
+
+    REQUIRE(theme.color("knob.arc").value() == colors.primary);
+    REQUIRE(theme.color("slider.fill").value() == colors.primary);
+    REQUIRE(theme.color("progress.fill").value() == colors.primary);
+    REQUIRE(theme.color("spinner").value() == colors.primary);
+    REQUIRE(theme.color("tab.active").value() == colors.primary);
+
+    REQUIRE(theme.color("meter.red").value() == colors.destructive);
+    REQUIRE(theme.color("card.empty").value() == colors.card);
+    REQUIRE(theme.color("card.ready").value() == colors.card);
+    REQUIRE(theme.color("modal.border").value() == colors.border);
+    REQUIRE(theme.color("gradient.start").value() == colors.primary);
+    REQUIRE(theme.color("gradient.end").value() == colors.secondary);
 }
 
 // ── Specific Presets ────────────────────────────────────────────────────────

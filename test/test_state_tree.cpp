@@ -214,6 +214,57 @@ TEST_CASE("StateTree child insertion clamps invalid indexes and skips null child
     REQUIRE(root->child(1)->type_name() == "last");
 }
 
+TEST_CASE("StateTree reparenting detaches children from the old parent",
+          "[state][tree][codecov]") {
+    auto old_parent = StateTree::create("old");
+    auto new_parent = StateTree::create("new");
+    auto sibling = StateTree::create("sibling");
+    auto child = StateTree::create("child");
+
+    int old_removed_count = 0;
+    old_parent->add_child_removed_listener(
+        [&](StateTree&, StateTree& removed, int index) {
+            REQUIRE(&removed == child.get());
+            REQUIRE(index == 0);
+            ++old_removed_count;
+        });
+
+    old_parent->add_child(child);
+    old_parent->add_child(sibling);
+    REQUIRE(old_parent->child_count() == 2);
+
+    new_parent->add_child(child);
+
+    REQUIRE(old_removed_count == 1);
+    REQUIRE(old_parent->child_count() == 1);
+    REQUIRE(old_parent->child(0) == sibling);
+    REQUIRE(new_parent->child_count() == 1);
+    REQUIRE(new_parent->child(0) == child);
+    REQUIRE(child->parent() == new_parent.get());
+}
+
+TEST_CASE("StateTree insert reparents children at the requested new index",
+          "[state][tree][codecov]") {
+    auto old_parent = StateTree::create("old");
+    auto new_parent = StateTree::create("new");
+    auto first = StateTree::create("first");
+    auto moved = StateTree::create("moved");
+    auto last = StateTree::create("last");
+
+    old_parent->add_child(moved);
+    new_parent->add_child(first);
+    new_parent->add_child(last);
+
+    new_parent->insert_child(1, moved);
+
+    REQUIRE(old_parent->child_count() == 0);
+    REQUIRE(new_parent->child_count() == 3);
+    REQUIRE(new_parent->child(0) == first);
+    REQUIRE(new_parent->child(1) == moved);
+    REQUIRE(new_parent->child(2) == last);
+    REQUIRE(moved->parent() == new_parent.get());
+}
+
 // ── Listeners ───────────────────────────────────────────────────────────
 
 TEST_CASE("StateTree property change listener", "[state][tree]") {
@@ -313,6 +364,39 @@ TEST_CASE("StateTree child listener removal stops callbacks", "[state][tree]") {
     root->add_child(StateTree::create("third"));
     root->remove_child(0);
 
+    REQUIRE(added_count == 1);
+    REQUIRE(removed_count == 1);
+}
+
+TEST_CASE("StateTree removing unknown listener ids is stable",
+          "[state][tree][coverage]") {
+    auto root = StateTree::create("root");
+    int property_count = 0;
+    int added_count = 0;
+    int removed_count = 0;
+
+    root->remove_listener(1234);
+    root->remove_child_added_listener(1234);
+    root->remove_child_removed_listener(1234);
+
+    auto property_id = root->add_listener(
+        [&](StateTree&, std::string_view, const PropertyValue&, const PropertyValue&) {
+            ++property_count;
+        });
+    auto added_id = root->add_child_added_listener(
+        [&](StateTree&, StateTree&, int) { ++added_count; });
+    auto removed_id = root->add_child_removed_listener(
+        [&](StateTree&, StateTree&, int) { ++removed_count; });
+
+    root->remove_listener(property_id + 100);
+    root->remove_child_added_listener(added_id + 100);
+    root->remove_child_removed_listener(removed_id + 100);
+
+    root->set("name", std::string("kept"));
+    root->add_child(StateTree::create("child"));
+    root->remove_child(0);
+
+    REQUIRE(property_count == 1);
     REQUIRE(added_count == 1);
     REQUIRE(removed_count == 1);
 }
@@ -461,6 +545,29 @@ TEST_CASE("StateTree JSON round-trip", "[state][tree][json]") {
     REQUIRE_THAT(filter_restored->get_double("cutoff"), WithinAbs(1200.5, 0.1));
 }
 
+TEST_CASE("StateTree JSON round-trip preserves escaped strings",
+          "[state][tree][json][coverage][phase3]") {
+    auto root = StateTree::create(R"(preset "A")");
+    root->set(R"(display\name)", std::string("Line 1\nLine \"2\" \\ tail"));
+
+    auto child = StateTree::create(R"(child\type)");
+    child->set("label", std::string(R"(quoted "child")"));
+    root->add_child(child);
+
+    const auto json = root->to_json();
+    REQUIRE(json.find("\\\"") != std::string::npos);
+    REQUIRE(json.find("\\\\") != std::string::npos);
+    REQUIRE(json.find("\\n") != std::string::npos);
+
+    auto restored = StateTree::from_json(json);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->type_name() == R"(preset "A")");
+    REQUIRE(restored->get_string(R"(display\name)") == "Line 1\nLine \"2\" \\ tail");
+    REQUIRE(restored->child_count() == 1);
+    REQUIRE(restored->child(0)->type_name() == R"(child\type)");
+    REQUIRE(restored->child(0)->get_string("label") == R"(quoted "child")");
+}
+
 TEST_CASE("StateTree from_json with invalid JSON returns nullptr", "[state][tree][json]") {
     auto result = StateTree::from_json("not json at all {{{");
     REQUIRE(result == nullptr);
@@ -540,6 +647,24 @@ TEST_CASE("StateTree from_json ignores malformed members and children",
     REQUIRE(result->child(1)->type_name() == "node");
 }
 
+TEST_CASE("StateTree JSON keeps integer values available as doubles",
+          "[state][tree][json][coverage]") {
+    auto result = StateTree::from_json(R"({
+        "type": "numbers",
+        "properties": {
+            "whole": 12,
+            "fractional": 12.5
+        }
+    })");
+
+    REQUIRE(result != nullptr);
+    REQUIRE(result->type_name() == "numbers");
+    REQUIRE(result->get_int("whole") == 12);
+    REQUIRE_THAT(result->get_double("whole"), WithinAbs(12.0, 1e-9));
+    REQUIRE(result->get_int("fractional", 99) == 99);
+    REQUIRE_THAT(result->get_double("fractional"), WithinAbs(12.5, 1e-9));
+}
+
 // ── Deep copy ───────────────────────────────────────────────────────────
 
 TEST_CASE("StateTree deep copy", "[state][tree]") {
@@ -568,6 +693,37 @@ TEST_CASE("StateTree deep copy rewires child parent pointers",
     REQUIRE(copy->child(0).get() != child.get());
     REQUIRE(copy->child(0)->parent() == copy.get());
     REQUIRE(child->parent() == root.get());
+}
+
+TEST_CASE("StateTree deep copy does not copy listeners",
+          "[state][tree][coverage]") {
+    auto root = StateTree::create("root");
+    auto child = StateTree::create("child");
+    root->add_child(child);
+
+    int property_count = 0;
+    int added_count = 0;
+    int removed_count = 0;
+    root->add_listener([&](StateTree&, std::string_view, const PropertyValue&, const PropertyValue&) {
+        ++property_count;
+    });
+    root->add_child_added_listener([&](StateTree&, StateTree&, int) {
+        ++added_count;
+    });
+    root->add_child_removed_listener([&](StateTree&, StateTree&, int) {
+        ++removed_count;
+    });
+
+    auto copy = root->deep_copy();
+    copy->set("name", std::string("copy"));
+    copy->add_child(StateTree::create("new_child"));
+    copy->remove_child(0);
+
+    REQUIRE(property_count == 0);
+    REQUIRE(added_count == 0);
+    REQUIRE(removed_count == 0);
+    REQUIRE(root->child_count() == 1);
+    REQUIRE(copy->child_count() == 1);
 }
 
 // ── ObservableValue ─────────────────────────────────────────────────────
@@ -655,6 +811,18 @@ TEST_CASE("ObservableValue skips empty listeners", "[state][observable][codecov]
     REQUIRE(count == 1);
 }
 
+TEST_CASE("ObservableValue removing an unknown listener is a no-op",
+          "[state][observable][coverage][phase3]") {
+    ObservableValue<int> val(1);
+    int count = 0;
+    val.add_listener([&](const int&, const int&) { ++count; });
+
+    val.remove_listener(999);
+    val.set(2);
+
+    REQUIRE(count == 1);
+}
+
 // ── CachedProperty ──────────────────────────────────────────────────────
 
 TEST_CASE("CachedProperty binds default and follows tree updates", "[state][cached]") {
@@ -711,6 +879,17 @@ TEST_CASE("CachedProperty unbound set only updates local cache", "[state][cached
     REQUIRE(size.get() == 512);
 }
 
+TEST_CASE("CachedProperty move of unbound property preserves cached value",
+          "[state][cached][coverage][phase3]") {
+    CachedProperty<int64_t> size;
+    size.set(256);
+
+    CachedProperty<int64_t> moved(std::move(size));
+
+    REQUIRE_FALSE(moved.is_bound());
+    REQUIRE(moved.get() == 256);
+}
+
 TEST_CASE("CachedProperty ignores mismatched external updates",
           "[state][cached][issue-641]") {
     auto tree = StateTree::create("params");
@@ -722,6 +901,74 @@ TEST_CASE("CachedProperty ignores mismatched external updates",
 
     name.set("Restored");
     REQUIRE(tree->get_string("name") == "Restored");
+}
+
+TEST_CASE("CachedProperty destruction removes its StateTree listener",
+          "[state][cached][coverage][phase3]") {
+    auto tree = StateTree::create("params");
+    tree->set("gain", 0.25);
+
+    {
+        CachedProperty<double> gain(tree, "gain", 0.0);
+        REQUIRE_THAT(gain.get(), WithinAbs(0.25, 1e-5));
+        tree->set("gain", 0.5);
+        REQUIRE_THAT(gain.get(), WithinAbs(0.5, 1e-5));
+    }
+
+    int count = 0;
+    tree->add_listener([&](StateTree&, std::string_view prop,
+                           const PropertyValue&, const PropertyValue&) {
+        REQUIRE(prop == "gain");
+        ++count;
+    });
+
+    tree->set("gain", 0.75);
+    REQUIRE(count == 1);
+}
+
+TEST_CASE("CachedProperty bool ignores mismatched refresh values",
+          "[state][cached][coverage][phase3-large]") {
+    auto tree = StateTree::create("params");
+    tree->set("enabled", true);
+    CachedProperty<bool> enabled(tree, "enabled", false);
+
+    REQUIRE(enabled.get());
+
+    tree->set("enabled", std::string("false"));
+    enabled.refresh();
+
+    REQUIRE(enabled.get());
+    enabled = false;
+    REQUIRE_FALSE(enabled.get());
+    REQUIRE_FALSE(tree->get_bool("enabled", true));
+}
+
+TEST_CASE("CachedProperty int64 move tracks later tree updates",
+          "[state][cached][coverage][phase3-large]") {
+    auto tree = StateTree::create("params");
+    tree->set("voices", int64_t(8));
+    CachedProperty<int64_t> voices(tree, "voices", 1);
+    CachedProperty<int64_t> moved(std::move(voices));
+
+    tree->set("voices", int64_t(16));
+
+    REQUIRE(moved.is_bound());
+    REQUIRE(moved.get() == 16);
+}
+
+TEST_CASE("CachedProperty int refresh preserves cache on incompatible values",
+          "[state][cached][coverage][phase3]") {
+    auto tree = StateTree::create("params");
+    CachedProperty<int64_t> count(tree, "count", 4);
+
+    REQUIRE(count.get() == 4);
+
+    tree->set("count", std::string("7"));
+    count.refresh();
+    REQUIRE(count.get() == 4);
+
+    tree->set("count", int64_t(7));
+    REQUIRE(count.get() == 7);
 }
 
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
@@ -911,6 +1158,35 @@ TEST_CASE("StateTreeSynchroniser decode keeps complete prefix on truncated batch
     REQUIRE(std::get<std::string>(decoded[0].value) == "Lead");
 }
 
+TEST_CASE("StateTreeSynchroniser preserves negative child indexes in encoding",
+          "[state][sync][coverage][phase3]") {
+    std::vector<SyncDelta> deltas = {
+        {SyncDeltaType::ChildAdd, "root", "child", {}, -1},
+        {SyncDeltaType::ChildRemove, "root", "", {}, -1},
+    };
+
+    auto encoded = StateTreeSynchroniser::encode(deltas);
+    auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
+
+    REQUIRE(decoded.size() == 2);
+    REQUIRE(decoded[0].child_index == -1);
+    REQUIRE(decoded[1].child_index == -1);
+}
+
+TEST_CASE("StateTreeSynchroniser decode treats unknown value types as null",
+          "[state][sync][coverage][phase3]") {
+    SyncDelta delta{SyncDeltaType::PropertySet, "root", "mystery", {}, -1};
+    auto encoded = StateTreeSynchroniser::encode({delta});
+    REQUIRE_FALSE(encoded.empty());
+    encoded.back() = 99;
+
+    auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
+    REQUIRE(decoded.size() == 1);
+    REQUIRE(decoded[0].type == SyncDeltaType::PropertySet);
+    REQUIRE(decoded[0].key == "mystery");
+    REQUIRE(std::holds_alternative<std::monostate>(decoded[0].value));
+}
+
 TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
           "[state][sync][codecov]") {
     const std::vector<SyncDelta> cases = {
@@ -928,6 +1204,23 @@ TEST_CASE("StateTreeSynchroniser decode rejects truncated typed values",
         auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
         REQUIRE(decoded.empty());
     }
+}
+
+TEST_CASE("StateTreeSynchroniser decode preserves negative child indexes",
+          "[state][sync][coverage][phase3]") {
+    std::vector<SyncDelta> deltas = {
+        {SyncDeltaType::ChildRemove, "root", "", {}, -1},
+        {SyncDeltaType::ChildAdd, "root", "tail", {}, -2},
+    };
+
+    auto encoded = StateTreeSynchroniser::encode(deltas);
+    auto decoded = StateTreeSynchroniser::decode(encoded.data(), encoded.size());
+
+    REQUIRE(decoded.size() == 2);
+    REQUIRE(decoded[0].type == SyncDeltaType::ChildRemove);
+    REQUIRE(decoded[0].child_index == -1);
+    REQUIRE(decoded[1].type == SyncDeltaType::ChildAdd);
+    REQUIRE(decoded[1].child_index == -2);
 }
 
 TEST_CASE("StateTreeSynchroniser apply mutates properties and children", "[state][sync]") {

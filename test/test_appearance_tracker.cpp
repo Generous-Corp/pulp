@@ -41,6 +41,22 @@ TEST_CASE("AppearanceTracker callback fires on lock", "[view][appearance]") {
     REQUIRE(received == Appearance::light);
 }
 
+TEST_CASE("AppearanceTracker replacing callback uses latest handler only",
+          "[view][appearance][coverage][phase3]") {
+    AppearanceTracker tracker;
+    int first_calls = 0;
+    std::vector<Appearance> latest;
+
+    tracker.on_appearance_changed([&](Appearance) { ++first_calls; });
+    tracker.on_appearance_changed([&](Appearance a) { latest.push_back(a); });
+
+    tracker.lock(Appearance::light);
+    tracker.lock(Appearance::dark);
+
+    REQUIRE(first_calls == 0);
+    REQUIRE(latest == std::vector<Appearance>{Appearance::light, Appearance::dark});
+}
+
 TEST_CASE("AppearanceTracker callbacks follow repeated locks and locked poll no-op",
           "[view][appearance][coverage][issue-493]") {
     AppearanceTracker tracker;
@@ -111,6 +127,30 @@ TEST_CASE("ThemeManager callback fires on theme change", "[view][appearance]") {
     mgr.lock_appearance(Appearance::light);
 
     REQUIRE(called);
+}
+
+TEST_CASE("ThemeManager replacing callback uses latest handler only",
+          "[view][appearance][coverage][phase3]") {
+    ThemeManager mgr;
+    int first_calls = 0;
+    std::vector<uint8_t> latest_red;
+
+    Theme light;
+    light.colors["bg.primary"] = color_from_hex(0x110000);
+    Theme dark;
+    dark.colors["bg.primary"] = color_from_hex(0x220000);
+    mgr.set_theme_pair(light, dark);
+
+    mgr.on_theme_changed([&](const Theme&) { ++first_calls; });
+    mgr.on_theme_changed([&](const Theme& theme) {
+        latest_red.push_back(theme.color("bg.primary")->r8());
+    });
+
+    mgr.lock_appearance(Appearance::light);
+    mgr.lock_appearance(Appearance::dark);
+
+    REQUIRE(first_calls == 0);
+    REQUIRE(latest_red == std::vector<uint8_t>{0x11, 0x22});
 }
 
 TEST_CASE("ThemeManager callbacks cover locked theme poll and unlock",

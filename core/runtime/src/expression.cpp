@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace pulp::runtime {
@@ -60,7 +61,7 @@ private:
     // power = unary ('^' unary)?
     double parse_power() {
         double base = parse_unary();
-        if (match('^')) return std::pow(base, parse_unary());
+        if (match('^')) return std::pow(base, parse_power());
         return base;
     }
 
@@ -95,7 +96,12 @@ private:
                 while (pos_ < input_.size() && std::isdigit(input_[pos_])) pos_++;
                 if (pos_ == exponent_start) throw std::runtime_error("Malformed exponent");
             }
-            return std::stod(std::string(input_.substr(start, pos_ - start)));
+            std::string token(input_.substr(start, pos_ - start));
+            char* end = nullptr;
+            double value = std::strtod(token.c_str(), &end);
+            if (end != token.c_str() + token.size())
+                throw std::runtime_error("Malformed number");
+            return value;
         }
 
         // Identifier (variable or function)
@@ -136,7 +142,7 @@ private:
 
                 // Custom functions
                 auto it = fns_.find(name);
-                if (it != fns_.end()) return it->second(arg);
+                if (it != fns_.end() && !has_arg2) return it->second(arg);
 
                 throw std::runtime_error("Unknown function: " + name);
             }

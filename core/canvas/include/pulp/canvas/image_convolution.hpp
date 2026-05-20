@@ -39,7 +39,7 @@ public:
         if (stride == 0) stride = width * 4;
         int half = size_ / 2;
 
-        std::vector<uint8_t> temp(static_cast<size_t>(height * stride));
+        std::vector<uint8_t> temp(pixels, pixels + static_cast<size_t>(height * stride));
 
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {

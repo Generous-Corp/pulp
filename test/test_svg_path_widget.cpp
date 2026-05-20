@@ -483,6 +483,40 @@ TEST_CASE("SvgPathWidget unparseable gradient falls back to solid fill_color",
     REQUIRE(c.b < 0.1f);
 }
 
+TEST_CASE("SvgPathWidget malformed gradient numbers fall back without throwing",
+          "[view][svg-path][issue-932][issue-1737][codecov]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    auto paint_first_fill = [](const char* gradient) -> std::optional<Color> {
+        SvgPathWidget w;
+        w.set_path("M 0 0 L 10 0 L 10 10 Z");
+        w.set_viewbox(10, 10);
+        w.set_bounds({0, 0, 10, 10});
+        w.set_fill_color(Color::rgba8(255, 0, 0));
+        w.set_fill_gradient(gradient);
+
+        RecordingCanvas canvas;
+        REQUIRE_NOTHROW(w.paint(canvas));
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::set_fill_color) return cmd.color;
+        }
+        return std::nullopt;
+    };
+
+    for (const char* gradient : {
+             "linear-gradient(12+deg, red, blue)",
+             "linear-gradient(to bottom, rgb(999999999999999999999999999999999999, 0, 0), blue)",
+             "linear-gradient(to bottom, red 12+%, blue)"}) {
+        auto first_fill = paint_first_fill(gradient);
+        REQUIRE(first_fill.has_value());
+        const auto& c = *first_fill;
+        REQUIRE(c.r > 0.9f);
+        REQUIRE(c.g < 0.1f);
+        REQUIRE(c.b < 0.1f);
+    }
+}
+
 TEST_CASE("SvgPathWidget clear_fill_gradient returns to solid-fill mode",
           "[view][svg-path][issue-932][issue-1737]") {
     using namespace pulp::view;

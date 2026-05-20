@@ -111,13 +111,21 @@ int cmd_design(const std::vector<std::string>& args) {
             watch_mode = true;
             continue;
         }
-        if (args[i] == "--build-dir" && i + 1 < args.size()) {
+        if (args[i] == "--build-dir") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp design: --build-dir requires a value\n";
+                return 2;
+            }
             build_dir = fs::absolute(args[++i]);
             build_dir_explicit = true;
             build_reason = "explicit --build-dir";
             continue;
         }
-        if (args[i] == "--script" && i + 1 < args.size()) {
+        if (args[i] == "--script") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp design: --script requires a value\n";
+                return 2;
+            }
             script_path = fs::absolute(args[++i]);
             script_reason = "explicit --script";
             continue;

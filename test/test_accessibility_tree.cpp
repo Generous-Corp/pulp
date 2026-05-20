@@ -169,6 +169,41 @@ TEST_CASE("find_by_role_and_label returns nullptr when absent",
             == nullptr);
 }
 
+TEST_CASE("snapshot preserves depth-first order and first matching view pointer",
+          "[a11y][harness][coverage][phase3]") {
+    Probe root;
+
+    auto group = std::make_unique<Probe>();
+    group->set_access_role(View::AccessRole::group);
+    group->set_access_label("Strip");
+    auto* group_ptr = group.get();
+
+    auto first_gain = std::make_unique<Probe>();
+    first_gain->set_access_role(View::AccessRole::slider);
+    first_gain->set_access_label("Gain");
+    auto* first_gain_ptr = first_gain.get();
+    group->add_child(std::move(first_gain));
+
+    auto second_gain = std::make_unique<Probe>();
+    second_gain->set_access_role(View::AccessRole::slider);
+    second_gain->set_access_label("Gain");
+    auto* second_gain_ptr = second_gain.get();
+    root.add_child(std::move(group));
+    root.add_child(std::move(second_gain));
+
+    auto nodes = snapshot_accessibility_tree(root);
+    REQUIRE(nodes.size() == 3);
+    REQUIRE(nodes[0].view == group_ptr);
+    REQUIRE(nodes[0].depth == 0);
+    REQUIRE(nodes[1].view == first_gain_ptr);
+    REQUIRE(nodes[1].depth == 1);
+    REQUIRE(nodes[2].view == second_gain_ptr);
+    REQUIRE(nodes[2].depth == 0);
+
+    REQUIRE(find_by_role_and_label(root, View::AccessRole::slider, "Gain")
+            == first_gain_ptr);
+}
+
 TEST_CASE("snapshot captures nested range metadata", "[a11y][harness]") {
     Probe root;
 

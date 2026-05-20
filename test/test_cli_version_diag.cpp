@@ -133,6 +133,23 @@ TEST_CASE("read_plugin_version returns empty when manifest has no version field"
     REQUIRE(v.raw.empty());
 }
 
+TEST_CASE("read_plugin_version accepts tag-style version strings",
+          "[version-diag][coverage][phase3]") {
+    TempDir tmp;
+    auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
+    write_file(plugin_json, R"({
+        "name": "pulp",
+        "version": "v1.2.3"
+    })");
+
+    auto v = read_plugin_version(plugin_json);
+    REQUIRE(v.comparable);
+    REQUIRE(v.raw == "v1.2.3");
+    REQUIRE(v.major == 1);
+    REQUIRE(v.minor == 2);
+    REQUIRE(v.patch == 3);
+}
+
 TEST_CASE("locate_plugin_json prefers an explicit override",
           "[version-diag][issue-499]") {
     TempDir tmp;
@@ -606,4 +623,26 @@ TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
     REQUIRE(out.find("\"findings\":") != std::string::npos);
     REQUIRE(out.find("\"name\": \"A\"") != std::string::npos);
     REQUIRE(out.find("\"severity\": \"warn\"") != std::string::npos);
+}
+
+TEST_CASE("render_report_json escapes project fields",
+          "[version-diag][coverage][phase3]") {
+    VersionReport r;
+    r.cli = parse_semver("0.31.0");
+
+    ProjectEntry p;
+    p.path = fs::path("project\"with_chars");
+    p.name = "Quoted \"Project\"\\Name\nTail";
+    p.sdk = parse_semver("0.31.0");
+    r.projects.push_back(p);
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report_json(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 0);
+    auto out = capture.str();
+    REQUIRE(out.find("\"path\": \"project\\\"with_chars\"") != std::string::npos);
+    REQUIRE(out.find("\"name\": \"Quoted \\\"Project\\\"\\\\Name\\nTail\"") != std::string::npos);
 }

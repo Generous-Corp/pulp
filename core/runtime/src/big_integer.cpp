@@ -1,6 +1,8 @@
 #include <pulp/runtime/big_integer.hpp>
 #include <mbedtls/bignum.h>
 #include <cstring>
+#include <limits>
+#include <string>
 
 namespace pulp::runtime {
 
@@ -18,7 +20,12 @@ struct BigInteger::Impl {
 
 BigInteger::BigInteger() : impl_(new Impl) {}
 BigInteger::BigInteger(uint64_t value) : impl_(new Impl) {
-    mbedtls_mpi_lset(&impl_->mpi, static_cast<mbedtls_mpi_sint>(value));
+    if (value <= static_cast<uint64_t>(std::numeric_limits<mbedtls_mpi_sint>::max())) {
+        mbedtls_mpi_lset(&impl_->mpi, static_cast<mbedtls_mpi_sint>(value));
+    } else {
+        auto decimal = std::to_string(value);
+        mbedtls_mpi_read_string(&impl_->mpi, 10, decimal.c_str());
+    }
 }
 BigInteger::BigInteger(const BigInteger& other) : impl_(new Impl(*other.impl_)) {}
 BigInteger::BigInteger(BigInteger&& other) noexcept : impl_(other.impl_) { other.impl_ = new Impl; }

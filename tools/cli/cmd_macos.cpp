@@ -161,9 +161,17 @@ int run_retarget(const std::vector<std::string>& args) {
     std::string pr_number;
     std::string runner;
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--pr" && i + 1 < args.size()) {
+        if (args[i] == "--pr") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp macos retarget: --pr requires a value\n";
+                return 2;
+            }
             pr_number = args[++i];
-        } else if (args[i] == "--to" && i + 1 < args.size()) {
+        } else if (args[i] == "--to") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp macos retarget: --to requires a value\n";
+                return 2;
+            }
             runner = args[++i];
         } else {
             std::cerr << "pulp macos retarget: unknown arg '" << args[i] << "'\n";
@@ -187,7 +195,11 @@ int run_retarget(const std::vector<std::string>& args) {
 int run_status(const std::vector<std::string>& args) {
     std::string pr_number;
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--pr" && i + 1 < args.size()) {
+        if (args[i] == "--pr") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp macos status: --pr requires a value\n";
+                return 2;
+            }
             pr_number = args[++i];
         } else {
             std::cerr << "pulp macos status: unknown arg '" << args[i] << "'\n";

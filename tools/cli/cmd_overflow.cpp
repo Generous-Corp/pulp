@@ -149,7 +149,11 @@ int run_status(const std::vector<std::string>&) {
 int run_enable(const std::vector<std::string>& args) {
     std::string selector = "\"macos-15\"";
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--to" && i + 1 < args.size()) {
+        if (args[i] == "--to") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp overflow enable: --to requires a value\n";
+                return 2;
+            }
             selector = args[++i];
         } else {
             std::cerr << "pulp overflow enable: unknown arg '" << args[i] << "'\n";

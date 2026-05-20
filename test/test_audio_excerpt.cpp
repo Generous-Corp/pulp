@@ -263,6 +263,28 @@ TEST_CASE("AudioSubsectionReader handles empty and past-end ranges",
     REQUIRE(dest[1] == 8.0f);
 }
 
+TEST_CASE("AudioSubsectionReader zero-length ranges retain source shape",
+          "[audio][subsection][coverage][phase3]") {
+    AudioFileData audio;
+    audio.sample_rate = 96000;
+    audio.channels = {{0.0f, 0.5f}, {1.0f, 1.5f}};
+
+    AudioSubsectionReader reader(audio, 1, 0);
+    REQUIRE_FALSE(reader.is_valid());
+    REQUIRE(reader.num_channels() == 2);
+    REQUIRE(reader.num_frames() == 0);
+    REQUIRE(reader.sample_rate() == 96000);
+    REQUIRE(reader.duration_seconds() == 0.0);
+    REQUIRE(reader.sample(0, 0) == 0.0f);
+
+    auto extracted = reader.extract();
+    REQUIRE(extracted.sample_rate == 96000);
+    REQUIRE(extracted.num_channels() == 2);
+    REQUIRE(extracted.num_frames() == 0);
+    REQUIRE(extracted.channels[0].empty());
+    REQUIRE(extracted.channels[1].empty());
+}
+
 TEST_CASE("AudioSubsectionReader ignores invalid read destinations",
           "[audio][subsection][codecov]") {
     AudioFileData audio;

@@ -44,6 +44,9 @@ void AssetManager::touch(CacheEntry& entry) const {
 }
 
 void AssetManager::add_to_cache(const std::string& key, CacheEntry entry) {
+    if (auto existing = cache_.find(key); existing != cache_.end()) {
+        cache_bytes_ -= existing->second.byte_size;
+    }
     cache_bytes_ += entry.byte_size;
     cache_[key] = std::move(entry);
 

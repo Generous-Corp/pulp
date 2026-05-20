@@ -161,11 +161,13 @@
         "roundtrip_script": "tools/import-validation/stitch-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -328,11 +330,13 @@
         "roundtrip_script": "tools/import-validation/pencil-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -424,11 +428,13 @@
         "roundtrip_script": "tools/import-validation/figma-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -513,11 +519,13 @@
         "roundtrip_script": "tools/import-validation/v0-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -671,11 +679,13 @@
         "roundtrip_script": "tools/import-validation/rn-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
+          "pulp-test-design-import-react-runtime",
           "pulp-test-widget-bridge",
           "pulp-test-widget-bridge-runtime-import"
         ],
         "test_files": [
           "test/test_design_import.cpp",
+          "test/test_design_import_react_runtime.cpp",
           "test/test_widget_bridge.cpp",
           "test/test_widget_bridge_runtime_import.cpp"
         ],
@@ -695,33 +705,47 @@
       "kind": "screen-export",
       "trust": "observed",
       "last_verified": "2026-05-18",
-      "recheck_interval_days": 180,
+      "recheck_interval_days": 90,
       "compat": {
         "mode": "not-applicable",
         "source": null,
-        "parser_version_owner": "runtime-import"
+        "parser_version_owner": "jsx-runtime-transform"
       },
       "dispatch": {
-        "kind": "explicit-runtime-parser",
-        "parser": "parse_jsx_react"
+        "kind": "design-source-label",
+        "label": "jsx"
       },
       "mcp": {
         "provider_server": null,
         "available": false,
         "runtime_parser_accepts_raw_mcp": false,
-        "lane_owner": "runtime-import-parser",
-        "notes": "JSX runtime-import is the experimental 2026-05-17 instrument lane (Node + esbuild transform → self-contained bundle); not a design-provider MCP lane."
+        "lane_owner": "jsx-runtime-transform",
+        "notes": "JSX runtime-import is the local Node + esbuild transform lane; provider acquisition is outside the source-contract registry."
       },
       "upstream": [
         {
           "url": "planning/2026-05-17-jsx-instrument-import.md",
           "kind": "spec",
-          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) — defines fixture shape, transform pipeline, and round-trip contract.",
+          "proves": "Spec for the JSX runtime-import experimental slice (Phase A) \u2014 defines fixture shape, transform pipeline, and round-trip contract.",
           "last_verified": "2026-05-18",
           "recheck_interval_days": null
+        },
+        {
+          "url": "tools/import-design/jsx-runtime/README.md",
+          "kind": "local-docs",
+          "proves": "Documents the supported local JSX transform and runtime import path.",
+          "last_verified": "2026-05-18",
+          "recheck_interval_days": 90
+        },
+        {
+          "url": "tools/import-design/jsx-runtime/jsx-transform.mjs",
+          "kind": "tooling",
+          "proves": "Local Node/esbuild transform turns JSX/TSX input into the runtime bundle consumed by parse_jsx_react.",
+          "last_verified": "2026-05-18",
+          "recheck_interval_days": 90
         }
       ],
-      "detected_artifact_shape": "Single-file JSX/TSX React component bundled via Node + esbuild into a self-contained runtime bundle.",
+      "detected_artifact_shape": "Single-file JSX or TSX React component transformed through the local esbuild runtime bridge.",
       "runtime_export_shape": "Self-contained JS bundle (React + ReactDOM + user JSX + Pulp host shim) consumed by WidgetBridge runtime-import dispatch.",
       "runtime_requirements": {
         "sdk_min": "v0.113.0",
@@ -729,6 +753,7 @@
           "compat.json:html",
           "compat.json:css",
           "compat.json:react",
+          "compat.json:canvas2d",
           "core/view"
         ]
       },
@@ -740,23 +765,28 @@
       "format_versions": [],
       "validation": {
         "fixtures": [
-          "planning/fixtures/jsx/chainer-instrument.jsx"
+          "planning/fixtures/jsx/chainer-instrument.jsx",
+          "planning/fixtures/jsx/typed-control.tsx"
         ],
         "roundtrip_script": "tools/import-validation/jsx-roundtrip.sh",
         "test_targets": [
           "pulp-test-design-import",
-          "pulp-test-widget-bridge-runtime-import"
+          "pulp-test-widget-bridge-runtime-import",
+          "pulp-test-design-import-jsx-runtime"
         ],
         "test_files": [
           "test/test_design_import.cpp",
-          "test/test_widget_bridge_runtime_import.cpp"
+          "test/test_widget_bridge_runtime_import.cpp",
+          "test/test_design_import_jsx_runtime.cpp"
         ],
         "test_tags": [
           "[view][import][parser][jsx][instrument]",
-          "[view][bridge][runtime-import-dispatch][jsx][instrument]"
+          "[view][bridge][runtime-import-dispatch][jsx][instrument]",
+          "[view][import][jsx]",
+          "[view][import][jsx][tsx]"
         ],
         "pulp_render_reference": {
-          "status": "pending",
+          "status": "not-applicable",
           "path": null
         }
       }

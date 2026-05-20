@@ -161,6 +161,11 @@ int cmd_config(const std::vector<std::string>& args) {
             std::cerr << "Error: `pulp config get` requires <section.key>\n";
             return 1;
         }
+        if (args.size() > 2) {
+            std::cerr << "Error: unexpected `pulp config get` argument: "
+                      << args[2] << "\n";
+            return 2;
+        }
         std::string section, key;
         if (!split_dotted_key(args[1], section, key)) {
             std::cerr << "Error: key must be dotted, e.g. update.mode\n";
@@ -182,6 +187,11 @@ int cmd_config(const std::vector<std::string>& args) {
         if (args.size() < 3) {
             std::cerr << "Error: `pulp config set` requires <section.key> <value>\n";
             return 1;
+        }
+        if (args.size() > 3) {
+            std::cerr << "Error: unexpected `pulp config set` argument: "
+                      << args[3] << "\n";
+            return 2;
         }
         std::string section, key;
         if (!split_dotted_key(args[1], section, key)) {
@@ -234,6 +244,11 @@ int cmd_config(const std::vector<std::string>& args) {
     }
 
     if (sub == "list") {
+        if (args.size() > 1) {
+            std::cerr << "Error: unexpected `pulp config list` argument: "
+                      << args[1] << "\n";
+            return 2;
+        }
         std::string contents;
         if (fs::exists(path)) {
             std::ifstream f(path);

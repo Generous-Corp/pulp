@@ -240,6 +240,25 @@ TEST_CASE("ComboBox opening another popup closes the previous one",
     ComboBox::close_active_popup();
 }
 
+TEST_CASE("ComboBox destructor clears active popup slot",
+          "[view][combo][coverage][phase3]") {
+    ComboBox::close_active_popup();
+
+    {
+        ComboBox combo;
+        combo.set_items({"One", "Two"});
+
+        KeyEvent space;
+        space.key = KeyCode::space;
+        space.is_down = true;
+        REQUIRE(combo.on_key_event(space));
+        REQUIRE(combo.is_open());
+        REQUIRE(ComboBox::active_popup_ == &combo);
+    }
+
+    REQUIRE(ComboBox::active_popup_ == nullptr);
+}
+
 // ── Tooltip ──────────────────────────────────────────────────────────────
 
 TEST_CASE("Tooltip show and hide", "[view][tooltip]") {

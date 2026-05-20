@@ -112,6 +112,17 @@ TEST_CASE("DescriptorValidation: malformed reverse-DNS bundle_id segments warn o
     }
 }
 
+TEST_CASE("DescriptorValidation: whitespace-only bundle_id segments warn only",
+          "[format][descriptor-validation][coverage]") {
+    auto d = well_formed_effect();
+    d.bundle_id = "com.\t.plugin";
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_warning_on(issues, "bundle_id"));
+    REQUIRE_FALSE(has_error_on(issues, "bundle_id"));
+    REQUIRE(descriptor_is_valid(issues));
+}
+
 TEST_CASE("DescriptorValidation: missing output bus is an error",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();

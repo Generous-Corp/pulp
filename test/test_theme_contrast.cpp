@@ -3,6 +3,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/theme_contrast.hpp>
 
+#include <algorithm>
+
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
@@ -87,6 +89,20 @@ TEST_CASE("Auto contrast picks black on light background", "[view][contrast]") {
     REQUIRE(fg.b == Catch::Approx(0.0f));
 }
 
+TEST_CASE("Auto contrast fallback chooses the higher ratio color",
+          "[view][contrast][coverage][phase3]") {
+    auto background = Color::rgba8(128, 128, 128);
+    auto fg = auto_contrast_foreground(background, ContrastLevel::aaa_normal);
+
+    REQUIRE_THAT(contrast_ratio(fg, background),
+                 WithinAbs(std::max(contrast_ratio(Color::rgba8(255, 255, 255), background),
+                                    contrast_ratio(Color::rgba8(0, 0, 0), background)),
+                           0.001));
+    REQUIRE(fg.r8() == 0);
+    REQUIRE(fg.g8() == 0);
+    REQUIRE(fg.b8() == 0);
+}
+
 TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
     auto result = adjust_for_contrast(
         Color::rgba8(150, 150, 150),  // Low contrast on white bg
@@ -95,6 +111,41 @@ TEST_CASE("Adjust for contrast returns meeting color", "[view][contrast]") {
 
     REQUIRE(result.has_value());
     REQUIRE(meets_contrast(*result, Color::rgba8(255, 255, 255), ContrastLevel::aa_normal));
+}
+
+TEST_CASE("Auto contrast falls back to the higher-ratio endpoint",
+          "[view][contrast][coverage][phase3]") {
+    auto background = Color::rgba8(120, 120, 120);
+    REQUIRE_FALSE(meets_contrast(Color::rgba8(255, 255, 255),
+                                 background,
+                                 ContrastLevel::aaa_normal));
+    REQUIRE_FALSE(meets_contrast(Color::rgba8(0, 0, 0),
+                                 background,
+                                 ContrastLevel::aaa_normal));
+
+    auto fg = auto_contrast_foreground(background, ContrastLevel::aaa_normal);
+
+    REQUIRE(fg.r == Catch::Approx(0.0f));
+    REQUIRE(fg.g == Catch::Approx(0.0f));
+    REQUIRE(fg.b == Catch::Approx(0.0f));
+}
+
+TEST_CASE("Adjust for contrast preserves already compliant colors",
+          "[view][contrast][coverage][phase3]") {
+    auto foreground = Color::rgba8(255, 255, 255, 128);
+    auto background = Color::rgba8(0, 0, 0);
+
+    auto result = adjust_for_contrast(foreground, background, ContrastLevel::aaa_normal);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->r8() == foreground.r8());
+    REQUIRE(result->g8() == foreground.g8());
+    REQUIRE(result->b8() == foreground.b8());
+    REQUIRE(result->a8() == foreground.a8());
+    REQUIRE_THAT(result->r, WithinAbs(foreground.r, 0.001));
+    REQUIRE_THAT(result->g, WithinAbs(foreground.g, 0.001));
+    REQUIRE_THAT(result->b, WithinAbs(foreground.b, 0.001));
+    REQUIRE_THAT(result->a, WithinAbs(foreground.a, 0.001));
 }
 
 // ── HSL Conversion ──────────────────────────────────────────────────────────

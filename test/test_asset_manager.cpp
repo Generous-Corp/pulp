@@ -143,6 +143,49 @@ TEST_CASE("AssetManager register and retrieve shader", "[view][assets]") {
     REQUIRE(shader.source.find("uniform") != std::string::npos);
 }
 
+TEST_CASE("AssetManager replacing cached shader keeps cache usage accurate",
+          "[view][assets][coverage][issue-651]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    mgr.register_shader("replaceable_effect", "void main() {}");
+    REQUIRE(mgr.cache_count() == 1);
+    REQUIRE(mgr.cache_usage() == std::string("void main() {}").size());
+
+    mgr.register_shader("replaceable_effect", "uniform float phase; void main() {}");
+    auto shader = mgr.shader("replaceable_effect");
+
+    REQUIRE(shader.valid());
+    REQUIRE(shader.source == "uniform float phase; void main() {}");
+    REQUIRE(mgr.cache_count() == 1);
+    REQUIRE(mgr.cache_usage() == shader.source.size());
+
+    mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
+}
+
+TEST_CASE("AssetManager replacing cached shader keeps cache accounting stable",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    mgr.register_shader("replaceable_shader", "abc");
+    REQUIRE(mgr.cache_count() == 1);
+    REQUIRE(mgr.cache_usage() == 3);
+
+    mgr.register_shader("replaceable_shader", "abcdef");
+    REQUIRE(mgr.cache_count() == 1);
+    REQUIRE(mgr.cache_usage() == 6);
+    REQUIRE(mgr.shader("replaceable_shader").source == "abcdef");
+
+    mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
+}
+
 TEST_CASE("AssetManager missing shader returns invalid", "[view][assets]") {
     auto& mgr = AssetManager::instance();
     auto shader = mgr.shader("nonexistent_shader_xyz");

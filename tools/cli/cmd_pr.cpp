@@ -281,8 +281,22 @@ ParseStatus parse_native_options(const std::vector<std::string>& args, Options& 
         else if (a == "--dry-run") opt.dry_run = true;
         else if (a == "--no-ship") opt.no_ship = true;
         else if (a == "--no-push") opt.no_push = true;
-        else if (a == "--base"  && i + 1 < args.size()) opt.base  = args[++i];
-        else if (a == "--title" && i + 1 < args.size()) opt.title = args[++i];
+        else if (a == "--base") {
+            if (i + 1 >= args.size() || args[i + 1].empty()
+                || args[i + 1].front() == '-') {
+                std::cerr << "pulp pr: --base requires a value\n";
+                return ParseStatus::error;
+            }
+            opt.base = args[++i];
+        }
+        else if (a == "--title") {
+            if (i + 1 >= args.size() || args[i + 1].empty()
+                || args[i + 1].front() == '-') {
+                std::cerr << "pulp pr: --title requires a value\n";
+                return ParseStatus::error;
+            }
+            opt.title = args[++i];
+        }
         else { std::cerr << "pulp pr: unknown option '" << a << "'\n"; print_usage(); return ParseStatus::error; }
     }
     return ParseStatus::ok;

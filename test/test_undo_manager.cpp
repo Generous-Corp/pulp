@@ -19,6 +19,20 @@ TEST_CASE("UndoManager perform and undo", "[state][undo]") {
     REQUIRE_FALSE(um.can_undo());
 }
 
+TEST_CASE("UndoManager empty undo and redo are no-ops", "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int changes = 0;
+    um.on_state_changed = [&] { ++changes; };
+
+    REQUIRE_FALSE(um.undo());
+    REQUIRE_FALSE(um.redo());
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.undo_name().empty());
+    REQUIRE(um.redo_name().empty());
+    REQUIRE(changes == 0);
+}
+
 TEST_CASE("UndoManager redo after undo", "[state][undo]") {
     UndoManager um;
     int value = 0;
@@ -215,6 +229,64 @@ TEST_CASE("UndoManager add_without_executing", "[state][undo]") {
     REQUIRE(v == 0);
 }
 
+TEST_CASE("UndoManager add_without_executing participates in transactions",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    int x = 10;
+    int y = 20;
+
+    um.begin_transaction("Already moved");
+    um.add_without_executing(UndoAction::create("Set X",
+        [&] { x = 0; },
+        [&] { x = 10; }));
+    um.add_without_executing(UndoAction::create("Set Y",
+        [&] { y = 0; },
+        [&] { y = 20; }));
+    um.end_transaction();
+
+    REQUIRE(x == 10);
+    REQUIRE(y == 20);
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo_name() == "Already moved");
+
+    REQUIRE(um.undo());
+    REQUIRE(x == 0);
+    REQUIRE(y == 0);
+    REQUIRE(um.redo_count() == 1);
+    REQUIRE(um.redo_name() == "Already moved");
+
+    REQUIRE(um.redo());
+    REQUIRE(x == 10);
+    REQUIRE(y == 20);
+}
+
+TEST_CASE("UndoManager add_without_executing mixes with performed transaction actions",
+          "[state][undo][coverage][phase3]") {
+    UndoManager um;
+    std::vector<int> values;
+    values.push_back(1);
+
+    um.begin_transaction("Batch");
+    um.add_without_executing(UndoAction::create("Already pushed",
+        [&] { values.pop_back(); },
+        [&] { values.push_back(1); }));
+    um.perform(UndoAction::create("Push two",
+        [&] { values.pop_back(); },
+        [&] { values.push_back(2); }));
+    um.end_transaction();
+
+    REQUIRE(values == std::vector<int>{1, 2});
+    REQUIRE(um.undo_count() == 1);
+    REQUIRE(um.undo_name() == "Batch");
+
+    REQUIRE(um.undo());
+    REQUIRE(values.empty());
+    REQUIRE(um.redo_name() == "Batch");
+
+    REQUIRE(um.redo());
+    REQUIRE(values == std::vector<int>{1, 2});
+}
+
 TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     UndoManager um;
     int v = 0;
@@ -230,4 +302,44 @@ TEST_CASE("UndoManager multiple undo/redo sequence", "[state][undo]") {
     um.undo(); REQUIRE(v == 1);
     um.undo(); REQUIRE(v == 0);
     REQUIRE_FALSE(um.can_undo());
+}
+
+TEST_CASE("UndoManager transaction redo preserves action order",
+          "[state][undo][coverage][phase3-large]") {
+    UndoManager um;
+    std::vector<int> events;
+
+    um.begin_transaction("Ordered");
+    um.perform(UndoAction::create("A",
+        [&] { events.push_back(-1); },
+        [&] { events.push_back(1); }));
+    um.perform(UndoAction::create("B",
+        [&] { events.push_back(-2); },
+        [&] { events.push_back(2); }));
+    um.end_transaction();
+
+    REQUIRE(events == std::vector<int>{1, 2});
+    REQUIRE(um.undo_name() == "Ordered");
+
+    REQUIRE(um.undo());
+    REQUIRE(events == std::vector<int>{1, 2, -2, -1});
+    REQUIRE(um.redo_name() == "Ordered");
+
+    REQUIRE(um.redo());
+    REQUIRE(events == std::vector<int>{1, 2, -2, -1, 1, 2});
+}
+
+TEST_CASE("UndoManager clear notifies even when history is empty",
+          "[state][undo][coverage][phase3-large]") {
+    UndoManager um;
+    int changes = 0;
+    um.on_state_changed = [&] { ++changes; };
+
+    um.clear();
+
+    REQUIRE(changes == 1);
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE_FALSE(um.can_redo());
+    REQUIRE(um.undo_name().empty());
+    REQUIRE(um.redo_name().empty());
 }

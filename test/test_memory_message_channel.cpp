@@ -140,6 +140,22 @@ TEST_CASE("MemoryMessageChannel rejects nonempty null binary sends",
     REQUIRE(right->is_open());
 }
 
+TEST_CASE("MemoryMessageChannel accepts empty null binary sends",
+          "[runtime][message_channel][coverage][phase3]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<Message> received;
+    right->on_message([&](const Message& message) {
+        received.push_back(message);
+    });
+
+    REQUIRE(left->send(nullptr, 0));
+
+    REQUIRE(received.size() == 1);
+    REQUIRE(received.front().kind == MessageKind::Binary);
+    REQUIRE(received.front().payload.empty());
+}
+
 TEST_CASE("MemoryMessageChannel can clear callbacks while remaining open",
           "[runtime][message_channel][coverage][issue-641]") {
     auto [left, right] = MemoryMessageChannel::make_pair();
@@ -277,6 +293,23 @@ TEST_CASE("MemoryMessageChannel sender observes peer callback replacement during
 
     REQUIRE(first_calls == 1);
     REQUIRE(second_calls == 1);
+}
+
+TEST_CASE("MemoryMessageChannel supports reentrant replies during delivery",
+          "[runtime][message_channel][coverage][phase3]") {
+    auto [left, right] = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> seen;
+    left->on_message([&](const Message& message) {
+        seen.emplace_back("left:" + std::string(message.as_text()));
+    });
+    right->on_message([&](const Message& message) {
+        seen.emplace_back("right:" + std::string(message.as_text()));
+        REQUIRE(right->send_text("reply"));
+    });
+
+    REQUIRE(left->send_text("request"));
+    REQUIRE(seen == std::vector<std::string>{"right:request", "left:reply"});
 }
 
 TEST_CASE("MemoryMessageChannel self close does not invoke a late replacement callback",

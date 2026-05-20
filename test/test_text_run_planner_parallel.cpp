@@ -100,6 +100,26 @@ TEST_CASE("shape_batch: parallel + serial paths produce equivalent output",
     }
 }
 
+TEST_CASE("shape_batch: duplicate inputs preserve duplicate outputs",
+          "[font][parallel][coverage]") {
+    auto opts = make_opts("Inter", 12.0f);
+    std::vector<std::pair<std::string, FontOptions>> inputs = {
+        {"duplicate", opts},
+        {"duplicate", opts},
+        {"unique", make_opts("Inter", 13.0f)},
+        {"duplicate", opts},
+    };
+
+    auto out = TextRunPlanner::instance().shape_batch(inputs);
+    REQUIRE(out.size() == inputs.size());
+    REQUIRE(out[0].text == "duplicate");
+    REQUIRE(out[1].text == out[0].text);
+    REQUIRE(out[3].text == out[0].text);
+    REQUIRE(out[1].total_width == out[0].total_width);
+    REQUIRE(out[3].total_width == out[0].total_width);
+    REQUIRE(out[2].text == "unique");
+}
+
 TEST_CASE("shape_batch: repeated stress run stays thread-safe",
           "[font][parallel][issue-2163]") {
     std::vector<std::pair<std::string, FontOptions>> inputs;

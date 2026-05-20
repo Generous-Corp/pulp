@@ -78,6 +78,31 @@ TEST_CASE("Identity kernel supports explicit row stride", "[canvas][convolution]
     REQUIRE(pixels == original);
 }
 
+TEST_CASE("Convolution preserves padded row stride bytes",
+          "[canvas][convolution][coverage][phase3-large]") {
+    ImageConvolutionKernel identity(1);
+    identity.set(0, 0, 1.0f);
+
+    constexpr int width = 2;
+    constexpr int height = 2;
+    constexpr int stride = 12;
+    std::vector<uint8_t> pixels = {
+        10, 20, 30, 40, 50, 60, 70, 80, 0xA1, 0xA2, 0xA3, 0xA4,
+        90, 91, 92, 93, 94, 95, 96, 97, 0xB1, 0xB2, 0xB3, 0xB4,
+    };
+
+    identity.apply(pixels.data(), width, height, stride);
+
+    REQUIRE(pixels[8] == 0xA1);
+    REQUIRE(pixels[9] == 0xA2);
+    REQUIRE(pixels[10] == 0xA3);
+    REQUIRE(pixels[11] == 0xA4);
+    REQUIRE(pixels[20] == 0xB1);
+    REQUIRE(pixels[21] == 0xB2);
+    REQUIRE(pixels[22] == 0xB3);
+    REQUIRE(pixels[23] == 0xB4);
+}
+
 TEST_CASE("ImageConvolutionKernel clamps color output", "[canvas][convolution][issue-641]") {
     ImageConvolutionKernel boost(1);
     boost.set(0, 0, 3.0f);
@@ -190,4 +215,39 @@ TEST_CASE("Standard kernel weights cover blur edge and emboss paths",
     auto emboss = ImageConvolutionKernel::emboss();
     REQUIRE(emboss.get(0, 0) == -2.0f);
     REQUIRE(emboss.get(2, 2) == 2.0f);
+}
+
+TEST_CASE("Standard kernels process a single pixel via edge clamping",
+          "[canvas][convolution][coverage][phase3-github]") {
+    auto pixel = make_solid_image(1, 1, 20, 40, 60);
+    ImageConvolutionKernel::gaussian_blur_3().apply(pixel.data(), 1, 1);
+    REQUIRE(pixel[0] == 20);
+    REQUIRE(pixel[1] == 40);
+    REQUIRE(pixel[2] == 60);
+    REQUIRE(pixel[3] == 255);
+
+    ImageConvolutionKernel::sharpen().apply(pixel.data(), 1, 1);
+    REQUIRE(pixel[0] == 20);
+    REQUIRE(pixel[1] == 40);
+    REQUIRE(pixel[2] == 60);
+    REQUIRE(pixel[3] == 255);
+}
+
+TEST_CASE("Single-pixel convolution clamps repeated edge samples",
+          "[canvas][convolution][coverage][phase3-large]") {
+    uint8_t sharpened[4] = {40, 80, 120, 77};
+    auto sharpen = ImageConvolutionKernel::sharpen();
+    sharpen.apply(sharpened, 1, 1);
+    REQUIRE(sharpened[0] == 40);
+    REQUIRE(sharpened[1] == 80);
+    REQUIRE(sharpened[2] == 120);
+    REQUIRE(sharpened[3] == 77);
+
+    uint8_t edge[4] = {40, 80, 120, 88};
+    auto edge_detect = ImageConvolutionKernel::edge_detect();
+    edge_detect.apply(edge, 1, 1);
+    REQUIRE(edge[0] == 0);
+    REQUIRE(edge[1] == 0);
+    REQUIRE(edge[2] == 0);
+    REQUIRE(edge[3] == 88);
 }

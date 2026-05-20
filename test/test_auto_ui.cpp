@@ -66,6 +66,18 @@ TEST_CASE("AutoUi builds from parameter store", "[view][auto_ui]") {
     REQUIRE(grid->child_count() == 3);  // Gain + Mix + Bypass
 }
 
+TEST_CASE("AutoUi builds empty parameter grids", "[view][auto_ui][coverage]") {
+    StateStore store;
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    auto* body = root->child_at(1);
+    REQUIRE(body->child_count() == 1);
+    auto* grid = body->child_at(0);
+    REQUIRE(grid->child_count() == 0);
+}
+
 // ── pulp #97 — layout invariants for the centered-wrapping-grid design ──
 //
 // These assertions encode the design contract the visual fix relies on
@@ -259,4 +271,22 @@ TEST_CASE("AutoUi sync updates generated toggles and existing faders",
     store.set_normalized(1, 0.0f);
     AutoUi::sync(*root, store);
     REQUIRE_FALSE(bypass->is_on());
+}
+
+TEST_CASE("AutoUi sync ignores unmatched widget identifiers",
+          "[view][auto_ui][coverage]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Level", "", {0.0f, 1.0f, 0.0f}));
+
+    auto root = AutoUi::build(store);
+    auto orphan = std::make_unique<Knob>();
+    auto* orphan_ptr = orphan.get();
+    orphan->set_id("Missing");
+    orphan->set_value(0.25f);
+    root->add_child(std::move(orphan));
+
+    store.set_normalized(1, 0.75f);
+    AutoUi::sync(*root, store);
+
+    REQUIRE_THAT(orphan_ptr->value(), WithinAbs(0.25f, 0.001f));
 }

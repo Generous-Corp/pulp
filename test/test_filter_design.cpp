@@ -52,6 +52,13 @@ TEST_CASE("FilterDesign allpass passes DC", "[signal][filter_design]") {
     REQUIRE_THAT(dc_gain(c), WithinAbs(1.0, 0.01));
 }
 
+TEST_CASE("FilterDesign allpass keeps unity magnitude at Nyquist",
+          "[signal][filter_design][coverage][phase3]") {
+    auto c = FilterDesign::allpass(5000.0f, 0.9f, 48000.0f);
+    require_finite(c);
+    REQUIRE_THAT(std::abs(nyquist_gain(c)), WithinAbs(1.0f, 0.01f));
+}
+
 TEST_CASE("FilterDesign peaking_eq with 0dB gain is unity", "[signal][filter_design]") {
     auto c = FilterDesign::peaking_eq(1000.0f, 1.0f, 0.0f, 44100.0f);
     // 0 dB gain = no change, coefficients should be identity-like
@@ -147,4 +154,72 @@ TEST_CASE("FilterDesign butterworth edge orders are bounded and finite",
         require_finite(c);
         REQUIRE_THAT(dc_gain(c), WithinAbs(0.0f, 0.01f));
     }
+}
+
+TEST_CASE("FilterDesign lowpass and highpass have complementary Nyquist behavior",
+          "[signal][filter_design][codecov]") {
+    auto low = FilterDesign::lowpass(1800.0f, 0.707f, 48000.0f);
+    auto high = FilterDesign::highpass(1800.0f, 0.707f, 48000.0f);
+
+    require_finite(low);
+    require_finite(high);
+    REQUIRE_THAT(nyquist_gain(low), WithinAbs(0.0f, 0.01f));
+    REQUIRE_THAT(nyquist_gain(high), WithinAbs(1.0f, 0.01f));
+}
+
+TEST_CASE("FilterDesign allpass keeps unity gain at DC and Nyquist",
+          "[signal][filter_design][codecov]") {
+    for (float q : {0.5f, 0.707f, 2.0f}) {
+        auto c = FilterDesign::allpass(3200.0f, q, 48000.0f);
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
+        REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));
+    }
+}
+
+TEST_CASE("FilterDesign notch preserves endpoint gains across Q values",
+          "[signal][filter_design][codecov]") {
+    for (float q : {0.25f, 1.0f, 4.0f}) {
+        auto c = FilterDesign::notch(2400.0f, q, 48000.0f);
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
+        REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));
+    }
+}
+
+TEST_CASE("FilterDesign butterworth odd orders truncate to complete biquads",
+          "[signal][filter_design][codecov]") {
+    auto low = FilterDesign::butterworth_lowpass(5, 1600.0f, 48000.0f);
+    auto high = FilterDesign::butterworth_highpass(5, 1600.0f, 48000.0f);
+    REQUIRE(low.size() == 2);
+    REQUIRE(high.size() == 2);
+
+    for (const auto& c : low) {
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
+    }
+    for (const auto& c : high) {
+        require_finite(c);
+        REQUIRE_THAT(dc_gain(c), WithinAbs(0.0f, 0.01f));
+    }
+}
+
+TEST_CASE("FilterDesign near-Nyquist biquads remain finite",
+          "[signal][filter_design][coverage][phase3-large]") {
+    const float sample_rate = 48000.0f;
+    const float near_nyquist = 0.49f * sample_rate;
+
+    auto low = FilterDesign::lowpass(near_nyquist, 0.707f, sample_rate);
+    auto high = FilterDesign::highpass(near_nyquist, 0.707f, sample_rate);
+    auto notch = FilterDesign::notch(near_nyquist, 1.0f, sample_rate);
+    auto allpass = FilterDesign::allpass(near_nyquist, 0.707f, sample_rate);
+
+    for (const auto& c : {low, high, notch, allpass}) {
+        require_finite(c);
+    }
+
+    REQUIRE(std::abs(nyquist_gain(low)) < 0.01f);
+    REQUIRE(nyquist_gain(high) > 0.9f);
+    REQUIRE_THAT(nyquist_gain(notch), WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(nyquist_gain(allpass), WithinAbs(1.0f, 0.01f));
 }

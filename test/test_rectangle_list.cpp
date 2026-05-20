@@ -88,6 +88,22 @@ TEST_CASE("RectangleList subtract handles no-op and full-cover cases",
     REQUIRE(rl.empty());
 }
 
+TEST_CASE("RectangleList subtract emits all side bands around a center cut",
+          "[canvas][rect][coverage][phase3-large]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+
+    rl.subtract({3, 2, 4, 5});
+
+    REQUIRE(rl.size() == 4);
+    require_rect(rl[0], 0, 0, 10, 2);
+    require_rect(rl[1], 0, 7, 10, 3);
+    require_rect(rl[2], 0, 2, 3, 5);
+    require_rect(rl[3], 7, 2, 3, 5);
+    REQUIRE_FALSE(rl.contains(5, 4));
+    REQUIRE(rl.total_area() == Catch::Approx(80.0f));
+}
+
 TEST_CASE("RectangleList empty clip and subtract are no-ops",
           "[canvas][rect][issue-641]") {
     RectangleList rl;

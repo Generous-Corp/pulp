@@ -823,7 +823,6 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
         std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
         all_bridges_set().insert(this);
     }
-
     if (widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
@@ -903,11 +902,6 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // `var window = {...}` reassignment performed by the preludes above
     // (notably web-compat-document.js). See kWindowListenerShim comment.
     eval_or_throw(engine_, "kWindowListenerShim", kWindowListenerShim);
-
-    {
-        std::lock_guard<std::recursive_mutex> lock(all_bridges_mutex());
-        all_bridges_set().insert(this);
-    }
 }
 
 WidgetBridge::~WidgetBridge() {
@@ -1335,14 +1329,16 @@ void WidgetBridge::install_runtime_import_handlers() {
                                 + src_label + "')");
                         return choc::value::Value();
                     }
-                } else if (source_lc == "rn" || source_lc == "react-native") {
+                } else if (source_lc == "rn" || source_lc == "react-native" ||
+                           source_lc == "reactnative") {
                     bundle = parse_react_native_export(html);
                     if (!bundle) {
                         set_err("__pulpRuntimeImport__: unsupported React Native export (got '"
                                 + src_label + "')");
                         return choc::value::Value();
                     }
-                } else if (source_lc == "pencil" || source_lc == "open-pencil") {
+                } else if (source_lc == "pencil" || source_lc == "open-pencil" ||
+                           source_lc == "openpencil") {
                     bundle = parse_pencil_react(html);
                     if (!bundle) {
                         set_err("__pulpRuntimeImport__: unsupported Pencil React export (got '"

@@ -59,6 +59,7 @@ struct BumpOptions {
     bool allow_cli_skew = false;
     bool allow_redundant = false;
     bool verify_builds = false;      // opt-in, also honors update.verify_builds
+    std::string error;
     std::vector<std::string> positional;
 };
 
@@ -85,7 +86,8 @@ BumpOptions parse_bump_options(const std::vector<std::string>& args,
         if (a == "--allow-redundant")  { opts.allow_redundant = true; continue; }
         if (a == "--verify-builds")    { opts.verify_builds = true; continue; }
         if (a == "--to") {
-            if (i + 1 >= args.size() || args[i + 1].empty()) {
+            if (i + 1 >= args.size() || args[i + 1].empty()
+                || args[i + 1].front() == '-') {
                 std::cerr << "pulp project bump: --to requires a version argument\n";
                 std::exit(2);
             }
@@ -104,10 +106,8 @@ BumpOptions parse_bump_options(const std::vector<std::string>& args,
             opts.positional.push_back(a);
             continue;
         }
-        // Unknown flag — keep going but surface later. Slice 7 doesn't
-        // do strict unknown-flag rejection the way cmd_validate does;
-        // that's tracked under issue #520.
-        std::cerr << "pulp project bump: ignoring unknown argument '" << a << "'\n";
+        opts.error = "pulp project bump: unknown argument '" + a + "'";
+        return opts;
     }
     return opts;
 }
@@ -763,9 +763,18 @@ int do_bump(const std::vector<std::string>& args) {
     bool want_help = false;
     auto opts = parse_bump_options(args, want_help);
     if (want_help) { print_bump_help(); return 0; }
+    if (!opts.error.empty()) {
+        std::cerr << opts.error << "\n";
+        return 2;
+    }
 
     // --to wins over positional, but accept positional as a legacy
     // alias. Positional sanity: at most one token.
+    if (opts.positional.size() > 1) {
+        std::cerr << "pulp project bump: unexpected extra version argument '"
+                  << opts.positional[1] << "'\n";
+        return 2;
+    }
     if (opts.to_version.empty() && !opts.positional.empty()) {
         opts.to_version = opts.positional.front();
     }
@@ -1065,7 +1074,8 @@ static int do_unpin(const std::vector<std::string>& args) {
             return 0;
         }
         if (a == "--dry-run") { dry_run = true; continue; }
-        std::cerr << "pulp project unpin: ignoring unknown argument '" << a << "'\n";
+        std::cerr << "pulp project unpin: unknown argument '" << a << "'\n";
+        return 2;
     }
 
     bool found_pulp_source = false;

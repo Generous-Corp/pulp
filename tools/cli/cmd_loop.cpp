@@ -101,6 +101,10 @@ std::string read_focus_state() {
     return read_user_config_value("loop", "focus_platform");
 }
 
+bool missing_value(const std::vector<std::string>& args, size_t i) {
+    return i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-');
+}
+
 }  // namespace
 
 int cmd_loop(const std::vector<std::string>& args) {
@@ -142,15 +146,27 @@ int cmd_loop(const std::vector<std::string>& args) {
             no_watch = true;
         } else if (a.rfind("--platform=", 0) == 0) {
             platform_override = a.substr(11);
-        } else if (a == "--platform" && i + 1 < args.size()) {
+        } else if (a == "--platform") {
+            if (missing_value(args, i)) {
+                std::cerr << "pulp loop: --platform requires a value\n";
+                return 2;
+            }
             platform_override = args[++i];
         } else if (a.rfind("--watch-issues=", 0) == 0) {
             watch_issues = a.substr(15);
-        } else if (a == "--watch-issues" && i + 1 < args.size()) {
+        } else if (a == "--watch-issues") {
+            if (missing_value(args, i)) {
+                std::cerr << "pulp loop: --watch-issues requires a value\n";
+                return 2;
+            }
             watch_issues = args[++i];
         } else if (a.rfind("--ar-swap-from=", 0) == 0) {
             ar_swap_from = a.substr(15);
-        } else if (a == "--ar-swap-from" && i + 1 < args.size()) {
+        } else if (a == "--ar-swap-from") {
+            if (missing_value(args, i)) {
+                std::cerr << "pulp loop: --ar-swap-from requires a value\n";
+                return 2;
+            }
             ar_swap_from = args[++i];
         } else if (a == "--test" || a == "-t") {
             run_tests = true;
@@ -161,9 +177,17 @@ int cmd_loop(const std::vector<std::string>& args) {
             run_validate = true;
         } else if (a == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
-        } else if (a == "--run" && i + 1 < args.size()) {
+        } else if (a == "--run") {
+            if (missing_value(args, i)) {
+                std::cerr << "pulp loop: --run requires a value\n";
+                return 2;
+            }
             launch_target = args[++i];
-        } else if (a == "--target" && i + 1 < args.size()) {
+        } else if (a == "--target") {
+            if (missing_value(args, i)) {
+                std::cerr << "pulp loop: --target requires a value\n";
+                return 2;
+            }
             build_args.push_back("--target");
             build_args.push_back(args[++i]);
         } else {

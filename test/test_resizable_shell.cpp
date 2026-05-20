@@ -25,6 +25,17 @@ TEST_CASE("max clamp", "[ui][resizable-shell]") {
     REQUIRE(got.height == 600);
 }
 
+TEST_CASE("negotiate reports clamped size without mutating current",
+          "[ui][resizable-shell]") {
+    ResizableShell s({.min_size = {320, 240}, .initial_size = {400, 300}});
+
+    auto got = s.negotiate({10, 10});
+    REQUIRE(got.width == 320);
+    REQUIRE(got.height == 240);
+    REQUIRE(s.current().width == 400);
+    REQUIRE(s.current().height == 300);
+}
+
 TEST_CASE("aspect lock shrinks the overgrown dimension",
           "[ui][resizable-shell]") {
     // 16:9 aspect — target ratio ≈ 1.7778
@@ -65,10 +76,44 @@ TEST_CASE("serialize + deserialize round-trip", "[ui][resizable-shell]") {
     s.apply({1000, 700});
     auto blob = s.serialize();
 
+    REQUIRE(blob == std::vector<uint8_t>{0xE8, 0x03, 0x00, 0x00,
+                                         0xBC, 0x02, 0x00, 0x00});
+
     ResizableShell other({.initial_size = {640, 480}});
     REQUIRE(other.deserialize(blob));
     REQUIRE(other.current().width == 1000);
     REQUIRE(other.current().height == 700);
+}
+
+TEST_CASE("serialize stores little-endian width and height bytes",
+          "[ui][resizable-shell][coverage][phase3]") {
+    ResizableShell s({.initial_size = {0x0304u, 0x020Du}});
+
+    const auto blob = s.serialize();
+
+    REQUIRE(blob.size() == 8);
+    REQUIRE(blob[0] == 0x04);
+    REQUIRE(blob[1] == 0x03);
+    REQUIRE(blob[2] == 0x00);
+    REQUIRE(blob[3] == 0x00);
+    REQUIRE(blob[4] == 0x0D);
+    REQUIRE(blob[5] == 0x02);
+    REQUIRE(blob[6] == 0x00);
+    REQUIRE(blob[7] == 0x00);
+}
+
+TEST_CASE("deserialize ignores trailing bytes after the size payload",
+          "[ui][resizable-shell][coverage][phase3]") {
+    uint8_t blob[] = {
+        0x2Cu, 0x01u, 0x00u, 0x00u, // 300
+        0xC8u, 0x00u, 0x00u, 0x00u, // 200
+        0xAAu, 0xBBu,
+    };
+
+    ResizableShell s({.initial_size = {640, 480}});
+    REQUIRE(s.deserialize({blob, sizeof(blob)}));
+    REQUIRE(s.current().width == 300);
+    REQUIRE(s.current().height == 200);
 }
 
 TEST_CASE("deserialize clamps against current config",
@@ -112,4 +157,23 @@ TEST_CASE("constructor normalizes initial size through negotiate",
                       .initial_size = {640, 480}});
     REQUIRE(s.current().width  <= 300);
     REQUIRE(s.current().height <= 300);
+}
+
+TEST_CASE("non-positive aspect ratio uses plain min max clamping",
+          "[ui][resizable-shell][coverage][phase3]") {
+    ResizableShell zero({.min_size = {100, 80},
+                         .max_size = {500, 400},
+                         .initial_size = {300, 300},
+                         .aspect_ratio = 0.0});
+    auto z = zero.apply({900, 10});
+    REQUIRE(z.width == 500);
+    REQUIRE(z.height == 80);
+
+    ResizableShell negative({.min_size = {120, 90},
+                             .max_size = {600, 450},
+                             .initial_size = {300, 300},
+                             .aspect_ratio = -2.0});
+    auto n = negative.negotiate({10, 900});
+    REQUIRE(n.width == 120);
+    REQUIRE(n.height == 450);
 }

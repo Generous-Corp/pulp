@@ -17,6 +17,19 @@ TEST_CASE("role_to_atk returns stable ATK role IDs", "[a11y][atk]") {
     REQUIRE(role_to_atk(View::AccessRole::none)   == kRoleUnknown);
 }
 
+TEST_CASE("ATK mapping falls back for unknown role values",
+          "[a11y][atk][coverage][phase3]") {
+    auto unknown = static_cast<View::AccessRole>(999);
+    REQUIRE(role_to_atk(unknown) == kRoleUnknown);
+
+    auto flags = interfaces_for_role(unknown);
+    REQUIRE((flags & kInterfaceComponent) != 0);
+    REQUIRE((flags & kInterfaceValue) == 0);
+    REQUIRE((flags & kInterfaceAction) == 0);
+    REQUIRE((flags & kInterfaceText) == 0);
+    REQUIRE((flags & kInterfaceImage) == 0);
+}
+
 TEST_CASE("ATK role IDs match documented AtkRole values",
           "[a11y][atk]") {
     // Locking the magic numbers against atk/atk.h so refactors can't

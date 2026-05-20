@@ -366,6 +366,55 @@ TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
     REQUIRE(last_signal.sine_frequency_hz == 880.0f);
 }
 
+TEST_CASE("SettingsPanel uses fallback rate and buffer choices without output devices",
+          "[standalone][settings][coverage][phase3]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "mic-only",
+         .name = "Mic Only",
+         .max_input_channels = 1,
+         .sample_rates = {48000.0},
+         .buffer_sizes = {128},
+         .is_default_input = true},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, nullptr);
+
+    StandaloneConfig applied;
+    applied.audio_device_id = "stale";
+    int apply_calls = 0;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_config_apply = [&](const StandaloneConfig& cfg) {
+            applied = cfg;
+            ++apply_calls;
+        },
+    });
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    REQUIRE(audio_tab != nullptr);
+
+    auto combos = descendants<ComboBox>(*audio_tab);
+    REQUIRE(combos.size() >= 4);
+    REQUIRE(combos[0]->items().empty());
+    REQUIRE(combos[1]->items().size() == 2);
+    REQUIRE(combos[2]->items().size() >= 6);
+    REQUIRE(combos[3]->items().size() >= 7);
+
+    combos[2]->set_selected(1);
+    REQUIRE(apply_calls == 1);
+    REQUIRE(applied.audio_device_id.empty());
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.buffer_size == 64);
+
+    combos[3]->set_selected(2);
+    REQUIRE(apply_calls == 2);
+    REQUIRE(applied.audio_device_id.empty());
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.buffer_size == 256);
+}
+
 TEST_CASE("Standalone editor chrome keeps the editor root when settings are hidden",
           "[standalone][chrome]") {
     auto editor_root = std::make_unique<View>();

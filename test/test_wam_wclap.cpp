@@ -27,8 +27,18 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
-        store.add_parameter({kGain, "Gain", "dB", {-60.0f, 24.0f, 0.0f, 0.1f}});
-        store.add_parameter({kBypass, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}});
+        store.add_parameter({
+            .id = kGain,
+            .name = "Gain",
+            .unit = "dB",
+            .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+        });
+        store.add_parameter({
+            .id = kBypass,
+            .name = "Bypass",
+            .unit = "",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
+        });
     }
 
     void prepare(const PrepareContext&) override {}
@@ -51,6 +61,10 @@ public:
 
 std::unique_ptr<Processor> create_test_wam() {
     return std::make_unique<TestWamProcessor>();
+}
+
+std::unique_ptr<Processor> create_null_wam() {
+    return {};
 }
 }
 
@@ -92,6 +106,23 @@ TEST_CASE("WamDescriptorData to_json", "[format][wam]") {
     REQUIRE(json.find("\"apiVersion\":\"2.0.0\"") != std::string::npos);
 }
 
+TEST_CASE("WamDescriptorData defaults serialize every advertised capability",
+          "[format][wam][coverage][phase3]") {
+    WamDescriptorData desc;
+    desc.name = "Default";
+    auto json = desc.to_json();
+
+    REQUIRE(json.find("\"name\":\"Default\"") != std::string::npos);
+    REQUIRE(json.find("\"hasAudioInput\":true") != std::string::npos);
+    REQUIRE(json.find("\"hasAudioOutput\":true") != std::string::npos);
+    REQUIRE(json.find("\"hasMidiInput\":false") != std::string::npos);
+    REQUIRE(json.find("\"hasMidiOutput\":false") != std::string::npos);
+    REQUIRE(json.find("\"hasAutomationInput\":true") != std::string::npos);
+    REQUIRE(json.find("\"hasAutomationOutput\":false") != std::string::npos);
+    REQUIRE(json.find("\"hasMpeInput\":false") != std::string::npos);
+    REQUIRE(json.find("\"hasMpeOutput\":false") != std::string::npos);
+}
+
 // ── WAMv2 ProcessorBridge Tests ─────────────────────────────────────────
 
 TEST_CASE("WamProcessorBridge initialization", "[format][wam]") {
@@ -102,6 +133,25 @@ TEST_CASE("WamProcessorBridge initialization", "[format][wam]") {
     auto desc = bridge.descriptor();
     REQUIRE(desc.name == "TestWAM");
     REQUIRE(desc.vendor == "PulpTest");
+}
+
+TEST_CASE("WamProcessorBridge handles uninitialized and null-factory states",
+          "[format][wam][coverage][phase3]") {
+    WamProcessorBridge uninitialized(create_test_wam);
+    auto empty_desc = uninitialized.descriptor();
+    REQUIRE(empty_desc.name.empty());
+    REQUIRE(empty_desc.vendor.empty());
+    REQUIRE(uninitialized.get_parameter_info().empty());
+
+    float input[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float output[4] = {9.0f, 9.0f, 9.0f, 9.0f};
+    uninitialized.process(input, output, 2, 2);
+    REQUIRE(output[0] == 9.0f);
+    REQUIRE(output[3] == 9.0f);
+
+    WamProcessorBridge null_bridge(create_null_wam);
+    REQUIRE_FALSE(null_bridge.initialize(48000.0, 64));
+    REQUIRE(null_bridge.descriptor().name.empty());
 }
 
 TEST_CASE("WamProcessorBridge parameter info", "[format][wam]") {
@@ -148,6 +198,29 @@ TEST_CASE("WamProcessorBridge audio processing", "[format][wam]") {
     REQUIRE(output[4] == Catch::Approx(-0.5f)); // L2
 }
 
+TEST_CASE("WamProcessorBridge clamps processing to prepared channel count",
+          "[format][wam][coverage][phase3]") {
+    WamProcessorBridge bridge(create_test_wam);
+    bridge.initialize(48000.0, 128);
+
+    float input[12] = {
+        1.0f, 2.0f, 99.0f,
+        0.5f, 0.25f, 88.0f,
+        -1.0f, -2.0f, 77.0f,
+        0.0f, 0.0f, 66.0f,
+    };
+    float output[12] = {};
+
+    bridge.process(input, output, 3, 4);
+
+    REQUIRE(output[0] == Catch::Approx(0.5f));
+    REQUIRE(output[1] == Catch::Approx(1.0f));
+    REQUIRE(output[2] == Catch::Approx(0.0f));
+    REQUIRE(output[3] == Catch::Approx(0.25f));
+    REQUIRE(output[4] == Catch::Approx(0.125f));
+    REQUIRE(output[5] == Catch::Approx(0.0f));
+}
+
 TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
     WamProcessorBridge bridge(create_test_wam);
     bridge.initialize(48000.0, 128);
@@ -158,6 +231,22 @@ TEST_CASE("WamProcessorBridge MIDI scheduling", "[format][wam]") {
     float input[4] = {};
     float output[4] = {};
     bridge.process(input, output, 2, 2);
+}
+
+TEST_CASE("WamProcessorBridge ignores unsupported MIDI statuses",
+          "[format][wam][coverage][phase3]") {
+    WamProcessorBridge bridge(create_test_wam);
+    bridge.initialize(48000.0, 128);
+
+    bridge.schedule_midi(0xF0, 1, 2, 0);
+    bridge.schedule_midi(0xE0, 0, 64, 1);
+
+    float input[4] = {};
+    float output[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    bridge.process(input, output, 2, 2);
+
+    REQUIRE(output[0] == Catch::Approx(0.0f));
+    REQUIRE(output[3] == Catch::Approx(0.0f));
 }
 
 TEST_CASE("WamProcessorBridge state round-trip", "[format][wam]") {

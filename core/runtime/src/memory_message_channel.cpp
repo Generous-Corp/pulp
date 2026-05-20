@@ -28,7 +28,9 @@ bool MemoryMessageChannel::send(const std::uint8_t* data, std::size_t size) {
     if (data == nullptr && size > 0) return false;
     auto p = peer_.lock();
     if (!p || *p == nullptr) return false;
-    Message m{MessageKind::Binary, std::vector<std::uint8_t>(data, data + size)};
+    Message m{MessageKind::Binary, {}};
+    if (size > 0)
+        m.payload.assign(data, data + size);
     (*p)->deliver(std::move(m));
     return true;
 }

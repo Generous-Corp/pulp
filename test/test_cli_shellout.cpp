@@ -9,182 +9,11 @@
 // stdout/stderr invariants for the non-destructive subcommands every
 // user hits on day one.
 
-#include <catch2/catch_test_macros.hpp>
-#include <pulp/platform/child_process.hpp>
-
-#include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <system_error>
-#include <vector>
+#include "test_cli_shellout_helpers.hpp"
 
 using namespace pulp::platform;
 namespace fs = std::filesystem;
-
-namespace {
-
-// Platform-aware setenv/unsetenv: Windows MSVC doesn't provide POSIX
-// `setenv` / `unsetenv` — it uses `_putenv_s` instead (empty string
-// value for unset). Wrap both so every test body stays portable.
-inline int pulp_setenv(const char* name, const char* value, int /*overwrite*/) {
-#if defined(_WIN32)
-    return _putenv_s(name, value);
-#else
-    return ::setenv(name, value, 1);
-#endif
-}
-
-inline int pulp_unsetenv(const char* name) {
-#if defined(_WIN32)
-    return _putenv_s(name, "");
-#else
-    return ::unsetenv(name);
-#endif
-}
-
-class ScopedEnvVar {
-public:
-    explicit ScopedEnvVar(const char* name)
-        : name_(name) {
-        if (const char* value = std::getenv(name)) {
-            had_value_ = true;
-            old_value_ = value;
-        }
-    }
-
-    ~ScopedEnvVar() {
-        if (had_value_) {
-            pulp_setenv(name_.c_str(), old_value_.c_str(), 1);
-        } else {
-            pulp_unsetenv(name_.c_str());
-        }
-    }
-
-    void set(const std::string& value) {
-        pulp_setenv(name_.c_str(), value.c_str(), 1);
-    }
-
-private:
-    std::string name_;
-    bool had_value_ = false;
-    std::string old_value_;
-};
-
-fs::path unique_temp_dir(const std::string& prefix) {
-    auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
-}
-
-
-// After the Rust CLI cutover, the instrumented C++ delegate lands at
-// <build>/tools/cli/pulp-cpp. Older/pre-cutover builds used
-// <build>/tools/cli/pulp. Prefer pulp-cpp so coverage builds exercise
-// the C++ implementation directly, but keep the old fallback for
-// compatibility. PULP_CLI_PATH can still override either path.
-fs::path pulp_binary() {
-    if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
-        return fs::path(env);
-    }
-    auto cpp = fs::current_path() / ".." / "tools" / "cli" / "pulp-cpp";
-    if (fs::exists(cpp)) return cpp;
-    return fs::current_path() / ".." / "tools" / "cli" / "pulp";
-}
-
-ProcessResult run_pulp(const std::vector<std::string>& args,
-                       int timeout_ms = 10000) {
-    auto bin = pulp_binary();
-    if (!fs::exists(bin)) {
-        // Binary not built for this target — rather than fail noisily,
-        // surface a SKIP at the call site. Tests check for .ok() first.
-        ProcessResult r;
-        r.exit_code = -1;
-        r.stderr_output = "pulp binary not at " + bin.string();
-        return r;
-    }
-    return exec(bin.string(), args, timeout_ms);
-}
-
-bool binary_exists() { return fs::exists(pulp_binary()); }
-
-std::string read_file(const fs::path& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) return {};
-    return std::string(std::istreambuf_iterator<char>(f),
-                       std::istreambuf_iterator<char>());
-}
-
-void write_text(const fs::path& path, const std::string& text) {
-    fs::create_directories(path.parent_path());
-    std::ofstream f(path);
-    REQUIRE(f.is_open());
-    f << text;
-    REQUIRE(f.good());
-}
-
-char path_separator() {
-#if defined(_WIN32)
-    return ';';
-#else
-    return ':';
-#endif
-}
-
-void prepend_to_path(const fs::path& dir) {
-    const char* old = std::getenv("PATH");
-    auto next = dir.string();
-    if (old && *old) {
-        next += path_separator();
-        next += old;
-    }
-    pulp_setenv("PATH", next.c_str(), 1);
-}
-
-#if !defined(_WIN32)
-std::string pinned_shipyard_version_for_test() {
-    auto toml = read_file(fs::current_path().parent_path().parent_path() /
-                          "tools" / "shipyard.toml");
-    std::istringstream lines(toml);
-    std::string line;
-    while (std::getline(lines, line)) {
-        auto pos = line.find("version");
-        if (pos == std::string::npos) continue;
-        auto eq = line.find('=', pos);
-        if (eq == std::string::npos) continue;
-        auto value = line.substr(eq + 1);
-        auto first = value.find('"');
-        auto last = value.find_last_of('"');
-        if (first != std::string::npos && last != std::string::npos && last > first) {
-            return value.substr(first + 1, last - first - 1);
-        }
-    }
-    return "v0.56.2";
-}
-
-fs::path write_fake_shipyard(const fs::path& dir, const std::string& version) {
-    auto path = dir / "shipyard";
-    write_text(path,
-               "#!/bin/sh\n"
-               "if [ \"$1\" = \"--version\" ]; then\n"
-               "  echo \"shipyard " + version + "\"\n"
-               "  exit 0\n"
-               "fi\n"
-               "if [ \"$1\" = \"pr\" ]; then\n"
-               "  echo \"fake shipyard pr $2\"\n"
-               "  exit 0\n"
-               "fi\n"
-               "echo \"fake shipyard\"\n");
-    fs::permissions(path,
-                    fs::perms::owner_exec | fs::perms::owner_read |
-                    fs::perms::owner_write,
-                    fs::perm_options::add);
-    return path;
-}
-#endif
-
-}  // namespace
+using namespace pulp_test_cli;
 
 TEST_CASE("pulp help exits 0 with a usage banner on stdout",
           "[cli][shellout]") {
@@ -269,12 +98,15 @@ TEST_CASE("pulp audio usage and parser errors are deterministic",
         {{"audio", "model", "activate"}, "model id is required", "pulp audio"},
         {{"audio", "model", "list", "--surprise"}, "Unknown option: --surprise", ""},
         {{"audio", "model", "status", "--surprise"}, "Unknown option: --surprise", ""},
+        {{"audio", "excerpt-find", "--text"}, "--text requires a value", ""},
         {{"audio", "excerpt-find", "--text", "kick", "--input"}, "--input requires a value", ""},
+        {{"audio", "excerpt-find", "--model"}, "--model requires a value", ""},
         {{"audio", "excerpt-find", "--top", "many"}, "invalid value for --top", ""},
         {{"audio", "excerpt-find", "--window-ms", "soon"}, "invalid value for --window-ms", ""},
         {{"audio", "excerpt-find", "--hop-ms", "soon"}, "invalid value for --hop-ms", ""},
         {{"audio", "excerpt-find", "--min-score", "loud"}, "invalid value for --min-score", ""},
         {{"audio", "excerpt-find", "--max-candidates-per-file", "lots"}, "invalid value for --max-candidates-per-file", ""},
+        {{"audio", "excerpt-find", "--bundle-out"}, "--bundle-out requires a value", ""},
         {{"audio", "excerpt-find", "--unknown"}, "Unknown option: --unknown", ""},
         {{"audio", "read-bundle"}, "bundle path is required", "pulp audio"},
         {{"audio", "read-bundle", "bundle-a", "bundle-b"}, "Unknown argument: bundle-b", ""},
@@ -304,6 +136,60 @@ TEST_CASE("pulp audio read-bundle json reports missing bundle errors",
     REQUIRE(r.stderr_output.empty());
     REQUIRE(r.stdout_output.find("\"ok\": false") != std::string::npos);
     REQUIRE(r.stdout_output.find("bundle path does not exist") != std::string::npos);
+}
+
+TEST_CASE("pulp cache usage and parser errors are deterministic",
+          "[cli][shellout][cache][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-cache-shellout-home");
+    ScopedEnvVar scoped_pulp_home("PULP_HOME");
+    scoped_pulp_home.set(home.string());
+
+    auto help = run_pulp({"cache"});
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("pulp cache") != std::string::npos);
+    REQUIRE(help.stdout_output.find("status") != std::string::npos);
+
+    auto status = run_pulp({"cache", "status"});
+    REQUIRE_FALSE(status.timed_out);
+    REQUIRE(status.exit_code == 0);
+    REQUIRE(status.stdout_output.find("Pulp Cache") != std::string::npos);
+    REQUIRE(status.stdout_output.find(home.string()) != std::string::npos);
+
+    struct Case {
+        std::vector<std::string> args;
+        int exit_code;
+        std::string stderr_substring;
+    };
+    const std::vector<Case> cases = {
+        {{"cache", "status", "extra"}, 2, "Unexpected cache status argument"},
+        {{"cache", "fetch"}, 1, "Usage: pulp cache fetch <asset>"},
+        {{"cache", "fetch", "fonts"}, 1, "Unknown asset: fonts"},
+        {{"cache", "fetch", "skia", "extra"}, 2, "Unexpected cache fetch argument"},
+        {{"cache", "clean", "extra"}, 2, "Unexpected cache clean argument"},
+        {{"cache", "mystery"}, 1, "Unknown cache subcommand"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("cache args size: " << c.args.size());
+        auto r = run_pulp(c.args);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == c.exit_code);
+        REQUIRE(r.stderr_output.find(c.stderr_substring) != std::string::npos);
+    }
+
+    fs::create_directories(home / "cache");
+    write_text(home / "cache" / "asset.bin", "cached");
+    auto clean = run_pulp({"cache", "clean"});
+    REQUIRE_FALSE(clean.timed_out);
+    REQUIRE(clean.exit_code == 0);
+    REQUIRE(clean.stdout_output.find("Cache cleared") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(home / "cache"));
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
 }
 
 TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
@@ -376,6 +262,23 @@ TEST_CASE("pulp status reports effective PR workflow",
     REQUIRE(r.stdout_output.find("Shipyard tracking: disabled by pr.workflow=manual") != std::string::npos);
 }
 
+TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
+          "[cli][shellout][misc][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto status_extra = run_pulp({"status", "extra"});
+    REQUIRE_FALSE(status_extra.timed_out);
+    REQUIRE(status_extra.exit_code == 2);
+    REQUIRE(status_extra.stderr_output.find("Unexpected status argument") !=
+            std::string::npos);
+
+    auto clean_extra = run_pulp({"clean", "extra"});
+    REQUIRE_FALSE(clean_extra.timed_out);
+    REQUIRE(clean_extra.exit_code == 2);
+    REQUIRE(clean_extra.stderr_output.find("Unexpected clean argument") !=
+            std::string::npos);
+}
+
 TEST_CASE("pulp status reports invalid and github PR workflow modes",
           "[cli][shellout][pr-workflow]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -415,183 +318,6 @@ TEST_CASE("pulp status reports invalid and github PR workflow modes",
             != std::string::npos);
 }
 
-TEST_CASE("pulp pr validates workflow selection before shipping",
-          "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar home_env("PULP_HOME");
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
-    ScopedEnvVar path_env("PATH");
-    ScopedEnvVar os_home_env("HOME");
-    update_disabled.set("1");
-
-    auto home = unique_temp_dir("pulp-pr-workflow-pr");
-    fs::create_directories(home);
-    home_env.set(home.string());
-    os_home_env.set(home.string());
-
-    auto missing_value = run_pulp({"pr", "--workflow"}, 10000);
-    REQUIRE_FALSE(missing_value.timed_out);
-    REQUIRE(missing_value.exit_code == 2);
-    REQUIRE(missing_value.stderr_output.find("--workflow requires a value")
-            != std::string::npos);
-
-    workflow_env.set("svn");
-    auto invalid_env = run_pulp({"pr", "--dry-run"}, 10000);
-    REQUIRE_FALSE(invalid_env.timed_out);
-    REQUIRE(invalid_env.exit_code == 2);
-    REQUIRE(invalid_env.stderr_output.find("invalid PR workflow 'svn' from env:PULP_PR_WORKFLOW")
-            != std::string::npos);
-    REQUIRE(invalid_env.stderr_output.find("pr.workflow must be one of")
-            != std::string::npos);
-
-    workflow_env.set("");
-    auto path_dir = home / "empty-path";
-    fs::create_directories(path_dir);
-    path_env.set(path_dir.string());
-    auto missing_shipyard = run_pulp({"pr", "--workflow", "shipyard"}, 10000);
-    REQUIRE_FALSE(missing_shipyard.timed_out);
-    REQUIRE(missing_shipyard.exit_code == 2);
-    REQUIRE(missing_shipyard.stderr_output.find("shipyard is not on PATH")
-            != std::string::npos);
-    REQUIRE(missing_shipyard.stderr_output.find("pulp config set pr.workflow github")
-            != std::string::npos);
-
-    fs::remove_all(home);
-}
-
-TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
-          "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar home_env("PULP_HOME");
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    ScopedEnvVar workflow_env("PULP_PR_WORKFLOW");
-    update_disabled.set("1");
-
-    auto home = unique_temp_dir("pulp-pr-workflow-manual-github");
-    fs::create_directories(home);
-    home_env.set(home.string());
-
-    auto manual = run_pulp({"pr", "--workflow=manual", "--base", "origin/main",
-                            "--title", "Manual PR Plan"}, 10000);
-    REQUIRE_FALSE(manual.timed_out);
-    REQUIRE(manual.exit_code == 0);
-    REQUIRE(manual.stdout_output.find("manual PR workflow selected")
-            != std::string::npos);
-    REQUIRE(manual.stdout_output.find("gh pr create --title")
-            != std::string::npos);
-    REQUIRE(manual.stdout_output.find("Manual and GitHub workflows do not create Shipyard tracking state")
-            != std::string::npos);
-
-    auto github_dry_run = run_pulp({"pr", "--workflow", "github", "--dry-run",
-                                    "--title", "GitHub PR Plan"}, 10000);
-    REQUIRE_FALSE(github_dry_run.timed_out);
-    REQUIRE(github_dry_run.exit_code == 0);
-    REQUIRE(github_dry_run.stderr_output.find("using github workflow via `gh`")
-            != std::string::npos);
-    REQUIRE(github_dry_run.stdout_output.find("[dry-run] Plan:")
-            != std::string::npos);
-    REQUIRE(github_dry_run.stdout_output.find("shipyard ship")
-            == std::string::npos);
-
-    fs::remove_all(home);
-}
-
-TEST_CASE("pulp pr github workflow requires gh for real PR creation",
-          "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar home_env("PULP_HOME");
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    ScopedEnvVar path_env("PATH");
-    ScopedEnvVar os_home_env("HOME");
-    update_disabled.set("1");
-
-    auto home = unique_temp_dir("pulp-pr-workflow-gh-missing");
-    auto path_dir = home / "empty-path";
-    fs::create_directories(path_dir);
-    home_env.set(home.string());
-    os_home_env.set(home.string());
-    path_env.set(path_dir.string());
-
-    auto missing_gh = run_pulp({"pr", "--workflow", "github"}, 10000);
-    fs::remove_all(home);
-
-    REQUIRE_FALSE(missing_gh.timed_out);
-    REQUIRE(missing_gh.exit_code == 2);
-    REQUIRE(missing_gh.stderr_output.find("PR workflow is `github`, but the GitHub CLI (`gh`) is not on PATH")
-            != std::string::npos);
-    REQUIRE(missing_gh.stderr_output.find("`github` is Pulp's direct GitHub workflow name")
-            != std::string::npos);
-}
-
-#if !defined(_WIN32)
-TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present",
-          "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar home_env("PULP_HOME");
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    ScopedEnvVar path_env("PATH");
-    ScopedEnvVar os_home_env("HOME");
-    update_disabled.set("1");
-
-    auto home = unique_temp_dir("pulp-pr-workflow-shipyard");
-    auto bin_dir = home / "bin";
-    fs::create_directories(bin_dir);
-    home_env.set(home.string());
-    os_home_env.set(home.string());
-
-    const std::string pinned = pinned_shipyard_version_for_test();
-    write_fake_shipyard(bin_dir, pinned);
-    prepend_to_path(bin_dir);
-
-    auto delegated = run_pulp({"pr", "--help"}, 10000);
-    fs::remove_all(home);
-
-    REQUIRE_FALSE(delegated.timed_out);
-    REQUIRE(delegated.exit_code == 0);
-    REQUIRE(delegated.stdout_output.find("Usage: pulp pr [--native]")
-            != std::string::npos);
-    REQUIRE(delegated.stdout_output.find("fake shipyard pr --help")
-            != std::string::npos);
-}
-
-TEST_CASE("pulp status reports shipyard version and pin health",
-          "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar home_env("PULP_HOME");
-    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
-    ScopedEnvVar path_env("PATH");
-    ScopedEnvVar os_home_env("HOME");
-    update_disabled.set("1");
-
-    auto home = unique_temp_dir("pulp-pr-workflow-status-shipyard");
-    auto bin_dir = home / "bin";
-    fs::create_directories(bin_dir);
-    home_env.set(home.string());
-    os_home_env.set(home.string());
-
-    const std::string pinned = pinned_shipyard_version_for_test();
-    auto shipyard = write_fake_shipyard(bin_dir, pinned);
-    prepend_to_path(bin_dir);
-
-    auto status = run_pulp({"status"}, 10000);
-    fs::remove_all(home);
-
-    REQUIRE_FALSE(status.timed_out);
-    REQUIRE(status.exit_code == 0);
-    REQUIRE(status.stdout_output.find("PR workflow: shipyard (default)")
-            != std::string::npos);
-    REQUIRE(status.stdout_output.find("Shipyard: " + shipyard.string())
-            != std::string::npos);
-    REQUIRE(status.stdout_output.find("(" + pinned + ") pinned " + pinned)
-            != std::string::npos);
-}
-#endif
 
 TEST_CASE("pulp config set/get/list round-trips isolated update settings",
           "[cli][shellout][config][issue-643]") {
@@ -675,6 +401,24 @@ TEST_CASE("pulp config rejects malformed and invalid update keys",
     REQUIRE(bad_interval.exit_code != 0);
     REQUIRE(bad_interval.stderr_output.find("non-negative integer") != std::string::npos);
     REQUIRE_FALSE(config_written);
+
+    auto extra_get = run_pulp({"config", "get", "update.mode", "extra"}, 10000);
+    REQUIRE_FALSE(extra_get.timed_out);
+    REQUIRE(extra_get.exit_code == 2);
+    REQUIRE(extra_get.stderr_output.find("unexpected `pulp config get` argument") !=
+            std::string::npos);
+
+    auto extra_set = run_pulp({"config", "set", "update.mode", "manual", "extra"}, 10000);
+    REQUIRE_FALSE(extra_set.timed_out);
+    REQUIRE(extra_set.exit_code == 2);
+    REQUIRE(extra_set.stderr_output.find("unexpected `pulp config set` argument") !=
+            std::string::npos);
+
+    auto extra_list = run_pulp({"config", "list", "extra"}, 10000);
+    REQUIRE_FALSE(extra_list.timed_out);
+    REQUIRE(extra_list.exit_code == 2);
+    REQUIRE(extra_list.stderr_output.find("unexpected `pulp config list` argument") !=
+            std::string::npos);
 }
 
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
@@ -807,6 +551,110 @@ TEST_CASE("pulp help output lists the top-level subcommands",
     }
 }
 
+TEST_CASE("pulp macos validates local operator arguments before gh calls",
+          "[cli][shellout][macos][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto help = run_pulp({"macos", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("pulp macos") != std::string::npos);
+    REQUIRE(help.stdout_output.find("retarget --pr") != std::string::npos);
+
+    auto unknown = run_pulp({"macos", "wat"}, 10000);
+    REQUIRE_FALSE(unknown.timed_out);
+    REQUIRE(unknown.exit_code == 1);
+    REQUIRE(unknown.stderr_output.find("unknown subcommand") != std::string::npos);
+
+    auto missing = run_pulp({"macos", "retarget", "--pr", "123"}, 10000);
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(missing.stderr_output.find("Usage: pulp macos retarget")
+            != std::string::npos);
+
+    auto missing_pr_value = run_pulp({"macos", "retarget", "--pr"}, 10000);
+    REQUIRE_FALSE(missing_pr_value.timed_out);
+    REQUIRE(missing_pr_value.exit_code == 2);
+    REQUIRE(missing_pr_value.stderr_output.find("--pr requires a value")
+            != std::string::npos);
+
+    auto missing_to_value = run_pulp({"macos", "retarget", "--pr", "123", "--to"},
+                                     10000);
+    REQUIRE_FALSE(missing_to_value.timed_out);
+    REQUIRE(missing_to_value.exit_code == 2);
+    REQUIRE(missing_to_value.stderr_output.find("--to requires a value")
+            != std::string::npos);
+
+    auto invalid_runner = run_pulp({"macos", "retarget", "--pr", "123", "--to", "mars"},
+                                   10000);
+    REQUIRE_FALSE(invalid_runner.timed_out);
+    REQUIRE(invalid_runner.exit_code == 1);
+    REQUIRE(invalid_runner.stderr_output.find("--to must be one of")
+            != std::string::npos);
+
+    auto status_unknown = run_pulp({"macos", "status", "--surprise"}, 10000);
+    REQUIRE_FALSE(status_unknown.timed_out);
+    REQUIRE(status_unknown.exit_code == 1);
+    REQUIRE(status_unknown.stderr_output.find("unknown arg '--surprise'")
+            != std::string::npos);
+
+    auto status_missing_pr = run_pulp({"macos", "status", "--pr"}, 10000);
+    REQUIRE_FALSE(status_missing_pr.timed_out);
+    REQUIRE(status_missing_pr.exit_code == 2);
+    REQUIRE(status_missing_pr.stderr_output.find("--pr requires a value")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp overflow validates non-mutating operator arguments",
+          "[cli][shellout][overflow][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    auto help = run_pulp({"overflow", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("pulp overflow") != std::string::npos);
+    REQUIRE(help.stdout_output.find("threshold [N]") != std::string::npos);
+
+    auto unknown = run_pulp({"overflow", "wat"}, 10000);
+    REQUIRE_FALSE(unknown.timed_out);
+    REQUIRE(unknown.exit_code == 1);
+    REQUIRE(unknown.stderr_output.find("unknown subcommand") != std::string::npos);
+
+    auto threshold_extra = run_pulp({"overflow", "threshold", "1", "2"}, 10000);
+    REQUIRE_FALSE(threshold_extra.timed_out);
+    REQUIRE(threshold_extra.exit_code == 1);
+    REQUIRE(threshold_extra.stderr_output.find("too many args") != std::string::npos);
+
+    auto threshold_negative = run_pulp({"overflow", "threshold", "-1"}, 10000);
+    REQUIRE_FALSE(threshold_negative.timed_out);
+    REQUIRE(threshold_negative.exit_code == 1);
+    REQUIRE(threshold_negative.stderr_output.find("must be >= 0") != std::string::npos);
+
+    auto threshold_bad = run_pulp({"overflow", "threshold", "nope"}, 10000);
+    REQUIRE_FALSE(threshold_bad.timed_out);
+    REQUIRE(threshold_bad.exit_code == 1);
+    REQUIRE(threshold_bad.stderr_output.find("is not a number") != std::string::npos);
+
+    auto enable_missing_to = run_pulp({"overflow", "enable", "--to"}, 10000);
+    REQUIRE_FALSE(enable_missing_to.timed_out);
+    REQUIRE(enable_missing_to.exit_code == 2);
+    REQUIRE(enable_missing_to.stderr_output.find("--to requires a value")
+            != std::string::npos);
+
+    auto enable_flag_value = run_pulp({"overflow", "enable", "--to", "--flag"},
+                                      10000);
+    REQUIRE_FALSE(enable_flag_value.timed_out);
+    REQUIRE(enable_flag_value.exit_code == 2);
+    REQUIRE(enable_flag_value.stderr_output.find("--to requires a value")
+            != std::string::npos);
+}
+
 TEST_CASE("pulp inspect help and no-discovery paths are deterministic",
           "[cli][shellout][inspect][issue-643][issue-641]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -892,6 +740,16 @@ TEST_CASE("pulp inspect rejects invalid arguments before networking",
     REQUIRE(invalid_port.stderr_output.find("invalid --port value: not-a-port")
             != std::string::npos);
     REQUIRE(invalid_port.stdout_output.find("Connecting to") == std::string::npos);
+
+    for (const char* port : {"0", "65536", "123abc"}) {
+        INFO("port=" << port);
+        auto rejected_port = run_pulp({"inspect", "--port", port}, 10000);
+        REQUIRE_FALSE(rejected_port.timed_out);
+        REQUIRE(rejected_port.exit_code == 2);
+        REQUIRE(rejected_port.stderr_output.find(std::string("invalid --port value: ") + port)
+                != std::string::npos);
+        REQUIRE(rejected_port.stdout_output.find("Connecting to") == std::string::npos);
+    }
 
     auto output_without_command = run_pulp({"inspect", "--output", "out.json"}, 10000);
     REQUIRE_FALSE(output_without_command.timed_out);
@@ -1012,6 +870,51 @@ TEST_CASE("pulp create rejects invalid type before scaffolding",
     REQUIRE(r.stderr_output.find("--type must be") != std::string::npos);
 }
 
+TEST_CASE("pulp create validates parser errors before scaffolding",
+          "[cli][shellout][create][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-create-parser-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto home = base / "home";
+    auto out = base / "out";
+    fs::create_directories(home);
+    {
+        std::ofstream cfg(home / "config.toml");
+        cfg << "[update]\nmode = \"off\"\n";
+    }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"create", "Missing Type", "--type"}, "--type requires a value"},
+        {{"create", "Missing Template", "--template", "--no-build"}, "--template requires a value"},
+        {{"create", "Missing Manufacturer", "--manufacturer"}, "--manufacturer requires a value"},
+        {{"create", "Missing Output", "--output"}, "--output requires a value"},
+        {{"create", "Missing Targets", "--targets"}, "--targets requires a value"},
+        {{"create", "Unknown Flag", "--definitely-not-create"}, "unknown flag"},
+    };
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+    }
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+
+    REQUIRE_FALSE(fs::exists(out));
+    fs::remove_all(base);
+}
+
 // #51 / #356: `pulp validate --strict` is supposed to upgrade
 // skipped-because-missing-tool into a hard failure.
 //
@@ -1039,10 +942,12 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     fs::current_path(fs::temp_directory_path());
     auto strict = exec(bin.string(), {"validate", "--strict"}, 10000);
     auto bogus = exec(bin.string(), {"validate", "--this-flag-does-not-exist"}, 10000);
+    auto missing_report = exec(bin.string(), {"validate", "--report"}, 10000);
     fs::current_path(cwd_saver);
 
     REQUIRE_FALSE(strict.timed_out);
     REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE_FALSE(missing_report.timed_out);
 
     // --strict is known: flag parser accepts, we fall through to the
     // project-root bail-out, exit 1.
@@ -1056,6 +961,12 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     REQUIRE(bogus.stderr_output.find("unknown flag") != std::string::npos);
     REQUIRE(bogus.stderr_output.find("--this-flag-does-not-exist")
             != std::string::npos);
+
+    REQUIRE(missing_report.exit_code == 2);
+    REQUIRE(missing_report.stderr_output.find("--report requires a path")
+            != std::string::npos);
+    REQUIRE(missing_report.stderr_output.find("not in a Pulp project directory")
+            == std::string::npos);
 }
 
 TEST_CASE("pulp validate strict json report records missing VST3 validators",
@@ -1199,6 +1110,40 @@ TEST_CASE("pulp build allows explicit unsupported SDK bypass",
     REQUIRE(combined.find("pulp upgrade 99.0.0") == std::string::npos);
 }
 
+TEST_CASE("pulp build validates js engine option before compatibility checks",
+          "[cli][shellout][build][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = unique_temp_dir("pulp-shellout-build-js-engine");
+    fs::create_directories(tmp);
+    write_text(tmp / "pulp.toml",
+               "[pulp]\n"
+               "sdk_version = \"99.0.0\"\n"
+               "cli_min_version = \"99.0.0\"\n");
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(tmp);
+    auto missing = exec(bin.string(), {"build", "--js-engine"}, 10000);
+    auto invalid = exec(bin.string(), {"build", "--js-engine=spidermonkey"}, 10000);
+    fs::current_path(cwd_saver);
+    fs::remove_all(tmp);
+
+    REQUIRE_FALSE(missing.timed_out);
+    REQUIRE(missing.exit_code == 2);
+    REQUIRE(missing.stderr_output.find("--js-engine requires a value")
+            != std::string::npos);
+    REQUIRE(missing.stderr_output.find("requires a newer Pulp CLI")
+            == std::string::npos);
+
+    REQUIRE_FALSE(invalid.timed_out);
+    REQUIRE(invalid.exit_code == 1);
+    REQUIRE(invalid.stderr_output.find("--js-engine must be auto, quickjs, jsc, or v8")
+            != std::string::npos);
+    REQUIRE(invalid.stderr_output.find("requires a newer Pulp CLI")
+            == std::string::npos);
+}
+
 // #8 / #355 — `pulp doctor android` and `pulp doctor ios` are
 // recognized subcommands; bogus subcommand fails with exit 2 + Usage.
 TEST_CASE("pulp doctor android|ios are recognized subcommands",
@@ -1213,10 +1158,16 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
     auto android = exec(bin.string(), {"doctor", "android", "--versions"}, 10000);
     auto ios     = exec(bin.string(), {"doctor", "ios", "--versions"},     10000);
     auto bogus   = exec(bin.string(), {"doctor", "potato", "--versions"},  10000);
+    auto missing_only = exec(bin.string(), {"doctor", "--only"}, 10000);
+    auto flag_only = exec(bin.string(), {"doctor", "--only", "--versions"}, 10000);
+    auto extra_positional = exec(bin.string(), {"doctor", "android", "extra"}, 10000);
 
     REQUIRE_FALSE(android.timed_out);
     REQUIRE_FALSE(ios.timed_out);
     REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE_FALSE(missing_only.timed_out);
+    REQUIRE_FALSE(flag_only.timed_out);
+    REQUIRE_FALSE(extra_positional.timed_out);
 
     REQUIRE(android.exit_code == 0);
     REQUIRE(ios.exit_code == 0);
@@ -1227,6 +1178,15 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
     REQUIRE(bogus.exit_code == 2);
     REQUIRE(bogus.stderr_output.find("unknown subcommand") != std::string::npos);
     REQUIRE(bogus.stderr_output.find("Usage:") != std::string::npos);
+
+    REQUIRE(missing_only.exit_code == 2);
+    REQUIRE(missing_only.stderr_output.find("--only requires a value") !=
+            std::string::npos);
+    REQUIRE(flag_only.exit_code == 2);
+    REQUIRE(flag_only.stderr_output.find("--only requires a value") != std::string::npos);
+    REQUIRE(extra_positional.exit_code == 2);
+    REQUIRE(extra_positional.stderr_output.find("unexpected argument") !=
+            std::string::npos);
 }
 
 // Issue #743: `pulp doctor --validators` is a recognized flag and
@@ -1287,6 +1247,78 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
     REQUIRE(combined.find("requires a newer Pulp CLI") != std::string::npos);
     REQUIRE(combined.find("pulp upgrade 99.0.0") != std::string::npos);
     REQUIRE(combined.find("--allow-unsupported-sdk") != std::string::npos);
+}
+
+TEST_CASE("pulp design validates owned option values before autobind",
+          "[cli][shellout][design][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"design", "--build-dir"}, "--build-dir requires a value"},
+        {{"design", "--build-dir", "--script", "tool.js"}, "--build-dir requires a value"},
+        {{"design", "--script"}, "--script requires a value"},
+        {{"design", "--script", "--watch"}, "--script requires a value"},
+    };
+
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stderr_output.find("Cannot infer design binding") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp dev validates value options before build or watch",
+          "[cli][shellout][dev][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() /
+               ("pulp-shellout-dev-parser-" +
+                std::to_string(std::chrono::steady_clock::now()
+                                   .time_since_epoch().count()));
+    fs::create_directories(tmp / "build");
+    {
+        std::ofstream f(tmp / "pulp.toml");
+        f << "[pulp]\n"
+          << "sdk_version = \"latest\"\n";
+    }
+    {
+        std::ofstream cache(tmp / "build" / "CMakeCache.txt");
+        cache << "# fake cache; parser errors should return before build\n";
+    }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"dev", "--run"}, "--run requires a value"},
+        {{"dev", "--run", "--test"}, "--run requires a value"},
+        {{"dev", "--design"}, "--design requires a value"},
+        {{"dev", "--design", "--validate"}, "--design requires a value"},
+        {{"dev", "--target"}, "--target requires a value"},
+        {{"dev", "--target", "--run", "app"}, "--target requires a value"},
+    };
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(tmp);
+    for (const auto& c : cases) {
+        auto r = exec(bin.string(), c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stdout_output.find("Building") == std::string::npos);
+    }
+    fs::current_path(cwd_saver);
+    fs::remove_all(tmp);
 }
 
 // Issue #499 Slice 1: `pulp doctor --versions` is the foundation of
@@ -1368,6 +1400,66 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
     REQUIRE(r.stdout_output.find("\"summary\":")    != std::string::npos);
     REQUIRE(r.stdout_output.find("\"applies_if\":") != std::string::npos);
     REQUIRE(r.stdout_output.find("\"body\":")       != std::string::npos);
+}
+
+TEST_CASE("pulp upgrade validates parser errors before network access",
+          "[cli][shellout][upgrade][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"upgrade", "--from"}, "--from requires a value"},
+        {{"upgrade", "--from", "--to", "0.29.0"}, "--from requires a value"},
+        {{"upgrade", "--to"}, "--to requires a value"},
+        {{"upgrade", "--to", "--notes"}, "--to requires a value"},
+        {{"upgrade", "--definitely-not-upgrade"}, "unknown flag"},
+    };
+
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stdout_output.find("Downloading") == std::string::npos);
+    }
+}
+
+TEST_CASE("pulp sdk install validates parser errors before side effects",
+          "[cli][shellout][sdk][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-sdk-parser-home");
+
+    struct Case {
+        std::vector<std::string> args;
+        std::string needle;
+    };
+    const std::vector<Case> cases = {
+        {{"sdk", "install", "--version"}, "--version requires a value"},
+        {{"sdk", "install", "--version", "--local"}, "--version requires a value"},
+        {{"sdk", "install", "--definitely-not-sdk"}, "unknown flag"},
+        {{"sdk", "install", "extra"}, "unknown argument"},
+    };
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    for (const auto& c : cases) {
+        auto r = run_pulp(c.args, 10000);
+        INFO("stderr: " << r.stderr_output);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.needle) != std::string::npos);
+        REQUIRE(r.stdout_output.find("Downloading SDK") == std::string::npos);
+        REQUIRE(r.stdout_output.find("Building SDK") == std::string::npos);
+    }
+    pulp_unsetenv("PULP_HOME");
+
+    REQUIRE_FALSE(fs::exists(home / "sdk"));
+    REQUIRE_FALSE(fs::exists(home / "sdk-local"));
+    fs::remove_all(home);
 }
 
 TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
@@ -1660,137 +1752,53 @@ TEST_CASE("pulp project bump rejects non-semver --to",
     REQUIRE(r.stderr_output.find("invalid target version") != std::string::npos);
 }
 
-TEST_CASE("pulp pr without shipyard prints install guidance",
-          "[cli][shellout][pr][issue-643]") {
+TEST_CASE("pulp project bump rejects missing --to values before project lookup",
+          "[cli][shellout][project][coverage][phase3]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar path("PATH");
-    path.set("");
-
-    auto r = run_pulp({"pr"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 2);
-
-    auto combined = r.stdout_output + r.stderr_output;
-    REQUIRE(combined.find("shipyard is not on PATH") != std::string::npos);
-    REQUIRE(combined.find("./tools/install-shipyard.sh") != std::string::npos);
-    REQUIRE(combined.find("pulp pr --native") != std::string::npos);
-}
-
-TEST_CASE("pulp pr github workflow requires gh instead of falling back from shipyard",
-          "[cli][shellout][pr][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar path("PATH");
-    ScopedEnvVar workflow("PULP_PR_WORKFLOW");
-    path.set("");
-    workflow.set("github");
-
-    auto r = run_pulp({"pr"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 2);
-
-    auto combined = r.stdout_output + r.stderr_output;
-    REQUIRE(combined.find("GitHub CLI (`gh`) is not on PATH") != std::string::npos);
-    REQUIRE(combined.find("shipyard is not on PATH") == std::string::npos);
-}
-
-TEST_CASE("pulp pr manual workflow does not require shipyard",
-          "[cli][shellout][pr][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar path("PATH");
-    path.set("");
-
-    auto r = run_pulp({"pr", "--workflow", "manual", "--help"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
-    REQUIRE(r.stderr_output.find("shipyard is not on PATH") == std::string::npos);
-}
-
-TEST_CASE("pulp pr native help stays available without shipyard",
-          "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar path("PATH");
-    path.set("");
-
-    auto r = run_pulp({"pr", "--native", "--help"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
-    REQUIRE(r.stdout_output.find("--no-ship") != std::string::npos);
-    REQUIRE(r.stdout_output.find("--dry-run") != std::string::npos);
-}
-
-TEST_CASE("pulp pr native mode refuses to run outside a project",
-          "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    ScopedEnvVar path("PATH");
-    path.set("");
 
     const auto bin = fs::absolute(pulp_binary());
     auto cwd_saver = fs::current_path();
     fs::current_path(fs::temp_directory_path());
-    auto r = exec(bin.string(), {"pr", "--native", "--no-push"}, 10000);
-    fs::current_path(cwd_saver);
 
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 2);
-    REQUIRE(r.stderr_output.find("not inside a pulp project") != std::string::npos);
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"project", "bump", "--to"},
+             {"project", "bump", "--to", "--dry-run"},
+             {"project", "pin", "--to"},
+             {"project", "pin", "--to", "--all"},
+         }) {
+        auto r = exec(bin.string(), args, 10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("--to requires a version argument")
+                != std::string::npos);
+    }
+
+    fs::current_path(cwd_saver);
 }
 
-#if !defined(_WIN32)
-TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
-          "[cli][shellout][pr][issue-643]") {
+TEST_CASE("pulp project validates stray parser arguments before project lookup",
+          "[cli][shellout][project][coverage][phase3]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
 
-    auto fake_dir = unique_temp_dir("pulp-pr-fake-shipyard");
-    fs::create_directories(fake_dir);
-    auto fake_shipyard = fake_dir / "shipyard";
-    // Report the version the pulp CLI's skew check expects (tools/shipyard.toml
-    // pin), stripped of the leading 'v' since that's what `shipyard --version`
-    // emits in practice. Reading dynamically keeps the test honest across pin
-    // bumps — the old hardcoded "0.46.0" broke on the v0.56.2 bump.
-    std::string version = pinned_shipyard_version_for_test();
-    if (!version.empty() && version[0] == 'v') version.erase(0, 1);
-    {
-        std::ofstream f(fake_shipyard);
-        f << "#!/bin/sh\n"
-             "if [ \"$1\" = \"--version\" ]; then\n"
-             "  echo \"shipyard, version "
-          << version
-          << "\"\n"
-             "  exit 0\n"
-             "fi\n"
-             "printf 'fake shipyard args:'\n"
-             "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n"
-             "printf '\\n'\n"
-             "exit 17\n";
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(fs::temp_directory_path());
+
+    for (const auto& c : std::vector<std::pair<std::vector<std::string>, std::string>>{
+             {{"project", "bump", "--bogus"}, "unknown argument '--bogus'"},
+             {{"project", "pin", "1.2.3", "2.3.4"}, "unexpected extra version argument '2.3.4'"},
+             {{"project", "unpin", "--bogus"}, "unknown argument '--bogus'"},
+         }) {
+        auto r = exec(bin.string(), c.first, 10000);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find(c.second) != std::string::npos);
+        REQUIRE(r.stderr_output.find("not inside") == std::string::npos);
     }
-    std::error_code ec;
-    fs::permissions(fake_shipyard,
-                    fs::perms::owner_read | fs::perms::owner_exec |
-                    fs::perms::group_read | fs::perms::group_exec,
-                    fs::perm_options::add,
-                    ec);
-    REQUIRE_FALSE(ec);
 
-    ScopedEnvVar path("PATH");
-    path.set(fake_dir.string());
-
-    auto r = run_pulp({"pr", "--help", "--no-ship"});
-    fs::remove_all(fake_dir);
-
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 17);
-    REQUIRE(r.stdout_output.find("Usage: pulp pr [--native]") != std::string::npos);
-    REQUIRE(r.stdout_output.find("fake shipyard args: [pr] [--help] [--no-ship]")
-            != std::string::npos);
+    fs::current_path(cwd_saver);
 }
-#endif
+
 
 TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
           "[cli][shellout][project-bump][issue-244]") {
@@ -2030,6 +2038,11 @@ TEST_CASE("pulp docs covers local reader index, search, open, and show paths",
         REQUIRE_FALSE(r.timed_out);
         REQUIRE((r.stdout_output.find("match(es) found") != std::string::npos ||
                  r.stdout_output.find("docs/") != std::string::npos));
+
+        auto multi_word = run_pulp({"docs", "search", "Getting", "Started"});
+        REQUIRE(multi_word.exit_code == 0);
+        REQUIRE_FALSE(multi_word.timed_out);
+        REQUIRE(multi_word.stdout_output.find("getting-started") != std::string::npos);
     }
 
     SECTION("search reports fuzzy suggestions and empty results") {
@@ -2299,494 +2312,3 @@ TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)",
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
 
-// Issue #940 Slice 1 — `pulp loop` is the leveraged-prototype focus
-// mode entry point. These tests cover the surface that doesn't depend
-// on a live watch loop (the watch-loop interactions are tested by
-// `pulp dev`'s harness):
-//
-//   * `pulp loop --help`     exits 0 + advertises focus mode
-//   * `pulp loop --status`   exits 0, reports detected host + focus state
-//   * `pulp loop --off`      clears focus state (and tolerates "already off")
-//   * `pulp loop --platform=<known>`   accepts macos/linux/windows
-//   * `pulp loop --platform=<unknown>` exits non-zero with diagnostic
-//   * `pulp loop --no-watch` flips focus + exits 0 without watching
-//
-// All of these run with PULP_HOME pointed at a per-test tmpdir so the
-// developer's real config.toml is never touched.
-TEST_CASE("pulp loop --help exits 0 with focus-mode banner",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-    auto r = run_pulp({"loop", "--help"});
-    REQUIRE(r.exit_code == 0);
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.stdout_output.find("leveraged-prototype focus mode") != std::string::npos);
-    REQUIRE(r.stdout_output.find("--platform") != std::string::npos);
-    REQUIRE(r.stdout_output.find("--off") != std::string::npos);
-}
-
-TEST_CASE("pulp loop --status reports detected host and focus state",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-status");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    auto r = run_pulp({"loop", "--status"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stdout_output.find("detected host") != std::string::npos);
-    REQUIRE(r.stdout_output.find("focus platform") != std::string::npos);
-    // Fresh PULP_HOME — no focus persisted yet.
-    REQUIRE(r.stdout_output.find("(none") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --off clears focus state idempotently",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-off");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    // First call: nothing to clear, must still exit 0.
-    auto r1 = run_pulp({"loop", "--off"});
-    REQUIRE_FALSE(r1.timed_out);
-    REQUIRE(r1.exit_code == 0);
-    REQUIRE(r1.stdout_output.find("already in cross-platform mode") != std::string::npos);
-
-    // Set focus via --no-watch, then clear.
-    auto r_set = run_pulp({"loop", "--platform=macos", "--no-watch"});
-    REQUIRE_FALSE(r_set.timed_out);
-    REQUIRE(r_set.exit_code == 0);
-    REQUIRE(r_set.stdout_output.find("focus mode active on macos") != std::string::npos);
-
-    auto r2 = run_pulp({"loop", "--off"});
-    REQUIRE_FALSE(r2.timed_out);
-    REQUIRE(r2.exit_code == 0);
-    REQUIRE(r2.stdout_output.find("focus mode cleared") != std::string::npos);
-    REQUIRE(r2.stdout_output.find("Cross-platform mode restored") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --platform=<known> accepts macos|linux|windows",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-platform");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    for (const char* p : {"macos", "linux", "windows"}) {
-        auto r = run_pulp({"loop", "--platform", p, "--no-watch"});
-        REQUIRE_FALSE(r.timed_out);
-        REQUIRE(r.exit_code == 0);
-        std::string expect = std::string("focus mode active on ") + p;
-        REQUIRE(r.stdout_output.find(expect) != std::string::npos);
-    }
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-unknown");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    auto r = run_pulp({"loop", "--platform=plan9", "--no-watch"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code != 0);
-    auto combined = r.stdout_output + r.stderr_output;
-    REQUIRE(combined.find("unknown --platform") != std::string::npos);
-    REQUIRE(combined.find("macos") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --watch-issues prints deferred-slice hint",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-watch-issues");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    auto r = run_pulp({"loop", "--watch-issues=924,927", "--no-watch"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    // Slice 3 deferred — surface the issue number so the user knows
-    // when the helper lands.
-    REQUIRE(r.stdout_output.find("--watch-issues=924,927") != std::string::npos);
-    REQUIRE(r.stdout_output.find("deferred") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --ar-swap-from prints deferred-slice hint",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-ar-swap");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    // Long form (separate value)
-    auto r1 = run_pulp({"loop", "--ar-swap-from", "feat/fix-x", "--no-watch"});
-    REQUIRE_FALSE(r1.timed_out);
-    REQUIRE(r1.exit_code == 0);
-    REQUIRE(r1.stdout_output.find("--ar-swap-from=feat/fix-x") != std::string::npos);
-    REQUIRE(r1.stdout_output.find("deferred") != std::string::npos);
-
-    // Equals form
-    auto r2 = run_pulp({"loop", "--ar-swap-from=feat/fix-y", "--no-watch"});
-    REQUIRE_FALSE(r2.timed_out);
-    REQUIRE(r2.exit_code == 0);
-    REQUIRE(r2.stdout_output.find("--ar-swap-from=feat/fix-y") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop --status reports persisted focus platform",
-          "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-status-set");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    // Set focus, then assert --status reflects the persisted value.
-    auto rs = run_pulp({"loop", "--platform=linux", "--no-watch"});
-    REQUIRE_FALSE(rs.timed_out);
-    REQUIRE(rs.exit_code == 0);
-
-    auto r = run_pulp({"loop", "--status"});
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stdout_output.find("focus platform: linux") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-TEST_CASE("pulp loop accepts --test, --validate, --target, --run flags via --no-watch",
-          "[cli][shellout][loop][issue-940]") {
-    // The flags exercise the parser branches that wouldn't otherwise run
-    // when only --status / --off / --no-watch are used. With --no-watch
-    // we exit before the watch loop, so the binary still terminates.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp_home = unique_temp_dir("pulp-940-flags");
-    fs::create_directories(tmp_home);
-    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
-    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
-
-    // --test, -t, --test-filter=, --validate, --allow-unsupported-sdk
-    // all exit cleanly with --no-watch.
-    auto r1 = run_pulp({"loop", "--platform=macos", "--test", "--validate", "--no-watch"});
-    REQUIRE_FALSE(r1.timed_out);
-    REQUIRE(r1.exit_code == 0);
-
-    auto r2 = run_pulp({"loop", "--platform=macos", "-t", "--test-filter=Foo", "--no-watch"});
-    REQUIRE_FALSE(r2.timed_out);
-    REQUIRE(r2.exit_code == 0);
-
-    // --target T pushes onto build_args; --run T sets launch_target. Both
-    // branches must accept the next-arg form without breaking the parser.
-    auto r3 = run_pulp({"loop", "--platform=macos", "--target", "pulp-format",
-                        "--run", "pulp-gain-standalone", "--no-watch"});
-    REQUIRE_FALSE(r3.timed_out);
-    REQUIRE(r3.exit_code == 0);
-
-    // Trailing -- forwards remaining args to the launched binary; with
-    // --no-watch we just exit so the args are silently consumed.
-    auto r4 = run_pulp({"loop", "--platform=macos", "--no-watch", "--", "--arg1", "value1"});
-    REQUIRE_FALSE(r4.timed_out);
-    REQUIRE(r4.exit_code == 0);
-
-    pulp_unsetenv("PULP_HOME");
-    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
-    fs::remove_all(tmp_home);
-}
-
-// ── projects list --json (cmd_projects.cpp do_list JSON path) ─────
-//
-// The C++ binary's `pulp projects list --json` was added in this
-// branch to mirror what the Rust port already does — without these
-// tests, the diff-cover gate flags the new JSON-rendering branch as
-// uncovered (per `ci/coverage-targets.yaml`, `tools/cli/**` is the
-// "user-facing" tier with a 70% per-PR floor).
-
-TEST_CASE("pulp projects list --json emits valid JSON for empty registry",
-          "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    // Isolated PULP_HOME so we don't read the user's real registry.
-    auto tmp = fs::temp_directory_path() / "pulp-projects-json-test";
-    fs::create_directories(tmp);
-    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
-    auto r = run_pulp({"projects", "list", "--json"});
-    pulp_unsetenv("PULP_HOME");
-    fs::remove_all(tmp);
-
-    REQUIRE(r.exit_code == 0);
-    // Must be parseable JSON with the documented top-level keys.
-    REQUIRE(r.stdout_output.find("\"registry\"") != std::string::npos);
-    REQUIRE(r.stdout_output.find("\"projects\"") != std::string::npos);
-    // Empty registry → empty array.
-    REQUIRE(r.stdout_output.find("[]") != std::string::npos);
-}
-
-TEST_CASE("pulp projects list (no --json) emits human text",
-          "[cli][shellout][projects]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto tmp = fs::temp_directory_path() / "pulp-projects-text-test";
-    fs::create_directories(tmp);
-    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
-    auto r = run_pulp({"projects", "list"});
-    pulp_unsetenv("PULP_HOME");
-    fs::remove_all(tmp);
-
-    REQUIRE(r.exit_code == 0);
-    // Human text path should NOT emit JSON braces.
-    REQUIRE(r.stdout_output.find("Registry:") != std::string::npos);
-    REQUIRE(r.stdout_output.find("(no projects registered)") != std::string::npos);
-}
-
-// Non-empty registry path — exercises the cmd_projects::do_list JSON
-// loop body (lines ~78-92 of cmd_projects.cpp) that the empty-registry
-// test above can't reach. Adds a synthetic project root, registers it,
-// then asserts the JSON output contains the per-project record. Also
-// exercises json_escape via a project name containing a literal
-// double-quote (the most common escapable character).
-TEST_CASE("pulp projects list --json emits per-project JSON with non-empty registry",
-          "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto pulp_home = unique_temp_dir("pulp-projects-json-nonempty-home");
-    fs::create_directories(pulp_home);
-    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
-
-    // Synthetic project root — find_project_root walks ancestors looking
-    // for `CMakeLists.txt && core/`, so create both. pulp.toml carries
-    // the SDK pin; cmd_projects::do_add reads name from there if present.
-    auto project = unique_temp_dir("pulp-projects-json-fake-project");
-    fs::create_directories(project / "core");
-    {
-        std::ofstream ct(project / "CMakeLists.txt");
-        ct << "project(FakeJsonListProject VERSION 0.1.0 LANGUAGES CXX)\n";
-    }
-    {
-        std::ofstream pt(project / "pulp.toml");
-        pt << "sdk_version = \"0.40.0\"\n";
-    }
-
-    auto add = run_pulp({"projects", "add", project.string()}, 15000);
-    REQUIRE_FALSE(add.timed_out);
-    REQUIRE(add.exit_code == 0);
-
-    auto list = run_pulp({"projects", "list", "--json"}, 15000);
-    REQUIRE_FALSE(list.timed_out);
-    REQUIRE(list.exit_code == 0);
-
-    // Top-level shape preserved.
-    REQUIRE(list.stdout_output.find("\"registry\"") != std::string::npos);
-    REQUIRE(list.stdout_output.find("\"projects\"") != std::string::npos);
-    // Loop body must have emitted one project record with these fields.
-    REQUIRE(list.stdout_output.find("\"path\"") != std::string::npos);
-    REQUIRE(list.stdout_output.find("\"name\"") != std::string::npos);
-    REQUIRE(list.stdout_output.find("\"registered_at\"") != std::string::npos);
-    REQUIRE(list.stdout_output.find("\"missing_on_disk\"") != std::string::npos);
-    REQUIRE(list.stdout_output.find(project.generic_string()) != std::string::npos);
-    // The synthetic project exists on disk → missing_on_disk false.
-    REQUIRE(list.stdout_output.find("\"missing_on_disk\": false") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    fs::remove_all(pulp_home);
-    fs::remove_all(project);
-}
-
-// Pairs with the above — exercises cmd_projects's missing-on-disk
-// branch by registering a project then deleting its directory. This
-// covers the `bool missing = !fs::exists(p.path)` true branch + the
-// `"missing_on_disk": true` JSON emission line.
-TEST_CASE("pulp projects list --json reports missing_on_disk=true for deleted project",
-          "[cli][shellout][projects][issue-244]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto pulp_home = unique_temp_dir("pulp-projects-json-missing-home");
-    fs::create_directories(pulp_home);
-    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
-
-    auto project = unique_temp_dir("pulp-projects-json-deleted-project");
-    fs::create_directories(project / "core");
-    {
-        std::ofstream ct(project / "CMakeLists.txt");
-        ct << "project(DeletedFakeProject VERSION 0.1.0 LANGUAGES CXX)\n";
-    }
-    {
-        std::ofstream pt(project / "pulp.toml");
-        pt << "sdk_version = \"0.40.0\"\n";
-    }
-
-    auto add = run_pulp({"projects", "add", project.string()}, 15000);
-    REQUIRE_FALSE(add.timed_out);
-    REQUIRE(add.exit_code == 0);
-
-    // Now delete the project directory but leave the registry entry.
-    fs::remove_all(project);
-
-    auto list = run_pulp({"projects", "list", "--json"}, 15000);
-    REQUIRE_FALSE(list.timed_out);
-    REQUIRE(list.exit_code == 0);
-    REQUIRE(list.stdout_output.find("\"missing_on_disk\": true") != std::string::npos);
-
-    pulp_unsetenv("PULP_HOME");
-    fs::remove_all(pulp_home);
-}
-
-// ── pulp scan --help / --no-load (#812) ──────────────────────────
-//
-// `pulp scan --help` previously walked the system plug-in paths and
-// dlopen'd everything (which crashes on a malformed plugin). The
-// fix added an early --help gate; this test locks in that behavior
-// so a future refactor can't reintroduce the crash.
-
-TEST_CASE("pulp scan --help exits 0 with usage on stdout",
-          "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-    auto r = run_pulp({"scan", "--help"});
-    REQUIRE(r.exit_code == 0);
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.stdout_output.find("Usage: pulp scan") != std::string::npos);
-    // The new --no-load flag must be advertised so users hitting #812
-    // can discover the safe-fast escape hatch.
-    REQUIRE(r.stdout_output.find("--no-load") != std::string::npos);
-}
-
-TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
-          "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-    auto r = run_pulp({"scan", "--no-load"}, /*timeout_ms=*/30000);
-    // The whole point of --no-load is "doesn't crash on bad plugins".
-    // If the host happens to have no plugins installed, that's also
-    // a clean rc=0 with "No plugins found." stdout — both are fine.
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    // No libc++abi termination message should appear in stderr —
-    // that's the regression --no-load specifically prevents.
-    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
-}
-
-TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
-          "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-#if defined(_WIN32)
-    SUCCEED("Windows CLAP defaults do not derive from HOME");
-    return;
-#else
-    auto home = unique_temp_dir("pulp-scan-noload-home");
-    ScopedEnvVar scoped_home("HOME");
-    scoped_home.set(home.string());
-
-#if defined(__APPLE__)
-    auto clap_dir = home / "Library" / "Audio" / "Plug-Ins" / "CLAP";
-#else
-    auto clap_dir = home / ".clap";
-#endif
-    auto alpha_path = clap_dir / "Phase8Alpha.clap";
-    auto beta_path = clap_dir / "Phase8Beta.clap";
-    fs::create_directories(beta_path);
-    fs::create_directories(alpha_path);
-
-    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
-                      /*timeout_ms=*/30000);
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
-    REQUIRE(r.stdout_output.find("[CLAP]") != std::string::npos);
-    REQUIRE(r.stdout_output.find(alpha_path.string()) != std::string::npos);
-    REQUIRE(r.stdout_output.find(beta_path.string()) != std::string::npos);
-
-    auto alpha = r.stdout_output.find("Phase8Alpha");
-    auto beta = r.stdout_output.find("Phase8Beta");
-    REQUIRE(alpha != std::string::npos);
-    REQUIRE(beta != std::string::npos);
-    REQUIRE(alpha < beta);
-
-    std::error_code ec;
-    fs::remove_all(home, ec);
-#endif
-}
-
-TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
-          "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-
-    auto home = unique_temp_dir("pulp-scan-lv2-home");
-    ScopedEnvVar scoped_home("HOME");
-    scoped_home.set(home.string());
-
-#if defined(__linux__)
-    auto lv2_dir = home / ".lv2" / "Phase8Probe.lv2";
-    fs::create_directories(lv2_dir);
-    write_text(lv2_dir / "manifest.ttl",
-               "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
-               "<http://example.org/phase8-probe> a lv2:Plugin .\n");
-#endif
-
-    auto r = run_pulp({"scan", "--format", "lv2"}, /*timeout_ms=*/30000);
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
-#if defined(__linux__)
-    REQUIRE(r.stdout_output.find("Phase8Probe") != std::string::npos);
-#else
-    REQUIRE((r.stdout_output.find("[LV2]") != std::string::npos ||
-             r.stdout_output.find("No plugins found") != std::string::npos));
-#endif
-
-    std::error_code ec;
-    fs::remove_all(home, ec);
-}
-
-TEST_CASE("pulp scan --no-load --format clap restricts to one bucket",
-          "[cli][shellout][scan][issue-812]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
-    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
-                      /*timeout_ms=*/30000);
-    REQUIRE_FALSE(r.timed_out);
-    REQUIRE(r.exit_code == 0);
-    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
-    // When the filter narrows to CLAP and no CLAP plugins exist on
-    // the runner, the output should be the documented empty-state
-    // message rather than crashing or printing other-format buckets.
-    REQUIRE((r.stdout_output.find("[CLAP]") != std::string::npos ||
-             r.stdout_output.find("No plugins found") != std::string::npos));
-}

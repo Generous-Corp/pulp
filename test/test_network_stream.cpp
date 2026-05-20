@@ -591,6 +591,41 @@ TEST_CASE("TcpStream zero-byte I/O succeeds while connected",
     REQUIRE(client_ok);
 }
 
+TEST_CASE("TcpStream rejects null buffers while connected",
+          "[network_stream][tcp][coverage][phase3]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+
+    auto bound_port = try_bind_loopback_ephemeral(listener);
+    REQUIRE(bound_port);
+
+    std::atomic<bool> ready{false};
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (accepted) {
+            std::this_thread::sleep_for(100ms);
+            accepted->close();
+        }
+    });
+    ThreadJoiner join_server{server_thread};
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    TcpStream stream;
+    REQUIRE(stream.connect("127.0.0.1", *bound_port));
+
+    auto null_read = stream.read(nullptr, 1);
+    REQUIRE_FALSE(null_read.ok());
+    REQUIRE(null_read.error == StreamError::Invalid);
+
+    auto null_write = stream.write(nullptr, 1);
+    REQUIRE_FALSE(null_write.ok());
+    REQUIRE(null_write.error == StreamError::Invalid);
+
+    stream.close();
+    join_server.join();
+}
+
 // ── Socket edge cases ───────────────────────────────────────────────────
 
 TEST_CASE("Socket UDP loopback send_to receive_from reports peer address",
@@ -770,6 +805,21 @@ TEST_CASE("HttpStream default state supports zero reads and idempotent close",
     auto closed_read = stream.read(&byte, 1);
     REQUIRE_FALSE(closed_read.ok());
     REQUIRE(closed_read.closed());
+}
+
+TEST_CASE("HttpStream rejects null read buffers before transport errors",
+          "[network_stream][http][coverage][phase3]") {
+    HttpStream::Request req;
+    req.url = "ftp://127.0.0.1/nope";
+    req.timeout_seconds = 1;
+    HttpStream stream(req);
+
+    auto null_read = stream.read(nullptr, 1);
+    REQUIRE_FALSE(null_read.ok());
+    REQUIRE(null_read.error == StreamError::Invalid);
+
+    stream.close();
+    REQUIRE(stream.read(nullptr, 1).closed());
 }
 
 TEST_CASE("HttpStream factories and refetch reset closed state to request results",

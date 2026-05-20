@@ -52,7 +52,6 @@ Label* add_child_label(View& parent, std::string text = "x") {
 
 }  // namespace
 
-
 TEST_CASE("Knob value clamping", "[view][widget]") {
     Knob knob;
     knob.set_value(0.5f);
@@ -504,6 +503,31 @@ TEST_CASE("Audio widgets render declarative schemas and invalid schema fallback"
     RecordingCanvas invalid_canvas;
     invalid.paint(invalid_canvas);
     REQUIRE(invalid_canvas.count(DrawCommand::Type::fill_rect) == 1);
+}
+
+TEST_CASE("Audio widget schemas reject malformed dimension tokens without error fallback",
+          "[view][widget][schema][coverage][phase3]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 80, 80});
+    knob.set_value(0.5f);
+    knob.set_widget_schema(R"json({
+        "elements": [
+            { "type": "arc", "color": "control.fill", "radius": "80%junk", "width": 4,
+              "startAngle": -120, "sweepAngle": { "bind": "value", "range": [0, 240] } },
+            { "type": "circle", "color": "control.thumb", "radius": "" },
+            { "type": "line", "color": "text.primary", "innerRadius": "15 %",
+              "outerRadius": "65x", "angle": { "bind": "value", "range": [-90, 90] } },
+            { "type": "rect", "color": "bg.surface", "cornerRadius": "5x" }
+        ]
+    })json");
+
+    RecordingCanvas canvas;
+    knob.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_arc) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
 }
 
 TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",

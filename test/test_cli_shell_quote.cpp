@@ -17,6 +17,8 @@
 
 #include "../tools/cli/cli_common.hpp"
 
+#include <filesystem>
+
 #ifdef _WIN32
 
 TEST_CASE("shell_quote leaves Windows path backslashes literal", "[cli][shell-quote][issue-776]") {
@@ -73,6 +75,16 @@ TEST_CASE("shell_quote escapes backslash and quote on POSIX", "[cli][shell-quote
     // Input:  say "hi"
     // Output: "say \"hi\""
     REQUIRE(shell_quote(std::string("say \"hi\"")) == "\"say \\\"hi\\\"\"");
+}
+
+TEST_CASE("shell_quote wraps empty and POSIX metacharacter arguments", "[cli][shell-quote]") {
+    REQUIRE(shell_quote(std::string()) == "\"\"");
+    REQUIRE(shell_quote(std::string("a;b$(c)`d e")) == "\"a;b$(c)`d e\"");
+}
+
+TEST_CASE("shell_quote path overload matches string overload on POSIX", "[cli][shell-quote]") {
+    const std::filesystem::path path = "/tmp/pulp path/with\"quote";
+    REQUIRE(shell_quote(path) == shell_quote(path.string()));
 }
 
 #endif

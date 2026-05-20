@@ -281,7 +281,7 @@ TEST_CASE("cmd_project reports help and unknown subcommands deterministically",
     }
 }
 
-TEST_CASE("cmd_project bump option parser accepts flags and reports ignored arguments",
+TEST_CASE("cmd_project bump option parser accepts flags and rejects unknown arguments",
           "[cli][project-command][issue-643]") {
     bool help = false;
     CapturedStreams capture;
@@ -308,8 +308,9 @@ TEST_CASE("cmd_project bump option parser accepts flags and reports ignored argu
     REQUIRE(opts.verify_builds);
     REQUIRE(opts.to_version == "1.2.3");
     REQUIRE(opts.positional == std::vector<std::string>{"legacy-positional"});
-    REQUIRE(capture.err.str().find("ignoring unknown argument '--surprise'")
+    REQUIRE(opts.error.find("unknown argument '--surprise'")
             != std::string::npos);
+    REQUIRE(capture.err.str().empty());
 }
 
 TEST_CASE("cmd_project bump --all reports empty registries without touching projects",

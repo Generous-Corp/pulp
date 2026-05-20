@@ -4163,6 +4163,34 @@ static Color parse_hex_color_str(const std::string& hex) {
     return {};
 }
 
+static std::optional<float> parse_design_number(std::string value) {
+    auto trim = [](std::string s) {
+        auto a = s.find_first_not_of(" \t\r\n");
+        auto b = s.find_last_not_of(" \t\r\n");
+        return (a == std::string::npos) ? std::string{} : s.substr(a, b - a + 1);
+    };
+
+    value = trim(std::move(value));
+    for (std::string_view suffix : {"px", "rem", "em", "%"}) {
+        if (value.size() > suffix.size() &&
+            value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            value = trim(value.substr(0, value.size() - suffix.size()));
+            break;
+        }
+    }
+    if (value.empty()) return std::nullopt;
+
+    char* end = nullptr;
+    float parsed = std::strtof(value.c_str(), &end);
+    if (end == value.c_str()) return std::nullopt;
+    while (*end != '\0') {
+        if (!std::isspace(static_cast<unsigned char>(*end))) return std::nullopt;
+        ++end;
+    }
+    if (!std::isfinite(parsed)) return std::nullopt;
+    return parsed;
+}
+
 Theme parse_w3c_tokens(const std::string& json) {
     Theme theme;
     auto root = choc::json::parse(json);
@@ -4195,21 +4223,20 @@ Theme parse_w3c_tokens(const std::string& json) {
         for (char op : {'*', '+', '-', '/'}) {
             auto pos = s.find(op);
             if (pos != std::string::npos && pos > 0 && pos < s.size() - 1) {
-                try {
-                    float a = std::stof(trim(s.substr(0, pos)));
-                    float b = std::stof(trim(s.substr(pos + 1)));
-                    float result = 0;
-                    if (op == '*') result = a * b;
-                    else if (op == '+') result = a + b;
-                    else if (op == '-') result = a - b;
-                    else if (op == '/' && b != 0) result = a / b;
-                    // Return as clean number string
-                    if (result == std::floor(result))
-                        return std::to_string(static_cast<int>(result));
-                    std::ostringstream oss;
-                    oss << result;
-                    return oss.str();
-                } catch (...) {}
+                auto a = parse_design_number(trim(s.substr(0, pos)));
+                auto b = parse_design_number(trim(s.substr(pos + 1)));
+                if (!a || !b) continue;
+                float result = 0;
+                if (op == '*') result = *a * *b;
+                else if (op == '+') result = *a + *b;
+                else if (op == '-') result = *a - *b;
+                else if (op == '/' && *b != 0) result = *a / *b;
+                // Return as clean number string
+                if (result == std::floor(result))
+                    return std::to_string(static_cast<int>(result));
+                std::ostringstream oss;
+                oss << result;
+                return oss.str();
             }
         }
         return expr;  // Not a math expression, return as-is
@@ -4333,24 +4360,19 @@ Theme parse_w3c_tokens(const std::string& json) {
                 theme.colors[name] = parse_hex_color_str(value_str);
             }
         } else if (type_str == "dimension") {
-            float v = 0;
-            try { v = std::stof(value_str); } catch (...) {}
-            theme.dimensions[name] = v;
+            if (auto v = parse_design_number(value_str)) theme.dimensions[name] = *v;
         } else if (type_str == "fontFamily" || type_str == "string") {
             theme.strings[name] = value_str;
         } else if (type_str == "number") {
-            float v = 0;
-            try { v = std::stof(value_str); } catch (...) {}
-            theme.dimensions[name] = v;
+            if (auto v = parse_design_number(value_str)) theme.dimensions[name] = *v;
         } else {
             // Infer type from resolved value
             if (!value_str.empty() && value_str[0] == '#') {
                 theme.colors[name] = parse_hex_color_str(value_str);
             } else {
-                try {
-                    float v = std::stof(value_str);
-                    theme.dimensions[name] = v;
-                } catch (...) {
+                if (auto v = parse_design_number(value_str)) {
+                    theme.dimensions[name] = *v;
+                } else {
                     theme.strings[name] = value_str;
                 }
             }
@@ -4492,7 +4514,7 @@ Theme parse_figma_variables(const std::string& json) {
                 if (!resolved.empty() && resolved[0] == '#')
                     theme.colors[dotted] = parse_hex_color_str(resolved);
             } else if (type == "FLOAT" || type == "float" || type == "number") {
-                try { theme.dimensions[dotted] = std::stof(resolved); } catch (...) {}
+                if (auto v = parse_design_number(resolved)) theme.dimensions[dotted] = *v;
             } else if (type == "STRING" || type == "string") {
                 theme.strings[dotted] = resolved;
             } else {
@@ -4500,8 +4522,8 @@ Theme parse_figma_variables(const std::string& json) {
                 if (!resolved.empty() && resolved[0] == '#')
                     theme.colors[dotted] = parse_hex_color_str(resolved);
                 else {
-                    try { theme.dimensions[dotted] = std::stof(resolved); }
-                    catch (...) { theme.strings[dotted] = resolved; }
+                    if (auto v = parse_design_number(resolved)) theme.dimensions[dotted] = *v;
+                    else theme.strings[dotted] = resolved;
                 }
             }
         }

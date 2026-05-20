@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -137,17 +138,25 @@ struct Dimension {
     }
 
     static Dimension parse(const std::string& str) {
-        if (str == "auto") return {0, DimensionUnit::auto_};
+        auto trim = [](std::string s) {
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(0, 1);
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+            return s;
+        };
+
+        const auto input = trim(str);
+        if (input == "auto") return {0, DimensionUnit::auto_};
         Dimension d;
         size_t pos = 0;
-        try { d.value = std::stof(str, &pos); } catch (...) { return d; }
-        auto suffix = str.substr(pos);
+        try { d.value = std::stof(input, &pos); } catch (...) { return d; }
+        auto suffix = trim(input.substr(pos));
         if (suffix == "vw") d.unit = DimensionUnit::vw;
         else if (suffix == "vh") d.unit = DimensionUnit::vh;
         else if (suffix == "vmin") d.unit = DimensionUnit::vmin;
         else if (suffix == "vmax") d.unit = DimensionUnit::vmax;
         else if (suffix == "%") d.unit = DimensionUnit::percent;
-        else d.unit = DimensionUnit::px;
+        else if (suffix.empty() || suffix == "px") d.unit = DimensionUnit::px;
+        else return {};
         return d;
     }
 };

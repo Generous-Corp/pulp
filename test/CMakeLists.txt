@@ -269,6 +269,38 @@ if(TARGET pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
+# P5-4 — `pulp loop` shell-out tests, extracted from test_cli_shellout.cpp
+# to bring the parent TU below the 2k line target. Shares
+# test_cli_shellout_helpers.hpp with the parent and its sibling
+# test_cli_shellout_scan_projects.cpp.
+add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
+target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-loop pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-loop)
+
+# P5-4 — `pulp scan` + `pulp projects list` shell-out tests, extracted
+# from test_cli_shellout.cpp. Shares the helpers header with its
+# siblings.
+add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
+target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-scan-projects pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-scan-projects)
+
+# P5-4 follow-up — `pulp pr` shell-out tests, extracted from
+# test_cli_shellout.cpp. Two contiguous clusters (pr.workflow validation
+# + Shipyard binary pin handling + native fallback). Shares the helpers
+# header with its siblings.
+add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
+target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-pr pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-pr)
+
 # pulp #776 — pin shell_quote's per-platform contract so it can't
 # silently regress to the pre-fix shape that broke `git fetch origin`
 # on Windows by writing doubled backslashes into clone URLs.
@@ -736,6 +768,10 @@ pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-modulation-matrix LIBRARIES pulp::view)
 # ModulationMatrixWidget canvas widget (workstream 07 slice B5)
 pulp_add_test_suite(pulp-test-modulation-matrix-widget LIBRARIES pulp::view)
+# Lasso selection overlay
+pulp_add_test_suite(pulp-test-lasso LIBRARIES pulp::view)
+# Split pane layout widget
+pulp_add_test_suite(pulp-test-split-view LIBRARIES pulp::view)
 # PluginDescriptor vendor_url + vendor_email (workstream 01 slice 1.8)
 pulp_add_test_suite(pulp-test-vendor-url LIBRARIES pulp::format)
 # Image cache (workstream 07 slice 7.4)
@@ -1674,6 +1710,24 @@ target_compile_definitions(pulp-test-canvas PRIVATE
     "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
+# Canvas CG-paths tests (P5-2 follow-up — extracted from test_canvas.cpp,
+# 2026-05). Apple-only TU covering pulp #943 / #933 concat_transform,
+# pulp #1322 Canvas2D path API (fill + curves + stroke + gradients),
+# fill_rect / fill_path with active gradient, pulp #1368 save/restore
+# tracking, and pulp #1322 BlendMode every-value round-trip. Companion
+# to test_canvas_cg_gradients.cpp; the non-Apple parts stay in
+# test_canvas.cpp.
+add_executable(pulp-test-canvas-cg-paths test_canvas_cg_paths.cpp)
+target_link_libraries(pulp-test-canvas-cg-paths PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(APPLE)
+    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE
+        "-framework CoreGraphics"
+        "-framework ImageIO"
+        "-framework CoreServices"
+    )
+endif()
+catch_discover_tests(pulp-test-canvas-cg-paths)
+
 # Canvas font tests (P5-2 first cut — extracted from test_canvas.cpp).
 # Covers pulp #932 (bundled-font registration via match_bundled_typeface)
 # + pulp #1150 (public register_font(path) API). Shares the
@@ -1916,6 +1970,15 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-tweak-store test_tweak_store.cpp)
     target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-tweak-store)
+
+    # Phase 5.3: editor URI plumbing for the future source-jump action.
+    # Pure config / format-helper / protocol — no overlay / GPU surface,
+    # but lives under the same PULP_ENABLE_GPU guard as the rest of
+    # pulp-inspect's tests so it links against the same library.
+    # planning/2026-05-19-inspector-phase5-source-jump-spike.md
+    add_executable(pulp-test-editor-url test_editor_url.cpp)
+    target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-editor-url)
 endif()
 
 # Widget bridge tests
@@ -1948,6 +2011,31 @@ pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
 # dedicated-command routing — the five Wave 2 partial → supported
 # compat.json entries.
 pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
+
+# Widget bridge — yoga logical-edge fan-out + A4 OOS pins (P5-1
+# follow-up). pulp #1542 yoga logical-edge (marginInline/Block +
+# paddingInline/Block + inset shorthand) + pulp #1434 A4 Bundles 2-7
+# css NOT-IMPL closure catalog hygiene.
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos LIBRARIES pulp::view)
+
+# Widget bridge — Wave 2 cheap-wiring (P5-1 follow-up). Bundles the
+# Wave 2 canvas2d cheap wiring (DIVERGE → PASS) + Wave 2 css value-
+# coverage wiring entries from compat.json's Wave 2 cleanup pass.
+pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap LIBRARIES pulp::view)
+
+# Widget bridge — RN style-prop bridge primitives (P5-1 follow-up,
+# pulp #1026). setShadow / setOpacity / setTransform RN-shaped style
+# functions flow through bridge into View's slots. Includes RN's
+# shadowOpacity-into-color-alpha composition + transform-prop
+# aggregation.
+pulp_add_test_suite(pulp-test-widget-bridge-rn-style LIBRARIES pulp::view)
+
+# Widget bridge — Tier-4 OOS / perf-hints / interaction misc pins
+# (P5-1 follow-up, pulp #1434). Pins the no-op / fallback contract
+# for properties Pulp deliberately doesn't paint: 3D transforms,
+# generated content, scroll-snap, will-change, contain, touch-action
+# secondary keywords. Catalog hygiene tests.
+pulp_add_test_suite(pulp-test-widget-bridge-tier4-oos LIBRARIES pulp::view)
 
 # Widget bridge — RN outline cluster (P5-1 follow-up, pulp #1519).
 # outlineColor / outlineOffset / outlineStyle / outlineWidth longhands
@@ -1996,6 +2084,44 @@ pulp_add_test_suite(pulp-test-widget-bridge-css-animations LIBRARIES pulp::view)
 # fr-unit + auto sizing tokens round-trip through the bridge.
 pulp_add_test_suite(pulp-test-widget-bridge-css-grid LIBRARIES pulp::view)
 
+# Widget bridge — animation API cluster (P5-1 follow-up). Bridge ↔
+# MotionEngine plumbing for setMotionToken, animate(), the Web
+# Animations API surface (Element.animate / KeyframeEffect), motion
+# provenance, and pulp-motion-bench harness output. Self-contained
+# ~800-line cluster from test_widget_bridge.cpp.
+pulp_add_test_suite(pulp-test-widget-bridge-animation LIBRARIES pulp::view)
+
+# Widget bridge — pulp #1434 (cross-surface mega-batch) per-edge margin
+# / padding (P5-1 follow-up). marginTop / marginRight / marginBottom /
+# marginLeft (and padding counterparts) each route to their own Yoga
+# edge enum without cross-contamination through the bridge.
+pulp_add_test_suite(pulp-test-widget-bridge-css-per-edge LIBRARIES pulp::view)
+
+# Widget bridge — pulp #1737 RN-OOS-fixup catalog audit tail (P5-1
+# follow-up). Material elevation shim, includeFontPadding round-trip,
+# pulp #1812 borderCurve squircle paint dispatch, isolation honest
+# CSS-subset, and other RN-side OOS catalog hygiene checks.
+pulp_add_test_suite(pulp-test-widget-bridge-rn-oos-fixup LIBRARIES pulp::view)
+
+# Widget bridge — Canvas2D bridge-fn cluster (P5-1 follow-up). pulp
+# #1434 canvasSetFontFull + pulp #1522 fillRule + pulp #1520
+# canvasSetDirection / canvasSetFilter — three closely related
+# bridge entry-points that thread JS-side Canvas2D semantics through
+# WidgetBridge into the native canvas pipeline.
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-bridge-fns LIBRARIES pulp::view)
+
+# Widget bridge — pulp #1543 Yoga borderWidth wiring (P5-1 follow-up).
+# Pins YGNodeStyleSetBorder integration with Yoga 3.x default box-sizing
+# (border-box); the companion content-box test lives in #1516 once
+# setBoxSizing is wired.
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-border LIBRARIES pulp::view)
+
+# Widget bridge — CSS-misc cluster (P5-1 follow-up). pulp #1434 batch 3
+# text-decoration longhands + pulp #1552 line-clamp + background-repeat.
+# Two coherent small CSS clusters that together push test_widget_bridge.cpp
+# under the 3,000-line P5-1 target.
+pulp_add_test_suite(pulp-test-widget-bridge-css-misc LIBRARIES pulp::view)
+
 # Autonomous Spectr regression suite (pulp-internal task #63, follow-up to
 # pulp #1792). Composes the six [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
@@ -2042,6 +2168,16 @@ set_tests_properties(visual-harness-self-test PROPERTIES
 
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
+
+# CanvasWidget NaN/Infinity sanitization cluster (P5-3 follow-up,
+# pulp #1387 gap #2). Pins that JS-supplied NaN / ±Inf coords land
+# as 0 in the recorded draw command, while finite values pass through.
+pulp_add_test_suite(pulp-test-canvas-widget-sanitize LIBRARIES pulp::view)
+
+# CanvasWidget + SkiaCanvas Canvas2D shadow-state cluster (P5-3
+# follow-up). Replay + clear + transparent/zero short-circuit
+# of sticky Canvas2D shadow* state.
+pulp_add_test_suite(pulp-test-canvas-widget-shadow LIBRARIES pulp::view)
 
 # pulp #964 — Canvas2D JS-shim coverage. Drives the full
 # web-compat-canvas.js → bridge → CanvasWidget path so a regression
@@ -2116,6 +2252,29 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import
+    PROPERTIES LABELS "parser-import")
+
+# P5-3 follow-up — W3C Design Tokens cluster extracted from
+# test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
+# composite typography/shadow shapes, alias resolution, math
+# expressions, group $type inheritance, ir_tokens_to_theme +
+# theme_to_ir_tokens round-trips.
+add_executable(pulp-test-design-import-w3c-tokens test_design_import_w3c_tokens.cpp)
+target_link_libraries(pulp-test-design-import-w3c-tokens PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-w3c-tokens PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-import-w3c-tokens
+    PROPERTIES LABELS "parser-import")
+
+# P5-3 follow-up — React-runtime parser cluster extracted from
+# test_design_import.cpp. Covers TSX/runtime React parsers for every
+# supported design-tool source: parse_v0_tsx / parse_v0_dev_react,
+# parse_figma_make_react, parse_stitch_react, parse_react_native_export,
+# parse_pencil_react. Shared contract: parse fixture, materialize via
+# host React shim, accept sanitized TSX, reject out-of-matrix surfaces.
+add_executable(pulp-test-design-import-react-runtime test_design_import_react_runtime.cpp)
+target_link_libraries(pulp-test-design-import-react-runtime PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-react-runtime PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-import-react-runtime
     PROPERTIES LABELS "parser-import")
 
 # Phase 0a: stable_anchor_id assignment per

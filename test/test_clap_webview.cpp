@@ -44,6 +44,39 @@ TEST_CASE("WebviewProvider message callback", "[format][webview]") {
     REQUIRE(provider.last_message == "{\"param\":\"gain\",\"value\":0.5}");
 }
 
+TEST_CASE("WebviewProvider defaults and outbound callback are stable",
+          "[format][webview][coverage][phase3]") {
+    class TestProvider : public WebviewProvider {
+    public:
+        WebviewContent get_webview_content() const override {
+            return {};
+        }
+
+        void send_for_test(const std::string& json) {
+            send_message(json);
+        }
+    };
+
+    TestProvider provider;
+    auto content = provider.get_webview_content();
+    REQUIRE(content.url.empty());
+    REQUIRE(content.html.empty());
+    REQUIRE(content.preferred_width == 400);
+    REQUIRE(content.preferred_height == 300);
+    REQUIRE(content.resizable);
+
+    provider.on_webview_message("{}");
+    provider.on_webview_show(true);
+    provider.send_for_test("{\"before\":true}");
+
+    std::string outbound;
+    provider.set_message_callback([&](const std::string& json) {
+        outbound = json;
+    });
+    provider.send_for_test("{\"after\":true}");
+    REQUIRE(outbound == "{\"after\":true}");
+}
+
 TEST_CASE("generate_webview_html produces valid HTML", "[format][webview]") {
     std::string params_json = R"([
         {"id":"0","label":"Gain","type":"float","defaultValue":0,"minValue":-60,"maxValue":24,"unit":"dB"},

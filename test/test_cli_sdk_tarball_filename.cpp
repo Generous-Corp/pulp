@@ -82,3 +82,11 @@ TEST_CASE("legacy_unversioned_sdk_tarball_filename: empty platform keeps legacy 
           "[cli][cache][coverage][phase3-large]") {
     REQUIRE(legacy_unversioned_sdk_tarball_filename("") == "pulp-sdk-.tar.gz");
 }
+
+TEST_CASE("sdk_tarball_filename: empty components remain literal",
+          "[cli][cache][coverage][phase3]") {
+    REQUIRE(sdk_tarball_filename("", "darwin-arm64") ==
+            "pulp-sdk-v-darwin-arm64.tar.gz");
+    REQUIRE(sdk_tarball_filename("0.92.0", "") ==
+            "pulp-sdk-v0.92.0-.tar.gz");
+}

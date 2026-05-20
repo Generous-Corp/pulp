@@ -66,6 +66,34 @@ TEST_CASE("SplitView lays out horizontal and vertical panes around divider",
     REQUIRE_THAT(second_ptr->bounds().height, WithinAbs(146.0f, 0.001f));
 }
 
+TEST_CASE("SplitView clamps split fraction and supports pane replacement",
+          "[view][split_view][coverage][phase3]") {
+    SplitView split;
+    auto first = std::make_unique<View>();
+    auto second = std::make_unique<View>();
+    auto replacement = std::make_unique<View>();
+    auto* first_ptr = first.get();
+    auto* replacement_ptr = replacement.get();
+
+    split.set_first(std::move(first));
+    split.set_second(std::move(second));
+    REQUIRE(split.child_count() == 2);
+    REQUIRE(split.first() == first_ptr);
+
+    split.set_split_fraction(-1.0f);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(0.0f, 0.001f));
+    split.set_split_fraction(2.0f);
+    REQUIRE_THAT(split.split_fraction(), WithinAbs(1.0f, 0.001f));
+
+    split.set_first(std::move(replacement));
+    REQUIRE(split.child_count() == 2);
+    REQUIRE(split.first() == replacement_ptr);
+
+    split.set_second(nullptr);
+    REQUIRE(split.second() == nullptr);
+    REQUIRE(split.child_count() == 1);
+}
+
 TEST_CASE("SplitView drag clamps to minimum pane sizes and reports changes",
           "[view][split_view][interaction]") {
     SplitView split;

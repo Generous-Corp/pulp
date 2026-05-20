@@ -1,6 +1,7 @@
 #include <pulp/host/scan_blacklist.hpp>
 
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -63,6 +64,21 @@ std::string unescape(std::string_view s) {
     return out;
 }
 
+bool parse_int64_field(const std::string& text, int64_t& out) {
+    try {
+        std::size_t pos = 0;
+        const auto value = std::stoll(text, &pos);
+        while (pos < text.size()) {
+            if (!std::isspace(static_cast<unsigned char>(text[pos]))) return false;
+            ++pos;
+        }
+        out = value;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 } // namespace
 
 std::optional<BlacklistEntry> ScanBlacklist::get(const std::string& path) const {
@@ -114,12 +130,8 @@ bool ScanBlacklist::from_text(const std::string& text) {
         }
         if (fields.size() != 4) continue;  // malformed — skip
         BlacklistEntry e;
-        try {
-            e.mtime = std::stoll(fields[1]);
-            e.size  = std::stoll(fields[2]);
-        } catch (...) {
-            continue;
-        }
+        if (!parse_int64_field(fields[1], e.mtime) ||
+            !parse_int64_field(fields[2], e.size)) continue;
         e.reason = unescape(fields[3]);
         entries_[unescape(fields[0])] = std::move(e);
     }

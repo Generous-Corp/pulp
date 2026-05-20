@@ -120,6 +120,11 @@ int do_list(bool json_mode) {
 }
 
 int do_add(const std::vector<std::string>& args) {
+    if (args.size() > 1) {
+        std::cerr << "pulp projects add: unexpected argument: " << args[1] << "\n";
+        return 2;
+    }
+
     fs::path target;
     if (args.empty()) {
         target = fs::current_path();
@@ -166,6 +171,10 @@ int do_remove(const std::vector<std::string>& args) {
         std::cerr << "pulp projects remove: a path argument is required\n";
         return 1;
     }
+    if (args.size() > 1) {
+        std::cerr << "pulp projects remove: unexpected argument: " << args[1] << "\n";
+        return 2;
+    }
     fs::path target = args[0];
     if (target.is_relative()) target = fs::current_path() / target;
 
@@ -193,7 +202,12 @@ int cmd_projects(const std::vector<std::string>& args) {
     if (sub == "list" || sub == "ls") {
         bool json_mode = false;
         for (const auto& a : rest) {
-            if (a == "--json") json_mode = true;
+            if (a == "--json") {
+                json_mode = true;
+            } else {
+                std::cerr << "pulp projects list: unknown option: " << a << "\n";
+                return 2;
+            }
         }
         return do_list(json_mode);
     }

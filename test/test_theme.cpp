@@ -66,15 +66,32 @@ TEST_CASE("Theme apply_overrides", "[view][theme]") {
     Theme overrides;
     overrides.colors["bg.primary"] = color_from_hex(0xFF0000);
     overrides.dimensions["spacing.md"] = 99.0f;
+    overrides.strings["font.family"] = "Override Sans";
 
     base.apply_overrides(overrides);
 
     REQUIRE(base.color("bg.primary")->r8() == 0xFF);
     REQUIRE(base.color("bg.primary")->g8() == 0x00);
     REQUIRE_THAT(base.dimension("spacing.md").value(), WithinAbs(99.0, 0.001));
+    REQUIRE(base.string_token("font.family").value() == "Override Sans");
 
     // Non-overridden tokens should still be there
     REQUIRE(base.color("text.primary").has_value());
+}
+
+TEST_CASE("Theme apply_overrides with empty theme preserves existing tokens",
+          "[view][theme][coverage][phase3]") {
+    auto base = Theme::dark();
+    const auto bg = base.color("bg.primary");
+    const auto spacing = base.dimension("spacing.md");
+    const auto font = base.string_token("font.family");
+
+    base.apply_overrides(Theme{});
+
+    REQUIRE(base.color("bg.primary") == bg);
+    REQUIRE(base.dimension("spacing.md") == spacing);
+    REQUIRE(base.string_token("font.family") == font);
+    REQUIRE(base.is_complete());
 }
 
 TEST_CASE("Theme JSON round-trip", "[view][theme]") {
@@ -230,6 +247,21 @@ TEST_CASE("Theme from_json maps malformed color strings to default color",
     REQUIRE(theme.color("bad.no_hash")->b8() == 0);
     REQUIRE(theme.color("bad.no_hash")->a8() == 255);
     REQUIRE(theme.color("bad.short").value() == Color{});
+}
+
+TEST_CASE("Theme from_json maps invalid hex digits to default color",
+          "[view][theme][coverage][phase3]") {
+    auto theme = Theme::from_json(R"({
+        "colors": {
+            "bad.digit": "#12xx56",
+            "bad.tail": "#123456zz",
+            "bad.long": "#fffffffff"
+        }
+    })");
+
+    REQUIRE(theme.color("bad.digit").value() == Color{});
+    REQUIRE(theme.color("bad.tail").value() == Color{});
+    REQUIRE(theme.color("bad.long").value() == Color{});
 }
 
 TEST_CASE("Theme JSON parser covers optional sections and alpha colors",

@@ -30,6 +30,7 @@ endif()
 # Wraps AAudio (API 26+) with automatic fallback to OpenSL ES.
 # Single audio backend for Pulp on Android.
 set(OBOE_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_Declare(
     oboe
     GIT_REPOSITORY https://github.com/google/oboe.git
@@ -37,6 +38,7 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(oboe)
+unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 # Suppress warnings in third-party Oboe code (NDK 30 Clang is stricter)
 if(TARGET oboe)
     target_compile_options(oboe PRIVATE -w)

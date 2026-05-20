@@ -42,6 +42,31 @@ TEST_CASE("plugin-side consumer can iterate UMP packets via the sidecar",
     REQUIRE((*buf.ump())[0].packet.message_type() == UmpMessageType::Midi2ChannelVoice);
 }
 
+TEST_CASE("UmpBuffer sorts, iterates, and clears sample-accurate events",
+          "[midi][buffer][ump][coverage][phase3-large]") {
+    UmpBuffer ump;
+    ump.add(UmpPacket::note_on_2(0, 2, 67, 0x4000), 96);
+    ump.add(UmpEvent{UmpPacket::note_off_2(0, 1, 60, 0), 12});
+    ump.add(UmpPacket::note_on_2(0, 1, 60, 0x8000), 48);
+
+    REQUIRE_FALSE(ump.empty());
+    REQUIRE(ump.size() == 3);
+
+    ump.sort();
+    REQUIRE(ump[0].sample_offset == 12);
+    REQUIRE(ump[1].sample_offset == 48);
+    REQUIRE(ump[2].sample_offset == 96);
+
+    int total_offsets = 0;
+    for (const auto& event : ump)
+        total_offsets += event.sample_offset;
+    REQUIRE(total_offsets == 156);
+
+    ump.clear();
+    REQUIRE(ump.empty());
+    REQUIRE(ump.size() == 0);
+}
+
 TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits",
           "[midi][buffer][ump][issue-645]") {
     MidiBuffer buf;
@@ -63,4 +88,23 @@ TEST_CASE("attached UMP sidecar remains externally owned across MidiBuffer edits
     buf.attach_ump(&second);
     REQUIRE(buf.ump() == &second);
     REQUIRE((*buf.ump())[0].packet.channel() == 2);
+}
+
+TEST_CASE("MidiBuffer move assignment preserves attached UMP sidecar pointer",
+          "[midi][buffer][ump][coverage][phase3]") {
+    UmpBuffer sidecar;
+    sidecar.add(UmpPacket::cc_2(0, 3, 74, 0x80000000u), 24);
+
+    MidiBuffer source;
+    source.add(MidiEvent::cc(3, 74, 64));
+    source.attach_ump(&sidecar);
+
+    MidiBuffer target;
+    target = std::move(source);
+
+    REQUIRE(target.size() == 1);
+    REQUIRE(target.ump() == &sidecar);
+    REQUIRE(target.ump()->size() == 1);
+    REQUIRE((*target.ump())[0].sample_offset == 24);
+    REQUIRE((*target.ump())[0].packet.channel() == 3);
 }

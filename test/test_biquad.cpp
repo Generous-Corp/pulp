@@ -53,6 +53,20 @@ TEST_CASE("Biquad default coefficients are an identity bypass",
     require_buffer_matches(buffer, expected);
 }
 
+TEST_CASE("Biquad zero and negative block lengths are no-ops",
+          "[signal][biquad][coverage][phase3]") {
+    Biquad filter;
+    filter.set_coefficients(Biquad::Type::lowpass, 1000.0f, 0.707f, kSampleRate);
+    filter.process(1.0f);
+
+    std::array<float, 3> buffer{{0.25f, -0.5f, 0.75f}};
+    const auto expected = buffer;
+    filter.process(buffer.data(), 0);
+    filter.process(buffer.data(), -4);
+
+    require_buffer_matches(buffer, expected);
+}
+
 TEST_CASE("Biquad sample and block processing paths match",
           "[signal][biquad][issue-645]") {
     const std::array<BiquadCase, 10> cases{{

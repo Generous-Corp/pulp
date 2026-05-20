@@ -82,6 +82,76 @@ TEST_CASE("FontOptions hash includes full resolver cache key",
     REQUIRE(changed.hash() != base.hash());
 }
 
+TEST_CASE("FontOptions hash includes scalar style and render policy fields",
+          "[canvas][font][options][coverage]") {
+    const FontOptions base = rich_options();
+
+    auto changed = base;
+    changed.weight = 500.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.width = 95.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.slant = FontSlant::Italic;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.oblique_angle = -8.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.size = 19.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.direction = BaseDirection::LTR;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.letter_spacing = 0.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.word_spacing = 0.0f;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.hinting_mode = HintingMode::None;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.aa_mode = AntiAliasMode::NoAA;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.color_font_mode = ColorFontMode::SVG;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.font_synthesis.slant = true;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+
+    changed = base;
+    changed.fallback_mode = FallbackMode::Native;
+    REQUIRE(changed != base);
+    REQUIRE(changed.hash() != base.hash());
+}
+
 TEST_CASE("FontOptions hash canonicalizes signed zero on float members",
           "[canvas][font][options][coverage][issue-2169]") {
     // Codex P2 on #2169 — `FontOptions::operator==` is `= default` (per-member

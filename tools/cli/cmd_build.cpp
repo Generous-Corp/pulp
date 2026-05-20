@@ -54,6 +54,10 @@ int cmd_build(const std::vector<std::string>& args) {
             allow_unsupported_sdk = true;
             continue;
         }
+        if (arg == "--js-engine") {
+            std::cerr << "Error: --js-engine requires a value\n";
+            return 2;
+        }
         if (arg.rfind("--js-engine=", 0) == 0) {
             js_engine = arg.substr(12);
             if (js_engine != "auto" && js_engine != "quickjs" && js_engine != "jsc" && js_engine != "v8") {

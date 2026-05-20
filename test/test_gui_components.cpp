@@ -432,6 +432,156 @@ TEST_CASE("Toolbar paint emits button, separator, custom, and orientation comman
     REQUIRE(vertical_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) >= 2);
 }
 
+// ── Extended Buttons ────────────────────────────────────────────────────
+
+TEST_CASE("TextButton disabled state suppresses click and still paints",
+          "[gui][buttons][coverage][phase3]") {
+    TextButton button("Render");
+    button.set_bounds({0, 0, 96, 32});
+
+    int clicks = 0;
+    button.on_click = [&] { ++clicks; };
+    button.on_mouse_enter();
+    button.on_mouse_down({8, 8});
+    REQUIRE(clicks == 1);
+
+    button.set_enabled(false);
+    button.on_mouse_down({8, 8});
+    REQUIRE(clicks == 1);
+    REQUIRE_FALSE(button.is_enabled());
+
+    RecordingCanvas canvas;
+    button.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+}
+
+TEST_CASE("ArrowButton paints all directions and invokes click callback",
+          "[gui][buttons][coverage][phase3]") {
+    ArrowButton button;
+    button.set_bounds({0, 0, 24, 24});
+
+    int clicks = 0;
+    button.on_click = [&] { ++clicks; };
+
+    for (auto direction : {ArrowDirection::up,
+                           ArrowDirection::down,
+                           ArrowDirection::left,
+                           ArrowDirection::right}) {
+        button.set_direction(direction);
+        REQUIRE(button.direction() == direction);
+
+        RecordingCanvas canvas;
+        REQUIRE_NOTHROW(button.paint(canvas));
+    }
+
+    button.on_mouse_down({12, 12});
+    REQUIRE(clicks == 1);
+}
+
+TEST_CASE("ShapeButton reports hover and pressed state to custom painter",
+          "[gui][buttons][coverage][phase3]") {
+    ShapeButton button;
+    button.set_bounds({0, 0, 32, 20});
+
+    std::vector<std::pair<bool, bool>> states;
+    int clicks = 0;
+    button.set_shape([&](Canvas& canvas, float width, float height, bool hovered, bool pressed) {
+        states.push_back({hovered, pressed});
+        canvas.set_fill_color(Color::rgba8(10, 20, 30));
+        canvas.fill_rect(0, 0, width, height);
+    });
+    button.on_click = [&] { ++clicks; };
+
+    RecordingCanvas first;
+    button.paint(first);
+    button.on_mouse_enter();
+    RecordingCanvas hovered;
+    button.paint(hovered);
+    button.on_mouse_down({3, 4});
+    RecordingCanvas pressed;
+    button.paint(pressed);
+    button.on_mouse_leave();
+    RecordingCanvas left;
+    button.paint(left);
+
+    REQUIRE(clicks == 1);
+    REQUIRE(states == std::vector<std::pair<bool, bool>>{
+        {false, false}, {true, false}, {true, true}, {false, false}});
+    REQUIRE(pressed.count(DrawCommand::Type::fill_rect) == 1);
+}
+
+TEST_CASE("ImageButton selects normal hover and pressed image paths",
+          "[gui][buttons][coverage][phase3]") {
+    ImageButton button;
+    button.set_bounds({0, 0, 40, 24});
+    button.set_image("normal.png");
+    button.set_hover_image("hover.png");
+    button.set_pressed_image("pressed.png");
+
+    RecordingCanvas normal;
+    button.paint(normal);
+    REQUIRE(normal.count(DrawCommand::Type::draw_image) == 1);
+    REQUIRE(normal.commands().back().text == "normal.png");
+
+    button.on_mouse_enter();
+    RecordingCanvas hover;
+    button.paint(hover);
+    REQUIRE(hover.commands().back().text == "hover.png");
+
+    int clicks = 0;
+    button.on_click = [&] { ++clicks; };
+    button.on_mouse_down({2, 2});
+    RecordingCanvas pressed;
+    button.paint(pressed);
+    REQUIRE(clicks == 1);
+    REQUIRE(pressed.commands().back().text == "pressed.png");
+
+    button.on_mouse_leave();
+    RecordingCanvas after_leave;
+    button.paint(after_leave);
+    REQUIRE(after_leave.commands().back().text == "normal.png");
+}
+
+TEST_CASE("ImageButton falls back to normal image for missing state assets",
+          "[gui][buttons][coverage][phase3]") {
+    ImageButton button;
+    button.set_bounds({0, 0, 40, 24});
+    button.set_image("normal.png");
+
+    button.on_mouse_enter();
+    RecordingCanvas hover;
+    button.paint(hover);
+    REQUIRE(hover.commands().back().text == "normal.png");
+
+    button.on_mouse_down({1, 1});
+    RecordingCanvas pressed;
+    button.paint(pressed);
+    REQUIRE(pressed.commands().back().text == "normal.png");
+}
+
+TEST_CASE("ResizableCorner reports drag deltas from mouse down origin",
+          "[gui][buttons][coverage][phase3]") {
+    ResizableCorner corner;
+    corner.set_bounds({0, 0, 16, 16});
+
+    std::vector<std::pair<float, float>> deltas;
+    corner.on_resize = [&](float dx, float dy) {
+        deltas.push_back({dx, dy});
+    };
+
+    corner.on_mouse_down({4, 6});
+    corner.on_mouse_drag({10, 3});
+    corner.on_mouse_drag({1, 9});
+
+    REQUIRE(deltas == std::vector<std::pair<float, float>>{{6.0f, -3.0f}, {-3.0f, 3.0f}});
+
+    RecordingCanvas canvas;
+    corner.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 3);
+}
+
 // ── ConcertinaPanel ─────────────────────────────────────────────────────
 
 TEST_CASE("ConcertinaPanel add sections", "[gui][concertina]") {
@@ -537,6 +687,77 @@ TEST_CASE("ConcertinaPanel paint and mouse hit testing cover content offsets",
     REQUIRE(second_ptr->paint_count == 1);
     REQUIRE(canvas.count(DrawCommand::Type::save) == 2);
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 2);
+}
+
+TEST_CASE("ConcertinaPanel handles null content and default content heights",
+          "[gui][concertina][coverage][phase3]") {
+    ConcertinaPanel panel;
+    panel.set_bounds({0, 0, 160, 220});
+    panel.set_header_height(18.0f);
+
+    auto fixed = std::make_unique<PanelProbeView>(32.0f);
+    auto* fixed_ptr = fixed.get();
+    panel.add_section("Empty", nullptr, true);
+    panel.add_section("Fixed", std::move(fixed), false);
+    panel.add_section("Fallback", std::make_unique<PanelProbeView>(0.0f), false);
+
+    REQUIRE(panel.header_height() == 18.0f);
+    REQUIRE(panel.is_expanded(0));
+    REQUIRE_FALSE(panel.is_expanded(1));
+    REQUIRE_FALSE(panel.is_expanded(2));
+
+    RecordingCanvas initial;
+    panel.paint(initial);
+    REQUIRE(initial.count(DrawCommand::Type::fill_text) >= 6);
+    REQUIRE(fixed_ptr->paint_count == 0);
+
+    panel.on_mouse_down({8, 124});  // after Empty's default 100px expanded area
+    REQUIRE(panel.is_expanded(1));
+    REQUIRE(fixed_ptr->visible());
+
+    panel.layout_sections();
+    REQUIRE(fixed_ptr->bounds().height == 32.0f);
+
+    RecordingCanvas expanded;
+    panel.paint(expanded);
+    REQUIRE(fixed_ptr->paint_count == 1);
+    REQUIRE(expanded.count(DrawCommand::Type::save) == 1);
+    REQUIRE(expanded.count(DrawCommand::Type::restore) == 1);
+}
+
+TEST_CASE("ConcertinaPanel exclusive expansion collapses visible content",
+          "[gui][concertina][coverage][phase3]") {
+    ConcertinaPanel panel;
+    panel.set_exclusive(true);
+
+    auto first = std::make_unique<PanelProbeView>(20.0f);
+    auto* first_ptr = first.get();
+    auto second = std::make_unique<PanelProbeView>(20.0f);
+    auto* second_ptr = second.get();
+    auto third = std::make_unique<PanelProbeView>(20.0f);
+    auto* third_ptr = third.get();
+
+    panel.add_section("First", std::move(first), true);
+    panel.add_section("Second", std::move(second), true);
+    panel.add_section("Third", std::move(third), false);
+
+    REQUIRE(panel.is_expanded(0));
+    REQUIRE(panel.is_expanded(1));
+    REQUIRE(first_ptr->visible());
+    REQUIRE(second_ptr->visible());
+    REQUIRE_FALSE(third_ptr->visible());
+
+    panel.expand(2);
+    REQUIRE_FALSE(panel.is_expanded(0));
+    REQUIRE_FALSE(panel.is_expanded(1));
+    REQUIRE(panel.is_expanded(2));
+    REQUIRE_FALSE(first_ptr->visible());
+    REQUIRE_FALSE(second_ptr->visible());
+    REQUIRE(third_ptr->visible());
+
+    panel.toggle(2);
+    REQUIRE_FALSE(panel.is_expanded(2));
+    REQUIRE_FALSE(third_ptr->visible());
 }
 
 // ── TextButton ──────────────────────────────────────────────────────────
@@ -862,4 +1083,72 @@ TEST_CASE("LassoComponent callback fires", "[gui][lasso]") {
 
     REQUIRE(last_rect.width == 100.0f);
     REQUIRE(last_rect.height == 100.0f);
+}
+
+TEST_CASE("SelectionRect contains and intersects use half-open bounds",
+          "[gui][lasso][coverage][phase3]") {
+    SelectionRect rect{10.0f, 20.0f, 40.0f, 30.0f};
+
+    REQUIRE(rect.contains(10.0f, 20.0f));
+    REQUIRE(rect.contains(49.9f, 49.9f));
+    REQUIRE_FALSE(rect.contains(50.0f, 20.0f));
+    REQUIRE_FALSE(rect.contains(10.0f, 50.0f));
+    REQUIRE_FALSE(rect.contains(9.9f, 25.0f));
+
+    REQUIRE(rect.intersects(0.0f, 0.0f, 11.0f, 21.0f));
+    REQUIRE(rect.intersects(49.0f, 49.0f, 5.0f, 5.0f));
+    REQUIRE_FALSE(rect.intersects(50.0f, 20.0f, 10.0f, 10.0f));
+    REQUIRE_FALSE(rect.intersects(0.0f, 50.0f, 100.0f, 10.0f));
+}
+
+TEST_CASE("LassoComponent inactive updates and end are no-ops",
+          "[gui][lasso][coverage][phase3]") {
+    LassoComponent lasso;
+    int changed = 0;
+    int completed = 0;
+    lasso.on_selection_changed = [&](const SelectionRect&) { ++changed; };
+    lasso.on_selection_complete = [&](const SelectionRect&) { ++completed; };
+
+    lasso.update_selection(20.0f, 30.0f);
+    lasso.end_selection();
+
+    REQUIRE_FALSE(lasso.is_active());
+    REQUIRE(changed == 0);
+    REQUIRE(completed == 0);
+    REQUIRE(lasso.selection_rect().width == 0.0f);
+    REQUIRE(lasso.selection_rect().height == 0.0f);
+}
+
+TEST_CASE("LassoComponent completes selection and only paints while active",
+          "[gui][lasso][coverage][phase3]") {
+    LassoComponent lasso;
+    SelectionRect completed;
+    int complete_calls = 0;
+    lasso.on_selection_complete = [&](const SelectionRect& r) {
+        completed = r;
+        ++complete_calls;
+    };
+
+    RecordingCanvas inactive;
+    lasso.paint(inactive);
+    REQUIRE(inactive.commands().empty());
+
+    lasso.on_mouse_down({40.0f, 30.0f});
+    lasso.on_mouse_drag({10.0f, 70.0f});
+
+    RecordingCanvas active;
+    lasso.paint(active);
+    REQUIRE(active.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(active.count(DrawCommand::Type::stroke_rect) == 1);
+
+    lasso.on_mouse_up({10.0f, 70.0f});
+    REQUIRE_FALSE(lasso.is_active());
+    REQUIRE(complete_calls == 1);
+    REQUIRE(completed.x == 10.0f);
+    REQUIRE(completed.y == 30.0f);
+    REQUIRE(completed.width == 30.0f);
+    REQUIRE(completed.height == 40.0f);
+
+    lasso.end_selection();
+    REQUIRE(complete_calls == 1);
 }

@@ -39,6 +39,14 @@ static void print_warn(const std::string& msg) {
     std::cout << yellow("⚠") << " " << msg << "\n";
 }
 
+static bool looks_like_option(const std::string& arg) {
+    return arg.starts_with("-");
+}
+
+static bool missing_option_value(const std::vector<std::string>& args, size_t i) {
+    return i + 1 >= args.size() || looks_like_option(args[i + 1]);
+}
+
 static fs::path find_project_root() {
     auto dir = fs::current_path();
     while (true) {
@@ -285,6 +293,10 @@ int cmd_target(const std::vector<std::string>& args) {
     auto subcmd = args[0];
 
     if (subcmd == "list") {
+        if (args.size() > 1) {
+            print_fail("Unexpected target list argument: " + args[1]);
+            return 2;
+        }
         auto targets = read_project_targets(root);
         bool has_toml = fs::exists(root / "pulp.toml");
         std::cout << "Project targets";
@@ -299,6 +311,10 @@ int cmd_target(const std::vector<std::string>& args) {
         if (args.size() < 2) {
             print_fail("Usage: pulp target add <Platform-arch>");
             return 1;
+        }
+        if (args.size() > 2) {
+            print_fail("Unexpected target add argument: " + args[2]);
+            return 2;
         }
         auto parsed = PlatformTarget::parse(args[1]);
         if (!parsed) {
@@ -345,6 +361,10 @@ int cmd_target(const std::vector<std::string>& args) {
             print_fail("Usage: pulp target remove <Platform-arch>");
             return 1;
         }
+        if (args.size() > 2) {
+            print_fail("Unexpected target remove argument: " + args[2]);
+            return 2;
+        }
         auto parsed = PlatformTarget::parse(args[1]);
         if (!parsed) {
             print_fail("Invalid target: " + args[1]);
@@ -384,8 +404,35 @@ int cmd_search(const std::vector<std::string>& args) {
     }
 
     bool refresh = false;
-    for (auto& a : args)
-        if (a == "--refresh") refresh = true;
+    std::string query;
+    bool json_output = false;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--refresh") {
+            refresh = true;
+        } else if (args[i] == "--format") {
+            if (missing_option_value(args, i)) {
+                print_fail("--format requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "json") {
+                print_fail("--format must be json");
+                return 2;
+            }
+            json_output = true;
+            ++i;
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown search option: " + args[i]);
+            return 2;
+        } else {
+            if (!query.empty()) query += " ";
+            query += args[i];
+        }
+    }
+
+    if (query.empty()) {
+        print_fail("Search query required");
+        return 2;
+    }
 
     // Try local registry first, fall back to remote
     auto root = find_project_root();
@@ -412,18 +459,6 @@ int cmd_search(const std::vector<std::string>& args) {
     }
 
     auto& reg = result.registry;
-
-    std::string query;
-    bool json_output = false;
-    for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
-            json_output = true;
-            ++i;
-        } else {
-            if (!query.empty()) query += " ";
-            query += args[i];
-        }
-    }
 
     auto results = search(reg, query);
     if (results.empty()) {
@@ -459,6 +494,19 @@ int cmd_search(const std::vector<std::string>& args) {
 }
 
 int cmd_list(const std::vector<std::string>& args) {
+    bool json_output = false;
+    for (const auto& arg : args) {
+        if (arg == "--json") {
+            json_output = true;
+        } else if (looks_like_option(arg)) {
+            print_fail("Unknown list option: " + arg);
+            return 2;
+        } else {
+            print_fail("Unexpected list argument: " + arg);
+            return 2;
+        }
+    }
+
     auto root = find_project_root();
     if (root.empty()) {
         print_fail("Not in a Pulp project");
@@ -485,8 +533,6 @@ int cmd_list(const std::vector<std::string>& args) {
         auto [r, e] = load_registry(reg_path);
         if (e.empty()) reg = r;
     }
-
-    bool json_output = std::find(args.begin(), args.end(), "--json") != args.end();
 
     if (json_output) {
         std::cout << "[\n";
@@ -532,9 +578,21 @@ int cmd_add(const std::vector<std::string>& args) {
     bool no_cmake = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--accept-license" && i + 1 < args.size()) {
+        if (args[i] == "--accept-license") {
+            if (missing_option_value(args, i)) {
+                print_fail("--accept-license requires a value");
+                return 2;
+            }
             accepted_license = args[++i]; license_override = true;
-        } else if (args[i] == "--license-override" && i + 1 < args.size() && args[i + 1] == "commercial") {
+        } else if (args[i] == "--license-override") {
+            if (missing_option_value(args, i)) {
+                print_fail("--license-override requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "commercial") {
+                print_fail("--license-override must be commercial");
+                return 2;
+            }
             license_override = true; ++i;
         } else if (args[i] == "--platform-guard") {
             platform_guard = true;
@@ -542,6 +600,12 @@ int cmd_add(const std::vector<std::string>& args) {
             no_cmake = true;
         } else if (package_id.empty() && !args[i].starts_with("-")) {
             package_id = args[i];
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown add option: " + args[i]);
+            return 2;
+        } else {
+            print_fail("Unexpected add argument: " + args[i]);
+            return 2;
         }
     }
 
@@ -766,6 +830,14 @@ int cmd_remove(const std::vector<std::string>& args) {
         std::cout << "Usage: pulp remove <package>\n";
         return 0;
     }
+    if (args[0].starts_with("-")) {
+        print_fail("Unknown remove option: " + args[0]);
+        return 2;
+    }
+    if (args.size() > 1) {
+        print_fail("Unexpected remove argument: " + args[1]);
+        return 2;
+    }
 
     auto root = find_project_root();
     if (root.empty()) {
@@ -820,6 +892,19 @@ int cmd_remove(const std::vector<std::string>& args) {
 }
 
 int cmd_update(const std::vector<std::string>& args) {
+    bool apply = false;
+    for (const auto& arg : args) {
+        if (arg == "--apply") {
+            apply = true;
+        } else if (looks_like_option(arg)) {
+            print_fail("Unknown update option: " + arg);
+            return 2;
+        } else {
+            print_fail("Unexpected update argument: " + arg);
+            return 2;
+        }
+    }
+
     auto root = find_project_root();
     if (root.empty()) {
         print_fail("Not in a Pulp project");
@@ -842,7 +927,6 @@ int cmd_update(const std::vector<std::string>& args) {
     if (!err.empty()) { print_fail(err); return 1; }
 
     auto lock = load_lock_file(lock_path);
-    bool apply = std::find(args.begin(), args.end(), "--apply") != args.end();
     bool has_updates = false;
 
     for (auto& [id, lp] : lock.packages) {
@@ -902,14 +986,40 @@ int cmd_suggest(const std::vector<std::string>& args) {
     std::string mode, value;
     bool json_output = false;
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--description" && i + 1 < args.size()) {
+        if (args[i] == "--description") {
+            if (missing_option_value(args, i)) {
+                print_fail("--description requires a value");
+                return 2;
+            }
             mode = "description"; value = args[++i];
-        } else if (args[i] == "--analyze" && i + 1 < args.size()) {
+        } else if (args[i] == "--analyze") {
+            if (missing_option_value(args, i)) {
+                print_fail("--analyze requires a value");
+                return 2;
+            }
             mode = "analyze"; value = args[++i];
-        } else if (args[i] == "--alternative" && i + 1 < args.size()) {
+        } else if (args[i] == "--alternative") {
+            if (missing_option_value(args, i)) {
+                print_fail("--alternative requires a value");
+                return 2;
+            }
             mode = "alternative"; value = args[++i];
-        } else if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
+        } else if (args[i] == "--format") {
+            if (missing_option_value(args, i)) {
+                print_fail("--format requires a value");
+                return 2;
+            }
+            if (args[i + 1] != "json") {
+                print_fail("--format must be json");
+                return 2;
+            }
             json_output = true; ++i;
+        } else if (looks_like_option(args[i])) {
+            print_fail("Unknown suggest option: " + args[i]);
+            return 2;
+        } else {
+            print_fail("Unexpected suggest argument: " + args[i]);
+            return 2;
         }
     }
 

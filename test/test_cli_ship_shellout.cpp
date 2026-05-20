@@ -301,6 +301,42 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship validates option parser errors before side effects",
+                 "[cli][shellout][ship][coverage][phase3]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("parser-errors", true);
+
+    const struct {
+        std::vector<std::string> args;
+        const char* message;
+    } cases[] = {
+        {{"ship", "sign", "--identity"}, "--identity requires a value"},
+        {{"ship", "sign", "--bogus"}, "unknown argument"},
+        {{"ship", "package", "--version"}, "--version requires a value"},
+        {{"ship", "package", "--abi"}, "--abi requires a value"},
+        {{"ship", "package", "--bogus"}, "unknown argument"},
+        {{"ship", "check", "--target"}, "--target requires a value"},
+        {{"ship", "check", "--bogus"}, "unknown argument"},
+        {{"ship", "appcast", "--url"}, "--url requires a value"},
+        {{"ship", "appcast", "--output"}, "--output requires a value"},
+        {{"ship", "appcast", "--bogus"}, "unknown argument"},
+    };
+
+    for (const auto& c : cases) {
+        INFO("ship args under test");
+        auto r = run_pulp_in(root, c.args);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(contains(r.stdout_output + r.stderr_output, c.message));
+        REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "Signing "));
+        REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "Packaging "));
+        REQUIRE_FALSE(contains(r.stdout_output + r.stderr_output, "Appcast written"));
+    }
+
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship Android validation paths fail before external tooling",
                  "[cli][shellout][ship][android][issue-643][issue-901]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }

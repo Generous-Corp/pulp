@@ -86,7 +86,12 @@ int cmd_doctor(const std::vector<std::string>& args) {
         else if (arg == "--au-cache") au_cache_mode = true;
         else if (arg == "--json") json_mode = true;
         else if (arg == "--list") list_mode = true;
-        else if (arg == "--only" && i + 1 < args.size()) {
+        else if (arg == "--only") {
+            if (i + 1 >= args.size() || args[i + 1].rfind("-", 0) == 0) {
+                std::cerr << "pulp doctor: --only requires a value\n";
+                std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+                return 2;
+            }
             only_filter = args[++i];
         } else if (arg.rfind("--only=", 0) == 0) {
             only_filter = arg.substr(7);
@@ -96,6 +101,10 @@ int cmd_doctor(const std::vector<std::string>& args) {
             return 2;
         } else if (mode.empty()) {
             mode = arg;
+        } else {
+            std::cerr << "pulp doctor: unexpected argument '" << arg << "'\n";
+            std::cerr << "Usage: pulp doctor [android|ios|list] [--fix] [--ci] [--dry-run] [--versions] [--validators] [--scan-parents] [--caches] [--json] [--list] [--only <name>]\n";
+            return 2;
         }
     }
 

@@ -8,7 +8,9 @@
 #include <mbedtls/ctr_drbg.h>
 
 #include <sstream>
+#include <cctype>
 #include <cstring>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 
@@ -31,9 +33,16 @@ static int64_t json_int_value(std::string_view json, std::string_view key) {
     auto pos = json.find(search);
     if (pos == std::string_view::npos) return 0;
     auto start = pos + search.size();
-    try {
-        return std::stoll(std::string(json.substr(start, 20)));
-    } catch (...) { return 0; }
+    auto text = std::string(json.substr(start, 20));
+    char* end = nullptr;
+    auto value = std::strtoll(text.c_str(), &end, 10);
+    if (end == text.c_str()) return 0;
+    while (*end != '\0') {
+        if (*end == ',' || *end == '}') return value;
+        if (!std::isspace(static_cast<unsigned char>(*end))) return 0;
+        ++end;
+    }
+    return value;
 }
 
 // ── LicenseValidator ────────────────────────────────────────────────────

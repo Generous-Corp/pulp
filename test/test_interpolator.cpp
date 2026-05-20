@@ -41,6 +41,14 @@ TEST_CASE("Interpolator hermite impulse response spans adjacent samples", "[sign
     REQUIRE_THAT(Interpolator::hermite(0.5f, 0.0f, 0.0f, 0.0f, 1.0f), WithinAbs(-0.0625, 0.001));
 }
 
+TEST_CASE("Interpolator hermite preserves affine sample ramps",
+          "[signal][interp][coverage][phase3]") {
+    REQUIRE_THAT(Interpolator::hermite(0.25f, -1.0f, 1.0f, 3.0f, 5.0f),
+                 WithinAbs(1.5f, 0.001f));
+    REQUIRE_THAT(Interpolator::hermite(0.75f, -1.0f, 1.0f, 3.0f, 5.0f),
+                 WithinAbs(2.5f, 0.001f));
+}
+
 TEST_CASE("Interpolator lagrange at frac=0 returns y0", "[signal][interp]") {
     float result = Interpolator::lagrange(0.0f, 0.0f, 5.0f, 10.0f, 15.0f);
     REQUIRE_THAT(result, WithinAbs(5.0, 0.01));
@@ -56,6 +64,15 @@ TEST_CASE("Interpolator lagrange for linear data", "[signal][interp]") {
     // At frac=0.5, result should be 1.5
     float result = Interpolator::lagrange(0.5f, 0.0f, 1.0f, 2.0f, 3.0f);
     REQUIRE_THAT(result, WithinAbs(1.5, 0.01));
+}
+
+TEST_CASE("Interpolator lagrange preserves quadratic curves",
+          "[signal][interp][coverage][phase3]") {
+    // Samples from f(x) = x^2 at x=-1,0,1,2.
+    REQUIRE_THAT(Interpolator::lagrange(0.25f, 1.0f, 0.0f, 1.0f, 4.0f),
+                 WithinAbs(0.0625f, 0.001f));
+    REQUIRE_THAT(Interpolator::lagrange(0.75f, 1.0f, 0.0f, 1.0f, 4.0f),
+                 WithinAbs(0.5625f, 0.001f));
 }
 
 TEST_CASE("Interpolator lagrange impulse response spans four samples", "[signal][interp]") {
@@ -90,4 +107,54 @@ TEST_CASE("Interpolator sinc6 impulse response is symmetric at midpoint", "[sign
     REQUIRE_THAT(outer_left, WithinAbs(outer_right, 0.001));
     REQUIRE(left > 0.0f);
     REQUIRE(outer_left < 0.0f);
+}
+
+TEST_CASE("Interpolator linear preserves constants outside the unit interval",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::linear(-2.0f, -0.75f, -0.75f), WithinAbs(-0.75f, 1e-6f));
+    REQUIRE_THAT(Interpolator::linear(3.0f, 4.5f, 4.5f), WithinAbs(4.5f, 1e-6f));
+}
+
+TEST_CASE("Interpolator hermite reproduces quadratic midpoint samples",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::hermite(0.5f, 1.0f, 0.0f, 1.0f, 4.0f),
+                 WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(Interpolator::hermite(0.25f, 4.0f, 1.0f, 0.0f, 1.0f),
+                 WithinAbs(0.5625f, 1e-6f));
+}
+
+TEST_CASE("Interpolator lagrange reproduces cubic samples",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::lagrange(0.25f, -1.0f, 0.0f, 1.0f, 8.0f),
+                 WithinAbs(0.015625f, 1e-6f));
+    REQUIRE_THAT(Interpolator::lagrange(0.75f, -8.0f, -1.0f, 0.0f, 1.0f),
+                 WithinAbs(-0.015625f, 1e-6f));
+}
+
+TEST_CASE("Interpolator sinc6 zero input remains silent",
+          "[signal][interp][codecov]") {
+    for (float frac : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        const float result = Interpolator::sinc6(frac, 0.0f, 0.0f, 0.0f,
+                                                 0.0f, 0.0f, 0.0f);
+        REQUIRE(std::isfinite(result));
+        REQUIRE_THAT(result, WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("Interpolator hermite preserves linear ramps",
+          "[signal][interp][codecov]") {
+    REQUIRE_THAT(Interpolator::hermite(0.25f, -1.0f, 0.0f, 1.0f, 2.0f),
+                 WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(Interpolator::hermite(0.75f, 2.0f, 4.0f, 6.0f, 8.0f),
+                 WithinAbs(5.5f, 1e-6f));
+}
+
+TEST_CASE("Interpolator sinc6 alternating samples stay finite",
+          "[signal][interp][codecov]") {
+    for (float frac : {0.125f, 0.375f, 0.625f, 0.875f}) {
+        const float result = Interpolator::sinc6(frac, -1.0f, 1.0f, -1.0f,
+                                                 1.0f, -1.0f, 1.0f);
+        REQUIRE(std::isfinite(result));
+        REQUIRE(std::abs(result) < 2.0f);
+    }
 }

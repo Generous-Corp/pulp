@@ -29,6 +29,27 @@ static std::string ship_config(const std::string& cli_val,
     return read_user_config_value(section, key);
 }
 
+static bool take_ship_value(const std::vector<std::string>& args,
+                            size_t& i,
+                            const std::string& subcommand,
+                            const std::string& flag,
+                            std::string& out) {
+    if (i + 1 >= args.size() || args[i + 1].empty()) {
+        std::cerr << "pulp ship " << subcommand << ": " << flag
+                  << " requires a value\n";
+        return false;
+    }
+    out = args[++i];
+    return true;
+}
+
+static int unknown_ship_arg(const std::string& subcommand,
+                            const std::string& arg) {
+    std::cerr << "pulp ship " << subcommand << ": unknown argument: "
+              << arg << "\n";
+    return 2;
+}
+
 int cmd_ship(const std::vector<std::string>& args) {
     auto root = find_project_root();
     if (root.empty()) {
@@ -50,13 +71,23 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string identity, target, keystore_path, key_alias, store_pass, key_pass;
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--identity" && i + 1 < args.size()) identity = args[++i];
-            else if (args[i] == "--entitlements" && i + 1 < args.size()) entitlements = args[++i];
-            else if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
-            else if (args[i] == "--keystore" && i + 1 < args.size()) keystore_path = args[++i];
-            else if (args[i] == "--key-alias" && i + 1 < args.size()) key_alias = args[++i];
-            else if (args[i] == "--store-pass" && i + 1 < args.size()) store_pass = args[++i];
-            else if (args[i] == "--key-pass" && i + 1 < args.size()) key_pass = args[++i];
+            if (args[i] == "--identity") {
+                if (!take_ship_value(args, i, sub, args[i], identity)) return 2;
+            } else if (args[i] == "--entitlements") {
+                if (!take_ship_value(args, i, sub, args[i], entitlements)) return 2;
+            } else if (args[i] == "--target") {
+                if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else if (args[i] == "--keystore") {
+                if (!take_ship_value(args, i, sub, args[i], keystore_path)) return 2;
+            } else if (args[i] == "--key-alias") {
+                if (!take_ship_value(args, i, sub, args[i], key_alias)) return 2;
+            } else if (args[i] == "--store-pass") {
+                if (!take_ship_value(args, i, sub, args[i], store_pass)) return 2;
+            } else if (args[i] == "--key-pass") {
+                if (!take_ship_value(args, i, sub, args[i], key_pass)) return 2;
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
         }
 
         if (target == "android") {
@@ -167,16 +198,25 @@ int cmd_ship(const std::vector<std::string>& args) {
         version = cmake_ver.empty() ? std::string(PULP_SDK_VERSION) : cmake_ver;
 
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
-            else if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
-            else if (args[i] == "--keystore" && i + 1 < args.size()) keystore_path = args[++i];
-            else if (args[i] == "--key-alias" && i + 1 < args.size()) key_alias = args[++i];
-            else if (args[i] == "--store-pass" && i + 1 < args.size()) store_pass = args[++i];
-            else if (args[i] == "--key-pass" && i + 1 < args.size()) key_pass = args[++i];
-            else if (args[i] == "--abi" && i + 1 < args.size()) abi_arg = args[++i];
+            if (args[i] == "--version") {
+                if (!take_ship_value(args, i, sub, args[i], version)) return 2;
+            } else if (args[i] == "--target") {
+                if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else if (args[i] == "--keystore") {
+                if (!take_ship_value(args, i, sub, args[i], keystore_path)) return 2;
+            } else if (args[i] == "--key-alias") {
+                if (!take_ship_value(args, i, sub, args[i], key_alias)) return 2;
+            } else if (args[i] == "--store-pass") {
+                if (!take_ship_value(args, i, sub, args[i], store_pass)) return 2;
+            } else if (args[i] == "--key-pass") {
+                if (!take_ship_value(args, i, sub, args[i], key_pass)) return 2;
+            } else if (args[i] == "--abi") {
+                if (!take_ship_value(args, i, sub, args[i], abi_arg)) return 2;
+            }
             else if (args[i] == "--apk-only") apk_only = true;
             else if (args[i] == "--aab-only") aab_only = true;
             else if (args[i] == "--per-user") per_user = true;
+            else return unknown_ship_arg(sub, args[i]);
         }
 
         if (apk_only && aab_only) {
@@ -330,7 +370,11 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "check") {
         std::string target;
         for (size_t i = 1; i < args.size(); ++i)
-            if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
+            if (args[i] == "--target") {
+                if (!take_ship_value(args, i, sub, args[i], target)) return 2;
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
 
         if (target == "android") {
             auto art_dir = root / "artifacts";
@@ -384,10 +428,15 @@ int cmd_ship(const std::vector<std::string>& args) {
         std::string apple_id, team_id, password;
         bool staple_only = false;
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--apple-id" && i + 1 < args.size()) apple_id = args[++i];
-            else if (args[i] == "--team-id" && i + 1 < args.size()) team_id = args[++i];
-            else if (args[i] == "--password" && i + 1 < args.size()) password = args[++i];
+            if (args[i] == "--apple-id") {
+                if (!take_ship_value(args, i, sub, args[i], apple_id)) return 2;
+            } else if (args[i] == "--team-id") {
+                if (!take_ship_value(args, i, sub, args[i], team_id)) return 2;
+            } else if (args[i] == "--password") {
+                if (!take_ship_value(args, i, sub, args[i], password)) return 2;
+            }
             else if (args[i] == "--staple") staple_only = true;
+            else return unknown_ship_arg(sub, args[i]);
         }
 
         std::vector<std::string> bundles;
@@ -466,13 +515,23 @@ int cmd_ship(const std::vector<std::string>& args) {
     if (sub == "appcast") {
         std::string version, notes, url, output_path, title, sign_key, min_os;
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
-            else if (args[i] == "--notes" && i + 1 < args.size()) notes = args[++i];
-            else if (args[i] == "--url" && i + 1 < args.size()) url = args[++i];
-            else if (args[i] == "--output" && i + 1 < args.size()) output_path = args[++i];
-            else if (args[i] == "--title" && i + 1 < args.size()) title = args[++i];
-            else if (args[i] == "--sign-key" && i + 1 < args.size()) sign_key = args[++i];
-            else if (args[i] == "--min-os" && i + 1 < args.size()) min_os = args[++i];
+            if (args[i] == "--version") {
+                if (!take_ship_value(args, i, sub, args[i], version)) return 2;
+            } else if (args[i] == "--notes") {
+                if (!take_ship_value(args, i, sub, args[i], notes)) return 2;
+            } else if (args[i] == "--url") {
+                if (!take_ship_value(args, i, sub, args[i], url)) return 2;
+            } else if (args[i] == "--output") {
+                if (!take_ship_value(args, i, sub, args[i], output_path)) return 2;
+            } else if (args[i] == "--title") {
+                if (!take_ship_value(args, i, sub, args[i], title)) return 2;
+            } else if (args[i] == "--sign-key") {
+                if (!take_ship_value(args, i, sub, args[i], sign_key)) return 2;
+            } else if (args[i] == "--min-os") {
+                if (!take_ship_value(args, i, sub, args[i], min_os)) return 2;
+            } else {
+                return unknown_ship_arg(sub, args[i]);
+            }
         }
 
         if (version.empty()) version = "0.1.0";

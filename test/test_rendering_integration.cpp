@@ -111,6 +111,28 @@ TEST_CASE("Dimension parse auto", "[view][dimension]") {
     REQUIRE(d.unit == view::DimensionUnit::auto_);
 }
 
+TEST_CASE("Dimension parse trims supported units and rejects unknown suffixes",
+          "[view][dimension][codecov]") {
+    auto px = view::Dimension::parse(" 12px \t");
+    REQUIRE(px.unit == view::DimensionUnit::px);
+    REQUIRE(px.value == Catch::Approx(12.0f));
+
+    auto bare = view::Dimension::parse(" 8 ");
+    REQUIRE(bare.unit == view::DimensionUnit::px);
+    REQUIRE(bare.value == Catch::Approx(8.0f));
+
+    auto aut = view::Dimension::parse(" auto ");
+    REQUIRE(aut.unit == view::DimensionUnit::auto_);
+
+    auto rem = view::Dimension::parse("100rem");
+    REQUIRE(rem.unit == view::DimensionUnit::px);
+    REQUIRE(rem.value == Catch::Approx(0.0f));
+
+    auto junk = view::Dimension::parse("12pxjunk");
+    REQUIRE(junk.unit == view::DimensionUnit::px);
+    REQUIRE(junk.value == Catch::Approx(0.0f));
+}
+
 TEST_CASE("Dimension DPI scaling", "[view][dimension]") {
     auto d = view::Dimension::parse("10px");
     REQUIRE(d.resolve(0, 0, 0, 2.0f) == Catch::Approx(20.0f));
@@ -169,6 +191,52 @@ TEST_CASE("RenderPassManager detects over budget", "[render][pass]") {
     REQUIRE(pm.over_budget());
 }
 
+TEST_CASE("RenderPassManager resets per-frame stats and preserves frame count",
+          "[render][pass][coverage][phase3]") {
+    render::RenderPassManager pm;
+
+    REQUIRE(pm.frame_count() == 0);
+    REQUIRE(pm.current_pass() == render::RenderPassType::background);
+
+    pm.begin_frame();
+    REQUIRE(pm.frame_count() == 1);
+    pm.begin_pass(render::RenderPassType::overlay);
+    REQUIRE(pm.current_pass() == render::RenderPassType::overlay);
+    pm.end_pass(1.5f, 3);
+    pm.end_frame();
+
+    REQUIRE(pm.passes().size() == 1);
+    REQUIRE(pm.passes().front().type == render::RenderPassType::overlay);
+    REQUIRE(pm.passes().front().draw_calls == 3);
+
+    pm.begin_frame();
+    REQUIRE(pm.frame_count() == 2);
+    REQUIRE(pm.passes().empty());
+    REQUIRE(pm.total_time_ms() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("RenderPassManager handles empty passes and disabled budget",
+          "[render][pass][coverage][phase3]") {
+    render::RenderPassManager pm;
+
+    pm.begin_frame();
+    pm.end_pass(99.0f, 100);
+    pm.end_frame();
+    REQUIRE(pm.passes().empty());
+    REQUIRE(pm.total_time_ms() == Catch::Approx(0.0f));
+    REQUIRE_FALSE(pm.over_budget());
+
+    pm.set_budget(0.0f);
+    REQUIRE(pm.budget() == Catch::Approx(0.0f));
+    pm.begin_frame();
+    pm.begin_pass(render::RenderPassType::post_effects);
+    pm.end_pass(250.0f, 1);
+    pm.end_frame();
+
+    REQUIRE(pm.total_time_ms() == Catch::Approx(250.0f));
+    REQUIRE_FALSE(pm.over_budget());
+}
+
 // ── SpriteStrip on Knob ─────────────────────────────────────────────────
 
 TEST_CASE("Knob with sprite strip set", "[view][widget]") {
@@ -215,6 +283,27 @@ TEST_CASE("FillStyle linear gradient", "[canvas][gradient]") {
     canvas::FillStyle fs(lg);
     REQUIRE(fs.is_linear());
     REQUIRE_FALSE(fs.is_solid());
+}
+
+TEST_CASE("FillStyle radial gradient exposes focal point and stops",
+          "[canvas][gradient][coverage][phase3]") {
+    canvas::RadialGradient rg{10.0f, 20.0f, 30.0f, 0.0f, 0.0f, {}};
+    rg.focal_x = 12.0f;
+    rg.focal_y = 18.0f;
+    rg.stops = {{0.0f, canvas::Color::rgba(1, 1, 1)},
+                {1.0f, canvas::Color::rgba(0, 0, 0)}};
+
+    canvas::FillStyle fs(rg);
+
+    REQUIRE(fs.is_radial());
+    REQUIRE_FALSE(fs.is_linear());
+    REQUIRE_FALSE(fs.is_conic());
+    REQUIRE(fs.radial().cx == 10.0f);
+    REQUIRE(fs.radial().cy == 20.0f);
+    REQUIRE(fs.radial().radius == 30.0f);
+    REQUIRE(fs.radial().focal_x == 12.0f);
+    REQUIRE(fs.radial().focal_y == 18.0f);
+    REQUIRE(fs.radial().stops.size() == 2);
 }
 
 TEST_CASE("FillStyle conic gradient", "[canvas][gradient]") {

@@ -69,9 +69,17 @@ int cmd_dev(const std::vector<std::string>& args) {
             allow_unsupported_sdk = true;
         } else if (args[i] == "--validate") {
             run_validate = true;
-        } else if (args[i] == "--run" && i + 1 < args.size()) {
+        } else if (args[i] == "--run") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp dev: --run requires a value\n";
+                return 2;
+            }
             launch_target = args[++i];
-        } else if (args[i] == "--design" && i + 1 < args.size()) {
+        } else if (args[i] == "--design") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp dev: --design requires a value\n";
+                return 2;
+            }
             // Build the design tool target and launch it with the script
             auto script = args[++i];
             build_args.push_back("--target");
@@ -90,7 +98,11 @@ int cmd_dev(const std::vector<std::string>& args) {
                 launch_target = (build_dir / "tools" / "design" / "pulp-design-tool").string();
             }
             launch_args.insert(launch_args.begin(), script);
-        } else if (args[i] == "--target" && i + 1 < args.size()) {
+        } else if (args[i] == "--target") {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp dev: --target requires a value\n";
+                return 2;
+            }
             build_args.push_back("--target");
             build_args.push_back(args[++i]);
         } else {

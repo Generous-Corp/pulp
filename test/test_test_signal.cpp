@@ -269,6 +269,25 @@ TEST_CASE("TestSignalSource: zero-amplitude sine stays active but silent",
     REQUIRE(src.is_active());
 }
 
+TEST_CASE("TestSignalSource: zero-sized fills apply pending config without writing",
+          "[format][test_signal][coverage][phase3]") {
+    TestSignalSource src;
+    src.set_sample_rate(4.0);
+    src.set_config({TestSignalType::sine, 1.0f, 0.5f});
+
+    float sample = 123.0f;
+    float* output = &sample;
+    src.fill(&output, 1, 0);
+
+    REQUIRE(sample == 123.0f);
+    REQUIRE(src.config().type == TestSignalType::sine);
+    REQUIRE(src.config().sine_frequency_hz == 1.0f);
+    REQUIRE(src.config().sine_amplitude == 0.5f);
+
+    src.fill(nullptr, 0, 16);
+    REQUIRE(src.config().type == TestSignalType::sine);
+}
+
 TEST_CASE("TestSignalSource: file mode without loaded data is silent and not playing",
           "[format][test_signal][coverage][phase3]") {
     TestSignalSource src;

@@ -99,15 +99,52 @@ public:
         }
     }
 
+    Buffer(const Buffer& other)
+        : data_(other.data_)
+        , num_channels_(other.num_channels_)
+        , num_samples_(other.num_samples_) {
+        refresh_channel_pointers();
+    }
+
+    Buffer& operator=(const Buffer& other) {
+        if (this != &other) {
+            data_ = other.data_;
+            num_channels_ = other.num_channels_;
+            num_samples_ = other.num_samples_;
+            refresh_channel_pointers();
+        }
+        return *this;
+    }
+
+    Buffer(Buffer&& other)
+        : data_(std::move(other.data_))
+        , num_channels_(other.num_channels_)
+        , num_samples_(other.num_samples_) {
+        refresh_channel_pointers();
+        other.num_channels_ = 0;
+        other.num_samples_ = 0;
+        other.ptrs_.clear();
+    }
+
+    Buffer& operator=(Buffer&& other) {
+        if (this != &other) {
+            data_ = std::move(other.data_);
+            num_channels_ = other.num_channels_;
+            num_samples_ = other.num_samples_;
+            refresh_channel_pointers();
+            other.num_channels_ = 0;
+            other.num_samples_ = 0;
+            other.ptrs_.clear();
+        }
+        return *this;
+    }
+
     /// Resize the buffer, reallocating if necessary. New samples are zero-filled.
     void resize(std::size_t num_channels, std::size_t num_samples) {
         num_channels_ = num_channels;
         num_samples_ = num_samples;
         data_.resize(num_channels * num_samples, SampleType{0});
-        ptrs_.resize(num_channels);
-        for (std::size_t ch = 0; ch < num_channels; ++ch) {
-            ptrs_[ch] = data_.data() + ch * num_samples;
-        }
+        refresh_channel_pointers();
     }
 
     /// Create a non-owning BufferView over this buffer's data.
@@ -135,6 +172,13 @@ public:
     }
 
 private:
+    void refresh_channel_pointers() {
+        ptrs_.resize(num_channels_);
+        for (std::size_t ch = 0; ch < num_channels_; ++ch) {
+            ptrs_[ch] = data_.data() + ch * num_samples_;
+        }
+    }
+
     std::vector<SampleType> data_;
     std::vector<SampleType*> ptrs_;
     std::size_t num_channels_ = 0;

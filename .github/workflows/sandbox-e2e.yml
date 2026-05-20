@@ -44,14 +44,39 @@ permissions:
   contents: read
 
 jobs:
+  resolve-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      macos_runs_on: ${{ steps.resolve.outputs.macos_runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - id: resolve
+        env:
+          MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          macos=$(python3 tools/scripts/resolve_runs_on.py \
+            --target-name "sandbox-e2e (macOS)" \
+            --mode default \
+            --override-env MACOS_RUNS_ON_JSON \
+            --default-label macos-latest)
+          echo "macos_runs_on=${macos}" >>"${GITHUB_OUTPUT}"
+
   sandbox-e2e:
     name: sandbox-e2e (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            runs_on_json: ${{ needs.resolve-runners.outputs.macos_runs_on }}
+          - os: ubuntu-latest
+            runs_on_json: '"ubuntu-latest"'
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +86,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install pytest
-        run: python -m pip install --upgrade pip pytest
+        run: |
+          python -m venv .sandbox-e2e-venv
+          .sandbox-e2e-venv/bin/python -m pip install --upgrade pip pytest
 
       # Linux-only: install the system deps the Pulp C++ CLI build
       # needs. SDL3 pulls in alsa / X11 / Wayland headers; without
@@ -125,7 +152,7 @@ jobs:
           # runs plugin-command enumeration + contamination audit + any
           # other binary-free scenarios. pytest.skip takes care of the
           # per-test gating.
-          pytest tools/sandbox-e2e/ -v --tb=short
+          .sandbox-e2e-venv/bin/pytest tools/sandbox-e2e/ -v --tb=short
 
       - name: Upload contamination-audit report on failure
         if: failure()

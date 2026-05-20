@@ -344,6 +344,35 @@ TEST_CASE("deflate compression levels round-trip edge settings",
     }
 }
 
+TEST_CASE("zip helpers reject malformed deflate and zlib input",
+          "[runtime][zip][coverage][phase3-large]") {
+    const uint8_t malformed[] = {0xde, 0xad, 0xbe, 0xef};
+    REQUIRE_FALSE(deflate_decompress(malformed, sizeof(malformed)).has_value());
+    REQUIRE_FALSE(gzip_decompress(malformed, sizeof(malformed)).has_value());
+}
+
+TEST_CASE("deflate empty payload round-trips through raw helpers",
+          "[runtime][zip][coverage][phase3-large]") {
+    auto compressed = deflate_compress(nullptr, 0);
+    REQUIRE(compressed.has_value());
+
+    auto decompressed = deflate_decompress(compressed->data(), compressed->size());
+    REQUIRE(decompressed.has_value());
+    REQUIRE(decompressed->empty());
+}
+
+TEST_CASE("deflate_decompress rejects truncated raw streams",
+          "[runtime][zip][coverage]") {
+    const std::string payload = "truncated raw deflate payload";
+    auto compressed = deflate_compress(
+        reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() > 2);
+
+    compressed->resize(compressed->size() - 1);
+    REQUIRE_FALSE(deflate_decompress(compressed->data(), compressed->size()).has_value());
+}
+
 // ── RFC 1952 gzip wire-format compliance (issue-468 follow-up) ──────────
 //
 // gzip_compress() must emit a real RFC 1952 stream — magic bytes, deflate

@@ -396,6 +396,51 @@ TEST_CASE("SysexAccumulator: reserved 0xF9/0xFD pass through mid-sysex",
     REQUIRE(e.complete[0][3] == 0xF7);
 }
 
+TEST_CASE("SysexAccumulator: every realtime byte passes through mid-sysex",
+          "[midi][sysex][coverage]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    REQUIRE(acc.feed(0xF0, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x7D, cb) == Classification::in_sysex);
+
+    for (int value = 0xF8; value <= 0xFF; ++value) {
+        const auto b = static_cast<std::uint8_t>(value);
+        REQUIRE(acc.feed(b, cb) == Classification::passthrough);
+        REQUIRE(acc.in_progress());
+        REQUIRE(acc.partial_size() == 2);
+    }
+
+    REQUIRE(acc.feed(0x01, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0xF7, cb) == Classification::completed);
+    REQUIRE(e.aborted.empty());
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] == std::vector<std::uint8_t>{0xF0, 0x7D, 0x01, 0xF7}));
+}
+
+TEST_CASE("SysexAccumulator: range feed reclassifies aborting status once",
+          "[midi][sysex][coverage]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    std::uint8_t stream[] = {
+        0xF0, 0x7D, 0x01,
+        0x90, 0x40, 0x7F,
+        0xF0, 0x7D, 0x02, 0xF7,
+    };
+
+    acc.feed(stream, sizeof(stream), cb);
+
+    REQUIRE(e.aborted.size() == 1);
+    REQUIRE((e.aborted[0] == std::vector<std::uint8_t>{0xF0, 0x7D, 0x01}));
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] == std::vector<std::uint8_t>{0xF0, 0x7D, 0x02, 0xF7}));
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+}
+
 TEST_CASE("SysexAccumulator: aborted then recovered sysex",
           "[midi][sysex][issue-86]") {
     SysexAccumulator acc;

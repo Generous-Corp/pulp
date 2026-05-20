@@ -19,7 +19,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <string>
+#include <string_view>
 
 namespace pulp::view {
 
@@ -165,7 +167,7 @@ void ImageView::paint(canvas::Canvas& canvas) {
             std::vector<std::string> toks;
             std::string cur;
             for (char c : s) {
-                if (c == ' ' || c == '\t') {
+                if (std::isspace(static_cast<unsigned char>(c))) {
                     if (!cur.empty()) { toks.push_back(cur); cur.clear(); }
                 } else {
                     cur.push_back(c);
@@ -173,20 +175,46 @@ void ImageView::paint(canvas::Canvas& canvas) {
             }
             if (!cur.empty()) toks.push_back(cur);
 
+            auto parse_float_strict = [](std::string_view text, float& out) {
+                if (text.empty()) return false;
+                std::string owned(text);
+                char* end = nullptr;
+                float value = std::strtof(owned.c_str(), &end);
+                if (end == owned.c_str()) return false;
+                while (*end != '\0') {
+                    if (!std::isspace(static_cast<unsigned char>(*end))) return false;
+                    ++end;
+                }
+                if (!std::isfinite(value)) return false;
+                out = value;
+                return true;
+            };
+
             auto parse_one = [&](const std::string& tok, float box_extent,
                                   float img_extent, float& out_pct) {
+                std::string_view body(tok);
+                const bool is_percent = !body.empty() && body.back() == '%';
+                const bool is_px = body.size() > 2 &&
+                                   body.substr(body.size() - 2) == "px";
+                if (is_percent) {
+                    body.remove_suffix(1);
+                } else if (is_px) {
+                    body.remove_suffix(2);
+                } else if (!body.empty() &&
+                           std::isalpha(static_cast<unsigned char>(body.back()))) {
+                    return;
+                }
+
+                float n = 0.0f;
+                if (!parse_float_strict(body, n)) return;
+
                 // Percentage: linear; CSS object-position percentage
                 // means "<P% of the SLACK> measured from the start".
-                if (!tok.empty() && tok.back() == '%') {
-                    try { out_pct = std::stof(tok.substr(0, tok.size() - 1)); }
-                    catch (...) {}
+                if (is_percent) {
+                    out_pct = n;
                     return;
                 }
                 // Length (px): convert to a percentage of the slack.
-                float n = 0.0f;
-                bool ok = true;
-                try { n = std::stof(tok); } catch (...) { ok = false; }
-                if (!ok) return;
                 float slack = box_extent - img_extent;
                 if (std::abs(slack) < 0.001f) { out_pct = 50.0f; return; }
                 out_pct = (n / slack) * 100.0f;

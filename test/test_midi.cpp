@@ -427,6 +427,81 @@ TEST_CASE("MidiMessageSequence sorts ranges and matches note-offs",
     REQUIRE(sequence.duration() == Approx(0.0));
 }
 
+TEST_CASE("MidiMessageSequence preserves same-timestamp insertion and SysEx events",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    TimestampedMidiEvent sysex;
+    sysex.timestamp = 1.0;
+    sysex.status = 0xF0;
+    sysex.sysex = {0xF0, 0x7D, 0x01, 0xF7};
+
+    TimestampedMidiEvent note_on_zero_velocity;
+    note_on_zero_velocity.timestamp = 1.0;
+    note_on_zero_velocity.status = 0x90;
+    note_on_zero_velocity.data1 = 60;
+    note_on_zero_velocity.data2 = 0;
+
+    sequence.add_event(sysex);
+    sequence.add_event(note_on_zero_velocity);
+    sequence.add_cc(0.5, 2, 74, 64);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_cc());
+    REQUIRE(sequence[1].is_note_off());
+    REQUIRE_FALSE(sequence[1].is_note_on());
+    REQUIRE(sequence[2].is_sysex());
+    REQUIRE(sequence[2].sysex == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+
+    auto at_one_second = sequence.events_in_range(1.0, 1.1);
+    REQUIRE(at_one_second.size() == 2);
+    REQUIRE(at_one_second[0]->is_note_off());
+    REQUIRE(at_one_second[1]->is_sysex());
+}
+
+TEST_CASE("MidiMessageSequence inserts equal timestamps before existing events",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    sequence.add_note_on(1.0, 0, 60, 100);
+    sequence.add_cc(1.0, 0, 74, 64);
+    sequence.add_note_off(1.0, 0, 60);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_note_off());
+    REQUIRE(sequence[1].is_cc());
+    REQUIRE(sequence[2].is_note_on());
+
+    auto in_range = sequence.events_in_range(1.0, 1.0);
+    REQUIRE(in_range.empty());
+}
+
+TEST_CASE("MidiMessageSequence stores raw sysex events and masks factories",
+          "[midi][sequence][coverage]") {
+    MidiMessageSequence sequence;
+
+    TimestampedMidiEvent sysex;
+    sysex.timestamp = 0.25;
+    sysex.status = 0xF0;
+    sysex.sysex = {0x7D, 0x01, 0x02};
+    sequence.add_event(sysex);
+
+    sequence.add_note_on(0.50, 0x2F, 0xFF, 0x81);
+    sequence.add_cc(0.75, 0x31, 0xF4, 0xC8);
+
+    REQUIRE(sequence.size() == 3);
+    REQUIRE(sequence[0].is_sysex());
+    REQUIRE(sequence[0].sysex == std::vector<uint8_t>{0x7D, 0x01, 0x02});
+
+    REQUIRE(sequence[1].status == 0x9F);
+    REQUIRE(sequence[1].note() == 0x7F);
+    REQUIRE(sequence[1].velocity() == 0x01);
+
+    REQUIRE(sequence[2].status == 0xB1);
+    REQUIRE(sequence[2].data1 == 0x74);
+    REQUIRE(sequence[2].data2 == 0x48);
+}
+
 TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") {
     auto note = UmpPacket::note_on_2(0x1F, 0x2F, 0xC0, 0xABCD, 0xEE, 0x1234);
     REQUIRE(note.word_count == 2);
@@ -468,6 +543,19 @@ TEST_CASE("UmpPacket factories expose MIDI 2.0 fields", "[midi][ump][codecov]") 
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Utility) == 1);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::DataSysEx) == 2);
     REQUIRE(UmpPacket::size_for_type(UmpMessageType::Data128) == 4);
+}
+
+TEST_CASE("UmpPacket MIDI 1.0 factory masks group channel and data bytes",
+          "[midi][ump][coverage]") {
+    auto packet = UmpPacket::midi1_note_on(0x2F, 0x31, 0xF4, 0xC8);
+
+    REQUIRE(packet.word_count == 1);
+    REQUIRE(packet.message_type() == UmpMessageType::Midi1ChannelVoice);
+    REQUIRE(packet.group() == 0x0F);
+    REQUIRE(packet.status() == 0x91);
+    REQUIRE(packet.channel() == 1);
+    REQUIRE(((packet.words[0] >> 8) & 0xFF) == 0x74);
+    REQUIRE((packet.words[0] & 0xFF) == 0x48);
 }
 
 TEST_CASE("UMP conversion scales MIDI 1.0 events both directions",
@@ -535,6 +623,20 @@ TEST_CASE("UMP conversion covers note-off cc and unsupported packet paths",
     utility.word_count = UmpPacket::size_for_type(UmpMessageType::Utility);
     utility.words[0] = 0;
     REQUIRE_FALSE(ump_to_midi1_event(utility, out));
+}
+
+TEST_CASE("UMP conversion rejects unsupported MIDI 2.0 channel statuses",
+          "[midi][ump][coverage]") {
+    UmpPacket channel_pressure{};
+    channel_pressure.word_count = 2;
+    channel_pressure.words[0] = (0x4u << 28) | (uint32_t(3) << 24)
+                              | (uint32_t(0xD2) << 16);
+    channel_pressure.words[1] = 0x12345678u;
+
+    MidiEvent out = MidiEvent::note_on(0, 60, 100);
+    REQUIRE_FALSE(ump_to_midi1_event(channel_pressure, out));
+    REQUIRE(out.is_note_on());
+    REQUIRE(out.note() == 60);
 }
 
 TEST_CASE("UMP conversion preserves MIDI 1.0 fallback bytes",
@@ -616,6 +718,27 @@ TEST_CASE("UmpBuffer and MidiBuffer bridge preserve order and offsets",
     REQUIRE(ump.empty());
 }
 
+TEST_CASE("MidiBuffer UMP sidecar pointer can be replaced and detached",
+          "[midi][ump][buffer][coverage]") {
+    MidiBuffer midi;
+    UmpBuffer first;
+    UmpBuffer second;
+
+    REQUIRE(midi.ump() == nullptr);
+
+    midi.attach_ump(&first);
+    REQUIRE(midi.ump() == &first);
+    const auto& const_midi = midi;
+    REQUIRE(const_midi.ump() == &first);
+
+    midi.attach_ump(&second);
+    REQUIRE(midi.ump() == &second);
+
+    midi.attach_ump(nullptr);
+    REQUIRE(midi.ump() == nullptr);
+    REQUIRE(const_midi.ump() == nullptr);
+}
+
 TEST_CASE("UmpBuffer flatten skips packets without MIDI 1.0 equivalents",
           "[midi][ump][buffer][codecov]") {
     UmpBuffer ump;
@@ -695,6 +818,23 @@ TEST_CASE("MidiFileData summarizes tracks", "[midi][file]") {
 
     REQUIRE(data.total_events() == 3);
     REQUIRE(data.duration_seconds() == Approx(1.50).margin(1e-6));
+}
+
+TEST_CASE("MidiFileData duration ignores empty and negative-only tracks",
+          "[midi][file][coverage]") {
+    MidiFileData data;
+    data.tracks.push_back(MidiTrack{});
+
+    MidiTrack negative_only;
+    negative_only.events.push_back({-0.25, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(negative_only));
+
+    REQUIRE(data.total_events() == 1);
+    REQUIRE(data.duration_seconds() == Approx(0.0).margin(1e-9));
+
+    data.tracks[1].events.push_back({0.125, MidiEvent::note_off(0, 60)});
+    REQUIRE(data.total_events() == 2);
+    REQUIRE(data.duration_seconds() == Approx(0.125).margin(1e-9));
 }
 
 TEST_CASE("MidiFileData handles empty tracks and empty file round-trips",

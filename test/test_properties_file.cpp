@@ -32,7 +32,49 @@ TEST_CASE("PropertiesFile get missing key returns nullopt", "[state][properties]
 TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[state][properties]") {
     PropertiesFile props;
     props.set_string("count", "not-an-int");
+    props.set_string("overflow_count", "999999999999999999999999999999999999");
+    props.set_string("underflow_count", "-999999999999999999999999999999999999");
     props.set_string("gain", "not-a-double");
+    props.set_string("partial_count", "42junk");
+    props.set_string("partial_gain", "0.5oops");
+    props.set_string("overflow_gain", "1e999");
+    props.set_string("spaced_count", "64\t");
+    props.set_string("spaced_gain", "0.25 ");
+
+    REQUIRE_FALSE(props.get_int("count").has_value());
+    REQUIRE_FALSE(props.get_int("overflow_count").has_value());
+    REQUIRE_FALSE(props.get_int("underflow_count").has_value());
+    REQUIRE_FALSE(props.get_double("gain").has_value());
+    REQUIRE_FALSE(props.get_int("partial_count").has_value());
+    REQUIRE_FALSE(props.get_double("partial_gain").has_value());
+    REQUIRE_FALSE(props.get_double("overflow_gain").has_value());
+    REQUIRE(props.get_int("spaced_count").value() == 64);
+    REQUIRE_THAT(props.get_double("spaced_gain").value(), WithinAbs(0.25, 1e-9));
+}
+
+TEST_CASE("PropertiesFile numeric getters reject partially parsed strings",
+          "[state][properties][coverage][phase3-large]") {
+    PropertiesFile props;
+    props.set_string("count_suffix", "12items");
+    props.set_string("count_prefix", "id12");
+    props.set_string("gain_suffix", "0.5db");
+    props.set_string("gain_prefix", "level0.5");
+    props.set_string("negative", "-12");
+    props.set_string("fraction", "-12.25");
+
+    REQUIRE_FALSE(props.get_int("count_suffix").has_value());
+    REQUIRE_FALSE(props.get_int("count_prefix").has_value());
+    REQUIRE_FALSE(props.get_double("gain_suffix").has_value());
+    REQUIRE_FALSE(props.get_double("gain_prefix").has_value());
+    REQUIRE(props.get_int("negative").value_or(0) == -12);
+    REQUIRE_THAT(props.get_double("fraction").value_or(0.0), WithinAbs(-12.25, 0.001));
+}
+
+TEST_CASE("PropertiesFile numeric getters reject trailing text",
+          "[state][properties][coverage][phase3]") {
+    PropertiesFile props;
+    props.set_string("count", "12abc");
+    props.set_string("gain", "3.5ms");
 
     REQUIRE_FALSE(props.get_int("count").has_value());
     REQUIRE_FALSE(props.get_double("gain").has_value());
@@ -80,6 +122,18 @@ TEST_CASE("PropertiesFile set and get bool", "[state][properties]") {
     val = props.get_bool("auto_save");
     REQUIRE(val.has_value());
     REQUIRE(*val == false);
+}
+
+TEST_CASE("PropertiesFile typed setters store retrievable string values",
+          "[state][properties][coverage][phase3]") {
+    PropertiesFile props;
+    props.set_int("voices", 16);
+    props.set_double("gain", -3.25);
+    props.set_bool("enabled", true);
+
+    REQUIRE(props.get_string("voices").value_or("") == "16");
+    REQUIRE(props.get_string("gain").value_or("").find("-3.25") == 0);
+    REQUIRE(props.get_string("enabled").value_or("") == "true");
 }
 
 TEST_CASE("PropertiesFile bool getter accepts true and numeric-one strings",
@@ -370,6 +424,33 @@ TEST_CASE("PropertiesFile save and reload preserves escaped string values",
     REQUIRE(reloaded.get_string("newline").value_or("") == "line one\nline two");
 }
 
+TEST_CASE("PropertiesFile save and reload preserves tab and carriage escapes",
+          "[state][properties][coverage][phase3-github]") {
+    TemporaryFile tmp(".json");
+
+    PropertiesFile props;
+    props.set_string("control", "left\tright\rend");
+    REQUIRE(props.save(tmp.path_string()));
+
+    PropertiesFile reloaded;
+    REQUIRE(reloaded.load(tmp.path_string()));
+    REQUIRE(reloaded.get_string("control").value_or("") == "left\tright\rend");
+}
+
+TEST_CASE("PropertiesFile round-trips mixed JSON string escapes",
+          "[state][properties][coverage]") {
+    TemporaryFile tmp(".json");
+    const std::string value = "path\\\\plugin\t\"quoted\"\nnext line";
+
+    PropertiesFile props;
+    props.set_string("escaped", value);
+    REQUIRE(props.save(tmp.path_string()));
+
+    PropertiesFile reloaded;
+    REQUIRE(reloaded.load(tmp.path_string()));
+    REQUIRE(reloaded.get_string("escaped").value_or("") == value);
+}
+
 TEST_CASE("PropertiesFile set_path can clear the implicit save destination",
           "[state][properties][coverage][phase3-large]") {
     TemporaryFile tmp(".json");
@@ -430,7 +511,53 @@ TEST_CASE("PropertiesFile remove and reinsert keeps sorted key enumeration",
     REQUIRE(props.get_string("b").value_or("") == "new");
 }
 
+TEST_CASE("PropertiesFile empty string values remain present",
+          "[state][properties][coverage][phase3-github]") {
+    PropertiesFile props;
+    props.set_string("empty", "");
+
+    REQUIRE(props.contains("empty"));
+    REQUIRE(props.get_string("empty").has_value());
+    REQUIRE(props.get_string("empty").value() == "");
+
+    props.remove("empty");
+    REQUIRE_FALSE(props.contains("empty"));
+    REQUIRE_FALSE(props.get_string("empty").has_value());
+}
+
+TEST_CASE("PropertiesFile contains tracks string-view keys across mutation",
+          "[state][properties][coverage][phase3-large]") {
+    PropertiesFile props;
+    std::string key = "dynamic";
+
+    props.set_int(std::string_view(key), 12);
+    key = "changed";
+
+    REQUIRE(props.contains("dynamic"));
+    REQUIRE_FALSE(props.contains("changed"));
+
+    props.remove(std::string_view("dynamic"));
+    REQUIRE_FALSE(props.contains("dynamic"));
+    REQUIRE(props.size() == 0);
+}
+
 // ── ApplicationProperties ───────────────────────────────────────────────
+
+TEST_CASE("ApplicationProperties exposes independent user and common stores",
+          "[state][properties][coverage][phase3]") {
+    ApplicationProperties app("PulpUnit");
+    REQUIRE(app.app_name() == "PulpUnit");
+
+    app.user_settings().set_string("scope", "user");
+    app.common_settings().set_string("scope", "common");
+
+    REQUIRE(app.user_settings().get_string("scope").value_or("") == "user");
+    REQUIRE(app.common_settings().get_string("scope").value_or("") == "common");
+
+    const auto& const_app = app;
+    REQUIRE(const_app.user_settings().contains("scope"));
+    REQUIRE(const_app.common_settings().contains("scope"));
+}
 
 TEST_CASE("ApplicationProperties paths are platform-appropriate", "[state][properties]") {
     auto user_dir = ApplicationProperties::user_settings_dir("PulpTest");

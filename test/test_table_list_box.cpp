@@ -174,6 +174,49 @@ TEST_CASE("SimpleTableModel handles negative sort columns and sparse rows",
     REQUIRE(model.cell_text(1, 1) == "two");
 }
 
+TEST_CASE("SimpleTableModel sorts descending and guards out-of-range cells",
+          "[gui][table][coverage][phase3]") {
+    SimpleTableModel model;
+    model.set_data({
+        {"Alpha", "3"},
+        {"Gamma", "1"},
+        {"Beta", "2"},
+    });
+
+    REQUIRE(model.cell_text(-1, 0).empty());
+    REQUIRE(model.cell_text(99, 0).empty());
+    REQUIRE(model.cell_text(0, -1).empty());
+    REQUIRE(model.cell_text(0, 99).empty());
+
+    REQUIRE(model.sort(0, false));
+    REQUIRE(model.cell_text(0, 0) == "Gamma");
+    REQUIRE(model.cell_text(1, 0) == "Beta");
+    REQUIRE(model.cell_text(2, 0) == "Alpha");
+}
+
+TEST_CASE("SimpleTableModel set_data replaces rows and sorts sparse descending",
+          "[gui][table][coverage][phase3]") {
+    SimpleTableModel model;
+    model.add_row({"old", "row"});
+    model.set_data({
+        {"Alpha"},
+        {"Gamma", "3"},
+        {"Beta", "2"},
+    });
+
+    REQUIRE(model.row_count() == 3);
+    REQUIRE(model.cell_text(0, 0) == "Alpha");
+    REQUIRE(model.cell_text(0, 1).empty());
+    REQUIRE(model.cell_text(99, 0).empty());
+    REQUIRE(model.cell_text(0, 99).empty());
+
+    REQUIRE(model.sort(1, false));
+    REQUIRE(model.cell_text(0, 0) == "Gamma");
+    REQUIRE(model.cell_text(1, 0) == "Beta");
+    REQUIRE(model.cell_text(2, 0) == "Alpha");
+    REQUIRE(model.cell_text(2, 1).empty());
+}
+
 TEST_CASE("TableListBox clear columns and model-less clicks are stable",
           "[gui][table][coverage][issue-653]") {
     TableListBox table;
@@ -243,4 +286,25 @@ TEST_CASE("TableListBox ignores clicks outside right and bottom bounds",
     REQUIRE(model.sort_calls.empty());
     REQUIRE(model.selected_rows.empty());
     REQUIRE(table.selected_row() == -1);
+}
+
+TEST_CASE("TableListBox ignores header clicks past scaled columns",
+          "[gui][table][coverage][phase3]") {
+    RecordingTableModel model({
+        {"First", "A"},
+        {"Second", "B"},
+    });
+
+    TableListBox table;
+    table.set_bounds({0, 0, 220, 80});
+    table.set_header_height(20.0f);
+    table.set_model(&model);
+    table.add_column({"Name", 80.0f, true});
+    table.add_column({"Value", 80.0f, true});
+
+    table.on_mouse_down({190.0f, 5.0f});
+    REQUIRE(model.sort_calls.empty());
+
+    table.on_mouse_down({10.0f, 5.0f});
+    REQUIRE(model.sort_calls == std::vector<std::pair<int, bool>>{{0, true}});
 }

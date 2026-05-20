@@ -2,6 +2,7 @@
 
 // Special mathematical functions for DSP and filter design.
 
+#include <algorithm>
 #include <cmath>
 
 namespace pulp::signal {

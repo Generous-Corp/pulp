@@ -62,6 +62,8 @@ std::vector<std::string> StateTree::property_names() const {
 
 void StateTree::add_child(Ptr child) {
     if (!child) return;
+    if (child->parent_ != nullptr)
+        child->parent_->remove_child(child.get());
     child->parent_ = this;
     children_.push_back(child);
     int idx = static_cast<int>(children_.size()) - 1;
@@ -71,6 +73,8 @@ void StateTree::add_child(Ptr child) {
 
 void StateTree::insert_child(int index, Ptr child) {
     if (!child) return;
+    if (child->parent_ != nullptr)
+        child->parent_->remove_child(child.get());
     index = std::clamp(index, 0, child_count());
     child->parent_ = this;
     children_.insert(children_.begin() + index, child);

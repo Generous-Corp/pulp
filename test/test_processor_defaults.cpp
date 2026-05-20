@@ -136,6 +136,18 @@ TEST_CASE("PluginDescriptor carries MIDI, MPE, UMP, and mobile flags independent
     REQUIRE(d.tail_samples == -1);
 }
 
+TEST_CASE("PluginDescriptor preserves optional vendor contact metadata",
+          "[format][processor-defaults][metadata][coverage][phase3]") {
+    PluginDescriptor d;
+    d.vendor_url = "https://example.test/pulp";
+    d.vendor_email = "support@example.test";
+
+    REQUIRE(d.vendor_url == "https://example.test/pulp");
+    REQUIRE(d.vendor_email == "support@example.test");
+    REQUIRE(d.default_input_channels() == 2);
+    REQUIRE(d.default_output_channels() == 2);
+}
+
 TEST_CASE("PrepareContext defaults match the headless stereo render path",
           "[format][processor-defaults][context]") {
     PrepareContext c;
@@ -338,4 +350,39 @@ TEST_CASE("Processor sidechain, MPE, and UMP sidecar pointers can be set and cle
     REQUIRE(p.sidechain_input() == nullptr);
     REQUIRE(p.mpe_input() == nullptr);
     REQUIRE(p.ump_input() == nullptr);
+}
+
+TEST_CASE("Processor sidecar pointers replace independently between blocks",
+          "[format][processor-defaults][sidecars][coverage]") {
+    PlainProcessor p;
+
+    const float first_samples[2] = {0.1f, 0.2f};
+    const float second_samples[2] = {0.3f, 0.4f};
+    const float* first_channels[1] = {first_samples};
+    const float* second_channels[1] = {second_samples};
+    pulp::audio::BufferView<const float> first_sidechain(first_channels, 1, 2);
+    pulp::audio::BufferView<const float> second_sidechain(second_channels, 1, 2);
+    pulp::midi::MpeBuffer first_mpe;
+    pulp::midi::MpeBuffer second_mpe;
+    pulp::midi::UmpBuffer first_ump;
+    pulp::midi::UmpBuffer second_ump;
+
+    p.set_sidechain(&first_sidechain);
+    p.set_mpe_input(&first_mpe);
+    p.set_ump_input(&first_ump);
+    REQUIRE(p.sidechain_input() == &first_sidechain);
+    REQUIRE(p.mpe_input() == &first_mpe);
+    REQUIRE(p.ump_input() == &first_ump);
+
+    p.set_sidechain(&second_sidechain);
+    p.set_mpe_input(&second_mpe);
+    p.set_ump_input(&second_ump);
+    REQUIRE(p.sidechain_input() == &second_sidechain);
+    REQUIRE(p.mpe_input() == &second_mpe);
+    REQUIRE(p.ump_input() == &second_ump);
+
+    p.set_mpe_input(nullptr);
+    REQUIRE(p.sidechain_input() == &second_sidechain);
+    REQUIRE(p.mpe_input() == nullptr);
+    REQUIRE(p.ump_input() == &second_ump);
 }

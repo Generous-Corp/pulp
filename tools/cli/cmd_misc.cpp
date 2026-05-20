@@ -21,6 +21,14 @@
 #endif
 #ifdef _WIN32
 #include <pulp/platform/win32_sane.hpp>
+// MSVC std::system() returns the child exit code directly, not a
+// wait(2)-encoded status, so the POSIX helpers are identity shims.
+#ifndef WIFEXITED
+#define WIFEXITED(status) (true)
+#endif
+#ifndef WEXITSTATUS
+#define WEXITSTATUS(status) (status)
+#endif
 #endif
 
 namespace {
@@ -116,7 +124,12 @@ int cmd_test(const std::vector<std::string>& args) {
 
 // ── cmd_status ──────────────────────────────────────────────────────────────
 
-int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
+int cmd_status(const std::vector<std::string>& args) {
+    if (!args.empty()) {
+        std::cerr << "Unexpected status argument: " << args[0] << "\n";
+        return 2;
+    }
+
     bool standalone_mode = false;
     auto root = resolve_active_project_root(&standalone_mode);
     if (root.empty()) {
@@ -219,7 +232,12 @@ int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
 
 // ── cmd_clean ───────────────────────────────────────────────────────────────
 
-int cmd_clean([[maybe_unused]] const std::vector<std::string>& args) {
+int cmd_clean(const std::vector<std::string>& args) {
+    if (!args.empty()) {
+        std::cerr << "Unexpected clean argument: " << args[0] << "\n";
+        return 2;
+    }
+
     auto root = resolve_active_project_root(nullptr);
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
@@ -396,6 +414,10 @@ int cmd_cache(const std::vector<std::string>& args) {
     std::string sub = args[0];
 
     if (sub == "status") {
+        if (args.size() > 1) {
+            std::cerr << "Unexpected cache status argument: " << args[1] << "\n";
+            return 2;
+        }
         std::cout << "Pulp Cache\n";
         std::cout << "==========\n\n";
         std::cout << "Location: " << home.string() << "\n\n";
@@ -446,6 +468,10 @@ int cmd_cache(const std::vector<std::string>& args) {
             std::cerr << "Usage: pulp cache fetch <asset>\n";
             std::cerr << "Available assets: skia\n";
             return 1;
+        }
+        if (args.size() > 2) {
+            std::cerr << "Unexpected cache fetch argument: " << args[2] << "\n";
+            return 2;
         }
 
         std::string asset = args[1];
@@ -521,6 +547,10 @@ int cmd_cache(const std::vector<std::string>& args) {
     }
 
     if (sub == "clean") {
+        if (args.size() > 1) {
+            std::cerr << "Unexpected cache clean argument: " << args[1] << "\n";
+            return 2;
+        }
         if (fs::exists(cache_dir)) {
             fs::remove_all(cache_dir);
             std::cout << "Cache cleared.\n";

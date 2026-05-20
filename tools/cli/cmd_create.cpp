@@ -127,13 +127,22 @@ int cmd_create(const std::vector<std::string>& args) {
     // resulting app and didn't match the "build the app" mental model.
     bool debug_build = false;
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
+        auto take_value = [&](std::string& out, const char* flag) -> bool {
+            if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
+                std::cerr << "pulp create: " << flag << " requires a value\n";
+                return false;
+            }
+            out = args[++i];
+            return true;
+        };
+        if (args[i] == "--type") { if (!take_value(type, "--type")) return 2; continue; }
         if (args[i] == "--mpe") { mpe_mode = true; continue; }
-        if (args[i] == "--template" && i + 1 < args.size()) { tmpl = args[++i]; continue; }
-        if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
-        if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
-        if ((args[i] == "--targets" || args[i] == "--target") && i + 1 < args.size()) {
-            targets_arg = args[++i]; continue;
+        if (args[i] == "--template") { if (!take_value(tmpl, "--template")) return 2; continue; }
+        if (args[i] == "--manufacturer") { if (!take_value(manufacturer, "--manufacturer")) return 2; continue; }
+        if (args[i] == "--output") { if (!take_value(output_path, "--output")) return 2; continue; }
+        if (args[i] == "--targets" || args[i] == "--target") {
+            if (!take_value(targets_arg, args[i].c_str())) return 2;
+            continue;
         }
         if (args[i] == "--in-tree" || args[i] == "--example") { in_tree_mode = true; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
@@ -164,6 +173,11 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  instead, or run `pulp project pin <version>` from inside the project\n";
             std::cout << "  at any time.\n";
             return 0;
+        }
+        if (!args[i].empty() && args[i][0] == '-') {
+            std::cerr << "pulp create: unknown flag: " << args[i] << "\n";
+            std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
+            return 2;
         }
         if (name.empty() && !args[i].empty() && args[i][0] != '-') { name = args[i]; continue; }
     }

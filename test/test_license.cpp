@@ -5,6 +5,7 @@
 #include <pulp/runtime/temporary_file.hpp>
 
 #include <fstream>
+#include <limits>
 #include <utility>
 
 using namespace pulp::runtime;
@@ -148,6 +149,64 @@ TEST_CASE("BigInteger self assignment and identity arithmetic stay stable",
     REQUIRE(value.mod_pow(BigInteger(0), BigInteger(17)).to_string() == "1");
 }
 
+TEST_CASE("BigInteger parses case-insensitive hex and decimal leading zeroes",
+          "[crypto][bigint][coverage][phase3]") {
+    auto hex = BigInteger::from_hex("00ff");
+    REQUIRE(hex.to_string() == "255");
+    REQUIRE(hex.to_hex() == "FF");
+
+    auto decimal = BigInteger::from_string("000123");
+    REQUIRE(decimal.to_string() == "123");
+    REQUIRE(decimal.bit_count() == 7);
+}
+
+TEST_CASE("BigInteger uint64 constructor preserves unsigned high values",
+          "[crypto][bigint][coverage][phase3]") {
+    BigInteger max_value(std::numeric_limits<std::uint64_t>::max());
+
+    REQUIRE(max_value.to_string() == "18446744073709551615");
+    REQUIRE(max_value.to_hex() == "FFFFFFFFFFFFFFFF");
+    REQUIRE(max_value.bit_count() == 64);
+    REQUIRE_FALSE(max_value.is_zero());
+}
+
+TEST_CASE("BigInteger ordering covers equal and greater comparisons",
+          "[crypto][bigint][coverage][phase3-large]") {
+    BigInteger low(99);
+    BigInteger same_low(99);
+    BigInteger high(100);
+
+    REQUIRE_FALSE(low < same_low);
+    REQUIRE_FALSE(high < low);
+    REQUIRE(low < high);
+    REQUIRE(low == same_low);
+    REQUIRE(high != low);
+}
+
+TEST_CASE("BigInteger comparison covers equal and greater-than paths",
+          "[crypto][bigint][coverage][phase3]") {
+    BigInteger low(255);
+    auto same = BigInteger::from_hex("FF");
+    BigInteger high(256);
+
+    REQUIRE(low == same);
+    REQUIRE_FALSE(low != same);
+    REQUIRE_FALSE(same < low);
+    REQUIRE_FALSE(high < low);
+    REQUIRE(low < high);
+    REQUIRE(BigInteger().bit_count() == 0);
+}
+
+TEST_CASE("BigInteger preserves negative decimal values through arithmetic",
+          "[crypto][bigint][coverage][phase3]") {
+    auto negative = BigInteger::from_string("-42");
+    auto positive = BigInteger(50);
+
+    REQUIRE(negative.to_string() == "-42");
+    REQUIRE((negative + positive).to_string() == "8");
+    REQUIRE((negative * BigInteger(2)).to_string() == "-84");
+}
+
 // ── License ─────────────────────────────────────────────────────────────
 
 TEST_CASE("LicenseValidator invalid format", "[crypto][license]") {
@@ -163,6 +222,13 @@ TEST_CASE("LicenseValidator missing dot separator", "[crypto][license]") {
 TEST_CASE("LicenseValidator rejects undecodable payload", "[crypto][license]") {
     LicenseValidator validator;
     REQUIRE(validator.validate("###.sig") == LicenseStatus::InvalidFormat);
+}
+
+TEST_CASE("LicenseValidator rejects impossible base64 payload lengths",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    REQUIRE(validator.validate("A.sig") == LicenseStatus::InvalidFormat);
+    REQUIRE_FALSE(validator.validate_and_parse("A.sig"));
 }
 
 TEST_CASE("LicenseValidator parse payload", "[crypto][license]") {
@@ -271,6 +337,14 @@ TEST_CASE("LicenseValidator file not found", "[crypto][license]") {
     REQUIRE(validator.validate_file("/tmp/nonexistent_license_12345.key") == LicenseStatus::NotFound);
 }
 
+TEST_CASE("LicenseValidator empty license file is invalid format",
+          "[crypto][license][coverage][phase3]") {
+    TemporaryFile tmp(".license");
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidFormat);
+}
+
 TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license]") {
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
@@ -324,6 +398,14 @@ TEST_CASE("LicenseValidator validate rejects empty payload section",
     REQUIRE(validator.validate(".sig") == LicenseStatus::InvalidSignature);
 }
 
+TEST_CASE("LicenseValidator validate rejects an empty signature section",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpSynth\"}";
+
+    REQUIRE(validator.validate(base64_encode(payload) + ".") == LicenseStatus::InvalidSignature);
+}
+
 TEST_CASE("LicenseValidator validate rejects malformed signature encoding",
           "[crypto][license][coverage][phase3-large]") {
     LicenseValidator validator;
@@ -351,13 +433,49 @@ TEST_CASE("LicenseValidator validate_and_parse accepts minimal product payload",
     REQUIRE(info->expiry_timestamp == 0);
 }
 
+TEST_CASE("LicenseValidator validate_and_parse ignores an empty signature section",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    auto info = validator.validate_and_parse(base64_encode("{\"product_id\":\"PulpParseOnly\"}") + ".");
+
+    REQUIRE(info.has_value());
+    REQUIRE(info->product_id == "PulpParseOnly");
+}
+
+TEST_CASE("LicenseValidator validate_and_parse keeps first dotted payload split",
+          "[crypto][license][coverage][phase3-batch742]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpDot\"}";
+    auto info = validator.validate_and_parse(base64_encode(payload) + ".sig.with.dots");
+
+    REQUIRE(info.has_value());
+    REQUIRE(info->product_id == "PulpDot");
+}
+
 TEST_CASE("LicenseValidator validate_and_parse ignores malformed optional integers",
           "[crypto][license][coverage][phase3-large]") {
     LicenseValidator validator;
-    std::string payload = "{\"product_id\":\"PulpMini\",\"expiry\":not-a-number}";
+    std::string payload = "{\"product_id\":\"PulpMini\",\"issued\":123junk,\"expiry\":not-a-number}";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
     REQUIRE(info.has_value());
+    REQUIRE(info->issued_timestamp == 0);
     REQUIRE(info->expiry_timestamp == 0);
+}
+
+TEST_CASE("LicenseValidator validate_and_parse accepts whitespace after optional integers",
+          "[crypto][license][coverage][phase3]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpMini\",\"issued\":123 \t,\"expiry\":456 }";
+    auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
+    REQUIRE(info.has_value());
+    REQUIRE(info->issued_timestamp == 123);
+    REQUIRE(info->expiry_timestamp == 456);
+
+    std::string truncated_after_int = "{\"product_id\":\"PulpMini\",\"issued\":789";
+    auto truncated_info =
+        validator.validate_and_parse(base64_encode(truncated_after_int) + ".sig");
+    REQUIRE(truncated_info.has_value());
+    REQUIRE(truncated_info->issued_timestamp == 789);
 }
 
 TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
@@ -365,6 +483,22 @@ TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
     TemporaryFile tmp(".license");
     std::string payload = "{\"product_id\":\"PulpSynth\"}";
     std::string key = base64_encode(payload) + "." + base64_encode("sig") + "\n\n";
+
+    {
+        std::ofstream out(tmp.path());
+        REQUIRE(out.good());
+        out << key;
+    }
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseValidator validate_file preserves leading whitespace",
+          "[crypto][license][coverage][phase3]") {
+    TemporaryFile tmp(".license");
+    std::string payload = "{\"product_id\":\"PulpSynth\"}";
+    std::string key = " " + base64_encode(payload) + "." + base64_encode("sig") + "\n";
 
     {
         std::ofstream out(tmp.path());

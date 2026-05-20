@@ -165,6 +165,86 @@ TEST_CASE("ValueAnimation advance returns false when not animating", "[view][ani
     REQUIRE_FALSE(a.advance(0.016f)); // no longer animating
 }
 
+// ── KeyframeAnimation tests ──────────────────────────────────────────────────
+
+TEST_CASE("KeyframeAnimation sorts keyframes and interpolates local spans",
+          "[view][animation][keyframe][coverage][phase3]") {
+    KeyframeAnimation anim;
+    anim.set_keyframes({{1.0f, 100.0f}, {0.0f, 0.0f}, {0.25f, 40.0f}});
+    anim.set_duration(1.0f);
+    anim.start();
+
+    REQUIRE_THAT(anim.advance(0.125f), WithinAbs(20.0f, 0.001f));
+    REQUIRE_THAT(anim.advance(0.125f), WithinAbs(40.0f, 0.001f));
+    REQUIRE_THAT(anim.advance(0.375f), WithinAbs(70.0f, 0.001f));
+}
+
+TEST_CASE("KeyframeAnimation honors reverse direction and forwards fill",
+          "[view][animation][keyframe][coverage][phase3]") {
+    KeyframeAnimation anim;
+    anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 10.0f}});
+    anim.set_duration(1.0f);
+    anim.set_direction(KeyframeAnimation::Direction::reverse);
+    anim.set_fill_mode(KeyframeAnimation::FillMode::forwards);
+    anim.start();
+
+    REQUIRE_THAT(anim.advance(0.25f), WithinAbs(7.5f, 0.001f));
+    REQUIRE_THAT(anim.advance(1.0f), WithinAbs(0.0f, 0.001f));
+    REQUIRE(anim.is_finished());
+    REQUIRE_FALSE(anim.is_running());
+}
+
+TEST_CASE("KeyframeAnimation alternate direction flips odd iterations",
+          "[view][animation][keyframe][coverage][phase3]") {
+    KeyframeAnimation anim;
+    anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 10.0f}});
+    anim.set_duration(1.0f);
+    anim.set_iterations(3.0f);
+    anim.set_direction(KeyframeAnimation::Direction::alternate);
+    anim.start();
+
+    REQUIRE_THAT(anim.advance(0.5f), WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(anim.advance(1.0f), WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(anim.advance(1.0f), WithinAbs(5.0f, 0.001f));
+    REQUIRE_FALSE(anim.is_finished());
+}
+
+TEST_CASE("KeyframeAnimation start resets a previously finished animation",
+          "[view][animation][keyframe][coverage][phase3]") {
+    KeyframeAnimation anim;
+    anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 1.0f}});
+    anim.set_duration(0.1f);
+    anim.start();
+    REQUIRE_THAT(anim.advance(0.2f), WithinAbs(1.0f, 0.001f));
+    REQUIRE(anim.is_finished());
+
+    anim.start();
+    REQUIRE(anim.is_running());
+    REQUIRE_FALSE(anim.is_finished());
+    REQUIRE_THAT(anim.advance(0.05f), WithinAbs(0.5f, 0.001f));
+}
+
+TEST_CASE("KeyframeAnimation pause resume stop and invalid inputs keep value",
+          "[view][animation][keyframe][coverage][phase3]") {
+    KeyframeAnimation anim;
+    anim.set_duration(1.0f);
+    anim.start();
+    REQUIRE_THAT(anim.advance(0.5f), WithinAbs(0.0f, 0.001f));
+
+    anim.set_keyframes({{0.0f, 0.0f}, {1.0f, 100.0f}});
+    anim.pause();
+    REQUIRE_FALSE(anim.is_running());
+    REQUIRE_THAT(anim.advance(0.5f), WithinAbs(0.0f, 0.001f));
+
+    anim.resume();
+    REQUIRE(anim.is_running());
+    REQUIRE_THAT(anim.advance(0.25f), WithinAbs(25.0f, 0.001f));
+
+    anim.stop();
+    REQUIRE_FALSE(anim.is_running());
+    REQUIRE_THAT(anim.advance(0.25f), WithinAbs(25.0f, 0.001f));
+}
+
 // ── easing_by_name tests ────────────────────────────────────────────────────
 
 TEST_CASE("easing_by_name resolves known easings", "[view][animation]") {

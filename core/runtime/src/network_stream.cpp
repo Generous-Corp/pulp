@@ -42,6 +42,7 @@ bool TcpStream::connect(std::string_view host, std::uint16_t port) {
 StreamResult TcpStream::read(std::uint8_t* buffer, std::size_t size) {
     if (!open_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     int n = socket_.receive(buffer, size);
     if (n < 0) return StreamResult::fail(StreamError::IoError);
@@ -55,6 +56,7 @@ StreamResult TcpStream::read(std::uint8_t* buffer, std::size_t size) {
 StreamResult TcpStream::write(const std::uint8_t* buffer, std::size_t size) {
     if (!open_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
 
     int n = socket_.send(buffer, size);
     if (n < 0) return StreamResult::fail(StreamError::IoError);
@@ -110,6 +112,7 @@ std::unique_ptr<HttpStream> HttpStream::post(std::string_view url,
 StreamResult HttpStream::read(std::uint8_t* buffer, std::size_t size) {
     if (closed_) return StreamResult::fail(StreamError::Closed);
     if (size == 0) return StreamResult::make(0);
+    if (buffer == nullptr) return StreamResult::fail(StreamError::Invalid);
     if (!response_.error.empty()) return StreamResult::fail(StreamError::IoError);
 
     auto total = response_.body.size();

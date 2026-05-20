@@ -135,6 +135,7 @@ void WindowManager::broadcast_message(const WindowMessage& msg) {
 }
 
 void WindowManager::set_message_handler(WindowId id, MessageHandler handler) {
+    if (windows_.find(id) == windows_.end()) return;
     handlers_[id] = std::move(handler);
 }
 

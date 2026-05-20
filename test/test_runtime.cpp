@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/dynamic_library.hpp>
 #include <pulp/runtime/high_resolution_timer.hpp>
+#include <pulp/runtime/range.hpp>
 #include <pulp/runtime/runtime.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <array>
@@ -173,6 +174,24 @@ TEST_CASE("SpscQueue accepts rvalue pushes", "[runtime][spsc][coverage][phase3]"
     REQUIRE(q.empty());
 }
 
+TEST_CASE("SpscQueue preserves moved string payload order",
+          "[runtime][spsc][coverage][phase3]") {
+    SpscQueue<std::string, 3> q;
+
+    std::string alpha = "alpha";
+    std::string beta = "beta";
+    REQUIRE(q.try_push(std::move(alpha)));
+    REQUIRE(q.try_push(std::move(beta)));
+    REQUIRE(q.try_push(std::string("gamma")));
+    REQUIRE_FALSE(q.try_push(std::string("overflow")));
+
+    REQUIRE(q.try_pop().value() == "alpha");
+    REQUIRE(q.try_pop().value() == "beta");
+    REQUIRE(q.try_pop().value() == "gamma");
+    REQUIRE_FALSE(q.try_pop().has_value());
+    REQUIRE(q.empty());
+}
+
 TEST_CASE("ScopeGuard executes on exit", "[runtime][scope_guard]") {
     int x = 0;
     {
@@ -201,6 +220,17 @@ TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("ScopeGuard dismiss after move suppresses transferred cleanup",
+          "[runtime][scope_guard][coverage][phase3]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        auto moved = std::move(guard);
+        moved.dismiss();
+    }
+    REQUIRE(calls == 0);
+}
+
 TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
           "[runtime][scope_guard][coverage][issue-641]") {
     int calls = 0;
@@ -209,6 +239,58 @@ TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit",
         REQUIRE(calls == 0);
     }
     REQUIRE(calls == 1);
+}
+
+TEST_CASE("ScopeGuard move preserves dismissed state",
+          "[runtime][scope_guard][coverage][phase3]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        guard.dismiss();
+        auto moved = std::move(guard);
+        static_cast<void>(moved);
+    }
+
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("Range reports containment intersections and empty spans",
+          "[runtime][range][codecov]") {
+    const IntRange range{10, 20};
+
+    REQUIRE(range.length() == 10);
+    REQUIRE_FALSE(range.empty());
+    REQUIRE(range.contains(10));
+    REQUIRE(range.contains(19));
+    REQUIRE_FALSE(range.contains(20));
+    REQUIRE(range.contains(IntRange{12, 18}));
+    REQUIRE_FALSE(range.contains(IntRange{9, 18}));
+
+    REQUIRE(range.intersects(IntRange{0, 11}));
+    REQUIRE(range.intersects(IntRange{19, 30}));
+    REQUIRE_FALSE(range.intersects(IntRange{20, 30}));
+
+    REQUIRE(range.intersection(IntRange{15, 25}) == IntRange{15, 20});
+    REQUIRE(range.intersection(IntRange{20, 25}).empty());
+    REQUIRE(IntRange{5, 5}.empty());
+    REQUIRE(IntRange{7, 3}.empty());
+}
+
+TEST_CASE("Range union constrain and expansion handle edge inputs",
+          "[runtime][range][codecov]") {
+    REQUIRE(IntRange{5, 5}.enclosing_union(IntRange{2, 4}) == IntRange{2, 4});
+    REQUIRE(IntRange{2, 4}.enclosing_union(IntRange{8, 10}) == IntRange{2, 10});
+
+    const IntRange range{3, 7};
+    REQUIRE(range.constrain(1) == 3);
+    REQUIRE(range.constrain(5) == 5);
+    REQUIRE(range.constrain(99) == 6);
+    REQUIRE(IntRange{4, 4}.constrain(99) == 4);
+
+    REQUIRE(IntRange{4, 4}.expanded(9) == IntRange{9, 10});
+    REQUIRE(range.expanded(1) == IntRange{1, 7});
+    REQUIRE(range.expanded(9) == IntRange{3, 10});
+    REQUIRE(IntRange::from_start_length(8, 3) == IntRange{8, 11});
 }
 
 TEST_CASE("Logging does not crash", "[runtime][log]") {
@@ -312,6 +394,18 @@ TEST_CASE("Runtime C string copy handles exact fits and leaves tail bytes alone"
     REQUIRE(padded[3] == '?');
     REQUIRE(padded[4] == '?');
     REQUIRE(padded[5] == '?');
+}
+
+TEST_CASE("Runtime C string copy writes terminator for empty sources",
+          "[runtime][system][coverage][phase3]") {
+    std::array<char, 4> buffer{'x', 'y', 'z', 'w'};
+
+    copy_c_string(buffer.data(), buffer.size(), "");
+
+    REQUIRE(buffer[0] == '\0');
+    REQUIRE(buffer[1] == 'y');
+    REQUIRE(buffer[2] == 'z');
+    REQUIRE(buffer[3] == 'w');
 }
 
 TEST_CASE("Runtime C string copy respects string_view length with embedded nulls",
@@ -464,6 +558,46 @@ TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_lib
     REQUIRE_FALSE(moved.is_open());
     REQUIRE(assigned.is_open());
     REQUIRE(assigned.find_symbol(symbol) != nullptr);
+}
+
+TEST_CASE("DynamicLibrary failed reopen closes the previous handle",
+          "[runtime][dynamic_library][coverage]") {
+    DynamicLibrary library;
+#ifdef __APPLE__
+    REQUIRE(library.open("/usr/lib/libSystem.B.dylib"));
+    const char* symbol = "malloc";
+#elif defined(__linux__)
+    REQUIRE(library.open("libc.so.6"));
+    const char* symbol = "malloc";
+#elif defined(_WIN32)
+    REQUIRE(library.open("kernel32.dll"));
+    const char* symbol = "GetCurrentProcess";
+#else
+    const char* symbol = nullptr;
+    SUCCEED("No stable system library fixture on this platform.");
+    return;
+#endif
+
+    REQUIRE(library.is_open());
+    REQUIRE(library.find_symbol(symbol) != nullptr);
+
+    auto missing_path = std::filesystem::temp_directory_path() /
+                        "pulp_missing_reopen_library_for_test";
+#ifdef _WIN32
+    missing_path += ".dll";
+#elif defined(__APPLE__)
+    missing_path += ".dylib";
+#else
+    missing_path += ".so";
+#endif
+
+    REQUIRE_FALSE(std::filesystem::exists(missing_path));
+    REQUIRE_FALSE(library.open(missing_path.string()));
+    REQUIRE_FALSE(library.is_open());
+    REQUIRE_FALSE(library.error().empty());
+
+    library.close();
+    REQUIRE_FALSE(library.is_open());
 }
 
 TEST_CASE("HighResolutionTimer starts stops and reports running state",

@@ -50,6 +50,48 @@ std::vector<uint8_t> read_bytes(const fs::path& path) {
 
 } // namespace
 
+TEST_CASE("MidiFileData aggregates empty and multi-track metadata",
+          "[midi][file][coverage][phase3]") {
+    MidiFileData empty;
+    REQUIRE(empty.duration_seconds() == Approx(0.0).margin(1e-9));
+    REQUIRE(empty.total_events() == 0);
+
+    MidiFileData data;
+    MidiTrack early;
+    early.events.push_back({0.125, MidiEvent::note_on(0, 60, 100)});
+    early.events.push_back({0.25, MidiEvent::note_off(0, 60)});
+
+    MidiTrack late;
+    late.events.push_back({1.5, MidiEvent::cc(1, 74, 64)});
+
+    data.tracks.push_back(std::move(early));
+    data.tracks.push_back(std::move(late));
+
+    REQUIRE(data.total_events() == 3);
+    REQUIRE(data.duration_seconds() == Approx(1.5).margin(1e-9));
+}
+
+TEST_CASE("MidiFileData aggregates duration and event counts across tracks",
+          "[midi][file][coverage][phase3]") {
+    MidiFileData data;
+    REQUIRE(data.total_events() == 0);
+    REQUIRE(data.duration_seconds() == Approx(0.0).margin(1e-9));
+
+    MidiTrack first;
+    first.events.push_back({0.25, MidiEvent::note_on(0, 60, 100)});
+    first.events.push_back({0.75, MidiEvent::note_off(0, 60, 0)});
+
+    MidiTrack second;
+    second.events.push_back({0.5, MidiEvent::cc(1, 74, 64)});
+    second.events.push_back({1.25, MidiEvent::program_change(1, 4)});
+
+    data.tracks.push_back(std::move(first));
+    data.tracks.push_back(std::move(second));
+
+    REQUIRE(data.total_events() == 4);
+    REQUIRE(data.duration_seconds() == Approx(1.25).margin(1e-9));
+}
+
 TEST_CASE("read_midi_file decodes running status byte fixtures",
           "[midi][file][issue-645]") {
     TempDir tmp;
@@ -156,6 +198,21 @@ TEST_CASE("read_midi_file rejects truncated track chunks",
     REQUIRE_FALSE(read_midi_file(path.string()).has_value());
 }
 
+TEST_CASE("midi file helpers report missing and unwritable paths",
+          "[midi][file][coverage][phase3]") {
+    TempDir tmp;
+
+    REQUIRE_FALSE(read_midi_file((tmp.path / "missing.mid").string()).has_value());
+
+    MidiFileData data;
+    data.ticks_per_quarter = 480;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE_FALSE(write_midi_file(tmp.path.string(), data));
+}
+
 TEST_CASE("write_midi_file emits a readable SMF header",
           "[midi][file][issue-645]") {
     TempDir tmp;
@@ -187,4 +244,28 @@ TEST_CASE("write_midi_file emits a readable SMF header",
     REQUIRE(read->ticks_per_quarter == 960);
     REQUIRE(read->total_events() == 2);
     REQUIRE(read->duration_seconds() == Approx(0.5).margin(0.05));
+}
+
+TEST_CASE("write_midi_file rejects missing parent directories",
+          "[midi][file][coverage][phase3]") {
+    TempDir tmp;
+    MidiFileData data;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(track));
+
+    const auto path = tmp.path / "missing" / "out.mid";
+    REQUIRE_FALSE(write_midi_file(path.string(), data));
+    REQUIRE_FALSE(fs::exists(path));
+}
+
+TEST_CASE("write_midi_file rejects directory destinations",
+          "[midi][file][coverage][phase3]") {
+    TempDir tmp;
+    MidiFileData data;
+    MidiTrack track;
+    track.events.push_back({0.0, MidiEvent::note_on(0, 60, 100)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE_FALSE(write_midi_file(tmp.path.string(), data));
 }

@@ -117,6 +117,33 @@ TEST_CASE("C ABI ignores null events and prefers C++ listeners over raw callback
     pulp_ios_audio_session_set_callback(nullptr, nullptr);
 }
 
+TEST_CASE("C ABI callback replacement uses latest user data",
+          "[ios][audio-session][c-abi][coverage][phase3]") {
+    set_ios_audio_session_listener({});
+    int first_calls = 0;
+    int second_calls = 0;
+
+    pulp_ios_audio_session_set_callback(
+        [](const PulpIosAudioSessionEvent*, void* ud) {
+            ++(*static_cast<int*>(ud));
+        },
+        &first_calls);
+    pulp_ios_audio_session_set_callback(
+        [](const PulpIosAudioSessionEvent*, void* ud) {
+            ++(*static_cast<int*>(ud));
+        },
+        &second_calls);
+
+    PulpIosAudioSessionEvent e{};
+    e.event = PULP_IOS_AUDIO_EVENT_INTERRUPTION_BEGAN;
+    pulp_ios_audio_session_emit(&e);
+
+    REQUIRE(first_calls == 0);
+    REQUIRE(second_calls == 1);
+
+    pulp_ios_audio_session_set_callback(nullptr, nullptr);
+}
+
 TEST_CASE("audio session listener replacement detaches the previous sink",
           "[ios][audio-session][coverage][issue-648]") {
     int first_calls = 0;
@@ -148,4 +175,13 @@ TEST_CASE("to_string covers every event code",
     REQUIRE(to_string(PULP_IOS_AUDIO_EVENT_SILENCE_SECONDARY_AUDIO_ENDED) ==
             "silence_secondary_audio_ended");
     REQUIRE(to_string(999) == "unknown");
+}
+
+TEST_CASE("typed audio session event names route through integer mapping",
+          "[ios][audio-session][coverage][phase3]") {
+    REQUIRE(to_string(PulpIosAudioEvent::PULP_IOS_AUDIO_EVENT_NONE) == "none");
+    REQUIRE(to_string(PulpIosAudioEvent::PULP_IOS_AUDIO_EVENT_ROUTE_CHANGED) ==
+            "route_changed");
+    REQUIRE(to_string(PulpIosAudioEvent::PULP_IOS_AUDIO_EVENT_SILENCE_SECONDARY_AUDIO_ENDED) ==
+            "silence_secondary_audio_ended");
 }

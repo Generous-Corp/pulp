@@ -337,6 +337,23 @@ TEST_CASE("WindowManager send and broadcast skip missing handlers",
     REQUIRE(count == 1);
 }
 
+TEST_CASE("WindowManager ignores handlers for unknown windows",
+          "[view][multiwindow][coverage][phase3]") {
+    WindowManager mgr;
+    int count = 0;
+
+    mgr.set_message_handler(42, [&](const WindowMessage&) {
+        ++count;
+    });
+
+    WindowMessage msg;
+    msg.type = "orphan";
+    mgr.send_message(42, msg);
+    mgr.broadcast_message(msg);
+
+    REQUIRE(count == 0);
+}
+
 // ── Window state save / restore ─────────────────────────────────────────────
 
 TEST_CASE("WindowManager state save and restore", "[view][multiwindow]") {

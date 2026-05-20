@@ -86,6 +86,38 @@ TEST_CASE("JsonRpcPeer request/response over an in-memory channel", "[json_rpc]"
     REQUIRE(response_payload == "5");
 }
 
+TEST_CASE("JsonRpcError factories expose spec codes and messages",
+          "[json_rpc][coverage][phase3]") {
+    const auto parse = JsonRpcError::parse_error();
+    const auto invalid = JsonRpcError::invalid_request();
+    const auto params = JsonRpcError::invalid_params();
+    const auto internal = JsonRpcError::internal_error();
+
+    REQUIRE(parse.code == -32700);
+    REQUIRE(parse.message == "Parse error");
+    REQUIRE(invalid.code == -32600);
+    REQUIRE(invalid.message == "Invalid Request");
+    REQUIRE(params.code == -32602);
+    REQUIRE(params.message == "Invalid params");
+    REQUIRE(internal.code == -32603);
+    REQUIRE(internal.message == "Internal error");
+    REQUIRE(internal.data_json.empty());
+}
+
+TEST_CASE("JsonRpcResult factories separate success payloads from failures",
+          "[json_rpc][coverage][phase3]") {
+    const auto ok = JsonRpcResult::ok(R"({"ready":true})");
+    REQUIRE(ok.result_json == R"({"ready":true})");
+    REQUIRE_FALSE(ok.error.has_value());
+
+    const auto failed = JsonRpcResult::fail({-32001, "server busy", R"({"retry":true})"});
+    REQUIRE(failed.result_json.empty());
+    REQUIRE(failed.error.has_value());
+    REQUIRE(failed.error->code == -32001);
+    REQUIRE(failed.error->message == "server busy");
+    REQUIRE(failed.error->data_json == R"({"retry":true})");
+}
+
 TEST_CASE("JsonRpcPeer returns method_not_found for unknown methods", "[json_rpc]") {
     auto pair = MemoryMessageChannel::make_pair();
     JsonRpcPeer client(*pair.first);
@@ -139,6 +171,21 @@ TEST_CASE("JsonRpcPeer fires notification handler and expects no response", "[js
 
     REQUIRE(wait_until([&] { return notify_count.load() == 2; }));
     REQUIRE(last_params == "[\"again\"]");
+}
+
+TEST_CASE("JsonRpcPeer delivers empty notification params when omitted",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer server(*pair.second);
+
+    std::string captured = "unset";
+    server.on_notification("bare", [&](std::string_view params) {
+        captured = std::string(params);
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","method":"bare"})json"));
+    REQUIRE(captured.empty());
 }
 
 TEST_CASE("JsonRpcPeer reports scalar parse errors and ignores batches", "[json_rpc]") {
@@ -317,6 +364,37 @@ TEST_CASE("JsonRpcPeer reports closed and failed sends", "[json_rpc]") {
     REQUIRE_FALSE(callback_called);
 }
 
+TEST_CASE("JsonRpcPeer rejects sends after direct channel close",
+          "[json_rpc][coverage][phase3-batch742]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+
+    pair.first->close();
+
+    bool callback_called = false;
+    REQUIRE_FALSE(client.send_request("closed", "[]", [&](const JsonRpcResult&) {
+        callback_called = true;
+    }));
+    REQUIRE_FALSE(client.notify("closed", "[]"));
+    REQUIRE_FALSE(callback_called);
+}
+
+TEST_CASE("JsonRpcPeer destructor detaches its message callback",
+          "[json_rpc][coverage][phase3-batch742]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    std::string reply;
+    pair.second->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    {
+        JsonRpcPeer client(*pair.first);
+    }
+
+    REQUIRE(pair.second->send_text("{not-json"));
+    REQUIRE(reply.empty());
+}
+
 TEST_CASE("JsonRpcPeer omits params for empty request payloads",
           "[json_rpc][coverage][issue-641]") {
     auto pair = MemoryMessageChannel::make_pair();
@@ -421,6 +499,53 @@ TEST_CASE("JsonRpcPeer replies to null id requests and notification gaps",
     REQUIRE(replies.size() == 1);
 }
 
+TEST_CASE("JsonRpcPeer rejects requests with non-string method names",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    bool empty_method_called = false;
+    server.register_method("", [&](std::string_view) {
+        empty_method_called = true;
+        return JsonRpcResult::ok("true");
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":7,"method":123,"params":[]})json"));
+
+    REQUIRE_FALSE(empty_method_called);
+    REQUIRE(replies.size() == 1);
+    REQUIRE(replies.back().find(R"("id":7)") != std::string::npos);
+    REQUIRE(replies.back().find(R"("code":-32600)") != std::string::npos);
+}
+
+TEST_CASE("JsonRpcPeer ignores notifications with non-string method names",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer server(*pair.second);
+    bool empty_notification_called = false;
+    server.on_notification("", [&](std::string_view) {
+        empty_notification_called = true;
+    });
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","method":false,"params":{"ignored":true}})json"));
+
+    REQUIRE_FALSE(empty_notification_called);
+    REQUIRE(replies.empty());
+}
+
 TEST_CASE("JsonRpcPeer unregisters a replacement handler cleanly",
           "[json_rpc][coverage][phase3]") {
     auto pair = MemoryMessageChannel::make_pair();
@@ -477,4 +602,263 @@ TEST_CASE("JsonRpcPeer ignores malformed response payloads without firing callba
 
     pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"result":true})json");
     REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+}
+
+TEST_CASE("JsonRpcPeer forwards scalar and object params unchanged",
+          "[json_rpc][coverage][phase3-large]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    std::vector<std::string> params_seen;
+    server.register_method("capture", [&](std::string_view params) {
+        params_seen.emplace_back(params);
+        return JsonRpcResult::ok(R"({"ok":true})");
+    });
+
+    std::atomic<int> callbacks{0};
+    REQUIRE(client.send_request("capture", R"({"nested":{"value":7}})",
+        [&](const JsonRpcResult& response) {
+            REQUIRE_FALSE(response.error.has_value());
+            callbacks.fetch_add(1);
+        }));
+    REQUIRE(client.send_request("capture", R"("scalar")",
+        [&](const JsonRpcResult& response) {
+            REQUIRE_FALSE(response.error.has_value());
+            callbacks.fetch_add(1);
+        }));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 2; }));
+    REQUIRE(params_seen.size() == 2);
+    REQUIRE(params_seen[0].find(R"("nested")") != std::string::npos);
+    REQUIRE(params_seen[0].find("7") != std::string::npos);
+    REQUIRE(params_seen[1] == R"("scalar")");
+}
+
+TEST_CASE("JsonRpcPeer ignores inert objects and unknown notifications without replies",
+          "[json_rpc][coverage][phase3-large]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    JsonRpcPeer peer(*pair.second);
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","id":4})json"));
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","params":[1,2,3]})json"));
+    REQUIRE(pair.first->send_text(R"json({"jsonrpc":"2.0","method":"unhandled"})json"));
+
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(replies.empty());
+}
+
+TEST_CASE("JsonRpcPeer destructor releases the channel callback",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string reply;
+    pair.first->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    {
+        JsonRpcPeer server(*pair.second);
+        server.register_method("echo", [](std::string_view params) {
+            return JsonRpcResult::ok(std::string(params));
+        });
+
+        REQUIRE(pair.first->send_text(
+            R"json({"jsonrpc":"2.0","id":1,"method":"echo","params":{"first":true}})json"));
+        REQUIRE(reply.find(R"("first")") != std::string::npos);
+    }
+
+    reply.clear();
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":2,"method":"echo","params":{"stale":true}})json"));
+    REQUIRE(reply.empty());
+
+    std::string raw_message;
+    pair.second->on_message([&](const Message& message) {
+        raw_message.assign(message.as_text());
+    });
+    REQUIRE(pair.first->send_text("raw after peer"));
+    REQUIRE(raw_message == "raw after peer");
+}
+
+TEST_CASE("JsonRpcPeer consumes pending callbacks after the first response",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string outbound_request;
+    pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer client(*pair.first);
+    std::atomic<int> callbacks{0};
+    std::string last_result;
+
+    REQUIRE(client.send_request("once", "[]", [&](const JsonRpcResult& response) {
+        last_result = response.result_json;
+        callbacks.fetch_add(1);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"result":"first"})json");
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(last_result == R"("first")");
+
+    pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"result":"duplicate"})json");
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(callbacks.load() == 1);
+    REQUIRE(last_result == R"("first")");
+}
+
+TEST_CASE("JsonRpcPeer destructor clears the channel message callback",
+          "[json_rpc][coverage]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    {
+        JsonRpcPeer peer(*pair.first);
+    }
+
+    std::string reply;
+    pair.second->on_message([&](const Message& message) {
+        reply.assign(message.as_text());
+    });
+
+    REQUIRE(pair.second->send_text("{not-json"));
+    REQUIRE(reply.empty());
+}
+
+TEST_CASE("JsonRpcPeer tolerates sparse error responses",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::string outbound_request;
+    pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer client(*pair.first);
+    std::atomic<bool> done{false};
+    std::optional<JsonRpcError> error;
+
+    REQUIRE(client.send_request("manual_error", "[]", [&](const JsonRpcResult& response) {
+        error = response.error;
+        done.store(true);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    pair.second->send_text(R"json({"jsonrpc":"2.0","id":1,"error":{}})json");
+
+    REQUIRE(wait_until([&] { return done.load(); }));
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == 0);
+    REQUIRE(error->message.empty());
+    REQUIRE(error->data_json.empty());
+}
+
+TEST_CASE("JsonRpcPeer notification handlers replace and clear cleanly",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    int first_calls = 0;
+    int second_calls = 0;
+    std::string params = "unset";
+
+    server.on_notification("changed", [&](std::string_view) {
+        ++first_calls;
+    });
+    server.on_notification("changed", [&](std::string_view payload) {
+        ++second_calls;
+        params = std::string(payload);
+    });
+
+    REQUIRE(client.notify("changed", ""));
+    REQUIRE(second_calls == 1);
+    REQUIRE(first_calls == 0);
+    REQUIRE(params.empty());
+
+    server.on_notification("changed", nullptr);
+    REQUIRE(client.notify("changed", R"({"ignored":true})"));
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(second_calls == 1);
+}
+
+TEST_CASE("JsonRpcPeer destructor clears the channel message handler",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+
+    std::vector<std::string> replies;
+    pair.first->on_message([&](const Message& message) {
+        replies.emplace_back(message.as_text());
+    });
+
+    {
+        JsonRpcPeer server(*pair.second);
+        server.register_method("echo", [](std::string_view params) {
+            return JsonRpcResult::ok(std::string(params));
+        });
+
+        REQUIRE(pair.first->send_text(
+            R"json({"jsonrpc":"2.0","id":1,"method":"echo","params":{"before":true}})json"));
+        REQUIRE(replies.size() == 1);
+    }
+
+    REQUIRE(pair.first->send_text(
+        R"json({"jsonrpc":"2.0","id":2,"method":"echo","params":{"after":true}})json"));
+    std::this_thread::sleep_for(10ms);
+    REQUIRE(replies.size() == 1);
+    REQUIRE(replies.front().find("before") != std::string::npos);
+}
+
+TEST_CASE("JsonRpcPeer accepts binary JSON and default error envelopes",
+          "[json_rpc][coverage][phase3]") {
+    auto pair = MemoryMessageChannel::make_pair();
+    JsonRpcPeer client(*pair.first);
+    JsonRpcPeer server(*pair.second);
+
+    server.register_method("echo", [](std::string_view params) {
+        return JsonRpcResult::ok(std::string(params));
+    });
+
+    std::atomic<int> callbacks{0};
+    std::string result;
+    REQUIRE(client.send_request("echo", R"({"value":3})", [&](const JsonRpcResult& response) {
+        result = response.result_json;
+        callbacks.fetch_add(1);
+    }));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 1; }));
+    REQUIRE(result.find(R"("value")") != std::string::npos);
+    REQUIRE(result.find("3") != std::string::npos);
+
+    auto error_pair = MemoryMessageChannel::make_pair();
+    std::string outbound_request;
+    error_pair.second->on_message([&](const Message& message) {
+        outbound_request.assign(message.as_text());
+    });
+
+    JsonRpcPeer error_client(*error_pair.first);
+    std::optional<JsonRpcError> default_error;
+    REQUIRE(error_client.send_request("manual", "", [&](const JsonRpcResult& response) {
+        default_error = response.error;
+        callbacks.fetch_add(1);
+    }));
+    REQUIRE(outbound_request.find(R"("id":1)") != std::string::npos);
+
+    const std::string error_payload = R"json({"jsonrpc":"2.0","id":1,"error":{}})json";
+    REQUIRE(error_pair.second->send(
+        reinterpret_cast<const std::uint8_t*>(error_payload.data()),
+        error_payload.size()));
+
+    REQUIRE(wait_until([&] { return callbacks.load() == 2; }));
+    REQUIRE(default_error.has_value());
+    REQUIRE(default_error->code == 0);
+    REQUIRE(default_error->message.empty());
+    REQUIRE(default_error->data_json.empty());
 }

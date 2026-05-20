@@ -146,6 +146,43 @@ TEST_CASE("PluginFormat enum covers the 5 shipping formats",
     }
 }
 
+TEST_CASE("PluginScanner default paths match platform format support",
+          "[host][plugin-info][format][coverage][phase3]") {
+#if defined(__APPLE__)
+    auto vst3 = PluginScanner::default_paths(PluginFormat::VST3);
+    auto au = PluginScanner::default_paths(PluginFormat::AudioUnit);
+    auto auv3 = PluginScanner::default_paths(PluginFormat::AudioUnitV3);
+    auto clap = PluginScanner::default_paths(PluginFormat::CLAP);
+    auto lv2 = PluginScanner::default_paths(PluginFormat::LV2);
+
+    REQUIRE(vst3.size() == 2);
+    REQUIRE(vst3[0].find("/Library/Audio/Plug-Ins/VST3") != std::string::npos);
+    REQUIRE(au.size() == 2);
+    REQUIRE(auv3 == au);
+    REQUIRE(clap.size() == 2);
+    REQUIRE(lv2.empty());
+#elif defined(_WIN32)
+    auto vst3 = PluginScanner::default_paths(PluginFormat::VST3);
+    auto au = PluginScanner::default_paths(PluginFormat::AudioUnit);
+
+    REQUIRE(vst3.size() == 2);
+    REQUIRE(vst3[0].find("VST3") != std::string::npos);
+    REQUIRE(au.size() == 2);
+#elif defined(__linux__)
+    auto vst3 = PluginScanner::default_paths(PluginFormat::VST3);
+    auto clap = PluginScanner::default_paths(PluginFormat::CLAP);
+    auto lv2 = PluginScanner::default_paths(PluginFormat::LV2);
+    auto au = PluginScanner::default_paths(PluginFormat::AudioUnit);
+
+    REQUIRE(vst3.size() == 3);
+    REQUIRE(clap.size() == 2);
+    REQUIRE(lv2.size() == 3);
+    REQUIRE(au.empty());
+#else
+    REQUIRE(PluginScanner::default_paths(PluginFormat::VST3).empty());
+#endif
+}
+
 TEST_CASE("PluginScanner identifies bundle suffixes for each host format",
           "[host][plugin-info][format]") {
     REQUIRE(PluginScanner::is_plugin_bundle("/Library/Audio/Plug-Ins/VST3/Test.vst3",

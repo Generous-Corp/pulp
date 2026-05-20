@@ -89,6 +89,34 @@ TEST_CASE("parse_transition_shorthand: steps(N, end|start)",
     REQUIRE(b[0].easing.steps_count == 8);
 }
 
+TEST_CASE("parse_transition_shorthand rejects partial easing numbers",
+          "[view][bridge][css][coverage][phase3]") {
+    auto bezier = parse_transition_shorthand(
+        "opacity 200ms cubic-bezier(0.42junk, 0, 0.58, 1)");
+    REQUIRE(bezier.size() == 1);
+    REQUIRE(bezier[0].easing.kind == CssEasing::Kind::ease);
+
+    auto steps = parse_transition_shorthand("opacity 200ms steps(4x, end)");
+    REQUIRE(steps.size() == 1);
+    REQUIRE(steps[0].easing.kind == CssEasing::Kind::ease);
+    REQUIRE(steps[0].easing.steps_count == 1);
+
+    REQUIRE(parse_css_time_seconds("200msjunk") == 0.0f);
+    REQUIRE_THAT(parse_css_time_seconds("200ms"), WithinAbs(0.2f, 0.001f));
+
+    float parsed_float = 0.0f;
+    REQUIRE(parse_css_float_token("0.75\t", parsed_float));
+    REQUIRE_THAT(parsed_float, WithinAbs(0.75f, 0.001f));
+    REQUIRE_FALSE(parse_css_float_token("", parsed_float));
+    REQUIRE_FALSE(parse_css_float_token("nan", parsed_float));
+
+    auto steps_with_ws = parse_transition_shorthand("opacity 200ms steps(12\t, end)");
+    REQUIRE(steps_with_ws[0].easing.kind == CssEasing::Kind::steps_end);
+    REQUIRE(steps_with_ws[0].easing.steps_count == 12);
+    auto steps_empty = parse_transition_shorthand("opacity 200ms steps(, end)");
+    REQUIRE(steps_empty[0].easing.kind == CssEasing::Kind::ease);
+}
+
 TEST_CASE("parse_transition_shorthand: none clears the list",
           "[view][bridge][css][issue-1434-anim]") {
     auto specs = parse_transition_shorthand("none");
@@ -363,4 +391,3 @@ TEST_CASE("CSSStyleDeclaration forwards font-family to bridge",
     REQUIRE(lbl != nullptr);
     REQUIRE(lbl->font_family() == "\"Atkinson Hyperlegible\", Georgia, serif");
 }
-

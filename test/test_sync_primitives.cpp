@@ -17,6 +17,17 @@ struct TransportState {
     int time_sig_den = 4;
 };
 
+TEST_CASE("SeqLock default constructor publishes value-initialized snapshots",
+          "[runtime][seqlock][coverage][phase3]") {
+    SeqLock<TransportState> lock;
+
+    auto result = lock.read();
+    REQUIRE(result.tempo == 120.0);
+    REQUIRE(result.beat_position == 0.0);
+    REQUIRE(result.time_sig_num == 4);
+    REQUIRE(result.time_sig_den == 4);
+}
+
 TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
     SeqLock<TransportState> lock;
 
@@ -91,6 +102,17 @@ TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
 
 // ── TripleBuffer tests ────────────────────────────────────────────────────
 
+TEST_CASE("TripleBuffer default constructor exposes value-initialized front buffer",
+          "[runtime][triple_buffer][coverage][phase3]") {
+    TripleBuffer<TransportState> buf;
+
+    const auto& initial = buf.read();
+    REQUIRE(initial.tempo == 120.0);
+    REQUIRE(initial.beat_position == 0.0);
+    REQUIRE(initial.time_sig_num == 4);
+    REQUIRE(initial.time_sig_den == 4);
+}
+
 TEST_CASE("TripleBuffer basic read/write", "[runtime][triple_buffer]") {
     TripleBuffer<int> buf(0);
 
@@ -142,6 +164,38 @@ TEST_CASE("TripleBuffer reader gets latest value", "[runtime][triple_buffer]") {
     REQUIRE(buf.read() == 3);
 }
 
+TEST_CASE("TripleBuffer default and clean reads are stable",
+          "[runtime][triple_buffer][coverage][phase3]") {
+    struct Snapshot {
+        float left = 0.0f;
+        float right = 0.0f;
+        int blocks = 0;
+    };
+
+    TripleBuffer<Snapshot> default_buffer;
+
+    const auto& initial = default_buffer.read();
+    REQUIRE(initial.left == 0.0f);
+    REQUIRE(initial.right == 0.0f);
+    REQUIRE(initial.blocks == 0);
+
+    Snapshot next;
+    next.left = 0.75f;
+    next.right = 0.5f;
+    next.blocks = 12;
+    default_buffer.write(next);
+
+    const auto& first = default_buffer.read();
+    REQUIRE(first.left == 0.75f);
+    REQUIRE(first.right == 0.5f);
+    REQUIRE(first.blocks == 12);
+
+    const auto& second = default_buffer.read();
+    REQUIRE(second.left == 0.75f);
+    REQUIRE(second.right == 0.5f);
+    REQUIRE(second.blocks == 12);
+}
+
 TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
     // Initialize with coherent state so early reads before first write are valid
     TransportState init;
@@ -180,6 +234,92 @@ TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
     reader.join();
 
     REQUIRE(bad_reads.load() == 0);
+}
+
+// ── SpscQueue tests ───────────────────────────────────────────────────────
+
+TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
+          "[runtime][spsc_queue][coverage]") {
+    SpscQueue<int, 4> queue;
+
+    REQUIRE(queue.capacity() == 4);
+    REQUIRE(queue.empty());
+    REQUIRE(queue.size_approx() == 0);
+    REQUIRE_FALSE(queue.try_pop().has_value());
+
+    REQUIRE(queue.try_push(10));
+    REQUIRE(queue.try_push(20));
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE(queue.size_approx() == 2);
+
+    auto first = queue.try_pop();
+    auto second = queue.try_pop();
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(*first == 10);
+    REQUIRE(*second == 20);
+    REQUIRE(queue.empty());
+}
+
+TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",
+          "[runtime][spsc_queue][coverage]") {
+    SpscQueue<int, 2> queue;
+
+    REQUIRE(queue.try_push(1));
+    REQUIRE(queue.try_push(2));
+    REQUIRE_FALSE(queue.try_push(3));
+    REQUIRE(queue.size_approx() == 2);
+
+    auto popped = queue.try_pop();
+    REQUIRE(popped.has_value());
+    REQUIRE(*popped == 1);
+
+    REQUIRE(queue.try_push(3));
+    REQUIRE(*queue.try_pop() == 2);
+    REQUIRE(*queue.try_pop() == 3);
+    REQUIRE_FALSE(queue.try_pop().has_value());
+}
+
+TEST_CASE("SpscQueue full small buffer drains and reuses slots",
+          "[runtime][spsc][coverage][phase3]") {
+    SpscQueue<int, 2> queue;
+
+    REQUIRE(queue.empty());
+    REQUIRE(queue.size_approx() == 0);
+    REQUIRE(queue.try_push(10));
+    REQUIRE(queue.try_push(20));
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE(queue.size_approx() == 2);
+    REQUIRE_FALSE(queue.try_push(30));
+
+    auto first = queue.try_pop();
+    REQUIRE(first.has_value());
+    REQUIRE(*first == 10);
+    REQUIRE(queue.try_push(30));
+
+    auto second = queue.try_pop();
+    auto third = queue.try_pop();
+    REQUIRE(second.has_value());
+    REQUIRE(third.has_value());
+    REQUIRE(*second == 20);
+    REQUIRE(*third == 30);
+    REQUIRE_FALSE(queue.try_pop().has_value());
+    REQUIRE(queue.empty());
+}
+
+TEST_CASE("SpscQueue supports rvalue item pushes",
+          "[runtime][spsc_queue][coverage]") {
+    struct MoveTracked {
+        int value = 0;
+    };
+
+    SpscQueue<MoveTracked, 2> queue;
+    REQUIRE(queue.try_push(MoveTracked{42}));
+
+    auto item = queue.try_pop();
+    REQUIRE(item.has_value());
+    REQUIRE(item->value == 42);
+    REQUIRE(queue.empty());
 }
 
 // ── Composed integration test ────────────────────────────────────────────

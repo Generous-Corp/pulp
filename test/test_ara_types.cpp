@@ -19,6 +19,23 @@ TEST_CASE("AudioSourceContentChange is a bitset", "[ara][types]") {
                       AudioSourceContentChange::Notes));
 }
 
+TEST_CASE("AudioSourceContentChange supports combined invalidation masks",
+          "[ara][types][coverage][phase3]") {
+    auto flags = AudioSourceContentChange::Notes
+               | AudioSourceContentChange::Tempo
+               | AudioSourceContentChange::Tuning
+               | AudioSourceContentChange::KeySignatures
+               | AudioSourceContentChange::Samples;
+
+    REQUIRE(any(flags));
+    REQUIRE(has(flags, AudioSourceContentChange::Notes));
+    REQUIRE(has(flags, AudioSourceContentChange::Tempo));
+    REQUIRE(has(flags, AudioSourceContentChange::Tuning));
+    REQUIRE(has(flags, AudioSourceContentChange::KeySignatures));
+    REQUIRE(has(flags, AudioSourceContentChange::Samples));
+    REQUIRE_FALSE(has(flags, AudioSourceContentChange::None));
+}
+
 TEST_CASE("AraAudioSource has expected default-constructed shape", "[ara][types]") {
     AraAudioSource src;
     REQUIRE(src.id == 0);

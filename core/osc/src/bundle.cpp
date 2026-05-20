@@ -1,5 +1,6 @@
 #include <pulp/osc/bundle.hpp>
 #include <cstring>
+#include <functional>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -120,71 +121,83 @@ std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
 // ── Address pattern matching ────────────────────────────────────────────────
 
 bool address_matches(std::string_view pattern, std::string_view address) {
-    size_t pi = 0, ai = 0;
-    while (pi < pattern.size() && ai < address.size()) {
-        char pc = pattern[pi];
-        if (pc == '*') {
-            // Match any sequence up to the next '/'
-            ++pi;
-            while (ai < address.size() && address[ai] != '/') ++ai;
-        } else if (pc == '?') {
-            // Match any single character except '/'
-            if (address[ai] == '/') return false;
-            ++pi; ++ai;
-        } else if (pc == '[') {
-            // Character class
-            ++pi;
-            bool negate = pi < pattern.size() && pattern[pi] == '!';
-            if (negate) ++pi;
-            bool matched = false;
-            bool closed = false;
-            while (pi < pattern.size() && pattern[pi] != ']') {
-                if (pi + 2 < pattern.size() && pattern[pi + 1] == '-') {
-                    if (address[ai] >= pattern[pi] && address[ai] <= pattern[pi + 2])
-                        matched = true;
-                    pi += 3;
-                } else {
-                    if (address[ai] == pattern[pi]) matched = true;
-                    ++pi;
+    std::function<bool(size_t, size_t)> match = [&](size_t pi, size_t ai) -> bool {
+        while (pi < pattern.size()) {
+            char pc = pattern[pi];
+            if (pc == '*') {
+                // Match any sequence up to the next '/'
+                ++pi;
+                for (size_t candidate = ai;; ++candidate) {
+                    if (match(pi, candidate)) return true;
+                    if (candidate >= address.size() || address[candidate] == '/') break;
                 }
-            }
-            if (pi < pattern.size()) {
-                closed = true;
-                ++pi;  // skip ']'
-            }
-            if (!closed) return false;
-            if (matched == negate) return false;
-            ++ai;
-        } else if (pc == '{') {
-            // Alternatives: {foo,bar,baz}
-            ++pi;
-            bool found = false;
-            bool closed = false;
-            while (pi < pattern.size() && pattern[pi] != '}') {
-                size_t start = pi;
-                while (pi < pattern.size() && pattern[pi] != ',' && pattern[pi] != '}') ++pi;
-                std::string_view alt = pattern.substr(start, pi - start);
-                if (address.substr(ai).starts_with(alt)) {
-                    ai += alt.size();
-                    found = true;
-                    // Skip to closing brace
-                    while (pi < pattern.size() && pattern[pi] != '}') ++pi;
-                    break;
+                return false;
+            } else if (pc == '?') {
+                // Match any single character except '/'
+                if (ai >= address.size()) return false;
+                if (address[ai] == '/') return false;
+                ++pi; ++ai;
+            } else if (pc == '[') {
+                // Character class
+                if (ai >= address.size()) return false;
+                ++pi;
+                bool negate = pi < pattern.size() && pattern[pi] == '!';
+                if (negate) ++pi;
+                bool matched = false;
+                bool closed = false;
+                while (pi < pattern.size() && pattern[pi] != ']') {
+                    if (pi + 2 < pattern.size() && pattern[pi + 1] == '-') {
+                        if (address[ai] >= pattern[pi] && address[ai] <= pattern[pi + 2])
+                            matched = true;
+                        pi += 3;
+                    } else {
+                        if (address[ai] == pattern[pi]) matched = true;
+                        ++pi;
+                    }
                 }
-                if (pi < pattern.size() && pattern[pi] == ',') ++pi;
+                if (pi < pattern.size()) {
+                    closed = true;
+                    ++pi;  // skip ']'
+                }
+                if (!closed) return false;
+                if (matched == negate) return false;
+                ++ai;
+            } else if (pc == '{') {
+                // Alternatives: {foo,bar,baz}
+                ++pi;
+                size_t close = pi;
+                while (close < pattern.size() && pattern[close] != '}') ++close;
+                if (close == pattern.size()) return false;
+
+                size_t scan = pi;
+                while (scan < close) {
+                    size_t start = scan;
+                    while (scan < close && pattern[scan] != ',') ++scan;
+                    if (scan == start) return false;
+                    if (scan < close && pattern[scan] == ',') ++scan;
+                }
+
+                while (pi < pattern.size() && pattern[pi] != '}') {
+                    size_t start = pi;
+                    while (pi < pattern.size() && pattern[pi] != ',' && pattern[pi] != '}') ++pi;
+                    std::string_view alt = pattern.substr(start, pi - start);
+                    if (address.substr(ai).starts_with(alt)
+                        && match(close + 1, ai + alt.size())) {
+                        return true;
+                    }
+                    if (pi < pattern.size() && pattern[pi] == ',') ++pi;
+                }
+                return false;
+            } else {
+                if (ai >= address.size()) return false;
+                if (pc != address[ai]) return false;
+                ++pi; ++ai;
             }
-            if (pi < pattern.size()) {
-                closed = true;
-                ++pi;  // skip '}'
-            }
-            if (!closed) return false;
-            if (!found) return false;
-        } else {
-            if (pc != address[ai]) return false;
-            ++pi; ++ai;
         }
-    }
-    return pi == pattern.size() && ai == address.size();
+        return ai == address.size();
+    };
+
+    return match(0, 0);
 }
 
 }  // namespace pulp::osc

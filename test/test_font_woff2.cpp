@@ -74,6 +74,29 @@ TEST_CASE("register_font_woff2: TTF/sfnt magic is rejected (not WOFF2)",
     REQUIRE_FALSE(register_font_woff2(otto_buf.data(), otto_buf.size(), ""));
 }
 
+TEST_CASE("register_font_woff2: near-miss signatures are rejected",
+          "[font][woff2][coverage]") {
+    std::vector<std::uint8_t> lowercase = {'w', 'o', 'f', '2'};
+    lowercase.resize(64, 0);
+    REQUIRE_FALSE(register_font_woff2(lowercase.data(), lowercase.size(), ""));
+
+    std::vector<std::uint8_t> leading_padding = {0, 0, 0, 0};
+    leading_padding.insert(leading_padding.end(), kWoff2Magic.begin(), kWoff2Magic.end());
+    leading_padding.resize(64, 0);
+    REQUIRE_FALSE(register_font_woff2(leading_padding.data(), leading_padding.size(), ""));
+
+    std::vector<std::uint8_t> partial = {0x77, 0x4F, 0x46, 0x33};
+    partial.resize(64, 0);
+    REQUIRE_FALSE(register_font_woff2(partial.data(), partial.size(), ""));
+}
+
+TEST_CASE("register_font_woff2: exact magic without header payload is rejected",
+          "[font][woff2][coverage]") {
+    std::array<std::uint8_t, 4> bytes = kWoff2Magic;
+    REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), ""));
+    REQUIRE_FALSE(register_font_woff2(bytes.data(), bytes.size(), "Tiny WOFF2"));
+}
+
 TEST_CASE("register_font_woff2: valid magic + truncated payload is rejected",
           "[font][woff2][issue-2163]") {
     // The magic is correct so the structural pre-check passes, but

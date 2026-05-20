@@ -105,6 +105,28 @@ TEST_CASE("Appcast XML emits Sparkle signature when present", "[ship][appcast]")
     REQUIRE(xml.find("sparkle:edSignature=\"base64-signature\"") != std::string::npos);
 }
 
+TEST_CASE("Appcast XML escapes greater-than characters in feed and item fields",
+          "[ship][appcast][coverage]") {
+    Appcast feed;
+    feed.title = "Pulp > Beta";
+    feed.link = "https://example.com/feed.xml";
+    feed.description = "Updates > previews";
+
+    AppcastItem item;
+    item.version = "1.0.0";
+    item.title = "Build > 100";
+    item.pub_date = "Mon, 01 Jun 2026 12:00:00 +0000";
+    item.download_url = "https://example.com/Pulp.pkg?min=>100";
+    feed.items.push_back(item);
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(xml.find("<title>Pulp &gt; Beta</title>") != std::string::npos);
+    REQUIRE(xml.find("<description>Updates &gt; previews</description>") != std::string::npos);
+    REQUIRE(xml.find("<title>Build &gt; 100</title>") != std::string::npos);
+    REQUIRE(xml.find("url=\"https://example.com/Pulp.pkg?min=&gt;100\"") != std::string::npos);
+}
+
 TEST_CASE("Appcast from_xml parses optional fields across multiple items", "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">

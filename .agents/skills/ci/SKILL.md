@@ -1453,6 +1453,45 @@ error: externally-managed-environment
 
 Followed by cascade-skipped downstream steps (default `if: success()`) and a "coverage.python.xml is missing" hard-fail in the validation step. Coverage Linux ran into this when it migrated to Namespace via `PULP_COVERAGE_LINUX_RUNS_ON_JSON` (PR #676 → #677).
 
+## Homebrew on Namespace macOS runners (PR #2399)
+
+Namespace macOS runners (`nscloud-macos-tahoe-arm64-*`) come up with
+Homebrew configured to disable automatic updates AND with a stale
+package index. Any first-call `brew install <pkg>` on a fresh runner
+exits non-zero with:
+
+```
+You have disabled automatic updates and have not updated today.
+Do not report this issue until you've run `brew update` and tried
+again.
+```
+
+Fix: always run `brew update --quiet` before the first `brew install`
+on macOS legs. The step is gated `if: runner.os == 'macOS'` so it
+no-ops on Linux/Windows. Local self-hosted Macs already keep brew
+warm between runs, so the update is a quick no-op there too —
+unconditional execution is simpler than per-runner-environment
+detection. See `.github/workflows/build.yml` for the canonical
+placement (immediately before `Install ccache (macOS)`).
+
+Cache: the `Namespace cache (brew + ccache + Pulp FetchContent)`
+step uses `namespacelabs/nscloud-cache-action@v1` with `cache: brew`
+plus ccache and FetchContent paths. It runs only on Namespace /
+nscloud labels (`contains(matrix.runs_on_json, 'namespace') ||
+contains(matrix.runs_on_json, 'nscloud')`); self-hosted Macs keep
+their caches on local disk and github-hosted runners use
+`actions/cache@v4` via the existing `Restore ccache (GitHub-hosted)`
+step (#420). The brew cache only restores the bottle download cache —
+it does NOT restore the brew config that would tell the runner
+"updates are recent," so `brew update --quiet` is still required
+even when the cache hits.
+
+Incident: 2026-05-19 — PRs #2367, #2374, #2378, #2388 all wedged on
+the macOS `Install ccache (macOS)` step within minutes of each other
+because Namespace's runner image had drifted past the freshness
+window the brew preamble enforces. Adding `brew update --quiet`
+once unblocks the whole queue.
+
 ## SignalGraph Phase 0 learnings (PR #153)
 
 Gotchas surfaced while landing the four-phase SignalGraph follow-up:
