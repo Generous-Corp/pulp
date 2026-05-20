@@ -44,3 +44,5 @@ MIT-licensed. No royalties. No copyleft.
 
 - [Code Style](policies/code-style.md) — coding standards and architectural rules
 - [Agent Rules](policies/agent-contribution-rules.md) — contribution rules for AI agents
+
+<!-- classify-gate skip-path validation probe — safe to delete -->
