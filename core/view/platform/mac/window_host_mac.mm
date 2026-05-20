@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <iostream>
+#include <memory>   // pulp #2502 — shared_ptr liveness token for deferred clicks
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/dirty_tracker.hpp>
@@ -111,11 +112,29 @@ static pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root) {
 // point before hit_test. Set by WindowHost::set_design_viewport; nil
 // when no design viewport is in effect (identity).
 @property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
+// pulp #2502 — the host destructor MUST call this before the View tree /
+// WidgetBridge / ScriptEngine the deferred-click blocks were built from can
+// be freed. It invalidates every still-queued `mouseUp:` deferred-click block
+// so none of them can run a `std::function` (`on_click` / `on_global_click`)
+// whose closure references freed bridge/engine state.
+- (void)prepareForTeardown;
 @end
 
 @implementation PulpView {
     pulp::view::View* _dragTarget;
     pulp::view::View* _focusedView;
+    // pulp #2502 — liveness token for `mouseUp:`'s deferred-click blocks.
+    // The block dispatched onto the main queue captures a COPY of this
+    // `shared_ptr`, which keeps the `atomic<bool>` alive independently of
+    // the PulpView. `prepareForTeardown` flips it to false; any block that
+    // later drains sees false and no-ops instead of invoking a
+    // `std::function` whose closure references a freed WidgetBridge /
+    // ScriptEngine. A `shared_ptr<atomic<bool>>` is used (rather than
+    // `dispatch_block_cancel`) because this file is compiled MRC and the
+    // deferred-click blocks must survive being copied onto the queue —
+    // `dispatch_block_create` blocks do not, and cancelling a non-dispatch
+    // block aborts.
+    std::shared_ptr<std::atomic<bool>> _deferredClickAlive;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -127,8 +146,23 @@ static pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root) {
         // never reflows on resize.
         self.autoresizesSubviews = YES;
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        _deferredClickAlive = std::make_shared<std::atomic<bool>>(true);
     }
     return self;
+}
+
+// pulp #2502 — invalidate every queued deferred-click block. After this
+// returns, any deferred-click block that later drains is a guaranteed no-op,
+// so it is safe for the owning View tree / WidgetBridge / ScriptEngine to be
+// destroyed. Invoked from the host destructors (`~MacWindowHost`,
+// `~MacGpuWindowHost`) which run synchronously in the same teardown step —
+// between a test's bridge going out of scope and the next run-loop pump — so
+// flipping the token here reliably defuses every block before it can fault.
+- (void)prepareForTeardown {
+    self.rootView = nullptr;
+    _dragTarget = nullptr;
+    if (_deferredClickAlive)
+        _deferredClickAlive->store(false);
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -630,12 +664,47 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                     bubble->on_pointer_event(bme);
                 }
                 if (released_target == _dragTarget && (click_handler || global_click)) {
+                    // pulp #2502 — `click_handler` / `global_click` are
+                    // `std::function`s whose closures reference the
+                    // WidgetBridge / ScriptEngine that built them. Deferring
+                    // their invocation via a bare `dispatch_async` block left
+                    // an unbounded lifetime hazard: if the bridge/engine were
+                    // freed (e.g. a test-scoped owner going out of scope)
+                    // before the block drained, the block ran a dangling
+                    // closure → intermittent SIGSEGV.
+                    //
+                    // Fix: the deferred block captures a COPY of the view's
+                    // `_deferredClickAlive` liveness token (a
+                    // `shared_ptr<atomic<bool>>`). The copy keeps the
+                    // `atomic<bool>` alive even after the PulpView itself is
+                    // gone. `-prepareForTeardown` — called from the host
+                    // destructor before the bridge/engine can be freed, and
+                    // again from -dealloc — flips the token to false. The
+                    // teardown runs synchronously with no run-loop pump
+                    // between the bridge's destruction and the flip, so every
+                    // still-queued block is defused. A block that drains after
+                    // teardown sees `false` and no-ops WITHOUT touching `self`
+                    // or invoking the captured handlers. `self` is captured
+                    // unretained (this file is compiled MRC); that is safe
+                    // because every `self` deref is gated behind the
+                    // token-is-alive check.
+                    std::shared_ptr<std::atomic<bool>> aliveToken = _deferredClickAlive;
                     dispatch_async(dispatch_get_main_queue(), ^{
+                        // Defused after teardown: do not touch `self` or the
+                        // captured `std::function`s — their backing
+                        // WidgetBridge / ScriptEngine may already be freed.
+                        if (!aliveToken || !aliveToken->load())
+                            return;
                         @try {
                             try {
-                                if (click_handler) click_handler();
-                                if (global_click) global_click(clicked_id, modifiers);
-                                [self setNeedsDisplay:YES];
+                                // Token still alive ⇒ the host (and therefore
+                                // this view) has not been torn down. The extra
+                                // rootView guard rejects a detached view tree.
+                                if (self.rootView) {
+                                    if (click_handler) click_handler();
+                                    if (global_click) global_click(clicked_id, modifiers);
+                                    [self setNeedsDisplay:YES];
+                                }
                             } catch (const std::exception& e) {
                                 std::cerr << "MacWindowHost deferred click error: " << e.what() << "\n";
                             } catch (...) {
@@ -1239,6 +1308,10 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 - (void)dealloc {
     [self.animationTimer invalidate];
+    // pulp #2502 — belt-and-suspenders: even if a host teardown path forgot
+    // to call -prepareForTeardown, cancel any still-queued deferred-click
+    // blocks here so a dangling block can never outlive this view.
+    [self prepareForTeardown];
 }
 
 @end
@@ -1634,6 +1707,12 @@ public:
     }
 
     ~MacWindowHost() override {
+        // pulp #2502 — cancel any queued deferred-click blocks before the
+        // root View tree / WidgetBridge / ScriptEngine they captured can be
+        // freed. This destructor runs synchronously, with no run-loop pump
+        // between here and the caller's earlier-destroyed bridge/engine, so
+        // cancelling now reliably catches every still-queued block.
+        [view_ prepareForTeardown];
         root_.set_window_host(nullptr);
         root_.set_frame_clock(nullptr);
     }
@@ -1823,6 +1902,10 @@ public:
         stop_display_link();
         skia_surface_.reset();
         gpu_surface_.reset();
+        // pulp #2502 — cancel any queued deferred-click blocks before the
+        // captured View tree / WidgetBridge / ScriptEngine can be freed.
+        // PulpMetalView inherits -prepareForTeardown from PulpView.
+        [metal_view_ prepareForTeardown];
         metal_view_.rootView = nullptr;
         root_.set_window_host(nullptr);
         root_.set_frame_clock(nullptr);

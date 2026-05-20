@@ -449,4 +449,112 @@ TEST_CASE("PulpView NSEvent click bubbles up to ancestor on_click handler",
     }
 }
 
+// pulp #2502 — deferred-click `dispatch_async` block must not outlive the
+// WidgetBridge / ScriptEngine it captured.
+//
+// `-[PulpView mouseUp:]` defers click delivery onto the main queue (post-#992)
+// so a click handler that unmounts the clicked widget can't trip over its own
+// teardown. The deferred block captures `click_handler` / `global_click` —
+// `std::function`s whose closures reference the WidgetBridge / ScriptEngine
+// that wired them. Before the fix, if a test-scoped bridge/engine went out of
+// scope while the block was still queued, the next run-loop pump ran the block
+// against freed memory → intermittent SIGSEGV (~4/12 on untouched main).
+//
+// This test reproduces the exact early-teardown ordering: click to queue the
+// deferred block, then destroy the bridge/engine/host *without draining the
+// run loop* so the block is still queued, THEN pump the run loop. The host
+// destructor's `-prepareForTeardown` must cancel the queued block so the
+// pump runs it as a safe no-op instead of dereferencing a freed closure.
+TEST_CASE("PulpView deferred click is cancelled when bridge/engine are torn down first",
+          "[view][hosts][bridge][issue-2502]") {
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+
+        // Stage the click + tear everything down inside an inner scope so the
+        // WidgetBridge, ScriptEngine, View tree, and WindowHost are all
+        // destroyed (in C++ reverse-declaration order: bridge, engine, host)
+        // before we pump the run loop below.
+        {
+            View root;
+            WindowOptions opts;
+            opts.title = "PulpView issue-2502";
+            opts.width = 200.0f;
+            opts.height = 100.0f;
+            opts.resizable = false;
+            opts.use_gpu = false;
+
+            auto host = WindowHost::create(root, opts);
+            REQUIRE(host != nullptr);
+            root.set_bounds({0, 0, 200, 100});
+
+            pulp::state::StateStore store;
+            pulp::view::ScriptEngine engine;
+            pulp::view::WidgetBridge bridge(engine, root, store);
+
+            // The click handler closure references `engine` (via the bridge's
+            // JS dispatch). Once `engine`/`bridge` are freed, invoking this
+            // `std::function` is a use-after-free.
+            bridge.load_script(R"(
+                var clicks = 0;
+                createCol('clear', '');
+                setFlex('clear', 'width', 200);
+                setFlex('clear', 'height', 100);
+                on('clear', 'click', function() { clicks += 1; });
+            )");
+            REQUIRE(bridge.widget("clear") != nullptr);
+
+            host->show();
+            auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
+            REQUIRE(nswindow != nil);
+            auto* contentView = nswindow.contentView;
+            REQUIRE(contentView != nil);
+
+            for (int i = 0; i < 20; ++i) {
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+            }
+
+            const NSPoint local = NSMakePoint(40.0, 50.0);
+            const NSPoint window_pt = [contentView convertPoint:local toView:nil];
+
+            NSEvent* down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                                               location:window_pt
+                                          modifierFlags:0
+                                              timestamp:0
+                                           windowNumber:nswindow.windowNumber
+                                                context:nil
+                                            eventNumber:0
+                                             clickCount:1
+                                               pressure:1.0];
+            NSEvent* up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
+                                             location:window_pt
+                                        modifierFlags:0
+                                            timestamp:0
+                                         windowNumber:nswindow.windowNumber
+                                              context:nil
+                                          eventNumber:0
+                                           clickCount:1
+                                             pressure:0.0];
+
+            // mouseUp queues the deferred-click block on the main queue.
+            // Deliberately DO NOT drain the run loop here — the block is
+            // still queued when this inner scope exits.
+            [contentView mouseDown:down];
+            REQUIRE_NOTHROW([contentView mouseUp:up]);
+
+            // Scope exit destroys bridge, engine, root, then host. The host
+            // destructor's -prepareForTeardown must cancel the still-queued
+            // deferred-click block here.
+        }
+
+        // Now pump the run loop. Before the fix, the still-queued block would
+        // run its captured `std::function` against the freed bridge/engine
+        // and SIGSEGV. After the fix the block is cancelled and no-ops.
+        for (int i = 0; i < 50; ++i) {
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+
+        SUCCEED("deferred click cancelled cleanly on early bridge/engine teardown");
+    }
+}
+
 #endif
