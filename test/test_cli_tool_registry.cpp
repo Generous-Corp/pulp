@@ -285,6 +285,51 @@ TEST_CASE("tool registry accepts empty and partial descriptor shapes",
     REQUIRE(tool.binary_sources.at(current_platform_key()).binary_name.empty());
 }
 
+TEST_CASE("tool registry coverage preserves platform sources and home helpers",
+          "[cli][tool-registry][coverage][phase3-batch757]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "custom-home"};
+
+    REQUIRE(pulp_home() == tmp.path / "custom-home");
+    REQUIRE(tools_dir() == tmp.path / "custom-home" / "tools");
+    REQUIRE_FALSE(current_platform_key().empty());
+    REQUIRE(current_platform_key() != "unknown");
+
+    write_file(tmp.path / "multi-source.json", R"({
+  "schema_version": 7,
+  "tools": {
+    "multi-source": {
+      "display_name": "Multi Source",
+      "requires_tools": ["uv", "cmake"],
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://example.invalid/mac-${version}.zip",
+          "archive_format": "zip",
+          "binary_name": "multi-mac"
+        },
+        "Linux-x64": {
+          "url_template": "https://example.invalid/linux-${version}.tar.xz",
+          "archive_format": "tar.xz",
+          "binary_name": "multi-linux"
+        }
+      }
+    }
+  }
+}
+)");
+
+    auto loaded = load_tool_registry(tmp.path / "multi-source.json");
+    REQUIRE(loaded.error.empty());
+    REQUIRE(loaded.registry.schema_version == 7);
+    const auto& tool = loaded.registry.tools.at("multi-source");
+    REQUIRE(tool.requires_tools == std::vector<std::string>{"uv", "cmake"});
+    REQUIRE(tool.managed_by_pulp);
+    REQUIRE_FALSE(tool.bundleable);
+    REQUIRE(tool.binary_sources.size() == 2);
+    REQUIRE(tool.binary_sources.at("macOS-arm64").archive_format == "zip");
+    REQUIRE(tool.binary_sources.at("Linux-x64").archive_format == "tar.xz");
+}
+
 TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
           "[cli][tool-registry][locate][issue-643]") {
     TempDir tmp;
@@ -439,6 +484,86 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE_FALSE(missing_wrapper.ok);
     REQUIRE(missing_wrapper.binary_path == wrapper);
     REQUIRE(missing_wrapper.installed_version == py.pinned_version);
+}
+
+TEST_CASE("tool install all succeeds with cached binary and python tools",
+          "[cli][tool-registry][install][coverage][phase3-batch757]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    fs::create_directories(tmp.path / "repo" / "tools" / "packages");
+    ScopedCurrentPath cwd{tmp.path / "repo"};
+
+    const auto platform = current_platform_key();
+    std::string registry_json = R"({
+  "schema_version": 1,
+  "tools": {
+    "cached-bin": {
+      "display_name": "Cached Binary",
+      "description": "Already cached binary",
+      "install_method": "binary_download",
+      "pinned_version": "1.0.0",
+      "binary_sources": {
+        "__PLATFORM__": {
+          "url_template": "https://example.invalid/cached-${version}.zip",
+          "archive_format": "zip",
+          "binary_name": "cached-bin"
+        }
+      }
+    },
+    "cached-py": {
+      "display_name": "Cached Python",
+      "description": "Already cached Python wrapper",
+      "install_method": "python_pip",
+      "pip_package": "cached_py",
+      "pinned_version": "2.0.0"
+    },
+    "uv": {
+      "display_name": "UV",
+      "description": "Cached UV",
+      "install_method": "binary_download",
+      "pinned_version": "3.0.0",
+      "binary_sources": {
+        "__PLATFORM__": {
+          "url_template": "https://example.invalid/uv-${version}.zip",
+          "archive_format": "zip",
+          "binary_name": "uv"
+        }
+      }
+    }
+  }
+}
+)";
+    for (auto pos = registry_json.find("__PLATFORM__");
+         pos != std::string::npos;
+         pos = registry_json.find("__PLATFORM__", pos + platform.size())) {
+        registry_json.replace(pos, std::string("__PLATFORM__").size(), platform);
+    }
+    write_file(tmp.path / "repo" / "tools" / "packages" / "tool-registry.json",
+               registry_json);
+
+    auto cached_bin = managed_binary_path(pulp_home(), "cached-bin", "1.0.0", "cached-bin");
+    touch_file(cached_bin);
+    write_file(cached_bin.parent_path() / "manifest.json",
+               "{\"version\":\"1.0.0\",\"tool_id\":\"cached-bin\"}\n");
+
+    auto uv_bin = managed_binary_path(pulp_home(), "uv", "3.0.0", "uv");
+    touch_file(uv_bin);
+    write_file(uv_bin.parent_path() / "manifest.json",
+               "{\"version\":\"3.0.0\",\"tool_id\":\"uv\"}\n");
+
+    auto py_dir = pulp_home() / "tools" / "python-envs" / "cached-py";
+    fs::create_directories(py_dir / ".venv");
+#ifdef _WIN32
+    touch_file(py_dir / "run.bat");
+#else
+    touch_file(py_dir / "run.sh");
+#endif
+
+    ScopedOutput output;
+    REQUIRE(cmd_tool({"install", "--all"}) == 0);
+    REQUIRE(output.out.str().find("Installed Cached Binary 1.0.0") != std::string::npos);
+    REQUIRE(output.out.str().find("Installed Cached Python 2.0.0") != std::string::npos);
+    REQUIRE(output.out.str().find("Installed UV 3.0.0") != std::string::npos);
 }
 
 TEST_CASE("tool uninstall removes managed binary and python tool roots",

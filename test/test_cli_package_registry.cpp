@@ -392,22 +392,48 @@ targets = ["Linux-x64"]
             std::vector<std::string>{"macOS-arm64", "Windows-x64", "Linux-x64"});
 }
 
-TEST_CASE("project target rewriting inserts into existing project section",
-          "[cli][package-registry][targets][coverage]") {
+TEST_CASE("project targets cover alternate valid architectures and platform rewrite",
+          "[cli][package-registry][targets][coverage][phase3-batch757]") {
+    auto linux_x86_64 = PlatformTarget::parse("Linux-x86_64");
+    REQUIRE(linux_x86_64);
+    REQUIRE(linux_x86_64->to_string() == "Linux-x86_64");
+
+    auto windows_x86 = PlatformTarget::parse("Windows-x86");
+    REQUIRE(windows_x86);
+    REQUIRE(windows_x86->to_string() == "Windows-x86");
+
+    auto ios_arm64 = PlatformTarget::parse("iOS-arm64");
+    REQUIRE(ios_arm64);
+    REQUIRE(ios_arm64->to_string() == "iOS-arm64");
+
+    REQUIRE(is_valid_target({"macOS", "x86_64"}));
+    REQUIRE(is_valid_target({"WASM", "x64"}));
+    REQUIRE(is_valid_target({"Android", "arm64-v8a"}));
+    REQUIRE_FALSE(is_valid_target({"Linux", "armv7"}));
+    REQUIRE_FALSE(PlatformTarget::parse("macOS-arm64-extra"));
+    REQUIRE_FALSE(PlatformTarget::parse("macOS-"));
+    REQUIRE_FALSE(PlatformTarget::parse(""));
+
     TempDir tmp;
     write_file(tmp.path / "pulp.toml", R"([project]
 name = "Demo"
+platforms = [
+  "macOS",
+  "Linux"
+]
 
 [plugin]
 name = "DemoPlugin"
 )");
 
-    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"Android", "arm64-v8a"}}));
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"Android", "arm64-v8a"}, PlatformTarget{"WASM", "wasm32"}}));
     REQUIRE(target_strings(read_project_targets(tmp.path)) ==
-            std::vector<std::string>{"Android-arm64-v8a"});
+            std::vector<std::string>{"Android-arm64-v8a", "WASM-wasm32"});
 
-    std::ifstream in(tmp.path / "pulp.toml");
-    std::string body{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    auto rewritten = std::ifstream(tmp.path / "pulp.toml");
+    std::string body{std::istreambuf_iterator<char>(rewritten), std::istreambuf_iterator<char>()};
     auto project_pos = body.find("[project]");
     auto targets_pos = body.find("targets = [");
     auto plugin_pos = body.find("[plugin]");
@@ -416,6 +442,10 @@ name = "DemoPlugin"
     REQUIRE(plugin_pos != std::string::npos);
     REQUIRE(project_pos < targets_pos);
     REQUIRE(targets_pos < plugin_pos);
+    REQUIRE(body.find("platforms = [") == std::string::npos);
+    REQUIRE(body.find("\"Android-arm64-v8a\"") != std::string::npos);
+    REQUIRE(body.find("\"WASM-wasm32\"") != std::string::npos);
+    REQUIRE(body.find("[plugin]") != std::string::npos);
 }
 
 TEST_CASE("project target parsing prefers targets over later platforms key",
@@ -428,6 +458,34 @@ platforms = ["macOS"]
 
     REQUIRE(target_strings(read_project_targets(tmp.path)) ==
             std::vector<std::string>{"Linux-x64"});
+}
+
+TEST_CASE("lock files tolerate sparse package entries and escaped package ids",
+          "[cli][package-registry][lock][coverage][phase3-batch757]") {
+    TempDir tmp;
+    write_file(tmp.path / "sparse-lock.json", R"({
+  "lockfile_version": 4,
+  "packages": {
+    "bare": {},
+    "scope/pkg": {
+      "version": "2.3.4"
+    }
+  }
+}
+)");
+
+    auto sparse = load_lock_file(tmp.path / "sparse-lock.json");
+    REQUIRE(sparse.version == 4);
+    REQUIRE(sparse.packages.size() == 2);
+    REQUIRE(sparse.packages.at("bare").version.empty());
+    REQUIRE(sparse.packages.at("scope/pkg").version == "2.3.4");
+    REQUIRE(sparse.packages.at("scope/pkg").resolved.empty());
+
+    LockFile lock;
+    lock.packages["quote\"id"] = {"1.0.0", "https://example.com/pkg.git", "sha", "commit"};
+    REQUIRE(save_lock_file(tmp.path / "escaped-lock.json", lock));
+    auto escaped = load_lock_file(tmp.path / "escaped-lock.json");
+    REQUIRE(escaped.packages.at("quote\"id").resolved == "https://example.com/pkg.git");
 }
 
 TEST_CASE("licenses, semver, and quality scoring classify local registry metadata",
@@ -504,6 +562,43 @@ TEST_CASE("licenses, semver, and quality scoring classify local registry metadat
     REQUIRE(mid.tier == "community");
 }
 
+TEST_CASE("semver and quality cover boundary tiers",
+          "[cli][package-registry][quality][coverage][phase3-batch757]") {
+    auto rc1 = *SemVer::parse("1.2.3-rc1");
+    auto rc2 = *SemVer::parse("1.2.3-rc2");
+    auto next_minor = *SemVer::parse("1.3.0");
+    REQUIRE(rc1 < rc2);
+    REQUIRE(rc2 < next_minor);
+    REQUIRE(next_minor.compatible_with(*SemVer::parse("1.2.9")));
+    REQUIRE_FALSE((*SemVer::parse("1.2.8")).compatible_with(*SemVer::parse("1.2.9")));
+    auto dotted_prerelease = SemVer::parse("1.2.-3");
+    REQUIRE(dotted_prerelease);
+    REQUIRE(dotted_prerelease->major == 1);
+    REQUIRE(dotted_prerelease->minor == 2);
+    REQUIRE(dotted_prerelease->patch == 0);
+    REQUIRE(dotted_prerelease->pre == "3");
+    REQUIRE(SemVer::parse("1.2.3-"));
+    REQUIRE_FALSE(SemVer::parse("v"));
+
+    PackageDescriptor capped = quality_fixture();
+    capped.platforms["iOS"].architectures = {"arm64"};
+    capped.platforms["Android"].architectures = {"arm64-v8a"};
+    capped.platforms["WASM"].architectures = {"wasm32"};
+    auto capped_score = compute_quality(capped);
+    REQUIRE(capped_score.platforms == 24);
+    REQUIRE(capped_score.tier == "official");
+
+    PackageDescriptor unverified;
+    unverified.license = "MIT-0";
+    unverified.platforms["macOS"].architectures = {"arm64"};
+    auto unverified_score = compute_quality(unverified);
+    REQUIRE(unverified_score.license == 25);
+    REQUIRE(unverified_score.platforms == 8);
+    REQUIRE(unverified_score.verification == 0);
+    REQUIRE(unverified_score.maintenance == 0);
+    REQUIRE(unverified_score.tier == "experimental");
+}
+
 TEST_CASE("package registry queries rank search hits and detect unsupported targets",
           "[cli][package-registry][search][issue-643]") {
     TempDir tmp;
@@ -540,8 +635,8 @@ TEST_CASE("package registry queries rank search hits and detect unsupported targ
     REQUIRE(missing.empty());
 }
 
-TEST_CASE("package registry search handles case and empty query scoring",
-          "[cli][package-registry][search][coverage]") {
+TEST_CASE("package registry search covers category description and no-platform fallbacks",
+          "[cli][package-registry][search][coverage][phase3-batch757]") {
     TempDir tmp;
     auto loaded = load_registry(write_registry_fixture(tmp.path));
     REQUIRE(loaded.error.empty());
@@ -554,4 +649,42 @@ TEST_CASE("package registry search handles case and empty query scoring",
     REQUIRE(empty.size() == loaded.registry.packages.size());
     REQUIRE(empty[0]->id == "filter-kit");
     REQUIRE(empty[1]->id == "synth-core");
+
+    auto description_hits = search(loaded.registry, "polyphonic");
+    REQUIRE_FALSE(description_hits.empty());
+    REQUIRE(description_hits.front()->id == "synth-core");
+
+    auto category_hits = search(loaded.registry, "DSP");
+    REQUIRE_FALSE(category_hits.empty());
+    REQUIRE(category_hits.front()->id == "synth-core");
+
+    const auto& filter = loaded.registry.packages.at("filter-kit");
+    auto unsupported = unsupported_targets(
+        filter,
+        {PlatformTarget{"macOS", "arm64"},
+         PlatformTarget{"macOS", "x64"},
+         PlatformTarget{"Windows", "x64"}});
+    REQUIRE(target_strings(unsupported) ==
+            std::vector<std::string>{"macOS-x64", "Windows-x64"});
+}
+
+TEST_CASE("remote registry retries corrupt fresh cache before stale fallback",
+          "[cli][package-registry][remote][cache][coverage][phase3-batch757]") {
+    TempDir tmp;
+    write_file(tmp.path / "registry-cache.json", "[]");
+
+    auto corrupt = load_remote_registry(
+        "https://127.0.0.1:9/pulp-registry-corrupt-cache.json",
+        tmp.path,
+        24);
+    REQUIRE(corrupt.registry.packages.empty());
+    REQUIRE(corrupt.error == "Registry file is not a valid JSON object");
+
+    write_registry_fixture(tmp.path, "registry-cache.json");
+    auto stale = load_remote_registry(
+        "https://127.0.0.1:9/pulp-registry-stale-after-failure.json",
+        tmp.path,
+        0);
+    REQUIRE(stale.error.empty());
+    REQUIRE(stale.registry.packages.size() == 2);
 }

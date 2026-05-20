@@ -361,6 +361,45 @@ TEST_CASE("cmd_target list shows source-checkout defaults without pulp.toml",
     REQUIRE(listed.stdout_text.find("macOS-arm64") != std::string::npos);
 }
 
+TEST_CASE("cmd_target covers alternate valid architectures",
+          "[cli][package-commands][target][coverage][phase3-batch757]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+
+    auto add_linux = run_in_project(tmp.path, [&] {
+        return cmd_target({"add", "Linux-x86_64"});
+    });
+    REQUIRE(add_linux.exit_code == 0);
+    REQUIRE(add_linux.stdout_text.find("Added target: Linux-x86_64") != std::string::npos);
+
+    auto add_windows = run_in_project(tmp.path, [&] {
+        return cmd_target({"add", "Windows-x86"});
+    });
+    REQUIRE(add_windows.exit_code == 0);
+
+    auto add_wasm = run_in_project(tmp.path, [&] {
+        return cmd_target({"add", "WASM-wasm32"});
+    });
+    REQUIRE(add_wasm.exit_code == 0);
+
+    REQUIRE(target_strings(tmp.path) ==
+            std::vector<std::string>{"macOS-arm64", "Linux-x86_64", "Windows-x86", "WASM-wasm32"});
+
+    auto listed = run_in_project(tmp.path, [&] { return cmd_target({"list"}); });
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.stdout_text.find("Linux-x86_64") != std::string::npos);
+    REQUIRE(listed.stdout_text.find("Windows-x86") != std::string::npos);
+    REQUIRE(listed.stdout_text.find("WASM-wasm32") != std::string::npos);
+
+    auto remove_windows = run_in_project(tmp.path, [&] {
+        return cmd_target({"remove", "Windows-x86"});
+    });
+    REQUIRE(remove_windows.exit_code == 0);
+    REQUIRE(target_strings(tmp.path) ==
+            std::vector<std::string>{"macOS-arm64", "Linux-x86_64", "WASM-wasm32"});
+}
+
 TEST_CASE("cmd_target add warns when installed packages do not support the new target",
           "[cli][package-commands][target][issue-493]") {
     TempDir tmp;
