@@ -861,6 +861,21 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_canvas_matrix", preludes::web_compat_canvas_matrix);
     eval_or_throw(engine_, "web_compat_canvas_image", preludes::web_compat_canvas_image);
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
+    // P5-5 — per-domain `_applyProperty` handler modules. The former
+    // monolithic per-CSS-property switch is split into layout / paint /
+    // typography / transform / misc handlers; web-compat-style-decl.js's
+    // `_applyProperty` is now a thin dispatcher that calls each handler
+    // (`_applyLayoutProp` etc.) in turn. The handlers are plain function
+    // declarations the dispatcher resolves at call time, so they MUST
+    // eval AFTER style_decl and before any consumer triggers a style
+    // apply (the helpers IIFE only installs setters; it does not call
+    // `_applyProperty` at install time, so the order vs. helpers below
+    // is not load-bearing — but keeping them adjacent is clearer).
+    eval_or_throw(engine_, "web_compat_style_decl_layout", preludes::web_compat_style_decl_layout);
+    eval_or_throw(engine_, "web_compat_style_decl_paint", preludes::web_compat_style_decl_paint);
+    eval_or_throw(engine_, "web_compat_style_decl_typography", preludes::web_compat_style_decl_typography);
+    eval_or_throw(engine_, "web_compat_style_decl_transform", preludes::web_compat_style_decl_transform);
+    eval_or_throw(engine_, "web_compat_style_decl_misc", preludes::web_compat_style_decl_misc);
     // P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
     // setProperty/getPropertyValue/removeProperty extracted out of
     // web-compat-style-decl.js. Must eval AFTER style_decl so the

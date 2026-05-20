@@ -97,9 +97,24 @@ class CssAdapter(AdapterBase):
     def __init__(self, repo_root: Path):
         super().__init__(repo_root)
         self._oracle = self._load_oracle()
-        # The wired set is parsed from web-compat-style-decl.js — adapter
-        # init is the only time we read the file.
-        self._js_text = self._read("core/view/js/web-compat-style-decl.js")
+        # The wired set is parsed from the CSS shim's `_applyProperty`
+        # surface. P5-5 split the former monolithic switch into per-domain
+        # handler modules (web-compat-style-decl-{layout,paint,typography,
+        # transform,misc}.js) with a thin dispatcher in the parent file,
+        # so the `case "X":` arms are now spread across all six files.
+        # Concatenate them before scanning so every wired property is
+        # still seen — adapter init is the only time we read the files.
+        self._js_text = "\n".join(
+            self._read(rel)
+            for rel in (
+                "core/view/js/web-compat-style-decl.js",
+                "core/view/js/web-compat-style-decl-layout.js",
+                "core/view/js/web-compat-style-decl-paint.js",
+                "core/view/js/web-compat-style-decl-typography.js",
+                "core/view/js/web-compat-style-decl-transform.js",
+                "core/view/js/web-compat-style-decl-misc.js",
+            )
+        )
         self._wired = self._extract_wired_cases(self._js_text)
         # MDN-known kebab-case props (used for OOS gate, permissive).
         self._mdn = self._load_mdn_props()
@@ -145,10 +160,14 @@ class CssAdapter(AdapterBase):
 
     @staticmethod
     def _extract_wired_cases(js_text: str) -> set[str]:
-        """Return every `case "X":` key inside web-compat-style-decl.js.
+        """Return every `case "X":` key in the CSS shim's apply surface.
 
-        The file has exactly one switch — the `_applyProperty` body — so
-        scanning the whole file's `case "X":` tokens is unambiguous.
+        After the P5-5 split the `_applyProperty` switch lives in five
+        per-domain handler modules (layout / paint / typography /
+        transform / misc). `__init__` concatenates those modules plus the
+        dispatcher file into `js_text`; every `case "X":` token belongs to
+        one of the domain switches, so scanning the joined text is
+        unambiguous.
         """
         if not js_text:
             return set()

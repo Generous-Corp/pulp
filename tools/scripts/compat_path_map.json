@@ -30,6 +30,26 @@
     "core/view/js/web-compat-style-decl.js": [
       {"kind": "compat-json", "prefix": "css/"},
       {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ],
+    "core/view/js/web-compat-style-decl-layout.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ],
+    "core/view/js/web-compat-style-decl-paint.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ],
+    "core/view/js/web-compat-style-decl-typography.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ],
+    "core/view/js/web-compat-style-decl-transform.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ],
+    "core/view/js/web-compat-style-decl-misc.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
     ]
   }
 }

@@ -29,6 +29,18 @@ set(PULP_JS_PRELUDES
     # CanvasRenderingContext2D constructor is in scope.
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
+    # P5-5 — per-domain `_applyProperty` handler modules. The former
+    # monolithic per-CSS-property switch is split into layout / paint /
+    # typography / transform / misc handlers; web-compat-style-decl.js's
+    # `_applyProperty` is now a thin dispatcher that calls each in turn.
+    # These are plain function declarations referenced by the dispatcher
+    # at call time, so they MUST embed AFTER web-compat-style-decl.js
+    # (and before any consumer that triggers a style apply).
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-layout.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-paint.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-typography.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-transform.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-misc.js
     # P5-5 first cut — _cssToFlex + __cssProperties__ IIFE +
     # setProperty/getPropertyValue/removeProperty. Loaded AFTER
     # web-compat-style-decl.js so the CSSStyleDeclaration constructor
@@ -84,6 +96,11 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-matrix.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-canvas-image.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-layout.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-paint.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-typography.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-transform.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-misc.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl-helpers.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
         ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document-selectors.js
