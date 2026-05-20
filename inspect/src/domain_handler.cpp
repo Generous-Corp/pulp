@@ -607,14 +607,27 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
             obj.addMember("budget_ms", choc::value::createFloat64(rpm_->budget()));
             obj.addMember("over_budget", choc::value::createBool(rpm_->over_budget()));
 
+            // Phase 6.5: per-pass timing now carries both clocks.
+            //  - `time_ms`/`cpu_time_ms`: CPU wall-time around draw
+            //    submission (unchanged; legacy `time_ms` kept for
+            //    back-compat with overlay consumers).
+            //  - `gpu_time_ms`: true GPU-side execution time from Dawn
+            //    timestamp queries, only meaningful when `gpu_time_valid`.
+            // `gpu_timing_available` lets the inspector pick between a
+            // CPU-vs-GPU view and an honest "GPU timestamps unavailable".
             auto passes = choc::value::createEmptyArray();
             for (auto& p : rpm_->passes()) {
                 auto pass = choc::value::createObject("");
                 pass.addMember("draw_calls", choc::value::createInt32(p.draw_calls));
                 pass.addMember("time_ms", choc::value::createFloat64(p.time_ms));
+                pass.addMember("cpu_time_ms", choc::value::createFloat64(p.cpu_time_ms()));
+                pass.addMember("gpu_time_ms", choc::value::createFloat64(p.gpu_time_ms));
+                pass.addMember("gpu_time_valid", choc::value::createBool(p.gpu_time_valid));
                 passes.addArrayElement(pass);
             }
             obj.addMember("passes", passes);
+            obj.addMember("gpu_timing_available",
+                          choc::value::createBool(rpm_->has_gpu_timing()));
         } else {
             obj.addMember("available", choc::value::createBool(false));
         }
