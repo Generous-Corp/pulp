@@ -486,12 +486,16 @@ catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
 # CLI package commands (#643): local-only tests for target/search/list/
 # update/suggest/audit/add/remove behavior against staged project files
 # and registry fixtures. Stays off remote fetch / archive extraction /
-# install branches; links package_commands.cpp + package_registry.cpp
+# install branches; links the package_commands_* TUs + package_registry.cpp
 # directly so the command surface can be exercised without shelling out
-# to the built binary.
+# to the built binary. Roadmap item P11-2 split the sub-command bodies
+# out of package_commands.cpp into _util / _search / _add sibling TUs.
 add_executable(pulp-test-cli-package-commands
     test_cli_package_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_commands.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_util.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_search.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_commands_add.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
 )
 target_include_directories(pulp-test-cli-package-commands PRIVATE

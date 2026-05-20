@@ -70,6 +70,9 @@ add_executable(pulp-cli
     create_targets.cpp
     package_registry.cpp
     package_commands.cpp
+    package_commands_util.cpp
+    package_commands_search.cpp
+    package_commands_add.cpp
     tool_registry.cpp
     version_diag.cpp
     projects_registry.cpp
