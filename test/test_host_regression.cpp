@@ -332,6 +332,90 @@ TEST_CASE("PluginScanner VST3 bundle with well-formed moduleinfo.json yields FUI
     REQUIRE(found);
 }
 
+TEST_CASE("PluginScanner VST3 moduleinfo raw CID bytes normalize to lowercase hex",
+          "[host][scanner][regression][codecov][phase3]") {
+    ScratchDir scratch("vst3-raw-cid");
+
+    const std::string body = R"({
+  "Classes": [
+    {
+      "Category": "Audio Module Class",
+      "CID": "\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u0009\u000a\u000b\u000c\u000d\u000e\u000f\u0010",
+      "Name": "RawCidEffect"
+    }
+  ]
+})";
+    auto bundle = make_vst3_bundle(scratch.path, "RawCID", body);
+
+    ScanOptions opts;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_vst3 = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(scratch.path.string());
+
+    PluginScanner scanner;
+    auto plugins = scanner.scan(opts);
+
+    bool found = false;
+    for (const auto& p : plugins) {
+        if (p.path != bundle.string()) continue;
+        found = true;
+        REQUIRE(p.format == PluginFormat::VST3);
+        REQUIRE(p.unique_id == "0102030405060708090a0b0c0d0e0f10");
+        REQUIRE(p.unique_id != p.name);
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("PluginScanner VST3 moduleinfo skips unusable class records",
+          "[host][scanner][regression][codecov][phase3]") {
+    ScratchDir scratch("vst3-unusable-classes");
+
+    const std::string body = R"({
+  "Classes": [
+    "not an object",
+    {
+      "Category": "Component Controller Class",
+      "CID": "11111111111111111111111111111111",
+      "Name": "Controller"
+    },
+    {
+      "Category": "Audio Module Class",
+      "Name": "MissingCID"
+    },
+    {
+      "Category": "Audio Module Class",
+      "CID": "not-a-normalizable-cid",
+      "Name": "BadCID"
+    }
+  ]
+})";
+    auto bundle = make_vst3_bundle(scratch.path, "NoUsableClass", body);
+
+    ScanOptions opts;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_vst3 = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(scratch.path.string());
+
+    PluginScanner scanner;
+    auto plugins = scanner.scan(opts);
+
+    bool found = false;
+    for (const auto& p : plugins) {
+        if (p.path != bundle.string()) continue;
+        found = true;
+        REQUIRE(p.format == PluginFormat::VST3);
+        REQUIRE(p.name == "NoUsableClass");
+        REQUIRE(p.unique_id == p.name);
+    }
+    REQUIRE(found);
+}
+
 // ── Scanner regression: malformed moduleinfo.json falls back cleanly ──────
 
 TEST_CASE("PluginScanner VST3 bundle with malformed moduleinfo.json falls back to stem",
@@ -551,6 +635,55 @@ TEST_CASE("ScanOptions progress callback fires at least once per format lane",
     PluginScanner scanner;
     (void)scanner.scan(opts);
     REQUIRE(calls.load() >= 1);
+}
+
+TEST_CASE("PluginScanner progress callback reports hermetic extra-path lanes",
+          "[host][scanner][coverage][phase3]") {
+    ScratchDir scratch("scan-progress-hermetic");
+
+    const std::string ttl_body =
+        "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+        "<http://example.org/hermetic-lv2> a lv2:Plugin .\n";
+    auto lv2 = make_lv2_bundle(scratch.path, "HermeticLv2", ttl_body);
+    auto vst = make_vst3_bundle(scratch.path, "HermeticVst3", "");
+
+    struct ProgressCall {
+        std::string path;
+        int scanned = -1;
+        int total = -1;
+    };
+    std::vector<ProgressCall> calls;
+
+    ScanOptions opts;
+    opts.scan_vst3 = true;
+    opts.scan_clap = false;
+    opts.scan_au = true;
+    opts.scan_lv2 = true;
+    opts.only_extra_paths = true;
+    opts.extra_paths.push_back(scratch.path.string());
+    opts.on_progress = [&](const std::string& path, int scanned, int total) {
+        calls.push_back({path, scanned, total});
+    };
+
+    PluginScanner scanner;
+    auto plugins = scanner.scan(opts);
+
+    REQUIRE(calls.size() == 2);
+    REQUIRE(calls[0].path == scratch.path.string());
+    REQUIRE(calls[0].scanned == 0);
+    REQUIRE(calls[0].total == 0);
+    REQUIRE(calls[1].path == scratch.path.string());
+    REQUIRE(calls[1].scanned == 1);
+    REQUIRE(calls[1].total == 0);
+
+    bool saw_lv2 = false;
+    bool saw_vst = false;
+    for (const auto& p : plugins) {
+        if (p.path == lv2.string()) saw_lv2 = true;
+        if (p.path == vst.string()) saw_vst = true;
+    }
+    REQUIRE(saw_lv2);
+    REQUIRE(saw_vst);
 }
 
 // ── Lifecycle: prepare → process → release on a mock slot ─────────────────

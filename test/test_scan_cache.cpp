@@ -200,6 +200,30 @@ TEST_CASE("from_json rejects wrong schema version", "[scan_cache]") {
     REQUIRE_FALSE(b.from_json("not json"));
 }
 
+TEST_CASE("ScanCache from_json rejects non-object roots without replacing cache",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json(R"([{"schema_version": 1}])"));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+
+    REQUIRE_FALSE(cache.from_json(R"("not an object")"));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
+TEST_CASE("ScanCache from_json rejects missing schema without replacing cache",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json(R"({"entries": []})"));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
 TEST_CASE("ScanCache from_json accepts schema-only blob as an empty cache",
           "[scan_cache]") {
     HostScanCache cache;
@@ -243,6 +267,33 @@ TEST_CASE("ScanCache from_json skips malformed entries while loading valid entri
     REQUIRE(c.entries().count("/tmp/valid.vst3") == 1);
 }
 
+TEST_CASE("ScanCache from_json skips entries missing required fields",
+          "[scan_cache][codecov]") {
+    HostScanCache c;
+    REQUIRE(c.from_json(R"({
+        "schema_version": 1,
+        "entries": [
+            {"path": "/tmp/missing-format.vst3"},
+            {"format": "vst3"},
+            {
+                "path": "/tmp/valid.vst3",
+                "mtime": 1,
+                "size": 2,
+                "name": "Valid",
+                "manufacturer": "Pulp",
+                "version": "1.0",
+                "plugin_path": "/tmp/valid.vst3",
+                "unique_id": "valid-id",
+                "format": "vst3"
+            }
+        ]
+    })"));
+
+    REQUIRE(c.size() == 1);
+    REQUIRE(c.entries().count("/tmp/valid.vst3") == 1);
+    REQUIRE(c.entries().count("/tmp/missing-format.vst3") == 0);
+}
+
 TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
           "[scan_cache]") {
     HostScanCache cache;
@@ -251,6 +302,31 @@ TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
     REQUIRE_FALSE(cache.from_json("{"));
     REQUIRE(cache.size() == 1);
     REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
+TEST_CASE("ScanCache from_json keeps existing cache when entry fields have wrong types",
+          "[scan_cache][codecov][phase3]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": [{
+            "path": "/tmp/wrong-type.vst3",
+            "mtime": "not-an-integer",
+            "size": 2,
+            "name": "WrongType",
+            "manufacturer": "Pulp",
+            "version": "1.0",
+            "plugin_path": "/tmp/wrong-type.vst3",
+            "unique_id": "wrong-type-id",
+            "format": "vst3"
+        }]
+    })"));
+
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+    REQUIRE(cache.entries().count("/tmp/wrong-type.vst3") == 0);
 }
 
 TEST_CASE("ScanCache loaded stale entry does not satisfy get", "[scan_cache]") {
@@ -465,6 +541,54 @@ TEST_CASE("ScanCache JSON round-trip preserves every plugin format",
         REQUIRE(entry.info.unique_id == "format-" + std::to_string(i));
         REQUIRE(entry.info.format == formats[i].first);
     }
+}
+
+TEST_CASE("ScanCache round-trips Audio Unit format identifiers",
+          "[scan_cache][codecov]") {
+    HostScanCache a;
+
+    auto au = sample_info();
+    au.name = "UnitV2";
+    au.path = "/tmp/UnitV2.component";
+    au.unique_id = "com.pulp.unit.v2";
+    au.format = PluginFormat::AudioUnit;
+    a.put(au.path, au);
+
+    auto auv3 = sample_info();
+    auv3.name = "UnitV3";
+    auv3.path = "/tmp/UnitV3.component";
+    auv3.unique_id = "com.pulp.unit.v3";
+    auv3.format = PluginFormat::AudioUnitV3;
+    a.put(auv3.path, auv3);
+
+    HostScanCache b;
+    REQUIRE(b.from_json(a.to_json()));
+    REQUIRE(b.size() == 2);
+    REQUIRE(b.entries().at(au.path).info.format == PluginFormat::AudioUnit);
+    REQUIRE(b.entries().at(auv3.path).info.format == PluginFormat::AudioUnitV3);
+}
+
+TEST_CASE("ScanCache from_json leaves features empty when features is not an array",
+          "[scan_cache][codecov]") {
+    HostScanCache cache;
+    REQUIRE(cache.from_json(R"({
+        "schema_version": 1,
+        "entries": [{
+            "path": "/tmp/not-array.clap",
+            "mtime": 1,
+            "size": 2,
+            "name": "NotArray",
+            "manufacturer": "Pulp",
+            "version": "1.0",
+            "plugin_path": "/tmp/not-array.clap",
+            "unique_id": "not-array-id",
+            "format": "clap",
+            "features": "audio-effect"
+        }]
+    })"));
+
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().at("/tmp/not-array.clap").info.features.empty());
 }
 
 TEST_CASE("ScanCache save_to creates nested parent directories",

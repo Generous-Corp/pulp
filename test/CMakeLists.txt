@@ -928,6 +928,8 @@ pulp_add_test_suite(pulp-test-atk-mapping LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-running-status LIBRARIES pulp::midi)
 # Background scanner (workstream 03 slice 3.2)
 pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
+# Host parameter-event queue
+pulp_add_test_suite(pulp-test-parameter-event-queue LIBRARIES pulp::host)
 
 # TextShaper (PreText-style measure-once-reflow-forever)
 pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)

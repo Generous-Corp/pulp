@@ -560,6 +560,73 @@ TEST_CASE("GraphSerializer clears partially loaded graphs after plugin field err
     REQUIRE(dst.connections().empty());
 }
 
+TEST_CASE("GraphSerializer reports plugin nodes missing plugin payload",
+          "[host][serializer][coverage][phase3]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 2,
+      "type": "plugin",
+      "name": "Missing Identity",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 3,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": 1,
+      "source_port": 0,
+      "dest_node": 2,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 1,
+      "source_port": 0,
+      "dest_node": 3,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(result.error.empty());
+    REQUIRE(missing_plugins_contain(result, "Missing Identity (no plugin info)"));
+    REQUIRE(dst.nodes().size() == 2);
+    REQUIRE(dst.connections().size() == 1);
+
+    for (const auto& node : dst.nodes()) {
+        REQUIRE(node.name != "Missing Identity");
+    }
+    REQUIRE_FALSE(dst.connections().front().feedback);
+    REQUIRE_FALSE(dst.connections().front().midi);
+    REQUIRE_FALSE(dst.connections().front().automation);
+}
+
 TEST_CASE("GraphSerializer round-trips MIDI routing", "[host][serializer]") {
     SignalGraph src;
     auto midi_in = src.add_midi_input_node();

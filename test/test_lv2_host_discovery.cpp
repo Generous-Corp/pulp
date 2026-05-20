@@ -243,6 +243,63 @@ TEST_CASE("LV2 host discovery resolves shared objects from bundle roots",
     REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string()) == so.string());
 }
 
+TEST_CASE("LV2 host discovery tolerates sparse bundles and dylib modules",
+          "[host][lv2][coverage][phase3]") {
+    ScratchDir scratch("sparse");
+    const auto missing = scratch.path / "Missing.lv2";
+
+    REQUIRE(pulp::host::detail::discover_lv2_ports(missing.string()).empty());
+    REQUIRE(pulp::host::detail::resolve_lv2_binary(missing.string()).empty());
+
+    const auto bundle = scratch.path / "Sparse.lv2";
+    fs::create_directories(bundle);
+    write_file(bundle / "broken.ttl", "[");
+    write_file(bundle / "metadata.ttl", R"TTL(
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+
+<http://example.com/pulp/sparse>
+    a lv2:Plugin ;
+    lv2:port
+    [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 8 ;
+        lv2:name "Bare Control"
+    ] .
+)TTL");
+    write_file(bundle / "ports.ttl", R"TTL(
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+
+<http://example.com/pulp/sparse>
+    lv2:port
+    [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 3 ;
+        lv2:name "Out"
+    ] .
+)TTL");
+
+    const auto module = bundle / "sparse.dylib";
+    write_file(module, "not a real shared library");
+
+    const auto roles = pulp::host::detail::discover_lv2_ports(bundle.string());
+    REQUIRE(roles.size() == 2);
+
+    REQUIRE(roles[0].index == 8);
+    REQUIRE(roles[0].is_control);
+    REQUIRE(roles[0].is_input);
+    REQUIRE(roles[0].name == "Bare Control");
+    REQUIRE_THAT(roles[0].default_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(roles[0].min_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(roles[0].max_value, WithinAbs(1.0f, 1e-6f));
+
+    REQUIRE(roles[1].index == 3);
+    REQUIRE(roles[1].is_audio);
+    REQUIRE_FALSE(roles[1].is_input);
+
+    REQUIRE(pulp::host::detail::resolve_lv2_binary(bundle.string())
+            == module.string());
+}
+
 TEST_CASE("LV2 PluginSlot load fails cleanly for invalid bundles",
           "[host][lv2][slot][issue-493]") {
     using namespace pulp::host;

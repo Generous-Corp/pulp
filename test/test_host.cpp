@@ -319,6 +319,26 @@ TEST_CASE("PluginSlot load returns nullptr for stub", "[host][slot]") {
     REQUIRE(slot == nullptr); // Stub always returns nullptr
 }
 
+TEST_CASE("PluginSlot load fails cleanly for invalid dispatch inputs",
+          "[host][slot][coverage][phase3]") {
+    PluginInfo clap;
+    clap.name = "MissingClap";
+    clap.path = "/definitely/missing/Missing.clap";
+    clap.format = PluginFormat::CLAP;
+    REQUIRE(PluginSlot::load(clap) == nullptr);
+
+    PluginInfo au;
+    au.name = "BadAU";
+    au.unique_id = "not-a-4cc-triplet";
+    au.format = PluginFormat::AudioUnit;
+    REQUIRE(PluginSlot::load(au) == nullptr);
+
+    PluginInfo auv3 = au;
+    auv3.name = "BadAUv3";
+    auv3.format = PluginFormat::AudioUnitV3;
+    REQUIRE(PluginSlot::load(auv3) == nullptr);
+}
+
 // #296 regression: set_parameter on the CLAP slot must be observable via
 // get_parameter immediately (cached readback), not silently dropped.
 // Unknown param IDs must be rejected instead of polluting the cache.
@@ -470,6 +490,38 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
     REQUIRE(graph.remove_node(input));
     REQUIRE(graph.nodes().size() == 1);
     REQUIRE(graph.node(input) == nullptr);
+}
+
+TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto gain = graph.add_gain_node("Gain");
+    auto output = graph.add_output_node(1, "Output");
+
+    REQUIRE(graph.connect(input, 0, gain, 0));
+    REQUIRE(graph.connect(gain, 0, output, 0));
+    REQUIRE(graph.connections().size() == 2);
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> input_samples(8, 0.5f);
+    std::vector<float> output_samples(8, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 8);
+
+    graph.process(out_view, in_view, 8);
+    for (float sample : output_samples) REQUIRE(sample == 0.5f);
+
+    REQUIRE(graph.remove_node(gain));
+    REQUIRE_FALSE(graph.remove_node(gain));
+    REQUIRE(graph.node(gain) == nullptr);
+    REQUIRE(graph.connections().empty());
+
+    std::fill(output_samples.begin(), output_samples.end(), -1.0f);
+    graph.process(out_view, in_view, 8);
+    for (float sample : output_samples) REQUIRE(sample == 0.0f);
 }
 
 TEST_CASE("SignalGraph connections", "[host][graph]") {
@@ -696,6 +748,33 @@ TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing
     graph.release();
 }
 
+TEST_CASE("SignalGraph ignores stale audio connections with invalid ports",
+          "[host][graph][routing][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto output = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(input, 99, gain, 0));
+    REQUIRE(graph.connect(input, 0, gain, 99));
+    REQUIRE(graph.connect(gain, 42, output, 0));
+    REQUIRE(graph.prepare(48000.0, 8));
+
+    std::vector<float> input_samples(8, 1.0f);
+    std::vector<float> output_samples(8, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 8);
+
+    graph.process(out_view, in_view, 8);
+
+    for (float sample : output_samples) {
+        REQUIRE(sample == 0.0f);
+    }
+    graph.release();
+}
+
 // ── Mock plugin for PDC tests ───────────────────────────────────────────
 
 namespace {
@@ -766,7 +845,116 @@ private:
     std::vector<std::vector<float>> rings_;
     int wp_ = 0;
 };
+
+class PrepareFailPlugin final : public PluginSlot {
+public:
+    PrepareFailPlugin() {
+        info_.name = "PrepareFail";
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return false; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue&,
+                 int) override {}
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+private:
+    PluginInfo info_;
+};
 } // namespace
+
+TEST_CASE("SignalGraph prepare failure leaves process output silent",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto plugin = graph.add_plugin_node(std::make_unique<PrepareFailPlugin>(),
+                                        1, 1, "fail");
+    auto output = graph.add_output_node(1, "out");
+
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE_FALSE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.latency_samples() == 0);
+    REQUIRE(graph.node_latency_samples(plugin) == 0);
+
+    std::vector<float> input_samples(16, 1.0f);
+    std::vector<float> output_samples(16, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 16);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 16);
+
+    graph.process(out_view, in_view, 16);
+    for (float sample : output_samples) {
+        REQUIRE(sample == 0.0f);
+    }
+}
+
+TEST_CASE("SignalGraph process silences oversized blocks",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples(8, 1.0f);
+    std::vector<float> output_samples(8, -1.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 8);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 8);
+
+    graph.process(out_view, in_view, 8);
+
+    for (float sample : output_samples) {
+        REQUIRE(sample == 0.0f);
+    }
+    graph.release();
+}
+
+TEST_CASE("SignalGraph process ignores non-positive block sizes",
+          "[host][graph][coverage][phase3]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "in");
+    auto output = graph.add_output_node(1, "out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples(4, 1.0f);
+    std::vector<float> output_samples{3.0f, 4.0f, 5.0f, 6.0f};
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 0);
+    REQUIRE(output_samples == std::vector<float>{3.0f, 4.0f, 5.0f, 6.0f});
+
+    graph.process(out_view, in_view, -1);
+    REQUIRE(output_samples == std::vector<float>{3.0f, 4.0f, 5.0f, 6.0f});
+
+    graph.release();
+}
 
 TEST_CASE("SignalGraph PDC aligns parallel branches", "[host][graph][pdc]") {
     // in → A(latency=32) → mix
@@ -1053,6 +1241,33 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     graph.release();
 }
 
+TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
+          "[host][graph][midi][coverage][phase3]") {
+    SignalGraph graph;
+    auto midi_in = graph.add_midi_input_node("keys");
+    auto midi_out = graph.add_midi_output_node("thru");
+
+    pulp::midi::MidiBuffer events;
+    events.add(pulp::midi::MidiEvent::note_on(0, 64, 100));
+
+    pulp::midi::MidiBuffer out;
+    REQUIRE_FALSE(graph.inject_midi(midi_in, events));
+    REQUIRE_FALSE(graph.extract_midi(midi_out, out));
+    REQUIRE(out.empty());
+
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE_FALSE(graph.inject_midi(999, events));
+    REQUIRE_FALSE(graph.extract_midi(999, out));
+    REQUIRE(out.empty());
+
+    REQUIRE(graph.inject_midi(midi_in, events));
+    graph.release();
+
+    REQUIRE_FALSE(graph.inject_midi(midi_in, events));
+    REQUIRE_FALSE(graph.extract_midi(midi_out, out));
+    REQUIRE(out.empty());
+}
+
 // ── Phase 1E connect_automation test ────────────────────────────────────
 
 namespace {
@@ -1157,6 +1372,69 @@ TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
     REQUIRE(graph.connect_automation(
         in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f,
         0.0f, pulp::host::AutomationMix::Add));
+}
+
+TEST_CASE("SignalGraph connect_automation rejects invalid endpoints and params",
+          "[host][graph][automation][coverage][phase3]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1);
+    auto out_node = graph.add_output_node(1);
+    auto plug = graph.add_plugin_node(std::make_unique<MockAutomatable>(), 0, 1);
+
+    REQUIRE_FALSE(graph.connect_automation(
+        999, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        in_node, 0, 999, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        in_node, 0, out_node, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        in_node, 2, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE_FALSE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId + 1, 0.0f, 1.0f));
+
+    REQUIRE(graph.connections().empty());
+}
+
+TEST_CASE("SignalGraph automation clamps add-mode and stored smoothing",
+          "[host][graph][automation][coverage][phase3]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot = std::make_unique<MockAutomatable>();
+    auto* slot_ptr = slot.get();
+    auto plug = graph.add_plugin_node(std::move(slot), 0, 1, "auto");
+
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f,
+        -25.0f, AutomationMix::Add));
+    REQUIRE(graph.connections().size() == 1);
+    REQUIRE(graph.connections().front().automation_smoothing_ms == 0.0f);
+    REQUIRE(graph.connections().front().automation_mix == AutomationMix::Add);
+
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f,
+        0.0f, AutomationMix::Add));
+    REQUIRE(graph.connections().size() == 2);
+
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    std::vector<float> input_samples(4, 0.0f);
+    input_samples[0] = 0.8f;
+    input_samples[3] = 0.7f;
+    std::vector<float> output_samples(4, 0.0f);
+    const float* in_ptrs[1] = {input_samples.data()};
+    float* out_ptrs[1] = {output_samples.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+
+    const auto& events = slot_ptr->received();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].param_id == MockAutomatable::kParamId);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE(events[0].value == 1.0f);
+    REQUIRE(events[1].sample_offset == 3);
+    REQUIRE(events[1].value == 1.0f);
 }
 
 // ── Phase 3 GraphSerializer round-trip ──────────────────────────────────

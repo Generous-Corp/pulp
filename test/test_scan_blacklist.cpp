@@ -79,6 +79,9 @@ TEST_CASE("clear unconditionally removes", "[host][blacklist]") {
     bl.blacklist(f.path.string(), "r");
     bl.clear(f.path.string());
     REQUIRE_FALSE(bl.is_blacklisted(f.path.string()));
+
+    bl.clear("/tmp/not-present.vst3");
+    REQUIRE(bl.size() == 0);
 }
 
 TEST_CASE("text round-trip handles pipes, newlines, and percents",
@@ -117,6 +120,36 @@ TEST_CASE("from_text skips malformed lines", "[host][blacklist]") {
     REQUIRE(bl.entries().count("/another") == 0);
     REQUIRE(bl.entries().count("/bad-size") == 0);
     REQUIRE(bl.entries().count("not-enough-fields") == 0);
+}
+
+TEST_CASE("from_text clears existing entries when every line is malformed",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/old.vst3|1|2|stale\n"));
+    REQUIRE(bl.size() == 1);
+
+    REQUIRE(bl.from_text(
+        "not-enough-fields\n"
+        "/bad-mtime|abc|2|reason\n"
+        "/bad-size|1|xyz|reason\n"));
+
+    REQUIRE(bl.size() == 0);
+    REQUIRE(bl.entries().empty());
+}
+
+TEST_CASE("from_text preserves empty blacklist reasons",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/plugin.vst3|10|20|\n"));
+
+    REQUIRE(bl.size() == 1);
+    const auto& entry = bl.entries().at("/plugin.vst3");
+    REQUIRE(entry.mtime == 10);
+    REQUIRE(entry.size == 20);
+    REQUIRE(entry.reason.empty());
+
+    const auto text = bl.to_text();
+    REQUIRE(text.find("/plugin.vst3|10|20|") != std::string::npos);
 }
 
 TEST_CASE("save_to + load_from via disk", "[host][blacklist]") {
@@ -247,6 +280,19 @@ TEST_CASE("from_text keeps unknown percent escapes literal",
     const auto text = bl.to_text();
     REQUIRE(text.find("/plugin%252Fname.vst3") != std::string::npos);
     REQUIRE(text.find("bad%252Greason%7Cok") != std::string::npos);
+}
+
+TEST_CASE("from_text keeps trailing incomplete percent escapes literal",
+          "[host][blacklist][codecov]") {
+    ScanBlacklist bl;
+    REQUIRE(bl.from_text("/plugin.vst3|1|2|reason%"));
+
+    auto entry = bl.entries().find("/plugin.vst3");
+    REQUIRE(entry != bl.entries().end());
+    REQUIRE(entry->second.reason == "reason%");
+
+    const auto text = bl.to_text();
+    REQUIRE(text.find("reason%25") != std::string::npos);
 }
 
 TEST_CASE("save_to creates nested blacklist parent directories",
