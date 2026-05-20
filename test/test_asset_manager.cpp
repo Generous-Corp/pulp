@@ -23,6 +23,12 @@ std::filesystem::path make_temp_asset_path(const char* stem, const char* suffix)
     return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + suffix);
 }
 
+std::string make_unique_asset_name(const char* stem) {
+    auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return std::string(stem) + "-" + unique;
+}
+
 std::vector<uint8_t> make_png_header(uint32_t width, uint32_t height) {
     return {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
@@ -235,6 +241,50 @@ TEST_CASE("AssetManager embedded shader loads into shader cache", "[view][assets
     REQUIRE(cached.source == shader.source);
 }
 
+TEST_CASE("AssetManager embedded shader loader returns cached source on repeat",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    const auto name = make_unique_asset_name("embedded-shader-cache");
+    static const uint8_t first[] = "void first() {}";
+    static const uint8_t second[] = "void second() {}";
+
+    mgr.register_embedded(name, first, sizeof(first) - 1);
+    auto shader = mgr.load_shader_embedded(name);
+    REQUIRE(shader.valid());
+    REQUIRE(shader.source == "void first() {}");
+
+    mgr.register_embedded(name, second, sizeof(second) - 1);
+    auto cached = mgr.load_shader_embedded(name);
+    REQUIRE(cached.valid());
+    REQUIRE(cached.source == "void first() {}");
+}
+
+TEST_CASE("AssetManager shader lookup finds cached file shader by path",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    auto path = make_temp_asset_path("pulp-test-shader-lookup", ".sksl");
+    const std::string source = "half4 main() { return half4(1); }";
+    {
+        std::ofstream file(path);
+        file << source;
+    }
+
+    auto loaded = mgr.load_shader(path.string());
+    REQUIRE(loaded.valid());
+    REQUIRE(loaded.source == source);
+
+    auto cached = mgr.shader(path.string());
+    REQUIRE(cached.valid());
+    REQUIRE(cached.source == source);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 TEST_CASE("AssetManager missing embedded shader reports error", "[view][assets]") {
     auto& mgr = AssetManager::instance();
     auto shader = mgr.load_shader_embedded("missing_embedded_shader_asset");
@@ -294,6 +344,37 @@ TEST_CASE("AssetManager fallback skips families without embedded data", "[view][
     REQUIRE(font.family_name == "PresentFallback");
 }
 
+TEST_CASE("AssetManager embedded font loader populates and reuses cache",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    const auto name = make_unique_asset_name("embedded-font-cache");
+    static const uint8_t first[] = {0x00, 0x01, 0x00, 0x00};
+    static const uint8_t second[] = {'O', 'T', 'T', 'O', 0x01};
+
+    mgr.register_embedded(name, first, sizeof(first));
+    auto font = mgr.load_font_embedded(name);
+    REQUIRE(font.valid());
+    REQUIRE(font.family_name == name);
+    REQUIRE(font.data == std::vector<uint8_t>(first, first + sizeof(first)));
+
+    mgr.register_embedded(name, second, sizeof(second));
+    auto cached = mgr.load_font_embedded(name);
+    REQUIRE(cached.valid());
+    REQUIRE(cached.family_name == name);
+    REQUIRE(cached.data == std::vector<uint8_t>(first, first + sizeof(first)));
+}
+
+TEST_CASE("AssetManager missing family without fallback returns invalid font",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.set_font_fallback({});
+
+    auto font = mgr.font_for_family(make_unique_asset_name("missing-family"));
+    REQUIRE_FALSE(font.valid());
+}
+
 // ── Image Loading ───────────────────────────────────────────────────────────
 
 TEST_CASE("AssetManager load image from memory with PNG header", "[view][assets]") {
@@ -347,6 +428,28 @@ TEST_CASE("AssetManager load image from embedded", "[view][assets]") {
     REQUIRE(img.valid());
     REQUIRE(img.width == 4);
     REQUIRE(img.height == 4);
+}
+
+TEST_CASE("AssetManager embedded image loader reuses cached decode",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    const auto name = make_unique_asset_name("embedded-image-cache");
+    auto first = make_png_header(2, 3);
+    auto second = make_png_header(9, 7);
+
+    mgr.register_embedded(name, first.data(), first.size());
+    auto image = mgr.load_image_embedded(name);
+    REQUIRE(image.valid());
+    REQUIRE(image.width == 2);
+    REQUIRE(image.height == 3);
+
+    mgr.register_embedded(name, second.data(), second.size());
+    auto cached = mgr.load_image_embedded(name);
+    REQUIRE(cached.valid());
+    REQUIRE(cached.width == 2);
+    REQUIRE(cached.height == 3);
 }
 
 // ── File I/O ────────────────────────────────────────────────────────────────
@@ -490,6 +593,52 @@ TEST_CASE("AssetManager blob from embedded", "[view][assets]") {
     auto blob = mgr.load_blob_embedded("test_json");
     REQUIRE(blob.valid());
     REQUIRE(blob.data.size() == sizeof(json_data) - 1);
+}
+
+TEST_CASE("AssetManager embedded blob loader returns cached bytes",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    const auto name = make_unique_asset_name("embedded-blob-cache");
+    static const uint8_t first[] = {1, 2, 3, 4};
+    static const uint8_t second[] = {5, 6, 7, 8, 9};
+
+    mgr.register_embedded(name, first, sizeof(first));
+    auto blob = mgr.load_blob_embedded(name);
+    REQUIRE(blob.valid());
+    REQUIRE(blob.data == std::vector<uint8_t>(first, first + sizeof(first)));
+
+    mgr.register_embedded(name, second, sizeof(second));
+    auto cached = mgr.load_blob_embedded(name);
+    REQUIRE(cached.valid());
+    REQUIRE(cached.data == std::vector<uint8_t>(first, first + sizeof(first)));
+}
+
+TEST_CASE("AssetManager shrinking cache budget trims existing entries",
+          "[view][assets][coverage][phase3]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    const auto first_name = make_unique_asset_name("budget-first");
+    const auto second_name = make_unique_asset_name("budget-second");
+    static const uint8_t first[] = {1, 2, 3, 4};
+    static const uint8_t second[] = {5, 6, 7, 8};
+
+    mgr.register_embedded(first_name, first, sizeof(first));
+    mgr.register_embedded(second_name, second, sizeof(second));
+    REQUIRE(mgr.load_blob_embedded(first_name).valid());
+    REQUIRE(mgr.load_blob_embedded(second_name).valid());
+    REQUIRE(mgr.cache_usage() == sizeof(first) + sizeof(second));
+
+    mgr.set_max_cache_size(sizeof(first));
+    REQUIRE(mgr.cache_usage() <= sizeof(first));
+    REQUIRE(mgr.cache_count() <= 1);
+
+    mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
 }
 
 TEST_CASE("AssetManager blob file cache and misses", "[view][assets]") {

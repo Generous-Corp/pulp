@@ -63,6 +63,12 @@ TEST_CASE("Min contrast thresholds are correct", "[view][contrast]") {
     REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aaa_large), WithinAbs(4.5, 0.01));
 }
 
+TEST_CASE("Unknown contrast levels fall back to AA normal",
+          "[view][contrast][coverage][phase3]") {
+    auto invalid = static_cast<ContrastLevel>(99);
+    REQUIRE_THAT(min_contrast_for_level(invalid), WithinAbs(4.5, 0.01));
+}
+
 TEST_CASE("Contrast helpers clamp channel inputs",
           "[view][contrast][coverage][issue-651]") {
     auto below_black = Color::rgba(-1.0f, -0.5f, -0.25f);
@@ -146,6 +152,16 @@ TEST_CASE("Adjust for contrast preserves already compliant colors",
     REQUIRE_THAT(result->g, WithinAbs(foreground.g, 0.001));
     REQUIRE_THAT(result->b, WithinAbs(foreground.b, 0.001));
     REQUIRE_THAT(result->a, WithinAbs(foreground.a, 0.001));
+}
+
+TEST_CASE("Adjust for contrast returns nullopt when threshold is impossible",
+          "[view][contrast][coverage][phase3]") {
+    auto background = Color::rgba8(128, 128, 128);
+    auto foreground = Color::rgba8(128, 128, 128);
+
+    auto result = adjust_for_contrast(foreground, background, ContrastLevel::aaa_normal);
+
+    REQUIRE_FALSE(result.has_value());
 }
 
 // ── HSL Conversion ──────────────────────────────────────────────────────────
@@ -292,4 +308,18 @@ TEST_CASE("Theme contrast validation skips missing pairs and reports failures",
     REQUIRE(meets_contrast(*fixed.color("text.primary"),
                            *fixed.color("bg.primary"),
                            ContrastLevel::aa_normal));
+}
+
+TEST_CASE("Auto-fix leaves unresolved contrast issues unchanged",
+          "[view][contrast][theme][coverage][phase3]") {
+    Theme bad;
+    bad.colors["bg.primary"] = Color::rgba8(128, 128, 128);
+    bad.colors["text.primary"] = Color::rgba8(128, 128, 128);
+
+    auto fixed = auto_fix_contrast(bad, ContrastLevel::aaa_normal);
+
+    REQUIRE(fixed.color("text.primary").value() == bad.color("text.primary").value());
+    REQUIRE_FALSE(meets_contrast(*fixed.color("text.primary"),
+                                 *fixed.color("bg.primary"),
+                                 ContrastLevel::aaa_normal));
 }

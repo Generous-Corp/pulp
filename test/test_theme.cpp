@@ -264,6 +264,17 @@ TEST_CASE("Theme from_json maps invalid hex digits to default color",
     REQUIRE(theme.color("bad.long").value() == Color{});
 }
 
+TEST_CASE("Theme from_json maps overflowing hex colors to default color",
+          "[view][theme][coverage][phase3]") {
+    auto theme = Theme::from_json(R"({
+        "colors": {
+            "bad.overflow": "#ffffffffffffffffffffffffffffffff"
+        }
+    })");
+
+    REQUIRE(theme.color("bad.overflow").value() == Color{});
+}
+
 TEST_CASE("Theme JSON parser covers optional sections and alpha colors",
           "[view][theme][coverage][issue-651]") {
     auto theme = Theme::from_json(R"({

@@ -187,6 +187,55 @@ TEST_CASE("EqCurveView paint covers disabled grid and disabled band handles",
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) > 0);
 }
 
+TEST_CASE("EqCurveView set_band updates valid indices",
+          "[view][eq_curve][coverage][phase3]") {
+    EqCurveView eq;
+    eq.add_band({500.0f, -3.0f, 0.8f, EqCurveView::FilterType::peak, true});
+
+    EqCurveView::Band replacement{2000.0f, 4.0f, 1.5f, EqCurveView::FilterType::notch, true};
+    eq.set_band(0, replacement);
+
+    REQUIRE(eq.band_count() == 1);
+    REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(2000.0f, 0.001f));
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(eq.bands()[0].q, WithinAbs(1.5f, 0.001f));
+    REQUIRE(eq.bands()[0].type == EqCurveView::FilterType::notch);
+}
+
+TEST_CASE("EqCurveView paint covers grid spectrum and enabled handles",
+          "[view][eq_curve][coverage][phase3]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 240, 120});
+    const float spectrum[] = {-18.0f, -12.0f, -24.0f, -6.0f};
+    eq.set_spectrum(spectrum, sizeof(spectrum) / sizeof(spectrum[0]));
+    eq.add_band({1000.0f, 6.0f, 1.0f, EqCurveView::FilterType::peak, true,
+                 Color::rgba8(240, 20, 20)});
+    eq.set_selected_band(0);
+
+    RecordingCanvas canvas;
+    eq.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) > 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) > 200);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_circle) == 1);
+    REQUIRE(has_fill_color(canvas, Color::rgba8(240, 20, 20)));
+}
+
+TEST_CASE("EqCurveView forwards rich mouse events to the base pointer hook",
+          "[view][eq_curve][coverage][phase3]") {
+    EqCurveView eq;
+    int forwarded = 0;
+    eq.on_pointer_event = [&](const MouseEvent& event) {
+        ++forwarded;
+        REQUIRE(event.pointer_id == 9);
+    };
+
+    eq.on_mouse_event(MouseEvent{{8, 9}, {8, 9}, MouseButton::left, 0, 9, 1, true});
+
+    REQUIRE(forwarded == 1);
+}
+
 // ── MidiKeyboard ────────────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboard note state", "[view][midi_keyboard]") {
@@ -328,6 +377,38 @@ TEST_CASE("MidiKeyboard paint emits note names and active highlight color",
     REQUIRE(has_fill_color(canvas, Color::rgba8(255, 0, 0)));
 }
 
+TEST_CASE("MidiKeyboard forwards rich mouse events to the base pointer hook",
+          "[view][midi_keyboard][coverage][phase3]") {
+    MidiKeyboard kb;
+    int forwarded = 0;
+    Point last{};
+    kb.on_pointer_event = [&](const MouseEvent& event) {
+        ++forwarded;
+        last = event.position;
+    };
+
+    kb.on_mouse_event(MouseEvent{{12, 34}, {12, 34}, MouseButton::left, 0, 7, 1, true});
+
+    REQUIRE(forwarded == 1);
+    REQUIRE(last.x == 12.0f);
+    REQUIRE(last.y == 34.0f);
+}
+
+TEST_CASE("MidiKeyboard overlapping black keys win hit testing",
+          "[view][midi_keyboard][coverage][phase3]") {
+    MidiKeyboard kb;
+    kb.set_range(60, 61);
+    kb.set_bounds({0, 0, 100, 80});
+    std::vector<int> notes;
+    kb.on_note_on = [&](int note, float) { notes.push_back(note); };
+
+    kb.on_mouse_down({80, 20});
+
+    REQUIRE(notes == std::vector<int>{61});
+    REQUIRE(kb.is_note_on(61));
+    REQUIRE_FALSE(kb.is_note_on(60));
+}
+
 // ── ColorPicker ─────────────────────────────────────────────────────────────
 
 TEST_CASE("ColorPicker set/get color", "[view][color_picker]") {
@@ -448,6 +529,58 @@ TEST_CASE("ColorPicker paint positions alpha cursor from normalized alpha",
     REQUIRE(found_alpha_cursor);
 }
 
+TEST_CASE("ColorPicker paint draws configured swatches",
+          "[view][color_picker][coverage][phase3]") {
+    ColorPicker picker;
+    picker.set_bounds({0, 0, 200, 260});
+    picker.set_swatches({
+        Color::rgba8(255, 0, 0),
+        Color::rgba8(0, 255, 0),
+        Color::rgba8(0, 0, 255),
+    });
+
+    RecordingCanvas canvas;
+    picker.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) >= 5);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) >= 4);
+    REQUIRE(has_fill_color(canvas, Color::rgba8(255, 0, 0)));
+    REQUIRE(has_fill_color(canvas, Color::rgba8(0, 255, 0)));
+    REQUIRE(has_fill_color(canvas, Color::rgba8(0, 0, 255)));
+}
+
+TEST_CASE("ColorPicker forwards rich mouse events to the base pointer hook",
+          "[view][color_picker][coverage][phase3]") {
+    ColorPicker picker;
+    int forwarded = 0;
+    picker.on_pointer_event = [&](const MouseEvent& event) {
+        ++forwarded;
+        REQUIRE(event.pointer_id == 3);
+        REQUIRE(event.is_down);
+    };
+
+    picker.on_mouse_event(MouseEvent{{1, 2}, {1, 2}, MouseButton::left, 0, 3, 1, true});
+
+    REQUIRE(forwarded == 1);
+}
+
+TEST_CASE("ColorPicker hidden alpha bar ignores alpha-region input",
+          "[view][color_picker][coverage][phase3]") {
+    ColorPicker picker;
+    picker.set_bounds({0, 0, 200, 280});
+    picker.set_show_alpha(false);
+    picker.set_hex("#33669980");
+    int changes = 0;
+    picker.on_change = [&](Color) { ++changes; };
+
+    picker.on_mouse_down({60, 212});
+    picker.on_mouse_drag({176, 212});
+    picker.on_mouse_up({176, 212});
+
+    REQUIRE(changes == 0);
+    REQUIRE(picker.hex() == "#33669980");
+}
+
 TEST_CASE("ColorPicker mode and outside mouse input are stable",
           "[view][color_picker][coverage][issue-652]") {
     ColorPicker picker;
@@ -516,6 +649,17 @@ TEST_CASE("FileDropZone empty extensions accepts all", "[view][file_drop]") {
     FileDropZone zone;
     zone.drag_enter({"anything.xyz"});
     REQUIRE(zone.is_drag_valid());
+}
+
+TEST_CASE("FileDropZone rejects extensionless files when extensions are required",
+          "[view][file_drop][coverage][phase3]") {
+    FileDropZone zone;
+    zone.set_accepted_extensions({".wav"});
+
+    zone.drag_enter({"README"});
+
+    REQUIRE(zone.is_drag_over());
+    REQUIRE_FALSE(zone.is_drag_valid());
 }
 
 TEST_CASE("FileDropZone paint reflects idle valid and invalid drag states",
@@ -748,6 +892,20 @@ TEST_CASE("SplitView can replace panes and lays out with custom divider width",
     REQUIRE(split.first() == replacement_ptr);
 }
 
+TEST_CASE("SplitView forwards rich mouse events to the base pointer hook",
+          "[view][split_view][coverage][phase3]") {
+    SplitView split;
+    int forwarded = 0;
+    split.on_pointer_event = [&](const MouseEvent& event) {
+        ++forwarded;
+        REQUIRE(event.position.x == 5.0f);
+    };
+
+    split.on_mouse_event(MouseEvent{{5, 6}, {5, 6}, MouseButton::left, 0, 0, 1, true});
+
+    REQUIRE(forwarded == 1);
+}
+
 // ── PropertyList ────────────────────────────────────────────────────────────
 
 TEST_CASE("PropertyList basic operations", "[view][property_list]") {
@@ -873,6 +1031,29 @@ TEST_CASE("PropertyList paints categories and scalar value variants",
     list.set_show_categories(true);
     list.paint(canvas);
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 10);
+}
+
+TEST_CASE("PropertyList paints color values and selected row highlight",
+          "[view][property_list][coverage][phase3]") {
+    PropertyList list;
+    list.set_bounds({0, 0, 260, 100});
+    list.set_row_height(24.0f);
+    list.set_show_categories(false);
+    list.set_properties({
+        {"accent", "Accent", Color::rgba8(0x33, 0x66, 0x99), true, ""},
+        {"enabled", "Enabled", false, false, ""},
+    });
+
+    list.on_mouse_down({12, 10});
+
+    RecordingCanvas canvas;
+    list.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(has_text(canvas, "#336699"));
+    REQUIRE(has_text(canvas, "false"));
+    REQUIRE(has_fill_color(canvas, Color::rgba8(0x33, 0x66, 0x99)));
 }
 
 // ── Breadcrumb ──────────────────────────────────────────────────────────────
@@ -1028,4 +1209,23 @@ TEST_CASE("ThemeEditor covers missing selection empty theme and selected paint",
     REQUIRE(selected.count(pulp::canvas::DrawCommand::Type::stroke_rounded_rect) == 1);
     REQUIRE(selected.count(pulp::canvas::DrawCommand::Type::fill_text) == 3);
     REQUIRE(editor.export_json().find("accent.primary") != std::string::npos);
+}
+
+TEST_CASE("ThemeEditor wraps swatches when the row is full",
+          "[view][theme-editor][coverage][phase3]") {
+    ThemeEditor editor;
+    editor.set_bounds({0, 0, 80, 160});
+
+    Theme theme;
+    theme.colors["accent.primary"] = Color::rgba8(1, 2, 3);
+    theme.colors["accent.secondary"] = Color::rgba8(4, 5, 6);
+    theme.colors["bg.primary"] = Color::rgba8(7, 8, 9);
+    editor.set_theme(theme);
+
+    RecordingCanvas canvas;
+    editor.paint_all(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 4);
+    REQUIRE(has_text(canvas, "Theme Editor"));
 }
