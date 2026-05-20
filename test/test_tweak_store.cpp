@@ -10,6 +10,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace pulp::inspect;
 
@@ -396,6 +398,72 @@ TEST_CASE("Inspector.listTweaks / clearTweaks / setBypass without store error",
     REQUIRE(h.handle(req(methods::kInspectorClearTweaks, "{}")).is_error);
     REQUIRE(h.handle(req(methods::kInspectorSetBypass,
         R"({"anchorId":"a","value":true})")).is_error);
+}
+
+// Codex P2 follow-up on #2300: listTweaks must include anchors that
+// have ONLY a bypass (no tweak records). Otherwise setBypass on an
+// anchor with no entries — or one whose entries were later cleared
+// via clearTweaks — silently drops out of the protocol response and
+// the Phase 1 disk-persistence path loses the bypass state.
+TEST_CASE("Inspector.listTweaks includes bypass-only anchors (codex P2 #2300)",
+          "[inspect][protocol][listTweaks][regression]") {
+    Fixture f;
+    // Anchor "a" has a tweak; anchor "b" has only a bypass.
+    f.store.apply_tweak("a", "layout.padding",
+                        choc::value::createInt32(12), "drag");
+    f.store.set_bypass("b", true);
+
+    auto resp = f.handler.handle(req(methods::kInspectorListTweaks, "{}"));
+    REQUIRE_FALSE(resp.is_error);
+    auto parsed = choc::json::parse(resp.params_json);
+
+    // Tweak side reports only anchors with records.
+    REQUIRE(parsed["tweaks"].hasObjectMember("a"));
+    REQUIRE_FALSE(parsed["tweaks"].hasObjectMember("b"));
+    // Bypassed side must report BOTH (a has none here but b has true).
+    REQUIRE(parsed["bypassed"].hasObjectMember("b"));
+    REQUIRE(parsed["bypassed"]["b"].getBool());
+}
+
+TEST_CASE("Inspector.listTweaks reports bypass-only anchor after clearTweaks "
+          "removes its records (codex P2 #2300)",
+          "[inspect][protocol][listTweaks][regression]") {
+    // Tweak on anchor c + a path-bypass on the same anchor. Then
+    // clearTweaks({anchorId: c}) wipes c's tweak entries but leaves
+    // its bypass intact. listTweaks must still surface the bypass.
+    Fixture f;
+    f.store.apply_tweak("c", "layout.padding",
+                        choc::value::createInt32(8), "drag");
+    f.store.set_bypass("c", std::vector<std::string>{"layout.padding"});
+
+    f.handler.handle(req(methods::kInspectorClearTweaks,
+        R"({"anchorId":"c"})"));
+
+    auto resp = f.handler.handle(req(methods::kInspectorListTweaks, "{}"));
+    REQUIRE_FALSE(resp.is_error);
+    auto parsed = choc::json::parse(resp.params_json);
+
+    REQUIRE_FALSE(parsed["tweaks"].hasObjectMember("c"));
+    REQUIRE(parsed["bypassed"].hasObjectMember("c"));
+    auto bypass_c = parsed["bypassed"]["c"];
+    REQUIRE(bypass_c.isArray());
+    REQUIRE(bypass_c.size() == 1);
+    REQUIRE(bypass_c[0].getString() == "layout.padding");
+}
+
+TEST_CASE("TweakStore::bypassed_anchors enumerates every bypass entry "
+          "regardless of tweak presence (codex P2 #2300)",
+          "[inspect][tweak-store][regression]") {
+    TweakStore s;
+    s.apply_tweak("with-tweak", "x", choc::value::createInt32(1), {});
+    s.set_bypass("with-tweak", true);
+    s.set_bypass("bypass-only", std::vector<std::string>{"layout.gap"});
+
+    auto anchors = s.bypassed_anchors();
+    std::sort(anchors.begin(), anchors.end());
+    REQUIRE(anchors.size() == 2);
+    REQUIRE(anchors[0] == "bypass-only");
+    REQUIRE(anchors[1] == "with-tweak");
 }
 
 TEST_CASE("Inspector.getInfo surfaces tweak_count when a store is attached",

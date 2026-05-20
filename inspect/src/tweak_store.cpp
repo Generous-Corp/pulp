@@ -227,6 +227,14 @@ TweakStore::bypass_for(std::string_view anchor_id) const {
     return it->second;
 }
 
+std::vector<std::string> TweakStore::bypassed_anchors() const {
+    std::lock_guard lock(mtx_);
+    std::vector<std::string> out;
+    out.reserve(bypassed_.size());
+    for (auto& [anchor, _] : bypassed_) out.push_back(anchor);
+    return out;
+}
+
 // ── Disk persistence (Phase 1) ──────────────────────────────────────────
 
 std::string TweakStore::default_tweaks_path() {

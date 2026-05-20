@@ -286,6 +286,14 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
 
     // Check if mouse is in the panel area
     if (point_in_panel(pos)) {
+        // Codex P2 follow-up on #2328: clear Alt-hover state before
+        // panel-entry early-return. Without this, moving from an
+        // Alt-hovered view straight into the inspector panel leaves
+        // `alt_hover_target_` pointing at the previous view and the
+        // overlay keeps drawing the live distance line even though
+        // the cursor has left the view area.
+        alt_hover_target_ = nullptr;
+
         if (event.is_down) {
             // Phase 3b — clicks on numeric values in the property
             // panel enter edit mode. The hit list is populated by the

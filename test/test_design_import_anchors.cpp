@@ -421,6 +421,16 @@ TEST_CASE("web-compat codegen emits setAnchor calls per node",
     REQUIRE(js.find("setAnchor(") != std::string::npos);
     REQUIRE(js.find("'figma:0:1'") != std::string::npos);
     REQUIRE(js.find("'figma:0:42'") != std::string::npos);
+
+    // Codex P1 follow-up on #2303: web-compat codegen MUST pass the
+    // element's internal `_id` (web-compat.js's __el_N__ auto-id) to
+    // setAnchor, not the JS variable name. The bridge's widget()
+    // lookup keys on _id; passing the var name silently no-ops and
+    // breaks the whole anchor wiring chain. Regression: there must
+    // be NO `setAnchor('<varname>', ...)` form (single-quoted var)
+    // and at least one `setAnchor(<varname>._id, ...)` form.
+    REQUIRE(js.find("setAnchor('") == std::string::npos);
+    REQUIRE(js.find("._id, '") != std::string::npos);
 }
 
 TEST_CASE("web-compat codegen emits setAnchor even when include_comments=false",

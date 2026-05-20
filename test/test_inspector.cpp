@@ -426,6 +426,61 @@ TEST_CASE("InspectorOverlay: Alt-hover does nothing without a selection",
     REQUIRE(after_alt_hover.command_count() == baseline_count);
 }
 
+// Codex P2 follow-up on #2328: Alt-hover state must clear when the
+// cursor enters the inspector panel. Otherwise the live distance line
+// keeps drawing from selected_ to a view that's no longer under the
+// cursor.
+TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
+          "(codex P2 #2328 regression)",
+          "[inspect][overlay][phase3f][regression]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto a = std::make_unique<View>();
+    a->set_bounds({10, 10, 60, 60});
+    auto* a_ptr = a.get();
+    root.add_child(std::move(a));
+    auto b = std::make_unique<View>();
+    b->set_bounds({100, 10, 60, 60});
+    auto* b_ptr = b.get();
+    root.add_child(std::move(b));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    // Select a + Alt-hover over b → distance line draws.
+    MouseEvent click_a;
+    click_a.position = {20, 20};
+    click_a.is_down = true;
+    overlay.handle_mouse_event(click_a);
+    REQUIRE(overlay.selected_view() == a_ptr);
+
+    MouseEvent alt_hover_b;
+    alt_hover_b.position = {130, 30};
+    alt_hover_b.modifiers = kModAlt;
+    alt_hover_b.is_down = false;
+    overlay.handle_mouse_event(alt_hover_b);
+    REQUIRE(overlay.hovered_view() == b_ptr);
+
+    pulp::canvas::RecordingCanvas with_line;
+    overlay.paint(with_line);
+    auto with_line_count = with_line.command_count();
+
+    // Move cursor INTO the panel (root.bounds().width - panel_width_;
+    // default panel_width_ = 300, so panel starts at x=300 for a 600-
+    // wide root). Pre-fix: alt_hover_target_ stays set, distance line
+    // still draws. Post-fix: alt_hover_target_ clears, distance line
+    // disappears, command count drops back to baseline.
+    MouseEvent enter_panel;
+    enter_panel.position = {450, 50};
+    enter_panel.modifiers = kModAlt;
+    enter_panel.is_down = false;
+    overlay.handle_mouse_event(enter_panel);
+
+    pulp::canvas::RecordingCanvas after_panel_entry;
+    overlay.paint(after_panel_entry);
+    REQUIRE(after_panel_entry.command_count() < with_line_count);
+}
+
 // ── Phase 0b PR-C-1: gesture-tweak emission via TweakStore ────────────────
 #include <pulp/inspect/tweak_store.hpp>
 #include <choc/containers/choc_Value.h>

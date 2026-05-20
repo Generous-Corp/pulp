@@ -167,6 +167,18 @@ void View::paint_all(canvas::Canvas& canvas) {
     // pulp::runtime::is_in_no_alloc_scope() to detect violations.
     pulp::runtime::ScopedNoAlloc no_alloc_guard;
 
+    // Phase 3d (Codex P2 follow-up on #2338): time the WHOLE paint_all
+    // body — background, border, gradients, clipping, shadows, layer
+    // setup, the paint() override, AND inset shadows / outlines /
+    // layer restores. The previous implementation timed only the
+    // paint(canvas) call, which made styled containers with no
+    // override (the common case — frames with a background color
+    // dominate a frame) report ~0ns self time. With the outer-scope
+    // timer, self_ns = (outer total) - (children total), which
+    // correctly attributes framework drawing to the view.
+    auto outer_t0 = std::chrono::steady_clock::now();
+    std::chrono::nanoseconds children_dt{0};
+
     canvas.save();
     canvas.translate(bounds_.x, bounds_.y);
 
@@ -467,13 +479,11 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
     }
 
-    // Widget-specific painting — timed for the inspector property
-    // panel (Phase 3d). Records nanoseconds spent INSIDE this view's
-    // own paint(canvas) override only; the children's recursive cost
-    // is timed separately below so the inspector can attribute cleanly.
-    auto self_t0 = std::chrono::steady_clock::now();
+    // Widget-specific painting. (Phase 3d timing moved to wrap the
+    // whole paint_all body — see outer_t0 at the top + write-back at
+    // the bottom. This means `paint(canvas)` no-op overrides on
+    // styled containers still get accurate self-time attribution.)
     paint(canvas);
-    auto self_dt = std::chrono::steady_clock::now() - self_t0;
 
     // Paint children — pulp #972. CSS z-index ordering: stable-sort
     // ascending by z_index() so siblings with equal z keep insertion
@@ -487,17 +497,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     for (View* child : paint_order) {
         child->paint_all(canvas);
     }
-    auto children_dt = std::chrono::steady_clock::now() - children_t0;
-
-    // Write back the timing samples — saturating at uint32_t max so a
-    // pathological frame doesn't wrap. ~4.29s ceiling, far past any
-    // realistic per-view paint budget.
-    auto self_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(self_dt).count();
-    auto total_ns = self_ns + std::chrono::duration_cast<std::chrono::nanoseconds>(children_dt).count();
-    last_paint_self_ns_ = static_cast<std::uint32_t>(
-        std::min<std::int64_t>(self_ns, std::numeric_limits<std::uint32_t>::max()));
-    last_paint_with_children_ns_ = static_cast<std::uint32_t>(
-        std::min<std::int64_t>(total_ns, std::numeric_limits<std::uint32_t>::max()));
+    children_dt = std::chrono::steady_clock::now() - children_t0;
 
     // Inset box shadows paint over the content so the inner darkening
     // shows through children (CSS spec: inset shadows are above the
@@ -576,6 +576,21 @@ void View::paint_all(canvas::Canvas& canvas) {
         canvas.restore();
 
     canvas.restore();
+
+    // Phase 3d timing write-back (Codex P2 #2338 follow-up). Outer
+    // delta covers all framework drawing + paint() + inset shadows +
+    // layer restores. Subtract children to get true self-time even
+    // when the view has no paint() override. Saturating cast at
+    // uint32_t max (~4.29s) so a pathological frame doesn't wrap.
+    auto outer_dt = std::chrono::steady_clock::now() - outer_t0;
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(outer_dt).count();
+    auto children_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(children_dt).count();
+    auto self_ns = total_ns - children_ns;
+    if (self_ns < 0) self_ns = 0;  // defensive against clock skew on a single core
+    last_paint_self_ns_ = static_cast<std::uint32_t>(
+        std::min<std::int64_t>(self_ns, std::numeric_limits<std::uint32_t>::max()));
+    last_paint_with_children_ns_ = static_cast<std::uint32_t>(
+        std::min<std::int64_t>(total_ns, std::numeric_limits<std::uint32_t>::max()));
 }
 
 void View::simulate_click(Point root_pos) {
