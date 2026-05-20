@@ -55,5 +55,44 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertNotIn("ctest --test-dir build ", text)
 
 
+class MacosNinjaGeneratorTests(unittest.TestCase):
+    """The macOS build leg uses the Ninja generator.
+
+    Ninja is faster than the default Makefile generator on the warm /
+    incremental builds the self-hosted M1 mostly does. Because the
+    self-hosted runners reuse `build-*` dirs (`clean: false`) and CMake
+    refuses to reconfigure a dir created with a different generator, the
+    Configure step must recreate the build dir when its cached generator
+    is not Ninja — otherwise the first build after the switch fails on
+    every warm runner with a generator-mismatch error.
+    """
+
+    def setUp(self) -> None:
+        self.text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_macos_configure_uses_ninja(self) -> None:
+        # The generator is scoped to macOS and passed to cmake configure.
+        self.assertIn('if [ "${RUNNER_OS}" = "macOS" ]; then', self.text)
+        self.assertIn('gen="-G Ninja"', self.text)
+        self.assertIn(
+            'cmake -S . -B "$PULP_BUILD_DIR" $gen -DCMAKE_BUILD_TYPE=Release',
+            self.text,
+        )
+
+    def test_configure_recreates_build_dir_on_generator_change(self) -> None:
+        # Warm self-hosted build dirs created with Make must be wiped so
+        # the first Ninja configure does not hit a generator mismatch.
+        self.assertIn(
+            "grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja$' \"$cache\"", self.text
+        )
+        self.assertIn('rm -rf "$PULP_BUILD_DIR"', self.text)
+
+    def test_ninja_availability_guard(self) -> None:
+        # A runner missing ninja installs it rather than failing configure.
+        self.assertIn(
+            "command -v ninja >/dev/null 2>&1 || brew install ninja", self.text
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -927,6 +927,18 @@ delegation to helper binaries must resolve from the active build directory
 hard-coded `build/` path; otherwise Linux catches missing helpers while warm
 self-hosted macOS workspaces can mask the bug.
 
+**macOS builds with the Ninja generator.** `build.yml`'s Configure step
+passes `-G Ninja` on macOS only (Linux/Windows keep their default
+generator). Ninja schedules parallelism better and is faster on the
+warm/incremental builds the self-hosted M1 mostly does. Because the
+self-hosted runners reuse `build-*` dirs (`clean: false`) and CMake
+refuses to reconfigure a dir created with a *different* generator, the
+Configure step recreates `$PULP_BUILD_DIR` when its cached
+`CMAKE_GENERATOR` is not `Ninja` — so the first Ninja run on each runner
+pays a one-time fresh-configure (the shared ccache stays warm). If you
+add a new macOS build path, configure it with Ninja too, or it will
+hit a generator-mismatch error against the warm dir.
+
 ### Overrides when you need them
 
 - **Dispatch a build manually**: `runner_provider` defaults to
