@@ -53,6 +53,34 @@ struct AUBridge {
     state::ParameterEventQueue param_events;
 };
 
+static int32_t block_relative_sample_offset(AUEventSampleTime event_sample_time,
+                                            const AudioTimeStamp* timestamp,
+                                            AUAudioFrameCount frame_count) {
+    int64_t offset = 0;
+    constexpr auto kImmediate = static_cast<int64_t>(AUEventSampleTimeImmediate);
+    constexpr int64_t kImmediateWindow = 4096;
+
+    if (event_sample_time >= kImmediate &&
+        event_sample_time < kImmediate + kImmediateWindow) {
+        offset = static_cast<int64_t>(event_sample_time) - kImmediate;
+    } else if (timestamp &&
+               (timestamp->mFlags & kAudioTimeStampSampleTimeValid) != 0) {
+        offset = static_cast<int64_t>(event_sample_time) -
+                 static_cast<int64_t>(timestamp->mSampleTime);
+    } else {
+        offset = static_cast<int64_t>(event_sample_time);
+    }
+
+    if (offset < 0) return 0;
+    if (frame_count > 0 && offset >= static_cast<int64_t>(frame_count)) {
+        return static_cast<int32_t>(frame_count - 1);
+    }
+    if (offset > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
+        return std::numeric_limits<int32_t>::max();
+    }
+    return static_cast<int32_t>(offset);
+}
+
 } // namespace pulp::format::au
 
 // ── AUAudioUnit subclass ───────────────────────────────────────────────────
@@ -407,7 +435,8 @@ struct AUBridge {
                 const auto param_id =
                     static_cast<pulp::state::ParamID>(p.parameterAddress);
                 const auto sample_offset =
-                    static_cast<int32_t>(p.eventSampleTime);
+                    pulp::format::au::block_relative_sample_offset(
+                        p.eventSampleTime, timestamp, frameCount);
                 bridge->param_events.push({
                     param_id,
                     sample_offset,

@@ -309,14 +309,14 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
         output.list.mBuffers[1].mData = right;
 
         AURenderEvent first{};
-        first.parameter.eventSampleTime = 1;
+        first.parameter.eventSampleTime = 101;
         first.parameter.eventType = AURenderEventParameter;
         first.parameter.rampDurationSampleFrames = 0;
         first.parameter.parameterAddress = 1;
         first.parameter.value = -6.0f;
 
         AURenderEvent second{};
-        second.parameter.eventSampleTime = 5;
+        second.parameter.eventSampleTime = 105;
         second.parameter.eventType = AURenderEventParameterRamp;
         second.parameter.rampDurationSampleFrames = 2;
         second.parameter.parameterAddress = 1;
@@ -326,7 +326,7 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
         AudioUnitRenderActionFlags flags = 0;
         AudioTimeStamp timestamp{};
         timestamp.mFlags = kAudioTimeStampSampleTimeValid;
-        timestamp.mSampleTime = 0;
+        timestamp.mSampleTime = 100;
 
         AUInternalRenderBlock block = [unit internalRenderBlock];
         REQUIRE(block != nil);
