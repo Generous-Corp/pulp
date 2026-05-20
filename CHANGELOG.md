@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01726"></a>
+## [0.172.6] - 2026-05-19
+
+- refactor(test): P5-2 extract CG-paths cluster from test_canvas (2,026 → 1,254)
+- refactor(test): P5-3 extract W3C Design Tokens cluster from test_design_import (2,491 → 2,182)
+- fix(test): drop Label tests duplicated in test_widgets.cpp + test_widgets_label.cpp (-569)
+- refactor(test): P5-3 extract sanitize + shadow clusters from test_canvas_widget (2,215 → 1,876)
+
 <a id="v01722"></a>
 ## [0.172.2] - 2026-05-19
 

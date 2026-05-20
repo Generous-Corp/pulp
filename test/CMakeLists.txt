@@ -1672,6 +1672,24 @@ target_compile_definitions(pulp-test-canvas PRIVATE
     "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
+# Canvas CG-paths tests (P5-2 follow-up — extracted from test_canvas.cpp,
+# 2026-05). Apple-only TU covering pulp #943 / #933 concat_transform,
+# pulp #1322 Canvas2D path API (fill + curves + stroke + gradients),
+# fill_rect / fill_path with active gradient, pulp #1368 save/restore
+# tracking, and pulp #1322 BlendMode every-value round-trip. Companion
+# to test_canvas_cg_gradients.cpp; the non-Apple parts stay in
+# test_canvas.cpp.
+add_executable(pulp-test-canvas-cg-paths test_canvas_cg_paths.cpp)
+target_link_libraries(pulp-test-canvas-cg-paths PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(APPLE)
+    target_link_libraries(pulp-test-canvas-cg-paths PRIVATE
+        "-framework CoreGraphics"
+        "-framework ImageIO"
+        "-framework CoreServices"
+    )
+endif()
+catch_discover_tests(pulp-test-canvas-cg-paths)
+
 # Canvas font tests (P5-2 first cut — extracted from test_canvas.cpp).
 # Covers pulp #932 (bundled-font registration via match_bundled_typeface)
 # + pulp #1150 (public register_font(path) API). Shares the
@@ -2087,6 +2105,16 @@ set_tests_properties(visual-harness-self-test PROPERTIES
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 
+# CanvasWidget NaN/Infinity sanitization cluster (P5-3 follow-up,
+# pulp #1387 gap #2). Pins that JS-supplied NaN / ±Inf coords land
+# as 0 in the recorded draw command, while finite values pass through.
+pulp_add_test_suite(pulp-test-canvas-widget-sanitize LIBRARIES pulp::view)
+
+# CanvasWidget + SkiaCanvas Canvas2D shadow-state cluster (P5-3
+# follow-up). Replay + clear + transparent/zero short-circuit
+# of sticky Canvas2D shadow* state.
+pulp_add_test_suite(pulp-test-canvas-widget-shadow LIBRARIES pulp::view)
+
 # pulp #964 — Canvas2D JS-shim coverage. Drives the full
 # web-compat-canvas.js → bridge → CanvasWidget path so a regression
 # that drops a save/restore/setTransform/createLinearGradient method
@@ -2160,6 +2188,17 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import
+    PROPERTIES LABELS "parser-import")
+
+# P5-3 follow-up — W3C Design Tokens cluster extracted from
+# test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
+# composite typography/shadow shapes, alias resolution, math
+# expressions, group $type inheritance, ir_tokens_to_theme +
+# theme_to_ir_tokens round-trips.
+add_executable(pulp-test-design-import-w3c-tokens test_design_import_w3c_tokens.cpp)
+target_link_libraries(pulp-test-design-import-w3c-tokens PRIVATE pulp::view Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-design-import-w3c-tokens PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-design-import-w3c-tokens
     PROPERTIES LABELS "parser-import")
 
 # Phase 0a: stable_anchor_id assignment per
