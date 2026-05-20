@@ -174,6 +174,13 @@ such as `jsx`, add a matching row to `source-contracts.json` and reference
 its roundtrip script there; otherwise pre-push will fail strict
 source-contract validation.
 
+Parser symbols may be split across implementation files. Keep
+`parser.file` as the default owner, and add `parser.files.runtime` /
+`parser.files.static` when a refactor moves one role without the other
+(for example runtime bundle parsers in `claude_bundle.cpp` and static
+parsers in `design_import.cpp`). The checker uses those role-specific
+paths for both parser-symbol and explicit runtime-dispatch validation.
+
 Provider MCP lanes are input-acquisition lanes only unless the source contract
 explicitly says otherwise. Current runtime parsers reject raw Figma/Stitch/Pencil
 MCP JSON and accept only their constrained exported artifacts.

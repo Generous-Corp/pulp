@@ -55,6 +55,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
 
     def test_trigger_scope_covers_workflow_and_action_changes(self) -> None:
         self.assertRegex(self.text, r"(?m)^on:\s*$")
+        self.assertRegex(self.text, r"(?m)^\s{2}workflow_dispatch:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{2}pull_request:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{2}push:\s*$")
         self.assertRegex(self.text, r"(?m)^\s{4}branches:\s*\[main\]\s*$")
@@ -62,6 +63,11 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         path_patterns = re.findall(r"(?m)^\s{6}-\s+'([^']+)'\s*$", self.text)
         self.assertGreaterEqual(path_patterns.count(".github/workflows/**"), 2)
         self.assertGreaterEqual(path_patterns.count(".github/actions/**"), 2)
+        self.assertGreaterEqual(path_patterns.count(".shipyard/config.toml"), 2)
+        self.assertGreaterEqual(
+            path_patterns.count("tools/scripts/test_shipyard_config.py"),
+            2,
+        )
 
     def test_workflow_has_minimal_permissions_and_concurrency(self) -> None:
         self.assertRegex(
@@ -105,7 +111,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         self.assertIn("structural parse OK", step)
 
     def test_release_regression_tests_remain_in_lint_gate(self) -> None:
-        step = _find_step(self.text, "Release-pipeline regression tests (#720)")
+        step = _find_step(self.text, "Release-pipeline regression tests (#720, #1962)")
         self.assertIn("set -euo pipefail", step)
         self.assertIn(
             "python3 tools/scripts/test_release_workflow_test_step.py",
@@ -113,6 +119,10 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "python3 tools/scripts/test_workflow_build_dirs.py",
+            step,
+        )
+        self.assertIn(
+            "python3 tools/scripts/test_shipyard_config.py",
             step,
         )
 

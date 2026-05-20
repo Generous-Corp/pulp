@@ -50,6 +50,10 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp",
+          "static": "core/view/src/design_import.cpp"
+        },
         "runtime": "parse_claude_html_with_runtime",
         "static": "parse_claude_html"
       },
@@ -137,6 +141,10 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp",
+          "static": "core/view/src/design_import.cpp"
+        },
         "runtime": "parse_stitch_react",
         "static": "parse_stitch_html"
       },
@@ -318,6 +326,10 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp",
+          "static": "core/view/src/design_import.cpp"
+        },
         "runtime": "parse_pencil_react",
         "static": "parse_pencil_json"
       },
@@ -416,6 +428,10 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp",
+          "static": "core/view/src/design_import.cpp"
+        },
         "runtime": "parse_figma_make_react",
         "static": "parse_figma_json"
       },
@@ -507,6 +523,10 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp",
+          "static": "core/view/src/design_import.cpp"
+        },
         "runtime": "parse_v0_dev_react",
         "static": "parse_v0_tsx"
       },
@@ -583,6 +603,9 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp"
+        },
         "runtime": "parse_jsx_react",
         "static": null
       },
@@ -667,6 +690,9 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp"
+        },
         "runtime": "parse_react_native_export",
         "static": null
       },
@@ -759,6 +785,9 @@
       },
       "parser": {
         "file": "core/view/src/design_import.cpp",
+        "files": {
+          "runtime": "core/view/src/claude_bundle.cpp"
+        },
         "runtime": "parse_jsx_react",
         "static": null
       },

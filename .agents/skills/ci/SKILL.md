@@ -124,6 +124,12 @@ signed/notarized `.dmg`, so the version and asset metadata must move together.
   macOS 26.3+ XProtect skips the deep scan for notarized binaries,
   cutting `shipyard pr` cold-start ~4-5x (from ~5-6s to ~1-1.5s).
   No pulp-side action; transparent.
+- **Cloud workflow selectors use file names.** When editing
+  `.shipyard/config.toml` for a cloud target or `[cloud]`, use the
+  workflow file name such as `build.yml`, not the bare stem `build`.
+  Shipyard passes the value to `gh --workflow`; `build` is not a
+  valid selector there. `tools/scripts/test_shipyard_config.py` and
+  the workflow-lint lane guard this.
 - **Heartbeat line during long validation** (Shipyard v0.29.0). A
   20-minute lane now prints periodic progress instead of leaving a
   silent terminal. Helpful when watching `shipyard ship` interactively.

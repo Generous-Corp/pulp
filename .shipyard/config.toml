@@ -162,7 +162,7 @@ build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE 
 # or by raising the threshold back to 1.
 backend  = "cloud"
 platform = "macos-arm64"
-workflow = "build"
+workflow = "build.yml"
 # Phase 8 timeout bump (Dawn + Skia + mbedtls + cargo build); see
 # git history for context. Kept at 1h because Namespace cold-start
 # + cache-miss cases still run long.
@@ -187,7 +187,7 @@ timeout_secs = 3600
 
 [cloud]
 provider   = "namespace"
-workflow   = "build"
+workflow   = "build.yml"
 repository = "danielraffel/pulp"
 
 # ── Merge gating ───────────────────────────────────────────────────────────

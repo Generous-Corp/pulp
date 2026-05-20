@@ -30,6 +30,7 @@ KNOWN_SURFACE_REFS = (
     "packages/",
     "core/view",
 )
+DEFAULT_PARSER_FILE = "core/view/src/design_import.cpp"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,6 +97,34 @@ def _symbol_exists(root: Path, rel_file: str, symbol: str) -> bool:
     if not path.exists():
         return False
     return re.search(rf"\b{re.escape(symbol)}\b", _read_text(path)) is not None
+
+
+def _parser_file_for(
+    findings: list[Finding],
+    source: str,
+    parser_info: dict[str, Any],
+    role: str,
+) -> str:
+    parser_file = parser_info.get("file", DEFAULT_PARSER_FILE)
+    if not isinstance(parser_file, str):
+        _add(findings, "invalid-parser-file", source, "parser.file must be a string")
+        parser_file = DEFAULT_PARSER_FILE
+
+    parser_files = parser_info.get("files") or {}
+    if not isinstance(parser_files, dict):
+        _add(findings, "invalid-parser-files", source, "parser.files must be an object")
+        parser_files = {}
+
+    role_file = parser_files.get(role, parser_file)
+    if not isinstance(role_file, str):
+        _add(
+            findings,
+            "invalid-parser-file",
+            source,
+            f"parser.files.{role} must be a string",
+        )
+        return parser_file
+    return role_file
 
 
 def _path_state(root: Path, rel_path: str) -> tuple[str, str | None]:
@@ -275,6 +304,7 @@ def _check_dispatch_and_symbols(
 ) -> None:
     source = _source(entry)
     dispatch = entry.get("dispatch") or {}
+    parser_info = entry.get("parser") or {}
     kind = dispatch.get("kind")
     if kind == "design-source-label":
         label = dispatch.get("label")
@@ -287,25 +317,22 @@ def _check_dispatch_and_symbols(
             )
     elif kind == "explicit-runtime-parser":
         parser = dispatch.get("parser")
+        runtime_file = _parser_file_for(findings, source, parser_info, "runtime")
         if not isinstance(parser, str) or not _symbol_exists(
-            root, "core/view/src/design_import.cpp", parser
+            root, runtime_file, parser
         ):
             _add(
                 findings,
                 "missing-explicit-runtime-parser",
                 source,
-                f"explicit runtime parser symbol is missing: {parser!r}",
+                f"explicit runtime parser symbol is missing from {runtime_file}: {parser!r}",
             )
 
-    parser_info = entry.get("parser") or {}
-    parser_file = parser_info.get("file", "core/view/src/design_import.cpp")
-    if not isinstance(parser_file, str):
-        _add(findings, "invalid-parser-file", source, "parser.file must be a string")
-        parser_file = "core/view/src/design_import.cpp"
     for role in ("runtime", "static"):
         symbol = parser_info.get(role)
         if symbol is None:
             continue
+        parser_file = _parser_file_for(findings, source, parser_info, role)
         if not isinstance(symbol, str) or not _symbol_exists(root, parser_file, symbol):
             _add(
                 findings,

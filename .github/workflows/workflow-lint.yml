@@ -15,19 +15,24 @@ name: Workflow lint
 # in #510; this lint workflow prevents the re-occurrence class.
 #
 # Scope: runs only on PRs that touch `.github/workflows/**` or this
-# file itself. Keeps the check fast on the 99% of PRs that don't
-# touch CI.
+# file itself, plus the Shipyard config that dispatches those workflows.
+# Keeps the check fast on the 99% of PRs that don't touch CI.
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.shipyard/config.toml'
+      - 'tools/scripts/test_shipyard_config.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - '.shipyard/config.toml'
+      - 'tools/scripts/test_shipyard_config.py'
 
 permissions:
   contents: read
@@ -108,6 +113,7 @@ jobs:
           python3 tools/scripts/test_release_workflow_test_step.py
           python3 tools/scripts/test_workflow_build_dirs.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_shipyard_config.py
 
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated

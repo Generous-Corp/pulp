@@ -113,6 +113,18 @@ class SourceContractsTest(unittest.TestCase):
         missing = [f for f in findings if f.code == "missing-parser-symbol"]
         self.assertGreaterEqual(len(missing), 2)
 
+    def test_parser_role_specific_files_must_resolve(self) -> None:
+        registry, entry = self.mutate("rn")
+        entry["parser"]["files"] = {"runtime": "core/view/src/does-not-exist.cpp"}
+        with tempfile.TemporaryDirectory() as td:
+            findings = _findings(registry, Path(td))
+        self.assertIn("missing-explicit-runtime-parser", _codes(findings))
+        missing = [f for f in findings if f.code == "missing-parser-symbol"]
+        self.assertTrue(
+            any("does-not-exist.cpp" in (finding.path or "") for finding in missing),
+            [str(f) for f in findings],
+        )
+
     def test_present_reference_screenshot_must_exist(self) -> None:
         registry, entry = self.mutate("stitch")
         entry["validation"]["pulp_render_reference"] = {
