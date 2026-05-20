@@ -794,6 +794,39 @@ it cancels by age regardless of why a run wedged, so a job that
 genuinely *executes* longer than 4h would be cancelled too. Bump the
 threshold via `workflow_dispatch` if a one-off legitimately needs longer.
 
+### Gotcha: a job with no `timeout-minutes` can hang the whole workflow
+
+The reaper is the *backstop*, not the fix. The root cause of repeated
+Coverage hangs was that `coverage.yml`'s `coverage` matrix job had **no
+`timeout-minutes`** and one matrix leg (`macos`) routes to a self-hosted
+runner pool via `PULP_COVERAGE_MACOS_RUNS_ON_JSON`. When that pool is
+saturated the leg sits `queued` forever — a `queued` job never reaches
+its steps, so step-level `continue-on-error` cannot help. The downstream
+`coverage-diff-gate` has `needs: coverage` + `if: always()`, so it
+cannot reach a terminal conclusion until *every* matrix leg ends; the
+required `Diff coverage required` check then sat `queued` and the whole
+Coverage run stayed `in_progress` for 4h+ until the reaper killed it.
+
+Fix pattern (applies to any GH-Actions job, not just coverage):
+
+- **Always set `timeout-minutes` on every job.** A healthy job's wall
+  time × ~2-2.5 is a safe backstop — it bounds both queued and running
+  time, so a starved self-hosted leg fails fast instead of squatting.
+- **Pin a pure gate/aggregation job to a GitHub-hosted runner**
+  (`ubuntu-latest` / `ubuntu-24.04`). A job that only downloads
+  artifacts and runs a check must never queue behind a saturated
+  self-hosted pool — if it does, `if: always()` cannot save it because
+  the job still needs a runner to start.
+- A `needs:` + `if: always()` job only reaches a conclusion once every
+  upstream job is terminal; an upstream job with no timeout therefore
+  hangs the gate transitively.
+
+Do not flip a `concurrency` block's `cancel-in-progress` to `true` to
+"fix" a pile-up if `false` was a deliberate choice (e.g. coverage.yml
+keeps `false` for Codecov's `after_n_builds` upload completeness,
+pulp#1884). Per-job `timeout-minutes` is the correct fix; it bounds runs
+regardless of `cancel-in-progress`.
+
 ## Prerequisites Check
 
 Before running any CI command, verify the required tooling AND provider config exists:

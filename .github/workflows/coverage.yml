@@ -62,6 +62,16 @@ concurrency:
   # SHA, re-run the workflow manually via `workflow_dispatch` after the
   # active run finishes. Upstream tracking:
   #   https://github.com/orgs/community/discussions/12835
+  #
+  # DELIBERATELY kept `false` (not flipped to `true`): the Coverage-run
+  # hang fixed alongside this comment was caused by missing
+  # `timeout-minutes` on the `coverage` matrix job and `coverage-diff-gate`
+  # — NOT by superseded runs piling up. Those job-level timeouts now bound
+  # every run to a few hours max regardless of `cancel-in-progress`.
+  # Flipping to `true` would reintroduce the pulp#1884 Codecov
+  # stuck-upload bug (cancel mid-`after_n_builds: 4` → no coverage signal
+  # on ~70% of merges). The timeout backstop is the correct fix; staying
+  # `false` preserves the coverage signal.
   group: coverage-${{ github.ref }}
   cancel-in-progress: false
 
@@ -199,6 +209,15 @@ jobs:
   coverage:
     needs: [resolve-runners, changed-files]
     name: Coverage report (${{ matrix.label }}, Clang)
+    # Hard backstop against a wedged matrix leg. A healthy coverage build
+    # runs ~1h; 150 min leaves generous headroom for a slow self-hosted
+    # runner without ever letting a leg squat for GitHub's 6h job limit.
+    # Critically, this also bounds the QUEUED state: when a self-hosted
+    # macOS runner pool (routed via PULP_COVERAGE_MACOS_RUNS_ON_JSON) is
+    # saturated, a leg that never gets a runner now fails on this timeout
+    # instead of hanging indefinitely — which previously kept the whole
+    # Coverage run `in_progress` for 4h+ and starved the downstream gate.
+    timeout-minutes: 150
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory
       # and we want every OS to attempt an upload independently so the
@@ -736,8 +755,22 @@ jobs:
     # branch-protection's required-status-checks list, and shows the
     # threshold inside the rendered PR comment body instead of the name.
     name: Diff coverage required
+    # GitHub-hosted runner on purpose: a pure diff-coverage gate must
+    # never queue behind a saturated self-hosted macOS pool. Combined
+    # with `if: always()` below, this guarantees the required check can
+    # always START and reach a terminal conclusion once the upstream
+    # `coverage` job ends — whether it succeeded, failed, or was
+    # cancelled — instead of squatting in `queued` for hours.
     runs-on: ubuntu-24.04
+    # Hard backstop. diff-cover + the per-tier gate finish in a few
+    # minutes; 30 min absorbs slow artifact downloads and pip installs
+    # while still capping a wedged step well short of GitHub's 6h limit.
+    timeout-minutes: 30
     needs: coverage
+    # `always()` keeps the required gate reaching a conclusion even when
+    # an upstream `coverage` matrix leg fails or is cancelled — the gate
+    # then renders the graceful "no Cobertura XML" fallback below and
+    # reports skip/fail promptly rather than staying eligible-but-stuck.
     if: always() && github.event_name == 'pull_request'
     permissions:
       contents: read
