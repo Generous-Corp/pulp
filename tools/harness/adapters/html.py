@@ -86,6 +86,12 @@ class HtmlAdapter(AdapterBase):
         # `html/Element_setPointerCapture` oracle false-classifies as
         # NOT_IMPL (Codex P2 on PR #2337 — same class as #2253's
         # canvas2d adapter gap fixed by #2317).
+        #
+        # The legacy web-compat.js bundle was further split: the CSS
+        # selector engine moved to web-compat-selector.js and the Phase 9
+        # runtime API shims moved to web-compat-runtime-apis.js. Both
+        # siblings join the union so the prototype/selector evidence
+        # regexes still see the full surface after the split.
         self._element_js = "\n".join(
             self._read(p)
             for p in (
@@ -93,6 +99,8 @@ class HtmlAdapter(AdapterBase):
                 "core/view/js/web-compat-element-events.js",
                 "core/view/js/web-compat-dom-ops.js",
                 "core/view/js/web-compat.js",
+                "core/view/js/web-compat-selector.js",
+                "core/view/js/web-compat-runtime-apis.js",
             )
         )
         # `document.<member>` is defined either inside the
