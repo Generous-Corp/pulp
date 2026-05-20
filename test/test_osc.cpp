@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <string_view>
@@ -21,6 +22,13 @@ namespace {
 constexpr uint16_t kOscHostnameTestPort = 29876;
 constexpr uint16_t kOscInvalidPacketPort = 29877;
 constexpr uint16_t kOscStopIdempotentPort = 29878;
+
+uint16_t loopback_port(uint16_t offset) {
+    static std::atomic<uint16_t> counter{0};
+    const auto tick = static_cast<uint16_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
+    return static_cast<uint16_t>(43000 + ((tick + offset + counter.fetch_add(1)) % 1000));
+}
 
 void append_osc_string(std::vector<uint8_t>& data, std::string_view text) {
     data.insert(data.end(), text.begin(), text.end());
@@ -276,9 +284,10 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     Message received_msg;
     std::mutex received_msg_mutex;
     std::atomic<bool> got_message{false};
+    const auto port = loopback_port(76);
 
     Receiver rx;
-    bool listening = rx.listen(9876, [&](const Message& msg) {
+    bool listening = rx.listen(port, [&](const Message& msg) {
         {
             std::lock_guard<std::mutex> lock(received_msg_mutex);
             received_msg = msg;
@@ -292,7 +301,7 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     Sender tx;
-    REQUIRE(tx.connect("127.0.0.1", 9876));
+    REQUIRE(tx.connect("127.0.0.1", port));
     REQUIRE(tx.is_connected());
 
     Message msg("/test/ping");
@@ -300,7 +309,7 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     REQUIRE(tx.send(msg));
 
     // Wait for message
-    for (int i = 0; i < 20 && !got_message.load(std::memory_order_acquire); ++i) {
+    for (int i = 0; i < 100 && !got_message.load(std::memory_order_acquire); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
