@@ -251,6 +251,7 @@ target_sources(pulp-view PRIVATE
     src/claude_bundle.cpp
     src/design_import_shortcuts.cpp
     src/design_import_designmd.cpp
+    src/token_lock.cpp
     src/screenshot_compare.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp

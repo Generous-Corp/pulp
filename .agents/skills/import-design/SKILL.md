@@ -488,6 +488,44 @@ If you add a codegen property to `design_codegen.cpp`'s `generate_node`,
 add it to the `kKnown` allow-list in `lock_property_to_style_name()` too
 — otherwise that property can never be locked to source.
 
+### Phase 4c — token lock-to-source (`DESIGN.md` rewrite)
+
+`token_lock.hpp` / `token_lock.cpp` (`core/view/`) lock a *token-typed*
+inspector tweak back into the project's `DESIGN.md` so a re-import picks
+up the corrected token instead of re-introducing the stale one. This is
+the token-level sibling of Phase 4a (generated-TSX rewrite) and 4b
+(JSX/TSX AST patch).
+
+- **Token vs element classification** — `classify_token_tweak(anchor,
+  property_path)` returns a `TokenTarget` when the tweak addresses a
+  DESIGN.md token, `std::nullopt` for element-only tweaks (`paint.*`,
+  `layout.*`, `text.*` — those lock via 4a/4b). Two signals, in
+  priority order: a dotted property path whose head is a canonical
+  token group (`colors` / `spacing` / `rounded` / `typography`), or a
+  `designtoken:<group>.<name>` anchor. Typography paths must be
+  three-segment (`typography.<level>.<field>`). `components.*` is
+  deliberately **not** lockable — a component entry is a reference
+  bundle, not a primitive value.
+- **Surgical text rewrite, not `export_designmd`** — the lock parses
+  the YAML frontmatter only to *locate* the token (yaml-cpp `Mark()`
+  gives the value line), then edits exactly that one value span in the
+  original file text. Prose sections, YAML comments, key order,
+  indentation, and the value's original quote style are all preserved.
+  `export_designmd(Theme, ...)` re-emits the whole file and would lose
+  every one of those — never use it for a single-token lock. (It also
+  still throws, gated on #1307.)
+- **Conservatism** — `lock_token_in_designmd` fails (and returns the
+  input byte-identical) on: no frontmatter, missing group/token/field,
+  a nested color palette (not a scalar), or a source line that does not
+  match the expected `key: <value>` shape. A failed lock never mutates
+  DESIGN.md. The locator keys off the *group*, so a leaf name that
+  appears in two groups (e.g. `md` under both `spacing` and `rounded`)
+  still resolves unambiguously.
+- **Overlay wiring deferred** — the inspector overlay "lock token"
+  affordance is intentionally not wired here (`inspector_overlay.cpp`
+  has in-flight PRs). The engine is pure data-in/data-out so the
+  overlay/protocol layer can adopt it without a rebuild.
+
 Spec + design:
 [`planning/2026-05-18-inspector-direct-manipulation-roadmap.md`](../../../planning/2026-05-18-inspector-direct-manipulation-roadmap.md)
 

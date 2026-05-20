@@ -2397,6 +2397,13 @@ target_compile_definitions(pulp-test-design-import-designmd PRIVATE PULP_REPO_RO
 catch_discover_tests(pulp-test-design-import-designmd
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+# Phase 4c — token lock-to-source via DESIGN.md rewrite
+# (planning/2026-05-18-inspector-direct-manipulation-roadmap.md).
+add_executable(pulp-test-token-lock test_token_lock.cpp)
+target_link_libraries(pulp-test-token-lock PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-token-lock
+    PROPERTIES LABELS "parser-import")
+
 # Post-parse widget promotion: <div onClick> / role=button / cursor:pointer
 # → button. Closure of pulp-internal task #84 / follow-up on #1814.
 # Links the importer-side .cpp directly (it's not in pulp::view) so the
