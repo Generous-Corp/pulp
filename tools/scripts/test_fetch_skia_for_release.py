@@ -409,6 +409,119 @@ class Sha256MismatchFails(unittest.TestCase):
             self.assertEqual(rc, 1, "sha256 mismatch must fail")
 
 
+class IdempotencyStamp(unittest.TestCase):
+    """The `.skia-asset-sha256` stamp (pulp #2458 follow-up).
+
+    A self-hosted CI runner checks out `clean: false`, so a prior fetch's
+    `external/skia-build/` persists. The fetch must be skipped when the
+    on-disk Skia matches the pinned asset, but MUST re-run when the
+    manifest pin changes — a stale local libskia.a silently shadowing a
+    new pin is exactly the non-reproducibility bug the stamp prevents.
+    """
+
+    def test_first_run_writes_stamp(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path, {"build/mac-gpu/lib/Release/libskia.a": b"skia-v1"}
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+
+            rc = fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"])
+
+            self.assertEqual(rc, 0)
+            stamp = td / "external/skia-build/.skia-asset-sha256"
+            self.assertTrue(stamp.is_file(), "fetch must write the stamp")
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha)
+
+    def test_second_run_skips_download_when_stamp_matches(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path, {"build/mac-gpu/lib/Release/libskia.a": b"skia-v1"}
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+            self.assertEqual(
+                fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"]), 0
+            )
+
+            # Delete the asset source — a download attempt would now fail.
+            # A correct skip leaves rc == 0.
+            zip_path.unlink()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "darwin-arm64"]
+                )
+
+            self.assertEqual(rc, 0, "matching stamp must skip the download")
+            self.assertIn("skipping download", out.getvalue())
+
+    def test_pin_change_forces_refetch(self):
+        with _in_tempdir() as td:
+            zip_v1 = td / "skia-v1.zip"
+            sha_v1 = _make_zip(
+                zip_v1, {"build/mac-gpu/lib/Release/libskia.a": b"skia-v1"}
+            )
+            _write_manifest(
+                td, f"file://{zip_v1.as_posix()}", sha_v1, "mac-arm64"
+            )
+            self.assertEqual(
+                fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"]), 0
+            )
+            lib = td / "external/skia-build/build/mac-gpu/lib/Release/libskia.a"
+            self.assertEqual(lib.read_bytes(), b"skia-v1")
+
+            # Bump the manifest pin to a different asset.
+            zip_v2 = td / "skia-v2.zip"
+            sha_v2 = _make_zip(
+                zip_v2,
+                {"build/mac-gpu/lib/Release/libskia.a": b"skia-v2-different"},
+            )
+            self.assertNotEqual(sha_v1, sha_v2)
+            _write_manifest(
+                td, f"file://{zip_v2.as_posix()}", sha_v2, "mac-arm64"
+            )
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = fetch_skia.main(
+                    ["fetch_skia_for_release.py", "darwin-arm64"]
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                lib.read_bytes(),
+                b"skia-v2-different",
+                "stale Skia must be replaced when the manifest pin changes",
+            )
+            stamp = td / "external/skia-build/.skia-asset-sha256"
+            self.assertEqual(stamp.read_text(encoding="utf-8").strip(), sha_v2)
+
+    def test_missing_lib_with_stamp_refetches(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia.zip"
+            sha = _make_zip(
+                zip_path, {"build/mac-gpu/lib/Release/libskia.a": b"skia-v1"}
+            )
+            _write_manifest(td, f"file://{zip_path.as_posix()}", sha, "mac-arm64")
+            self.assertEqual(
+                fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"]), 0
+            )
+
+            # A wiped/partial workspace: stamp survives, library is gone.
+            lib = td / "external/skia-build/build/mac-gpu/lib/Release/libskia.a"
+            lib.unlink()
+
+            rc = fetch_skia.main(["fetch_skia_for_release.py", "darwin-arm64"])
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(
+                lib.is_file(),
+                "a missing library must re-fetch even when the stamp exists",
+            )
+
+
 if __name__ == "__main__":
     # Silence the script's progress prints during tests — unittest's own
     # output is what we want to see.

@@ -593,18 +593,16 @@ jobs:
         # PULP_HAS_SKIA gate (examples-ON / GPU builds — e.g.
         # examples/design-tool). fetch_skia_for_release.py pulls the
         # pinned, sha256-verified asset from tools/deps/manifest.json.
-        # Guarded: re-fetch only when the real lib is absent — on a
-        # self-hosted runner (clean: false) it persists between builds.
+        # The script is idempotent: it stamps the unpacked asset sha and
+        # skips the download when the stamp matches the current manifest
+        # pin — and re-fetches when the pin changes — so a self-hosted
+        # runner (clean: false) reuses Skia between builds without ever
+        # building against a stale pin.
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          lib="external/skia-build/build/mac-gpu/lib/Release/libskia.a"
-          if [ -f "$lib" ] && ! head -c 64 "$lib" | grep -q "git-lfs"; then
-            echo "Skia already present: $lib"
-          else
-            python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
-          fi
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
 
       - name: Configure
         # On pull_request events, skip example plugin builds

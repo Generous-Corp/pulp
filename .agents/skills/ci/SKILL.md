@@ -1900,11 +1900,20 @@ The `resolve-provider` job in `build.yml` decides per-run where each
 Configure. The Skia `.a` libraries are LFS-declared but not committed,
 so a fresh checkout has only pointer files — without real Skia,
 `FindSkia.cmake` sets `PULP_HAS_SKIA=FALSE` and any examples-ON / GPU
-build fails the Configure gate (`examples/design-tool`). The step runs
-`tools/scripts/fetch_skia_for_release.py darwin-arm64` (pinned,
-sha256-verified asset from `tools/deps/manifest.json`). It is guarded —
-it re-fetches only when the real `libskia.a` is absent, so on a
-self-hosted runner (`clean: false`) it persists between builds.
+build fails the Configure gate (`examples/design-tool`). The step
+unconditionally runs `tools/scripts/fetch_skia_for_release.py
+darwin-arm64` (pinned, sha256-verified asset from
+`tools/deps/manifest.json`).
+
+The script is **idempotency-stamped**: after a successful unpack it
+writes the asset sha256 to `external/skia-build/.skia-asset-sha256`. On
+the next run it skips the ~250-500 MiB download only when that stamp
+matches the *current* manifest pin. On a self-hosted runner
+(`clean: false`) Skia persists between builds, so the common case is a
+fast no-op — but a `manifest.json` Skia pin bump changes the expected
+sha, the stamp no longer matches, and the asset is re-fetched. Never
+guard the fetch on "is `libskia.a` present?" alone: a stale local
+library would silently shadow a new pin (pulp #2458 follow-up).
 
 The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
 `["macos-15"]`. The repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`

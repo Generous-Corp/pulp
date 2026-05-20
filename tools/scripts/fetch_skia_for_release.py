@@ -141,6 +141,29 @@ def main(argv: list[str]) -> int:
     print(f"  sha256: {expected_sha}")
     print(f"  expected lib: {expected_lib}")
 
+    # Idempotency stamp. A self-hosted CI runner checks out with
+    # `clean: false`, so `external/skia-build/` persists between jobs;
+    # re-downloading the ~250-500 MiB asset every build is wasteful. But a
+    # naive "is libskia.a present?" guard is *wrong*: when
+    # tools/deps/manifest.json bumps the pinned Skia asset, a stale local
+    # library would silently shadow the new pin and CI would build against
+    # the wrong Skia (pulp #2458 follow-up). The stamp records the sha256
+    # actually unpacked here, so the download is skipped only when that
+    # sha matches the current pin — a pin bump changes expected_sha, the
+    # stamp no longer matches, and the asset is re-fetched.
+    stamp_path = Path("external/skia-build/.skia-asset-sha256")
+    if expected_lib.is_file() and stamp_path.is_file():
+        if stamp_path.read_text(encoding="utf-8").strip() == expected_sha:
+            print(
+                f"OK: Skia already unpacked from the pinned asset "
+                f"(sha256 {expected_sha}); skipping download"
+            )
+            return 0
+        print(
+            "Skia stamp does not match the pinned asset — the manifest "
+            "pin changed since the last fetch; re-downloading."
+        )
+
     zip_path = Path("skia-release-asset.zip")
     print(f"Downloading → {zip_path}")
     with urllib.request.urlopen(url) as resp, zip_path.open("wb") as fp:
@@ -226,6 +249,11 @@ def main(argv: list[str]) -> int:
         for p in sorted(dest.rglob("*"))[:50]:
             print(f"  {p}", file=sys.stderr)
         return 1
+
+    # Record the asset identity so the next run on a `clean: false` runner
+    # can skip the download — and so a future manifest pin bump forces a
+    # re-fetch (the stamp will no longer match the new expected_sha).
+    stamp_path.write_text(expected_sha + "\n", encoding="utf-8")
 
     print(f"OK: {expected_lib} present ({expected_lib.stat().st_size:,} bytes)")
     return 0
