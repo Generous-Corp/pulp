@@ -585,6 +585,27 @@ jobs:
             ~/AppData/Local/Pulp/Cache/fetchcontent-src
           key: ${{ steps.fetchcontent-cache.outputs.cache-primary-key }}
 
+      - name: Fetch prebuilt Skia (macOS)
+        # FindSkia.cmake needs
+        # external/skia-build/build/mac-gpu/lib/Release/libskia.a. The
+        # LFS-declared Skia binaries are not committed, so a fresh
+        # checkout has only headers/pointers and Configure fails the
+        # PULP_HAS_SKIA gate (examples-ON / GPU builds — e.g.
+        # examples/design-tool). fetch_skia_for_release.py pulls the
+        # pinned, sha256-verified asset from tools/deps/manifest.json.
+        # Guarded: re-fetch only when the real lib is absent — on a
+        # self-hosted runner (clean: false) it persists between builds.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib="external/skia-build/build/mac-gpu/lib/Release/libskia.a"
+          if [ -f "$lib" ] && ! head -c 64 "$lib" | grep -q "git-lfs"; then
+            echo "Skia already present: $lib"
+          else
+            python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+          fi
+
       - name: Configure
         # On pull_request events, skip example plugin builds
         # (PulpDrums / PulpSynth / PulpMpeSynth / PulpPluck /
