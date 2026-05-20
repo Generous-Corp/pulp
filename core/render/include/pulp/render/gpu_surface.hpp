@@ -78,6 +78,15 @@ public:
     /// Returns an unavailable record when no native adapter has been initialized.
     virtual AdapterInfo adapter_info() const = 0;
 
+    /// Whether the initialized device supports WebGPU timestamp queries
+    /// (the `timestamp-query` feature). Phase 6.5 uses this to decide
+    /// whether the inspector perf view can show real GPU-side pass
+    /// durations or must fall back to the Phase 6.1 CPU numbers. The
+    /// feature is requested best-effort at device creation; an adapter
+    /// that lacks it still yields a working surface — this just returns
+    /// false. Always false before `initialize()` and on non-Dawn builds.
+    virtual bool gpu_timestamps_supported() const { return false; }
+
     static std::unique_ptr<GpuSurface> create_dawn();
 };
 

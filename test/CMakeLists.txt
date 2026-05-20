@@ -1904,6 +1904,19 @@ target_include_directories(pulp-test-gpu-graph PRIVATE
 target_link_libraries(pulp-test-gpu-graph PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-gpu-graph)
 
+# Phase 6.5 — GPU timestamp-query resolution math. Header-only
+# (GpuTimestampResolver + RenderPassManager GPU-time API), so it builds
+# and runs without a GPU; the Dawn-coupled GpuPassTimer live-device path
+# is exercised by the GPU matrix.
+add_executable(pulp-test-render-gpu-timestamp test_render_gpu_timestamp.cpp)
+target_include_directories(pulp-test-render-gpu-timestamp PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-render-gpu-timestamp PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-render-gpu-timestamp
+    PROPERTIES
+        LABELS coverage)
+
 add_executable(pulp-test-render-loop
     test_render_loop.cpp
     ${CMAKE_SOURCE_DIR}/core/render/src/render_loop.cpp)

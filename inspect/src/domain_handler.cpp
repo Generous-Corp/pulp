@@ -606,12 +606,26 @@ InspectorMessage DomainHandler::handle_performance(const InspectorMessage& req) 
             obj.addMember("frame_count", choc::value::createInt64(static_cast<int64_t>(rpm_->frame_count())));
             obj.addMember("budget_ms", choc::value::createFloat64(rpm_->budget()));
             obj.addMember("over_budget", choc::value::createBool(rpm_->over_budget()));
+            // Phase 6.5 — whether real GPU-side timings are available on
+            // this adapter. When false the perf view shows CPU time only.
+            obj.addMember("gpu_timestamps_available",
+                          choc::value::createBool(rpm_->gpu_timestamps_available()));
 
             auto passes = choc::value::createEmptyArray();
             for (auto& p : rpm_->passes()) {
                 auto pass = choc::value::createObject("");
                 pass.addMember("draw_calls", choc::value::createInt32(p.draw_calls));
+                // `time_ms` is CPU wall-time (Phase 6.1). `cpu_time_ms`
+                // is the same value under an unambiguous name so a
+                // perf-view client never confuses it with GPU time;
+                // `time_ms` stays for backward compatibility.
                 pass.addMember("time_ms", choc::value::createFloat64(p.time_ms));
+                pass.addMember("cpu_time_ms", choc::value::createFloat64(p.time_ms));
+                // Phase 6.5 — real GPU-side execution time. Only present
+                // a number when the timestamp pair resolved; otherwise
+                // the client falls back to the CPU figure.
+                pass.addMember("gpu_time_ms", choc::value::createFloat64(p.gpu_time_ms));
+                pass.addMember("gpu_time_valid", choc::value::createBool(p.gpu_time_valid));
                 passes.addArrayElement(pass);
             }
             obj.addMember("passes", passes);

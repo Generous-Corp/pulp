@@ -116,6 +116,20 @@ public:
                     std::string(message.data, message.length));
             });
 
+        // Phase 6.5 — opt into GPU timestamp queries when the adapter
+        // supports it. Requesting an unsupported feature *fails* device
+        // creation, so this is gated on the adapter's capability; an
+        // adapter without it still yields a working (CPU-timed) surface.
+        wgpu::FeatureName device_features[1];
+        if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+            device_features[0] = wgpu::FeatureName::TimestampQuery;
+            device_desc.requiredFeatures = device_features;
+            device_desc.requiredFeatureCount = 1;
+        } else {
+            runtime::log_info("GpuSurface: adapter lacks timestamp-query — "
+                "GPU pass timings unavailable, CPU timings only");
+        }
+
         adapter_.RequestDevice(
             &device_desc,
             wgpu::CallbackMode::AllowProcessEvents,
@@ -132,6 +146,13 @@ public:
         }
 
         queue_ = device_.GetQueue();
+
+        // Record whether the created device actually carries the
+        // timestamp-query feature (Phase 6.5). Query the device, not the
+        // adapter — a device only has features that were requested AND
+        // granted.
+        gpu_timestamps_supported_ =
+            device_.HasFeature(wgpu::FeatureName::TimestampQuery);
 
         // Configure the surface for presentation
         if (surface_) {
@@ -195,6 +216,9 @@ public:
     bool has_surface() const override { return surface_ != nullptr; }
     uint32_t width() const override { return width_; }
     uint32_t height() const override { return height_; }
+    bool gpu_timestamps_supported() const override {
+        return gpu_timestamps_supported_;
+    }
 
     // Dawn handle accessors — SkiaSurface casts these back to Dawn C++ types
     void* dawn_device_handle() const override {
@@ -359,6 +383,7 @@ private:
     wgpu::PresentMode preferred_mode_ = wgpu::PresentMode::Fifo;
     uint32_t width_ = 0, height_ = 0;
     bool initialized_ = false;
+    bool gpu_timestamps_supported_ = false;
 };
 
 std::unique_ptr<GpuSurface> GpuSurface::create_dawn() {
