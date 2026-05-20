@@ -178,6 +178,7 @@ struct Receiver::Impl {
     std::thread thread;
     std::atomic<bool> running{false};
     MessageHandler handler;
+    std::atomic<uint16_t> local_port{0};
 };
 
 Receiver::Receiver() : impl_(std::make_unique<Impl>()) {}
@@ -188,6 +189,7 @@ bool Receiver::listen(uint16_t port, MessageHandler handler) {
     #if defined(_WIN32)
     if (!ensure_winsock()) return false;
     #endif
+    impl_->local_port.store(0, std::memory_order_relaxed);
     impl_->sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (impl_->sock == kInvalidSocket) return false;
 
@@ -206,6 +208,17 @@ bool Receiver::listen(uint16_t port, MessageHandler handler) {
         impl_->sock = kInvalidSocket;
         return false;
     }
+
+    sockaddr_in bound_addr{};
+    SockLen bound_len = static_cast<SockLen>(sizeof(bound_addr));
+    if (getsockname(impl_->sock,
+                    reinterpret_cast<sockaddr*>(&bound_addr),
+                    &bound_len) < 0) {
+        close_socket(impl_->sock);
+        impl_->sock = kInvalidSocket;
+        return false;
+    }
+    impl_->local_port.store(ntohs(bound_addr.sin_port), std::memory_order_relaxed);
 
     // Set receive timeout so we can check running_ flag
 #if defined(_WIN32)
@@ -281,8 +294,13 @@ void Receiver::stop() {
         close_socket(impl_->sock);
         impl_->sock = kInvalidSocket;
     }
+    impl_->local_port.store(0, std::memory_order_relaxed);
 }
 
 bool Receiver::is_listening() const { return impl_->running; }
+
+uint16_t Receiver::local_port() const {
+    return impl_->local_port.load(std::memory_order_relaxed);
+}
 
 } // namespace pulp::osc

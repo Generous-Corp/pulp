@@ -20,15 +20,6 @@ using Catch::Matchers::WithinAbs;
 namespace {
 
 constexpr uint16_t kOscHostnameTestPort = 29876;
-constexpr uint16_t kOscInvalidPacketPort = 29877;
-constexpr uint16_t kOscStopIdempotentPort = 29878;
-
-uint16_t loopback_port(uint16_t offset) {
-    static std::atomic<uint16_t> counter{0};
-    const auto tick = static_cast<uint16_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
-    return static_cast<uint16_t>(43000 + ((tick + offset + counter.fetch_add(1)) % 1000));
-}
 
 void append_osc_string(std::vector<uint8_t>& data, std::string_view text) {
     data.insert(data.end(), text.begin(), text.end());
@@ -284,10 +275,9 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     Message received_msg;
     std::mutex received_msg_mutex;
     std::atomic<bool> got_message{false};
-    const auto port = loopback_port(76);
 
     Receiver rx;
-    bool listening = rx.listen(port, [&](const Message& msg) {
+    bool listening = rx.listen(0, [&](const Message& msg) {
         {
             std::lock_guard<std::mutex> lock(received_msg_mutex);
             received_msg = msg;
@@ -296,6 +286,8 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     });
     REQUIRE(listening);
     REQUIRE(rx.is_listening());
+    const auto port = rx.local_port();
+    REQUIRE(port != 0);
 
     // Give receiver time to start
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -306,11 +298,12 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
 
     Message msg("/test/ping");
     msg.add(42).add(3.14f);
-    REQUIRE(tx.send(msg));
 
-    // Wait for message
+    // UDP delivery is best-effort even on loopback; retry within a
+    // bounded window so scheduler/load hiccups do not make the test flaky.
     for (int i = 0; i < 100 && !got_message.load(std::memory_order_acquire); ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        REQUIRE(tx.send(msg));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     REQUIRE(got_message.load(std::memory_order_acquire));
@@ -325,6 +318,7 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     rx.stop();
     REQUIRE_FALSE(tx.is_connected());
     REQUIRE_FALSE(rx.is_listening());
+    REQUIRE(rx.local_port() == 0);
 }
 
 TEST_CASE("OSC Sender resolves localhost hostnames", "[osc][udp][sender]") {
@@ -352,12 +346,14 @@ TEST_CASE("OSC Receiver drops invalid datagrams without invoking handler", "[osc
     std::atomic<int> handled{0};
 
     Receiver rx;
-    REQUIRE(rx.listen(kOscInvalidPacketPort, [&](const Message&) {
+    REQUIRE(rx.listen(0, [&](const Message&) {
         handled.fetch_add(1, std::memory_order_relaxed);
     }));
+    const auto port = rx.local_port();
+    REQUIRE(port != 0);
 
     Sender tx;
-    REQUIRE(tx.connect("127.0.0.1", kOscInvalidPacketPort));
+    REQUIRE(tx.connect("127.0.0.1", port));
 
     uint8_t invalid[] = {0x00, 0x01, 0x02};
     REQUIRE(tx.send_raw(invalid, sizeof(invalid)));
@@ -374,13 +370,16 @@ TEST_CASE("OSC Receiver stop is idempotent", "[osc][udp][receiver]") {
     Receiver never_started;
     never_started.stop();
     REQUIRE_FALSE(never_started.is_listening());
+    REQUIRE(never_started.local_port() == 0);
 
     Receiver rx;
-    REQUIRE(rx.listen(kOscStopIdempotentPort, [](const Message&) {}));
+    REQUIRE(rx.listen(0, [](const Message&) {}));
     REQUIRE(rx.is_listening());
+    REQUIRE(rx.local_port() != 0);
     rx.stop();
     rx.stop();
     REQUIRE_FALSE(rx.is_listening());
+    REQUIRE(rx.local_port() == 0);
 }
 
 // ── Codec edges (spec compliance & decoder robustness) ─────────────────────

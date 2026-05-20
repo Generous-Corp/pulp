@@ -89,6 +89,7 @@ public:
     void stop();
 
     bool is_listening() const;
+    uint16_t local_port() const;
 
 private:
     struct Impl;

@@ -5,7 +5,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -26,26 +28,93 @@ bool wait_until(Pred pred, std::chrono::milliseconds budget = 5s) {
     return pred();
 }
 
-std::pair<uint16_t, uint16_t> loopback_port_pair(uint16_t offset) {
-    static std::atomic<uint16_t> counter{0};
-    const auto tick = static_cast<uint16_t>(
-        std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
-    const auto n = static_cast<uint16_t>(counter.fetch_add(1));
-    const auto base = static_cast<uint16_t>(41000 + ((tick + offset + n * 2) % 1000) * 2);
-    return {base, static_cast<uint16_t>(base + 1)};
+template <typename Send, typename Pred>
+bool send_until(Send send, Pred pred, std::chrono::milliseconds budget = 5s) {
+    auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        if (!send()) return false;
+        if (pred()) return true;
+        std::this_thread::sleep_for(20ms);
+    }
+    return pred();
+}
+
+struct PortPair {
+    std::uint16_t first = 0;
+    std::uint16_t second = 0;
+};
+
+std::optional<PortPair> reserve_udp_port_pair() {
+    Receiver first;
+    Receiver second;
+    const auto noop = [](const Message&) {};
+
+    if (!first.listen(0, noop)) return std::nullopt;
+    if (!second.listen(0, noop)) {
+        first.stop();
+        return std::nullopt;
+    }
+
+    const PortPair ports{first.local_port(), second.local_port()};
+    first.stop();
+    second.stop();
+
+    if (ports.first == 0 || ports.second == 0 || ports.first == ports.second) {
+        return std::nullopt;
+    }
+    return ports;
+}
+
+struct ChannelPair {
+    std::unique_ptr<OscChannel> first;
+    std::unique_ptr<OscChannel> second;
+
+    explicit operator bool() const { return first && second; }
+};
+
+ChannelPair open_loopback_pair(OscChannelOptions first_options = {},
+                               OscChannelOptions second_options = {}) {
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        auto ports = reserve_udp_port_pair();
+        if (!ports) continue;
+
+        auto first = OscChannel::open("127.0.0.1", ports->second, ports->first,
+                                      first_options);
+        auto second = OscChannel::open("127.0.0.1", ports->first, ports->second,
+                                       second_options);
+        if (first && second) {
+            return {std::move(first), std::move(second)};
+        }
+        if (first) first->close();
+        if (second) second->close();
+    }
+
+    return {};
+}
+
+std::unique_ptr<OscChannel> open_loopback_endpoint(OscChannelOptions options = {}) {
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        auto ports = reserve_udp_port_pair();
+        if (!ports) continue;
+
+        auto channel = OscChannel::open("127.0.0.1", ports->second, ports->first,
+                                        options);
+        if (channel) return channel;
+    }
+    return nullptr;
 }
 
 }  // namespace
 
 TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_channel]") {
-    // Two channels pointed at each other on loopback.
-    const auto [a_port, b_port] = loopback_port_pair(1);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
-    auto b = OscChannel::open("127.0.0.1", b_port, a_port);
-    if (!a || !b) {
+    auto pair = open_loopback_pair();
+    if (!pair) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
     }
+    auto& a = pair.first;
+    auto& b = pair.second;
 
     std::mutex mu;
     std::vector<pulp::runtime::Message> a_got, b_got;
@@ -60,9 +129,8 @@ TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_chann
 
     Message msg("/synth/freq");
     msg.add(440.0f).add(std::string("sine"));
-    REQUIRE(a->send(msg));
 
-    REQUIRE(wait_until([&] {
+    REQUIRE(send_until([&] { return a->send(msg); }, [&] {
         std::lock_guard<std::mutex> lock(mu);
         return !b_got.empty();
     }));
@@ -82,8 +150,7 @@ TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_chann
 }
 
 TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]") {
-    const auto [a_port, b_port] = loopback_port_pair(11);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto a = open_loopback_endpoint();
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -96,8 +163,7 @@ TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]
 }
 
 TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
-    const auto [a_port, b_port] = loopback_port_pair(13);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto a = open_loopback_endpoint();
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -116,8 +182,7 @@ TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]")
 
 TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
           "[osc_channel][lifecycle]") {
-    const auto [a_port, b_port] = loopback_port_pair(15);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto a = open_loopback_endpoint();
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -146,8 +211,7 @@ TEST_CASE("OscChannel routes close callbacks through custom executor",
         queued.push_back(std::move(fn));
     };
 
-    const auto [a_port, b_port] = loopback_port_pair(19);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port, options);
+    auto a = open_loopback_endpoint(options);
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -165,13 +229,13 @@ TEST_CASE("OscChannel routes close callbacks through custom executor",
 
 TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
           "[osc_channel][raw]") {
-    const auto [a_port, b_port] = loopback_port_pair(17);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
-    auto b = OscChannel::open("127.0.0.1", b_port, a_port);
-    if (!a || !b) {
+    auto pair = open_loopback_pair();
+    if (!pair) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
     }
+    auto& a = pair.first;
+    auto& b = pair.second;
 
     std::mutex mu;
     std::vector<uint8_t> received;
@@ -186,9 +250,7 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
     golden.add(int32_t{7}).add(std::string("abc"));
     const auto encoded = encode(golden);
 
-    REQUIRE(a->send(encoded.data(), encoded.size()));
-
-    REQUIRE(wait_until([&] {
+    REQUIRE(send_until([&] { return a->send(encoded.data(), encoded.size()); }, [&] {
         std::lock_guard<std::mutex> lock(mu);
         return !received.empty();
     }));
@@ -214,13 +276,13 @@ TEST_CASE("OscChannel routes received messages through custom executor",
         queued.push_back(std::move(fn));
     };
 
-    const auto [a_port, b_port] = loopback_port_pair(21);
-    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
-    auto b = OscChannel::open("127.0.0.1", b_port, a_port, options);
-    if (!a || !b) {
+    auto pair = open_loopback_pair({}, options);
+    if (!pair) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
     }
+    auto& a = pair.first;
+    auto& b = pair.second;
 
     std::vector<uint8_t> received;
     b->on_message([&](const pulp::runtime::Message& m) {
@@ -230,9 +292,8 @@ TEST_CASE("OscChannel routes received messages through custom executor",
     Message msg("/queued");
     msg.add(int32_t{9});
     const auto encoded = encode(msg);
-    REQUIRE(a->send(encoded.data(), encoded.size()));
 
-    REQUIRE(wait_until([&] {
+    REQUIRE(send_until([&] { return a->send(encoded.data(), encoded.size()); }, [&] {
         std::lock_guard<std::mutex> lock(queue_mu);
         return !queued.empty();
     }));
