@@ -29,17 +29,19 @@ InspectorMessage req(std::string method, std::string params) {
     return make_request(/*id=*/1, std::move(method), std::move(params));
 }
 
-std::string path_params(const std::filesystem::path& path) {
-    auto params = choc::value::createObject("");
-    params.addMember("path", choc::value::createString(path.string()));
-    return choc::json::toString(params, false);
+std::string params_with_path(const std::filesystem::path& path) {
+    auto obj = choc::value::createObject("");
+    obj.addMember("path", choc::value::createString(path.string()));
+    return choc::json::toString(obj, false);
 }
 
-std::string auto_save_params(bool enabled, const std::filesystem::path& path) {
-    auto params = choc::value::createObject("");
-    params.addMember("enabled", choc::value::createBool(enabled));
-    params.addMember("path", choc::value::createString(path.string()));
-    return choc::json::toString(params, false);
+std::string auto_save_params(bool enabled, const std::filesystem::path& path = {}) {
+    auto obj = choc::value::createObject("");
+    obj.addMember("enabled", choc::value::createBool(enabled));
+    if (!path.empty()) {
+        obj.addMember("path", choc::value::createString(path.string()));
+    }
+    return choc::json::toString(obj, false);
 }
 
 // Wire a DomainHandler with just the TweakStore for these tests.
@@ -868,9 +870,9 @@ TEST_CASE("TweakStore: save_to_disk on a bad path returns error, no partial writ
     REQUIRE_FALSE(saved.ok);
     REQUIRE_FALSE(saved.error.empty());
     REQUIRE_FALSE(std::filesystem::exists(bad));
-    auto tmp_file = bad;
-    tmp_file += ".tmp";
-    REQUIRE_FALSE(std::filesystem::exists(tmp_file));
+    auto tmp_sidecar = bad;
+    tmp_sidecar += ".tmp";
+    REQUIRE_FALSE(std::filesystem::exists(tmp_sidecar));
 }
 
 TEST_CASE("TweakStore: auto-save flushes after every mutation",
@@ -1035,7 +1037,7 @@ TEST_CASE("Inspector.saveTweaks writes the file and returns the resolved path",
     f.store.apply_tweak("a", "x", choc::value::createInt32(1), "drag");
 
     auto resp = f.handler.handle(req(methods::kInspectorSaveTweaks,
-                                     path_params(tmp.file)));
+        params_with_path(tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["ok"].getBool());
@@ -1055,7 +1057,7 @@ TEST_CASE("Inspector.loadTweaks restores state from disk",
     }
     Fixture f;
     auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks,
-                                     path_params(tmp.file)));
+        params_with_path(tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["ok"].getBool());
@@ -1070,7 +1072,7 @@ TEST_CASE("Inspector.loadTweaks reports schema mismatch as a protocol error",
 
     Fixture f;
     auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks,
-                                     path_params(tmp.file)));
+        params_with_path(tmp.file)));
     REQUIRE(resp.is_error);
     REQUIRE(resp.params_json.find("999") != std::string::npos);
 }
@@ -1080,7 +1082,7 @@ TEST_CASE("Inspector.setAutoSave arms and disarms the flush hook",
     TempTweaksDir tmp;
     Fixture f;
     auto resp = f.handler.handle(req(methods::kInspectorSetAutoSave,
-                                     auto_save_params(true, tmp.file)));
+        auto_save_params(true, tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["enabled"].getBool());
@@ -1094,7 +1096,7 @@ TEST_CASE("Inspector.setAutoSave arms and disarms the flush hook",
 
     // Disable.
     auto resp2 = f.handler.handle(req(methods::kInspectorSetAutoSave,
-        R"({"enabled":false})"));
+        auto_save_params(false)));
     REQUIRE_FALSE(resp2.is_error);
     REQUIRE_FALSE(f.store.auto_save_enabled());
 }
