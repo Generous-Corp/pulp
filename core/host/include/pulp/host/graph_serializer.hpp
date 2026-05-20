@@ -44,6 +44,7 @@ public:
         bool ok = false;
         std::string error;  // populated when ok == false
         std::vector<std::string> missing_plugins;  // identity strings
+        std::vector<std::string> missing_custom_node_types;  // type_id@version
         std::unordered_map<NodeId, std::pair<float,float>> editor_layout;
     };
 

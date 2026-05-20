@@ -208,6 +208,7 @@ const char* node_type_str(NodeType t) {
         case NodeType::Gain:        return "gain";
         case NodeType::MidiInput:   return "midi_in";
         case NodeType::MidiOutput:  return "midi_out";
+        case NodeType::Custom:      return "custom";
     }
     return "unknown";
 }
@@ -231,13 +232,21 @@ PluginFormat parse_format(std::string_view s) {
     return PluginFormat::LV2;
 }
 
-NodeType parse_type(std::string_view s) {
-    if (s == "audio_in")  return NodeType::AudioInput;
-    if (s == "audio_out") return NodeType::AudioOutput;
-    if (s == "plugin")    return NodeType::Plugin;
-    if (s == "gain")      return NodeType::Gain;
-    if (s == "midi_in")   return NodeType::MidiInput;
-    return NodeType::MidiOutput;
+bool parse_type(std::string_view s, NodeType& out) {
+    if (s == "audio_in")  { out = NodeType::AudioInput; return true; }
+    if (s == "audio_out") { out = NodeType::AudioOutput; return true; }
+    if (s == "plugin")    { out = NodeType::Plugin; return true; }
+    if (s == "gain")      { out = NodeType::Gain; return true; }
+    if (s == "midi_in")   { out = NodeType::MidiInput; return true; }
+    if (s == "midi_out")  { out = NodeType::MidiOutput; return true; }
+    if (s == "custom")    { out = NodeType::Custom; return true; }
+    return false;
+}
+
+std::string custom_type_label(std::string_view type_id, int version) {
+    std::ostringstream oss;
+    oss << type_id << "@" << version;
+    return oss.str();
 }
 
 // Minimal base64 encoder (no padding stripping), good enough for state
@@ -348,6 +357,14 @@ std::string GraphSerializer::to_json(
             }
             node_obj.addMember("plugin", plug_obj);
         }
+        if (n.type == NodeType::Custom) {
+            auto custom_obj = choc::value::createObject("CustomNode");
+            custom_obj.addMember("type_id", n.custom_type_id);
+            custom_obj.addMember(
+                "version",
+                (int64_t)(n.custom_type_version > 0 ? n.custom_type_version : 1));
+            node_obj.addMember("custom", custom_obj);
+        }
         auto layout_it = editor_layout.find(n.id);
         if (layout_it != editor_layout.end()) {
             auto pos = choc::value::createObject("Pos");
@@ -422,7 +439,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const NodeId old_id = (NodeId)nv["id"].getInt64();
             const std::string name(nv["name"].getString());
             const std::string type_s(nv["type"].getString());
-            const NodeType t = parse_type(type_s);
+            NodeType t = NodeType::Custom;
+            const bool known_type = parse_type(type_s, t);
             const int in_ch  = (int)nv["num_input_ports"].getInt64();
             const int out_ch = (int)nv["num_output_ports"].getInt64();
             const float gain = nv.hasObjectMember("gain") ? (float)get_double(nv["gain"]) : 1.0f;
@@ -434,6 +452,32 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 case NodeType::Gain:        new_id = graph.add_gain_node(name); break;
                 case NodeType::MidiInput:   new_id = graph.add_midi_input_node(name); break;
                 case NodeType::MidiOutput:  new_id = graph.add_midi_output_node(name); break;
+                case NodeType::Custom: {
+                    std::string type_id = type_s;
+                    int version = 1;
+                    if (known_type && nv.hasObjectMember("custom")) {
+                        const auto& cv = nv["custom"];
+                        if (cv.hasObjectMember("type_id")) {
+                            type_id = cv["type_id"].getString();
+                        }
+                        if (cv.hasObjectMember("version")) {
+                            version = (int)cv["version"].getInt64();
+                        }
+                    }
+                    const auto* registered = graph.custom_node_type(type_id);
+                    if (registered
+                        && registered->version == version
+                        && registered->num_input_ports == in_ch
+                        && registered->num_output_ports == out_ch) {
+                        new_id = graph.add_custom_node(type_id, name);
+                    } else {
+                        result.missing_custom_node_types.push_back(
+                            custom_type_label(type_id, version));
+                        new_id = graph.add_unresolved_custom_node(
+                            type_id, version, in_ch, out_ch, name);
+                    }
+                    break;
+                }
                 case NodeType::Plugin: {
                     if (!nv.hasObjectMember("plugin")) {
                         result.missing_plugins.push_back(name + " (no plugin info)");

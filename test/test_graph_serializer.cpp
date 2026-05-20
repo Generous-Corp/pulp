@@ -13,6 +13,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -102,6 +103,14 @@ bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
     return false;
 }
 
+bool missing_custom_types_contain(const GraphSerializer::LoadResult& result,
+                                  const std::string& needle) {
+    for (const auto& entry : result.missing_custom_node_types) {
+        if (entry.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("GraphSerializer round-trips an empty graph", "[host][serializer]") {
@@ -139,7 +148,7 @@ TEST_CASE("GraphSerializer round-trips topology with gain and I/O nodes", "[host
 
     // Node types preserved
     const auto& dst_nodes = dst.nodes();
-    int type_counts[6] = {0};
+    std::array<int, 7> type_counts{};
     for (const auto& n : dst_nodes) type_counts[static_cast<int>(n.type)]++;
     REQUIRE(type_counts[static_cast<int>(NodeType::AudioInput)] == 1);
     REQUIRE(type_counts[static_cast<int>(NodeType::Gain)] == 1);
@@ -542,16 +551,88 @@ TEST_CASE("GraphSerializer decodes fallback wire values deterministically",
 
     REQUIRE(result.ok);
     REQUIRE(dst.nodes().size() == 2);
+    REQUIRE(missing_custom_types_contain(result, "future_node_type@1"));
     REQUIRE(missing_plugins_contain(result, "lv2:pulp.test.future"));
 
-    bool saw_midi_output_fallback = false;
+    bool saw_custom_fallback = false;
     for (const auto& node : dst.nodes()) {
         if (node.name == "Future sink") {
-            saw_midi_output_fallback = true;
-            REQUIRE(node.type == NodeType::MidiOutput);
+            saw_custom_fallback = true;
+            REQUIRE(node.type == NodeType::Custom);
+            REQUIRE(node.custom_type_id == "future_node_type");
+            REQUIRE(node.custom_type_version == 1);
+            REQUIRE(node.num_input_ports == 1);
+            REQUIRE(node.num_output_ports == 0);
         }
     }
-    REQUIRE(saw_midi_output_fallback);
+    REQUIRE(saw_custom_fallback);
+}
+
+TEST_CASE("GraphSerializer round-trips registered custom node identity",
+          "[host][serializer][node-abi]") {
+    SignalGraph src;
+    REQUIRE(src.register_custom_node_type(
+        {"pulp.test.custom-filter", 2, 1, 1, "Custom Filter"}));
+    auto input = src.add_input_node(1, "Input");
+    auto custom = src.add_custom_node("pulp.test.custom-filter", "Filter A");
+    auto output = src.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+    REQUIRE(src.connect(input, 0, custom, 0));
+    REQUIRE(src.connect(custom, 0, output, 0));
+
+    const auto json = GraphSerializer::to_json(src);
+    REQUIRE(json.find("\"type\": \"custom\"") != std::string::npos);
+    REQUIRE(json.find("\"type_id\": \"pulp.test.custom-filter\"") !=
+            std::string::npos);
+    REQUIRE(json.find("\"version\": 2") != std::string::npos);
+
+    SignalGraph dst;
+    REQUIRE(dst.register_custom_node_type(
+        {"pulp.test.custom-filter", 2, 1, 1, "Custom Filter"}));
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_custom_node_types.empty());
+    REQUIRE(dst.nodes().size() == 3);
+    REQUIRE(dst.connections().size() == 2);
+
+    bool saw_custom = false;
+    for (const auto& node : dst.nodes()) {
+        if (node.name != "Filter A") continue;
+        saw_custom = true;
+        REQUIRE(node.type == NodeType::Custom);
+        REQUIRE(node.custom_type_id == "pulp.test.custom-filter");
+        REQUIRE(node.custom_type_version == 2);
+        REQUIRE(node.num_input_ports == 1);
+        REQUIRE(node.num_output_ports == 1);
+    }
+    REQUIRE(saw_custom);
+}
+
+TEST_CASE("GraphSerializer preserves unresolved custom node identity",
+          "[host][serializer][node-abi]") {
+    SignalGraph src;
+    auto custom = src.add_unresolved_custom_node(
+        "pulp.test.future-node", 4, 2, 1, "Future Node");
+    REQUIRE(custom != 0);
+
+    const auto json = GraphSerializer::to_json(src);
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(missing_custom_types_contain(result, "pulp.test.future-node@4"));
+    REQUIRE(dst.nodes().size() == 1);
+
+    const auto& node = dst.nodes().front();
+    REQUIRE(node.type == NodeType::Custom);
+    REQUIRE(node.custom_type_id == "pulp.test.future-node");
+    REQUIRE(node.custom_type_version == 4);
+    REQUIRE(node.num_input_ports == 2);
+    REQUIRE(node.num_output_ports == 1);
+
+    const auto second_json = GraphSerializer::to_json(dst);
+    REQUIRE(second_json.find("\"type_id\": \"pulp.test.future-node\"") !=
+            std::string::npos);
+    REQUIRE(second_json.find("\"version\": 4") != std::string::npos);
 }
 
 TEST_CASE("GraphSerializer serializes plugin formats and state blobs",

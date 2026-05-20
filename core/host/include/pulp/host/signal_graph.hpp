@@ -22,6 +22,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
+#include <string_view>
 #include <cstdint>
 
 namespace pulp::host {
@@ -35,10 +36,19 @@ enum class NodeType {
     Gain,          // Simple gain utility
     MidiInput,     // System MIDI input
     MidiOutput,    // System MIDI output
+    Custom,        // String-keyed extension node
 };
 
 using NodeId = uint32_t;
 using PortIndex = uint32_t;
+
+struct CustomNodeType {
+    std::string type_id;
+    int version = 1;
+    int num_input_ports = 0;
+    int num_output_ports = 0;
+    std::string default_name;
+};
 
 // ── Connection ──────────────────────────────────────────────────────────
 
@@ -101,6 +111,12 @@ struct GraphNode {
     // UI-thread-owned scalar state that needs to survive snapshot
     // recompilation. compile_() copies these into per-snapshot NodeRuntime.
     float gain = 1.0f;
+
+    // For Custom nodes, the registry identity that created the node. The
+    // version is serialized with the graph so older custom topologies can be
+    // distinguished from newer incompatible factories.
+    std::string custom_type_id;
+    int custom_type_version = 0;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -126,6 +142,15 @@ public:
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
+    bool register_custom_node_type(CustomNodeType type);
+    const CustomNodeType* custom_node_type(std::string_view type_id) const;
+    NodeId add_custom_node(std::string_view type_id,
+                           const std::string& name = {});
+    NodeId add_unresolved_custom_node(std::string_view type_id,
+                                      int version,
+                                      int num_inputs,
+                                      int num_outputs,
+                                      const std::string& name);
 
     // Remove a node and all its connections
     bool remove_node(NodeId id);
@@ -323,6 +348,7 @@ private:
 
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
+    std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     NodeId next_id_ = 1;
 
     // Audio-thread snapshot, published by prepare() / mutators. Uses the

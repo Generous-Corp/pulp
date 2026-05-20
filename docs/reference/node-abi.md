@@ -44,3 +44,15 @@ remain valid for source compatibility.
 Use `PluginDescriptor::effective_capabilities()` when adapter or host code
 needs the effective value. It ORs the legacy flags with the node capability
 field so both declaration styles behave the same.
+
+## Custom Host Graph Nodes
+
+`SignalGraph` supports string-keyed custom host nodes through
+`CustomNodeType`. Register a type on the graph with a stable `type_id`, a
+positive integer `version`, and its input/output port shape, then instantiate
+it with `add_custom_node(type_id)`.
+
+The node type enum only appends `NodeType::Custom`; built-in enum values stay
+stable. Serialized graphs store the custom `type_id` and `version`, and loads
+preserve that identity even when the target graph has not registered a matching
+factory.

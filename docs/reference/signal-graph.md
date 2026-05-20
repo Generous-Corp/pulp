@@ -14,9 +14,18 @@ routable audio topology.
 | `Plugin`       | Wraps a `PluginSlot`                      | N in → N out |
 | `MidiInput`    | Source for MIDI events                    | 0 in → 1 out |
 | `MidiOutput`   | Sink for MIDI events                      | 1 in → 0 out |
+| `Custom`       | String-keyed extension node               | Registered shape |
 
 Each node has a stable `NodeId` that survives connection edits. The graph
 owns the nodes; removing a node invalidates its id.
+
+Custom node types are registered per graph with `CustomNodeType`
+(`type_id`, `version`, input ports, output ports, default name) before
+calling `add_custom_node(type_id)`. Graph serialization stores the custom
+`type_id` and `version` so a topology can be reloaded on another machine.
+If the target graph has not registered the matching factory, the loader still
+creates a placeholder `Custom` node with the saved identity and port shape and
+reports the unresolved type in `LoadResult::missing_custom_node_types`.
 
 ## Connections
 
@@ -54,8 +63,10 @@ walks this vector once per block:
 1. Input nodes copy from the host buffer to their output port.
 2. Plugin nodes call `PluginSlot::process()` with their gathered inputs.
 3. Gain nodes multiply in place.
-4. MIDI nodes route events the same way audio flows.
-5. Output nodes copy to the host buffer.
+4. Custom nodes pass audio inputs through to matching output ports unless a
+   future registered implementation gives them behavior.
+5. MIDI nodes route events the same way audio flows.
+6. Output nodes copy to the host buffer.
 
 Topological sort is stable: for a given set of nodes and connections, the
 resulting order is deterministic, so routing is reproducible across runs.

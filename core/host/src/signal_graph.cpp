@@ -47,6 +47,13 @@ bool push_parameter_event(ParameterEventQueue& queue,
     });
 }
 
+bool is_valid_custom_node_type(const CustomNodeType& type) {
+    return !type.type_id.empty()
+        && type.version > 0
+        && type.num_input_ports >= 0
+        && type.num_output_ports >= 0;
+}
+
 } // namespace
 
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
@@ -154,6 +161,58 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
     node.type = NodeType::MidiOutput;
     node.name = name;
     node.num_input_ports = 1;
+    nodes_.push_back(std::move(node));
+    invalidate_live_();
+    return nodes_.back().id;
+}
+
+bool SignalGraph::register_custom_node_type(CustomNodeType type) {
+    if (!is_valid_custom_node_type(type)) return false;
+    if (type.default_name.empty()) type.default_name = type.type_id;
+    const auto key = type.type_id;
+    custom_node_types_[key] = std::move(type);
+    return true;
+}
+
+const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id) const {
+    auto it = custom_node_types_.find(std::string(type_id));
+    if (it == custom_node_types_.end()) return nullptr;
+    return &it->second;
+}
+
+NodeId SignalGraph::add_custom_node(std::string_view type_id,
+                                    const std::string& name) {
+    const auto* type = custom_node_type(type_id);
+    if (!type) return 0;
+    return add_unresolved_custom_node(
+        type->type_id,
+        type->version,
+        type->num_input_ports,
+        type->num_output_ports,
+        name.empty() ? type->default_name : name);
+}
+
+NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id,
+                                               int version,
+                                               int num_inputs,
+                                               int num_outputs,
+                                               const std::string& name) {
+    CustomNodeType type;
+    type.type_id = std::string(type_id);
+    type.version = version;
+    type.num_input_ports = num_inputs;
+    type.num_output_ports = num_outputs;
+    type.default_name = name;
+    if (!is_valid_custom_node_type(type)) return 0;
+
+    GraphNode node;
+    node.id = next_id_++;
+    node.type = NodeType::Custom;
+    node.name = name.empty() ? type.type_id : name;
+    node.num_input_ports = num_inputs;
+    node.num_output_ports = num_outputs;
+    node.custom_type_id = std::move(type.type_id);
+    node.custom_type_version = version;
     nodes_.push_back(std::move(node));
     invalidate_live_();
     return nodes_.back().id;
@@ -610,6 +669,20 @@ void SignalGraph::process(audio::BufferView<float>& output,
         std::memset(output.channel_ptr(c), 0, sizeof(float) * static_cast<size_t>(num_samples));
     }
 
+    auto pass_through_or_zero = [num_samples](NodeRuntime& rt) {
+        const int in_ch  = static_cast<int>(rt.input_ptrs.size());
+        const int out_ch = static_cast<int>(rt.output_ptrs.size());
+        const int chs = std::min(in_ch, out_ch);
+        for (int c = 0; c < chs; ++c) {
+            std::memcpy(rt.output_ptrs[c], rt.input_ptrs[c],
+                        sizeof(float) * static_cast<size_t>(num_samples));
+        }
+        for (int c = chs; c < out_ch; ++c) {
+            std::memset(rt.output_ptrs[c], 0,
+                        sizeof(float) * static_cast<size_t>(num_samples));
+        }
+    };
+
     for (NodeId id : cg->order) {
         auto shape_it = cg->shapes.find(id);
         if (shape_it == cg->shapes.end()) continue;
@@ -700,17 +773,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     // audible artifacts on the next AudioOutput gather.
                     // Deterministic fallback: pass input → output when
                     // channel counts match, zero-fill when they don't.
-                    const int in_ch  = static_cast<int>(rt.input_ptrs.size());
-                    const int out_ch = static_cast<int>(rt.output_ptrs.size());
-                    const int chs = std::min(in_ch, out_ch);
-                    for (int c = 0; c < chs; ++c) {
-                        std::memcpy(rt.output_ptrs[c], rt.input_ptrs[c],
-                                    sizeof(float) * static_cast<size_t>(num_samples));
-                    }
-                    for (int c = chs; c < out_ch; ++c) {
-                        std::memset(rt.output_ptrs[c], 0,
-                                    sizeof(float) * static_cast<size_t>(num_samples));
-                    }
+                    pass_through_or_zero(rt);
                     break;
                 }
                 audio::BufferView<float> out_view(
@@ -929,6 +992,9 @@ void SignalGraph::process(audio::BufferView<float>& output,
             }
             case NodeType::MidiInput:
             case NodeType::MidiOutput:
+                break;
+            case NodeType::Custom:
+                pass_through_or_zero(rt);
                 break;
         }
     }

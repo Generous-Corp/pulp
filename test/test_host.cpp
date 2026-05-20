@@ -492,6 +492,42 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
     REQUIRE(graph.node(input) == nullptr);
 }
 
+TEST_CASE("SignalGraph registers and processes custom nodes",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    REQUIRE_FALSE(graph.register_custom_node_type({"", 1, 1, 1, "Bad"}));
+    REQUIRE_FALSE(graph.register_custom_node_type({"pulp.test.bad", 0, 1, 1, "Bad"}));
+    REQUIRE_FALSE(graph.add_custom_node("pulp.test.custom"));
+
+    REQUIRE(graph.register_custom_node_type(
+        {"pulp.test.custom", 3, 1, 1, "Custom"}));
+    auto input = graph.add_input_node(1, "Input");
+    auto custom = graph.add_custom_node("pulp.test.custom", "Custom A");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+
+    const auto* node = graph.node(custom);
+    REQUIRE(node != nullptr);
+    REQUIRE(node->type == NodeType::Custom);
+    REQUIRE(node->custom_type_id == "pulp.test.custom");
+    REQUIRE(node->custom_type_version == 3);
+    REQUIRE(node->num_input_ports == 1);
+    REQUIRE(node->num_output_ports == 1);
+
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_samples[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_samples[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    const float* in_ptrs[1] = {in_samples};
+    float* out_ptrs[1] = {out_samples};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i]);
+}
+
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
           "[host][graph][coverage][phase3]") {
     SignalGraph graph;
