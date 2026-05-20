@@ -174,6 +174,20 @@ such as `jsx`, add a matching row to `source-contracts.json` and reference
 its roundtrip script there; otherwise pre-push will fail strict
 source-contract validation.
 
+**`parser.runtime_file` — runtime parsers extracted out of `design_import.cpp`.**
+Each contract's `parser` block has a single `file` plus `runtime`/`static`
+symbol names. After the P6-A3 refactor the *runtime* parsers
+(`parse_*_react`, `parse_claude_html_with_runtime`, `parse_react_native_export`)
+moved into `core/view/src/claude_bundle.cpp` while the *static* parsers stayed
+in `design_import.cpp`. A single `parser.file` can no longer locate both, so
+contracts whose runtime parser lives elsewhere set the optional
+`parser.runtime_file` (e.g. `core/view/src/claude_bundle.cpp`). The checker
+resolves `parser.runtime` and the `explicit-runtime-parser` dispatch symbol
+against `runtime_file` (falling back to `parser.file`); `parser.static` always
+resolves against `parser.file`. **If a future refactor moves a parser symbol
+to a new file, update `parser.file` / `parser.runtime_file` in the same PR** —
+otherwise the `Source-contract registry check` step fails for every PR.
+
 Provider MCP lanes are input-acquisition lanes only unless the source contract
 explicitly says otherwise. Current runtime parsers reject raw Figma/Stitch/Pencil
 MCP JSON and accept only their constrained exported artifacts.

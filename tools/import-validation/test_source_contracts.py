@@ -113,6 +113,25 @@ class SourceContractsTest(unittest.TestCase):
         missing = [f for f in findings if f.code == "missing-parser-symbol"]
         self.assertGreaterEqual(len(missing), 2)
 
+    def test_runtime_file_resolves_runtime_parser_separately(self) -> None:
+        # The P6-A3 refactor moved the runtime parsers into claude_bundle.cpp;
+        # parser.runtime_file points runtime symbols there while parser.static
+        # stays in parser.file. Pointing runtime_file back at the old
+        # design_import.cpp must still flag the moved symbol as missing.
+        registry, entry = self.mutate("pencil")
+        entry["parser"]["runtime_file"] = "core/view/src/design_import.cpp"
+        with tempfile.TemporaryDirectory() as td:
+            findings = _findings(registry, Path(td))
+        missing = [f for f in findings if f.code == "missing-parser-symbol"]
+        self.assertTrue(
+            any(
+                f.path == "core/view/src/design_import.cpp"
+                and "parse_pencil_react" in f.message
+                for f in missing
+            ),
+            [str(f) for f in findings],
+        )
+
     def test_present_reference_screenshot_must_exist(self) -> None:
         registry, entry = self.mutate("stitch")
         entry["validation"]["pulp_render_reference"] = {
