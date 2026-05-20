@@ -83,6 +83,7 @@ struct AUBridge {
 - (NSUInteger)pulpLastParameterEventCount;
 - (uint32_t)pulpLastParameterEventParamIDAtIndex:(NSUInteger)index;
 - (int32_t)pulpLastParameterEventSampleOffsetAtIndex:(NSUInteger)index;
+- (int32_t)pulpLastParameterEventRampDurationAtIndex:(NSUInteger)index;
 - (float)pulpLastParameterEventValueAtIndex:(NSUInteger)index;
 
 @end
@@ -411,6 +412,9 @@ struct AUBridge {
                     param_id,
                     sample_offset,
                     static_cast<float>(p.value),
+                    event->head.eventType == AURenderEventParameterRamp
+                        ? static_cast<int32_t>(p.rampDurationSampleFrames)
+                        : 0,
                 });
                 bridge->store.set_value_rt(param_id, static_cast<float>(p.value));
             } else if (event->head.eventType == AURenderEventMIDI) {
@@ -630,6 +634,12 @@ struct AUBridge {
     const auto& events = _bridge.param_events.events();
     if (index >= events.size()) return 0;
     return events[index].sample_offset;
+}
+
+- (int32_t)pulpLastParameterEventRampDurationAtIndex:(NSUInteger)index {
+    const auto& events = _bridge.param_events.events();
+    if (index >= events.size()) return 0;
+    return events[index].ramp_duration_sample_frames;
 }
 
 - (float)pulpLastParameterEventValueAtIndex:(NSUInteger)index {

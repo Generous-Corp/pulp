@@ -698,6 +698,23 @@ TEST_CASE("ParameterEventQueue clear makes the queue reusable",
     REQUIRE_THAT(queue.begin()->value, WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("ParameterEventQueue has fixed capacity and drops overflow without allocation",
+          "[host][automation][regression]") {
+    pulp::host::ParameterEventQueue queue;
+    REQUIRE(queue.capacity() == pulp::host::ParameterEventQueue::kCapacity);
+
+    for (std::size_t i = 0; i < queue.capacity(); ++i) {
+        REQUIRE(queue.push({MockStatefulPlugin::kGainParamId,
+                            static_cast<int32_t>(i),
+                            static_cast<float>(i)}));
+    }
+
+    REQUIRE_FALSE(queue.push({MockStatefulPlugin::kGainParamId, 9999, 1.0f}));
+    REQUIRE(queue.size() == queue.capacity());
+    REQUIRE(queue.events().back().sample_offset ==
+            static_cast<int32_t>(queue.capacity() - 1));
+}
+
 TEST_CASE("ParameterEventQueue accepts rvalue pushes and exposes const iteration",
           "[host][automation][coverage][phase3]") {
     pulp::host::ParameterEventQueue queue;

@@ -346,9 +346,11 @@ TEST_CASE("AU v3 render events preserve parameter sample offsets and update Stat
         REQUIRE([unit pulpLastParameterEventCount] == 2);
         REQUIRE([unit pulpLastParameterEventParamIDAtIndex:0] == 1);
         REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:0] == 1);
+        REQUIRE([unit pulpLastParameterEventRampDurationAtIndex:0] == 0);
         REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:0], WithinAbs(-6.0f, 1e-6f));
         REQUIRE([unit pulpLastParameterEventParamIDAtIndex:1] == 1);
         REQUIRE([unit pulpLastParameterEventSampleOffsetAtIndex:1] == 5);
+        REQUIRE([unit pulpLastParameterEventRampDurationAtIndex:1] == 2);
         REQUIRE_THAT([unit pulpLastParameterEventValueAtIndex:1], WithinAbs(-12.0f, 1e-6f));
 
         [unit deallocateRenderResources];
