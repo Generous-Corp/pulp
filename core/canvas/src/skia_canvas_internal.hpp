@@ -18,6 +18,11 @@
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkFont.h"
+#include "include/core/SkFontMgr.h"
+#include "include/core/SkFontStyle.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkRefCnt.h"
 
 #include "pulp/canvas/canvas.hpp"  // Color, Canvas::BlendMode
 
@@ -80,6 +85,31 @@ inline sk_sp<SkColorSpace> sk_color_space_from_webgpu_format(const std::string& 
     if (format == "rgba16float") return SkColorSpace::MakeSRGBLinear();
     return SkColorSpace::MakeSRGB();
 }
+
+// ── Text / font helpers (R2-3 text split, 2026-05) ───────────────────────────
+// Shared by skia_canvas.cpp and skia_canvas_text.cpp. The definitions
+// live in skia_canvas.cpp (they carry process-wide font-manager state
+// and are referenced by dozens of internal call sites there).
+
+// Early-return guard for SkiaCanvas methods — canvas_ can be null when a
+// swapchain texture wrap fails on Android. A macro so the bare `return;`
+// works in void methods.
+#define GUARD_CANVAS if (!canvas_) return
+
+// Process-wide platform SkFontMgr. Defined in skia_canvas.cpp.
+sk_sp<SkFontMgr> get_font_manager();
+
+// Build a stroke SkPaint for the given color + width. Defined in
+// skia_canvas.cpp.
+SkPaint make_stroke_paint(Color c, float width);
+
+// Build an SkFont for the given family / size / weight / slant. The
+// non_opaque_dst flag selects greyscale vs. LCD antialiasing. Defined
+// in skia_canvas.cpp.
+SkFont make_font(const std::string& family, float size,
+                 int weight = SkFontStyle::kNormal_Weight,
+                 int slant = 0,
+                 bool non_opaque_dst = false);
 
 } // namespace pulp::canvas
 
