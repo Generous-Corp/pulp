@@ -22,6 +22,10 @@ CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
 CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-80G}"
 REPO_SLUG="${PULP_REPO_SLUG:-danielraffel/pulp}"
 RUNNER_LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build}"
+# Runner name prefix; instances are named "<prefix>-NN". Use a machine
+# tag (pulp-m1, pulp-m5, ...) so runners on different hosts stay
+# distinct and a label like pulp-build-m1 can target one host.
+RUNNER_NAME_PREFIX="${PULP_RUNNER_NAME_PREFIX:-pulp-$(hostname -s)}"
 
 CHECK_ONLY=0
 RUNNERS=0
@@ -168,9 +172,12 @@ register_runners() {
   for i in $(seq 1 "$RUNNERS"); do
     local idx name rdir work
     idx="$(printf '%02d' "$i")"
-    name="pulp-$(hostname -s)-$idx"
-    rdir="$HOME/actions-runner-$idx"
-    work="$CI_ROOT/tmp/runner-$idx"
+    name="$RUNNER_NAME_PREFIX-$idx"
+    # Per-runner dir + workspace keyed on the unique runner name, so
+    # multiple runners (and runners for other repos already on the host)
+    # never collide or overwrite each other.
+    rdir="$HOME/actions-runner-$name"
+    work="$CI_ROOT/tmp/$name"
     note "runner $idx: name=$name dir=$rdir work=$work"
     do_ mkdir -p "$rdir" "$work"
     if [ ! -x "$rdir/config.sh" ]; then
