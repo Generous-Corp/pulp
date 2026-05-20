@@ -305,7 +305,8 @@ TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
         REQUIRE(restored->cullRect() == picture->cullRect());
     }
 
-    // (b) With fImageProc / fImageProc set, the embedded image round-trips.
+    // (b) With matching SkSerialProcs/SkDeserialProcs fImageProc set, the
+    //     embedded image round-trips through serialize + MakeFromData.
     {
         SkSerialProcs sprocs;
         sprocs.fImageProc = [](SkImage* img, void*) -> sk_sp<SkData> {
