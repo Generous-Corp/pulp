@@ -8,10 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01739"></a>
-## [0.173.9] - 2026-05-19
+<a id="v0173b"></a>
+## [0.173.11] - 2026-05-19
 
-- refactor(cli): R2-4 — extract cli_sdk.cpp from cli_common.cpp (2,022 → 1,257)
+- refactor(canvas): R2-3 — extract skia_canvas_text.cpp (skia_canvas.cpp 2,873 → 1,879)
 
 <a id="v01731"></a>
 ## [0.173.1] - 2026-05-19
