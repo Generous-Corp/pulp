@@ -195,7 +195,7 @@ try {
     $configureArgs = @(
         "-S", $SrcDir,
         "-B", $BuildDir,
-        "-DCMAKE_BUILD_TYPE=Debug"
+        "-DCMAKE_BUILD_TYPE=Release"
     )
     if ($Smoke) {
         $configureArgs += @(
@@ -210,11 +210,11 @@ try {
 
     $Jobs = [Environment]::ProcessorCount
     Run-OrDump "build" $BuildLog {
-        cmake --build $BuildDir --config Debug --parallel $Jobs
+        cmake --build $BuildDir --config Release --parallel $Jobs
     }
 
     Run-OrDump "install" $InstallLog {
-        cmake --install $BuildDir --prefix $InstallDir --config Debug
+        cmake --install $BuildDir --prefix $InstallDir --config Release
     }
 
     $SmokeBuildLog = Join-Path $TmpRoot "smoke-build.log"
@@ -225,12 +225,12 @@ try {
     }
 
     Run-OrDump "install smoke build" $SmokeBuildLog {
-        cmake --build (Join-Path $SmokeDir "build") --config Debug
+        cmake --build (Join-Path $SmokeDir "build") --config Release
     }
 
     if (-not $NoTests) {
         Run-OrDump "test" $TestLog {
-            ctest --test-dir $BuildDir --output-on-failure -C Debug
+            ctest --test-dir $BuildDir --output-on-failure -C Release
         }
     }
 

@@ -100,6 +100,22 @@ fs::path make_vst3_bundle(const fs::path& parent,
     return bundle;
 }
 
+#ifdef PULP_TEST_CLAP_PATH
+fs::path copy_bundle_for_scan(const fs::path& source, const fs::path& parent) {
+    const auto target = parent / source.filename();
+    std::error_code ec;
+    if (fs::is_directory(source, ec)) {
+        fs::copy(source, target,
+                 fs::copy_options::recursive | fs::copy_options::overwrite_existing,
+                 ec);
+    } else {
+        fs::copy_file(source, target, fs::copy_options::overwrite_existing, ec);
+    }
+    REQUIRE_FALSE(ec);
+    return target;
+}
+#endif
+
 // Plain-text byte store used to drive bit-identical state round-trip
 // assertions. MockStatefulPlugin exposes this as its state blob.
 struct StateBlob {
@@ -931,16 +947,19 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
         return;
     }
 
-    // Point the scanner at the parent directory of the built CLAP so it
-    // discovers PulpGain via the normal path (NOT default_paths, which
+    // Point the scanner at a scratch directory containing only PulpGain so
+    // it discovers the plugin via the normal path (NOT default_paths, which
     // would collide with system-installed bundles on the dev's machine).
     // Codex 2026-04-21 review on #545: `extra_paths` alone does not
     // suppress the default scan roots — the scanner still enumerated
     // every user/system CLAP, which can execute unrelated plugin
     // `clap_entry` code during CI. `only_extra_paths = true` restricts
-    // the scan to the bundle under test so the lane is hermetic and
-    // cannot flake on a developer's installed plugins.
-    auto parent = clap_path.parent_path().string();
+    // the scan to the scratch directory. Keep that directory single-plugin:
+    // the build output directory may contain other CLAP examples whose
+    // descriptor probes should not affect this load/process/unload test.
+    ScratchDir scratch("clap-isolated");
+    const fs::path isolated_clap_path = copy_bundle_for_scan(clap_path, scratch.path);
+    auto parent = isolated_clap_path.parent_path().string();
     ScanOptions opts;
     opts.scan_vst3 = false;
     opts.scan_au = false;
@@ -951,9 +970,10 @@ TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
 
     PluginScanner scanner;
     auto plugins = scanner.scan(opts);
+    REQUIRE(plugins.size() == 1);
     const PluginInfo* found = nullptr;
     for (const auto& p : plugins) {
-        if (p.path == clap_path.string()) { found = &p; break; }
+        if (p.path == isolated_clap_path.string()) { found = &p; break; }
     }
     REQUIRE(found != nullptr);
     REQUIRE(found->format == PluginFormat::CLAP);

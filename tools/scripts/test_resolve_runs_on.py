@@ -20,11 +20,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 SCRIPT = Path(__file__).parent / "resolve_runs_on.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+
+
+def _build_workflow_runner_provider_default() -> str:
+    text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(
+        r"(?ms)^      runner_provider:\n(?P<body>(?:        .+\n)+)",
+        text,
+    )
+    _assert(match is not None, "build.yml missing runner_provider input")
+    body = match.group("body")
+    default = re.search(r"(?m)^        default:\s*([A-Za-z0-9_-]+)\s*$", body)
+    _assert(default is not None, "runner_provider input missing default")
+    return default.group(1)
 
 
 def _run(args: list[str], env_extra: dict[str, str] | None = None,
@@ -72,6 +88,24 @@ def test_provider_github_hosted_default() -> None:
     ], env_extra={"REQUESTED_PROVIDER": "github-hosted"})
     _assert(json.loads(out) == "ubuntu-latest",
             f"expected 'ubuntu-latest', got {out!r}")
+
+
+def test_build_workflow_dispatch_default_does_not_require_namespace() -> None:
+    """Shipyard workflow_dispatch must work when Namespace vars are unset."""
+    provider = _build_workflow_runner_provider_default()
+    _assert(provider == "github-hosted",
+            f"workflow_dispatch default must avoid Namespace, got {provider!r}")
+    _, out, _ = _run([
+        "--target-name", "Linux (x64)",
+        "--mode", "provider",
+        "--github-hosted-label", "ubuntu-latest",
+        "--explicit-env", "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
+        "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
+        "--namespace-setting-name",
+        "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
+    ], env_extra={"REQUESTED_PROVIDER": provider})
+    _assert(json.loads(out) == "ubuntu-latest",
+            f"dispatch default unexpectedly required Namespace: {out!r}")
 
 
 def test_provider_namespace_with_env() -> None:
