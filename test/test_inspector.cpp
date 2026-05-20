@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/inspect/inspector_window.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string_view>
 #include <tuple>
@@ -44,6 +46,52 @@ bool has_label_containing(View& root, std::string_view text) {
     }
     return false;
 }
+
+// A RecordingCanvas that also serves real pixel readback over a small
+// synthetic surface — lets phase-3e tests exercise the loupe's
+// readback path (which the plain RecordingCanvas never does) and
+// assert the read rect that the loupe actually requested.
+class ReadbackCanvas : public pulp::canvas::RecordingCanvas {
+public:
+    ReadbackCanvas(int w, int h) : surface_w_(w), surface_h_(h) {}
+
+    bool read_pixels(int x, int y, int width, int height,
+                     std::uint8_t* out) override {
+        // Mirror Skia's SkSurface::readPixels() contract: the source
+        // rect must lie fully within the surface or the read fails.
+        if (!out || width <= 0 || height <= 0) return false;
+        if (x < 0 || y < 0 ||
+            x + width > surface_w_ || y + height > surface_h_) {
+            return false;
+        }
+        last_read_x_ = x;
+        last_read_y_ = y;
+        last_read_w_ = width;
+        last_read_h_ = height;
+        ++read_count_;
+        // Fill with a deterministic non-checkerboard color so callers
+        // can tell "real readback" from the loupe's fallback render.
+        for (int i = 0; i < width * height; ++i) {
+            out[i * 4 + 0] = 64;
+            out[i * 4 + 1] = 128;
+            out[i * 4 + 2] = 192;
+            out[i * 4 + 3] = 255;
+        }
+        return true;
+    }
+
+    int  last_read_x() const { return last_read_x_; }
+    int  last_read_y() const { return last_read_y_; }
+    int  last_read_w() const { return last_read_w_; }
+    int  last_read_h() const { return last_read_h_; }
+    int  read_count()  const { return read_count_; }
+
+private:
+    int surface_w_, surface_h_;
+    int last_read_x_ = -1, last_read_y_ = -1;
+    int last_read_w_ = -1, last_read_h_ = -1;
+    int read_count_ = 0;
+};
 
 } // namespace
 
@@ -483,6 +531,270 @@ TEST_CASE("InspectorOverlay: Alt-hover target clears when cursor enters panel "
     pulp::canvas::RecordingCanvas after_panel_entry;
     overlay.paint(after_panel_entry);
     REQUIRE(after_panel_entry.command_count() < with_line_count);
+}
+
+// ── Phase 3e — 20× zoom loupe ─────────────────────────────────────────────
+//
+// The loupe is a magnified-pixel preview panel toggled with the Z key.
+// It samples the region under the cursor (via Canvas::read_pixels() when
+// available, else a graceful resolved-color fallback) and renders a
+// magnified grid + center crosshair + coordinate / hex readout. These
+// tests exercise it through the headless RecordingCanvas — which does
+// NOT implement read_pixels(), so they all run the fallback path.
+
+TEST_CASE("InspectorOverlay: Z toggles the zoom loupe on and off",
+          "[inspect][overlay][phase3e]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    REQUIRE_FALSE(overlay.zoom_active());
+
+    KeyEvent z;
+    z.key = KeyCode::z;
+    z.is_down = true;
+    z.modifiers = 0;
+    REQUIRE(overlay.handle_key_event(z));
+    REQUIRE(overlay.zoom_active());
+
+    // Toggle back off.
+    REQUIRE(overlay.handle_key_event(z));
+    REQUIRE_FALSE(overlay.zoom_active());
+
+    // Z does nothing when the inspector itself is inactive.
+    overlay.set_active(false);
+    REQUIRE_FALSE(overlay.handle_key_event(z));
+    REQUIRE_FALSE(overlay.zoom_active());
+}
+
+TEST_CASE("InspectorOverlay: dismissing the inspector closes the loupe",
+          "[inspect][overlay][phase3e]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_zoom_active(true);
+    REQUIRE(overlay.zoom_active());
+
+    // set_active(false) should reset the transient loupe state.
+    overlay.set_active(false);
+    REQUIRE_FALSE(overlay.zoom_active());
+}
+
+TEST_CASE("InspectorOverlay: zoom panel renders extra commands when active",
+          "[inspect][overlay][phase3e]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    // Baseline: loupe OFF.
+    pulp::canvas::RecordingCanvas baseline;
+    overlay.paint(baseline);
+    auto baseline_count = baseline.command_count();
+    REQUIRE(baseline_count > 0);
+
+    // Loupe ON → paint_zoom_panel() draws the panel, the magnified
+    // grid, grid lines, the crosshair, and the readout — strictly more
+    // commands than the baseline.
+    overlay.set_zoom_active(true);
+    pulp::canvas::RecordingCanvas with_loupe;
+    overlay.paint(with_loupe);
+    REQUIRE(with_loupe.command_count() > baseline_count);
+
+    // The grid is an N×N block of filled cells, so the loupe alone
+    // contributes well over a hundred fill_rect commands.
+    auto fills = with_loupe.count(
+        pulp::canvas::DrawCommand::Type::fill_rect);
+    REQUIRE(fills > 100);
+}
+
+TEST_CASE("InspectorOverlay: loupe readout reflects the hovered position",
+          "[inspect][overlay][phase3e]") {
+    // Wide root so the test cursor positions land in the canvas area
+    // (left of the 300px-wide props panel that hugs the right edge).
+    View root;
+    root.set_bounds({0, 0, 900, 400});
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_zoom_active(true);
+
+    // Move the cursor over the canvas — the loupe records the sample
+    // center on every mouse event while active, without consuming a
+    // plain hover.
+    MouseEvent move;
+    move.position = {137, 92};
+    move.is_down = false;
+    REQUIRE_FALSE(overlay.handle_mouse_event(move));
+
+    auto center = overlay.zoom_sample_center();
+    REQUIRE(center.x == Catch::Approx(137.0f));
+    REQUIRE(center.y == Catch::Approx(92.0f));
+
+    // A second move re-centers the loupe.
+    MouseEvent move2;
+    move2.position = {210, 40};
+    move2.is_down = false;
+    overlay.handle_mouse_event(move2);
+    REQUIRE(overlay.zoom_sample_center().x == Catch::Approx(210.0f));
+    REQUIRE(overlay.zoom_sample_center().y == Catch::Approx(40.0f));
+
+    // The loupe also tracks the cursor when it's over the props panel
+    // (panel hover events ARE consumed, but the loupe still records).
+    MouseEvent panel_move;
+    panel_move.position = {700, 50};  // x >= 900-300 → inside panel
+    panel_move.is_down = false;
+    overlay.handle_mouse_event(panel_move);
+    REQUIRE(overlay.zoom_sample_center().x == Catch::Approx(700.0f));
+}
+
+TEST_CASE("InspectorOverlay: loupe falls back to resolved view color",
+          "[inspect][overlay][phase3e]") {
+    // RecordingCanvas has no read_pixels() — exercises the graceful
+    // no-readback path. With a background-colored view under the
+    // cursor, the center-pixel readout should resolve to that color.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto panel = std::make_unique<View>();
+    panel->set_bounds({50, 50, 200, 150});
+    const Color kPanelColor = Color::rgba(0.2f, 0.6f, 0.9f, 1.0f);
+    panel->set_background_color(kPanelColor);
+    root.add_child(std::move(panel));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_zoom_active(true);
+
+    // Cursor inside the colored panel.
+    MouseEvent inside;
+    inside.position = {120, 110};
+    inside.is_down = false;
+    overlay.handle_mouse_event(inside);
+
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);  // update_zoom_sample() runs inside paint()
+
+    auto c = overlay.zoom_center_color();
+    REQUIRE(c.r == Catch::Approx(kPanelColor.r));
+    REQUIRE(c.g == Catch::Approx(kPanelColor.g));
+    REQUIRE(c.b == Catch::Approx(kPanelColor.b));
+
+    // Cursor outside any background-bearing view → fully transparent.
+    MouseEvent outside;
+    outside.position = {10, 10};
+    outside.is_down = false;
+    overlay.handle_mouse_event(outside);
+    overlay.paint(canvas);
+    REQUIRE(overlay.zoom_center_color().a == Catch::Approx(0.0f));
+}
+
+TEST_CASE("InspectorOverlay: zoom factor is clamped to a sane range",
+          "[inspect][overlay][phase3e]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    InspectorOverlay overlay(root);
+    REQUIRE(overlay.zoom_factor() == 20);  // roadmap default
+
+    overlay.set_zoom_factor(8);
+    REQUIRE(overlay.zoom_factor() == 8);
+
+    // Out-of-range requests clamp rather than degenerate the grid.
+    overlay.set_zoom_factor(1);
+    REQUIRE(overlay.zoom_factor() >= 4);
+
+    overlay.set_zoom_factor(1000);
+    REQUIRE(overlay.zoom_factor() <= 40);
+}
+
+TEST_CASE("InspectorOverlay: loupe clamps the sample window at canvas edges",
+          "[inspect][overlay][phase3e]") {
+    // codex P2 #2464 — a loupe centered within kZoomGridCells/2 pixels
+    // of a canvas edge used to push the cells×cells read rect
+    // out of bounds, so read_pixels() rejected the WHOLE block and the
+    // grid fell back to checkerboard exactly where edge inspection
+    // matters most. With clamping the read rect stays in-bounds and the
+    // grid keeps showing real device pixels.
+    const int kW = 400, kH = 300;
+    View root;
+    root.set_bounds({0, 0, static_cast<float>(kW),
+                     static_cast<float>(kH)});
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_zoom_active(true);
+
+    // Park the loupe on the exact top-left corner — the worst case:
+    // an unclamped window would read from (-5, -5).
+    MouseEvent corner;
+    corner.position = {0, 0};
+    corner.is_down = false;
+    overlay.handle_mouse_event(corner);
+
+    ReadbackCanvas canvas(kW, kH);
+    overlay.paint(canvas);
+
+    // The loupe must have issued a block read AND it must have
+    // succeeded — i.e. the requested rect was clamped fully in-bounds.
+    REQUIRE(canvas.read_count() >= 1);
+    REQUIRE(canvas.last_read_x() >= 0);
+    REQUIRE(canvas.last_read_y() >= 0);
+    REQUIRE(canvas.last_read_x() + canvas.last_read_w() <= kW);
+    REQUIRE(canvas.last_read_y() + canvas.last_read_h() <= kH);
+
+    // The center-pixel readout must agree with the block: a real
+    // readback succeeded, so the readout reports the synthetic
+    // readback color (64,128,192) — not the degraded fallback path.
+    auto c = overlay.zoom_center_color();
+    REQUIRE(c.r == Catch::Approx(64.0f / 255.0f));
+    REQUIRE(c.g == Catch::Approx(128.0f / 255.0f));
+    REQUIRE(c.b == Catch::Approx(192.0f / 255.0f));
+
+    // The magnified grid is painted with the synthetic readback color
+    // (it is NOT a checkerboard). The loupe draws kZoomGridCells² grid
+    // cells; all of them should carry the real readback color, proving
+    // the whole block — corner included — used real pixels.
+    int readback_cells = 0;
+    const Color kReadback =
+        Color::rgba(64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f);
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type != pulp::canvas::DrawCommand::Type::set_fill_color)
+            continue;
+        if (cmd.color.r == Catch::Approx(kReadback.r) &&
+            cmd.color.g == Catch::Approx(kReadback.g) &&
+            cmd.color.b == Catch::Approx(kReadback.b)) {
+            ++readback_cells;
+        }
+    }
+    // 11×11 = 121 cells, all real-readback colored. Allow a generous
+    // floor — the point is "many real cells", not "exactly zero
+    // checkerboard" (panel chrome uses other colors).
+    REQUIRE(readback_cells >= 100);
+
+    // Bottom-right corner is the symmetric worst case: an unclamped
+    // window would read past the surface.
+    MouseEvent br;
+    br.position = {static_cast<float>(kW), static_cast<float>(kH)};
+    br.is_down = false;
+    overlay.handle_mouse_event(br);
+
+    ReadbackCanvas canvas2(kW, kH);
+    overlay.paint(canvas2);
+    REQUIRE(canvas2.read_count() >= 1);
+    REQUIRE(canvas2.last_read_x() >= 0);
+    REQUIRE(canvas2.last_read_y() >= 0);
+    REQUIRE(canvas2.last_read_x() + canvas2.last_read_w() <= kW);
+    REQUIRE(canvas2.last_read_y() + canvas2.last_read_h() <= kH);
+
+    auto c2 = overlay.zoom_center_color();
+    REQUIRE(c2.r == Catch::Approx(64.0f / 255.0f));
+    REQUIRE(c2.g == Catch::Approx(128.0f / 255.0f));
+    REQUIRE(c2.b == Catch::Approx(192.0f / 255.0f));
 }
 
 // ── Phase 0b PR-C-1: gesture-tweak emission via TweakStore ────────────────
