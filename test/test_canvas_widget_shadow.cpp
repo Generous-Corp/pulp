@@ -20,17 +20,20 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
+#include "canvas_pixel_sample.hpp"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
-#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 #endif
 
 using namespace pulp::view;
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;
+#ifdef PULP_HAS_SKIA
+using pulp::test::sample_pixel;
+#endif
 
 TEST_CASE("CanvasWidget replays shadow setters onto the canvas",
           "[canvas_widget][issue-1434-batch-7]") {
@@ -240,4 +243,3 @@ TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
 // `set_direction` / `set_filter` commands through to the underlying
 // canvas (here, RecordingCanvas) so the JS shim's setter intent reaches
 // the active backend on every frame.
-

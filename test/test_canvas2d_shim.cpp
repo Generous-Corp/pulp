@@ -32,6 +32,7 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
+#include "canvas_pixel_sample.hpp"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
@@ -44,6 +45,9 @@
 
 using namespace pulp::view;
 using namespace pulp::state;
+#ifdef PULP_HAS_SKIA
+using pulp::test::sample_pixel;
+#endif
 
 namespace {
 
@@ -395,16 +399,6 @@ TEST_CASE("Canvas2D fillStyle = string clears prior gradient",
 }
 
 #ifdef PULP_HAS_SKIA
-
-namespace {
-struct Pixel { uint8_t r, g, b, a; };
-Pixel sample_pixel(SkSurface* surface, int x, int y) {
-    SkPixmap pix;
-    REQUIRE(surface->peekPixels(&pix));
-    auto* row = static_cast<const uint8_t*>(pix.addr(0, y));
-    return {row[4 * x + 0], row[4 * x + 1], row[4 * x + 2], row[4 * x + 3]};
-}
-}  // namespace
 
 // ── End-to-end FilterBank repro: JS → bridge → CanvasWidget → SkiaCanvas ──
 //
@@ -1631,4 +1625,3 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     REQUIRE(any_painted);
 }
 #endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
-

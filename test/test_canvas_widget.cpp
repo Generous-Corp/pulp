@@ -9,17 +9,20 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
+#include "canvas_pixel_sample.hpp"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImageInfo.h"
-#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 #endif
 
 using namespace pulp::view;
 using pulp::canvas::DrawCommand;
 using pulp::canvas::RecordingCanvas;
+#ifdef PULP_HAS_SKIA
+using pulp::test::sample_pixel;
+#endif
 
 TEST_CASE("CanvasWidget: add and clear commands", "[canvas_widget]") {
     CanvasWidget cw;
@@ -276,21 +279,6 @@ TEST_CASE("CanvasWidget::paint_all under parent View emits correct command order
 }
 
 #ifdef PULP_HAS_SKIA
-
-namespace {
-struct Pixel {
-    uint8_t r, g, b, a;
-};
-
-// Sample a single RGBA8 pixel (premul) from a Skia raster surface so
-// tests can assert on the actual texels CanvasWidget produced.
-Pixel sample_pixel(SkSurface* surface, int x, int y) {
-    SkPixmap pix;
-    REQUIRE(surface->peekPixels(&pix));
-    auto* row = static_cast<const uint8_t*>(pix.addr(0, y));
-    return {row[4 * x + 0], row[4 * x + 1], row[4 * x + 2], row[4 * x + 3]};
-}
-}  // namespace
 
 TEST_CASE("CanvasWidget paints transparent by default on a Skia raster surface",
           "[canvas_widget][skia][issue-929]") {
