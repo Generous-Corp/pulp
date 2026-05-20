@@ -8,6 +8,17 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01780"></a>
+## [0.178.0] - 2026-05-20
+
+- fix(inspect): suppress real editor launch in source-jump tests/CI ([#2498](https://github.com/danielraffel/pulp/pull/2498))
+- test: stop view-host-bridge tests from popping real windows on screen ([#2501](https://github.com/danielraffel/pulp/pull/2501))
+- feat(render): add Dawn GPU timestamp queries for true per-pass GPU timing ([#2516](https://github.com/danielraffel/pulp/pull/2516))
+- ci(reaper): age in_progress runs from run_started_at; 4h threshold ([#2514](https://github.com/danielraffel/pulp/pull/2514))
+- refactor(test): split test_signal.cpp by DSP concern (P5 test-split) ([#2504](https://github.com/danielraffel/pulp/pull/2504))
+- fix(import-design): harden CLI fetch and flag parsing ([#2509](https://github.com/danielraffel/pulp/pull/2509))
+- refactor(harness): split verifier.py into focused validator modules (P9-3) ([#2503](https://github.com/danielraffel/pulp/pull/2503))
+
 <a id="v01771"></a>
 ## [0.177.1] - 2026-05-20
 
@@ -2312,6 +2323,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.178.0]: https://github.com/danielraffel/pulp/releases/tag/v0.178.0
 [0.177.1]: https://github.com/danielraffel/pulp/releases/tag/v0.177.1
 [0.177.0]: https://github.com/danielraffel/pulp/releases/tag/v0.177.0
 [0.176.0]: https://github.com/danielraffel/pulp/releases/tag/v0.176.0
