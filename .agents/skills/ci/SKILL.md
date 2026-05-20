@@ -1877,3 +1877,29 @@ Key facts:
   allowlist without a test.
 
 Companion plan: `planning/2026-05-19-ci-optimization-plan.md`.
+
+## macOS runner routing — local primary, GitHub-hosted overflow
+
+The `resolve-provider` job in `build.yml` decides per-run where each
+`Build and Test` macOS leg runs:
+
+- **Local first.** While the local self-hosted Mac has spare capacity
+  the macOS leg routes to it (`PULP_LOCAL_MACOS_RUNS_ON_JSON`).
+- **Overflow to free GitHub-hosted `macos-15`.** When the local Mac is
+  saturated — `_count_busy_local_mac_runners()` returns
+  `>= PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default 2) Build-and-Test runs
+  already targeting local — the leg routes to `macos-15` instead. The
+  repo is public, so GitHub-hosted macOS is **free**; overflow costs
+  nothing, it just runs slower than the M1 Max.
+- **Operator override.** A `workflow_dispatch` `macos_runner_selector_json`
+  input always wins.
+
+The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
+`["macos-15"]`; the repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
+overrides it (set it empty to pin macOS local-only). Routing is decided
+**once per run, at dispatch** — a leg already sent to `macos-15` is not
+migrated back to local if the Mac frees up; cloud overflow is parallel
+capacity, not a queue waiting on the Mac. Namespace is no longer a
+routing target (cut for cost, 2026-05-20). The matrix leg name's
+`[<provider>]` suffix reflects the real route (`local` / `github-hosted`
+/ `operator`).
