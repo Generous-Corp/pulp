@@ -1,0 +1,931 @@
+{
+  "canvas2d": {
+    "_note": "Populated 2026-05-04 from web-compat-canvas.js (~36 prototype methods + 7 attrs) crossed against widget_bridge.cpp's canvas* register_function entries (~47 funcs) and the Skia/CG backends in core/canvas/. Spec source: HTML Living Standard CanvasRenderingContext2D / https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D. The bridge layer is consistent across Skia (Linux/Windows) and CG (mac); divergences are noted per-entry. Heavy expansion landed in PR #1348 (pulp #1346 / #1322): save, restore, setTransform, translate, scale, rotate, globalAlpha, globalCompositeOperation, createLinearGradient, createRadialGradient, arc, arcTo, bezierCurveTo, quadraticCurveTo, rect, roundRect, ellipse, clip, fillText, strokeText. Skia gradient shape fills landed in #1353; CG counterpart in #1360 (merged 2026-05-03).",
+    "canvas2d/fillRect": {
+      "status": "supported",
+      "mapsTo": "web-compat-canvas.js: ctx.fillRect(x,y,w,h) -> _syncGlobalState + _applyFillStyle + canvasRect(id,x,y,w,h). Bridge `canvasRect` honors the active fillStyle / gradient via the use_active_style path (#968).",
+      "supportedValues": [
+        "any rectangle"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348 fixed a typo where the JS was calling canvasFillRect (which never existed) \u2014 now correctly calls canvasRect.",
+      "issue": "1346"
+    },
+    "canvas2d/strokeRect": {
+      "status": "supported",
+      "mapsTo": "ctx.strokeRect -> _syncGlobalState + _syncLineState + _applyStrokeStyle + canvasStrokeRect.",
+      "supportedValues": [
+        "any rectangle"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Stroke gradients fall back to first stop's color (bridge has no stroke-gradient setter today).",
+      "issue": ""
+    },
+    "canvas2d/clearRect": {
+      "status": "supported",
+      "mapsTo": "ctx.clearRect -> canvasClearRect.",
+      "supportedValues": [
+        "any rectangle"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/beginPath": {
+      "status": "supported",
+      "mapsTo": "ctx.beginPath -> canvasBeginPath.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/closePath": {
+      "status": "supported",
+      "mapsTo": "ctx.closePath -> canvasClosePath.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/moveTo": {
+      "status": "supported",
+      "mapsTo": "ctx.moveTo -> canvasMoveTo.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/lineTo": {
+      "status": "supported",
+      "mapsTo": "ctx.lineTo -> canvasLineTo.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/rect": {
+      "status": "supported",
+      "mapsTo": "ctx.rect(x,y,w,h) -> moveTo + 4\u00d7 lineTo back to start (composes a closed subpath).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Path-construction op (no fill/stroke). Honors fill()/stroke()/clip() afterward. PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/roundRect": {
+      "status": "supported",
+      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> canvasPathRoundRect(id, x, y, w, h, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y) -> SkRRect::setRectRadii (Skia) / per-corner CGPath layout (CG). All five spec radii forms (number / [r] / [r1,r2] / [r1,r2,r3] / [r1,r2,r3,r4]) and elliptical {x,y} corners are normalized to 8 floats in the JS shim.",
+      "supportedValues": [
+        "uniform radius (number, or array[1])",
+        "two-value [horizontal, vertical] (array[2])",
+        "three-value [tl, tr=bl, br] (array[3])",
+        "four-value [tl, tr, br, bl] (array[4])",
+        "elliptical {x, y} corner objects in any slot"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "PR #1348 + Wave 2 cheap wiring \u2014 confirmed all five radii forms thread through to SkRRect::setRectRadii with 4 distinct SkVector corners.",
+      "issue": "1346"
+    },
+    "canvas2d/arc": {
+      "status": "supported",
+      "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> path-mode emit as cubic-bezier segments via canvasMoveTo + canvasCubicTo. Bridge has immediate-mode canvasArc but no path-mode arc primitive.",
+      "supportedValues": [
+        "any arc"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)\u00b7tan(\u03b8/4)); fidelity is visually exact for fill/stroke/clip use cases. Wave 1 drift cleanup \u2014 partial \u2192 supported (PR #1348 wired path-mode arc as cubic-bezier segments via canvasPathArc; bezier approximation is per-quadrant, visually exact for fill/stroke/clip use cases).",
+      "issue": "1346"
+    },
+    "canvas2d/arcTo": {
+      "status": "supported",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius) \u2014 closed-form tangent-arc geometry. CG: CGPathAddArcToPoint(p1, p2, radius). pulp #1521 replaced the conservative lineTo-only fallback with the spec-compliant radius-tangent computation.",
+      "supportedValues": [
+        "arcTo(x1, y1, x2, y2, radius) \u2014 geometrically correct on Skia + CG"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "pulp #1521 \u2014 native SkPath::arcTo (Skia) / CGPathAddArcToPoint (CG). Wave 4 c2d cleanup: catalog reconciled to match wired implementation (prior PR #1348 lineTo fallback was replaced by #1521).",
+      "issue": ""
+    },
+    "canvas2d/bezierCurveTo": {
+      "status": "supported",
+      "mapsTo": "ctx.bezierCurveTo -> canvasCubicTo.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/quadraticCurveTo": {
+      "status": "supported",
+      "mapsTo": "ctx.quadraticCurveTo -> canvasQuadTo.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/ellipse": {
+      "status": "supported",
+      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> canvasPathEllipse(id, cx, cy, rx, ry, rotation, start, end, anticlockwise) -> SkPathBuilder::arcTo + SkMatrix::preRotate (Skia) / CGPathAddArc + CGAffineTransform (CG). PR #1521 wired native arc geometry; rotation is honoured via a temporary oval-aligned arc rotated through (cx, cy).",
+      "supportedValues": [
+        "axis-aligned ellipses",
+        "non-zero rotation",
+        "anticlockwise sweep"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "PR #1521 + Wave 2 cheap wiring \u2014 confirmed rotation threads through SkMatrix and CGAffineTransform.",
+      "issue": "1346"
+    },
+    "canvas2d/fill": {
+      "status": "supported",
+      "mapsTo": "ctx.fill(fillRule?) -> _syncGlobalState + _applyFillStyle + canvasFillPath(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::fill_current_path(FillRule) -> SkPath::setFillType (Skia) / CGContextEOFillPath vs CGContextFillPath (CG).",
+      "supportedValues": [
+        "default (nonzero) fill",
+        "evenodd fill rule"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOFillPath) backends. Pre-Wave-2 the rule was read by widget_bridge but discarded by canvas_widget.",
+      "issue": ""
+    },
+    "canvas2d/stroke": {
+      "status": "supported",
+      "mapsTo": "ctx.stroke -> _syncGlobalState + _syncLineState + _applyStrokeStyle + canvasStrokePath.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/clip": {
+      "status": "supported",
+      "mapsTo": "ctx.clip(fillRule?) -> canvasClip(id, fillRule). The fillRule int (0 = nonzero, 1 = evenodd) threads through canvas_widget.cpp into Canvas::clip(FillRule) -> SkPath::setFillType + SkCanvas::clipPath (Skia) / CGContextEOClip vs CGContextClip (CG).",
+      "supportedValues": [
+        "default (nonzero) clip",
+        "evenodd clip rule"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.) Wave 2 cheap wiring \u2014 added FillRule enum to canvas.hpp, plumbed cmd.int_val from widget_bridge through CanvasWidget::paint into both Skia (SkPathFillType::kEvenOdd) and CG (CGContextEOClip) backends.",
+      "issue": ""
+    },
+    "canvas2d/isPointInPath": {
+      "status": "supported",
+      "mapsTo": "ctx.isPointInPath(x, y[, fillRule]) -> JS-side ray-cast against the path mirror. Each path-construction method (moveTo / lineTo / rect / roundRect / arc / arcTo / ellipse / bezierCurveTo / quadraticCurveTo / closePath) appends to `_pathSubpaths` in addition to forwarding to the bridge. Curve segments sample to ~16 line pieces \u2014 accurate enough for spec-compliant hit testing.",
+      "supportedValues": [
+        "isPointInPath(x, y) on rect / lineTo polygon / arc / curve paths",
+        "rolls back across save / restore via the path-mirror snapshot"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527]"
+      ],
+      "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return \u2014 no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time. Wave 1 paperwork \u2014 synchronous return; no bridge round-trip; bridge-thin gap-fill (pulp #1527). arch-path2d-deferred \u2014 Path2D-object first argument requires a separate JS shim object (pulp #1527) that maintains its own subpath mirror. The 2-arg form (x, y) using the canvas's current path is fully wired and matches the spec semantics for the most-used invocation pattern.",
+      "issue": "1527"
+    },
+    "canvas2d/isPointInStroke": {
+      "status": "supported",
+      "mapsTo": "ctx.isPointInStroke(x, y) -> JS-side closest-point-on-segment distance check against `_pathSubpaths`. Returns true when the test point's distance to any path segment is \u2264 lineWidth / 2.",
+      "supportedValues": [
+        "lineWidth-aware hit test on straight + curve segments",
+        "respects later assignments to ctx.lineWidth"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527]"
+      ],
+      "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror. Wave 1 paperwork \u2014 pairs with isPointInPath; same JS path mirror (pulp #1527). arch-cap-join-approximated \u2014 lineCap (square) / lineJoin (miter spikes) geometry are approximated as round caps in the JS-side polyline mirror. Spec-compliance for sub-pixel hit-testing on stroke join geometry would need a real path stroker. The common case (round caps + bevel/round joins) works correctly.",
+      "issue": "1527"
+    },
+    "canvas2d/save": {
+      "status": "supported",
+      "mapsTo": "ctx.save -> canvasSave (Skia/CG canvas state stack).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348. Without save/restore, FilterBank's first ctx.save() threw TypeError and aborted the frame.",
+      "issue": "1346"
+    },
+    "canvas2d/restore": {
+      "status": "supported",
+      "mapsTo": "ctx.restore -> canvasRestore.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/translate": {
+      "status": "supported",
+      "mapsTo": "ctx.translate(x,y) -> canvasTranslate.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/scale": {
+      "status": "supported",
+      "mapsTo": "ctx.scale(sx,sy) -> canvasScale.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/rotate": {
+      "status": "supported",
+      "mapsTo": "ctx.rotate(radians) -> canvasRotate.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/setTransform": {
+      "status": "supported",
+      "mapsTo": "ctx.setTransform(a,b,c,d,e,f) \u2014 also accepts a single DOMMatrix-like arg, shim unpacks. -> canvasSetTransform.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348. resetTransform aliases to setTransform(1,0,0,1,0,0).",
+      "issue": "1346"
+    },
+    "canvas2d/resetTransform": {
+      "status": "supported",
+      "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0). Also resets the JS-side _currentTransform mirror (pulp #1527) so getTransform reads back the identity.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348. Mirror update added in pulp #1527.",
+      "issue": "1346"
+    },
+    "canvas2d/getTransform": {
+      "status": "supported",
+      "mapsTo": "ctx.getTransform() -> returns a DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform. The shim tracks `_currentTransform` via translate / scale / rotate / setTransform / transform / save / restore so the read is synchronous (no bridge round-trip; the bridge replays draws at paint time and has no queryable 'current matrix' from JS). Per HTML5 Canvas spec, getTransform() returns a NEW DOMMatrix per call (a snapshot \u2014 mutating it does not affect the live ctx). DOMMatrix mutation methods (multiplySelf, scaleSelf, etc.) on the returned object are not exposed because they would only mutate the snapshot, not the canvas \u2014 same outcome as on the standard browser surface.",
+      "supportedValues": [
+        "a, b, c, d, e, f (live)",
+        "m11/m12/m21/m22/m41/m42 DOMMatrix aliases",
+        "is2D, isIdentity flags",
+        "toFloat32Array / toFloat64Array readers",
+        "multiplySelf(other) \u2014 right-multiply + chain",
+        "scaleSelf(sx, sy?) \u2014 post-multiply scale",
+        "rotateSelf(angle) \u2014 post-multiply rotation (radians)",
+        "translateSelf(tx, ty) \u2014 post-multiply translation",
+        "inverse() \u2014 return inverted copy (throws on singular)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1527][dommatrix-mutators]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 clarified that snapshot semantics are spec-compliant (HTML5 Canvas spec: getTransform() returns a NEW DOMMatrix); DOMMatrix mutation methods on a snapshot wouldn't affect the canvas anyway. pulp #1527 bridge-thin gap-fill. Wave-5 follow-up audit (post-PR #1616 sweep): walked back to partial. `_PulpCanvasMatrix` (web-compat-canvas.js) has `a/b/c/d/e/f` getters and `is2D`/`isIdentity` flags but does NOT implement DOMMatrix mutators like `multiplySelf` / `scaleSelf` / `inverse()`. Standard DOM code that does `ctx.getTransform().multiplySelf(other)` will throw at runtime. PR #1527 followup: DOMMatrix mutator methods (multiplySelf / scaleSelf / rotateSelf / translateSelf / inverse) now implemented on the snapshot. Snapshot semantics preserved per HTML5 spec \u2014 mutating the returned matrix does NOT affect the live ctx; mutators return `this` for chaining; inverse() returns a NEW matrix (throws TypeError on singular).",
+      "issue": "1527"
+    },
+    "canvas2d/transform": {
+      "status": "supported",
+      "mapsTo": "ctx.transform(a,b,c,d,e,f) \u2014 multiplies CURRENT transform; bridge only exposes replace (setTransform), not concat. Pure-translation matrices (a===1, b===0, c===0, d===1) fall through to canvasTranslate; everything else is a no-op.",
+      "supportedValues": [
+        "pure-translation matrices",
+        "arbitrary concat (rotate/scale/skew composed onto existing transform)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1348][codex-p1]"
+      ],
+      "notes": "PR #1348. File a follow-up if a plugin needs strict concat. Wave 1 paperwork \u2014 strict concat semantics deferred (PR #1348); pure-translation fast path covers the common case. Wired in PR #1701 \u2014 ctx.transform() forwards the composed matrix M' = M * given to canvasSetTransform; JS-side mirror and bridge state stay in sync. Verified via [view][canvas2d][issue-1348][codex-p1] tests.",
+      "issue": "1346"
+    },
+    "canvas2d/fillText": {
+      "status": "supported",
+      "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncShadowState + _syncFilterState + _syncDirectionState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color, maxWidth). pulp #1525 plumbed maxWidth end-to-end (Skia: SkMatrix::Scale around the origin; CG: CGContextScaleCTM). pulp Wave 3 c2d.6 routes gradient/pattern fillStyle through current_fill_paint() on Skia. pulp #1666 \u2014 CoreGraphicsCanvas::fill_text now switches to kCGTextClip on the glyph fills then calls fill_with_active_paint(), so the active gradient (set via set_fill_gradient_linear/_radial/_two_circles) paints the glyphs on the CG path too.",
+      "supportedValues": [
+        "fillText(text, x, y) \u2014 solid colour fillStyle",
+        "fillText(text, x, y, maxWidth) \u2014 squeezed via SkMatrix::Scale (Skia) / CGContextScaleCTM (CG)",
+        "gradient fillStyle on Skia (shader flows onto glyph paint via current_fill_paint)",
+        "gradient fillStyle on CoreGraphics (kCGTextClip + CGContextDrawLinearGradient/Radial inside the glyph clip)",
+        "CanvasPattern fillStyle on Skia (SkShader::MakeImage)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [issue-1666]",
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "pulp #1525 \u2014 maxWidth plumbed end-to-end. pulp Wave 3 c2d.6 \u2014 gradient/pattern fillStyle routes through current_fill_paint() on Skia. pulp #1666 \u2014 CoreGraphics path now handles gradient fillStyle via kCGTextClip + fill_with_active_paint(). CG pattern fillStyle on glyphs is a separate sub-feature tracked under canvas2d/createPattern follow-ups.",
+      "issue": ""
+    },
+    "canvas2d/strokeText": {
+      "status": "supported",
+      "mapsTo": "ctx.strokeText(text, x, y, maxWidth?) -> canvasStrokeText -> SkiaCanvas::stroke_text builds an SkPaint via make_stroke_paint() (which sets SkPaint::kStroke_Style) and draws the SkShaper / per-glyph SkTextBlob with that paint. Honors line_width, lineJoin, lineCap, miterLimit, strokeStyle (incl. patterns/gradients), and shadow filter.",
+      "supportedValues": [
+        "true stroked-glyph rendering (kStroke_Style)",
+        "maxWidth squeeze",
+        "lineWidth, lineJoin, lineCap, miterLimit",
+        "stroke patterns / gradients via _applyStrokeStyle"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave2-canvas2d]"
+      ],
+      "notes": "PR #1525 + Codex P2 follow-up \u2014 make_stroke_paint() sets kStroke_Style and apply_stroke_state() propagates sticky stroke state. Wave 2 cheap wiring \u2014 confirmed end-to-end and bumped from partial -> supported.",
+      "issue": ""
+    },
+    "canvas2d/measureText": {
+      "status": "supported",
+      "mapsTo": "ctx.measureText(text) \u2014 when canvasMeasureText is available returns the bridge-side TextMetrics; else returns a coarse char-width estimate.",
+      "supportedValues": [
+        "width",
+        "actualBoundingBoxLeft/Right/Ascent/Descent",
+        "fontBoundingBoxAscent/Descent"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "issue-916. The shim guarantees a non-null TextMetrics object even on older hosts where canvasMeasureText isn't registered (returns zero-filled fields based on font px size).",
+      "issue": ""
+    },
+    "canvas2d/drawImage": {
+      "status": "supported",
+      "mapsTo": "ctx.drawImage(img, ...) -> canvasDrawImage(id, src, dx, dy, dw, dh [, sx, sy, sw, sh]). Supports the 3-arg, 5-arg, and 9-arg signatures. pulp #1737 \u2014 9-arg source-rect form (sprite-sheet slicing) is now plumbed end-to-end: JS shim passes sx/sy/sw/sh as args[6..9]; bridge sets has_source_rect on the CanvasDrawCmd; canvas widget routes through Canvas::draw_image_from_file_rect (Skia: SkCanvas::drawImageRect with src+dst).",
+      "supportedValues": [
+        "drawImage(img, dx, dy)",
+        "drawImage(img, dx, dy, dw, dh)",
+        "drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) \u2014 sprite-sheet slicing"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1737]"
+      ],
+      "notes": "pulp #1737 \u2014 9-arg source-rect form wired: Canvas + Skia + RecordingCanvas got draw_image_from_*_rect overrides; CanvasDrawCmd gained has_source_rect + uses x2/y2/x3/y3 for sx/sy/sw/sh.",
+      "issue": ""
+    },
+    "canvas2d/getImageData": {
+      "status": "supported",
+      "mapsTo": "ctx.getImageData(x,y,w,h) -> canvasGetImageData (returns base64 RGBA blob, shim decodes to Uint8ClampedArray).",
+      "supportedValues": [
+        "any rect from a rasterized canvas"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-916]"
+      ],
+      "notes": "issue-916. The base64 round-trip avoids passing typed arrays across the JS bridge. Wave 1 paperwork \u2014 base64 round-trip avoids typed-array bridge cost (issue-916). arch-recordingcanvas-by-design \u2014 RecordingCanvas returns zero-filled pixels by design (it records draw commands; no rasterization). The Skia + CoreGraphics backends both return real pixel data.",
+      "issue": ""
+    },
+    "canvas2d/putImageData": {
+      "status": "supported",
+      "mapsTo": "ctx.putImageData(imgdata, dx, dy [, dirtyX, dirtyY, dirtyW, dirtyH]) -> base64-encodes and calls canvasPutImageData. pulp #1737 \u2014 7-arg sub-rect form is now plumbed: the JS shim slices the (dirtyX, dirtyY, dirtyW, dirtyH) sub-rect from imageData.data row-by-row, clamps the rect to source bounds (per HTML5 spec), short-circuits to no-op on empty rect, and calls the same canvasPutImageData bridge fn with the sliced buffer + smaller dimensions + adjusted dst (dx + dirtyX, dy + dirtyY).",
+      "supportedValues": [
+        "putImageData(img, dx, dy)",
+        "putImageData(img, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) \u2014 sub-rect form"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1737]"
+      ],
+      "notes": "pulp #1737 \u2014 sub-rect form sliced in JS shim (no bridge contract change). Empty dirty rect is a no-op per HTML5 spec; negative dirtyW/dirtyH are normalised; out-of-bounds dirty rect is clamped to source bounds.",
+      "issue": ""
+    },
+    "canvas2d/createLinearGradient": {
+      "status": "supported",
+      "mapsTo": "ctx.createLinearGradient(x0,y0,x1,y1) -> returns a JS-side CanvasGradient object with addColorStop(); the bridge picks it up on the next fill via canvasSetLinearGradient.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1348. CG (mac) gradient-shape fill landed in #1359/#1360 (merged 2026-05-03).",
+      "issue": "964"
+    },
+    "canvas2d/createRadialGradient": {
+      "status": "supported",
+      "mapsTo": "ctx.createRadialGradient(x0,y0,r0,x1,y1,r1) -> CanvasGradient with kind='radial'. Both circles are wired through to the backend: Skia routes through SkGradientShader::MakeTwoPointConical, CG routes through CGContextDrawRadialGradient(start_centre, start_radius, end_centre, end_radius). The bridge dispatches via canvasSetRadialGradientTwoCircles when both circles differ.",
+      "supportedValues": [
+        "centre-bloom (x0===x1, y0===y1, r0===0)",
+        "true two-circle radial with offset / sized inner circle"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
+        "test/test_canvas2d_shim.cpp [view][canvas2d][issue-1524]"
+      ],
+      "notes": "pulp #1524. Two-circle support: Skia MakeTwoPointConical, CG full CGContextDrawRadialGradient with both circles. Inner circle (x0,y0,r0) packed in CanvasDrawCmd as (x, y, extra), outer (x1,y1,r1) as (x2, y2, w).",
+      "issue": "1524"
+    },
+    "canvas2d/createConicGradient": {
+      "status": "supported",
+      "mapsTo": "ctx.createConicGradient(startAngle, x, y) -> CanvasGradient with _kind='conic'; flushed via canvasSetConicGradient when assigned to fillStyle. Skia routes through SkGradientShader::MakeSweep (real sweep). CG software-rasterises a CGImage of the active clip's bounding box (per-pixel atan2 sweep + colour-stop interpolation) and paints it via CGContextDrawImage.",
+      "supportedValues": [
+        "Skia backend: real conic sweep with multiple stops",
+        "CG backend: software-rasterised conic with multiple stops (atan2 sweep + linear interpolation between stops, premultiplied RGBA8)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1524. Skia uses MakeSweep; CG falls back to a software rasteriser that rebuilds the conic CGImage when the clip-bounding-box changes (caches across repeated fills with the same clip).",
+      "issue": "1524"
+    },
+    "canvas2d/createPattern": {
+      "status": "supported",
+      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG routes through CGPatternCreate + CGPatternCallbacks (image-tile draw callback) and CGContextSetFillPattern.",
+      "supportedValues": [
+        "repeat",
+        "repeat-x",
+        "repeat-y",
+        "no-repeat"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1524. Skia uses SkShader::MakeImage; CG uses CGPatternCreate with a draw callback that emits one tile via CGContextDrawImage. `no_repeat` axes blow up the tile step beyond the clip bbox so only the seed tile lands. Image source decoded via ImageIO (CGImageSourceCreateWithData / WithURL) for both file paths and `data:` URLs. Note: CG stroke patterns are still a no-op (strokes continue with stroke_color_) \u2014 file a follow-up if a CG-targeted plugin needs tiled stroke patterns; this entry is for the createPattern fill surface.",
+      "issue": "1524"
+    },
+    "canvas2d/addColorStop": {
+      "status": "supported",
+      "mapsTo": "CanvasGradient.addColorStop(offset, color) \u2014 accumulates stops on the JS-side gradient object; flushed to bridge via canvasSetLinearGradient / canvasSetRadialGradient when the gradient is assigned to fillStyle.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": "964"
+    },
+    "canvas2d/setLineDash": {
+      "status": "supported",
+      "mapsTo": "ctx.setLineDash(pattern) -> canvasSetLineDash(id, pattern, lineDashOffset). Bridge does the HTML5-spec odd-length array doubling (`[5, 10, 15]` \u2192 `[5, 10, 15, 5, 10, 15]`) in widget_bridge.cpp::canvasSetLineDash before recording the command. Negative / non-finite values drop the pattern (graceful solid-stroke fallback per spec's implementation-defined clause).",
+      "supportedValues": [
+        "even-length pattern arrays",
+        "odd-length pattern arrays (spec-doubled by the bridge)",
+        "lineDashOffset phase arg"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 the catalog note about \"shim takes pattern verbatim; bridge handles the spec-doubling\" was describing the architecture, not a gap. The end-to-end behavior is spec-compliant. Wave 1 paperwork \u2014 see SKILL canvas2d gotchas; HTML5-spec odd-length doubling is performed internally by canvasSetLineDash before recording.",
+      "issue": ""
+    },
+    "canvas2d/getLineDash": {
+      "status": "supported",
+      "mapsTo": "Returns a copy of the current pattern (per spec).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/lineDashOffset": {
+      "status": "supported",
+      "mapsTo": "ctx.lineDashOffset getter/setter pair (Wave 4 c2d cleanup). Setting re-pushes the active dash pattern via canvasSetLineDash with the new phase, so mutating between draws shifts the stroke phase without requiring a redundant setLineDash call. Non-finite values (NaN, Infinity) are ignored per HTML5 spec.",
+      "supportedValues": [
+        "lineDashOffset assignment between draws (re-flushes the dash pattern with new phase)",
+        "lineDashOffset read (returns the most-recently-assigned value)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "Wave 4 c2d cleanup \u2014 defineProperty getter/setter pair re-flushes dash on assignment. Pre-Wave-4 the field tracked locally but only sent on the next setLineDash, so phase mutations between draws were silently dropped.",
+      "issue": ""
+    },
+    "canvas2d/fillStyle": {
+      "status": "supported",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient object OR a CanvasPattern object. Solid colors push via canvasSetFillColor; gradients push via canvasSetLinearGradient / canvasSetRadialGradient on the next draw; patterns push via canvasSetFillPattern (handled by `_applyFillStyle` in web-compat-canvas.js).",
+      "supportedValues": [
+        "CSS color strings",
+        "CanvasGradient (linear, radial, conic)",
+        "CanvasPattern (via createPattern)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 pattern path was already wired (createPattern in PASS list, _applyFillStyle dispatches canvasSetFillPattern); the catalog had a stale gap entry from before pulp #1434's createPattern bridge work. Wave 1 paperwork \u2014 CanvasPattern wiring confirmed via createPattern + _applyFillStyle / canvasSetFillPattern (#1625 finding).",
+      "issue": ""
+    },
+    "canvas2d/strokeStyle": {
+      "status": "supported",
+      "mapsTo": "Settable to a CSS-color string OR a CanvasGradient OR a CanvasPattern. pulp Wave 3 c2d.7 \u2014 bridge exposes canvasSetStrokeLinearGradient / canvasSetStrokeRadialGradient / canvasSetStrokeRadialGradientTwoCircles / canvasSetStrokeConicGradient / canvasSetStrokePattern; the JS shim routes gradients per kind in _applyStrokeStyle. Skia populates stroke_shader_; apply_stroke_state attaches it to SkPaint via setShader. pulp #1666 \u2014 CoreGraphicsCanvas now implements set_stroke_gradient_linear/_radial/_two_circles/_conic + a stroke_with_active_paint() helper that builds CGGradientRef from the stops, calls CGContextReplacePathWithStrokedPath + CGContextClip, then CGContextDrawLinearGradient/Radial inside the clip. All stroke entry points (stroke_rect, stroke_rounded_rect, stroke_circle, stroke_arc, stroke_line, stroke_path, stroke_current_path, stroke_text via CTFontCreatePathForGlyph) route through that helper when has_stroke_gradient_ is set.",
+      "supportedValues": [
+        "CSS color strings",
+        "CanvasGradient (linear, radial, two-circle radial) on stroke (Skia + CoreGraphics)",
+        "CanvasGradient (conic) on stroke (Skia)",
+        "CanvasPattern on stroke (Skia)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [issue-1666]"
+      ],
+      "notes": "pulp Wave 3 c2d.7 \u2014 stroke gradients wired through dedicated setters. Wave 4 c2d cleanup: catalog reconciled to match wired implementation. PR #1643 added gradient stroke shaders on Skia. pulp #1666 \u2014 added native CG stroke gradient implementation (linear/radial/two-circle) using CGContextReplacePathWithStrokedPath + CGContextDrawLinearGradient/Radial. CG conic stroke + CG pattern stroke fall back to first-stop solid; tracked as separate follow-ups under canvas2d/createConicGradient + canvas2d/createPattern.",
+      "issue": ""
+    },
+    "canvas2d/lineWidth": {
+      "status": "supported",
+      "mapsTo": "Tracked locally; pushed to bridge via canvasSetLineWidth on the next stroke().",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/lineCap": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasSetLineCap on next stroke (idempotent: only pushes when value changed).",
+      "supportedValues": [
+        "butt",
+        "round",
+        "square"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/lineJoin": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasSetLineJoin on next stroke.",
+      "supportedValues": [
+        "miter",
+        "round",
+        "bevel"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/miterLimit": {
+      "status": "supported",
+      "mapsTo": "ctx.miterLimit -> canvasSetMiterLimit (web-compat-canvas.js _syncLineState). Sticky stroke state. Skia honours via SkPaint::setStrokeMiter; CG via CGContextSetMiterLimit. Spec: assigning \u2264 0 / NaN / Infinity is silently ignored (validated at the shim level).",
+      "supportedValues": [
+        "any positive finite number",
+        "spec default = 10"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1434 bridge-thin gap-fill. Side note: this PR also wired SkPaint::setStrokeJoin + setStrokeCap from line_join_/line_cap_ \u2014 those were stored but never applied on Skia before.",
+      "issue": "1434"
+    },
+    "canvas2d/globalAlpha": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasSetGlobalAlpha on the next draw.",
+      "supportedValues": [
+        "[0, 1]"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "PR #1348.",
+      "issue": "1346"
+    },
+    "canvas2d/globalCompositeOperation": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasGlobalCompositeOperation OR canvasSetBlendMode on the next draw.",
+      "supportedValues": [
+        "source-over",
+        "source-in",
+        "source-out",
+        "source-atop",
+        "destination-over",
+        "destination-in",
+        "destination-out",
+        "destination-atop",
+        "lighter",
+        "copy",
+        "xor",
+        "multiply",
+        "screen",
+        "overlay",
+        "darken",
+        "lighten",
+        "color-dodge",
+        "color-burn",
+        "hard-light",
+        "soft-light",
+        "difference",
+        "exclusion",
+        "hue",
+        "saturation",
+        "color",
+        "luminosity"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
+      "issue": "1346"
+    },
+    "canvas2d/font": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; the shim's _parseFontShorthand walks the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>) and dispatches canvasSetFontFull(id, family, size, weight, slant, letterSpacing) when the host registered it (post pulp #1434), falling back to canvasSetFont(id, family, size) otherwise. Skia honours weight + slant via SkFontStyle; CG falls through to family + size.",
+      "supportedValues": [
+        "'<size>px <family>'",
+        "'<weight> <size>px <family>' (e.g. 'bold 14px Inter')",
+        "'<style> <size>px <family>' (e.g. 'italic 14px Inter')",
+        "'<style> <weight> <size>px <family>'",
+        "'<style> <variant> <weight> <size>px/<lineHeight> <family>' (full shorthand)",
+        "weight keywords: normal/bold/bolder/lighter",
+        "weight numerics: 100..900 (3-digit)",
+        "style keywords: normal/italic/oblique",
+        "stretch keywords: ultra-condensed..ultra-expanded (parsed, dropped)",
+        "lineHeight: number / length / 'normal' (parsed, ignored per Canvas2D spec \u2014 canvas uses the font's own line metrics)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434]"
+      ],
+      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim. font-variant 'small-caps' is the ONLY genuine gap and is architecturally tied: Canvas::set_font_full has no variant field and Skia/CG canvas font pipelines don't expose OpenType variation axes at this layer. Per #1657 discipline this stays as DIVERGE (honest signal of a real value-gap) rather than being moved to notes \u2014 the gap IS real and consumers should know. Reclassification would require either (a) extending Canvas::set_font to carry variant flags, or (b) adapter-level architectural-exclusion support. arch-skia-cg-no-small-caps \u2014 font-variant 'small-caps' is parsed and tracked but Skia/CG canvas pipeline doesn't honour it (Canvas::set_font_full has no variant field). Architectural \u2014 full small-caps rendering would need OpenType glyph substitution which neither backend exposes through the canvas API. The other shorthand fields (size, family, style, weight) all work.",
+      "issue": "1434"
+    },
+    "canvas2d/textAlign": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasSetTextAlign on next text draw.",
+      "supportedValues": [
+        "left",
+        "right",
+        "center",
+        "start",
+        "end"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/textBaseline": {
+      "status": "supported",
+      "mapsTo": "Locally tracked; flushed via canvasSetTextBaseline.",
+      "supportedValues": [
+        "top",
+        "hanging",
+        "middle",
+        "alphabetic",
+        "ideographic",
+        "bottom"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1526]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/imageSmoothingEnabled": {
+      "status": "supported",
+      "mapsTo": "ctx.imageSmoothingEnabled -> canvasSetImageSmoothing (web-compat-canvas.js _syncImageSmoothingState, flushed before drawImage). Skia translates to SkSamplingOptions(kLinear/kNearest); CG to CGContextSetInterpolationQuality(kCGInterpolationLow/None).",
+      "supportedValues": [
+        "true (smoothed bilinear/bicubic by default)",
+        "false (nearest-neighbour, pixel-art preservation)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1434 bridge-thin gap-fill. Spec defaults match Skia/CG defaults so unmodified callers see no change.",
+      "issue": "1434"
+    },
+    "canvas2d/imageSmoothingQuality": {
+      "status": "supported",
+      "mapsTo": "ctx.imageSmoothingQuality -> canvasSetImageSmoothing 3rd arg. Skia: low=kLinear, medium=kLinear+mipmap, high=Mitchell cubic. CG: low/medium/high -> kCGInterpolationLow/Medium/High. Unknown strings coerce to 'low'.",
+      "supportedValues": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1434 bridge-thin gap-fill.",
+      "issue": "1434"
+    },
+    "canvas2d/direction": {
+      "status": "supported",
+      "mapsTo": "ctx.direction -> canvasSetDirection (web-compat-canvas.js _syncDirectionState, flushed before fillText/strokeText). Skia: SkShaper leftToRight flag flipped per direction (RTL emits glyphs in visual order via HarfBuzz). Stored on the canvas state and consumed by both fill_text() and recording capture. inherit currently maps to ltr until per-View writing-direction lookup lands (#1506).",
+      "supportedValues": [
+        "ltr (default, leftToRight shaping)",
+        "rtl (HarfBuzz buffer direction RTL via SkShaper leftToRight=false)",
+        "inherit (treated as ltr; per-View resolution tracked under #1506)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 \u2014 JS shim + bridge + SkShaper direction flag. Real bidi (mixed LTR/RTL paragraphs) shares plumbing with #1506. arch-skparagraph-bidi \u2014 Full Unicode Bidi Algorithm for mixed-script paragraphs is deferred to SkParagraph plumbing (pulp #1506); the ltr/rtl/inherit value set the catalog claims is fully wired via SkShaper direction flag.",
+      "issue": "1520"
+    },
+    "canvas2d/filter": {
+      "status": "supported",
+      "mapsTo": "ctx.filter -> canvasSetFilter (web-compat-canvas.js _syncFilterState, flushed before fill/stroke/text/image draws). Skia parses CSS <filter-function-list> into an SkImageFilter chain (Blur + ColorFilter::Matrix combinations) applied via SkPaint::setImageFilter. Distinct from CSS `filter` on the View element (#1503) \u2014 this is per-2D-context state and stacks with save()/restore().",
+      "supportedValues": [
+        "blur(<length>)",
+        "brightness(<num|%>)",
+        "contrast(<num|%>)",
+        "drop-shadow(<dx> <dy> <blur> <color>)",
+        "grayscale(<num|%>)",
+        "hue-rotate(<angle>)",
+        "invert(<num|%>)",
+        "opacity(<num|%>)",
+        "saturate(<num|%>)",
+        "sepia(<num|%>)",
+        "none (default; clears any active chain)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [skia][filter-chain][drop-shadow]",
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 \u2014 JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up. arch-no-svg-filter-refs \u2014 url(#filter-id) SVG filter references are not supported \u2014 Pulp doesn't have an SVG filter graph. The 9 filter functions (blur/brightness/contrast/grayscale/hue-rotate/invert/opacity/saturate/sepia) plus drop-shadow are all wired on the Skia (GPU) backend. CG canvas backend (the CPU fallback used when no GPU context is available \u2014 `core/canvas/platform/mac/cg_canvas.mm` inherits the base `Canvas::set_filter` no-op) silently drops ALL filter functions; promoting CG to honor the chain requires CGImage filter wiring + a CG color-matrix equivalent (follow-up, tracked alongside the parallel `css/filter` CG-degradation note). For now, ctx.filter is honest-supported only when a Skia context is active; the Skia tests cited above prove that path.",
+      "issue": "1520"
+    },
+    "canvas2d/shadowColor": {
+      "status": "supported",
+      "mapsTo": "ctx.shadowColor -> canvasSetShadowColor (web-compat-canvas.js _syncShadowState). Sticky state on the C++ canvas; backends apply via SkImageFilters::DropShadow (Skia) or CGContextSetShadowWithColor (CoreGraphics).",
+      "supportedValues": [
+        "CSS color string (#rgb, #rrggbb, rgba(...), hsl(...), named colors, transparent)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Box-shadow on the View widget remains the separate setBoxShadow primitive (#925).",
+      "issue": "1434"
+    },
+    "canvas2d/shadowBlur": {
+      "status": "supported",
+      "mapsTo": "ctx.shadowBlur -> canvasSetShadowBlur (web-compat-canvas.js _syncShadowState). Skia maps blur radius to Gaussian sigma via sigma = blur/2.0 (Chromium's mapping); CG passes blur radius through directly.",
+      "supportedValues": [
+        "non-negative finite Number (CSS pixels)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. HTML5 spec: negative values are silently ignored at the shim/bridge boundary.",
+      "issue": "1434"
+    },
+    "canvas2d/shadowOffsetX": {
+      "status": "supported",
+      "mapsTo": "ctx.shadowOffsetX -> canvasSetShadowOffsetX (web-compat-canvas.js _syncShadowState). Combines with shadowOffsetY into the dx/dy components of the Skia DropShadow filter / CG shadow offset CGSize.",
+      "supportedValues": [
+        "finite Number (CSS pixels)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Non-finite values are silently ignored by the shim.",
+      "issue": "1434"
+    },
+    "canvas2d/shadowOffsetY": {
+      "status": "supported",
+      "mapsTo": "ctx.shadowOffsetY -> canvasSetShadowOffsetY (web-compat-canvas.js _syncShadowState). Combines with shadowOffsetX; same Skia / CG mapping.",
+      "supportedValues": [
+        "finite Number (CSS pixels)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Non-finite values are silently ignored by the shim.",
+      "issue": "1434"
+    },
+    "canvas2d/getContext_webgpu": {
+      "status": "supported",
+      "mapsTo": "HTMLCanvasElement.getContext('webgpu') -> __createGPUCanvasContext (web-compat-canvas.js). Returns a GPUCanvasContext with configure / getCurrentTexture / present that bridges to native WebGPU when the device is native.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Tracked in detail under canvas2d/* by convention even though WebGPU is not strictly Canvas2D \u2014 the shim co-locates them. See planning/research/three-js* for the Three.js end-to-end story.",
+      "issue": ""
+    },
+    "canvas2d/getContext_2d": {
+      "status": "supported",
+      "mapsTo": "HTMLCanvasElement.getContext('2d') -> CanvasRenderingContext2D singleton per-canvas (cached on _canvasContext2d).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "canvas2d/_native_canvasFillCircle": {
+      "status": "supported",
+      "mapsTo": "Pulp-specific bridge fn (canvasFillCircle). Used by some legacy widget renderers; NOT spec'd in HTML5 Canvas. Plugin code should prefer arc()+fill().",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Bridge convenience; not part of the standard Canvas2D API.",
+      "issue": ""
+    },
+    "canvas2d/_native_canvasFillRoundedRect": {
+      "status": "supported",
+      "mapsTo": "Pulp-specific bridge fn (canvasFillRoundedRect). Equivalent of roundRect()+fill() in one call.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Bridge convenience.",
+      "issue": ""
+    },
+    "canvas2d/_native_canvasStrokeLine": {
+      "status": "supported",
+      "mapsTo": "Pulp-specific bridge fn (canvasStrokeLine). Equivalent of moveTo()+lineTo()+stroke() in one call.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Bridge convenience.",
+      "issue": ""
+    }
+  }
+}

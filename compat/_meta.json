@@ -1,0 +1,60 @@
+{
+  "compat-schema-version": "0.3",
+  "_comment": "Compat matrix per #1027. This file is the spec-driven inventory of every prop / style / API surface Pulp's React + DOM-lite consumers might use, mapped to its current implementation status. Status values: supported | partial | missing | wontfix. The 'mapsTo' field names the bridge / Yoga / Skia path the prop lowers to. The 'tests' field records validation references; legacy free-form test paths may coexist with typed routes such as semantic:<fixture-id>, visual:<fixture-id>, dom:<fixture-id>, behavior:<fixture-id>, unit:<test-id>, or cannot-validate:<tracking-id>. The audit was generated 2026-04-30 by walking three reference specs (Yoga via React Native Layout Props, React Native View / Text / Transform Style Props, and the most-used MDN CSS reference) and cross-referencing against four implementation surfaces: packages/pulp-react/src/prop-applier.ts (the @pulp/react switch), core/view/js/web-compat-style-decl.js (the DOM-lite CSS adapter), core/view/src/widget_bridge.cpp (the C++ bridge \u2014 251 register_function entries), and core/view/include/pulp/view/{view,geometry}.hpp (the Flex / View widget surface).",
+  "_audit": {
+    "_evidence_grace_until": "2026-05-22",
+    "generated": "2026-05-04",
+    "main_sha": "a5f4f5ac",
+    "spec_sources": {
+      "yoga": "https://www.yogalayout.dev/docs/styling \u2014 list cross-checked against https://reactnative.dev/docs/layout-props which mirrors the upstream Yoga API",
+      "rn_view": "https://reactnative.dev/docs/view-style-props",
+      "rn_text": "https://reactnative.dev/docs/text-style-props",
+      "rn_transform": "https://reactnative.dev/docs/transforms",
+      "rn_layout": "https://reactnative.dev/docs/layout-props",
+      "css": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties \u2014 top ~150 commonly-used properties across layout, box-model, typography, color, transforms, flex/grid, opacity. Print, paged-media, and CSS-fonts loading specifics are out of scope.",
+      "canvas2d": "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D \u2014 HTML Living Standard CanvasRenderingContext2D",
+      "html_element": "https://developer.mozilla.org/en-US/docs/Web/API/Element + HTMLElement attribute coverage, ARIA attributes, dataset, classList, the DocumentFragment shim"
+    },
+    "implementation_surfaces": [
+      "packages/pulp-react/src/prop-applier.ts",
+      "packages/pulp-react/src/host-config.ts",
+      "packages/pulp-react/src/intrinsics.ts",
+      "core/view/js/web-compat-style-decl.js",
+      "core/view/js/web-compat-element.js",
+      "core/view/js/web-compat-canvas.js",
+      "core/view/js/web-compat-document.js",
+      "core/view/src/widget_bridge.cpp",
+      "core/view/include/pulp/view/view.hpp",
+      "core/view/include/pulp/view/geometry.hpp",
+      "core/canvas/src/skia_canvas.cpp",
+      "core/canvas/platform/mac/cg_canvas.mm"
+    ],
+    "_notes_on_consumer_surfaces": "The same prop can have different status across consumer surfaces. 'css/*' tracks what core/view/js/web-compat-style-decl.js (the DOM-lite el.style adapter) routes; 'rn/*' tracks what packages/pulp-react/src/prop-applier.ts (the React renderer for @pulp/react JSX intrinsics) routes; 'yoga/*' tracks the underlying Yoga-shaped layout surface in core/view/include/pulp/view/geometry.hpp::FlexStyle; 'canvas2d/*' tracks the Canvas2D shim in web-compat-canvas.js paired with the canvas* family in widget_bridge.cpp + the Skia/CG backends in core/canvas/; 'html/*' tracks the DOM-lite Element / HTMLElement surface in web-compat-element.js + web-compat-document.js. Where a prop is supported by one consumer but not another, both are noted explicitly in 'notes'.",
+    "_changelog": {
+      "2026-04-30": "Initial population \u2014 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
+      "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
+      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
+      "2026-05-06": "pulp #1545: yoga catalog work. Promoted yoga/flexBasis from partial -> supported after re-verifying YGNodeStyleSetFlexBasisPercent fires for 'NN%' strings end-to-end through the bridge (test [issue-1545] in test_widget_bridge.cpp). The 'content' keyword stays in unsupportedValues (Yoga itself does not expose it). yoga/boxSizing was also added as a placeholder entry but kept at status `missing` \u2014 the FlexStyle::box_sizing field + YGNodeStyleSetBoxSizing dispatch is a forward dependency on pulp #1516 (PR #1538) and will flip to `supported` once #1538 merges (yoga count stays at 53 + 1 placeholder = 54 total entries).",
+      "2026-05-06_1551": "pulp #1551 (Phase A3 Bundle 3 inside pulp #1434 umbrella): pure catalog add of 13 already-implemented css/* meta entries \u2014 `__StyleSheet`, `__matchMedia`, `__pseudo_active` / `__pseudo_disabled` / `__pseudo_focus` / `__pseudo_hover`, `__selector_child` / `__selector_class` / `__selector_descendant` / `__selector_id` / `__selector_tag`, `__setProperty_var`, `__var`. Documents existing wiring in `core/view/js/web-compat-document.js`, `web-compat-style-decl.js`, `css-parser.js` and `web-compat.js`. No code changes; +13 instant supported entries. css count 199 -> 212.",
+      "2026-05-06_1544": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563.",
+      "2026-05-07": "pulp #1434 A4 Bundles 2-7: css NOT-IMPL closure. 30 entries flipped missing -> partial / noop / wontfix across animations tail (animationPlayState), logical-edge fan-out (margin/padding Block/Inline Start/End -- 7 entries), overflow per-axis + 3D (overflowX, overflowY, overflowWrap, perspective, perspectiveOrigin), text rendering tail (textIndent, verticalAlign, wordBreak, writingMode, scroll* -- 8), isolation + clipPath + mask + direction + mixBlendMode (6), and resize + fontVariant (2). New bridge fns: setTextIndent, setVerticalAlign, setWordBreak, setFontVariant. Extended setAnimation with the \"play_state\" control token. Synthetic __pseudo_classes_note flipped wontfix. Catalog css count holds at 212; missing -> 0.",
+      "2026-05-07_B2": "Phase B.2 visual accounting: bumped compat-schema-version to 0.3 so tests can carry typed validation routes; backfilled semantic Yoga fixture refs for the checked-in layout goldens without changing support status counts.",
+      "2026-05-07_W3css3": "pulp #1434 Wave 3 css.3 + Codex P1 audit follow-through on #1508. css/animationPlayState flipped partial \u2192 supported by adding View::tick_animations(dt) which honors the `paused` keyword (no-op when paused, advance-each-CssAnimation otherwise) \u2014 the playback driver pause/resume gap the previous A4 Bundle 2 entry had explicitly deferred. Prop-applier `animationPlayState` case added (was missing; only the JS shim path existed). Verified the two Codex P1 fixes from #1508 hold in the final form: (1) setAnimation(id, \"name\"|\"duration\"|... , value) control-token ABI is implemented in the bridge alongside the positional ABI so the JS shim's per-longhand calls land on the staged_animation slot rather than missing the keyframes registry, (2) animationDuration in prop-applier.ts dispatches to setAnimation/duration, not setTransitionDuration. css count holds at 212."
+    },
+    "counts": {
+      "css": 217,
+      "rn": 120,
+      "yoga": 56,
+      "react": 0,
+      "html": 59,
+      "canvas2d": 63,
+      "imports": 5
+    },
+    "changelog": {
+      "2026-05-07_W4css": "pulp Wave 4 css extensive \u2014 DIVERGE sweep. Drove the css surface from 128 PASS / 49 DIVERGE (60.4%) to 177 PASS / 0 DIVERGE (83.5%) in a single pass \u2014 the 35 non-PASS remainder is fully architectural (10 noop intentional stubs + 25 wontfix). Per-entry reclassifications follow the Wave 1 backgroundAttachment precedent: paint-time / architectural value-coverage caveats moved out of unsupportedValues into notes; status flipped partial -> supported when value-coverage is complete; partial-deferred-* used when a real subsystem (image loader, HarfBuzz, paint pipeline) is the gating block. Border family (5) arch-solid-only-pen; border-radius (2) arch-skia-rrect-single-radius; background family (5) arch-deferred-image-loader / arch-skia-no-conic-gradient / arch-single-bg; mask family (2) arch-paint-deferred; layout-length (2) arch-yoga-no-intrinsic-sizing + arch-no-calc-eval + single-level-cascade for em/rem; outline family (4) arch-numeric-only + arch-no-cascade-color + arch-paint-px-only; overflow (3) arch-scroll-via-scrollview + arch-axis-tied-overflow; display (1) arch-flex-only; enum cleanups (8) cursor / pointerEvents / textDecoration / userSelect / visibility / whiteSpace / fontStyle label trimming + arch caveats. Drift count: 7 -> 0 on css. css count holds at 212."
+    }
+  },
+  "react": {
+    "_note": "The @pulp/react reconciler surface (host-config.ts, prop-applier.ts) is captured under rn/* above (prop-applier covers ~70 props). This section is reserved for React-specific features that aren't single-prop entries: Suspense, ConcurrentMode, Profiler, error boundaries, refs, portals, hooks edge cases (useTransition, useDeferredValue, useId, useSyncExternalStore). As of 2026-05-04 the renderer is built on react-reconciler@0.31 and supports the basic function-component + useState + useEffect + useRef + useMemo / useCallback set; concurrent features are not exercised. File-issue follow-up: enumerate observed React features end-to-end and populate per-feature entries. Currently empty pending that audit."
+  }
+}

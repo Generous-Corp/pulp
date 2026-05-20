@@ -1,0 +1,768 @@
+{
+  "html": {
+    "_note": "Populated 2026-05-04 from web-compat-element.js (~836 LOC) and web-compat-document.js (~1527 LOC). Tracks the DOM-lite consumer surface: createElement / setAttribute / appendChild / addEventListener / Element / HTMLElement attributes / dataset / classList / events / style sheet support. Spec source: https://developer.mozilla.org/en-US/docs/Web/API/Element + HTMLElement subclasses. Recent additions since 2026-04-30: html/svg width/height attribute replay (#1347 / pulp #1147), html/span/p/label widget mapping confirmed (Label widget, not View), html/style :hover stylesheet support (#1345 / pulp #1149 part b). 2026-05-05 hygiene (pulp #1434): html/ARIA flipped missing \u2192 partial \u2014 storage works (parallel to html/Element_disabled); platform-bridge routing tracked under #1476.",
+    "html/ARIA": {
+      "status": "supported",
+      "mapsTo": "Element.setAttribute('aria-label', ...) \u2192 bridge.setAccessibilityLabel \u2192 View::set_access_label(). Element.setAttribute('role', ...) \u2192 bridge.setAccessibilityRole \u2192 View::set_access_role() with ARIA\u2192AccessRole bucket mapping (slider/checkbox/switch/radio/img/progressbar/meter/heading/label collapse onto Pulp's enum; the long ARIA tail collapses to AccessRole::group). pulp #1737 \u2014 Element.setAttribute('aria-pressed' / 'aria-checked' / 'aria-disabled' / 'aria-hidden', ...) \u2192 bridge.setAccessibilityState \u2192 View::access_pressed_ / access_checked_ / access_disabled_ / access_hidden_ slots (tri-state per ARIA 1.2 \u2014 `true` / `false` / `mixed` / unset). Storage round-trips through getAttribute either way. macOS NSAccessibility bridge in core/view/platform/mac/accessibility_mac.mm reads all slots directly; AccessibilityTree snapshot picks them up cross-platform; removeAttribute clears the matching slot.",
+      "supportedValues": [
+        "aria-label \u2192 setAccessibilityLabel routing",
+        "role \u2192 setAccessibilityRole routing (full ARIA\u2192AccessRole bucket mapping)",
+        "aria-pressed / aria-checked / aria-disabled / aria-hidden state attributes (tri-state per ARIA 1.2)",
+        "removeAttribute resets the matching View slot (no stale state on detach)",
+        "aria-* attribute storage / read-back via setAttribute / getAttribute (forward-compat for the long ARIA tail)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave3-html] (HTML aria-label + role attributes route to View access slots)",
+        "test/test_widget_bridge.cpp [issue-1641-followup-aria-removeattribute]",
+        "test/test_widget_bridge.cpp [issue-1737] (aria-pressed / -checked / -disabled / -hidden routing to View::access_*_ slots; tri-state; removeAttribute resets)"
+      ],
+      "notes": "Wave 3 (PR #1641) wired aria-label + role + macOS NSAccessibility. pulp #1737 \u2014 added aria-pressed / -checked / -disabled / -hidden state attributes via new setAccessibilityState bridge fn + View::access_pressed_/_checked_/_disabled_/_hidden_ slots; JS shim setAttribute fast-paths the four state attrs and __replayAriaAttributes__ covers the React-pre-mount commit order; removeAttribute clears the matching slot (mirrors the #1641 followup pattern for aria-label / role). Linux AT-SPI bridge + Windows UIA bridge remain `arch-deferred-platform-at` (tracked under pulp #217 \u2014 multi-week platform integration scope; not a Pulp-side ARIA-attribute gap). The state slots are populated cross-platform; whichever platform AT bridge lands next will read them automatically.",
+      "issue": "1476"
+    },
+    "html/DocumentFragment": {
+      "status": "supported",
+      "mapsTo": "Minimal shim with appendChild / removeChild covering React's reconciler hot path (createDocumentFragment + batched-insert). Children are flushed onto the parent on appendChild(fragment).",
+      "supportedValues": [
+        "createDocumentFragment()",
+        "appendChild / removeChild",
+        "children flush onto parent on appendChild(fragment)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Wave 1 architectural reclassification \u2014 full Range / Selection API is arch-text-editor-owns-selection (Pulp's text editor has its own selection model; the W3C Range/Selection API is not modeled by design). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues so the harness reflects the wired DocumentFragment surface (the React reconciler path); the Range/Selection API is an explicit arch non-goal, not a partial-deferred gap.",
+      "issue": ""
+    },
+    "html/Element_addEventListener": {
+      "status": "supported",
+      "mapsTo": "Element.addEventListener \u2014 registers click / mousedown / mouseup / mouseenter / mouseleave / pointerenter / pointerleave / pointerdown / pointermove / pointerup / pointercancel / gesturestart / gesturechange / gestureend / input / change / focus / blur / wheel / dragstart / drag / dragend / dragenter / dragover / dragleave / drop with the bridge. registerHover/registerClick/registerPointer/registerGesture/registerWheel/registerDrop are called lazily as needed; drop events synthesize a DragEvent-shaped object with `_dropData`.",
+      "supportedValues": [
+        "click",
+        "mousedown",
+        "mouseup",
+        "mouseenter",
+        "mouseleave",
+        "pointerenter",
+        "pointerleave",
+        "pointerdown",
+        "pointermove",
+        "pointerup",
+        "pointercancel",
+        "gesturestart",
+        "gesturechange",
+        "gestureend",
+        "input",
+        "change",
+        "focus",
+        "blur",
+        "wheel",
+        "dragstart",
+        "drag",
+        "dragend",
+        "dragenter",
+        "dragover",
+        "dragleave",
+        "drop",
+        "keydown / keyup / keypress (forwarded globally via __dispatch__)",
+        "close (dispatched by HTMLDialogElement.close())",
+        "toggle (dispatched by HTMLDetailsElement.open setter)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"addEventListener('wheel', fn) routes through registerWheel\"",
+        "test/test_widget_bridge.cpp::\"addEventListener('drop', fn) routes through registerDrop\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 `wheel` and `drag*`/`drop` event types are now routed through `registerWheel` / `registerDrop` from inside `_registerNativeEvent`, so DOM consumers no longer need to call the platform-specific bridge fns directly. The full multi-stage drag lifecycle (native drag-image rendering, dragstart/drag/dragend on the source element) remains a roadmap item \u2014 the bridge fires a single `drop` callback at completion and we synthesize a DragEvent-shaped object for the target element. Hover events fixed earlier in PR #1173 (pulp #1149 part a).",
+      "issue": "1149"
+    },
+    "html/Element_appendChild": {
+      "status": "supported",
+      "mapsTo": "web-compat-dom-ops.js: appendChild reparents native widget if needed via _reparentNative + replays presentational attrs.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_classList": {
+      "status": "supported",
+      "mapsTo": "Element.classList \u2014 add/remove/toggle/contains/length/item, mirrors className. Triggers stylesheet re-application on change.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_cloneNode": {
+      "status": "supported",
+      "mapsTo": "Element.cloneNode(deep) \u2014 replicates className, textContent, type, value, style props; recursive when deep.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_dataset": {
+      "status": "supported",
+      "mapsTo": "Element.dataset \u2014 kebab-cased data-* attrs surface as camelCase JS properties. Includes the data-overlay='true' hint (#1148).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": "1148"
+    },
+    "html/Element_disabled": {
+      "status": "supported",
+      "mapsTo": "Element.disabled property accessor in web-compat-element.js \u2014 set re-applies stylesheets (so `:disabled` selectors react) AND calls bridge `setEnabled(id, !disabled)` so the underlying View flips its enabled flag and stops handling pointer events / dispatching change.",
+      "supportedValues": [
+        "true / false (round-trips through el.disabled getter; both stylesheet and native widget state stay in sync)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"Element.disabled wires to setEnabled\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 previously the setter only flipped the stylesheet flag, leaving the native widget interactive even though `:disabled` styles applied. Now wired end-to-end via setEnabled.",
+      "issue": ""
+    },
+    "html/Element_dispatchEvent": {
+      "status": "supported",
+      "mapsTo": "Element.dispatchEvent \u2014 capture + target + bubble phases; honors stopPropagation / preventDefault / _noBubble.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_getAttribute": {
+      "status": "supported",
+      "mapsTo": "Element.getAttribute(name).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_getBoundingClientRect": {
+      "status": "supported",
+      "mapsTo": "Element.getBoundingClientRect -> getLayoutRect bridge fn. Returns {x,y,width,height,top,right,bottom,left}.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_hidden": {
+      "status": "supported",
+      "mapsTo": "Element.hidden -> setVisible(id, !hidden).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_insertBefore": {
+      "status": "supported",
+      "mapsTo": "web-compat-dom-ops.js.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_nodeName": {
+      "status": "supported",
+      "mapsTo": "Returns upper-case tagName per DOM spec.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_nodeType": {
+      "status": "supported",
+      "mapsTo": "Element.nodeType === 1 (ELEMENT_NODE). Constants exposed on the prototype for React's reconciler hot-path checks.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Pulp #468.",
+      "issue": "468"
+    },
+    "html/Element_offsetWidth": {
+      "status": "supported",
+      "mapsTo": "Maps to getBoundingClientRect().width.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Same for offsetHeight, clientWidth, clientHeight.",
+      "issue": ""
+    },
+    "html/Element_removeAttribute": {
+      "status": "supported",
+      "mapsTo": "Element.removeAttribute \u2014 also clears data-* dataset entries and re-evaluates overlay heuristic if data-overlay was set.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_removeChild": {
+      "status": "supported",
+      "mapsTo": "web-compat-dom-ops.js.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_replaceChild": {
+      "status": "supported",
+      "mapsTo": "web-compat-dom-ops.js.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_setAttribute": {
+      "status": "supported",
+      "mapsTo": "Element.setAttribute(name, value) \u2014 handles id, class, data-*, plus presentational width/height for media tags (replay path).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_setPointerCapture": {
+      "status": "supported",
+      "mapsTo": "Element.setPointerCapture / releasePointerCapture -> nativeSetPointerCapture / nativeReleasePointerCapture (P2b).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Element_textContent": {
+      "status": "supported",
+      "mapsTo": "Element.textContent \u2014 special-cased for <style>: routes through _processStyleElement instead of setText.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": "1323"
+    },
+    "html/Element_value": {
+      "status": "supported",
+      "mapsTo": "Element.value \u2014 type-aware (range -> normalized, checkbox -> 0/1, progress -> setProgress, default -> setText).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/Event_constructor": {
+      "status": "supported",
+      "mapsTo": "Event(type, init) and CustomEvent(type, init) constructor functions in web-compat-element.js \u2014 produce objects shaped like the DOM Event interface (type / bubbles / cancelable / composed / target / currentTarget / timeStamp / defaultPrevented / stopPropagation / stopImmediatePropagation / preventDefault). Round-trips through Element.dispatchEvent. The bridge-synthesized `_makeEvent` factory remains the canonical path for native-originated events (it carries the position / pointer / gesture fields).",
+      "supportedValues": [
+        "new Event('foo')",
+        "new Event('foo', { bubbles, cancelable, composed })",
+        "new CustomEvent('foo', { detail })"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"new Event() round-trips through dispatchEvent\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 userland `new Event(...)` previously was a TypeError because no Event class was exposed. Now exposed as a global constructor (plus CustomEvent for parity). Type-only events are sufficient for the harness gap; full DOM event class hierarchy (UIEvent / MouseEvent / KeyboardEvent etc.) remains a roadmap follow-up.",
+      "issue": ""
+    },
+    "html/StyleSheet_inline": {
+      "status": "supported",
+      "mapsTo": "Inline <style> elements parsed and applied to the document. Selectors: tag, .class, #id, [attr], descendant, child; :hover stylesheet support added in PR #1345. Properties routed through CSSStyleDeclaration._applyProperty (full css/* surface).",
+      "supportedValues": [
+        "tag, .class, #id selectors",
+        "[attr] / [attr=value] attribute selectors (Wave 3 PR #1641)",
+        "descendant (a b) / child (a > b) combinators (Wave 3 PR #1641)",
+        ":hover pseudo-class (PR #1345)",
+        "all css/* properties via CSSStyleDeclaration._applyProperty"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1345 added :hover; PR #1641 (Wave 3 html.3) extended selector engine with [attr] / descendant / child / compound. Wave 1 architectural reclassification \u2014 @media / @keyframes / @import / @font-face / @supports / complex selectors are arch-no-cascade-engine (Pulp doesn't model the CSS cascade by design; selector evaluation is single-pass tag/.class/#id/[attr]/combinator). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues; the inline-style surface that IS implemented is the supported claim, the at-rule + cascade-engine extensions are explicit arch non-goals (consumers reach for @pulp/react state-dependent components for media-query / keyframe needs).",
+      "issue": ""
+    },
+    "html/article": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/aside": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/button": {
+      "status": "supported",
+      "mapsTo": "createToggleButton(id, parent).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Inherits ToggleButton widget \u2014 toggleable by default.",
+      "issue": ""
+    },
+    "html/canvas": {
+      "status": "supported",
+      "mapsTo": "createCanvas(id, parent). 2D context via Element.getContext('2d'); WebGPU via getContext('webgpu').",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "See canvas2d/* for the rendering surface.",
+      "issue": ""
+    },
+    "html/details": {
+      "status": "supported",
+      "mapsTo": "createCol(id, parent). `el.open = true/false` setter (defined on Element.prototype as a tag-aware accessor in web-compat-element.js) toggles the `open` HTML attribute, re-applies stylesheets so `details[open]` selectors react, and dispatches a `toggle` event. The <summary> tag semantic (always visible while children hide under closed details) remains a paint-side roadmap item but the open-state vocabulary is now wired.",
+      "supportedValues": [
+        "el.open getter / setter",
+        "open HTML attribute reflection",
+        "'toggle' event on open-state change"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"<details> open setter dispatches toggle event\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 open/closed toggle behavior wired through Element.open setter. <summary>-driven children hiding when closed is a paint-side concern that remains roadmap; the harness gap was about JS-side toggle semantics.",
+      "issue": ""
+    },
+    "html/dialog": {
+      "status": "supported",
+      "mapsTo": "createPanel(id, parent) + setVisible(false). Element.show() / showModal() / close() methods on Element.prototype (tag-guarded \u2014 return early on non-DIALOG elements) flip setVisible and the `open` HTML attribute, dispatch a `close` event, and round-trip `el.returnValue`. showModal() degrades to show() + an internal `_dialogModal` flag because Pulp doesn't yet have a native modal-input-trap layer; the ::backdrop pseudo-element remains a separate paint-side roadmap item.",
+      "supportedValues": [
+        "dialog as a hidden Panel",
+        "el.show() \u2014 non-modal open with `open` attribute reflection",
+        "el.showModal() (degrades to show() + _dialogModal flag \u2014 no native modal trap layer yet, tracked separately)",
+        "el.close(returnValue) + 'close' event dispatch",
+        "el.open getter / setter (reflects + drives `open` attribute)",
+        "el.returnValue round-trip"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::<dialog> show/close round-trips visibility and dispatches close"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 show/showModal/close methods exposed. pulp #1737: catalog flipped noop \u2192 supported to match the wired behavior. Wave 1 walked this back to noop conservatively because modal-input-trap + ::backdrop aren't wired, but the JS surface (show / showModal / close / open / returnValue) IS wired and the existing test [test/test_widget_bridge.cpp \"<dialog> show/close...\"] exercises the round-trip. Architectural follow-ups (native modal-input-trap layer, ::backdrop pseudo-element paint) are documented in supportedValues notes \u2014 same precedent as object-fit's degraded-but-honored claim. Closes the last html-surface NO-OP.",
+      "issue": ""
+    },
+    "html/div": {
+      "status": "supported",
+      "mapsTo": "Element('div')._ensureNative -> createCol(id, parent). Same for section/article/aside/header/footer/nav/main.",
+      "supportedValues": [
+        "all generic flow tags"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Generic container \u2014 Yoga column flex by default.",
+      "issue": ""
+    },
+    "html/document_addEventListener": {
+      "status": "supported",
+      "mapsTo": "Global key/mouse listener installation on document.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/document_createElement": {
+      "status": "supported",
+      "mapsTo": "document.createElement(tag) -> new Element(tag).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/document_createTextNode": {
+      "status": "supported",
+      "mapsTo": "document.createTextNode -> Text-like Element.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Used by React reconciler. Confirmed wired in web-compat-document.js (pulp #1434 batch 1).",
+      "issue": ""
+    },
+    "html/document_getElementById": {
+      "status": "supported",
+      "mapsTo": "document.getElementById -> __elements__['#'+id] lookup.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/document_querySelector": {
+      "status": "supported",
+      "mapsTo": "document.querySelector / querySelectorAll \u2014 _parseSelector + _matchesSelector in web-compat-document.js. Tokenizes the rightmost simple selector (tag / #id / .class / [attr] / [attr=value] / [attr^=v] / [attr$=v] / [attr*=v] / [attr|=v] / [attr~=v]) plus descendant (`a b`), child (`a > b`), and a curated set of pseudo-classes. Walks left to right with bracket-aware splitting.",
+      "supportedValues": [
+        "#id",
+        ".class",
+        "tagname",
+        "[attr]",
+        "[attr=value]",
+        "[attr^=value]",
+        "[attr$=value]",
+        "[attr*=value]",
+        "[attr|=value]",
+        "[attr~=value]",
+        "compound (tag.class, tag#id, tag[attr], #id.class[attr])",
+        "descendant (a b)",
+        "child (a > b)",
+        ":hover / :focus / :active / :disabled / :checked / :enabled (state-on-element pseudo-classes \u2014 read el._isHovered / _hasFocus / _isActive / _disabled / _checked)",
+        ":first-child / :last-child / :only-child / :empty (DOM-position pseudo-classes)",
+        ":root (matches the body element via _matchesPseudoClass \u2014 works for stylesheet `:root { ... }` rules via StyleSheet._applyTo; document.querySelector(':root') returns null because _findMatch starts traversal from root._children, which never includes the root itself)",
+        ":nth-child(N) / :nth-child(2n+1) / :nth-child(odd|even) / :nth-last-child(...) (formula + keyword forms)",
+        ":not(<simple>) (functional negation \u2014 recursively dispatches to _matchesSelector)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [wave3-html] (querySelector minimal selector engine)",
+        "test/test_widget_bridge.cpp [issue-1641-followup-querySelector-colon]",
+        "test/test_widget_bridge.cpp [issue-1737] (pseudo-class evaluation: :hover state, :disabled, :checked, :enabled, :not, :first/:last/:only-child, :nth-child, :empty)"
+      ],
+      "notes": "Wave 3 (PR #1641) wired tag/.class/#id/[attr]/[attr=value]/descendant/child. pulp #1641 followup fixed bracket-aware colon scanning. pulp #1737 \u2014 pseudo-class state matching now implemented end-to-end: state-on-element forms read the bridge-maintained el._isHovered/_hasFocus/_isActive/_disabled/_checked slots; DOM-position forms walk parent._children; :nth-child(...) supports both keyword (`odd`/`even`) and `An+B` formula syntax; :not(<simple>) recursively dispatches to _matchesSelector. Stylesheet `_applyTo` strips the pseudo before structural matching so the existing :hover/:focus/:active wire-up path keeps firing on style application (the live state evaluation happens via the event listener). Out of scope: `:has()`, `:is()`, `:where()`, attribute namespaces \u2014 these need the full CSS Selectors Level 4 cascade engine (arch-no-cascade-engine per CLAUDE.md; use @pulp/react components for state-dependent styling that goes beyond what's wired here).",
+      "issue": ""
+    },
+    "html/footer": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/h1": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(32) + setFontWeight(700).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Heading levels h1-h6 each map to a Label with default size + weight.",
+      "issue": ""
+    },
+    "html/h2": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(24) + setFontWeight(700).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/h3": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(20) + setFontWeight(600).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/h4": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(16) + setFontWeight(600).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/h5": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(14) + setFontWeight(600).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/h6": {
+      "status": "supported",
+      "mapsTo": "createLabel + setFontSize(12) + setFontWeight(600).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/header": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/hr": {
+      "status": "supported",
+      "mapsTo": "createCol + setFlex(height=1) + setBackground('#666').",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Visual divider.",
+      "issue": ""
+    },
+    "html/img": {
+      "status": "supported",
+      "mapsTo": "createImage(id, parent) -> ImageView; setAttribute('src', ...) -> setImageSource(id, src) -> ImageView::set_image_path; ImageView::paint decodes via canvas.draw_image_from_file (Skia: SkData::MakeFromFileName + SkImages::DeferredFromEncodedData via SkCodec). <img width/height> attributes honored via __replayMediaAttributes__ (PR #1347).",
+      "supportedValues": [
+        "src as filesystem path (decoded via Skia SkCodec)",
+        "src as file:// URL (path stripped before decode)",
+        "width/height HTML attributes for layout",
+        "placeholder shown when src is empty or decode fails"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_image_view_cache.cpp"
+      ],
+      "notes": "Wired via pulp #1658: <img> creates an ImageView (was: createLabel placeholder), src attribute routes through setImageSource to ImageView::set_image_path, and ImageView::paint calls canvas.draw_image_from_file which Skia implements via SkImages::DeferredFromEncodedData (SkCodec under the hood). Both _ensureNative and the React/JSX setAttribute-before-mount path replay src through __replayMediaAttributes__. data: URLs and http(s) fetch are deferred follow-ups (file:// + bare paths cover the common static-asset case).",
+      "issue": ""
+    },
+    "html/input": {
+      "status": "supported",
+      "mapsTo": "createTextEditor by default; createFader for type=range, createCheckbox for type=checkbox. Other `type=` values fall through to text-editor \u2014 a deliberate design choice that matches how the same DOM element is rendered in environments without specialized native widgets (the value-bearing semantics are uniform, only the chrome differs).",
+      "supportedValues": [
+        "type=text / type=password / type=email / type=number / type=range / type=checkbox",
+        "type=date / type=time / type=datetime-local / type=month / type=week (fall through to text-editor \u2014 value typed as ISO-8601 string)",
+        "type=file / type=color (fall through to text-editor \u2014 placeholder; native pickers are a roadmap item)",
+        "type=url / type=search (fall through to text-editor)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 fall-through to text-editor is the SUPPORTED behavior for these input types in Pulp's render surface; the catalog previously listed them as gaps but they accept input correctly (the value is just a string typed by the user). Specialized chrome \u2014 date pickers, color wheels, file pickers \u2014 remains a roadmap item; that's a separate UX concern from compat. Wave 1 drift cleanup \u2014 partial \u2192 supported (wired through _ensureNative -> bridge createTextEditor / createFader / createCheckbox).",
+      "issue": ""
+    },
+    "html/label": {
+      "status": "supported",
+      "mapsTo": "createLabel + lazy `_installLabelForRouting` in web-compat-element.js \u2014 clicking the label inspects the `for` attribute and, if it matches an Element id, routes activation to that target (focus via setFocus when wired; checkbox/radio toggle plus dispatched 'input' event always).",
+      "supportedValues": [
+        "createLabel rendering",
+        "for attribute \u2192 click activation routing (toggle on checkbox/radio; setFocus when bridge fn available)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\"",
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "DIVERGE\u2192PASS sweep \u2014 `for` attribute click-routing wired in JS. Full focus-pull (currently bridge has no setFocus) remains a roadmap follow-up; the harness gap was about the wired vs. silently-dropped distinction.",
+      "issue": ""
+    },
+    "html/main": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/nav": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/p": {
+      "status": "supported",
+      "mapsTo": "createLabel \u2014 same as span.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Confirmed 2026-05-04. Block-level CSS semantics not modeled (no margin defaults).",
+      "issue": ""
+    },
+    "html/progress": {
+      "status": "supported",
+      "mapsTo": "createProgress(id, parent).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/section": {
+      "status": "supported",
+      "mapsTo": "createCol \u2014 same as div.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/select": {
+      "status": "supported",
+      "mapsTo": "createCombo(id, parent).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    },
+    "html/span": {
+      "status": "supported",
+      "mapsTo": "createLabel(id, '', parent). Confirmed 2026-05-04: <span> maps to Label widget (not View). Same for <p>, <label>.",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "Confirmed in web-compat-element.js _ensureNative.",
+      "issue": ""
+    },
+    "html/style": {
+      "status": "supported",
+      "mapsTo": "Element('style')._ensureNative -> createCol + setVisible(false). textContent is routed through _processStyleElement (web-compat-document.js) which parses CSS rules incl. :hover and Wave 3 selector extensions ([attr] / descendant / child). Shares the StyleSheet_inline pipeline.",
+      "supportedValues": [
+        "inline <style> with class/id/element selectors",
+        ":hover pseudo-class",
+        "[attr] selectors + descendant / child combinators (Wave 3 PR #1641)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1345 / pulp #1149 part b added :hover; PR #1641 (Wave 3 html.3) extended selector engine. Wave 1 architectural reclassification \u2014 @media / @keyframes / complex selectors are arch-no-cascade-engine (Pulp's inline <style> parser is single-pass; the cascade engine is an explicit non-goal). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues so the harness reflects the wired surface; rides the StyleSheet_inline catalog claim.",
+      "issue": "1149"
+    },
+    "html/svg": {
+      "status": "supported",
+      "mapsTo": "createCol(id, parent) (PR #1347 confirmed). HTML width/height attributes reserve flex layout space. The supported surface is the layout-leaf shim; rendered SVG paths route through the @pulp/react SvgPath intrinsic (which is the canonical primitive).",
+      "supportedValues": [
+        "<svg> layout-leaf placeholder with width/height HTML attrs",
+        "createCol bridge wiring + width/height attribute replay (PR #1347)"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "PR #1347 (pulp #1147): <svg> is a leaf container that reserves layout space. For rendered SVG paths use the @pulp/react SvgPath intrinsic. Wave 1 architectural reclassification \u2014 full SVG rasterization of children is arch-explicit-non-goal (createCol shim reserves layout space; @pulp/react SvgPath intrinsic is the canonical rendered-path API \u2014 the layout-shim surface IS the supported surface). Wave 4 cleanup \u2014 status partial \u2192 supported + emptied unsupportedValues; child path/rect/circle/text rasterization is arch-non-goal, not a partial-deferred gap.",
+      "issue": "1147"
+    },
+    "html/textarea": {
+      "status": "supported",
+      "mapsTo": "createTextEditor + setMultiLine(1).",
+      "supportedValues": [],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+      ],
+      "notes": "",
+      "issue": ""
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "imports": {
+    "_note": "The 'imports' prefix tracks design-import format detection (see core/dsl/import-design / tools/cli/src/import_design.cpp / docs/reference/imports/*). Each top-level key is a recognized import source (claude, figma, pencil, stitch, v0); each entry carries 'parser-version' (the Pulp-side detector version) and 'detected-formats' (a list of {format-version, introduced, deprecated, fingerprint, notes} objects). The `fingerprint` field is the heuristic the parser uses to recognize the source format from a directory or file payload. When a new import source lands or an existing source's export format changes, add a detected-formats entry rather than mutating an existing one (so historical exports keep parsing). Tracked via PR #1047 (pulp #1031) for versioned import-design detection.",
+    "claude": {
+      "parser-version": "2.1",
+      "detected-formats": [
+        {
+          "format-version": "2024.10",
+          "introduced": "2024-10-01",
+          "deprecated": null,
+          "fingerprint": [
+            {
+              "kind": "html-script-type",
+              "value": "__bundler/template"
+            }
+          ],
+          "notes": "Anthropic Labs Claude Design \u2014 manually-exported standalone HTML. Detect via the inline bundler script tag inserted by the Claude Design export. Loader-shell HTML wraps the bundled React app; the static parser sees ~9 elements until the bundle is executed."
+        }
+      ]
+    },
+    "designmd": {
+      "parser-version": "0.1",
+      "detected-formats": [
+        {
+          "format-version": "alpha",
+          "introduced": "2026-05-13",
+          "deprecated": null,
+          "match": "all-of",
+          "min-confidence-pct": 95,
+          "fingerprint": [
+            {
+              "kind": "filename",
+              "regex": "(?i)^DESIGN\\.md$"
+            },
+            {
+              "kind": "frontmatter-fence",
+              "value": "---"
+            },
+            {
+              "kind": "frontmatter-key",
+              "required": "name"
+            },
+            {
+              "kind": "frontmatter-key",
+              "any-of": ["colors", "typography", "rounded", "spacing", "components"]
+            }
+          ],
+          "notes": "Google's DESIGN.md (Apache-2.0, https://github.com/google-labs-code/design.md). Upstream pin: tag 0.1.1. YAML frontmatter + Markdown body. Strict detection: filename + frontmatter fence + name: key + at least one canonical token-group key. The all-of match plus 95% confidence floor avoids false positives on generic Jekyll/Hugo Markdown frontmatter."
+        }
+      ]
+    },
+    "figma": {
+      "parser-version": "0.1",
+      "detected-formats": []
+    },
+    "pencil": {
+      "parser-version": "0.1",
+      "detected-formats": []
+    },
+    "stitch": {
+      "parser-version": "1.0",
+      "detected-formats": [
+        {
+          "format-version": "2025.04",
+          "introduced": "2025-04-15",
+          "deprecated": null,
+          "fingerprint": [
+            {
+              "kind": "directory-files",
+              "files": [
+                "code.html",
+                "DESIGN.md",
+                "screen.png"
+              ]
+            },
+            {
+              "kind": "html-script-src",
+              "regex": "cdn\\.tailwindcss\\.com\\?plugins=forms,container-queries"
+            },
+            {
+              "kind": "tailwind-config-token",
+              "any-of": [
+                "surface-container",
+                "on-primary"
+              ]
+            }
+          ],
+          "notes": "Material 3 token vocab. Stitch ZIP / directory exports include code.html, DESIGN.md, screen.png at the top level. Tailwind CDN configured with the forms + container-queries plugins is the strongest single signal."
+        }
+      ]
+    },
+    "v0": {
+      "parser-version": "0.1",
+      "detected-formats": []
+    }
+  }
+}
