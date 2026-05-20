@@ -164,6 +164,16 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(result["should_tag"], 1)
 
+    def test_valid_head_with_malformed_tag_is_treated_as_first_release(self):
+        result = ard.decide(
+            head_version="0.2.0",
+            tag_version="not-a-semver",
+            bump_commit_has_skip=False,
+            surface="plugin",
+        )
+        self.assertEqual(result["should_tag"], 1)
+        self.assertIn("vnot-a-semver", result["reason"])
+
     # ── Empty head version ───────────────────────────────────────────────
     def test_missing_head_version_does_not_tag(self):
         """Defensive: if extraction failed, don't tag."""
@@ -282,6 +292,17 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(result["should_tag"], 0)
         self.assertEqual(result["surface"], "sdk")
         self.assertIn("no sdk version", result["reason"].lower())
+
+    def test_cli_empty_tag_version_tags_valid_head(self):
+        rc, result = self.run_main(
+            "--head-version", "1.0.0",
+            "--tag-version", "",
+            "--surface", "sdk",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["should_tag"], 1)
+        self.assertIn("v<none>", result["reason"])
 
     def test_cli_rejects_non_binary_skip_choice(self):
         stderr = io.StringIO()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,11 @@ class PathMatchingTests(unittest.TestCase):
         self.assertTrue(vps._match_recursive("docs/reference/imports/**", "docs/reference/imports"))
         self.assertTrue(vps._match_recursive("docs/reference/imports/**", "docs/reference/imports/designmd/ref.md"))
         self.assertFalse(vps._match_recursive("docs/reference/imports/**", "docs/reference/imports-extra/ref.md"))
+
+    def test_recursive_match_requires_remaining_suffix(self):
+        self.assertFalse(vps._match_recursive("tools/**/fixture.json", "tools/import-design"))
+        self.assertFalse(vps._match_recursive("tools/import-design/*", "tools/import-design"))
+        self.assertFalse(vps._match_recursive("tools/import-design/*.cpp", "tools/import-design/foo.ts"))
 
 
 class ClassifyTests(unittest.TestCase):
@@ -179,6 +185,52 @@ class CliTests(unittest.TestCase):
                 ["tools/import-design/foo.cpp", "core/audio/src/buffer.cpp"],
             )
         run.assert_called_once_with(["diff", "--name-only", "origin/main...HEAD"])
+
+    def test_run_git_delegates_to_subprocess(self):
+        completed = subprocess.CompletedProcess(
+            ["git"], 0, stdout="a\nb\n", stderr="",
+        )
+        with mock.patch.object(vps.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(vps._run_git(["status", "--short"]), "a\nb\n")
+        run.assert_called_once_with(
+            ["git", "status", "--short"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_default_git_path_plain_output(self):
+        with mock.patch.object(
+            vps,
+            "changed_paths_from_git",
+            return_value=["tools/import-design/foo.cpp"],
+        ) as changed:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = vps.main(["--base", "upstream/main"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "parser")
+        changed.assert_called_once_with("upstream/main")
+
+    def test_paths_from_missing_file_returns_two(self):
+        stderr = io.StringIO()
+        with redirect_stdout(io.StringIO()):
+            with mock.patch.object(sys, "stderr", stderr):
+                rc = vps.main(["--paths-from", "/definitely/missing/paths.txt"])
+        self.assertEqual(rc, 2)
+        self.assertIn("validation_profile_select:", stderr.getvalue())
+
+    def test_script_entrypoint_exits_with_main_status(self):
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", [str(Path(__file__).parent / "validation_profile_select.py"),
+                                             "--paths-from", "-", "--json"]), \
+             mock.patch.object(sys, "stdin", io.StringIO("tools/import-design/foo.cpp\n")), \
+             redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(Path(__file__).parent / "validation_profile_select.py"),
+                               run_name="__main__")
+        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["profile"], "parser")
 
 
 if __name__ == "__main__":

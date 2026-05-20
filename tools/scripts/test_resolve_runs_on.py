@@ -19,6 +19,9 @@ Run with:
 from __future__ import annotations
 
 import json
+import contextlib
+import importlib.util
+import io
 import os
 import re
 import subprocess
@@ -28,6 +31,11 @@ from pathlib import Path
 SCRIPT = Path(__file__).parent / "resolve_runs_on.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
+
+_SPEC = importlib.util.spec_from_file_location("resolve_runs_on_under_test", SCRIPT)
+resolver = importlib.util.module_from_spec(_SPEC)
+assert _SPEC.loader is not None
+_SPEC.loader.exec_module(resolver)
 
 
 def _build_workflow_runner_provider_default() -> str:
@@ -170,6 +178,18 @@ def test_provider_namespace_missing_env_errors() -> None:
             f"stderr missing setting name: {err!r}")
 
 
+def test_provider_namespace_missing_env_uses_env_name_without_setting_name() -> None:
+    code, _, err = _run([
+        "--target-name", "Linux (x64)",
+        "--mode", "provider",
+        "--github-hosted-label", "ubuntu-latest",
+        "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
+    ], env_extra={"REQUESTED_PROVIDER": "namespace"}, expect_error=True)
+    _assert(code == 1, "expected error exit")
+    _assert("NAMESPACE_LINUX_RUNS_ON_JSON is not set" in err,
+            f"stderr missing env fallback name: {err!r}")
+
+
 def test_provider_explicit_beats_everything() -> None:
     _, out, _ = _run([
         "--target-name", "Linux (x64)",
@@ -188,6 +208,21 @@ def test_provider_explicit_beats_everything() -> None:
             f"explicit selector did not win: {out!r}")
 
 
+def test_provider_uses_custom_requested_provider_env() -> None:
+    _, out, _ = _run([
+        "--target-name", "Linux (x64)",
+        "--mode", "provider",
+        "--requested-provider-env", "CUSTOM_PROVIDER",
+        "--github-hosted-label", "ubuntu-latest",
+        "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
+    ], env_extra={
+        "CUSTOM_PROVIDER": "namespace",
+        "NAMESPACE_LINUX_RUNS_ON_JSON": '"namespace-linux"',
+    })
+    _assert(json.loads(out) == "namespace-linux",
+            f"custom provider env was ignored: {out!r}")
+
+
 def test_optional_namespace_no_env_returns_empty() -> None:
     """macOS path: if provider is not namespace and no selector, emit ''."""
     _, out, _ = _run([
@@ -197,6 +232,25 @@ def test_optional_namespace_no_env_returns_empty() -> None:
         "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
     ], env_extra={"REQUESTED_PROVIDER": "github-hosted"})
     _assert(out == "", f"expected empty stdout, got {out!r}")
+
+
+def test_optional_namespace_provider_missing_env_returns_empty() -> None:
+    _, out, _ = _run([
+        "--target-name", "macOS (ARM64)",
+        "--mode", "optional-namespace",
+        "--namespace-env", "NAMESPACE_MACOS_RUNS_ON_JSON",
+    ], env_extra={"REQUESTED_PROVIDER": "namespace"})
+    _assert(out == "", f"expected empty stdout for unset namespace env, got {out!r}")
+
+
+def test_optional_namespace_rejects_unsupported_provider() -> None:
+    code, _, err = _run([
+        "--target-name", "macOS (ARM64)",
+        "--mode", "optional-namespace",
+    ], env_extra={"REQUESTED_PROVIDER": "cloud"}, expect_error=True)
+    _assert(code == 1, "expected error exit")
+    _assert("Unsupported runner_provider" in err,
+            f"stderr missing unsupported-provider error: {err!r}")
 
 
 def test_optional_namespace_with_explicit_routes_under_namespace_provider() -> None:
@@ -283,6 +337,18 @@ def test_provider_local_missing_env_errors() -> None:
             f"stderr missing setting name: {err!r}")
 
 
+def test_provider_local_missing_env_uses_env_name_without_setting_name() -> None:
+    code, _, err = _run([
+        "--target-name", "macOS (ARM64)",
+        "--mode", "provider",
+        "--github-hosted-label", "macos-15",
+        "--local-env", "LOCAL_MACOS_RUNS_ON_JSON",
+    ], env_extra={"REQUESTED_PROVIDER": "local"}, expect_error=True)
+    _assert(code == 1, "expected error exit")
+    _assert("LOCAL_MACOS_RUNS_ON_JSON is not set" in err,
+            f"stderr missing env fallback name: {err!r}")
+
+
 # ── default mode (sanitizers) ───────────────────────────────────────────
 
 
@@ -342,6 +408,16 @@ def test_default_mode_ubuntu_default() -> None:
             f"expected default 'ubuntu-24.04', got {out!r}")
 
 
+def test_default_mode_ignores_unsupported_requested_provider() -> None:
+    _, out, _ = _run([
+        "--target-name", "TSan (macOS ARM64)",
+        "--mode", "default",
+        "--default-label", "macos-14",
+    ], env_extra={"REQUESTED_PROVIDER": "bogus"})
+    _assert(json.loads(out) == "macos-14",
+            f"default mode unexpectedly consulted provider: {out!r}")
+
+
 # ── argument validation ───────────────────────────────────────────────────
 
 
@@ -376,6 +452,28 @@ def test_provider_mode_rejects_unsupported_provider() -> None:
             f"stderr missing unsupported-provider error: {err!r}")
 
 
+def test_provider_resolver_function_rejects_unsupported_provider_directly() -> None:
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        try:
+            resolver.resolve_provider_mode(
+                target_name="Linux (x64)",
+                requested="unsupported",
+                github_hosted_label="ubuntu-latest",
+                explicit_env=None,
+                namespace_env=None,
+                namespace_setting_name=None,
+                local_env=None,
+                local_setting_name=None,
+            )
+        except SystemExit as exc:
+            _assert(exc.code == 1, f"unexpected exit code: {exc.code!r}")
+        else:
+            raise AssertionError("expected SystemExit")
+    _assert("Unsupported runner_provider: unsupported" in stderr.getvalue(),
+            f"stderr missing direct unsupported-provider error: {stderr.getvalue()!r}")
+
+
 # ── JSON validation ─────────────────────────────────────────────────────
 
 
@@ -390,6 +488,23 @@ def test_invalid_json_errors() -> None:
     _assert("TSan" in err, f"stderr missing target name: {err!r}")
 
 
+def test_explicit_invalid_json_errors_before_provider_selection() -> None:
+    code, _, err = _run([
+        "--target-name", "Linux (x64)",
+        "--mode", "provider",
+        "--github-hosted-label", "ubuntu-latest",
+        "--explicit-env", "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
+        "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
+    ], env_extra={
+        "REQUESTED_PROVIDER": "namespace",
+        "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "{bad-json",
+        "NAMESPACE_LINUX_RUNS_ON_JSON": '"namespace-linux"',
+    }, expect_error=True)
+    _assert(code == 1, "expected error exit")
+    _assert("Linux (x64) runner selector JSON is not valid" in err,
+            f"stderr missing explicit selector error: {err!r}")
+
+
 def test_non_string_or_list_json_errors() -> None:
     code, _, err = _run([
         "--target-name", "Linux (x64)",
@@ -398,6 +513,23 @@ def test_non_string_or_list_json_errors() -> None:
         "--default-label", "ubuntu-24.04",
     ], env_extra={"LINUX_RUNS_ON_JSON": "42"}, expect_error=True)
     _assert(code == 1, "expected error exit")
+
+
+def test_script_entrypoint_success() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable, str(SCRIPT),
+            "--target-name", "Linux (x64)",
+            "--mode", "default",
+            "--default-label", "ubuntu-24.04",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    _assert(proc.returncode == 0, f"unexpected rc: {proc.stderr!r}")
+    _assert(json.loads(proc.stdout) == "ubuntu-24.04",
+            f"unexpected script output: {proc.stdout!r}")
 
 
 def _all_tests() -> list:

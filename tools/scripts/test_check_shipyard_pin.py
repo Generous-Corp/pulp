@@ -8,6 +8,9 @@ exact current pin or the exact workflow inventory.
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import os
 import pathlib
 import subprocess
@@ -18,6 +21,14 @@ import unittest.mock as mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "tools" / "scripts" / "check_shipyard_pin.py"
+
+
+def load_script_module():
+    spec = importlib.util.spec_from_file_location("check_shipyard_pin_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_check_in_fake_repo(tmp: pathlib.Path) -> subprocess.CompletedProcess:
@@ -109,6 +120,55 @@ class ShipyardPinCheckTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2)
             self.assertIn("does not exist", r.stderr)
 
+    def test_malformed_pin_file_is_config_error(self) -> None:
+        import tempfile
+        csp = load_script_module()
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            (tmp / "tools").mkdir(parents=True)
+            (tmp / "tools" / "shipyard.toml").write_text(
+                "not_version = \"v1.2.3\"\n", encoding="utf-8",
+            )
+            csp.PIN_FILE = tmp / "tools" / "shipyard.toml"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as cm:
+                    csp.read_pinned_version()
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("could not find", stderr.getvalue())
+
+    def test_find_workflow_versions_returns_empty_without_workflows_dir(self) -> None:
+        import tempfile
+        csp = load_script_module()
+        with tempfile.TemporaryDirectory() as td:
+            csp.WORKFLOWS_DIR = pathlib.Path(td) / "missing-workflows"
+            self.assertEqual(csp.find_workflow_versions(), [])
+
+    def test_find_workflow_versions_sorts_and_extracts_multiple_pins(self) -> None:
+        import tempfile
+        csp = load_script_module()
+        with tempfile.TemporaryDirectory() as td:
+            wfdir = pathlib.Path(td) / ".github" / "workflows"
+            wfdir.mkdir(parents=True)
+            (wfdir / "z.yml").write_text(
+                "env:\n  SHIPYARD_VERSION: \"v2.0.0\"\n", encoding="utf-8",
+            )
+            (wfdir / "a.yml").write_text(
+                "env:\n  SHIPYARD_VERSION: 1.2.3\n  OTHER: x\n"
+                "jobs:\n  sync:\n    env:\n      SHIPYARD_VERSION: \"1.2.4\"\n",
+                encoding="utf-8",
+            )
+            (wfdir / "ignored.yaml").write_text(
+                "env:\n  SHIPYARD_VERSION: \"9.9.9\"\n", encoding="utf-8",
+            )
+            csp.WORKFLOWS_DIR = wfdir
+            found = [(path.name, version) for path, version in csp.find_workflow_versions()]
+            self.assertEqual(found, [
+                ("a.yml", "1.2.3"),
+                ("a.yml", "1.2.4"),
+                ("z.yml", "2.0.0"),
+            ])
+
     def test_no_workflows_passes_quietly(self) -> None:
         """If the repo has the pin file but no workflows declare
         SHIPYARD_VERSION, there is no drift to report. Pass."""
@@ -126,6 +186,23 @@ class ShipyardPinCheckTests(unittest.TestCase):
             )
             r = run_check_in_fake_repo(tmp)
             self.assertEqual(r.returncode, 0)
+
+    def test_no_workflows_dir_with_no_required_files_is_configured_noop(self) -> None:
+        import tempfile
+        csp = load_script_module()
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            (tmp / "tools").mkdir(parents=True)
+            (tmp / "tools" / "shipyard.toml").write_text(
+                'version = "v1.2.3"\n', encoding="utf-8",
+            )
+            csp.REPO_ROOT = tmp
+            csp.PIN_FILE = tmp / "tools" / "shipyard.toml"
+            csp.WORKFLOWS_DIR = tmp / ".github" / "workflows"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(csp.main(), 0)
+            self.assertIn("No workflows declare SHIPYARD_VERSION", stderr.getvalue())
 
     def test_required_workflow_exists_but_missing_pin_is_failure(self) -> None:
         """Codex P1 (PR #2131): a required workflow that exists but

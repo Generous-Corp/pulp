@@ -54,6 +54,12 @@ class SkipSafeTests(unittest.TestCase):
                      "docs/migrations/v2-upgrade.md"):
             self.assertFalse(classify.is_skip_safe(path), path)
 
+    def test_docs_migrations_prefix_boundary(self) -> None:
+        # Only the real docs/migrations/ tree is generated into C++.
+        self.assertTrue(classify.is_skip_safe("docs/migrations-guide.md"))
+        self.assertTrue(classify.is_skip_safe("docs/migrations_old/foo.md"))
+        self.assertFalse(classify.is_skip_safe("docs/migrations/foo.md"))
+
     def test_build_inputs_are_NOT_skip_safe(self) -> None:
         for path in ("core/signal/src/fft.cpp",
                      "core/view/include/pulp/view/view.hpp",
@@ -161,6 +167,22 @@ class DiffModeTests(unittest.TestCase):
         self.assertIsNone(files)
         self.assertIn("[classify] git diff failed (exit 128)", stderr.getvalue())
 
+    def test_main_diff_empty_output_is_fail_closed_json(self) -> None:
+        completed = subprocess.CompletedProcess(["git"], 0, stdout="\n\n", stderr="")
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with mock.patch.object(classify.subprocess, "run", return_value=completed):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = classify.main(["--mode=diff", "--json"])
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["native_build_required"])
+        self.assertEqual(payload["changed_file_count"], 0)
+        self.assertIn("no changed files", payload["reason"])
+        self.assertIn("native_build_required=true", stderr.getvalue())
+
     def test_main_diff_failure_is_json_fail_closed(self) -> None:
         completed = subprocess.CompletedProcess(
             ["git"],
@@ -199,10 +221,27 @@ class CliTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('"native_build_required": false', r.stdout)
 
+    def test_files_mode_docs_only_reports_reason_and_count(self) -> None:
+        r = self._run("--mode=files", "--json", "README.md", "docs/x.md")
+        payload = json.loads(r.stdout)
+        self.assertEqual(payload["changed_file_count"], 2)
+        self.assertFalse(payload["native_build_required"])
+        self.assertIn("skip-safe", payload["reason"])
+        self.assertIn("native_build_required=false", r.stderr)
+
     def test_files_mode_with_code(self) -> None:
         r = self._run("--mode=files", "--json", "core/signal/src/fft.cpp")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('"native_build_required": true', r.stdout)
+
+    def test_files_mode_truncates_long_native_input_reason(self) -> None:
+        files = [f"core/signal/src/file_{i}.cpp" for i in range(10)]
+        r = self._run("--mode=files", "--json", *files)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(r.stdout)
+        self.assertTrue(payload["native_build_required"])
+        self.assertIn("file_0.cpp", payload["reason"])
+        self.assertIn("(+2 more)", payload["reason"])
 
     def test_files_mode_empty_is_failclosed(self) -> None:
         # --mode=files with no files -> empty -> fail-closed -> true.
@@ -223,6 +262,27 @@ class CliTests(unittest.TestCase):
             self.assertIn("native_build_required=false", content)
         finally:
             os.unlink(out_path)
+
+    def test_writes_github_output_appends_true_for_code(self) -> None:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w+", suffix=".txt",
+                                         delete=False) as fh:
+            fh.write("existing=1\n")
+            out_path = fh.name
+        try:
+            r = self._run("--mode=files", "core/view/src/widget.cpp",
+                          env_extra={"GITHUB_OUTPUT": out_path})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            content = Path(out_path).read_text()
+            self.assertIn("existing=1\n", content)
+            self.assertTrue(content.endswith("native_build_required=true\n"))
+        finally:
+            os.unlink(out_path)
+
+    def test_invalid_mode_exits_usage_error(self) -> None:
+        r = self._run("--mode=bogus")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
 
 
 if __name__ == "__main__":
