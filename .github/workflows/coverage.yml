@@ -318,6 +318,19 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      - name: Fetch prebuilt Skia (macOS)
+        # scripts/run_coverage.sh configures with examples enabled. The
+        # design-tool example requires Skia when GPU support is enabled,
+        # and fresh macOS coverage checkouts do not have the LFS-declared
+        # Skia binaries on disk. Reuse the same pinned, sha256-verified
+        # fetch path as build.yml so coverage can configure on the current
+        # self-hosted macOS runners.
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64
+
       - name: Run coverage suite
         # Coverage never fails the run — thresholds come later per
         # the #290 hardening initiative. `continue-on-error` combined
