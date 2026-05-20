@@ -1,0 +1,11 @@
+# Pulp macOS CI host dependencies.
+# Consumed by tools/ci/bootstrap-macos-host.sh via `brew bundle`.
+# Keep this minimal — toolchain + CI essentials only.
+
+brew "cmake"      # build system generator
+brew "ninja"      # build backend
+brew "git-lfs"    # large-file assets (Skia binaries, fixtures)
+brew "gh"         # GitHub CLI — runner registration, CI queries
+brew "ccache"     # compiler cache (default Pulp compiler launcher)
+brew "sccache"    # alternative compiler cache (Phase 2 A/B only)
+brew "jq"         # JSON wrangling in CI helper scripts
