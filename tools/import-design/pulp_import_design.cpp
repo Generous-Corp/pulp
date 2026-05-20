@@ -16,11 +16,14 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <cstring>
 #include <filesystem>
 #include <chrono>
+#include <limits>
 #include <stdexcept>
 #include <system_error>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 using namespace pulp::view;
@@ -183,6 +186,71 @@ bool fetch_url_to_file(const std::string& url, const fs::path& output_path) {
     return true;
 }
 
+const char* diagnostic_severity_name(ImportDiagnosticSeverity severity) {
+    switch (severity) {
+        case ImportDiagnosticSeverity::info: return "info";
+        case ImportDiagnosticSeverity::warning: return "warning";
+        case ImportDiagnosticSeverity::error: return "error";
+    }
+    return "warning";
+}
+
+bool parse_positive_int_arg(const char* flag, const std::string& value, int& out) {
+    try {
+        size_t parsed_len = 0;
+        const long parsed = std::stol(value, &parsed_len, 10);
+        if (parsed_len != value.size() || parsed <= 0
+            || parsed > std::numeric_limits<int>::max()) {
+            std::cerr << "Error: " << flag << " requires a positive integer value\n";
+            return false;
+        }
+        out = static_cast<int>(parsed);
+        return true;
+    } catch (...) {
+        std::cerr << "Error: " << flag << " requires a positive integer value\n";
+        return false;
+    }
+}
+
+bool parse_asset_hash_arg(const std::string& value,
+                          std::unordered_map<std::string, std::string>& expected_hash_by_uri) {
+    const auto sep = value.find('=');
+    if (sep == std::string::npos || sep == 0 || sep + 1 >= value.size()) {
+        std::cerr << "Error: --asset-hash requires <uri=sha256-hex>\n";
+        return false;
+    }
+    auto uri = value.substr(0, sep);
+    auto hash = value.substr(sep + 1);
+    constexpr std::string_view prefix = "sha256:";
+    if (hash.rfind(prefix, 0) == 0)
+        hash = hash.substr(prefix.size());
+    expected_hash_by_uri[std::move(uri)] = std::move(hash);
+    return true;
+}
+
+void print_asset_manifest_diagnostics(const IRAssetManifest& manifest) {
+    for (const auto& asset : manifest.assets) {
+        for (const auto& diagnostic : asset.diagnostics) {
+            std::cerr << "[" << diagnostic_severity_name(diagnostic.severity)
+                      << "] " << diagnostic.code << " at "
+                      << (diagnostic.path.empty() ? asset.original_uri : diagnostic.path)
+                      << ": " << diagnostic.message << "\n";
+        }
+    }
+}
+
+bool has_blocking_asset_diagnostic(const IRAssetManifest& manifest) {
+    for (const auto& asset : manifest.assets) {
+        for (const auto& diagnostic : asset.diagnostics) {
+            if (diagnostic.severity == ImportDiagnosticSeverity::error
+                || diagnostic.code == "asset-network-fetch-disabled") {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 static void print_usage() {
@@ -205,11 +273,19 @@ static void print_usage() {
     std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Destination file for the primary artifact (default: ui.js)\n";
     std::cout << "  --emit {js|ir-json|cpp}\n";
-    std::cout << "                    Primary artifact kind (default: js; ir-json/cpp reserved)\n";
+    std::cout << "                    Primary artifact kind (default: js; cpp reserved)\n";
     std::cout << "  --mode {live|baked}\n";
     std::cout << "                    Runtime model (default: live; baked reserved for future imports)\n";
     std::cout << "  --snapshot-semantics {fail|warn|accept}\n";
     std::cout << "                    JSX baked snapshot policy (default: fail)\n";
+    std::cout << "  --allow-network-fetch\n";
+    std::cout << "                    Allow DesignIR asset-manifest HTTP fetches at import time\n";
+    std::cout << "  --asset-cache <path>\n";
+    std::cout << "                    Asset cache directory (default: PULP_IMPORT_ASSET_CACHE or user cache)\n";
+    std::cout << "  --asset-timeout-ms <ms>\n";
+    std::cout << "                    Per-request asset fetch timeout (default: 30000)\n";
+    std::cout << "  --asset-hash <uri=sha256>\n";
+    std::cout << "                    Expected asset content hash; may be repeated\n";
     std::cout << "  --tokens <path>   Output W3C token file (default: tokens.json)\n";
     std::cout << "  --dry-run         Show generated code without writing files\n";
     std::cout << "  --no-tokens       Skip token extraction\n";
@@ -332,6 +408,10 @@ int main(int argc, char* argv[]) {
     ArtifactEmit artifact_emit = ArtifactEmit::js;
     RuntimeMode runtime_mode = RuntimeMode::live;
     SnapshotSemantics snapshot_semantics = SnapshotSemantics::fail;
+    bool allow_network_fetch = false;
+    int asset_timeout_ms = 30000;
+    std::string asset_cache_dir;
+    std::unordered_map<std::string, std::string> expected_asset_hashes;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -445,6 +525,24 @@ int main(int argc, char* argv[]) {
                           << "' (expected fail, warn, or accept)\n";
                 return 2;
             }
+        } else if (std::strcmp(argv[i], "--allow-network-fetch") == 0) {
+            allow_network_fetch = true;
+        } else if (std::strcmp(argv[i], "--asset-cache") == 0 && i + 1 < argc) {
+            asset_cache_dir = argv[++i];
+        } else if (std::strcmp(argv[i], "--asset-timeout-ms") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --asset-timeout-ms requires a value\n";
+                return 2;
+            }
+            if (!parse_positive_int_arg("--asset-timeout-ms", argv[++i], asset_timeout_ms))
+                return 2;
+        } else if (std::strcmp(argv[i], "--asset-hash") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --asset-hash requires <uri=sha256-hex>\n";
+                return 2;
+            }
+            if (!parse_asset_hash_arg(argv[++i], expected_asset_hashes))
+                return 2;
         } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
             emit_classnames = false;
         } else if (std::strcmp(argv[i], "--shortcuts") == 0 && i + 1 < argc) {
@@ -627,10 +725,6 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    if (artifact_emit == ArtifactEmit::ir_json) {
-        std::cerr << "Error: --emit ir-json is reserved for the IR-v1 design-import implementation and is not implemented yet\n";
-        return 2;
-    }
     if (artifact_emit == ArtifactEmit::cpp) {
         std::cerr << "Error: --emit cpp is reserved for the baked C++ design-import implementation and is not implemented yet\n";
         return 2;
@@ -751,6 +845,36 @@ int main(int argc, char* argv[]) {
     // Store frame/screen selection metadata
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
+
+    DesignIrAssetOptions asset_options;
+    asset_options.allow_network_fetch = allow_network_fetch;
+    asset_options.network_timeout_ms = asset_timeout_ms;
+    if (!asset_cache_dir.empty()) asset_options.cache_directory = asset_cache_dir;
+    if (!input_file.empty()) {
+        std::error_code ec;
+        auto input_path = fs::weakly_canonical(fs::path(input_file), ec);
+        if (ec) input_path = fs::absolute(fs::path(input_file), ec);
+        asset_options.base_directory = ec ? fs::path(input_file).parent_path()
+                                          : input_path.parent_path();
+    }
+    asset_options.expected_hash_by_uri = expected_asset_hashes;
+    refresh_design_ir_asset_manifest(ir, asset_options);
+    print_asset_manifest_diagnostics(ir.asset_manifest);
+    if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+
+    if (artifact_emit == ArtifactEmit::ir_json) {
+        const auto ir_json = serialize_design_ir(ir);
+        if (dry_run) {
+            std::cout << ir_json << "\n";
+            return 0;
+        }
+        if (!write_file(output_file, ir_json)) return 1;
+        std::cout << "Wrote " << output_file << " (DesignIR v1, "
+                  << ir.asset_manifest.assets.size() << " asset"
+                  << (ir.asset_manifest.assets.size() == 1 ? "" : "s")
+                  << ")\n";
+        return 0;
+    }
 
     // Promote interactive frames to buttons (post-parse, pre-codegen).
     // Figma / Stitch / v0 / Pencil / Claude Design exporters almost

@@ -5,13 +5,17 @@
 #include <pulp/view/widget_bridge.hpp>
 
 #include <cstdlib>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 using namespace pulp::view;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -50,6 +54,78 @@ std::string read_fixture(const std::string& rel_path) {
 
 std::string asset_text(const ClaudeBundleAsset& asset) {
     return std::string(asset.data.begin(), asset.data.end());
+}
+
+class TempDir {
+public:
+    explicit TempDir(const std::string& prefix) {
+        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
+        fs::create_directories(path);
+    }
+
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+
+    fs::path path;
+};
+
+void write_text(const fs::path& path, const std::string& text) {
+    fs::create_directories(path.parent_path());
+    std::ofstream f(path, std::ios::binary);
+    REQUIRE(f.is_open());
+    f << text;
+    REQUIRE(f.good());
+}
+
+std::optional<std::string> read_env_var(const char* name) {
+    if (const char* value = std::getenv(name); value) return std::string(value);
+    return std::nullopt;
+}
+
+void set_env_var(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char* name, const std::string& value)
+        : name_(name), old_(read_env_var(name)) {
+        set_env_var(name_.c_str(), value);
+    }
+
+    ~ScopedEnvVar() {
+        if (old_) set_env_var(name_.c_str(), *old_);
+        else unset_env_var(name_.c_str());
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+private:
+    std::string name_;
+    std::optional<std::string> old_;
+};
+
+bool has_diagnostic(const IRAssetRef& asset, const std::string& code) {
+    for (const auto& diagnostic : asset.diagnostics) {
+        if (diagnostic.code == code) return true;
+    }
+    return false;
 }
 
 const char* minimal_host_react_dom_shim() {
@@ -197,6 +273,8 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE(parse_design_source("v0") == DesignSource::v0);
     REQUIRE(parse_design_source("pencil") == DesignSource::pencil);
     REQUIRE(parse_design_source("claude") == DesignSource::claude);
+    REQUIRE(parse_design_source("designmd") == DesignSource::designmd);
+    REQUIRE(parse_design_source("jsx") == DesignSource::jsx);
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
 }
 
@@ -204,7 +282,325 @@ TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
     REQUIRE(std::string(design_source_name(DesignSource::claude)) == "Claude Design");
+    REQUIRE(std::string(design_source_name(DesignSource::designmd)) == "DESIGN.md");
+    REQUIRE(std::string(design_source_name(DesignSource::jsx)) == "JSX instrument");
 }
+
+TEST_CASE("DesignIR v1 canonical JSON round-trips source metadata and assets",
+          "[view][import][ir-v1][assets]") {
+    DesignIR ir;
+    ir.source = DesignSource::stitch;
+    ir.source_file = "https://example.test/design.html";
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.layout.display = "flex";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.gap = 8.0f;
+    ir.root.layout.row_gap = 4.0f;
+    ir.root.layout.column_gap = 6.0f;
+    ir.root.layout.margin_top = 1.0f;
+    ir.root.layout.margin_right = 2.0f;
+    ir.root.layout.margin_bottom = 3.0f;
+    ir.root.layout.margin_left = 4.0f;
+    ir.root.layout.justify = LayoutAlign::space_between;
+    ir.root.layout.align = LayoutAlign::center;
+    ir.root.layout.align_self = "stretch";
+    ir.root.layout.align_content = "space-between";
+    ir.root.layout.flex_grow = 1.0f;
+    ir.root.layout.flex_shrink = 0.0f;
+    ir.root.layout.flex_basis = "auto";
+    ir.root.layout.order = 2;
+    ir.root.layout.aspect_ratio = 1.5f;
+    ir.root.layout.overflow_x = "hidden";
+    ir.root.layout.overflow_y = "auto";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::hug;
+    ir.root.style.background_color = "#101010";
+    ir.root.style.background_image = "url(data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E)";
+    ir.root.style.background_repeat = "no-repeat";
+    ir.root.style.border_color = "#ffffff";
+    ir.root.style.border_width = 2.0f;
+    ir.root.style.border_style = "solid";
+    ir.root.style.border_top_left_radius = 3.0f;
+    ir.root.style.border_top_right_radius = 4.0f;
+    ir.root.style.border_bottom_right_radius = 5.0f;
+    ir.root.style.border_bottom_left_radius = 6.0f;
+    ir.root.style.backdrop_filter = "blur(4px)";
+    ir.root.style.text_decoration = "underline";
+    ir.root.style.white_space = "nowrap";
+    ir.root.style.text_overflow = "ellipsis";
+    ir.root.stable_anchor_id = "stitch:panel";
+    ir.root.anchor_strategy = "adapter";
+    ir.root.source_node_id = "node-1";
+    ir.root.source_adapter = "stitch";
+    ir.root.source_version = "1";
+    ir.root.attributes["zeta"] = "last";
+    ir.root.attributes["alpha"] = "first";
+
+    IRNode label;
+    label.type = "text";
+    label.name = "Title";
+    label.text_content = "Gain";
+    ir.root.children.push_back(label);
+
+    ir.tokens.colors["accent"] = "#ff00ff";
+    ir.tokens.dimensions["spacing.md"] = 8.0f;
+    ir.tokens.strings["copy.title"] = "Gain";
+    ir.tokens.source_identity["colors.accent"] = IRTokenIdentity{
+        "var-1", "palette", "dark", "stitch"
+    };
+
+    refresh_design_ir_asset_manifest(ir);
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    const auto canonical_again = serialize_design_ir(parsed);
+
+    REQUIRE(canonical_again == canonical);
+    REQUIRE(parsed.version == 1);
+    REQUIRE(parsed.source == DesignSource::stitch);
+    REQUIRE(parsed.source_file == "https://example.test/design.html");
+    REQUIRE(parsed.root.layout.display == "flex");
+    REQUIRE(parsed.root.layout.flex_grow == 1.0f);
+    REQUIRE(parsed.root.layout.overflow_y == "auto");
+    REQUIRE(parsed.root.style.background_repeat == "no-repeat");
+    REQUIRE(parsed.root.style.border_top_left_radius == 3.0f);
+    REQUIRE(parsed.root.style.text_overflow == "ellipsis");
+    REQUIRE(parsed.root.stable_anchor_id == "stitch:panel");
+    REQUIRE(parsed.root.anchor_strategy == "adapter");
+    REQUIRE(parsed.root.source_adapter == "stitch");
+    REQUIRE(parsed.root.attributes.at("alpha") == "first");
+    REQUIRE(parsed.tokens.source_identity.at("colors.accent").source_mode == "dark");
+    REQUIRE(parsed.asset_manifest.version == 1);
+    REQUIRE(parsed.asset_manifest.assets.size() == 1);
+    REQUIRE(parsed.asset_manifest.assets[0].mime == "image/svg+xml");
+    REQUIRE_FALSE(parsed.asset_manifest.assets[0].content_hash.empty());
+}
+
+TEST_CASE("parse_design_ir_json accepts legacy bare-node IR JSON",
+          "[view][import][ir-v1]") {
+    const auto legacy = std::string{R"json({
+        "type": "frame",
+        "name": "Legacy",
+        "layout": { "direction": "column", "gap": 12 },
+        "style": { "backgroundColor": "#202020" },
+        "tokens": {
+            "colors": { "bg": "#202020" }
+        }
+    })json"};
+
+    const auto parsed = parse_design_ir_json(legacy);
+    REQUIRE(parsed.version == 1);
+    REQUIRE(parsed.root.type == "frame");
+    REQUIRE(parsed.root.name == "Legacy");
+    REQUIRE(parsed.root.layout.direction == LayoutDirection::column);
+    REQUIRE(parsed.root.layout.gap == 12.0f);
+    REQUIRE(parsed.root.style.background_color == "#202020");
+    REQUIRE(parsed.tokens.colors.at("bg") == "#202020");
+}
+
+TEST_CASE("DesignIR v1 canonical equivalence covers static source adapters",
+          "[view][import][ir-v1]") {
+    auto assert_canonical_round_trip = [](DesignIR ir) {
+        refresh_design_ir_asset_manifest(ir);
+        const auto canonical = serialize_design_ir(ir);
+        const auto parsed = parse_design_ir_json(canonical);
+        REQUIRE(serialize_design_ir(parsed) == canonical);
+        REQUIRE(parsed.version == 1);
+        REQUIRE(parsed.asset_manifest.version == 1);
+    };
+
+    SECTION("figma JSON") {
+        auto ir = parse_figma_json(R"json({
+            "type": "frame",
+            "name": "Figma Panel",
+            "id": "figma-node-1",
+            "style": { "backgroundColor": "#18191c" },
+            "tokens": {
+                "colors": { "accent": "#57a6ff" },
+                "sourceIdentity": {
+                    "colors.accent": {
+                        "sourceId": "var-accent",
+                        "sourceCollection": "palette",
+                        "sourceMode": "dark",
+                        "sourceAdapter": "figma"
+                    }
+                }
+            },
+            "children": [
+                { "type": "text", "name": "Title", "content": "Gain" }
+            ]
+        })json");
+        REQUIRE(ir.tokens.source_identity.at("colors.accent").source_adapter == "figma");
+        assert_canonical_round_trip(std::move(ir));
+    }
+
+    SECTION("stitch HTML") {
+        assert_canonical_round_trip(parse_stitch_html(
+            "<!doctype html><main><label>Frequency</label><span>8473 Hz</span></main>"));
+    }
+
+    SECTION("v0 TSX") {
+        assert_canonical_round_trip(parse_v0_tsx(
+            "export default function App(){ return <div className=\"flex flex-row gap-2 bg-slate-900\" />; }"));
+    }
+
+    SECTION("pencil JSON") {
+        assert_canonical_round_trip(parse_pencil_json(R"json({
+            "type": "frame",
+            "name": "Pencil Card",
+            "nodeId": "pencil-node-1",
+            "style": { "backgroundImage": "url(data:image/svg+xml,%3Csvg%2F%3E)" },
+            "children": [
+                { "type": "text", "name": "Label", "content": "Mix" }
+            ]
+        })json"));
+    }
+
+    SECTION("claude HTML") {
+        assert_canonical_round_trip(parse_claude_html(
+            "<!doctype html><html><body><section><h1>Parameters</h1></section></body></html>"));
+    }
+}
+
+TEST_CASE("DesignIR asset manifest records data URI local image and font assets",
+          "[view][import][assets]") {
+    TempDir tmp("pulp-design-ir-assets");
+    const auto image_path = tmp.path / "meter.png";
+    const auto font_path = tmp.path / "Inter.woff2";
+    write_text(image_path, "\x89PNG\r\n\x1a\nnot-a-real-png-but-sniffable");
+    write_text(font_path, "wOF2font-bytes");
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Assets";
+    ir.root.style.background_image = "url(data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E)";
+    ir.root.attributes["src"] = "meter.png";
+    ir.root.attributes["fontUrl"] = "Inter.woff2";
+
+    DesignIrAssetOptions options;
+    options.base_directory = tmp.path;
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 3);
+
+    bool saw_data = false;
+    bool saw_image = false;
+    bool saw_font = false;
+    for (const auto& asset : ir.asset_manifest.assets) {
+        REQUIRE_FALSE(asset.asset_id.empty());
+        REQUIRE_FALSE(asset.content_hash.empty());
+        REQUIRE(asset.diagnostics.empty());
+        if (asset.original_uri.rfind("data:", 0) == 0) {
+            saw_data = true;
+            REQUIRE(asset.mime == "image/svg+xml");
+        } else if (asset.original_uri == "meter.png") {
+            saw_image = true;
+            REQUIRE(asset.mime == "image/png");
+            REQUIRE(asset.local_path);
+        } else if (asset.original_uri == "Inter.woff2") {
+            saw_font = true;
+            REQUIRE(asset.mime == "font/woff2");
+            REQUIRE(asset.local_path);
+        }
+    }
+    REQUIRE(saw_data);
+    REQUIRE(saw_image);
+    REQUIRE(saw_font);
+
+    const auto round_trip = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(round_trip.asset_manifest.assets.size() == 3);
+    REQUIRE(serialize_design_ir(round_trip) == serialize_design_ir(ir));
+}
+
+TEST_CASE("DesignIR asset manifest records unresolved and network-gated diagnostics",
+          "[view][import][assets]") {
+    TempDir tmp("pulp-design-ir-asset-diagnostics");
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Diagnostics";
+    ir.root.style.background_image = "url(https://example.test/hero.png)";
+    ir.root.attributes["src"] = "missing.png";
+
+    DesignIrAssetOptions options;
+    options.base_directory = tmp.path;
+    auto manifest = collect_design_ir_assets(ir, options);
+
+    REQUIRE(manifest.assets.size() == 2);
+    bool saw_missing = false;
+    bool saw_network = false;
+    for (const auto& asset : manifest.assets) {
+        if (asset.original_uri == "missing.png") {
+            saw_missing = true;
+            REQUIRE(has_diagnostic(asset, "asset-unresolved"));
+            REQUIRE(asset.content_hash.empty());
+        } else if (asset.original_uri == "https://example.test/hero.png") {
+            saw_network = true;
+            REQUIRE(has_diagnostic(asset, "asset-network-fetch-disabled"));
+            REQUIRE(asset.content_hash.empty());
+        }
+    }
+    REQUIRE(saw_missing);
+    REQUIRE(saw_network);
+}
+
+#ifndef _WIN32
+TEST_CASE("DesignIR asset manifest fetches network assets through cache and verifies hashes",
+          "[view][import][assets][network]") {
+    TempDir tmp("pulp-design-ir-network-assets");
+    const auto bin = tmp.path / "bin";
+    const auto curl = bin / "curl";
+    fs::create_directories(bin);
+    write_text(curl,
+               "#!/bin/sh\n"
+               "out=''\n"
+               "while [ \"$#\" -gt 0 ]; do\n"
+               "  case \"$1\" in\n"
+               "    --output) shift; out=\"$1\" ;;\n"
+               "  esac\n"
+               "  shift\n"
+               "done\n"
+               "[ -n \"$out\" ] || exit 9\n"
+               "printf '%s' '<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>' > \"$out\"\n");
+    fs::permissions(curl,
+                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::add);
+
+    const auto url = std::string("https://example.test/icon.svg");
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Network";
+    ir.root.style.background_image = "url(" + url + ")";
+
+    auto old_path = read_env_var("PATH").value_or("");
+    ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
+
+    DesignIrAssetOptions options;
+    options.allow_network_fetch = true;
+    options.network_timeout_ms = 5000;
+    options.cache_directory = tmp.path / "asset-cache";
+    options.expected_hash_by_uri[url] = "not-the-actual-hash";
+
+    auto manifest = collect_design_ir_assets(ir, options);
+    REQUIRE(manifest.assets.size() == 1);
+    const auto& fetched = manifest.assets[0];
+    REQUIRE(fetched.original_uri == url);
+    REQUIRE(fetched.source_url == url);
+    REQUIRE(fetched.mime == "image/svg+xml");
+    REQUIRE(fetched.local_path);
+    REQUIRE(fs::exists(*fetched.local_path));
+    REQUIRE_FALSE(fetched.content_hash.empty());
+    REQUIRE(has_diagnostic(fetched, "asset-hash-mismatch"));
+
+    fs::remove(curl);
+    options.expected_hash_by_uri.clear();
+    auto cached = collect_design_ir_assets(ir, options);
+    REQUIRE(cached.assets.size() == 1);
+    REQUIRE(cached.assets[0].content_hash == fetched.content_hash);
+    REQUIRE(cached.assets[0].diagnostics.empty());
+}
+#endif
 
 // pulp #709 / #468 — Claude Design imports are manually-exported HTML
 // parsed via the Stitch HTML pipeline and re-tagged as Claude.

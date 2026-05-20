@@ -141,7 +141,7 @@ commands:
         required: false
       - name: --workflow
         kind: option
-        description: One-shot PR workflow override: shipyard, github, or manual
+        description: "One-shot PR workflow override: shipyard, github, or manual"
         required: false
       - name: --no-ship
         kind: flag
@@ -611,13 +611,25 @@ commands:
         description: "Destination file for the primary artifact (default: ui.js)"
       - name: --emit
         kind: option
-        description: "Primary artifact kind: js (implemented), ir-json or cpp (recognized reserved values that fail cleanly), or legacy classnames sidecar"
+        description: "Primary artifact kind: js or ir-json (implemented), cpp (reserved), or legacy classnames sidecar"
       - name: --mode
         kind: option
         description: "Runtime model: live (implemented) or baked (recognized reserved value that fails cleanly)"
       - name: --snapshot-semantics
         kind: option
         description: "Future JSX baked snapshot policy: fail, warn, or accept"
+      - name: --allow-network-fetch
+        kind: option
+        description: "Allow DesignIR asset-manifest HTTP(S) fetches at import time"
+      - name: --asset-cache
+        kind: option
+        description: "Asset cache directory for DesignIR HTTP(S) asset imports"
+      - name: --asset-timeout-ms
+        kind: option
+        description: "Per-request network asset timeout for DesignIR asset imports"
+      - name: --asset-hash
+        kind: option
+        description: "Expected content hash for an imported asset URI"
       - name: --tokens
         kind: option
         description: "Output W3C token file (default: tokens.json)"

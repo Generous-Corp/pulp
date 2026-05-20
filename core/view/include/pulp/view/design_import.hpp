@@ -6,6 +6,8 @@
 /// representation (IR) and W3C Design Tokens.
 
 #include <pulp/view/theme.hpp>
+#include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 #include <optional>
@@ -50,12 +52,30 @@ enum class SizingMode { fixed, hug, fill };
 struct IRStyle {
     std::optional<std::string> background_color;
     std::optional<std::string> background_gradient;   // linear-gradient(...)
+    std::optional<std::string> background_image;      // url(...), data:..., or none
+    std::optional<std::string> background_repeat;
     std::optional<std::string> color;                  // text color
     std::optional<float> opacity;
     std::optional<float> border_radius;
     std::optional<std::string> border;                 // e.g. "1px solid #333"
+    std::optional<std::string> border_color;
+    std::optional<float> border_width;
+    std::optional<std::string> border_style;
+    std::optional<std::string> border_top_color;
+    std::optional<std::string> border_right_color;
+    std::optional<std::string> border_bottom_color;
+    std::optional<std::string> border_left_color;
+    std::optional<float> border_top_width;
+    std::optional<float> border_right_width;
+    std::optional<float> border_bottom_width;
+    std::optional<float> border_left_width;
+    std::optional<float> border_top_left_radius;
+    std::optional<float> border_top_right_radius;
+    std::optional<float> border_bottom_right_radius;
+    std::optional<float> border_bottom_left_radius;
     std::optional<std::string> box_shadow;
     std::optional<std::string> filter;                 // e.g. "blur(4px)"
+    std::optional<std::string> backdrop_filter;
     std::optional<std::string> font_family;
     std::optional<float> font_size;
     std::optional<int> font_weight;
@@ -64,6 +84,9 @@ struct IRStyle {
     std::optional<float> letter_spacing;
     std::optional<float> line_height;
     std::optional<std::string> text_transform;
+    std::optional<std::string> text_decoration;
+    std::optional<std::string> white_space;
+    std::optional<std::string> text_overflow;
     std::optional<std::string> overflow;               // hidden, scroll, auto
     std::optional<std::string> cursor;
     std::optional<std::string> position;               // absolute, relative
@@ -77,15 +100,31 @@ struct IRStyle {
 
 /// Layout properties for an IR container node.
 struct IRLayout {
+    std::optional<std::string> display;  // flex, grid, none
     LayoutDirection direction = LayoutDirection::column;
     float gap = 0.0f;
+    std::optional<float> row_gap;
+    std::optional<float> column_gap;
     float padding_top = 0.0f;
     float padding_right = 0.0f;
     float padding_bottom = 0.0f;
     float padding_left = 0.0f;
+    std::optional<float> margin_top;
+    std::optional<float> margin_right;
+    std::optional<float> margin_bottom;
+    std::optional<float> margin_left;
     LayoutAlign justify = LayoutAlign::flex_start;
     LayoutAlign align = LayoutAlign::stretch;
+    std::optional<std::string> align_self;
+    std::optional<std::string> align_content;
     bool wrap = false;
+    std::optional<float> flex_grow;
+    std::optional<float> flex_shrink;
+    std::optional<std::string> flex_basis;
+    std::optional<int> order;
+    std::optional<float> aspect_ratio;
+    std::optional<std::string> overflow_x;
+    std::optional<std::string> overflow_y;
     SizingMode width_mode = SizingMode::fixed;
     SizingMode height_mode = SizingMode::fixed;
 };
@@ -152,9 +191,16 @@ struct IRNode {
     /// Stable anchor for the tweaks layer. Empty until an anchor strategy
     /// has populated it (call assign_anchors() in anchor_strategy.hpp).
     std::optional<std::string> stable_anchor_id;
+    /// Strategy used to produce stable_anchor_id:
+    /// "adapter", "content-hash", or "path".
+    std::optional<std::string> anchor_strategy;
     /// Source-side native ID (e.g. Figma layer UUID, Pencil node ID).
     /// Only populated for sources that have native IDs.
     std::optional<std::string> source_node_id;
+    /// Canonical adapter provenance fields. Kept alongside IRProvenance
+    /// for compatibility with older call sites.
+    std::optional<std::string> source_adapter;
+    std::optional<std::string> source_version;
     /// Adapter provenance — typically set on the root node by each parser.
     std::optional<IRProvenance> provenance;
     /// Adapter's confidence in this node's lowering.
@@ -164,20 +210,98 @@ struct IRNode {
     std::optional<std::string> raw_source;
 };
 
+enum class ImportDiagnosticSeverity {
+    info,
+    warning,
+    error
+};
+
+struct ImportDiagnostic {
+    ImportDiagnosticSeverity severity = ImportDiagnosticSeverity::warning;
+    std::string code;
+    std::string path;
+    std::string message;
+};
+
+struct IRAssetRef {
+    std::string asset_id;       // stable handle used by nodes
+    std::string original_uri;   // as authored
+    std::optional<std::string> local_path;
+    std::string content_hash;   // sha256 of resolved bytes; empty if unresolved
+    std::string mime;
+    std::optional<int> width;
+    std::optional<int> height;
+    std::optional<std::string> font_family;
+    std::optional<std::string> license;
+    std::optional<std::string> source_url;
+    std::vector<ImportDiagnostic> diagnostics;
+};
+
+struct IRAssetManifest {
+    std::vector<IRAssetRef> assets;
+    int version = 1;
+};
+
+struct IRTokenIdentity {
+    std::string source_id;
+    std::string source_collection;
+    std::string source_mode;
+    std::string source_adapter;
+};
+
 /// Design token collection (W3C-compatible).
 struct IRTokens {
     std::unordered_map<std::string, std::string> colors;       // name → "#hex"
     std::unordered_map<std::string, float> dimensions;         // name → px value
     std::unordered_map<std::string, std::string> strings;      // name → string
+    // Keyed by canonical token path (for example "colors.primary").
+    std::unordered_map<std::string, IRTokenIdentity> source_identity;
 };
 
 /// Complete design IR document.
 struct DesignIR {
+    int version = 1;
     IRNode root;
     IRTokens tokens;
+    IRAssetManifest asset_manifest;
     DesignSource source = DesignSource::figma;
     std::string source_file;
 };
+
+struct DesignIrJsonOptions {
+    int version = 1;
+    bool include_tokens = true;
+    bool include_source_metadata = true;
+    bool include_asset_manifest = true;
+};
+
+struct DesignIrAssetOptions {
+    bool allow_network_fetch = false;
+    int network_timeout_ms = 30000;
+    std::filesystem::path cache_directory;
+    std::filesystem::path base_directory;
+    std::unordered_map<std::string, std::string> expected_hash_by_uri;
+};
+
+/// Serialize a DesignIR as a deterministic, versioned canonical JSON
+/// envelope. The reader remains permissive; this writer emits only the
+/// canonical nested form.
+std::string serialize_design_ir(const DesignIR& ir,
+                                const DesignIrJsonOptions& options = {});
+
+/// Parse either the v1 canonical envelope or a legacy bare-node IR JSON
+/// document. Legacy source adapters keep their JSON-first compatibility by
+/// routing through this reader.
+DesignIR parse_design_ir_json(const std::string& json);
+
+/// Collect all external resources referenced by the IR into a manifest.
+/// Network fetches require explicit opt-in through options.
+IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
+                                         const DesignIrAssetOptions& options = {});
+
+/// Rebuild and store ir.asset_manifest from the current tree.
+void refresh_design_ir_asset_manifest(DesignIR& ir,
+                                      const DesignIrAssetOptions& options = {});
 
 // ── Source adapters ─────────────────────────────────────────────────────
 

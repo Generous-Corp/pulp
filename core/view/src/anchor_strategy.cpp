@@ -21,6 +21,15 @@ namespace pulp::view {
 
 namespace {
 
+std::string_view strategy_name(AnchorStrategy strategy) {
+    switch (strategy) {
+        case AnchorStrategy::content_hash: return "content-hash";
+        case AnchorStrategy::path:         return "path";
+        case AnchorStrategy::adapter:      return "adapter";
+    }
+    return "content-hash";
+}
+
 // ── FNV-1a 32-bit hash, returned as base-36 string (matches TS) ──────────
 std::string fnv1a_base36(std::string_view input) {
     std::uint32_t hash = 0x811c9dc5u;
@@ -154,6 +163,9 @@ void walk(IRNode& node,
         node.stable_anchor_id = compute_anchor_id(
             node, parent_anchor, sibling_tag_index, depth, sig_index,
             strategy, adapter_name);
+    }
+    if (!node.anchor_strategy || node.anchor_strategy->empty()) {
+        node.anchor_strategy = std::string(strategy_name(strategy));
     }
 
     // Child-anchors are path-scoped under this node for the path strategy;

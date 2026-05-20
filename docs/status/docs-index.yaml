@@ -299,6 +299,11 @@ docs:
     kind: reference
     summary: CLI and pipeline reference for design import adapters, IR, validation, and token sync
 
+  - slug: design-ir-v1
+    path: reference/design-ir-v1.md
+    kind: reference
+    summary: Canonical DesignIR v1 schema, round-trip contract, source metadata, token identity, and asset manifest
+
   - slug: imports-designmd
     path: reference/imports/designmd.md
     kind: reference

@@ -172,14 +172,130 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(unknown.stderr_output.find("unsupported --emit value") != std::string::npos);
     }
 
-    SECTION("reserved emit targets are accepted vocabulary but not implemented") {
-        auto ir = run_import_design({"--from", "stitch",
-                                     "--file", input.string(),
-                                     "--emit", "ir-json"});
-        REQUIRE_FALSE(ir.timed_out);
-        REQUIRE(ir.exit_code == 2);
-        REQUIRE(ir.stderr_output.find("--emit ir-json is reserved") != std::string::npos);
+    SECTION("ir-json emit writes canonical DesignIR v1 with asset manifest") {
+        const auto ir_input = tmp.path / "screen-ir.json";
+        const auto ir_output = tmp.path / "screen-ir.out.json";
+        write_text(ir_input, R"json({
+            "type": "frame",
+            "name": "Screen",
+            "style": {
+                "backgroundImage": "url(data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E)"
+            },
+            "children": [
+                { "type": "text", "name": "Title", "content": "Gain" }
+            ]
+        })json");
 
+        auto ir = run_import_design({"--from", "stitch",
+                                     "--file", ir_input.string(),
+                                     "--emit", "ir-json",
+                                     "--output", ir_output.string()});
+        REQUIRE_FALSE(ir.timed_out);
+        REQUIRE(ir.exit_code == 0);
+        const auto out = read_text(ir_output);
+        REQUIRE(out.find("\"version\":1") != std::string::npos);
+        REQUIRE(out.find("\"assetManifest\"") != std::string::npos);
+        REQUIRE(out.find("\"content_hash\"") != std::string::npos);
+        REQUIRE(out.find("\"image/svg+xml\"") != std::string::npos);
+    }
+
+    SECTION("ir-json emit blocks first network fetch without explicit consent") {
+        const auto network_input = tmp.path / "network-ir.json";
+        const auto ir_output = tmp.path / "network-ir.out.json";
+        write_text(network_input, R"json({
+            "type": "frame",
+            "name": "Screen",
+            "style": { "backgroundImage": "url(https://example.test/hero.png)" }
+        })json");
+
+        auto ir = run_import_design({"--from", "stitch",
+                                     "--file", network_input.string(),
+                                     "--emit", "ir-json",
+                                     "--output", ir_output.string()});
+        REQUIRE_FALSE(ir.timed_out);
+        REQUIRE(ir.exit_code == 1);
+        REQUIRE(ir.stderr_output.find("asset-network-fetch-disabled") != std::string::npos);
+    }
+
+#ifndef _WIN32
+    SECTION("ir-json emit fetches allowed network assets through cache and verifies hashes") {
+        const auto bin = tmp.path / "bin";
+        const auto curl = bin / "curl";
+        fs::create_directories(bin);
+        write_text(curl,
+                   "#!/bin/sh\n"
+                   "out=''\n"
+                   "while [ \"$#\" -gt 0 ]; do\n"
+                   "  case \"$1\" in\n"
+                   "    --output) shift; out=\"$1\" ;;\n"
+                   "  esac\n"
+                   "  shift\n"
+                   "done\n"
+                   "[ -n \"$out\" ] || exit 9\n"
+                   "printf '%s' '<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>' > \"$out\"\n");
+        fs::permissions(curl,
+                        fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::add);
+
+        const auto url = std::string("https://example.test/icon.svg");
+        const auto expected_hash =
+            std::string("b131556c36b0323b4981999443b5b22f7e35032e604d152b2d6698fc072e88c1");
+        const auto network_input = tmp.path / "network-ir-allowed.json";
+        const auto ir_output = tmp.path / "network-ir-allowed.out.json";
+        const auto cached_output = tmp.path / "network-ir-cached.out.json";
+        const auto cache_dir = tmp.path / "asset-cache";
+        write_text(network_input, R"json({
+            "type": "frame",
+            "name": "Screen",
+            "style": { "backgroundImage": "url(https://example.test/icon.svg)" }
+        })json");
+
+        auto old_path = read_env_var("PATH").value_or("");
+        ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
+
+        auto fetched = run_import_design({"--from", "stitch",
+                                          "--file", network_input.string(),
+                                          "--emit", "ir-json",
+                                          "--output", ir_output.string(),
+                                          "--allow-network-fetch",
+                                          "--asset-cache", cache_dir.string(),
+                                          "--asset-timeout-ms", "5000",
+                                          "--asset-hash", url + "=" + expected_hash});
+        REQUIRE_FALSE(fetched.timed_out);
+        REQUIRE(fetched.exit_code == 0);
+        const auto fetched_json = read_text(ir_output);
+        REQUIRE(fetched_json.find(expected_hash) != std::string::npos);
+        REQUIRE(fetched_json.find("\"mime\":\"image/svg+xml\"") != std::string::npos);
+        REQUIRE(fetched_json.find("\"source_url\":\"" + url + "\"") != std::string::npos);
+        REQUIRE(fetched.stderr_output.find("asset-hash-mismatch") == std::string::npos);
+
+        fs::remove(curl);
+        auto cached = run_import_design({"--from", "stitch",
+                                         "--file", network_input.string(),
+                                         "--emit", "ir-json",
+                                         "--output", cached_output.string(),
+                                         "--allow-network-fetch",
+                                         "--asset-cache", cache_dir.string()});
+        REQUIRE_FALSE(cached.timed_out);
+        REQUIRE(cached.exit_code == 0);
+        REQUIRE(read_text(cached_output).find(expected_hash) != std::string::npos);
+        REQUIRE(cached.stderr_output.find("asset-fetcher-missing") == std::string::npos);
+    }
+#endif
+
+    SECTION("asset option diagnostics are usage errors") {
+        auto missing_timeout = run_import_design({"--asset-timeout-ms"});
+        REQUIRE_FALSE(missing_timeout.timed_out);
+        REQUIRE(missing_timeout.exit_code == 2);
+        REQUIRE(missing_timeout.stderr_output.find("--asset-timeout-ms requires a value") != std::string::npos);
+
+        auto bad_hash = run_import_design({"--asset-hash", "not-a-pair"});
+        REQUIRE_FALSE(bad_hash.timed_out);
+        REQUIRE(bad_hash.exit_code == 2);
+        REQUIRE(bad_hash.stderr_output.find("--asset-hash requires") != std::string::npos);
+    }
+
+    SECTION("cpp emit target is accepted vocabulary but not implemented") {
         auto cpp = run_import_design({"--from", "stitch",
                                       "--file", input.string(),
                                       "--emit", "cpp"});
