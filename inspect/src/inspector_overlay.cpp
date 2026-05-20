@@ -4,6 +4,7 @@
 #include <pulp/inspect/tweak_store.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/render/atlas_inventory.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -115,6 +116,11 @@ void InspectorOverlay::set_active(bool active) {
         // The R-key toggle state itself is left intact (mirrors how
         // the tweaks panel keeps tweaks_panel_visible_ across opens).
         reconcile_rows_.clear();
+        // Phase 6.2 — reset the atlas viewer's laid-out row count so
+        // atlas_row_count() reports 0 while the inspector is shut. As
+        // with the reconciliation tab the `A`-key toggle state is left
+        // intact so re-opening the inspector restores the same tab.
+        atlas_row_count_ = 0;
     }
 }
 
@@ -481,6 +487,17 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
     if (active_ && editing_field_.empty() && event.key == KeyCode::r &&
         event.is_down && event.modifiers == 0) {
         toggle_reconcile_tab();
+        return true;
+    }
+
+    // Phase 6.2 — A toggles the texture-atlas viewer tab (no modifier;
+    // only while the inspector is active, same opt-in discipline as the
+    // D / E / P / Z / R toggles). Guarded behind not-editing so typing
+    // an 'a' into a field-edit buffer can't flip the tab. D/E/T/J/P/Z/R
+    // are already claimed, so A ("atlas") is the natural free letter.
+    if (active_ && editing_field_.empty() && event.key == KeyCode::a &&
+        event.is_down && event.modifiers == 0) {
+        toggle_atlas_viewer();
         return true;
     }
 
@@ -1088,17 +1105,26 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
     // this region instead of the property panel; the tree section above
     // is untouched so the user keeps navigation context. Phase 5.2 —
     // the reconciliation tab (R-key) takes over the same region with
-    // the same discipline. The pass viewer wins when both are toggled
-    // (it is the older surface), and reconcile_rows_ is cleared so
-    // reconcile_row_count() never reports a stale layout.
+    // the same discipline. Phase 6.2 — the texture-atlas viewer (A-key)
+    // is the third tab to claim this region. Precedence when multiple
+    // are toggled, oldest surface wins: pass viewer > reconciliation >
+    // atlas viewer > props. The losers' cached row counts are reset so
+    // reconcile_row_count() / atlas_row_count() never report a stale
+    // layout for a tab that did not paint this frame.
     auto paint_middle = [&](float x, float y, float w, float h) {
         if (pass_viewer_enabled_) {
             reconcile_rows_.clear();
+            atlas_row_count_ = 0;
             paint_pass_attribution(canvas, x, y, w, h);
         } else if (reconcile_tab_visible_) {
+            atlas_row_count_ = 0;
             paint_reconcile_tab(canvas, x, y, w, h);
+        } else if (atlas_viewer_visible_) {
+            reconcile_rows_.clear();
+            paint_atlas_tab(canvas, x, y, w, h);
         } else {
             reconcile_rows_.clear();
+            atlas_row_count_ = 0;
             paint_props_section(canvas, x, y, w, h);
         }
     };
@@ -2051,6 +2077,113 @@ void InspectorOverlay::paint_reconcile_tab(Canvas& canvas, float x, float y,
                              row_y + 14);
         }
         row_y += kRowHeight;
+    }
+
+    canvas.restore();
+}
+
+// ── Phase 6.2 — Texture atlas viewer ────────────────────────────────────────
+//
+// A read-only GPU-perf observability tab that answers "is my SDF atlas
+// thrashing?". It renders the render layer's texture-atlas inventory —
+// per-atlas dimensions, page count, live entry count, and a shelf-packer
+// occupancy bar. Like the Phase 6.1 pass viewer and Phase 5.2
+// reconciliation tab it takes over the property-panel region; it has no
+// interactive controls (purely informational), so there are no hit-rects
+// to record. Degrades gracefully to a "GPU atlas unavailable" line when
+// no inventory is wired (headless / GPU-off builds).
+
+void InspectorOverlay::paint_atlas_tab(Canvas& canvas, float x, float y,
+                                       float w, float h) {
+    // Occupancy bar colors: green when there's headroom, amber when the
+    // atlas is filling, red when nearly full (thrash risk). The amber/red
+    // pair matches the drift drawer + reconciliation tab so the GPU-perf
+    // surfaces read consistently.
+    const Color kBarTrack = Color::rgba(0.20f, 0.20f, 0.24f, 1.0f);
+    const Color kBarLow   = Color::rgba(0.35f, 0.85f, 0.45f, 1.0f);
+    const Color kBarMid   = Color::rgba(0.95f, 0.65f, 0.25f, 1.0f);
+    const Color kBarHigh  = Color::rgba(0.95f, 0.40f, 0.38f, 1.0f);
+
+    canvas.set_font("monospace", kFontSize);
+
+    // Section heading.
+    canvas.set_fill_color(kHighlightStroke);
+    canvas.fill_text("Texture Atlases (A)", x, y + 11);
+
+    // No inventory wired — graceful empty state. This is the headless /
+    // GPU-off path; the tab must never crash here.
+    if (!atlas_inventory_ || atlas_inventory_->empty()) {
+        atlas_row_count_ = 0;
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("GPU atlas unavailable", x, y + 11 + kRowHeight);
+        return;
+    }
+
+    const auto& atlases = atlas_inventory_->atlases();
+    atlas_row_count_ = atlases.size();
+
+    // Summary line: total pages + total packed entries, right-aligned in
+    // the header — mirrors the reconciliation tab's per-status summary.
+    {
+        std::ostringstream summary;
+        summary << atlas_inventory_->total_pages() << " pages  "
+                << atlas_inventory_->total_entries() << " entries";
+        canvas.set_fill_color(kPanelDim);
+        float sw = canvas.measure_text(summary.str());
+        canvas.fill_text(summary.str(), x + w - sw, y + 11);
+    }
+
+    // Each atlas occupies a two-line row: a label/dimensions/entries
+    // line, then an occupancy bar with a percentage readout.
+    constexpr float kAtlasRowH = kRowHeight * 2.0f + 6.0f;
+
+    canvas.save();
+    float list_top = y + kRowHeight;
+    canvas.clip_rect(x, list_top, w, h - kRowHeight);
+
+    float row_y = list_top - atlas_scroll_y_;
+    for (const auto& a : atlases) {
+        const bool visible = row_y > list_top - kAtlasRowH && row_y < y + h;
+        if (visible) {
+            // Line 1: "<label>  <W>x<H>" left, "<N> entries" right.
+            std::ostringstream dims;
+            dims << a.label << "  " << a.width << "x" << a.height;
+            if (a.pages > 1) dims << " x" << a.pages << "p";
+            canvas.set_fill_color(kPanelText);
+            canvas.fill_text(dims.str(), x, row_y + 12);
+
+            std::ostringstream ent;
+            ent << a.entries << " entries";
+            canvas.set_fill_color(kPanelDim);
+            float ew = canvas.measure_text(ent.str());
+            canvas.fill_text(ent.str(), x + w - ew, row_y + 12);
+
+            // Line 2: occupancy bar + percent readout.
+            const int pct = a.occupancy_percent();
+            const Color& fill = pct >= 85 ? kBarHigh
+                              : pct >= 60 ? kBarMid
+                                          : kBarLow;
+            const float bar_y = row_y + kRowHeight;
+            const float bar_h = 8.0f;
+            std::ostringstream pctstr;
+            pctstr << pct << "%";
+            const float pct_w = canvas.measure_text(pctstr.str()) + 6.0f;
+            const float bar_w = w - pct_w;
+
+            canvas.set_fill_color(kBarTrack);
+            canvas.fill_rounded_rect(x, bar_y, bar_w, bar_h, 2.0f);
+            float frac = static_cast<float>(pct) / 100.0f;
+            if (frac > 0.0f) {
+                canvas.set_fill_color(fill);
+                canvas.fill_rounded_rect(x, bar_y,
+                                         std::max(2.0f, bar_w * frac),
+                                         bar_h, 2.0f);
+            }
+            canvas.set_fill_color(fill);
+            canvas.fill_text(pctstr.str(), x + w - pct_w + 6.0f,
+                             bar_y + bar_h);
+        }
+        row_y += kAtlasRowH;
     }
 
     canvas.restore();

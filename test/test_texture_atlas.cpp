@@ -1,5 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/render/texture_atlas.hpp>
+#include <pulp/render/atlas_inventory.hpp>
+
+#include <string>
 
 using namespace pulp::render;
 
@@ -430,4 +434,185 @@ TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
         ++drained;
     }
     REQUIRE(drained == 32);
+}
+
+// ── Phase 6.2 — atlas introspection accessors ───────────────────────────────
+//
+// Spec: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md § Phase 6.2.
+// The inspector's texture-atlas viewer reads per-atlas dimensions and a
+// shelf-packer occupancy estimate. These tests pin the read-only accessors
+// added to AtlasPacker / ImageAtlas / GlyphAtlas / GradientAtlas / PathAtlas.
+
+TEST_CASE("AtlasPacker reports capacity and occupancy - phase6.2",
+          "[render][atlas][phase6.2]") {
+    AtlasPacker p(64, 64);
+    REQUIRE(p.capacity() == 64u * 64u);
+    REQUIRE(p.used_area() == 0u);
+    REQUIRE(p.occupancy() == Catch::Approx(0.0f));
+
+    AtlasPacker::Region r{};
+    // Pack a 32×64 column on the first shelf: the in-progress shelf is
+    // 32 wide × 64 tall → 2048 texels of a 4096-texel atlas.
+    REQUIRE(p.allocate(32, 64, r));
+    REQUIRE(p.used_area() == 32u * 64u);
+    REQUIRE(p.occupancy() == Catch::Approx(0.5f));
+
+    // Fill the rest of the shelf — atlas is now fully occupied.
+    REQUIRE(p.allocate(32, 64, r));
+    REQUIRE(p.occupancy() == Catch::Approx(1.0f));
+}
+
+TEST_CASE("AtlasPacker occupancy is zero for a degenerate atlas - phase6.2",
+          "[render][atlas][phase6.2]") {
+    AtlasPacker p(0, 0);
+    REQUIRE(p.capacity() == 0u);
+    REQUIRE(p.occupancy() == Catch::Approx(0.0f));  // no divide-by-zero.
+}
+
+TEST_CASE("ImageAtlas exposes dimensions and occupancy - phase6.2",
+          "[render][atlas][phase6.2]") {
+    ImageAtlas atlas(128);
+    REQUIRE(atlas.width() == 128);
+    REQUIRE(atlas.height() == 128);
+    REQUIRE(atlas.occupancy() == Catch::Approx(0.0f));
+
+    AtlasPacker::Region r{};
+    REQUIRE(atlas.allocate(1, 64, 128, r));  // half the page width.
+    REQUIRE(atlas.occupancy() == Catch::Approx(0.5f));
+    REQUIRE(atlas.entry_count() == 1);
+}
+
+TEST_CASE("GlyphAtlas and PathAtlas expose dimensions - phase6.2",
+          "[render][atlas][phase6.2]") {
+    GlyphAtlas glyphs(256);
+    REQUIRE(glyphs.width() == 256);
+    REQUIRE(glyphs.height() == 256);
+    REQUIRE(glyphs.occupancy() == Catch::Approx(0.0f));
+
+    PathAtlas paths(512);
+    REQUIRE(paths.width() == 512);
+    REQUIRE(paths.height() == 512);
+    REQUIRE(paths.occupancy() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("GradientAtlas exposes row capacity and occupancy - phase6.2",
+          "[render][atlas][phase6.2]") {
+    GradientAtlas ga;
+    REQUIRE(ga.row_capacity() == 512);
+    REQUIRE(ga.rows_used() == 0);
+    REQUIRE(ga.occupancy() == Catch::Approx(0.0f));
+
+    int row = -1;
+    for (int i = 0; i < 256; ++i)
+        REQUIRE(ga.allocate(static_cast<uint64_t>(i), row));
+    REQUIRE(ga.rows_used() == 256);
+    REQUIRE(ga.occupancy() == Catch::Approx(0.5f));  // 256 / 512.
+}
+
+// ── Phase 6.2 — AtlasInventory aggregator ───────────────────────────────────
+
+TEST_CASE("AtlasInventory starts empty - phase6.2",
+          "[render][atlas][phase6.2]") {
+    AtlasInventory inv;
+    REQUIRE(inv.empty());
+    REQUIRE(inv.size() == 0);
+    REQUIRE(inv.total_pages() == 0);
+    REQUIRE(inv.total_entries() == 0u);
+    REQUIRE(inv.average_occupancy() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("AtlasInventory snapshots a packed atlas - phase6.2",
+          "[render][atlas][phase6.2]") {
+    GlyphAtlas glyphs(256);
+    AtlasPacker::Region r{};
+    REQUIRE(glyphs.allocate(7, 128, 256, r));  // half-page → 50% occupancy.
+
+    AtlasInventory inv;
+    inv.add_atlas(glyphs, AtlasKind::glyph);
+    REQUIRE_FALSE(inv.empty());
+    REQUIRE(inv.size() == 1);
+
+    const AtlasInfo& info = inv.atlases().front();
+    REQUIRE(info.kind == AtlasKind::glyph);
+    REQUIRE(info.label == "glyph");          // defaults to the kind name.
+    REQUIRE(info.width == 256);
+    REQUIRE(info.height == 256);
+    REQUIRE(info.pages == 1);
+    REQUIRE(info.entries == 1u);
+    REQUIRE(info.occupancy == Catch::Approx(0.5f));
+    REQUIRE(info.occupancy_percent() == 50);
+    REQUIRE(info.texel_capacity() == 256u * 256u);
+}
+
+TEST_CASE("AtlasInventory snapshot_gradient uses row capacity as height - phase6.2",
+          "[render][atlas][phase6.2]") {
+    GradientAtlas ga;
+    int row = -1;
+    for (int i = 0; i < 128; ++i)
+        REQUIRE(ga.allocate(static_cast<uint64_t>(i), row));
+
+    AtlasInventory inv;
+    inv.add_gradient(ga);
+    const AtlasInfo& info = inv.atlases().front();
+    REQUIRE(info.kind == AtlasKind::gradient);
+    REQUIRE(info.width == 256);             // default ramp width.
+    REQUIRE(info.height == 512);            // GradientAtlas row budget.
+    REQUIRE(info.entries == 128u);
+    REQUIRE(info.occupancy == Catch::Approx(0.25f));  // 128 / 512.
+}
+
+TEST_CASE("AtlasInventory aggregates across multiple atlases - phase6.2",
+          "[render][atlas][phase6.2]") {
+    ImageAtlas images(128);
+    GlyphAtlas glyphs(256);
+    AtlasPacker::Region r{};
+    REQUIRE(images.allocate(1, 64, 128, r));   // 50% of the image atlas.
+    REQUIRE(glyphs.allocate(2, 256, 256, r));  // 100% of the glyph atlas.
+
+    AtlasInventory inv;
+    inv.add_atlas(images, AtlasKind::image, "images", /*pages=*/2);
+    inv.add_atlas(glyphs, AtlasKind::glyph);
+
+    REQUIRE(inv.size() == 2);
+    REQUIRE(inv.total_pages() == 3);          // 2 + 1.
+    REQUIRE(inv.total_entries() == 2u);       // one entry per atlas.
+    // average occupancy = (0.5 + 1.0) / 2 = 0.75.
+    REQUIRE(inv.average_occupancy() == Catch::Approx(0.75f));
+    // The custom label survives; the default falls back to the kind name.
+    REQUIRE(inv.atlases()[0].label == "images");
+    REQUIRE(inv.atlases()[1].label == "glyph");
+}
+
+TEST_CASE("AtlasInventory clear empties the collection - phase6.2",
+          "[render][atlas][phase6.2]") {
+    ImageAtlas images(64);
+    AtlasInventory inv;
+    inv.add_atlas(images, AtlasKind::image);
+    REQUIRE(inv.size() == 1);
+    inv.clear();
+    REQUIRE(inv.empty());
+    REQUIRE(inv.total_pages() == 0);
+}
+
+TEST_CASE("AtlasInfo occupancy_percent clamps out-of-range values - phase6.2",
+          "[render][atlas][phase6.2]") {
+    AtlasInfo over;
+    over.occupancy = 1.7f;
+    REQUIRE(over.occupancy_percent() == 100);  // clamped high.
+
+    AtlasInfo under;
+    under.occupancy = -0.3f;
+    REQUIRE(under.occupancy_percent() == 0);   // clamped low.
+
+    AtlasInfo mid;
+    mid.occupancy = 0.333f;
+    REQUIRE(mid.occupancy_percent() == 33);    // rounds to nearest.
+}
+
+TEST_CASE("atlas_kind_name covers every AtlasKind - phase6.2",
+          "[render][atlas][phase6.2]") {
+    REQUIRE(std::string(atlas_kind_name(AtlasKind::glyph))    == "glyph");
+    REQUIRE(std::string(atlas_kind_name(AtlasKind::image))    == "image");
+    REQUIRE(std::string(atlas_kind_name(AtlasKind::gradient)) == "gradient");
+    REQUIRE(std::string(atlas_kind_name(AtlasKind::path))     == "path");
 }
