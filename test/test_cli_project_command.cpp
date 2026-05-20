@@ -13,7 +13,19 @@
 
 namespace fs = std::filesystem;
 
+// Roadmap item P11-1 split `cmd_project.cpp` into focused sibling TUs.
+// This test exercises the anonymous-namespace helpers (`bump_one`,
+// `parse_bump_options`, …) plus the public `cmd_project` dispatcher
+// without shelling out, so it includes every TU in the family.
+#include "../tools/cli/cmd_project_common.cpp"
+#include "../tools/cli/cmd_project_bump.cpp"
+#include "../tools/cli/cmd_project_undo.cpp"
 #include "../tools/cli/cmd_project.cpp"
+
+// The shared helpers and option types now live in this private
+// namespace; pull them in so the existing unqualified test code
+// (`bump_one`, `BumpOptions`, `parse_bump_options`) keeps resolving.
+using namespace pulp_cli::project_detail;
 
 namespace pulp::cli::migration {
 const MigrationEntry* const kMigrationIndex = nullptr;
