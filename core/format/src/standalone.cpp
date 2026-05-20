@@ -175,6 +175,14 @@ bool StandaloneApp::apply_config(const StandaloneConfig& new_config) {
 }
 
 bool StandaloneApp::run_with_editor(bool use_gpu) {
+    const auto effective_config = detail::standalone_config_from_environment(config_);
+    if (detail::standalone_headless_requires_screenshot(effective_config)) {
+        runtime::log_error(
+            "Standalone: headless/CI mode requires a screenshot path; "
+            "set StandaloneConfig::screenshot_path or PULP_SCREENSHOT");
+        return false;
+    }
+
     if (!start()) return false;
 
     if (!processor_ || !processor_->has_editor()) {
@@ -209,7 +217,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     auto desc = processor_->descriptor();
 
     auto chrome = detail::make_standalone_editor_chrome(
-        std::move(root), config_, audio_system_.get(), midi_system_.get(), &input_meter_bridge_,
+        std::move(root), effective_config, audio_system_.get(), midi_system_.get(), &input_meter_bridge_,
         detail::StandaloneSettingsActions{
             .apply_config = [this](const StandaloneConfig& cfg) {
                 return apply_config(cfg);
@@ -236,6 +244,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // honor them (#1362).
     auto opts = detail::make_standalone_window_options(
         size_hints, chrome, desc.name + " — Standalone", use_gpu);
+    opts.initially_hidden = effective_config.headless;
 
     auto window = view::WindowHost::create(window_root, opts);
     if (!window) {
@@ -318,27 +327,28 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     detail::install_standalone_idle_callback(*window, scripted_ui_ptr, settings_ptr);
 #endif
 
-    window->show();
+    if (!opts.initially_hidden)
+        window->show();
 
     detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
 
     // ── Headless one-shot screenshot (SDK-codified, pulp #468 follow-up) ──
     //
-    // When `config_.screenshot_path` is non-empty (set via set_config or
-    // parsed from `--screenshot=PATH` argv in the consumer's main), wait
-    // `screenshot_frame_delay` frames, then capture the window via
-    // `WindowHost::capture_png()` and exit. This is the SDK-level shape
+    // When `effective_config.screenshot_path` is non-empty (set via
+    // config/env or forwarded `pulp run --screenshot` args), wait
+    // `screenshot_frame_delay` frames, then capture the host back buffer and
+    // exit. This is the SDK-level shape
     // so every consumer (Spectr, examples, future plugins) gets headless
     // visual-regression capture without bespoke per-app code.
-    if (!config_.screenshot_path.empty()) {
+    if (!effective_config.screenshot_path.empty()) {
         auto* host = window.get();
         detail::ScreenshotCapture cap;
-        cap.delay = config_.screenshot_frame_delay > 0
-            ? config_.screenshot_frame_delay : 30;
-        cap.path = config_.screenshot_path;
-        cap.capture_fn = [host] { return host->capture_png(); };
+        cap.delay = effective_config.screenshot_frame_delay > 0
+            ? effective_config.screenshot_frame_delay : 30;
+        cap.path = effective_config.screenshot_path;
+        cap.capture_fn = [host] { return host->capture_back_buffer_png(); };
         cap.close_fn   = [host] { host->request_close(); };
-        cap.on_error   = [out_path = config_.screenshot_path](const std::string& msg) {
+        cap.on_error   = [out_path = effective_config.screenshot_path](const std::string& msg) {
             runtime::log_error("Standalone: screenshot {} ({})", msg, out_path);
         };
         // Compose with the pre-screenshot idle callback (inspector +
@@ -350,7 +360,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             cap();
         });
         runtime::log_info("Standalone: screenshot mode armed — will capture to {} after {} frames",
-                          config_.screenshot_path, cap.delay);
+                          effective_config.screenshot_path, cap.delay);
     }
 
     // Blocks until the window is closed. The close callback above has

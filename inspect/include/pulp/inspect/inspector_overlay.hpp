@@ -216,12 +216,13 @@ public:
     const InspectorConfig& config() const { return config_; }
 
     /// Resolve the selected view's authored source location and (unless
-    /// `dry_run`) open the user's editor at that file:line. Returns the
-    /// full result so callers / tests can inspect the formatted URL.
+    /// `dry_run`) open the user's editor at that file:line. Defaults to
+    /// dry-run so tests and protocol callers must opt into launching.
+    /// Returns the full result so callers / tests can inspect the formatted URL.
     /// A graceful no-op (ok == false) when there is no selection or the
     /// selected view carries no source provenance — the inspector never
     /// throws or spawns a process for a non-imported view.
-    SourceJumpResult jump_to_selection_source(bool dry_run = false);
+    SourceJumpResult jump_to_selection_source(bool dry_run = true);
 
     // ── Phase 3b — live-editable box-model fields ──────────────────
     //

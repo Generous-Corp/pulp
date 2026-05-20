@@ -144,6 +144,10 @@ Do not rerun broad unrelated suites when a focused bridge/demo tag is enough.
 ```
 
 Use screenshots to confirm the result is visibly truthful, not just test-green.
+Capture mode is also the CI/headless smoke path: `--capture` sets
+`WindowOptions::initially_hidden=true` and exits before `run_event_loop()`.
+Keep future capture changes on that hidden path; do not add `show()` or
+focus-stealing activation before the screenshot is written.
 
 ### 5. Prefer contract-driven bridge work
 

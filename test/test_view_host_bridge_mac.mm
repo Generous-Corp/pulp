@@ -29,6 +29,7 @@ TEST_CASE("macOS WindowHost reports content size and fires resize callbacks",
         opts.height = 240.0f;
         opts.resizable = true;
         opts.use_gpu = false;
+        opts.initially_hidden = true;
 
         auto host = WindowHost::create(root, opts);
         REQUIRE(host != nullptr);
@@ -100,6 +101,7 @@ TEST_CASE("macOS GPU WindowHost accepts set_idle_callback (pulp #1387 gap #3)",
         opts.width = 200.0f;
         opts.height = 200.0f;
         opts.use_gpu = true;
+        opts.initially_hidden = true;
 
         auto host = WindowHost::create(root, opts);
         if (!host) {
@@ -153,6 +155,7 @@ TEST_CASE("PulpView mouseUp survives mouseDown handler that unmounts the target"
         opts.height = 100.0f;
         opts.resizable = false;
         opts.use_gpu = false;
+        opts.initially_hidden = true;
 
         auto host = WindowHost::create(root, opts);
         REQUIRE(host != nullptr);
@@ -241,6 +244,7 @@ TEST_CASE("PulpView NSEvent click dispatches JS on(id,'click') subscriber",
         opts.height = 100.0f;
         opts.resizable = false;
         opts.use_gpu = false;
+        opts.initially_hidden = true;
 
         auto host = WindowHost::create(root, opts);
         REQUIRE(host != nullptr);
@@ -353,6 +357,7 @@ TEST_CASE("PulpView NSEvent click bubbles up to ancestor on_click handler",
         opts.height = 100.0f;
         opts.resizable = false;
         opts.use_gpu = false;
+        opts.initially_hidden = true;
 
         auto host = WindowHost::create(root, opts);
         REQUIRE(host != nullptr);

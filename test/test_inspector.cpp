@@ -7,7 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -46,6 +48,41 @@ bool has_label_containing(View& root, std::string_view text) {
     }
     return false;
 }
+
+struct ScopedEnv {
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            prev_ = std::string(prev);
+            had_prev_ = true;
+        }
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+#endif
+    }
+
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+    ~ScopedEnv() {
+        if (had_prev_) set(prev_);
+        else unset();
+    }
+
+private:
+    std::string name_;
+    std::string prev_;
+    bool had_prev_ = false;
+};
 
 // A RecordingCanvas that also serves real pixel readback over a small
 // synthetic surface — lets phase-3e tests exercise the loupe's
@@ -3328,6 +3365,34 @@ TEST_CASE("InspectorOverlay: J jumps to source for a view with provenance",
     jk.modifiers = 0;
     jk.is_down = true;
     REQUIRE(overlay.handle_key_event(jk));
+}
+
+TEST_CASE("InspectorOverlay source jump helper defaults to dry-run",
+          "[inspect][overlay][source-jump][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    headless.set("1");
+
+    View root;
+    root.set_bounds({0, 0, 500, 300});
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 80, 40});
+    child->set_source_loc({"src/Panel.jsx", 24, 3});
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    MouseEvent click;
+    click.position = {20, 20};
+    click.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(click));
+    REQUIRE(overlay.selected_view() != nullptr);
+
+    auto result = overlay.jump_to_selection_source();
+    REQUIRE(result.ok);
+    REQUIRE(result.url == "vscode://file/src/Panel.jsx:24");
+    REQUIRE_FALSE(result.launched);
+    REQUIRE(result.error.empty());
 }
 
 TEST_CASE("InspectorOverlay: J is a graceful no-op without a selection",

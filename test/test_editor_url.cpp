@@ -401,6 +401,59 @@ TEST_CASE("jump_to_source with dry_run=false does not launch under the guard",
     REQUIRE_FALSE(result.launched);
 }
 
+TEST_CASE("launch_editor_url refuses to spawn when PULP_HEADLESS is set",
+          "[inspect][source-jump][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    headless.set("1");
+
+    std::string error;
+    REQUIRE_FALSE(launch_editor_url("vscode://file/src/Panel.jsx:24", &error));
+    REQUIRE(error.find("PULP_HEADLESS") != std::string::npos);
+}
+
+TEST_CASE("launch_editor_url refuses to spawn when CI is set",
+          "[inspect][source-jump][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    headless.unset();
+    test_mode.unset();
+    ci.set("true");
+
+    std::string error;
+    REQUIRE_FALSE(launch_editor_url("vscode://file/src/Panel.jsx:24", &error));
+    REQUIRE(error.find("CI") != std::string::npos);
+}
+
+TEST_CASE("launch_editor_url refuses to spawn from pulp-test binaries",
+          "[inspect][source-jump][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    std::string error;
+    REQUIRE_FALSE(launch_editor_url("vscode://file/src/Panel.jsx:24", &error));
+    REQUIRE(error.find("pulp-test") != std::string::npos);
+}
+
+TEST_CASE("jump_to_source non-dry launch is guarded in headless mode",
+          "[inspect][source-jump][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    headless.set("1");
+
+    pulp::view::View view;
+    view.set_source_loc({"src/Panel.jsx", 24, 3});
+
+    InspectorConfig cfg;
+    auto result = jump_to_source(cfg, &view, /*dry_run=*/false);
+    REQUIRE(result.ok);
+    REQUIRE_FALSE(result.launched);
+    REQUIRE(result.error.find("PULP_HEADLESS") != std::string::npos);
+}
+
 // ── Phase 5.1: Inspector.jumpToSource protocol round-trip ──────────────────
 
 TEST_CASE("Inspector.jumpToSource resolves an anchored view in dryRun",
@@ -430,6 +483,63 @@ TEST_CASE("Inspector.jumpToSource resolves an anchored view in dryRun",
     REQUIRE(obj["line"].getInt64() == 24);
     REQUIRE_FALSE(obj["launched"].getBool());
     REQUIRE(obj["dryRun"].getBool());
+}
+
+TEST_CASE("Inspector.jumpToSource defaults to dry-run when dryRun is omitted",
+          "[inspect][source-jump][protocol][issue-2515]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+    ScopedEnv headless("PULP_HEADLESS");
+    headless.set("1");
+
+    pulp::view::View root;
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_anchor_id("figma:node-7");
+    child->set_source_loc({"src/Panel.jsx", 24, 3});
+    root.add_child(std::move(child));
+
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource,
+        R"({"anchorId":"figma:node-7"})"));
+    REQUIRE_FALSE(resp.is_error);
+
+    auto obj = choc::json::parse(resp.params_json);
+    REQUIRE(obj["ok"].getBool());
+    REQUIRE_FALSE(obj["launched"].getBool());
+    REQUIRE(obj["dryRun"].getBool());
+    REQUIRE_FALSE(obj.hasObjectMember("launchError"));
+}
+
+TEST_CASE("Inspector.jumpToSource reports guarded launch errors",
+          "[inspect][source-jump][protocol][issue-2515]") {
+    ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
+    env.unset();
+    ScopedEnv headless("PULP_HEADLESS");
+    headless.set("1");
+
+    pulp::view::View root;
+    auto child = std::make_unique<pulp::view::View>();
+    child->set_anchor_id("figma:node-7");
+    child->set_source_loc({"src/Panel.jsx", 24, 3});
+    root.add_child(std::move(child));
+
+    DomainHandler handler;
+    handler.set_root_view(&root);
+
+    auto resp = handler.handle(make_request(
+        1, methods::kInspectorJumpToSource,
+        R"({"anchorId":"figma:node-7","dryRun":false})"));
+    REQUIRE_FALSE(resp.is_error);
+
+    auto obj = choc::json::parse(resp.params_json);
+    REQUIRE(obj["ok"].getBool());
+    REQUIRE_FALSE(obj["launched"].getBool());
+    REQUIRE_FALSE(obj["dryRun"].getBool());
+    REQUIRE(std::string(obj["launchError"].getString()).find("PULP_HEADLESS")
+            != std::string::npos);
 }
 
 TEST_CASE("Inspector.jumpToSource returns ok:false for an unknown anchor",

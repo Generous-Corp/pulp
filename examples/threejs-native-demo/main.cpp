@@ -1895,6 +1895,7 @@ int main(int argc, char* argv[]) {
     opts.width = width;
     opts.height = height;
     opts.use_gpu = true;
+    opts.initially_hidden = capture_path.has_value();
 
     auto window = WindowHost::create(env.root, opts);
     if (!window) {

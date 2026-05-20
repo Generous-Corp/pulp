@@ -67,9 +67,9 @@ namespace methods {
     constexpr auto kInspectorSetEditorUrlTemplate = "Inspector.setEditorUrlTemplate";
     constexpr auto kInspectorGetEditorUrlTemplate = "Inspector.getEditorUrlTemplate";
     // Phase 5.1: the concrete source-jump action. Resolves the selected
-    // (or a given `anchorId`'s) view's recorded source location, formats
-    // the editor URL, and — unless `dryRun` is true — hands it to the OS
-    // so the user's editor opens at the originating JSX file:line.
+    // (or a given `anchorId`'s) view's recorded source location and formats
+    // the editor URL. It defaults to dry-run; callers must pass
+    // `dryRun:false` to hand the URL to the OS and open the user's editor.
     // Returns {ok, url, path, line, col, launched}. See
     // pulp/inspect/source_jump.hpp.
     constexpr auto kInspectorJumpToSource = "Inspector.jumpToSource";

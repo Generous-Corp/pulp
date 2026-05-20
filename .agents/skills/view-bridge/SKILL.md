@@ -82,6 +82,15 @@ height, dispatches `ViewBridge::resize(...)`, and re-dispatches on each
 or rely on `Processor::on_view_resized(...)`, do not assume
 `editor_size()` is the last word after attach.
 
+Standalone headless/test launches must not show or activate a native
+window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
+`CI`, or `PULP_SCREENSHOT` route `run_with_editor()` through
+`WindowOptions::initially_hidden`; screenshot mode captures
+`WindowHost::capture_back_buffer_png()`, not compositor-visible
+`capture_png()`. If a CI/test run is headless but has no screenshot path,
+`run_with_editor()` fails before creating the host so tests cannot park a
+hidden live window forever.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called
