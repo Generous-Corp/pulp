@@ -36,6 +36,25 @@ static const Color kFieldEditCaret   = Color::rgba(0.95f, 0.6f, 0.2f, 1.0f);
 static const Color kFieldEditUnder   = Color::rgba(0.95f, 0.6f, 0.2f, 0.9f);
 static const Color kFieldEditBg      = Color::rgba(0.95f, 0.6f, 0.2f, 0.18f);
 
+// Phase 3c — eyedropper cursor swatch chrome
+static const Color kEyedropChromeBg  = Color::rgba(0.08f, 0.08f, 0.1f, 0.95f);
+static const Color kEyedropBorder    = Color::rgba(1.0f, 1.0f, 1.0f, 0.85f);
+static const Color kEyedropText      = Color::rgba(0.95f, 0.95f, 1.0f, 1.0f);
+
+// Format a Color as a CSS hex string: "#rrggbb" when fully opaque,
+// "#rrggbbaa" otherwise. Lower-case, fixed-width — matches the hex
+// shape the JS bridge and pulp-tweaks.json already use for colors.
+static std::string color_to_hex(const Color& c) {
+    std::ostringstream oss;
+    oss << '#' << std::hex << std::nouppercase << std::setfill('0');
+    oss << std::setw(2) << static_cast<int>(c.r8())
+        << std::setw(2) << static_cast<int>(c.g8())
+        << std::setw(2) << static_cast<int>(c.b8());
+    if (c.a8() != 255)
+        oss << std::setw(2) << static_cast<int>(c.a8());
+    return oss.str();
+}
+
 // ── Constructor ─────────────────────────────────────────────────────────────
 
 InspectorOverlay::InspectorOverlay(View& root) : root_(root) {}
@@ -66,7 +85,85 @@ void InspectorOverlay::set_active(bool active) {
         alt_hover_target_ = nullptr;
         distance_anchor_ = nullptr;
         editable_fields_.clear();
+        // Phase 3c — drop any pending eyedropper state with the
+        // inspector so a stale swatch never paints on the next open.
+        eyedropper_active_ = false;
+        eyedropper_has_sample_ = false;
     }
+}
+
+// ── Phase 3c — color eyedropper ─────────────────────────────────────────────
+//
+// An eyedropper mode (E-key, mirroring Phase 3a's D-key for drag
+// handles) lets the user sample a color from the rendered UI and
+// apply it as a tweak to the selected view's color property.
+//
+// Two sampling paths, picked at runtime:
+//   1. Framebuffer readback — `Canvas::read_pixels()` returns the
+//      exact rendered pixel under the cursor. Implemented only on
+//      Skia raster surfaces (see canvas.hpp issue-916); when present
+//      it is authoritative because it captures gradients, borders,
+//      child paint, and theme blending the View tree alone can't.
+//   2. Resolved-style fallback — when readback is unavailable
+//      (RecordingCanvas, CG fallback, headless tests), the
+//      eyedropper samples the resolved background color of the
+//      top-most View under the cursor, walking up to the nearest
+//      ancestor with an explicit background. This is a documented v1
+//      simplification: it sees declared View backgrounds, not
+//      arbitrary pixels.
+//
+// On click the sampled color is emitted via emit_tweak_for_selection()
+// — the SAME path Phase 3a/3b gestures use — encoded as a "#rrggbb"
+// hex string, source "inspector-eyedropper".
+
+void InspectorOverlay::set_eyedropper_active(bool active) {
+    eyedropper_active_ = active;
+    if (!active) eyedropper_has_sample_ = false;
+}
+
+bool InspectorOverlay::resolved_color_under(Point pos, Color& out) const {
+    const View* hit = root_.hit_test(pos);
+    for (const View* v = hit; v; v = v->parent()) {
+        if (v->has_background_color()) {
+            out = v->background_color();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool InspectorOverlay::sample_color_at(Point pos, Canvas* canvas,
+                                       Color& out) const {
+    // Path 1 — framebuffer readback (Skia raster only). read_pixels
+    // returns RGBA8 in `px`; a false return (RecordingCanvas / CG
+    // fallback) drops through to the resolved-style path.
+    if (canvas) {
+        std::uint8_t px[4] = {0, 0, 0, 0};
+        int ix = static_cast<int>(std::lround(pos.x));
+        int iy = static_cast<int>(std::lround(pos.y));
+        if (ix >= 0 && iy >= 0 &&
+            canvas->read_pixels(ix, iy, 1, 1, px)) {
+            out = Color::rgba8(px[0], px[1], px[2], px[3]);
+            return true;
+        }
+    }
+    // Path 2 — resolved-style fallback.
+    return resolved_color_under(pos, out);
+}
+
+bool InspectorOverlay::apply_eyedropper_pick() {
+    if (!eyedropper_has_sample_) return false;
+    bool ok = emit_tweak_for_selection(
+        eyedropper_target_,
+        choc::value::createString(color_to_hex(eyedropper_sample_)),
+        "inspector-eyedropper");
+    // A pick is a single deliberate action — disable the mode so the
+    // very next click resumes normal selection rather than picking
+    // again. (Re-arm with the E key for another pick.) We disable
+    // even on a no-op emit so the UX is predictable: the user clicked
+    // with the eyedropper, the eyedropper is now spent.
+    set_eyedropper_active(false);
+    return ok;
 }
 
 // ── Phase 0b PR-C-1: in-process gesture-tweak emission ─────────────────────
@@ -220,6 +317,16 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
+    // Phase 3c — E toggles eyedropper mode (no modifier; same opt-in
+    // discipline as the D-key drag toggle above). Entering edit mode
+    // already swallows keys before this point, so the E-key can't
+    // collide with numeric-field editing.
+    if (active_ && event.key == KeyCode::e && event.is_down &&
+        event.modifiers == 0) {
+        toggle_eyedropper();
+        return true;
+    }
+
     return false;
 }
 
@@ -236,6 +343,55 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     if (!active_) return false;
 
     auto pos = event.position;
+
+    // ── Phase 3c: eyedropper mode ──────────────────────────────────
+    // When the eyedropper is armed it owns canvas-area mouse events:
+    // moves sample the color under the cursor (driving the swatch),
+    // a press applies the pick. It deliberately yields to the panel
+    // (so the user can still click the tree / fields) — a press over
+    // the panel falls through to the normal panel path below.
+    //
+    // The eyedropper's paint() captures the pixel under the cursor at
+    // sample time, BEFORE the swatch chrome is drawn, so the chrome
+    // never contaminates a subsequent read. Sampling here in the
+    // handler instead would read the previous frame; we therefore
+    // record the cursor position and let paint() do the readback.
+    if (eyedropper_active_ && !point_in_panel(pos)) {
+        eyedropper_cursor_ = pos;
+        if (event.is_down) {
+            // Resolved-style sampling is synchronous + frame-
+            // independent, so a click without a prior move still
+            // picks a real color (covers headless / scripted use).
+            //
+            // Codex P1 (#2434): the click must be authoritative on the
+            // click coordinate. Invalidate any prior sample FIRST — a
+            // hover move or a paint_eyedropper_cursor() framebuffer
+            // readback at the default/old cursor position may have left
+            // a stale `eyedropper_sample_` with `eyedropper_has_sample_`
+            // still true. If the click-position resample then fails
+            // (e.g. the click lands where no view carries a background
+            // color and only the resolved-style fallback is available),
+            // apply_eyedropper_pick() must no-op rather than commit the
+            // stale color — so the invalidation has to happen before the
+            // resample, not be skipped on a failed read.
+            eyedropper_has_sample_ = false;
+            Color sampled;
+            if (sample_color_at(pos, nullptr, sampled)) {
+                eyedropper_sample_ = sampled;
+                eyedropper_has_sample_ = true;
+            }
+            apply_eyedropper_pick();
+            return true;  // consume the pick click
+        }
+        // Move: resolved-style sample now for an immediate swatch;
+        // paint() upgrades to framebuffer readback when available.
+        Color sampled;
+        if (sample_color_at(pos, nullptr, sampled)) {
+            eyedropper_sample_ = sampled;
+            eyedropper_has_sample_ = true;
+        }
+        return false;  // don't consume moves — let hover effects run
+    }
 
     // ── Phase 3a: drag-handle gesture state machine ────────────────
     // The Pulp MouseEvent model uses is_down=true ONLY for the
@@ -491,6 +647,80 @@ void InspectorOverlay::paint(Canvas& canvas) {
     paint_distance_lines(canvas);
     if (selected_) paint_box_model(canvas, selected_);
     paint_panel(canvas);
+    // Phase 3c — eyedropper swatch paints last so it floats above
+    // everything (including the panel) and never under the highlight.
+    paint_eyedropper_cursor(canvas);
+}
+
+void InspectorOverlay::paint_eyedropper_cursor(Canvas& canvas) {
+    if (!eyedropper_active_) return;
+
+    // Upgrade the sample to an exact framebuffer pixel if the live
+    // Canvas supports readback. Done here (not in the mouse handler)
+    // so the read happens against the fully-composited frame, before
+    // the swatch chrome below would otherwise contaminate the pixel.
+    {
+        Color sampled;
+        if (sample_color_at(eyedropper_cursor_, &canvas, sampled)) {
+            eyedropper_sample_ = sampled;
+            eyedropper_has_sample_ = true;
+        }
+    }
+    if (!eyedropper_has_sample_) return;
+
+    // Swatch + hex readout, offset down-right of the cursor so the
+    // pointer itself never sits on top of the chrome being read.
+    constexpr float kSwatch = 22.0f;   // swatch square side
+    constexpr float kPad    = 4.0f;
+    constexpr float kRowH   = 16.0f;
+    const std::string hex = color_to_hex(eyedropper_sample_);
+
+    canvas.save();
+    canvas.set_font("monospace", kFontSize);
+    float text_w = canvas.measure_text(hex);
+    float box_w = kPad + kSwatch + kPad + text_w + kPad;
+    float box_h = kPad + std::max(kSwatch, kRowH) + kPad;
+    float bx = eyedropper_cursor_.x + 14.0f;
+    float by = eyedropper_cursor_.y + 14.0f;
+
+    // Keep the chrome on-screen near the right / bottom edges.
+    float root_w = root_.bounds().width;
+    float root_h = root_.bounds().height;
+    if (bx + box_w > root_w) bx = eyedropper_cursor_.x - 14.0f - box_w;
+    if (by + box_h > root_h) by = eyedropper_cursor_.y - 14.0f - box_h;
+
+    // Chrome background.
+    canvas.set_fill_color(kEyedropChromeBg);
+    canvas.fill_rounded_rect(bx, by, box_w, box_h, 4.0f);
+
+    // Checkerboard behind the swatch so transparent samples read as
+    // transparent rather than as solid black.
+    float sx = bx + kPad;
+    float sy = by + kPad;
+    const Color kCheckA = Color::rgba(0.75f, 0.75f, 0.75f, 1.0f);
+    const Color kCheckB = Color::rgba(0.55f, 0.55f, 0.55f, 1.0f);
+    constexpr float kCell = kSwatch / 2.0f;
+    for (int cy = 0; cy < 2; ++cy)
+        for (int cx = 0; cx < 2; ++cx) {
+            canvas.set_fill_color(((cx + cy) & 1) ? kCheckB : kCheckA);
+            canvas.fill_rect(sx + cx * kCell, sy + cy * kCell, kCell, kCell);
+        }
+
+    // Sampled color on top of the checkerboard.
+    canvas.set_fill_color(eyedropper_sample_);
+    canvas.fill_rect(sx, sy, kSwatch, kSwatch);
+
+    // Swatch border.
+    canvas.set_stroke_color(kEyedropBorder);
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rect(sx, sy, kSwatch, kSwatch);
+
+    // Hex readout.
+    canvas.set_fill_color(kEyedropText);
+    canvas.fill_text(hex, sx + kSwatch + kPad,
+                     by + box_h / 2.0f + 4.0f);
+
+    canvas.restore();
 }
 
 void InspectorOverlay::paint_highlight(Canvas& canvas) {
@@ -1047,6 +1277,18 @@ void InspectorOverlay::paint_stats_bar(Canvas& canvas, float x, float y, float w
     } else {
         canvas.set_fill_color(kPanelDim);
         canvas.fill_text("No render stats", x + 8, y + 16);
+    }
+
+    // Phase 3c — active-mode hint. Drag (D) and eyedropper (E) are
+    // mutually informative; show whichever is armed so the user
+    // remembers a non-default canvas mode is in effect. Placed at the
+    // bar midpoint so it never overlaps the left-aligned frame-time
+    // readout or the right-aligned view count.
+    if (eyedropper_active_ || dragging_enabled_) {
+        canvas.set_fill_color(kFieldEditCaret);
+        const char* mode = eyedropper_active_ ? "\xe2\x97\x89 eyedropper"
+                                              : "\xe2\x97\x89 drag";
+        canvas.fill_text(mode, x + w * 0.5f - 24.0f, y + 16);
     }
 
     // View count

@@ -149,6 +149,61 @@ public:
     bool pass_viewer_enabled() const { return pass_viewer_enabled_; }
     void toggle_pass_viewer() { pass_viewer_enabled_ = !pass_viewer_enabled_; }
 
+    // ── Phase 3c — color eyedropper ─────────────────────────────────
+    /// Toggle eyedropper mode. When enabled, mouse-move samples the
+    /// color under the cursor and a swatch + hex readout follows the
+    /// pointer; the next click captures that color and emits it as a
+    /// tweak on the selected view's color property (default
+    /// "style.background_color"). Toggled via the E key (no modifier)
+    /// while the inspector is active — mirrors how D toggles drag
+    /// handles in Phase 3a. Default OFF: without it, normal
+    /// click-to-select is unchanged.
+    ///
+    /// Sampling strategy: if the live Canvas exposes pixel readback
+    /// (`Canvas::read_pixels` — Skia raster surfaces only), the
+    /// eyedropper reads the exact framebuffer pixel under the cursor.
+    /// Otherwise it falls back to the resolved-style color of the
+    /// top-most View under the cursor — walking up the tree to the
+    /// nearest ancestor with an explicit background color. The v1
+    /// fallback is documented as a known simplification.
+    void set_eyedropper_active(bool active);
+    bool eyedropper_active() const { return eyedropper_active_; }
+    void toggle_eyedropper() { set_eyedropper_active(!eyedropper_active_); }
+
+    /// Last color sampled by the eyedropper (updated on every
+    /// mouse-move while eyedropper mode is active). Read by tests and
+    /// by the cursor-swatch paint. Defaults to transparent black until
+    /// the first sample lands.
+    Color eyedropper_sample() const { return eyedropper_sample_; }
+
+    /// Whether `eyedropper_sample_` reflects a real sample yet (false
+    /// until the first mouse-move inside the canvas while active).
+    bool eyedropper_has_sample() const { return eyedropper_has_sample_; }
+
+    /// The dotted color property the eyedropper writes to on click.
+    /// Defaults to "style.background_color"; a host could retarget it
+    /// to "style.color" / "style.border_color" before a pick. The
+    /// setter ignores empty strings.
+    const std::string& eyedropper_target() const { return eyedropper_target_; }
+    void set_eyedropper_target(std::string path) {
+        if (!path.empty()) eyedropper_target_ = std::move(path);
+    }
+
+    /// Sample the color under `pos` (root coords) WITHOUT applying it.
+    /// Visible for tests + used internally by the mouse-move handler.
+    /// Returns true if a color was found (always true for the
+    /// resolved-style fallback once a view is under the cursor).
+    bool sample_color_at(Point pos, Canvas* canvas, Color& out) const;
+
+    /// Apply the last sampled color as a tweak to the current
+    /// selection's `eyedropper_target_` property, encoded as a
+    /// "#rrggbb" / "#rrggbbaa" hex string, with source
+    /// "inspector-eyedropper". Returns false if there's no sample yet
+    /// or `emit_tweak_for_selection` reports no-op (no selection /
+    /// anchor / store). On success the eyedropper auto-disables so a
+    /// pick is a single, deliberate action.
+    bool apply_eyedropper_pick();
+
     // ── Selection ───────────────────────────────────────────────────
     View* selected_view() const { return selected_; }
     View* hovered_view() const { return hovered_; }
@@ -343,6 +398,26 @@ private:
     // for the currently-selected view (root coords). Returns
     // DragCorner::none if no handle is hit or no view selected.
     DragCorner hit_test_drag_handle(Point pos) const;
+
+    // ── Phase 3c — color eyedropper state ───────────────────────────
+    // Off by default so the inspector behaves identically to the
+    // pre-3c build until the user opts in (E-key toggle).
+    bool eyedropper_active_ = false;
+    bool eyedropper_has_sample_ = false;
+    Color eyedropper_sample_{0.0f, 0.0f, 0.0f, 0.0f};
+    Point eyedropper_cursor_{};  ///< Last cursor pos (root coords) for swatch.
+    std::string eyedropper_target_ = "style.background_color";
+
+    // Walk from the View under `pos` up to the nearest ancestor that
+    // has an explicit background color; returns that color. Returns
+    // false when no view under the cursor carries a background — the
+    // resolved-style fallback used when Canvas pixel readback is
+    // unavailable.
+    bool resolved_color_under(Point pos, Color& out) const;
+
+    // Paint the cursor-following swatch + hex readout. No-op unless
+    // eyedropper mode is active and at least one sample has landed.
+    void paint_eyedropper_cursor(Canvas& canvas);
 
     // ── Flat tree for rendering ─────────────────────────────────────
     struct TreeItem {
