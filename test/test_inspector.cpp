@@ -3200,6 +3200,44 @@ TEST_CASE("InspectorOverlay Phase 6.1: paint() drives capture automatically",
 #include <pulp/inspect/source_jump.hpp>
 #include <choc/text/choc_JSON.h>
 
+#include <cstdlib>
+
+namespace {
+
+// Scoped guard that sets PULP_INSPECTOR_NO_LAUNCH for the duration of a
+// test, restoring the prior value on destruction. The overlay's J
+// hotkey resolves with dry_run=false and would otherwise spawn a real
+// editor (and pop the macOS open-confirmation dialog). The CTest target
+// sets this env var globally, but a test that exercises the real-launch
+// path sets it in-process too so it is safe when the binary is run
+// directly. With the guard in place, launch_editor_url() never spawns a
+// process and reports launched=false.
+struct ScopedNoLaunch {
+    ScopedNoLaunch() {
+        if (const char* prev = std::getenv("PULP_INSPECTOR_NO_LAUNCH")) {
+            prev_ = std::string(prev);
+            had_prev_ = true;
+        }
+#if defined(_WIN32)
+        _putenv_s("PULP_INSPECTOR_NO_LAUNCH", "1");
+#else
+        ::setenv("PULP_INSPECTOR_NO_LAUNCH", "1", /*overwrite=*/1);
+#endif
+    }
+    ~ScopedNoLaunch() {
+#if defined(_WIN32)
+        _putenv_s("PULP_INSPECTOR_NO_LAUNCH", had_prev_ ? prev_.c_str() : "");
+#else
+        if (had_prev_) ::setenv("PULP_INSPECTOR_NO_LAUNCH", prev_.c_str(), 1);
+        else ::unsetenv("PULP_INSPECTOR_NO_LAUNCH");
+#endif
+    }
+    std::string prev_;
+    bool had_prev_ = false;
+};
+
+} // namespace
+
 TEST_CASE("View::source_loc round-trips a file:line:col record",
           "[inspect][source-jump]") {
     View v;
@@ -3238,6 +3276,13 @@ TEST_CASE("ViewInspector::find_by_anchor locates a view by its anchor id",
 
 TEST_CASE("InspectorOverlay: J jumps to source for a view with provenance",
           "[inspect][overlay][source-jump]") {
+    // The J hotkey resolves with dry_run=false — the real-launch path.
+    // Without the no-launch guard this would spawn `open vscode://...`
+    // and pop the macOS open-confirmation dialog. The guard makes
+    // launch_editor_url() a no-op so the test verifies the *constructed*
+    // URL, never an actual editor launch.
+    ScopedNoLaunch no_launch;
+
     View root;
     root.set_bounds({0, 0, 500, 300});
     auto child = std::make_unique<View>();
@@ -3263,7 +3308,21 @@ TEST_CASE("InspectorOverlay: J jumps to source for a view with provenance",
     REQUIRE(result.url == "vscode://file/src/Panel.jsx:24");
     REQUIRE_FALSE(result.launched);
 
-    // The J hotkey is consumed while the inspector is active.
+    // Real-launch path (dry_run=false), as the J hotkey runs it: the URL
+    // still resolves, but the no-launch guard suppresses the spawn so
+    // `launched` stays false. This is the regression assertion for the
+    // unexpected-editor-launch bug.
+    auto live = overlay.jump_to_selection_source(/*dry_run=*/false);
+    REQUIRE(live.ok);
+    REQUIRE(live.url == "vscode://file/src/Panel.jsx:24");
+    REQUIRE_FALSE(live.launched);
+
+    // launch_editor_url() itself is a no-op under the guard.
+    REQUIRE_FALSE(launch_editor_url("vscode://file/src/Panel.jsx:24"));
+
+    // The J hotkey is consumed while the inspector is active. The
+    // handler runs the dry_run=false path; the guard keeps it from
+    // spawning a real editor process.
     KeyEvent jk;
     jk.key = KeyCode::j;
     jk.modifiers = 0;
@@ -3273,6 +3332,11 @@ TEST_CASE("InspectorOverlay: J jumps to source for a view with provenance",
 
 TEST_CASE("InspectorOverlay: J is a graceful no-op without a selection",
           "[inspect][overlay][source-jump]") {
+    // No selection means jump_to_source resolves ok==false and never
+    // reaches launch_editor_url(); the guard is belt-and-suspenders so
+    // the key event below stays inert when the binary is run directly.
+    ScopedNoLaunch no_launch;
+
     View root;
     InspectorOverlay overlay(root);
     overlay.set_active(true);

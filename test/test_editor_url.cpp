@@ -361,6 +361,46 @@ TEST_CASE("launch_editor_url rejects an empty URL", "[inspect][source-jump]") {
     REQUIRE_FALSE(launch_editor_url(""));
 }
 
+// ── Phase 5.1: PULP_INSPECTOR_NO_LAUNCH guard ──────────────────────────────
+//
+// Regression cover for the unexpected-editor-launch bug: a non-interactive
+// run (test binary, CI) that hits the real-launch path (dry_run=false)
+// must never spawn `open vscode://file/...` and pop the macOS
+// open-confirmation dialog. The guard env var makes launch_editor_url() a
+// no-op. The pulp-test-editor-url / pulp-test-inspector CTest targets set
+// PULP_INSPECTOR_NO_LAUNCH=1 globally; these tests set it in-process via
+// ScopedEnv so they are deterministic even when the binary is run
+// directly, and they restore the prior value on scope exit.
+
+TEST_CASE("launch_editor_url is suppressed under PULP_INSPECTOR_NO_LAUNCH",
+          "[inspect][source-jump]") {
+    ScopedEnv guard("PULP_INSPECTOR_NO_LAUNCH");
+    guard.set("1");
+    // A well-formed URL would normally spawn the OS handler; with the
+    // guard set, launch_editor_url() returns false without spawning.
+    REQUIRE_FALSE(launch_editor_url("vscode://file/src/Panel.jsx:24"));
+}
+
+TEST_CASE("jump_to_source with dry_run=false does not launch under the guard",
+          "[inspect][source-jump]") {
+    ScopedEnv editor("PULP_INSPECTOR_EDITOR_URL");
+    editor.unset();
+    ScopedEnv guard("PULP_INSPECTOR_NO_LAUNCH");
+    guard.set("1");
+
+    pulp::view::View view;
+    view.set_source_loc({"src/Panel.jsx", 24, 3});
+
+    InspectorConfig cfg;  // default vscode template
+    // dry_run=false is the real-launch path the J hotkey uses. The URL
+    // still resolves so a caller can read/assert it, but `launched`
+    // stays false because the guard suppressed the spawn.
+    auto result = jump_to_source(cfg, &view, /*dry_run=*/false);
+    REQUIRE(result.ok);
+    REQUIRE(result.url == "vscode://file/src/Panel.jsx:24");
+    REQUIRE_FALSE(result.launched);
+}
+
 // ── Phase 5.1: Inspector.jumpToSource protocol round-trip ──────────────────
 
 TEST_CASE("Inspector.jumpToSource resolves an anchored view in dryRun",

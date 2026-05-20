@@ -60,6 +60,14 @@ SourceJumpResult resolve_source_jump(const InspectorConfig& config,
 /// This is the side-effecting seam: callers that want a dry run (tests,
 /// the protocol `dryRun` param) should call `resolve_source_jump()` and
 /// skip this entirely.
+///
+/// Guard: when the environment variable `PULP_INSPECTOR_NO_LAUNCH` is
+/// set to a non-empty value, this function never spawns a process and
+/// returns false. The test suite sets it (per-target in CTest, and the
+/// J-hotkey test sets it in-process) so a headless run can never pop a
+/// real editor window or the macOS "an external application wants to
+/// open …" security dialog. An interactive session leaves it unset, so
+/// a genuine user action launches the editor for real.
 bool launch_editor_url(std::string_view url);
 
 /// Convenience: resolve + launch in one call. When `dry_run` is true,

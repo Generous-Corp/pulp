@@ -6,6 +6,8 @@
 #include <pulp/inspect/source_jump.hpp>
 #include <pulp/view/view.hpp>
 
+#include <cstdlib>
+
 #if defined(_WIN32)
   #include <windows.h>
   #include <shellapi.h>
@@ -17,6 +19,26 @@
 #endif
 
 namespace pulp::inspect {
+
+namespace {
+
+// Test / CI / non-interactive guard. When `PULP_INSPECTOR_NO_LAUNCH` is
+// set to a non-empty value, `launch_editor_url()` resolves and formats
+// the URL exactly as it would otherwise, but never spawns the editor
+// process. This keeps headless test runs, CI, and any scripted /
+// non-interactive use of the inspector from popping a real editor
+// window (and, on macOS, the "an external application wants to open …"
+// security dialog). A genuine user action — the J hotkey in an
+// interactive session — runs without this env var and launches for
+// real. Tests assert the *constructed* URL via `resolve_source_jump()`
+// or the `dryRun` protocol path; they must never depend on a real
+// launch.
+bool editor_launch_suppressed() {
+    const char* v = std::getenv("PULP_INSPECTOR_NO_LAUNCH");
+    return v != nullptr && v[0] != '\0';
+}
+
+} // namespace
 
 SourceJumpResult resolve_source_jump(const InspectorConfig& config,
                                      const pulp::view::View* view) {
@@ -61,6 +83,13 @@ SourceJumpResult resolve_source_jump(const InspectorConfig& config,
 
 bool launch_editor_url(std::string_view url) {
     if (url.empty()) return false;
+
+    // Defense in depth: refuse to spawn under the test/CI/non-interactive
+    // guard. This is independent of the `dry_run` flag — even a caller
+    // that asked to launch (the J hotkey wired with `dry_run=false`) is
+    // suppressed when the env var is set, so a non-interactive run can
+    // never pop a real editor or the macOS open-confirmation dialog.
+    if (editor_launch_suppressed()) return false;
 
 #if defined(_WIN32)
     std::wstring wurl(url.begin(), url.end());

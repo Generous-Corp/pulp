@@ -2029,7 +2029,14 @@ catch_discover_tests(pulp-test-hot-reload
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     add_executable(pulp-test-inspector test_inspector.cpp)
     target_link_libraries(pulp-test-inspector PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector)
+    # PULP_INSPECTOR_NO_LAUNCH: the source-jump tests exercise the J
+    # hotkey, whose handler resolves with dry_run=false. Without this
+    # guard the test would spawn a real `open vscode://file/...`, popping
+    # a macOS open-confirmation dialog. The env var makes launch_editor_url()
+    # a no-op. The test file also sets it in-process so it stays safe when
+    # the binary is run directly, outside CTest.
+    catch_discover_tests(pulp-test-inspector
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Phase 0b PR-A: TweakStore + Inspector.applyTweak protocol surface.
     # planning/2026-05-18-inspector-direct-manipulation-roadmap.md
@@ -2044,7 +2051,8 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     # planning/2026-05-19-inspector-phase5-source-jump-spike.md
     add_executable(pulp-test-editor-url test_editor_url.cpp)
     target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-editor-url)
+    catch_discover_tests(pulp-test-editor-url
+        PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
 
 # Widget bridge tests
