@@ -339,8 +339,50 @@ void View::paint_all(canvas::Canvas& canvas) {
     // the painted box like `hidden` per CSS spec — we don't have a
     // scrollbar layer yet, but the layout-side overflow propagation
     // is wired through Yoga so descendants measure correctly.
-    if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll)
-        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
+    if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll) {
+        // pulp-internal #70 — marker overflow tolerance. Common
+        // imported-design pattern: an XY pad (or similar drag-driven
+        // widget) sets overflow:hidden on the container AND positions
+        // a circular dot at left:cx-r, top:cy-r where (cx,cy) is the
+        // value-driven center. At edge values (0 or 1) half the dot
+        // sits outside the container's content bounds and gets
+        // chopped by the strict CSS clip — visually broken for an
+        // explicit interactive marker. Detect circle-markers
+        // (position:absolute, near-square bounds with border-radius
+        // ≥ 40% of the smaller dimension) and expand the clip rect
+        // just enough to admit them. Non-marker children (text,
+        // images, panels) still clip normally because they don't
+        // match the circle heuristic.
+        float marker_pad = 0.0f;
+        for (const auto& child : children_) {
+            if (!child || !child->visible_) continue;
+            if (child->position_ != Position::absolute) continue;
+            const auto& cb = child->bounds_;
+            if (cb.width <= 0 || cb.height <= 0) continue;
+            const float min_dim = std::min(cb.width, cb.height);
+            const float max_dim = std::max(cb.width, cb.height);
+            // Approximate-circle test: aspect close to 1, corner
+            // radius close to half the smaller dim.
+            const float aspect = (max_dim > 0) ? (min_dim / max_dim) : 0.0f;
+            const float br = child->effective_corner_radius(cb.width, cb.height);
+            if (aspect < 0.7f) continue;            // not close to square
+            if (br < min_dim * 0.4f) continue;      // not visually circular
+            // How far the child extends past each edge.
+            const float right_over  = std::max(0.0f, cb.x + cb.width  - bounds_.width);
+            const float bottom_over = std::max(0.0f, cb.y + cb.height - bounds_.height);
+            const float left_over   = std::max(0.0f, -cb.x);
+            const float top_over    = std::max(0.0f, -cb.y);
+            marker_pad = std::max({marker_pad, right_over, bottom_over,
+                                              left_over, top_over});
+        }
+        if (marker_pad > 0.0f) {
+            canvas.clip_rect(-marker_pad, -marker_pad,
+                             bounds_.width  + 2.0f * marker_pad,
+                             bounds_.height + 2.0f * marker_pad);
+        } else {
+            canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
+        }
+    }
 
     // CSS `clip-path: path("...")` (pulp #1515). The View's local
     // coordinate space is (0,0)→(bounds_.width, bounds_.height) at
