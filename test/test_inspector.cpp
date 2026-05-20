@@ -944,6 +944,196 @@ TEST_CASE("InspectorOverlay Phase 3b: Tab without paint does nothing extra",
     REQUIRE_FALSE(s.overlay.is_editing());
 }
 
+// ── Phase 3a: drag handles ────────────────────────────────────────────────
+
+TEST_CASE("InspectorOverlay: drag handles default OFF", "[inspect][overlay][phase3a]") {
+    View root;
+    InspectorOverlay overlay(root);
+    REQUIRE_FALSE(overlay.dragging_enabled());
+    overlay.set_dragging_enabled(true);
+    REQUIRE(overlay.dragging_enabled());
+    overlay.toggle_dragging();
+    REQUIRE_FALSE(overlay.dragging_enabled());
+}
+
+TEST_CASE("InspectorOverlay: 'D' key toggles drag handles only when active",
+          "[inspect][overlay][phase3a]") {
+    View root;
+    InspectorOverlay overlay(root);
+
+    // Inactive — D does nothing.
+    KeyEvent d;
+    d.key = KeyCode::d;
+    d.is_down = true;
+    REQUIRE_FALSE(overlay.handle_key_event(d));
+    REQUIRE_FALSE(overlay.dragging_enabled());
+
+    // Active — D toggles.
+    overlay.set_active(true);
+    REQUIRE(overlay.handle_key_event(d));
+    REQUIRE(overlay.dragging_enabled());
+    REQUIRE(overlay.handle_key_event(d));
+    REQUIRE_FALSE(overlay.dragging_enabled());
+}
+
+TEST_CASE("InspectorOverlay: drag from SE handle resizes view and emits tweaks",
+          "[inspect][overlay][phase3a][drag]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("figma:0:42");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_dragging_enabled(true);
+
+    // Select via click in the canvas area.
+    MouseEvent click;
+    click.position = {30, 30};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    // Press on the SE handle (bottom-right corner = 90, 50).
+    MouseEvent press;
+    press.position = {90, 50};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));  // consumed → drag started
+
+    // Drag +20 / +15 (move event = is_down=false).
+    MouseEvent drag;
+    drag.position = {110, 65};
+    drag.is_down = false;
+    REQUIRE(overlay.handle_mouse_event(drag));
+
+    // View resized live (Yoga inputs + bounds both updated).
+    REQUIRE(child_ptr->bounds().width == 100.0f);  // 80 + 20
+    REQUIRE(child_ptr->bounds().height == 55.0f);  // 40 + 15
+    REQUIRE(child_ptr->flex().preferred_width == 100.0f);
+    REQUIRE(child_ptr->flex().preferred_height == 55.0f);
+
+    // Tweaks emitted per move (apply_tweak overwrites).
+    auto w = store.lookup("figma:0:42", "layout.width");
+    auto h = store.lookup("figma:0:42", "layout.height");
+    REQUIRE(w.has_value());
+    REQUIRE(h.has_value());
+    REQUIRE(w->getFloat32() == 100.0f);
+    REQUIRE(h->getFloat32() == 55.0f);
+
+    // A subsequent is_down=true ends the drag (acts as release).
+    MouseEvent release;
+    release.position = {200, 200};
+    release.is_down = true;
+    overlay.handle_mouse_event(release);
+    // Drag state cleared — the press at (200,200) lands outside the
+    // resized view (now 100x55 at 10,10 → corner at 110,65), so
+    // selection moves to root or clears.
+}
+
+TEST_CASE("InspectorOverlay: NW handle drag resizes from top-left",
+          "[inspect][overlay][phase3a][drag]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("a");
+    child->set_bounds({50, 50, 100, 80});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    overlay.set_dragging_enabled(true);
+
+    MouseEvent click;
+    click.position = {70, 70};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+
+    // NW handle = top-left = (50, 50).
+    MouseEvent press;
+    press.position = {50, 50};
+    press.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(press));
+
+    // Drag NW by +10/+10 → shrinks the view (NW pulls top-left inward).
+    MouseEvent drag;
+    drag.position = {60, 60};
+    drag.is_down = false;
+    overlay.handle_mouse_event(drag);
+
+    REQUIRE(child_ptr->bounds().width == 90.0f);   // 100 - 10
+    REQUIRE(child_ptr->bounds().height == 70.0f);  // 80 - 10
+}
+
+TEST_CASE("InspectorOverlay: drag handle hit-test no-op without enabled mode",
+          "[inspect][overlay][phase3a][drag]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("a");
+    child->set_bounds({10, 10, 80, 40});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+    overlay.set_tweak_store(&store);
+    // dragging_enabled_ NOT set — default OFF.
+
+    MouseEvent click;
+    click.position = {30, 30};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+    REQUIRE(overlay.selected_view() == child_ptr);
+
+    // Press at SE corner — but drag is disabled, so this is just
+    // a regular click on the canvas (not a drag start).
+    MouseEvent press_corner;
+    press_corner.position = {90, 50};
+    press_corner.is_down = true;
+    overlay.handle_mouse_event(press_corner);
+    // No tweak emitted; view bounds unchanged.
+    REQUIRE(store.count() == 0);
+    REQUIRE(child_ptr->bounds().width == 80.0f);
+}
+
+TEST_CASE("InspectorOverlay: drag handles paint when enabled + selected",
+          "[inspect][overlay][phase3a][drag]") {
+    View root;
+    root.set_bounds({0, 0, 600, 400});
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 80, 40});
+    root.add_child(std::move(child));
+
+    InspectorOverlay overlay(root);
+    overlay.set_active(true);
+
+    // Select via click first.
+    MouseEvent click;
+    click.position = {30, 30};
+    click.is_down = true;
+    overlay.handle_mouse_event(click);
+
+    // Baseline: drag disabled → no handles painted.
+    pulp::canvas::RecordingCanvas baseline;
+    overlay.paint(baseline);
+
+    // Enable drag mode → 4 corner handles add canvas commands.
+    overlay.set_dragging_enabled(true);
+    pulp::canvas::RecordingCanvas with_handles;
+    overlay.paint(with_handles);
+
+    REQUIRE(with_handles.command_count() > baseline.command_count());
+}
+
 // ── InspectorWindow ────────────────────────────────────────────────────────
 
 TEST_CASE("CollapsableSection toggles content from header clicks", "[inspect][window][issue-641]") {

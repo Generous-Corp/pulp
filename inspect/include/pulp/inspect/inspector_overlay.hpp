@@ -9,6 +9,7 @@
 
 #include <choc/containers/choc_Value.h>
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -64,6 +65,18 @@ public:
     bool emit_tweak_for_selection(std::string_view property_path,
                                   choc::value::Value value,
                                   std::string_view source = "inspector-gesture");
+
+    // ── Phase 3a — drag handles ─────────────────────────────────────
+    /// Toggle drag-handles mode. When enabled AND a view is selected AND
+    /// has an anchor_id, eight 8×8 handles paint at the selected view's
+    /// corners + edges; mouse-down on a handle starts a resize gesture
+    /// that mutates flex inputs (preferred_width / preferred_height) so
+    /// Yoga picks up the new size, then emits "layout.width" /
+    /// "layout.height" tweaks on mouse-up. Default OFF for safety —
+    /// without it, normal click-to-select is unchanged.
+    void set_dragging_enabled(bool enabled) { dragging_enabled_ = enabled; }
+    bool dragging_enabled() const { return dragging_enabled_; }
+    void toggle_dragging() { dragging_enabled_ = !dragging_enabled_; }
 
     // ── Selection ───────────────────────────────────────────────────
     View* selected_view() const { return selected_; }
@@ -160,6 +173,22 @@ private:
     // Phase 0b PR-C-1: optional in-process gesture-tweak persistence.
     // When null, emit_tweak_for_selection() is a no-op.
     TweakStore* tweak_store_ = nullptr;
+
+    // Phase 3a — drag-handles state. Off by default so the inspector
+    // behaves identically to the pre-3a build until the user opts in
+    // (D-key toggle in handle_key_event).
+    bool dragging_enabled_ = false;
+    enum class DragCorner : std::uint8_t { none, nw, ne, sw, se };
+    DragCorner active_drag_ = DragCorner::none;
+    Point drag_start_pos_{};         // mouse pos when drag began (root coords)
+    Rect drag_start_bounds_{};       // selected_->bounds() snapshot
+    float drag_start_pref_w_ = 0.0f; // flex().preferred_width snapshot
+    float drag_start_pref_h_ = 0.0f; // flex().preferred_height snapshot
+
+    // Returns the corner whose 8px handle hit-rectangle contains `pos`,
+    // for the currently-selected view (root coords). Returns
+    // DragCorner::none if no handle is hit or no view selected.
+    DragCorner hit_test_drag_handle(Point pos) const;
 
     // ── Flat tree for rendering ─────────────────────────────────────
     struct TreeItem {

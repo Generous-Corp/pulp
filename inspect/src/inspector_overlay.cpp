@@ -109,6 +109,28 @@ Rect InspectorOverlay::view_bounds_in_root(const View* v) const {
     return {x, y, v->bounds().width, v->bounds().height};
 }
 
+// ── Phase 3a — drag handle hit-test ────────────────────────────────────────
+// Each handle is an 8×8 box centered on a corner of the selected view's
+// bounds (root coords). We test against a slightly-larger 12×12 grab
+// rectangle for forgiving hit detection — corners are small targets,
+// and Fitts's law rewards generous hit boxes.
+InspectorOverlay::DragCorner
+InspectorOverlay::hit_test_drag_handle(Point pos) const {
+    if (!selected_) return DragCorner::none;
+    if (!dragging_enabled_) return DragCorner::none;
+    auto r = view_bounds_in_root(selected_);
+    constexpr float kGrab = 6.0f;  // half-side of the 12px grab box
+    auto in_box = [&](float cx, float cy) {
+        return pos.x >= cx - kGrab && pos.x <= cx + kGrab &&
+               pos.y >= cy - kGrab && pos.y <= cy + kGrab;
+    };
+    if (in_box(r.x,             r.y))              return DragCorner::nw;
+    if (in_box(r.x + r.width,   r.y))              return DragCorner::ne;
+    if (in_box(r.x,             r.y + r.height))   return DragCorner::sw;
+    if (in_box(r.x + r.width,   r.y + r.height))   return DragCorner::se;
+    return DragCorner::none;
+}
+
 // ── Flat tree ───────────────────────────────────────────────────────────────
 
 void InspectorOverlay::rebuild_flat_tree() {
@@ -160,6 +182,15 @@ bool InspectorOverlay::handle_key_event(const KeyEvent& event) {
         return true;
     }
 
+    // Phase 3a — D toggles drag-handles mode (no modifier; only when
+    // the inspector is active so a hotkey collision in a plain text
+    // input doesn't accidentally flip drag mode).
+    if (active_ && event.key == KeyCode::d && event.is_down &&
+        event.modifiers == 0) {
+        toggle_dragging();
+        return true;
+    }
+
     return false;
 }
 
@@ -167,6 +198,91 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
     if (!active_) return false;
 
     auto pos = event.position;
+
+    // ── Phase 3a: drag-handle gesture state machine ────────────────
+    // The Pulp MouseEvent model uses is_down=true ONLY for the
+    // initial press; subsequent moves AND the release both arrive
+    // as is_down=false (JUCE convention). Without a distinct
+    // release flag we adopt: down on a handle starts the drag,
+    // every is_down=false event live-resizes + overwrites the
+    // tweak, and the NEXT is_down=true event ends the drag (acts
+    // as the release). apply_tweak() overwrites the same key so
+    // the final tweak value matches the cursor position at
+    // release time.
+    //
+    // Runs BEFORE the panel-area test so a drag started over the
+    // canvas is owned by this branch even if the cursor briefly
+    // enters the panel mid-drag.
+    if (active_drag_ != DragCorner::none && selected_) {
+        if (event.is_down) {
+            // Release: end the drag. Don't consume — let this click
+            // fall through to normal selection logic so the user can
+            // immediately re-target without a wasted click.
+            active_drag_ = DragCorner::none;
+            // fall through to the normal handlers below
+        } else {
+            // Move: live-resize + overwrite the tweak.
+            float dx = pos.x - drag_start_pos_.x;
+            float dy = pos.y - drag_start_pos_.y;
+
+            float new_w = drag_start_bounds_.width;
+            float new_h = drag_start_bounds_.height;
+            switch (active_drag_) {
+                case DragCorner::nw: new_w -= dx; new_h -= dy; break;
+                case DragCorner::ne: new_w += dx; new_h -= dy; break;
+                case DragCorner::sw: new_w -= dx; new_h += dy; break;
+                case DragCorner::se: new_w += dx; new_h += dy; break;
+                case DragCorner::none: break;
+            }
+            // Floor at 4px so the view never collapses small enough
+            // that handles overlap and the user can't grab them.
+            new_w = std::max(4.0f, new_w);
+            new_h = std::max(4.0f, new_h);
+
+            // Mutate Yoga inputs (NOT View::set_bounds — Yoga
+            // overwrites resolved bounds on next layout pass).
+            // preferred_* are the input fields Yoga reads;
+            // dim_* keeps the px-unit metadata.
+            auto& f = selected_->flex();
+            f.preferred_width = new_w;
+            f.preferred_height = new_h;
+            f.dim_width = {new_w, DimensionUnit::px};
+            f.dim_height = {new_h, DimensionUnit::px};
+            // Update bounds locally so paint_highlight + hit-test
+            // see the new size before the next layout pass.
+            auto b = selected_->bounds();
+            b.width = new_w;
+            b.height = new_h;
+            selected_->set_bounds(b);
+
+            // Emit tweaks every tick — apply_tweak() overwrites,
+            // so the final value matches release time.
+            emit_tweak_for_selection(
+                "layout.width",
+                choc::value::createFloat32(new_w),
+                "inspector-drag-handle");
+            emit_tweak_for_selection(
+                "layout.height",
+                choc::value::createFloat32(new_h),
+                "inspector-drag-handle");
+            return true;  // consume the move event
+        }
+    }
+
+    // Phase 3a: hand-off from selection to drag — if drag-handles
+    // mode is enabled, a view is selected, and the press lands on a
+    // drag handle, START the drag and consume.
+    if (event.is_down && active_drag_ == DragCorner::none && selected_) {
+        auto handle = hit_test_drag_handle(pos);
+        if (handle != DragCorner::none) {
+            active_drag_ = handle;
+            drag_start_pos_ = pos;
+            drag_start_bounds_ = view_bounds_in_root(selected_);
+            drag_start_pref_w_ = selected_->flex().preferred_width;
+            drag_start_pref_h_ = selected_->flex().preferred_height;
+            return true;  // consume the press; subsequent moves are ours
+        }
+    }
 
     // Check if mouse is in the panel area
     if (point_in_panel(pos)) {
@@ -317,6 +433,31 @@ void InspectorOverlay::paint_highlight(Canvas& canvas) {
         canvas.set_stroke_color(kSelectedStroke);
         canvas.set_line_width(2.0f);
         canvas.stroke_rect(r.x, r.y, r.width, r.height);
+
+        // Phase 3a — drag handles. Only when dragging mode is on (opt-
+        // in via D key). Four 8×8 filled squares at the corners. The
+        // actively-dragged corner paints in a brighter shade so the
+        // user sees which handle they grabbed even if the cursor
+        // moves slightly off the original target.
+        if (dragging_enabled_) {
+            constexpr float kHandle = 4.0f;  // half-side of 8px box
+            auto paint_handle = [&](float cx, float cy, DragCorner which) {
+                bool active = (active_drag_ == which);
+                canvas.set_fill_color(active
+                    ? Color::rgba(1.0f, 0.7f, 0.2f, 1.0f)   // active = bright orange
+                    : Color::rgba(1.0f, 0.5f, 0.0f, 0.9f)); // idle = same orange as kSelectedStroke
+                canvas.fill_rect(cx - kHandle, cy - kHandle,
+                                 kHandle * 2, kHandle * 2);
+                canvas.set_stroke_color(Color::rgba(0.0f, 0.0f, 0.0f, 0.6f));
+                canvas.set_line_width(1.0f);
+                canvas.stroke_rect(cx - kHandle, cy - kHandle,
+                                   kHandle * 2, kHandle * 2);
+            };
+            paint_handle(r.x,             r.y,              DragCorner::nw);
+            paint_handle(r.x + r.width,   r.y,              DragCorner::ne);
+            paint_handle(r.x,             r.y + r.height,   DragCorner::sw);
+            paint_handle(r.x + r.width,   r.y + r.height,   DragCorner::se);
+        }
     }
 }
 
