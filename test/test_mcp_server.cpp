@@ -8,9 +8,22 @@
 #include <system_error>
 #include <utility>
 
+// pulp-test-mcp-server compiles only this TU; it does not link the
+// pulp-mcp target's object files. So the test must pull in every
+// translation unit pulp_mcp.cpp depends on:
+//   - pulp_mcp.cpp  — protocol dispatcher (renames main → pulp_mcp_main_for_test)
+//   - mcp_compat.cpp — SDK-compat resolution; also re-exposes the file-local
+//                      parse_cmake_project_version / parse_pulp_toml_sdk_version
+//                      helpers this test exercises directly (Phase 6 B4 extraction)
+//   - mcp_tools.cpp  — tool-call handlers invoked by the dispatcher
+// Without mcp_compat.cpp / mcp_tools.cpp the test fails to link
+// (undefined handle_build / resolve_project_sdk_version / …); without
+// them being in this TU the parse_* helpers stay invisible.
 #define main pulp_mcp_main_for_test
 #include "../tools/mcp/pulp_mcp.cpp"
 #undef main
+#include "../tools/mcp/mcp_compat.cpp"
+#include "../tools/mcp/mcp_tools.cpp"
 
 namespace {
 
@@ -476,7 +489,7 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
     std::ifstream in(cmake_path);
     std::stringstream buf;
     buf << in.rdbuf();
-    const auto version = parse_cmake_project_version(buf.str());
+    const auto version = pulp_mcp::parse_cmake_project_version(buf.str());
     // Must look like x.y.z.
     int dots = 0;
     for (char c : version) if (c == '.') ++dots;
@@ -687,13 +700,13 @@ TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
     // Hand-rolled scanner — confirm the obvious cases and the trap
     // case where another key contains 'sdk_version' as a substring
     // (e.g., min_sdk_version) doesn't poison the result.
-    REQUIRE(parse_pulp_toml_sdk_version("sdk_version = \"0.99.0\"\n") == "0.99.0");
-    REQUIRE(parse_pulp_toml_sdk_version("  sdk_version=\"1.2.3\"\n") == "1.2.3");
-    REQUIRE(parse_pulp_toml_sdk_version("# sdk_version commented out\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("sdk_version = \"0.99.0\"\n") == "0.99.0");
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("  sdk_version=\"1.2.3\"\n") == "1.2.3");
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("# sdk_version commented out\n").empty());
     // The substring trap: min_sdk_version must NOT be returned as the
     // top-level sdk_version.
-    REQUIRE(parse_pulp_toml_sdk_version("min_sdk_version = \"0.50.0\"\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("min_sdk_version = \"0.50.0\"\n").empty());
     // When both are present, the top-level wins.
-    REQUIRE(parse_pulp_toml_sdk_version(
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
         "min_sdk_version = \"0.50.0\"\nsdk_version = \"0.99.0\"\n") == "0.99.0");
 }
