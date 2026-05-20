@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v017311"></a>
+## [0.173.11] - 2026-05-19
+
+- refactor(canvas): R2-3 — extract skia_canvas_text.cpp (2,873 → 1,879) ([#2444](https://github.com/danielraffel/pulp/pull/2444))
+- refactor(cli): R2-4 — extract cli_sdk.cpp from cli_common.cpp (2,022 → 1,257) ([#2443](https://github.com/danielraffel/pulp/pull/2443))
+
 <a id="v01738"></a>
 ## [0.173.8] - 2026-05-19
 
@@ -2247,6 +2253,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.173.11]: https://github.com/danielraffel/pulp/releases/tag/v0.173.11
 [0.173.8]: https://github.com/danielraffel/pulp/releases/tag/v0.173.8
 [0.173.7]: https://github.com/danielraffel/pulp/releases/tag/v0.173.7
 [0.173.1]: https://github.com/danielraffel/pulp/releases/tag/v0.173.1
