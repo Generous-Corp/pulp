@@ -202,15 +202,13 @@ PreparedParagraph make_paragraph(const std::string& text,
     auto paragraph = pb->Build();
     if (!paragraph) return result;
     paragraph->layout(SK_ScalarInfinity);
-    // With an infinite layout width SkParagraph produces a single line;
-    // `getLongestLine()` is therefore the paint advance. Intrinsic width
-    // can under-report mixed emoji/default runs on newer Skia builds,
-    // which breaks Canvas2D textAlign because paint still uses the full
-    // line width.
-    result.advance = paragraph->getLongestLine();
-    if (result.advance <= 0.0f) {
-        result.advance = paragraph->getMaxIntrinsicWidth();
-    }
+    // With an infinite layout width SkParagraph produces a single line.
+    // `getLongestLine()` matches the painted line width on mixed
+    // emoji/default runs where intrinsic width can under-report, but it
+    // drops trailing whitespace advance. Canvas2D measureText/textAlign
+    // need the full advance, so keep whichever metric is wider.
+    result.advance = std::max(paragraph->getLongestLine(),
+                              paragraph->getMaxIntrinsicWidth());
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
     result.paragraph = std::move(paragraph);
     return result;

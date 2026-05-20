@@ -626,6 +626,23 @@ TEST_CASE("letter_spacing tracks between graphemes, not within emoji cluster",
     write_surface_png(*h.surface, "fill_text_letter_spacing_8");
 }
 
+TEST_CASE("measure_text includes trailing spaces on SkParagraph emoji path",
+          "[canvas][emoji][skia][measure][issue-2163]") {
+    if (!pulp::canvas::TextFontContext::shared()->has_emoji_typeface()) {
+        SUCCEED("Skipped: no emoji typeface registered.");
+        return;
+    }
+    SurfaceHarness h(256, 64);
+    h.canvas->set_font("Inter", 32.0f);
+
+    const float tight = h.canvas->measure_text("\xF0\x9F\x98\x80");
+    const float padded = h.canvas->measure_text("\xF0\x9F\x98\x80   ");
+
+    INFO("tight=" << tight << " padded=" << padded);
+    REQUIRE(tight > 0.0f);
+    REQUIRE(padded > tight);
+}
+
 TEST_CASE("register_emoji_fallback re-registration invalidates cached typefaces",
           "[canvas][emoji][skia][cache-invalidation]") {
     // Take initial measurement under whatever emoji typeface the
