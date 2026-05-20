@@ -9,6 +9,8 @@
 
 #include <choc/containers/choc_Value.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -77,6 +79,73 @@ public:
     void set_dragging_enabled(bool enabled) { dragging_enabled_ = enabled; }
     bool dragging_enabled() const { return dragging_enabled_; }
     void toggle_dragging() { dragging_enabled_ = !dragging_enabled_; }
+
+    // ── Phase 6.1 — per-pass GPU/render attribution viewer ──────────
+    //
+    // Spike reference: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md
+    // § Phase 6.1. The RenderPassManager already populates per-pass
+    // `PassStats { type, draw_calls, time_ms }` every frame, but only
+    // keeps the *last* frame. The attribution viewer accumulates a
+    // rolling history (kPassHistoryFrames) per pass type so the panel
+    // can show frame-over-frame trend + smoothed averages + a
+    // budget-overrun event count.
+    //
+    // IMPORTANT (honesty about what's measured): `PassStats::time_ms`
+    // is CPU wall-time around the pass's draw calls — NOT true GPU
+    // time. Real GPU timestamp queries are Phase 6.5 (deferred — see
+    // the spike's "What we DON'T have" table). The viewer labels its
+    // timings "cpu" so nobody mistakes them for GPU-side numbers.
+
+    /// Aggregated attribution data for a single render pass type,
+    /// computed over the rolling frame history.
+    struct PassAttribution {
+        int type = 0;             ///< RenderPassType cast to int.
+        const char* name = "";    ///< Human-readable pass name.
+        bool present = false;     ///< Pass appeared in the most recent frame.
+        float last_cpu_ms = 0.0f; ///< CPU time_ms in the most recent frame.
+        float avg_cpu_ms = 0.0f;  ///< Mean CPU time_ms over recorded history.
+        float peak_cpu_ms = 0.0f; ///< Worst CPU time_ms over recorded history.
+        int last_draw_calls = 0;  ///< Draw calls in the most recent frame.
+        int peak_draw_calls = 0;  ///< Worst draw-call count over history.
+        std::size_t samples = 0;  ///< Number of recorded frames for this pass.
+    };
+
+    /// Number of frames the rolling per-pass history retains. The spike
+    /// asks for a "last 60 frames" trend; 60 keeps one second of 60fps
+    /// history without unbounded growth.
+    static constexpr std::size_t kPassHistoryFrames = 60;
+
+    /// Sample the attached RenderPassManager's current-frame pass stats
+    /// into the rolling history. Safe to call when no RPM is attached
+    /// (no-op). Called automatically at the start of every paint() so
+    /// the viewer always reflects fresh data; also callable directly
+    /// from tests to drive deterministic history without a real frame
+    /// loop. Returns true if a frame was actually captured.
+    bool capture_pass_frame();
+
+    /// Per-pass attribution computed over the current rolling history,
+    /// ordered by RenderPassType (background → post_effects). Entries
+    /// with `present == false` had no frames in history and are skipped
+    /// by the panel; tests can still inspect the full ordered set.
+    std::vector<PassAttribution> pass_attribution() const;
+
+    /// Count of frames in history where the manager reported the frame
+    /// exceeded its time budget (RenderPassManager::over_budget()).
+    /// Surfaced as the panel's "overruns" figure.
+    int budget_overrun_count() const { return budget_overrun_count_; }
+
+    /// Total frames sampled into the rolling history since construction
+    /// (saturates conceptually — only the last kPassHistoryFrames worth
+    /// of per-pass detail is retained, but this counter keeps growing).
+    std::uint64_t pass_frames_captured() const { return pass_frames_captured_; }
+
+    /// Toggle the per-pass attribution panel section. Off by default so
+    /// the inspector panel layout is unchanged until the user opts in
+    /// (P-key in handle_key_event). When on, the section replaces the
+    /// lower portion of the property panel.
+    void set_pass_viewer_enabled(bool enabled) { pass_viewer_enabled_ = enabled; }
+    bool pass_viewer_enabled() const { return pass_viewer_enabled_; }
+    void toggle_pass_viewer() { pass_viewer_enabled_ = !pass_viewer_enabled_; }
 
     // ── Selection ───────────────────────────────────────────────────
     View* selected_view() const { return selected_; }
@@ -170,6 +239,33 @@ private:
     // Optional stats source
     render::RenderPassManager* rpm_ = nullptr;
 
+    // ── Phase 6.1 — per-pass attribution history ────────────────────
+    //
+    // The RenderPassManager forgets everything but the current frame,
+    // so the viewer keeps its own rolling buffers. There are exactly 5
+    // RenderPassType values; each gets a fixed-size ring of CPU-time +
+    // draw-call samples. Indexing the outer array by RenderPassType
+    // (cast to size_t) keeps capture O(passes) with no allocation.
+    static constexpr std::size_t kPassTypeCount = 5;
+    struct PassRing {
+        std::array<float, kPassHistoryFrames> cpu_ms{};
+        std::array<int, kPassHistoryFrames> draw_calls{};
+        std::size_t count = 0;  ///< Valid samples (caps at kPassHistoryFrames).
+        std::size_t head = 0;   ///< Next write index (wraps).
+        // Whether this pass type appeared in the most recently captured
+        // frame — distinguishes "no history" from "history but absent
+        // this frame" so the panel can dim a pass that just went quiet.
+        bool present_last_frame = false;
+    };
+    std::array<PassRing, kPassTypeCount> pass_rings_{};
+    int budget_overrun_count_ = 0;
+    std::uint64_t pass_frames_captured_ = 0;
+    // Last frame_count() observed from the RPM — capture is a no-op if
+    // the manager hasn't advanced a frame, so multiple paints of the
+    // same frame don't inflate the history with duplicates.
+    std::uint64_t last_captured_frame_ = 0;
+    bool pass_viewer_enabled_ = false;
+
     // Phase 0b PR-C-1: optional in-process gesture-tweak persistence.
     // When null, emit_tweak_for_selection() is a no-op.
     TweakStore* tweak_store_ = nullptr;
@@ -209,6 +305,11 @@ private:
     void paint_tree_section(Canvas& canvas, float x, float y, float w, float& cursor_y);
     void paint_props_section(Canvas& canvas, float x, float y, float w, float h);
     void paint_stats_bar(Canvas& canvas, float x, float y, float w);
+    /// Phase 6.1 — render the per-pass attribution viewer in the panel
+    /// region normally occupied by the property section. Each pass type
+    /// gets a row with a color-coded type bar, last/avg/peak CPU time,
+    /// draw-call counts, and a 60-frame sparkline trend.
+    void paint_pass_attribution(Canvas& canvas, float x, float y, float w, float h);
 
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;
