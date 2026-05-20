@@ -271,86 +271,40 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
-### macOS overflow routing (Plan B)
+### macOS runner routing (current)
 
-`.github/workflows/build.yml`'s `resolve-provider` job auto-routes the
-macOS leg to Namespace when the local self-hosted Mac runner is busy.
-With one local runner serving ~15 open PRs serially, this is the
-difference between "PR merges in 20 min" and "PR queues for 5 hours."
+As of 2026-05-20, Namespace macOS routing is disabled for cost control.
+The required macOS PR gate runs through the self-hosted `pulp-build`
+runners (`pulp-m1-01`, `pulp-m1-02`) via
+`PULP_LOCAL_MACOS_RUNS_ON_JSON`. Shipyard's `mac` target must stay
+`backend = "local"`; do not flip it to `cloud` unless the operator is
+explicitly re-enabling Namespace.
 
-**Trigger condition** (all three must hold):
+Linux and Windows CI legs default to GitHub-hosted runners. The legacy
+Shipyard SSH targets (`ubuntu`, `windows`) are optional local validation
+hosts and may be unreachable; use `--skip-target ubuntu --skip-target
+windows` when shipping a macOS/local-only tranche and the PR has already
+run the appropriate focused local tests.
 
-- Local runner BUSY count >= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` (default `2`)
-- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set on the repo
-- Event is `pull_request` (manual `workflow_dispatch` honors the operator's explicit `macos_runner_selector_json`)
-
-When triggered, the macOS matrix leg dispatches to the Namespace
-runner profile (e.g. `namespace-profile-generouscorp-macos`) instead
-of the local `["self-hosted","sanitizer"]` pool. The stable `macos`
-wrapper job (branch-protection's required check) doesn't change — it
-gates on the matrix leg's conclusion regardless of which runner pool
-served it.
-
-**When this kicks in vs. doesn't:**
-
-```
-push to PR  →  resolve-provider runs
-            →  count busy local "sanitizer" runners
-            →  BUSY >= 2 AND Namespace configured?
-                  ├── yes  →  macOS = namespace-profile-...
-                  └── no   →  macOS = self-hosted,sanitizer (local)
-```
-
-**Inspect the decision:**
+If a PR's macOS check is queued, first verify whether it is actually
+waiting on the self-hosted runner pool before taking action:
 
 ```bash
-gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
-# → resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"
+gh api repos/danielraffel/pulp/actions/runners --jq \
+  '.runners[] | select(.labels[].name == "pulp-build") |
+   {name,status,busy,labels:[.labels[].name]}'
 ```
 
-**`shipyard rescue <PR>` still works** as a manual override for PRs
-that queued before Plan B was in place, or when overflow conditions
-don't match (e.g., only 1 busy runner) but you want cloud anyway.
-With Plan B routing automatic, rescue is a less common tool.
+Do not rerun or empty-commit just to "unstick" a queued macOS job. Rebase
+only when the branch needs current `main` fixes, and cancel stale
+pre-cutover Namespace runs instead of rerunning them.
 
-**Disable temporarily** (revert all PRs to local-only):
+### Release workflows: runner routing
 
-```bash
-gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo danielraffel/pulp
-```
-
-Plan source: `planning/2026-05-13-namespace-overflow-implementation.md`
-(reviewed by `/codex` 2026-05-13). Full operator docs:
-`docs/guides/local-ci.md` § "macOS overflow routing".
-
-### Release workflows: Namespace routing (post-2026-05-18 incident)
-
-`.github/workflows/sign-and-release.yml` and `.github/workflows/release-cli.yml`
-also route their macOS legs through Namespace when
-`PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` is set. Unlike `build.yml` (which
-has the full overflow logic above), release workflows take a simpler
-"namespace if configured, GitHub-hosted otherwise" approach via a tiny
-`resolve-macos-runner` job at the top of each file.
-
-**Why this matters:** during the 2026-05-18 SDK starvation incident,
-the GitHub-hosted `macos-14` / `macos-15` queue backed up for hours and
-blocked every release-cli darwin-arm64 leg and every sign-and-release
-build from v0.111.0 through v0.134.0 (25 tags piled up). PR work was
-already routing through Namespace post-cutover; releases were still
-hitting the GitHub-hosted pool because release-cli.yml and
-sign-and-release.yml had hardcoded `runs-on: macos-14` / `macos-15`.
-
-**Fall-back behavior:** when `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON`
-is unset, both workflows revert to the previous GitHub-hosted runners —
-so removing the variable doesn't break releases.
-
-**Caveat:** this does NOT include the `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD`
-logic from build.yml. Releases are infrequent enough that overflow isn't
-the bottleneck; sending all release macOS legs to Namespace directly is
-simpler and matches what the user has already configured.
-
-See pulp #2238 (supersede cascade fix), pulp #2281 (Skia gate fix),
-and the post-mortem-driven follow-up that introduced this routing.
+Release workflows should follow the same post-cutover rule: do not add
+new Namespace defaults while the repo variables are unset. If a release
+workflow exposes a manual runner selector, treat Namespace as an explicit
+operator choice, not an automatic fallback.
 
 ### Per-PR macOS retargeting: `pulp macos`
 
@@ -802,35 +756,28 @@ Then proceed with the `ship` workflow below.
 ## Runner Priority (hard rule)
 
 **GitHub-hosted is the default runner provider** for Linux and Windows.
-macOS routes to **Namespace** (`namespace-profile-generouscorp-macos`) by
-default as of 2026-05-18 re-commissioning, with the local self-hosted Mac
-(`Daniels-MacBook-Pro`) as a manual fallback the operator can force via
-`workflow_dispatch macos_runner_selector_json` or by raising
-`PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` back above 0. The required
-branch-protection check on `main` is the `macos` alias job — that name MUST
-NOT be renamed.
+macOS uses the self-hosted `pulp-build` runners. Namespace is not a
+default PR-validation backend after the 2026-05-20 cost cutover. The
+required branch-protection check on `main` is the `macos` alias job —
+that name MUST NOT be renamed.
 
 Routing variables (verify before debugging "stuck" macOS PRs):
 - `PULP_DEFAULT_RUNNER_PROVIDER = github-hosted` (Linux/Windows default)
-- `PULP_LOCAL_MACOS_RUNS_ON_JSON = ["self-hosted","sanitizer"]` (local fallback selector)
-- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON = "namespace-profile-generouscorp-macos"` (Namespace mac profile)
-- `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD = 0` (always overflow to Namespace)
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON = ["self-hosted","pulp-build"]` (local mac selector)
+- `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON = local-only` (no Namespace overflow)
+- `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` should be unset unless the operator is deliberately testing Namespace
 
 `shipyard pr` is the authoritative ship path. Do NOT push empty commits to
-retrigger a slow macOS check — the queue is paced by Namespace concurrency
-limits, not stuck. If macOS is queued >45 min, check
+retrigger a slow macOS check. If macOS is queued >45 min, check
 `gh api repos/danielraffel/pulp/actions/runners` first.
 
-## Pre-push rebase hygiene (Namespace cutover lesson)
+## Pre-push rebase hygiene
 
-After 2026-05-18 every macOS PR leg runs on Namespace's cloud image.
-That image's environment is NOT identical to the operator's local Mac:
-the bundled Skia archive (`external/skia-build/`) is absent there, so
-`PULP_HAS_SKIA` is undefined and Skia-only test contracts (any test
-that asserts `FontResolver::cache_size()`, paragraph layout pixel
-positions, SkParagraph behavior, etc.) only hold when gated on the
-macro. A test that passes locally and fails on Namespace is almost
-always a missing `#ifdef PULP_HAS_SKIA` gate, not a runner problem.
+The macOS runner pool has changed several times. Before pushing a branch
+whose CI touches a macOS leg, rebase onto current `main` so it picks up
+the latest workflow fixes and runner labels. Skia-sensitive tests should
+still be gated on `PULP_HAS_SKIA`; different runner images may or may not
+have the bundled Skia archive available.
 
 Before pushing ANY branch whose CI touches a macOS leg
 (`Build and Test`, `Sanitizer Tests`, `Coverage`, `Visual Harness`,
@@ -880,28 +827,21 @@ That keeps your SHA + queue position, only re-fires the failed legs.
 
 ### Display-name vs runner-name gotcha
 
-The macOS matrix job is named `macOS (ARM64) [github-hosted]` even
-though, post-cutover, the actual runner is `nsc-runner-*` from
-Namespace. Branch protection gates on the `macos` alias job, not the
-display name, so do NOT propose renaming the display name to match
-reality — the alias coupling is fragile. Mention the gotcha when
-explaining the routing to a new contributor.
+The macOS matrix job display name includes a provider suffix, but branch
+protection gates on the stable `macos` alias job. Do NOT rename the alias
+while debugging runner routing.
 
-### Verifying your branch isn't burning Namespace cycles
+### Verifying your branch isn't burning macOS runner time
 
-Two-runner pool: each failed macOS leg consumes ~10–20 min of
-Namespace compute AND queues every other PR behind your run. Before
-broadcasting "my CI is stuck", confirm:
+Each failed macOS leg consumes one of the scarce self-hosted runners and
+queues every other PR behind your run. Before broadcasting "my CI is
+stuck", confirm:
 
 ```bash
-# Are there Namespace runners online?
+# Are the pulp-build runners online and busy?
 gh api repos/danielraffel/pulp/actions/runners --jq \
-  '.runners[] | select(.labels[].name | contains("namespace-profile"))
+  '.runners[] | select(.labels[].name == "pulp-build")
    | "\(.name) status=\(.status) busy=\(.busy)"'
-
-# What's the queue look like across all PRs?
-nsc github jobs list --repository danielraffel/pulp --since 1h \
-  --running --output plain
 ```
 
 If your branch's macOS leg is the only thing failing, rebase. If

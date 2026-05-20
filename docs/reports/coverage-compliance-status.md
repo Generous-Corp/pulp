@@ -153,7 +153,7 @@ remaining misses are concentrated in:
 
 | Date | Branch | SHA | Scope | Local validation | PR state | Next action |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-05-20 | `feature/phase3-codecov-batch-755` | `062de20e0` | Runtime `ScopedNoAlloc` nested-depth and thread-local guard coverage in `pulp-test-runtime-utils`. | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`; `cmake --build build --target pulp-test-runtime-utils -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-runtime-utils "[runtime][scoped_no_alloc]"`; skill-sync report; version-bump report; `git diff --check`. | Local commit only; no PR opened yet. | Batch with the next deterministic Phase 3 coverage slice before shipping through `shipyard pr`. |
+| 2026-05-20 | `feature/phase3-codecov-batch-755` | `062de20e0` | Runtime `ScopedNoAlloc` nested-depth and thread-local guard coverage in `pulp-test-runtime-utils`; Shipyard mac target restored to local validation after the Namespace cutover. | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF`; `cmake --build build --target pulp-test-runtime-utils -j$(sysctl -n hw.ncpu)`; `./build/test/pulp-test-runtime-utils "[runtime][scoped_no_alloc]"`; skill-sync report; version-bump report; `git diff --check`. | PR #2473 opened; pending GitHub queue. | Monitor #2473 required checks and merge on green. |
 - `#645`: `midi` / `signal`, with `signal` close to the 80% tier and
   `midi` still led by platform MIDI shims and MPE tracker paths.
 - `#646`: `render`, now close to the 70% tier and best handled through
