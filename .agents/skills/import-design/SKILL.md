@@ -181,7 +181,14 @@ symbol names. After the P6-A3 refactor the *runtime* parsers
 moved into `core/view/src/claude_bundle.cpp` while the *static* parsers stayed
 in `design_import.cpp`. A single `parser.file` can no longer locate both, so
 contracts whose runtime parser lives elsewhere set the optional
-`parser.runtime_file` (e.g. `core/view/src/claude_bundle.cpp`). The checker
+`parser.runtime_file`. The Phase 7 follow-up split `claude_bundle.cpp` again:
+the per-design-tool source-detection families and their five public
+`parse_*_react` entry points (`parse_v0_dev_react`, `parse_figma_make_react`,
+`parse_stitch_react`, `parse_react_native_export`, `parse_pencil_react`) now
+live in `core/view/src/claude_bundle_sources.cpp`; only `parse_jsx_react` and
+`parse_claude_html_with_runtime` stayed in `claude_bundle.cpp`. So a contract's
+`runtime_file` is now `claude_bundle_sources.cpp` for those five and
+`claude_bundle.cpp` for the JSX/Claude-HTML pair. The checker
 resolves `parser.runtime` and the `explicit-runtime-parser` dispatch symbol
 against `runtime_file` (falling back to `parser.file`); `parser.static` always
 resolves against `parser.file`. **If a future refactor moves a parser symbol
