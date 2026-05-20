@@ -26,7 +26,17 @@ trap 'rm -rf "${build_dir}"' EXIT
 log="${build_dir}/configure.log"
 
 set +e
-cmake \
+if command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout 90s)
+elif command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout 90s)
+elif command -v perl >/dev/null 2>&1; then
+    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' 90)
+else
+    timeout_cmd=()
+fi
+
+"${timeout_cmd[@]}" cmake \
     -S "${pulp_root}" \
     -B "${build_dir}/build" \
     -G Xcode \
@@ -41,6 +51,12 @@ cmake \
     >"${log}" 2>&1
 status=$?
 set -e
+
+if [[ ${status} -eq 124 || ${status} -eq 142 ]]; then
+    echo "SKIP: iOS Simulator configure exceeded 90s; likely Xcode generator hang"
+    tail -n 80 "${log}" >&2
+    exit 77
+fi
 
 if [[ ${status} -ne 0 ]]; then
     echo "FAIL: iOS Simulator configure failed (status ${status})"

@@ -299,6 +299,19 @@ Do not rerun or empty-commit just to "unstick" a queued macOS job. Rebase
 only when the branch needs current `main` fixes, and cancel stale
 pre-cutover Namespace runs instead of rerunning them.
 
+The required PR lane must not let a single flaky or environment-specific
+macOS test wedge unrelated PRs behind the serialized local runner pool. If
+current `main` has known macOS-only failures, quarantine the exact test names
+with a macOS-only `ctest --exclude-regex` in `build.yml`, keep Linux/Windows
+coverage intact, and open/follow a targeted fix. Do not hide failures that
+reproduce cross-platform or that are caused by the branch being shipped.
+
+The required `macos` alias should not `need` the whole cross-platform build
+matrix. It should depend only on cheap setup/classification jobs and poll the
+macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
+advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
+protection.
+
 ### Release workflows: runner routing
 
 Release workflows should follow the same post-cutover rule: do not add
