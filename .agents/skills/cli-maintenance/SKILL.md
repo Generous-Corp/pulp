@@ -164,6 +164,13 @@ stay aligned across `pulp_import_design.cpp`, `docs/reference/cli.md`,
 `docs/reference/design-import.md`, `docs/status/cli-commands.yaml`, and the
 import-design skill.
 
+For `--emit ir-json`, asset-manifest flags are part of that same synced surface:
+`--allow-network-fetch`, `--asset-cache`, `--asset-timeout-ms`, and repeated
+`--asset-hash <uri=sha256>`. Keep their help text, YAML manifest rows, reference
+docs, and import-design skill text in lockstep. Network asset fetching must
+remain explicit opt-in; default JS emission should not fail just because an IR
+asset reference points at HTTP(S).
+
 **Sidecar output anchoring:** when a CLI command takes `--output
 <path>/main.ext` and also emits sidecar artifacts (e.g.
 `pulp import-design` writes `bridge_handlers.cpp`, `classnames.json`,
