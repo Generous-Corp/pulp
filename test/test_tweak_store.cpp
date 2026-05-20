@@ -29,6 +29,19 @@ InspectorMessage req(std::string method, std::string params) {
     return make_request(/*id=*/1, std::move(method), std::move(params));
 }
 
+std::string path_params(const std::filesystem::path& path) {
+    auto params = choc::value::createObject("");
+    params.addMember("path", choc::value::createString(path.string()));
+    return choc::json::toString(params, false);
+}
+
+std::string auto_save_params(bool enabled, const std::filesystem::path& path) {
+    auto params = choc::value::createObject("");
+    params.addMember("enabled", choc::value::createBool(enabled));
+    params.addMember("path", choc::value::createString(path.string()));
+    return choc::json::toString(params, false);
+}
+
 // Wire a DomainHandler with just the TweakStore for these tests.
 struct Fixture {
     TweakStore store;
@@ -542,16 +555,28 @@ TEST_CASE("TweakStore: atomic write leaves no .tmp file behind after success",
 
 TEST_CASE("TweakStore: save_to_disk on a bad path returns error, no partial write",
           "[inspect][tweak-store][disk]") {
+    TempTweaksDir tmp;
     TweakStore s;
     s.apply_tweak("a", "x", choc::value::createInt32(1), {});
 
-    // /this/path/should/not/exist is unwritable on any sane system.
-    std::string bad = "/this/path/should/not/exist/pulp-tweaks.json";
-    auto saved = s.save_to_disk(bad);
+    // Put a regular file where the parent directory should be. This is
+    // unwritable on POSIX and Windows without assuming anything about
+    // root-drive permissions on the CI runner.
+    const auto blocked_parent = tmp.dir / "not-a-directory";
+    {
+        std::ofstream out(blocked_parent);
+        out << "blocks child creation";
+    }
+    REQUIRE(std::filesystem::is_regular_file(blocked_parent));
+    const auto bad = blocked_parent / "pulp-tweaks.json";
+
+    auto saved = s.save_to_disk(bad.string());
     REQUIRE_FALSE(saved.ok);
     REQUIRE_FALSE(saved.error.empty());
     REQUIRE_FALSE(std::filesystem::exists(bad));
-    REQUIRE_FALSE(std::filesystem::exists(bad + ".tmp"));
+    auto tmp_file = bad;
+    tmp_file += ".tmp";
+    REQUIRE_FALSE(std::filesystem::exists(tmp_file));
 }
 
 TEST_CASE("TweakStore: auto-save flushes after every mutation",
@@ -715,8 +740,8 @@ TEST_CASE("Inspector.saveTweaks writes the file and returns the resolved path",
     Fixture f;
     f.store.apply_tweak("a", "x", choc::value::createInt32(1), "drag");
 
-    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
-    auto resp = f.handler.handle(req(methods::kInspectorSaveTweaks, params));
+    auto resp = f.handler.handle(req(methods::kInspectorSaveTweaks,
+                                     path_params(tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["ok"].getBool());
@@ -735,8 +760,8 @@ TEST_CASE("Inspector.loadTweaks restores state from disk",
         REQUIRE(writer.save_to_disk(tmp.file.string()).ok);
     }
     Fixture f;
-    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
-    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks, params));
+    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks,
+                                     path_params(tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["ok"].getBool());
@@ -750,8 +775,8 @@ TEST_CASE("Inspector.loadTweaks reports schema mismatch as a protocol error",
     tmp.write(R"({"version":999,"tweaks":{}})");
 
     Fixture f;
-    std::string params = R"({"path":")" + tmp.file.string() + R"("})";
-    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks, params));
+    auto resp = f.handler.handle(req(methods::kInspectorLoadTweaks,
+                                     path_params(tmp.file)));
     REQUIRE(resp.is_error);
     REQUIRE(resp.params_json.find("999") != std::string::npos);
 }
@@ -760,8 +785,8 @@ TEST_CASE("Inspector.setAutoSave arms and disarms the flush hook",
           "[inspect][protocol][setAutoSave]") {
     TempTweaksDir tmp;
     Fixture f;
-    std::string enable = R"({"enabled":true,"path":")" + tmp.file.string() + R"("})";
-    auto resp = f.handler.handle(req(methods::kInspectorSetAutoSave, enable));
+    auto resp = f.handler.handle(req(methods::kInspectorSetAutoSave,
+                                     auto_save_params(true, tmp.file)));
     REQUIRE_FALSE(resp.is_error);
     auto parsed = choc::json::parse(resp.params_json);
     REQUIRE(parsed["enabled"].getBool());
