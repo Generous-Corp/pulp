@@ -359,14 +359,45 @@ jobs:
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
           PY
 
+  # ── Change classifier ────────────────────────────────────────────────────
+  # Decides whether this PR needs the native build matrix at all. A PR that
+  # touches only docs / markdown / git-hooks / Shipyard config does not need
+  # a Skia/Dawn compile on any platform — the `build` matrix and
+  # `windows-msvc-release-gate` are skipped at the job level (no runner is
+  # ever allocated), and the `macos`/`linux`/`windows` alias jobs report a
+  # fast green from Ubuntu. Fail-closed: tools/scripts/classify_changes.py
+  # treats any uncertainty as "native build required". See that script's
+  # module docstring + tools/scripts/test_classify_changes.py.
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      native_build_required: ${{ steps.classify.outputs.native_build_required }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: false
+      - id: classify
+        run: |
+          python3 tools/scripts/classify_changes.py \
+            --mode=diff \
+            --base "${{ github.event.pull_request.base.sha || 'origin/main' }}"
+
   build:
-    needs: resolve-provider
+    needs: [resolve-provider, classify]
+    # Skip the entire native build matrix (no runner allocated) when the PR
+    # touches no C++/Swift build input. The macos/linux/windows alias jobs
+    # below still run and report.
+    if: needs.classify.outputs.native_build_required == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    name: ${{ matrix.key == 'macos' && 'macos' || format('{0} [{1}]', matrix.name, matrix.provider) }}
+    # All legs named uniformly `<name> [<provider>]`. The required `macos`
+    # check is now provided by the dedicated `macos` alias job below, not by
+    # this matrix leg — so the leg no longer self-names `macos`.
+    name: ${{ format('{0} [{1}]', matrix.name, matrix.provider) }}
     env:
       # Self-hosted macOS keeps the workspace warm between workflows.
       # Keep the ordinary build matrix out of sanitizer-owned build dirs so
@@ -656,6 +687,8 @@ jobs:
   # tests either, and the main matrix above already covers Windows tests on
   # Namespace.
   windows-msvc-release-gate:
+    needs: classify
+    if: needs.classify.outputs.native_build_required == 'true'
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -695,8 +728,37 @@ jobs:
   # to leave their queues. Linux and Windows keep stable advisory aliases
   # for visibility only.
 
+  # ── macos alias (REQUIRED branch-protection check) ───────────────────────
+  # Always runs (`if: always()`) so the required `macos` context always
+  # reports — never left pending. On a skip-safe PR (classify said no native
+  # build) it reports a fast green from Ubuntu without touching the macOS
+  # runner. On a code PR it mirrors the macOS matrix leg's conclusion.
+  macos:
+    needs: [build, classify]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: macOS leg outcome (required)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
+            echo "Skip-safe PR — no C++/Swift build input changed. macos gate ✓ (no native build)"
+            exit 0
+          fi
+          conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | startswith("macOS")) | .conclusion' | head -1)
+          echo "macOS leg conclusion: ${conclusion:-unknown}"
+          if [ "$conclusion" = "success" ]; then
+            echo "macOS leg green — macos gate ✓"
+            exit 0
+          fi
+          echo "macOS leg ${conclusion:-not found} — failing macos gate (required)"
+          exit 1
+
   linux:
-    needs: build
+    needs: [build, classify]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -705,6 +767,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
+            echo "Skip-safe PR — no C++/Swift build input changed. linux gate ✓ (no native build)"
+            exit 0
+          fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | startswith("Linux")) | .conclusion' | head -1)
           echo "Linux leg conclusion: ${conclusion:-unknown}"
@@ -723,7 +789,7 @@ jobs:
           exit 1
 
   windows:
-    needs: [build, windows-msvc-release-gate]
+    needs: [build, windows-msvc-release-gate, classify]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -732,6 +798,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
+            echo "Skip-safe PR — no C++/Swift build input changed. windows gate ✓ (no native build)"
+            exit 0
+          fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | startswith("Windows (x64)")) | .conclusion' | head -1)
           msvc_ok="${{ needs.windows-msvc-release-gate.result }}"
