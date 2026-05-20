@@ -86,8 +86,13 @@ jobs:
           NAMESPACE_WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON }}
           # macOS overflow target. Defaults to GitHub-hosted macos-15,
           # which is free for public repos. Override via the repo variable
-          # PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON (set it empty to pin
-          # macOS local-only with no overflow).
+          # PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON: set it to a runs-on
+          # selector to change the target, or to the sentinel "local-only"
+          # to disable overflow (macOS pinned to the local runner).
+          # NOTE: an *empty* variable value cannot disable overflow —
+          # GitHub treats unset and empty identically and the `||` default
+          # below re-fills it — so "local-only" is the explicit off
+          # switch, not emptiness (Codex P2 on #2451).
           OVERFLOW_MACOS_RUNS_ON_JSON: ${{ vars.PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON || '["macos-15"]' }}
           # gh CLI auth for the overflow-busy-count probe.
           GH_TOKEN: ${{ github.token }}
@@ -239,6 +244,13 @@ jobs:
           overflow_macos_selector = (
               os.environ.get("OVERFLOW_MACOS_RUNS_ON_JSON") or ""
           ).strip()
+          # "local-only" is the explicit off switch for overflow. An empty
+          # repo variable cannot express this — GitHub treats unset and
+          # empty identically, and the env default re-fills it with
+          # macos-15 — so operators disable overflow with the sentinel
+          # instead. Treat it as "no overflow selector" → stay local.
+          if overflow_macos_selector == "local-only":
+              overflow_macos_selector = ""
           local_macos_selector = (
               os.environ.get("LOCAL_MACOS_RUNS_ON_JSON") or ""
           ).strip()

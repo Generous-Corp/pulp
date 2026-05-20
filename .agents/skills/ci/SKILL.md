@@ -1895,8 +1895,12 @@ The `resolve-provider` job in `build.yml` decides per-run where each
   input always wins.
 
 The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
-`["macos-15"]`; the repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
-overrides it (set it empty to pin macOS local-only). Routing is decided
+`["macos-15"]`. The repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
+overrides it: set it to a different runs-on selector to change the
+target, or to the sentinel `local-only` to disable overflow (macOS
+pinned to the local runner). An *empty* variable value does NOT disable
+overflow — GitHub treats unset and empty identically — so `local-only`
+is the explicit off switch. Routing is decided
 **once per run, at dispatch** — a leg already sent to `macos-15` is not
 migrated back to local if the Mac frees up; cloud overflow is parallel
 capacity, not a queue waiting on the Mac. Namespace is no longer a
