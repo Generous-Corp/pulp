@@ -290,6 +290,17 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 
+# P5-4 follow-up — `pulp pr` shell-out tests, extracted from
+# test_cli_shellout.cpp. Two contiguous clusters (pr.workflow validation
+# + Shipyard binary pin handling + native fallback). Shares the helpers
+# header with its siblings.
+add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
+target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-pr pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-pr)
+
 # pulp #776 — pin shell_quote's per-platform contract so it can't
 # silently regress to the pre-fix shape that broke `git fetch origin`
 # on Windows by writing doubled backslashes into clone URLs.
