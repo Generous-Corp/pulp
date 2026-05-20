@@ -40,6 +40,25 @@ skill for the full banner contract and override knobs
 (`PULP_SKEW_CHECK_DISABLE`, `PULP_SKEW_CHECK_CACHE`). Release-discovery
 Slice 6 (#551).
 
+## Current Build-and-Test routing
+
+As of the 2026-05-20 classify gate, `build.yml` runs a cheap
+`classify` job before allocating the native matrix. PRs that touch only
+skip-safe docs/planning paths report the native aliases green without
+running macOS/Linux/Windows builds; PRs that touch C++/Swift/CMake or
+workflow inputs must run the native matrix. A code PR whose native build
+is skipped is a CI bug.
+
+`workflow_dispatch` defaults `runner_provider` to `github-hosted`, not
+Namespace; do not dispatch with `runner_provider=namespace`. Linux/Windows
+use GitHub-hosted runners by default. macOS routes through the self-hosted
+`pulp-build` pool (`pulp-m1-01`, `pulp-m1-02`) via
+`PULP_LOCAL_MACOS_RUNS_ON_JSON`; repository variables control any overflow.
+
+Do not push empty commits just to churn queued macOS checks. Cancel
+superseded SHAs, rebase or push only when a PR needs current `main`, and
+wait unless a check has actually failed.
+
 ## Shipping a PR: route through `shipyard pr`
 
 When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
@@ -224,7 +243,7 @@ shipyard ship-state discard <pr>          # archive stale state
 shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
-shipyard cloud run build <branch>         # dispatch to Namespace
+shipyard cloud run build <branch>         # dispatch the GHA build workflow
 shipyard rescue <PR>                      # recover a wedged PR by redispatching queued runs
 shipyard rescue <PR> --rerun-failed       # also re-arm cancelled/failed runs
 shipyard runner watch --kill-hung-workers # host-side prevention daemon for self-hosted runners

@@ -139,7 +139,11 @@ os.execvpe(cmd[0], cmd, env)
 PY
 }
 
-acquire_validation_lock "${ORIGINAL_ARGS[@]}"
+if ((${#ORIGINAL_ARGS[@]})); then
+    acquire_validation_lock "${ORIGINAL_ARGS[@]}"
+else
+    acquire_validation_lock
+fi
 
 if [ -n "$ROOT_OVERRIDE" ]; then
     tmp_root="$ROOT_OVERRIDE"
@@ -237,7 +241,7 @@ run_or_dump() {
 }
 
 run_or_dump "dependency bootstrap" "$setup_log" bash -lc "cd \"$src_dir\" && ./setup.sh --ci --deps-only"
-configure_args=(-S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug)
+configure_args=(-S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Release)
 if [ "$SMOKE_ONLY" = true ]; then
     SKIP_TESTS=true
     configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF)
