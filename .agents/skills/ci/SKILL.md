@@ -611,6 +611,16 @@ JSON modes carry the diagnostics. Lets you chain
 `shipyard pr && shipyard watch --pr <N>` and stop babysitting the
 GitHub UI on slow CI runs.
 
+## PR test selection
+
+`build.yml` excludes CTest labels matching `slow` on `pull_request`
+events, while keeping those tests in full validation lanes such as
+`workflow_dispatch`, push, and scheduled runs. Preserve that split:
+slow configure smokes like `cmake-ios-auv3-configure` can legitimately
+take many minutes on a self-hosted Mac and should not block the cheap
+PR matrix after the classify gate has already decided a native build is
+needed.
+
 ## Recovery + maintenance toolkit (>= v0.56.2)
 
 Three operational commands cover the prevention → recovery → maintenance
