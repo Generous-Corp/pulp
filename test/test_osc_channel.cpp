@@ -255,12 +255,14 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
         return !received.empty();
     }));
 
-    std::lock_guard<std::mutex> lock(mu);
-    // Re-decode on this end and verify every field survives the trip.
-    auto decoded = decode(received.data(), received.size());
-    REQUIRE(decoded.address == "/raw/path");
-    REQUIRE(decoded.get_int(0) == 7);
-    REQUIRE(decoded.get_string(1) == "abc");
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        // Re-decode on this end and verify every field survives the trip.
+        auto decoded = decode(received.data(), received.size());
+        REQUIRE(decoded.address == "/raw/path");
+        REQUIRE(decoded.get_int(0) == 7);
+        REQUIRE(decoded.get_string(1) == "abc");
+    }
 
     a->close();
     b->close();
