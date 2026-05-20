@@ -75,6 +75,37 @@ class ParseXmlTests(unittest.TestCase):
             result = mc.parse_xml(p)
             self.assertEqual(result["core/foo.cpp"][10], 5)
 
+    def test_ignores_incomplete_or_invalid_class_line_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            coverage = ET.Element("coverage")
+            pkgs = ET.SubElement(coverage, "packages")
+            pkg = ET.SubElement(pkgs, "package", attrib={"name": "x"})
+            classes = ET.SubElement(pkg, "classes")
+
+            ET.SubElement(classes, "class", attrib={"name": "missing.filename"})
+            ET.SubElement(classes, "class", attrib={"filename": "core/no-lines.cpp"})
+
+            cls = ET.SubElement(
+                classes,
+                "class",
+                attrib={"name": "core.foo.cpp", "filename": "core/foo.cpp"},
+            )
+            lines_el = ET.SubElement(cls, "lines")
+            ET.SubElement(lines_el, "line", attrib={"number": "10"})
+            ET.SubElement(lines_el, "line", attrib={"hits": "1"})
+            ET.SubElement(lines_el, "line", attrib={"number": "bad", "hits": "1"})
+            ET.SubElement(lines_el, "line", attrib={"number": "10", "hits": "5"})
+            ET.SubElement(lines_el, "line", attrib={"number": "10", "hits": "1"})
+            ET.SubElement(lines_el, "line", attrib={"number": "11", "hits": "0"})
+
+            p = tmp / "invalid-lines.xml"
+            ET.ElementTree(coverage).write(str(p), encoding="utf-8", xml_declaration=True)
+
+            result = mc.parse_xml(p)
+            self.assertEqual(result["core/no-lines.cpp"], {})
+            self.assertEqual(result["core/foo.cpp"], {10: 5, 11: 0})
+
 
 class MergeTests(unittest.TestCase):
     def test_union_takes_max(self) -> None:
