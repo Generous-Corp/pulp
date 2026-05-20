@@ -896,6 +896,58 @@ Options:
 - `--params JSON` - JSON params for `--command`
 - `--output FILE` - write a one-shot command response to a file
 
+### tweaks
+
+**Status**: experimental
+
+Inspect the `pulp-tweaks.json` sidecar the inspector overlay writes for
+direct-manipulation edits. Tweaks are keyed by `stable_anchor_id`; after a
+design re-import an anchor may no longer exist in the live tree, so the
+tweak silently stops applying. `pulp tweaks diff` surfaces this — it is the
+CLI mirror of the inspector's drift drawer, sharing the same drift-detection
+logic underneath.
+
+```bash
+pulp tweaks diff
+pulp tweaks diff --tweaks pulp-tweaks.json --design design.json
+pulp tweaks diff --design design.json --json
+```
+
+`tweaks diff` classifies every stored tweak against a design snapshot:
+
+- **clean** - the anchor (and property) still resolve
+- **drifted** - the anchor survives but the targeted property is gone
+- **orphaned** - the anchor itself is gone (re-import removed the element)
+
+The design snapshot comes from `--design FILE`, a small JSON "anchors
+manifest" in any of three shapes:
+
+```json
+["anchor-a", "anchor-b"]
+```
+
+```json
+{ "anchors": ["anchor-a", "anchor-b"] }
+```
+
+```json
+{ "anchors": { "anchor-a": ["paint.color", "layout.padding"] } }
+```
+
+The first two forms enable anchor-only matching (orphan detection); the
+third (anchor → property-path map) additionally enables property-level
+drift detection. With `--design` omitted, the snapshot is empty and every
+tweak is reported as orphaned.
+
+Options:
+
+- `--tweaks FILE` - path to `pulp-tweaks.json` (default: auto-resolved project sidecar)
+- `--design FILE` - anchors-manifest JSON to diff against (default: empty)
+- `--json` - emit the drift report as JSON instead of human-readable text
+
+Exit code: `0` when no drift, `1` when drift is found, `2` on a usage or
+file error.
+
 ### import-design
 
 **Status**: experimental

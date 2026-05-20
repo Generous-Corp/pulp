@@ -64,6 +64,7 @@ static const Command commands[] = {
     {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
     {"macos",    "Per-PR macOS-runner retargeting (local/namespace/github-hosted)", cmd_macos},
     {"overflow", "Configure macOS-runner overflow routing (status/enable/disable/threshold)", cmd_overflow},
+    {"tweaks",   "Inspect the pulp-tweaks.json sidecar (diff against a design)", cmd_tweaks},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);

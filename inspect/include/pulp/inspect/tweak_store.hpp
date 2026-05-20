@@ -223,6 +223,88 @@ public:
     /// without touching the filesystem.
     DiskResult from_json(std::string_view json);
 
+    // ── Phase 2: drift detection ────────────────────────────────────
+    //
+    // A tweak is keyed by (anchor_id, property_path). After a design
+    // re-import the live view tree may no longer carry an anchor a
+    // stored tweak references — that tweak is "orphaned" and silently
+    // does nothing. The drift API surfaces these so the inspector
+    // drawer + `pulp tweaks diff` CLI can warn the user.
+
+    /// Why a tweak failed to apply cleanly.
+    enum class DriftReason {
+        anchor_not_found,    ///< No live view carries this anchor_id.
+        property_not_found,  ///< Anchor resolves but the design no longer
+                             ///  exposes this property path.
+    };
+
+    /// Stringify a DriftReason for JSON / human output.
+    static const char* drift_reason_str(DriftReason reason);
+
+    /// One drifted tweak — a stored edit that no longer maps cleanly to
+    /// the current design.
+    struct DriftedTweak {
+        std::string anchor_id;
+        std::string property_path;
+        choc::value::Value value;
+        std::string source;
+        DriftReason reason = DriftReason::anchor_not_found;
+    };
+
+    /// Three-way classification of every stored tweak against a design.
+    struct DriftReport {
+        std::vector<Record> clean;          ///< Anchor + property both resolve.
+        std::vector<DriftedTweak> drifted;  ///< Anchor resolves, property gone.
+        std::vector<DriftedTweak> orphaned; ///< Anchor itself is gone.
+
+        std::size_t total() const {
+            return clean.size() + drifted.size() + orphaned.size();
+        }
+        bool has_drift() const {
+            return !drifted.empty() || !orphaned.empty();
+        }
+    };
+
+    /// A design snapshot the drift logic diffs tweaks against.
+    ///
+    /// `anchors` is every anchor_id present in the live view tree (or a
+    /// fresh import). `properties`, when populated for an anchor, is the
+    /// set of dotted property paths that anchor still exposes — used to
+    /// detect property-level drift (anchor survives, but the field it
+    /// targeted is gone). An anchor with no `properties` entry is
+    /// treated as "all properties valid" (anchor-only matching), so
+    /// callers that only know the anchor set still get orphan
+    /// detection for free.
+    struct DesignSnapshot {
+        std::unordered_set<std::string> anchors;
+        std::unordered_map<std::string, std::unordered_set<std::string>>
+            properties;
+    };
+
+    /// Classify every stored tweak against `design`. Bypass overlay is
+    /// ignored — a bypassed tweak can still be orphaned, and the user
+    /// should see that.
+    DriftReport diff(const DesignSnapshot& design) const;
+
+    /// Convenience: classify against a flat anchor list (anchor-only
+    /// matching — no property-level drift). Equivalent to building a
+    /// DesignSnapshot with just `anchors` populated.
+    DriftReport diff(const std::vector<std::string>& live_anchors) const;
+
+    /// Return only the orphaned + drifted tweaks for `design` — the
+    /// subset the inspector drift drawer renders.
+    std::vector<DriftedTweak> find_drifted(const DesignSnapshot& design) const;
+
+    /// Convenience overload taking a flat anchor list.
+    std::vector<DriftedTweak>
+    find_drifted(const std::vector<std::string>& live_anchors) const;
+
+    /// Render a DriftReport as a JSON string (used by `pulp tweaks
+    /// diff --json` and the protocol layer). Shape:
+    ///   { "clean": [...], "drifted": [...], "orphaned": [...],
+    ///     "summary": { "total", "clean", "drifted", "orphaned" } }
+    static std::string drift_report_to_json(const DriftReport& report);
+
 private:
     mutable std::mutex mtx_;
     // Outer key: anchor_id. Inner key: dotted property path.

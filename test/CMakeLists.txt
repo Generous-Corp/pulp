@@ -321,6 +321,16 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 
+# Inspector Phase 2 — `pulp tweaks diff` shell-out tests. Drives the
+# built binary against pulp-tweaks.json + design-snapshot fixtures and
+# pins the clean / drifted / orphaned exit-code contract.
+add_executable(pulp-test-cli-tweaks-shellout test_cli_tweaks_shellout.cpp)
+target_link_libraries(pulp-test-cli-tweaks-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-tweaks-shellout pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-tweaks-shellout)
+
 # pulp #776 — pin shell_quote's per-platform contract so it can't
 # silently regress to the pre-fix shape that broke `git fetch origin`
 # on Windows by writing doubled backslashes into clone URLs.

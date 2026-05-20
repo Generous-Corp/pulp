@@ -3071,3 +3071,187 @@ TEST_CASE("DomainHandler propagates config to the attached overlay",
     REQUIRE(std::string(obj["url"].getString())
             == "cursor://file/x/Y.jsx:5");
 }
+
+// ── Phase 2 — drift drawer ──────────────────────────────────────────────
+//
+// The drift drawer is a collapsible warning panel inside the inspector
+// overlay that lists tweaks whose anchor_id no longer resolves to a live
+// view. It is populated by refresh_drift(), which walks the live view
+// tree's anchor set and diffs it against the attached TweakStore.
+// Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+// (Phase 2).
+namespace {
+
+// True if any fill_text command's text contains `needle`.
+bool canvas_has_text(const pulp::canvas::RecordingCanvas& canvas,
+                     std::string_view needle) {
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text &&
+            cmd.text.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("InspectorOverlay: refresh_drift finds tweaks with no live anchor",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 500, 400});
+
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("anchor-still-here");
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    // One tweak whose anchor is live, one whose anchor is gone.
+    store.apply_tweak("anchor-still-here", "layout.padding",
+                      choc::value::createInt32(8));
+    store.apply_tweak("anchor-removed-by-reimport", "paint.color",
+                      choc::value::createString("#ff0000"));
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+    overlay.refresh_drift();
+
+    REQUIRE(overlay.drift_count() == 1);
+    REQUIRE(overlay.drifted().front().anchor_id ==
+            "anchor-removed-by-reimport");
+    REQUIRE(overlay.drifted().front().reason ==
+            TweakStore::DriftReason::anchor_not_found);
+    // First drift detection auto-expands the drawer so it is not silent.
+    REQUIRE(overlay.drift_drawer_open());
+}
+
+TEST_CASE("InspectorOverlay: no drift means no drawer and an empty list",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 500, 400});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("live-anchor");
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    store.apply_tweak("live-anchor", "layout.width",
+                      choc::value::createInt32(120));
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+    overlay.refresh_drift();
+
+    REQUIRE(overlay.drift_count() == 0);
+    REQUIRE(overlay.drifted().empty());
+
+    // The drawer paints nothing on the happy path.
+    overlay.set_active(true);
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);
+    REQUIRE_FALSE(canvas_has_text(canvas, "Drift"));
+}
+
+TEST_CASE("InspectorOverlay: refresh_drift with no TweakStore is a safe no-op",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    InspectorOverlay overlay(root);
+    overlay.refresh_drift();  // no store wired
+    REQUIRE(overlay.drift_count() == 0);
+    REQUIRE(overlay.drifted().empty());
+}
+
+TEST_CASE("InspectorOverlay: drift drawer renders header and orphan rows",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 600, 500});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("kept");
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    store.apply_tweak("kept", "layout.width",
+                      choc::value::createInt32(64));
+    store.apply_tweak("gone-anchor", "layout.margin",
+                      choc::value::createInt32(10));
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+    overlay.set_active(true);
+
+    // First paint auto-refreshes drift and auto-expands the drawer.
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);
+
+    REQUIRE(overlay.drift_count() == 1);
+    REQUIRE(overlay.drift_drawer_open());
+    // Header text + the orphaned anchor + its reason tag are painted.
+    REQUIRE(canvas_has_text(canvas, "Drift"));
+    REQUIRE(canvas_has_text(canvas, "gone-anchor"));
+    REQUIRE(canvas_has_text(canvas, "anchor-not-found"));
+    REQUIRE(canvas_has_text(canvas, "layout.margin"));
+}
+
+TEST_CASE("InspectorOverlay: clicking the drift header toggles the drawer",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 600, 500});
+    auto child = std::make_unique<View>();
+    child->set_anchor_id("present");
+    root.add_child(std::move(child));
+
+    TweakStore store;
+    store.apply_tweak("present", "layout.width",
+                      choc::value::createInt32(80));
+    store.apply_tweak("missing", "paint.opacity",
+                      choc::value::createFloat32(0.4f));
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+    overlay.set_active(true);
+
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);  // auto-expands; populates the header hit-rect
+    REQUIRE(overlay.drift_drawer_open());
+
+    // The drawer header sits just below the tree section (root_h * 0.5
+    // = 250) on the panel side (panel_x = 600 - 300 = 300). A click in
+    // that band collapses the drawer.
+    MouseEvent click;
+    click.position = {360, 258};
+    click.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(click));
+    REQUIRE_FALSE(overlay.drift_drawer_open());
+
+    // Re-paint so the (now-collapsed) header hit-rect is refreshed,
+    // then click again to re-expand.
+    canvas.clear();
+    overlay.paint(canvas);
+    MouseEvent click2;
+    click2.position = {360, 258};
+    click2.is_down = true;
+    REQUIRE(overlay.handle_mouse_event(click2));
+    REQUIRE(overlay.drift_drawer_open());
+}
+
+TEST_CASE("InspectorOverlay: collapsed drawer hides rows but keeps the header",
+          "[inspect][overlay][drift][phase2]") {
+    View root;
+    root.set_bounds({0, 0, 600, 500});
+
+    TweakStore store;
+    store.apply_tweak("orphan-a", "layout.width",
+                      choc::value::createInt32(50));
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+    overlay.set_active(true);
+    overlay.refresh_drift();
+    overlay.set_drift_drawer_open(false);
+
+    pulp::canvas::RecordingCanvas canvas;
+    overlay.paint(canvas);
+    // Header still shows the drift count; the orphan row does not.
+    REQUIRE(canvas_has_text(canvas, "Drift"));
+    REQUIRE_FALSE(canvas_has_text(canvas, "layout.width"));
+}

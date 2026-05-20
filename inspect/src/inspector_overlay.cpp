@@ -5,6 +5,8 @@
 #include <pulp/view/inspector.hpp>
 #include <pulp/render/render_pass.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <sstream>
@@ -75,6 +77,11 @@ void install_inspector_hooks(InspectorOverlay& inspector) {
 
 void InspectorOverlay::set_active(bool active) {
     active_ = active;
+    if (active) {
+        // Re-check drift each time the inspector opens — the design may
+        // have been re-imported while the overlay was dismissed.
+        drift_refreshed_once_ = false;
+    }
     if (!active) {
         // Dropping selection while editing would leave a dangling
         // edit_target_view_ — cancel first so the buffer state is
@@ -190,6 +197,44 @@ bool InspectorOverlay::emit_tweak_for_selection(std::string_view property_path,
     if (!tweak_store_) return false;
     tweak_store_->apply_tweak(anchor, property_path, std::move(value), source);
     return true;
+}
+
+// ── Phase 2 — drift detection ───────────────────────────────────────────────
+//
+// Walks the live view tree collecting every non-empty anchor_id, then
+// diffs the attached TweakStore against that anchor set. Tweaks whose
+// anchor is no longer present are "orphaned" — they silently do nothing
+// because direct manipulation can't re-find the element. The drawer
+// surfaces them so a design re-import never quietly drops the user's
+// edits.
+
+namespace {
+
+void collect_anchor_ids(const View& v, std::vector<std::string>& out) {
+    const auto& a = v.anchor_id();
+    if (!a.empty()) out.push_back(a);
+    for (std::size_t i = 0; i < v.child_count(); ++i)
+        collect_anchor_ids(*v.child_at(i), out);
+}
+
+}  // namespace
+
+void InspectorOverlay::refresh_drift() {
+    drift_refreshed_once_ = true;
+    if (!tweak_store_) {
+        drifted_.clear();
+        return;
+    }
+    std::vector<std::string> live;
+    collect_anchor_ids(root_, live);
+    auto next = tweak_store_->find_drifted(live);
+    // Auto-expand the drawer the first time drift appears — a stale
+    // tweak must never be silent. Once the user collapses it we leave
+    // it collapsed even if the count changes.
+    if (!next.empty() && drifted_.empty()) {
+        drift_drawer_open_ = true;
+    }
+    drifted_ = std::move(next);
 }
 
 // ── Coordinate helpers ──────────────────────────────────────────────────────
@@ -527,6 +572,19 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
                 }
             }
 
+            // Phase 2 — a click on the drift-drawer header toggles the
+            // drawer expand/collapse. Checked first because the header
+            // overlaps the props-section coordinate range; without
+            // this the click would fall through to tree selection.
+            if (drift_header_hit_.width > 0 &&
+                pos.x >= drift_header_hit_.x &&
+                pos.x <= drift_header_hit_.x + drift_header_hit_.width &&
+                pos.y >= drift_header_hit_.y &&
+                pos.y <= drift_header_hit_.y + drift_header_hit_.height) {
+                toggle_drift_drawer();
+                return true;
+            }
+
             // Phase 3b — clicks on numeric values in the property
             // panel enter edit mode. The hit list is populated by the
             // most recent paint_props_section() call; we check it
@@ -643,6 +701,10 @@ void InspectorOverlay::paint(Canvas& canvas) {
     capture_pass_frame();
 
     rebuild_flat_tree();
+    // Phase 2 — populate the drift list on the first paint after the
+    // inspector goes active so the drawer is never empty just because
+    // the host forgot to call refresh_drift() explicitly.
+    if (!drift_refreshed_once_) refresh_drift();
     paint_highlight(canvas);
     paint_distance_lines(canvas);
     if (selected_) paint_box_model(canvas, selected_);
@@ -917,8 +979,14 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
         float props_y = section_h;
         canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
         canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
-        paint_middle(panel_x + 8, props_y + 4,
-                     panel_width_ - 16, section_h - 8);
+
+        // Phase 2 — drift drawer sits directly under the tree divider.
+        // Paints nothing (and returns 0) when there is no drift, so the
+        // props section is unaffected on the happy path.
+        float drift_h = paint_drift_drawer(canvas, panel_x + 8, props_y + 4,
+                                           panel_width_ - 16);
+        paint_middle(panel_x + 8, props_y + 4 + drift_h,
+                     panel_width_ - 16, section_h - 8 - drift_h);
 
         float tweaks_y = section_h * 2.0f;
         canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
@@ -936,8 +1004,13 @@ void InspectorOverlay::paint_panel(Canvas& canvas) {
         canvas.set_stroke_color(Color::rgba(0.3f, 0.3f, 0.35f, 0.5f));
         canvas.stroke_line(panel_x + 8, props_y, root_w - 8, props_y);
 
-        paint_middle(panel_x + 8, props_y + 4,
-                     panel_width_ - 16, stats_y - props_y - 8);
+        // Phase 2 — drift drawer sits directly under the tree divider.
+        // Paints nothing (and returns 0) when there is no drift, so the
+        // props section is unaffected on the happy path.
+        float drift_h = paint_drift_drawer(canvas, panel_x + 8, props_y + 4,
+                                           panel_width_ - 16);
+        paint_middle(panel_x + 8, props_y + 4 + drift_h,
+                     panel_width_ - 16, stats_y - props_y - 8 - drift_h);
     }
 
     // Stats bar (bottom)
@@ -1738,6 +1811,115 @@ InspectorOverlay::tweak_action_at(Point p, std::size_t& out_row) const {
         if (hit(row.delete_icon)) { out_row = i; return TweakAction::remove; }
     }
     return TweakAction::none;
+}
+
+// ── Phase 2 — Drift drawer ──────────────────────────────────────────────────
+//
+// A collapsible warning panel that lists tweaks whose anchor / property
+// no longer maps to the live design. Header is always shown when drift
+// exists (so the count badge is visible); the body — one row per
+// orphaned/drifted tweak — only renders when expanded. Each row shows
+// the anchor, the dotted property path, the stored value, and a reason
+// tag. Clicking the header chevron toggles the drawer.
+
+float InspectorOverlay::paint_drift_drawer(Canvas& canvas, float x, float y,
+                                           float w) {
+    drift_header_hit_ = {};  // reset; repopulated below if we paint.
+    if (drifted_.empty()) return 0.0f;
+
+    const Color kDriftBg     = Color::rgba(0.22f, 0.06f, 0.07f, 0.95f);
+    const Color kDriftBorder = Color::rgba(0.95f, 0.32f, 0.30f, 0.85f);
+    const Color kDriftText   = Color::rgba(0.98f, 0.72f, 0.70f, 1.0f);
+    const Color kDriftReason = Color::rgba(0.95f, 0.55f, 0.30f, 1.0f);
+
+    constexpr float kHeaderH = 22.0f;
+    constexpr float kDriftRowH = 30.0f;
+    // Cap the body so a large drift list never eats the whole panel.
+    const std::size_t kMaxRows = 6;
+    const std::size_t shown_rows =
+        drift_drawer_open_ ? std::min(drifted_.size(), kMaxRows) : 0;
+    const bool truncated = drifted_.size() > kMaxRows;
+    float body_h = static_cast<float>(shown_rows) * kDriftRowH;
+    if (drift_drawer_open_ && truncated) body_h += 16.0f;  // "+N more" line
+    float total_h = kHeaderH + body_h + 4.0f;
+
+    canvas.set_font("monospace", kFontSize);
+
+    // ── Header ──────────────────────────────────────────────────────
+    canvas.set_fill_color(kDriftBg);
+    canvas.fill_rect(x, y, w, kHeaderH);
+    canvas.set_stroke_color(kDriftBorder);
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rect(x, y, w, kHeaderH);
+
+    // The whole header is the toggle target (generous hit box).
+    drift_header_hit_ = {x, y, w, kHeaderH};
+
+    auto chevron = drift_drawer_open_ ? "\xe2\x96\xbc" : "\xe2\x96\xb6";
+    canvas.set_fill_color(kDriftBorder);
+    canvas.fill_text(chevron, x + 4, y + 15);
+
+    std::string title = "\xe2\x9a\xa0 Drift — " +
+                        std::to_string(drifted_.size()) +
+                        (drifted_.size() == 1 ? " orphaned tweak"
+                                              : " orphaned tweaks");
+    canvas.set_fill_color(kDriftText);
+    canvas.fill_text(title, x + 18, y + 15);
+
+    if (!drift_drawer_open_) return total_h;
+
+    // ── Body — one row per drifted/orphaned tweak ──────────────────
+    canvas.set_fill_color(Color::rgba(0.14f, 0.05f, 0.06f, 0.95f));
+    canvas.fill_rect(x, y + kHeaderH, w, body_h);
+
+    float row_y = y + kHeaderH;
+    for (std::size_t i = 0; i < shown_rows; ++i) {
+        const auto& d = drifted_[i];
+
+        // Left red marker stripe — matches Phase 2.5's planned
+        // drift-row styling so the two panels read consistently.
+        canvas.set_fill_color(kDriftBorder);
+        canvas.fill_rect(x, row_y + 2, 2.0f, kDriftRowH - 4);
+
+        // Line 1: anchor + reason tag.
+        std::string anchor = d.anchor_id;
+        if (anchor.size() > 28) anchor = anchor.substr(0, 27) + "\xe2\x80\xa6";
+        canvas.set_fill_color(kDriftText);
+        canvas.fill_text(anchor, x + 8, row_y + 13);
+
+        std::string reason = TweakStore::drift_reason_str(d.reason);
+        canvas.set_fill_color(kDriftReason);
+        float rw = canvas.measure_text(reason);
+        canvas.fill_text(reason, x + w - rw - 4, row_y + 13);
+
+        // Line 2: property path = stored value.
+        std::string value_str;
+        if (d.value.isString()) {
+            value_str = std::string(d.value.getString());
+        } else {
+            try {
+                value_str = choc::json::toString(d.value);
+            } catch (...) {
+                value_str = "?";
+            }
+        }
+        std::string detail = d.property_path + " = " + value_str;
+        if (detail.size() > 40) detail = detail.substr(0, 39) + "\xe2\x80\xa6";
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text(detail, x + 8, row_y + 25);
+
+        row_y += kDriftRowH;
+    }
+
+    if (truncated) {
+        canvas.set_fill_color(kPanelDim);
+        canvas.fill_text("\xe2\x80\xa6 +" +
+                             std::to_string(drifted_.size() - kMaxRows) +
+                             " more (see `pulp tweaks diff`)",
+                         x + 8, row_y + 12);
+    }
+
+    return total_h;
 }
 
 // ── Phase 3b — Live-editable box-model fields ───────────────────────────────
