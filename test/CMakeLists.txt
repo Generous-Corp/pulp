@@ -2318,6 +2318,14 @@ target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2:
 catch_discover_tests(pulp-test-design-import-anchors
     PROPERTIES LABELS "parser-import")
 
+# Inspector Phase 4a — Lock-to-source, Path A (generated-TSX/JS rewrite).
+# Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md
+# Proves the tweak -> lock-to-source -> re-import round-trip.
+add_executable(pulp-test-lock-to-source test_lock_to_source.cpp)
+target_link_libraries(pulp-test-lock-to-source PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-lock-to-source
+    PROPERTIES LABELS "parser-import")
+
 # DESIGN.md import (Google design.md, Apache-2.0 — pulp #1434 follow-up)
 # Compiles import_detect.cpp directly into the test target so the
 # detector tests do not require linking the whole pulp-import-design CLI.
