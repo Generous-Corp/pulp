@@ -6,15 +6,24 @@ Run via:
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 THIS_DIR = Path(__file__).parent
 SCRIPT = THIS_DIR / "source_tree_pollution_check.py"
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location("stpc", str(SCRIPT))
+    stpc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stpc)
+    return stpc
 
 
 class SourceTreePollutionTests(unittest.TestCase):
@@ -229,10 +238,7 @@ class RootAllowlistTests(unittest.TestCase):
         # Import the function and stub subprocess.run to return blank lines
         # interleaved with one allowlisted entry. Confirms (a) blanks are
         # skipped without error, and (b) the allowlisted entry still passes.
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("stpc", str(SCRIPT))
-        stpc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(stpc)
+        stpc = load_module()
 
         # Use a class with the subprocess.CompletedProcess shape.
         class FakeResult:
@@ -248,6 +254,79 @@ class RootAllowlistTests(unittest.TestCase):
             stpc.subprocess.run = orig_run
         # README.md and CMakeLists.txt are allowlisted, blanks are skipped.
         self.assertEqual(errors, [])
+
+
+class HelperCoverageTests(unittest.TestCase):
+    def test_git_diff_files_stage_filters_blank_lines(self) -> None:
+        stpc = load_module()
+        completed = subprocess.CompletedProcess(
+            ["git"],
+            0,
+            stdout="\nCMakeLists.txt\n docs/guide.md \n\n",
+            stderr="",
+        )
+
+        with mock.patch.object(stpc.subprocess, "run", return_value=completed) as run:
+            files = stpc._git_diff_files(None, "stage")
+
+        self.assertEqual(files, ["CMakeLists.txt", "docs/guide.md"])
+        run.assert_called_once_with(
+            ["git", "diff", "--cached", "--name-only"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_git_diff_files_push_requires_range(self) -> None:
+        stpc = load_module()
+
+        with self.assertRaisesRegex(stpc._DiffFailure, "push mode requires"):
+            stpc._git_diff_files("", "push")
+
+    def test_git_diff_files_push_raises_on_git_error(self) -> None:
+        stpc = load_module()
+        completed = subprocess.CompletedProcess(
+            ["git"],
+            128,
+            stdout="",
+            stderr="fatal: bad revision 'missing...HEAD'",
+        )
+
+        with mock.patch.object(stpc.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(stpc._DiffFailure, "bad revision"):
+                stpc._git_diff_files("missing...HEAD", "push")
+
+    def test_git_diff_files_ignores_unknown_internal_mode(self) -> None:
+        stpc = load_module()
+
+        self.assertEqual(stpc._git_diff_files(None, "files"), [])
+
+    def test_read_blob_uses_git_show_for_revision(self) -> None:
+        stpc = load_module()
+        completed = subprocess.CompletedProcess(
+            ["git"],
+            0,
+            stdout="project(Pulp VERSION 0.1.0)\n",
+            stderr="",
+        )
+
+        with mock.patch.object(stpc.subprocess, "run", return_value=completed) as run:
+            content = stpc._read_blob("HEAD", "CMakeLists.txt")
+
+        self.assertEqual(content, "project(Pulp VERSION 0.1.0)\n")
+        run.assert_called_once_with(
+            ["git", "show", "HEAD:CMakeLists.txt"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_read_blob_returns_empty_on_git_show_failure(self) -> None:
+        stpc = load_module()
+        completed = subprocess.CompletedProcess(["git"], 128, stdout="", stderr="fatal")
+
+        with mock.patch.object(stpc.subprocess, "run", return_value=completed):
+            self.assertEqual(stpc._read_blob("HEAD", "missing.txt"), "")
 
 
 if __name__ == "__main__":
