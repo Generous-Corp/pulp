@@ -214,7 +214,7 @@ class RootAllowlistTests(unittest.TestCase):
     def test_compat_root_directory_is_allowlisted(self) -> None:
         self._commit_allowlisted_only()
         Path("compat").mkdir()
-        Path("compat/README.md").write_text("# compat\n")
+        Path("compat/css.json").write_text("{}\n", encoding="utf-8")
         subprocess.run(["git", "add", "compat"], check=True)
         subprocess.run(["git", "commit", "-q", "-m", "add compat"], check=True)
         result = self._run_root_allowlist()

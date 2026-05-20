@@ -9,9 +9,11 @@ import io
 import json
 import os
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).parent / "check_cli_mcp_parity.py"
@@ -78,6 +80,21 @@ def write_baseline(root: pathlib.Path, cli_only: dict, mcp_only: dict) -> pathli
     return bl
 
 
+def make_diff(**overrides) -> parity.Diff:
+    defaults = {
+        "cli_commands": {"build"},
+        "mcp_tools": {"pulp_build"},
+        "new_cli_only": set(),
+        "new_mcp_only": set(),
+        "accepted_cli_only": set(),
+        "accepted_mcp_only": set(),
+        "stale_cli_only_baseline": set(),
+        "stale_mcp_only_baseline": set(),
+    }
+    defaults.update(overrides)
+    return parity.Diff(**defaults)
+
+
 # ── Tests ───────────────────────────────────────────────────────────────
 
 
@@ -114,6 +131,27 @@ class CliExtractor(unittest.TestCase):
                 {"build", "audit"},
             )
 
+    def test_extracts_script_and_binary_command_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            cli_path = root / "tools" / "cli" / "pulp_cli.cpp"
+            cli_path.write_text(
+                "static const Command commands[] = {\n"
+                '    {"build", "x", h_build},\n'
+                "};\n"
+                "static const ScriptCommand script_commands[] = {\n"
+                '    {"loop", "x", h_loop},\n'
+                "};\n"
+                "static const BinaryCommand binary_commands[] = {\n"
+                '    {"mcp", "x", h_mcp},\n'
+                "};\n"
+            )
+
+            self.assertEqual(
+                parity.extract_cli_commands(cli_path),
+                {"build", "loop", "mcp"},
+            )
+
     def test_skips_hidden_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = make_repo(pathlib.Path(td) / "repo")
@@ -146,6 +184,21 @@ class McpExtractor(unittest.TestCase):
             self.assertEqual(
                 parity.extract_mcp_tools(root / "tools" / "mcp" / "pulp_mcp.cpp"),
                 {"pulp_build", "pulp_test", "pulp_inspect_dom"},
+            )
+
+    def test_extract_mcp_tools_ignores_non_pulp_names(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            mcp_path = root / "tools" / "mcp" / "pulp_mcp.cpp"
+            mcp_path.write_text(
+                '"name":"pulp_build"\n'
+                '"name":"other_tool"\n'
+                '"name":"pulp_test"\n'
+            )
+
+            self.assertEqual(
+                parity.extract_mcp_tools(mcp_path),
+                {"pulp_build", "pulp_test"},
             )
 
     def test_returns_empty_for_missing_file(self) -> None:
@@ -181,6 +234,28 @@ class BaselineLoader(unittest.TestCase):
             p.write_text("[]")
             with self.assertRaises(ValueError):
                 parity.load_baseline(p)
+
+    def test_non_object_baseline_sections_raise(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "bad.json"
+            for payload in (
+                {"cli_only": ["ship"], "mcp_only": {}},
+                {"cli_only": {}, "mcp_only": ["pulp_ship"]},
+            ):
+                with self.subTest(payload=payload):
+                    p.write_text(json.dumps(payload), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "cli_only/mcp_only"):
+                        parity.load_baseline(p)
+
+    def test_missing_baseline_sections_default_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = pathlib.Path(td) / "baseline.json"
+            p.write_text("{}", encoding="utf-8")
+
+            baseline = parity.load_baseline(p)
+
+        self.assertEqual(baseline.cli_only, {})
+        self.assertEqual(baseline.mcp_only, {})
 
 
 class DiffComputation(unittest.TestCase):
@@ -237,6 +312,55 @@ class DiffComputation(unittest.TestCase):
             baseline=parity.Baseline(),
         )
         self.assertEqual(diff.new_cli_only, set())
+
+    def test_mcp_only_baseline_accepts_and_stales_entries(self) -> None:
+        diff = parity.compute_diff(
+            cli_commands={"build"},
+            mcp_tools={"pulp_build", "pulp_inspect_dom"},
+            baseline=parity.Baseline(mcp_only={
+                "pulp_inspect_dom": "inspector-only",
+                "pulp_old_tool": "removed",
+            }),
+        )
+
+        self.assertEqual(diff.new_mcp_only, set())
+        self.assertEqual(diff.accepted_mcp_only, {"pulp_inspect_dom"})
+        self.assertEqual(diff.stale_mcp_only_baseline, {"pulp_old_tool"})
+
+
+class RenderTextTests(unittest.TestCase):
+    def test_render_text_colorizes_failure_warning_and_stale_sections(self) -> None:
+        diff = make_diff(
+            cli_commands={"build", "ship"},
+            mcp_tools={"pulp_build", "pulp_inspect_dom"},
+            new_cli_only={"ship"},
+            new_mcp_only={"pulp_inspect_dom"},
+            stale_cli_only_baseline={"old-cli"},
+            stale_mcp_only_baseline={"pulp_old"},
+        )
+
+        rendered = parity.render_text(diff, color=True, mode="report")
+
+        self.assertIn("\033[31m", rendered)
+        self.assertIn("expected MCP tool: pulp_ship", rendered)
+        self.assertIn("MCP tool(s) without CLI", rendered)
+        self.assertIn("cli_only.old-cli", rendered)
+        self.assertIn("mcp_only.pulp_old", rendered)
+        self.assertIn("FAIL: new CLI", rendered)
+
+    def test_render_text_hint_mode_explains_non_blocking_gap(self) -> None:
+        rendered = parity.render_text(
+            make_diff(new_cli_only={"ship"}, cli_commands={"ship"}, mcp_tools=set()),
+            color=False,
+            mode="hint",
+        )
+
+        self.assertIn("HINT: new CLI", rendered)
+        self.assertNotIn("\033[", rendered)
+
+    def test_color_helper_can_be_disabled(self) -> None:
+        self.assertEqual(parity._color("32", "OK", enabled=False), "OK")
+        self.assertEqual(parity._color("32", "OK", enabled=True), "\033[32mOK\033[0m")
 
 
 class MainExitCodes(unittest.TestCase):
@@ -309,6 +433,43 @@ class MainExitCodes(unittest.TestCase):
             self.assertEqual(payload["mcp_tools"], ["pulp_build"])
             self.assertEqual(payload["accepted_cli_only"], ["ship"])
             self.assertEqual(payload["new_cli_only"], [])
+
+    def test_main_uses_source_and_baseline_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            cli = root / "custom_cli.cpp"
+            mcp = root / "custom_mcp.cpp"
+            cli.write_text('static const Command commands[] = {\n    {"ship", "x", h},\n};\n')
+            mcp.write_text('return R"JSON({"tools":[]})JSON";\n')
+            baseline = root / "custom_baseline.json"
+            baseline.write_text(json.dumps({"cli_only": {"ship": "manual"}, "mcp_only": {}}))
+
+            rc, out, _ = self._run(
+                root,
+                "--mode=report",
+                "--cli-source", str(cli),
+                "--mcp-source", str(mcp),
+                "--baseline", str(baseline),
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("allow-list covers 1", out)
+
+    def test_script_entrypoint_propagates_main_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_cli(root, "ship")
+            write_mcp(root)
+            write_baseline(root, {}, {})
+            with mock.patch.object(
+                sys,
+                "argv",
+                [str(SCRIPT), "--repo-root", str(root), "--mode=report", "--no-color"],
+            ), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 1)
 
     def test_no_repo_root_returns_one(self) -> None:
         with tempfile.TemporaryDirectory() as td, chdir(pathlib.Path(td)):

@@ -8,9 +8,11 @@ import importlib.util
 import io
 import json
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parent / "bench_diff.py"
@@ -201,6 +203,20 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("error:", stderr.getvalue())
+
+    def test_script_entrypoint_exits_zero(self) -> None:
+        stdout = io.StringIO()
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            baseline_path = self._write_json(root, "baseline.json", BASELINE)
+            current_path = self._write_json(root, "current.json", CURRENT)
+            with mock.patch.object(sys, "argv", [str(SCRIPT), str(baseline_path), str(current_path)]), \
+                 contextlib.redirect_stdout(stdout):
+                with self.assertRaises(SystemExit) as cm:
+                    runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("# Bench diff: oscilloscope", stdout.getvalue())
 
 
 if __name__ == "__main__":
