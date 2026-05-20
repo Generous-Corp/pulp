@@ -839,7 +839,7 @@ int main(int argc, char* argv[]) {
         dbg << "  \"source\": \"" << design_source_name(*source) << "\",\n";
         dbg << "  \"input_file\": \"" << input_file << "\",\n";
         dbg << "  \"output_file\": \"" << output_file << "\",\n";
-        dbg << "  \"mode\": \"" << (use_web_compat ? "web_compat" : "native") << "\",\n";
+        dbg << "  \"mode\": \"" << (use_web_compat ? "web_compat" : "bridge_native_js") << "\",\n";
         dbg << "  \"elements\": {\n";
         dbg << "    \"total\": " << node_count << ",\n";
         dbg << "    \"containers\": " << container_count << ",\n";

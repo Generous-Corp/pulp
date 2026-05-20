@@ -382,8 +382,9 @@ lookup key — not the JS-local variable name.
 
 `bridge_native_js` codegen does NOT yet emit `setAnchor` (small
 follow-up; the native-bridge JS codegen has many early-return branches
-that need each to be wired). Web-compat is the default mode for
-imports — covered.
+that need each to be wired). `bridge_native_js` is the default codegen
+mode for imports; pass `--web-compat` only when the DOM-compatible JS
+lane is required.
 
 **Phase 5.1 — `setSource()` source-jump wiring:** alongside `setAnchor`,
 the `@pulp/react` reconciler now forwards React's dev-mode `__source`

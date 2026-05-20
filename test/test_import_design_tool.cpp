@@ -151,3 +151,34 @@ TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested output
     REQUIRE(js.find("document.body.appendChild") != std::string::npos);
     REQUIRE(r.stdout_output.find(output.string()) != std::string::npos);
 }
+
+TEST_CASE("pulp-import-design debug report names the default bridge-native mode",
+          "[cli][import-design][tool][issue-2439]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-debug");
+    const auto input = tmp.path / "screen.html";
+    const auto output = tmp.path / "generated" / "ui.js";
+    const auto debug = tmp.path / "generated" / "debug.json";
+
+    write_text(input,
+               "<!DOCTYPE html><html><body>"
+               "<main><h1>Gain</h1><button>Bypass</button></main>"
+               "</body></html>");
+
+    auto r = run_import_design({"--from", "stitch",
+                                "--file", input.string(),
+                                "--output", output.string(),
+                                "--debug-output", debug.string(),
+                                "--no-comments",
+                                "--no-tokens"});
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::exists(debug));
+
+    const auto report = read_text(debug);
+    REQUIRE(report.find("\"mode\": \"bridge_native_js\"") != std::string::npos);
+    REQUIRE(report.find("\"mode\": \"native\"") == std::string::npos);
+}
