@@ -8,10 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0172e"></a>
-## [0.172.14] - 2026-05-19
+<a id="v0172g"></a>
+## [0.172.16] - 2026-05-19
 
-- refactor(test): P5-1 extract CSS-misc cluster — push widget_bridge under 3k (3,056 → 2,815, -241)
+- refactor(test): P5-4 extract pulp pr shell-out tests (2,646 → 2,314, -332)
 
 <a id="v01722"></a>
 ## [0.172.2] - 2026-05-19
