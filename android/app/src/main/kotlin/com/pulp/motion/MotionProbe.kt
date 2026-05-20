@@ -44,8 +44,8 @@ class PulpMotionGeometryProbe internal constructor(
             metricName = metricName,
             minX = rect.left.toDouble(),
             minY = rect.top.toDouble(),
-            width = rect.width().toDouble(),
-            height = rect.height().toDouble(),
+            width = (rect.right - rect.left).toDouble(),
+            height = (rect.bottom - rect.top).toDouble(),
         )
     }
 

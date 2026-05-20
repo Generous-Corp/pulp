@@ -168,14 +168,14 @@ fun motionTrace(block: MotionTraceScope.() -> Unit): List<MotionMetric> {
 fun RectF.toMotionComponents(): List<Pair<String, Double>> = listOf(
     "minX"   to left.toDouble(),
     "minY"   to top.toDouble(),
-    "width"  to width().toDouble(),
-    "height" to height().toDouble(),
+    "width"  to (right - left).toDouble(),
+    "height" to (bottom - top).toDouble(),
 )
 
 /** [Rect] variant of [toMotionComponents]. */
 fun Rect.toMotionComponents(): List<Pair<String, Double>> = listOf(
     "minX"   to left.toDouble(),
     "minY"   to top.toDouble(),
-    "width"  to width().toDouble(),
-    "height" to height().toDouble(),
+    "width"  to (right - left).toDouble(),
+    "height" to (bottom - top).toDouble(),
 )

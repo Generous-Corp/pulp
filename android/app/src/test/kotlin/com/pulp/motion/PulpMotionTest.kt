@@ -241,9 +241,25 @@ class PulpMotionTest {
 
     // ── Rect helpers ────────────────────────────────────────────────
 
+    private fun rectF(left: Float, top: Float, right: Float, bottom: Float): RectF =
+        RectF().apply {
+            this.left = left
+            this.top = top
+            this.right = right
+            this.bottom = bottom
+        }
+
+    private fun rect(left: Int, top: Int, right: Int, bottom: Int): Rect =
+        Rect().apply {
+            this.left = left
+            this.top = top
+            this.right = right
+            this.bottom = bottom
+        }
+
     @Test
     fun rectFToMotionComponentsMatchesCanonicalShape() {
-        val r = RectF(10f, 20f, 110f, 220f)  // width=100, height=200
+        val r = rectF(10f, 20f, 110f, 220f)  // width=100, height=200
         val comps = r.toMotionComponents()
         assertEquals(
             listOf(
@@ -258,7 +274,7 @@ class PulpMotionTest {
 
     @Test
     fun rectToMotionComponentsMatchesCanonicalShape() {
-        val r = Rect(5, 7, 25, 47)  // width=20, height=40
+        val r = rect(5, 7, 25, 47)  // width=20, height=40
         val comps = r.toMotionComponents()
         assertEquals(
             listOf(
@@ -273,7 +289,7 @@ class PulpMotionTest {
 
     @Test
     fun publishComponentsForwardsRectShapeToBackend() {
-        val r = RectF(0f, 0f, 320f, 480f)
+        val r = rectF(0f, 0f, 320f, 480f)
         PulpMotion.publishComponents(
             view = "ScrollView",
             metric = "frame",
