@@ -22,6 +22,7 @@
 #include <vector>
 
 namespace pulp::render { class RenderPassManager; }
+namespace pulp::render { class AtlasInventory; }
 
 namespace pulp::inspect {
 
@@ -49,6 +50,20 @@ public:
 
     // ── Data sources ────────────────────────────────────────────────
     void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
+
+    /// Phase 6.2 — attach the render layer's texture-atlas inventory so
+    /// the atlas viewer tab (`A` hotkey) can report per-atlas
+    /// dimensions, page count, and occupancy. The inventory is a
+    /// value-snapshot collection owned by the render/host layer; the
+    /// overlay only reads it. Passing nullptr (the default) makes the
+    /// atlas tab render its "GPU atlas unavailable" empty state — the
+    /// inspector never crashes when no GPU atlas is wired.
+    void set_atlas_inventory(const render::AtlasInventory* inv) {
+        atlas_inventory_ = inv;
+    }
+    const render::AtlasInventory* atlas_inventory() const {
+        return atlas_inventory_;
+    }
 
     /// Phase 0b PR-C-1 — connect the inspector overlay to the in-process
     /// TweakStore so gesture detectors can persist direct-manipulation
@@ -397,6 +412,47 @@ public:
         return reconcile_rows_.size();
     }
 
+    // ── Phase 6.2 — texture atlas viewer ────────────────────────────
+    //
+    // Spec: planning/2026-05-19-inspector-phase6-gpu-perf-spike.md
+    // § Phase 6.2. The render layer packs small bitmaps into a handful
+    // of shelf-packed GPU texture atlases — the glyph atlas (SDF text),
+    // the image atlas, the gradient ramp atlas, the path atlas. When an
+    // atlas fills, rendering thrashes (evict + re-pack churn). The
+    // atlas viewer answers "is my SDF atlas thrashing?" without leaving
+    // the inspector.
+    //
+    // It is a *read-only* report over a render::AtlasInventory — a
+    // value-snapshot collection the host wires in via
+    // set_atlas_inventory(). The tab invents no parallel data model:
+    // every per-atlas figure (dimensions, page count, occupancy, entry
+    // count) comes straight from the Pulp-owned atlas classes'
+    // introspection accessors. When no inventory is attached the tab
+    // renders a graceful "GPU atlas unavailable" empty state.
+    //
+    // The tab toggles with the `A` key (atlas) and, when on, takes over
+    // the property-panel region exactly like the Phase 6.1 pass viewer
+    // and Phase 5.2 reconciliation tab — the tree section above stays
+    // put so the user keeps navigation context.
+
+    /// Toggle the texture-atlas viewer tab. Off by default so the
+    /// inspector panel layout is unchanged until the user opts in
+    /// (`A` key in handle_key_event). When on, the tab replaces the
+    /// property section, mirroring the Phase 6.1 pass viewer.
+    void set_atlas_viewer_visible(bool visible) {
+        atlas_viewer_visible_ = visible;
+    }
+    bool atlas_viewer_visible() const { return atlas_viewer_visible_; }
+    void toggle_atlas_viewer() {
+        atlas_viewer_visible_ = !atlas_viewer_visible_;
+    }
+
+    /// Number of atlas rows the viewer laid out on the most recent
+    /// paint() while it was visible. Visible for tests so they can
+    /// assert the tab rendered the expected rows without scraping
+    /// pixels. Zero when the tab is hidden or no inventory is wired.
+    std::size_t atlas_row_count() const { return atlas_row_count_; }
+
     // ── Phase 3e — 20× zoom loupe ───────────────────────────────────
     //
     // A magnified-pixel preview panel ("loupe") that shows the region
@@ -567,6 +623,20 @@ private:
     float reconcile_scroll_y_ = 0.0f;
     std::vector<ReconcileRow> reconcile_rows_;
 
+    // ── Phase 6.2 — texture-atlas-viewer state ──────────────────────
+    //
+    // atlas_viewer_visible_ tracks the `A`-key toggle; off by default
+    // so the panel layout is unchanged until the user opts in.
+    // atlas_inventory_ is a non-owning pointer to the render layer's
+    // snapshot collection (nullptr → graceful empty state).
+    // atlas_scroll_y_ keeps the row list stable across frames;
+    // atlas_row_count_ caches how many rows the last paint laid out so
+    // atlas_row_count() can report it to tests without scraping pixels.
+    bool atlas_viewer_visible_ = false;
+    const render::AtlasInventory* atlas_inventory_ = nullptr;
+    float atlas_scroll_y_ = 0.0f;
+    std::size_t atlas_row_count_ = 0;
+
     // Phase 3a — drag-handles state. Off by default so the inspector
     // behaves identically to the pre-3a build until the user opts in
     // (D-key toggle in handle_key_event).
@@ -668,6 +738,13 @@ private:
     /// reconciliation-status badge (locked / drift / unresolvable).
     /// Repopulates reconcile_rows_ with this frame's classified rows.
     void paint_reconcile_tab(Canvas& canvas, float x, float y, float w, float h);
+
+    /// Phase 6.2 — render the texture-atlas viewer into the panel
+    /// region normally occupied by the property section. Each
+    /// registered atlas gets a row showing its kind label, pixel
+    /// dimensions, page count, live entry count, and an occupancy bar.
+    /// Updates atlas_row_count_ with the number of rows laid out.
+    void paint_atlas_tab(Canvas& canvas, float x, float y, float w, float h);
 
     // ── Panel hit testing ───────────────────────────────────────────
     bool point_in_panel(Point p) const;

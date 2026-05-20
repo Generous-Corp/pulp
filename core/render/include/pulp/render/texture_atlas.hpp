@@ -25,6 +25,37 @@ public:
     int width() const { return width_; }
     int height() const { return height_; }
 
+    /// Area of the atlas surface (width × height), in texels.
+    /// Read-only introspection — used by the inspector's atlas viewer.
+    std::size_t capacity() const {
+        return static_cast<std::size_t>(width_) *
+               static_cast<std::size_t>(height_);
+    }
+
+    /// Texels consumed by the shelf allocator so far. This is the
+    /// shelf-packed *footprint* — every completed shelf counts its full
+    /// height across the atlas width, plus the in-progress shelf counts
+    /// up to its current write cursor. It is an upper bound on the live
+    /// pixel area (shelf packing leaves gaps), which is exactly the
+    /// number that answers "how close is this atlas to full?".
+    std::size_t used_area() const {
+        const std::size_t completed =
+            static_cast<std::size_t>(shelf_y_) *
+            static_cast<std::size_t>(width_);
+        const std::size_t in_progress =
+            static_cast<std::size_t>(shelf_x_) *
+            static_cast<std::size_t>(shelf_h_);
+        return completed + in_progress;
+    }
+
+    /// Fraction of the atlas the shelf allocator has consumed, in
+    /// [0, 1]. Returns 0 for a degenerate (zero-area) atlas.
+    float occupancy() const {
+        const std::size_t cap = capacity();
+        if (cap == 0) return 0.0f;
+        return static_cast<float>(used_area()) / static_cast<float>(cap);
+    }
+
 private:
     int width_, height_;
     int shelf_y_, shelf_h_, shelf_x_;
@@ -54,6 +85,11 @@ public:
 
     size_t entry_count() const { return entries_.size(); }
 
+    /// Read-only introspection for the inspector's atlas viewer.
+    int width() const { return packer_.width(); }
+    int height() const { return packer_.height(); }
+    float occupancy() const { return packer_.occupancy(); }
+
 private:
     AtlasPacker packer_;
     std::unordered_map<uint64_t, Entry> entries_;
@@ -77,6 +113,17 @@ public:
     size_t evict_stale(uint64_t current_frame, uint64_t max_age = 120);
 
     size_t entry_count() const { return entries_.size(); }
+
+    /// Read-only introspection for the inspector's atlas viewer. A
+    /// GradientAtlas is row-packed (one ramp per row) rather than
+    /// shelf-packed, so occupancy is simply allocated rows over the
+    /// row budget.
+    int row_capacity() const { return max_rows_; }
+    int rows_used() const { return next_row_; }
+    float occupancy() const {
+        if (max_rows_ <= 0) return 0.0f;
+        return static_cast<float>(next_row_) / static_cast<float>(max_rows_);
+    }
 
 private:
     std::unordered_map<uint64_t, Entry> entries_;
@@ -104,6 +151,11 @@ public:
 
     size_t entry_count() const { return entries_.size(); }
 
+    /// Read-only introspection for the inspector's atlas viewer.
+    int width() const { return packer_.width(); }
+    int height() const { return packer_.height(); }
+    float occupancy() const { return packer_.occupancy(); }
+
 private:
     AtlasPacker packer_;
     std::unordered_map<uint64_t, Entry> entries_;
@@ -127,6 +179,11 @@ public:
     size_t evict_stale(uint64_t current_frame, uint64_t max_age = 600);
 
     size_t entry_count() const { return entries_.size(); }
+
+    /// Read-only introspection for the inspector's atlas viewer.
+    int width() const { return packer_.width(); }
+    int height() const { return packer_.height(); }
+    float occupancy() const { return packer_.occupancy(); }
 
 private:
     AtlasPacker packer_;
