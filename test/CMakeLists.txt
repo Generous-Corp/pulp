@@ -808,6 +808,12 @@ pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
 # fixed-design content into the current window.
 pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
 
+# pulp-internal #70 — design-tool viewport resolver probe-layout
+# pattern. Locks in the yoga-measured-height path that the design-tool
+# example uses to auto-size its window for grid + row trees where
+# View::intrinsic_height returns 0.
+pulp_add_test_suite(pulp-test-design-tool-viewport-resolver LIBRARIES pulp::view)
+
 # View host bridges — screenshot/window/plugin-view (#299)
 add_executable(pulp-test-view-host-bridge test_view_host_bridge.cpp)
 if(APPLE AND NOT PULP_IOS)
