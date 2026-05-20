@@ -577,7 +577,11 @@ struct AUBridge {
 
         return noErr;
     };
-    return renderBlock;
+#if __has_feature(objc_arc)
+    return [renderBlock copy];
+#else
+    return [[renderBlock copy] autorelease];
+#endif
 }
 
 // ── State persistence ──────────────────────────────────────────────────────
