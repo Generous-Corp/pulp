@@ -8,25 +8,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v01738"></a>
-## [0.173.8] - 2026-05-19
+<a id="v01731"></a>
+## [0.173.1] - 2026-05-19
 
-- refactor(view): P6-A3 final cut — extract claude_bundle.cpp; design_import.cpp 4,691 → 913 (-80%) across all three A3 cuts
-
-<a id="v01737"></a>
-## [0.173.7] - 2026-05-19
-
-- refactor(mcp): P6-B4 third cut — extract mcp_tools + mcp_shell (pulp_mcp.cpp 597 → 451)
-
-<a id="v01736"></a>
-## [0.173.6] - 2026-05-19
-
-- refactor(mcp): P6-B4 second cut — extract mcp_compat.{hpp,cpp} (pulp_mcp.cpp 844 → 597)
-
-<a id="v01735"></a>
-## [0.173.5] - 2026-05-19
-
-- refactor(view): P6-A3 second cut — extract design_codegen.cpp from design_import.cpp (4,155 → 3,324)
+- refactor(test): P5-4 final cut — lifecycle tests under 2k (2,314 → 1,919) ([#2426](https://github.com/danielraffel/pulp/pull/2426))
 
 <a id="v01730"></a>
 ## [0.173.0] - 2026-05-19
@@ -2246,6 +2231,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.173.1]: https://github.com/danielraffel/pulp/releases/tag/v0.173.1
 [0.173.0]: https://github.com/danielraffel/pulp/releases/tag/v0.173.0
 [0.172.6]: https://github.com/danielraffel/pulp/releases/tag/v0.172.6
 [0.172.2]: https://github.com/danielraffel/pulp/releases/tag/v0.172.2
