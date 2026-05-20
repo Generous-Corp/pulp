@@ -508,6 +508,127 @@ TweakStore::DiskResult TweakStore::from_json(std::string_view json) {
     return from_json_locked(json);
 }
 
+// ── Drift detection (Phase 2) ───────────────────────────────────────────
+
+const char* TweakStore::drift_reason_str(DriftReason reason) {
+    switch (reason) {
+        case DriftReason::anchor_not_found:   return "anchor-not-found";
+        case DriftReason::property_not_found: return "property-not-found";
+    }
+    return "unknown";
+}
+
+TweakStore::DriftReport
+TweakStore::diff(const DesignSnapshot& design) const {
+    DriftReport report;
+    std::lock_guard lock(mtx_);
+    for (auto& [anchor, m] : tweaks_) {
+        const bool anchor_live = design.anchors.count(anchor) > 0;
+        // properties[anchor] is the set of paths the design still
+        // exposes for this anchor. Absent → anchor-only matching:
+        // every property is treated as valid (no property-level drift).
+        auto prop_it = design.properties.find(anchor);
+        const bool have_prop_set = prop_it != design.properties.end();
+        for (auto& [path, entry] : m) {
+            if (!anchor_live) {
+                report.orphaned.push_back(DriftedTweak{
+                    anchor, path, entry.value, entry.source,
+                    DriftReason::anchor_not_found});
+            } else if (have_prop_set &&
+                       prop_it->second.count(path) == 0) {
+                report.drifted.push_back(DriftedTweak{
+                    anchor, path, entry.value, entry.source,
+                    DriftReason::property_not_found});
+            } else {
+                report.clean.push_back(
+                    Record{anchor, path, entry.value, entry.source});
+            }
+        }
+    }
+    return report;
+}
+
+TweakStore::DriftReport
+TweakStore::diff(const std::vector<std::string>& live_anchors) const {
+    DesignSnapshot snap;
+    snap.anchors.insert(live_anchors.begin(), live_anchors.end());
+    return diff(snap);
+}
+
+std::vector<TweakStore::DriftedTweak>
+TweakStore::find_drifted(const DesignSnapshot& design) const {
+    auto report = diff(design);
+    std::vector<DriftedTweak> out;
+    out.reserve(report.orphaned.size() + report.drifted.size());
+    // Orphans first — anchor loss is the louder failure mode.
+    for (auto& d : report.orphaned) out.push_back(std::move(d));
+    for (auto& d : report.drifted)  out.push_back(std::move(d));
+    return out;
+}
+
+std::vector<TweakStore::DriftedTweak>
+TweakStore::find_drifted(const std::vector<std::string>& live_anchors) const {
+    DesignSnapshot snap;
+    snap.anchors.insert(live_anchors.begin(), live_anchors.end());
+    return find_drifted(snap);
+}
+
+std::string
+TweakStore::drift_report_to_json(const DriftReport& report) {
+    auto record_obj = [](const std::string& anchor,
+                         const std::string& path,
+                         const choc::value::Value& value,
+                         const std::string& source) {
+        auto o = choc::value::createObject("");
+        o.addMember("anchorId", choc::value::createString(anchor));
+        o.addMember("propertyPath", choc::value::createString(path));
+        o.addMember("value", value);
+        if (!source.empty())
+            o.addMember("source", choc::value::createString(source));
+        return o;
+    };
+
+    auto obj = choc::value::createObject("");
+
+    auto clean_arr = choc::value::createEmptyArray();
+    for (auto& r : report.clean) {
+        clean_arr.addArrayElement(
+            record_obj(r.anchor_id, r.property_path, r.value, r.source));
+    }
+    obj.addMember("clean", clean_arr);
+
+    auto emit_drift = [&](const std::vector<DriftedTweak>& list) {
+        auto arr = choc::value::createEmptyArray();
+        for (auto& d : list) {
+            auto o = record_obj(d.anchor_id, d.property_path,
+                                d.value, d.source);
+            o.addMember("reason",
+                        choc::value::createString(drift_reason_str(d.reason)));
+            arr.addArrayElement(o);
+        }
+        return arr;
+    };
+    obj.addMember("drifted", emit_drift(report.drifted));
+    obj.addMember("orphaned", emit_drift(report.orphaned));
+
+    auto summary = choc::value::createObject("");
+    summary.addMember("total",
+                      choc::value::createInt64(
+                          static_cast<int64_t>(report.total())));
+    summary.addMember("clean",
+                      choc::value::createInt64(
+                          static_cast<int64_t>(report.clean.size())));
+    summary.addMember("drifted",
+                      choc::value::createInt64(
+                          static_cast<int64_t>(report.drifted.size())));
+    summary.addMember("orphaned",
+                      choc::value::createInt64(
+                          static_cast<int64_t>(report.orphaned.size())));
+    obj.addMember("summary", summary);
+
+    return choc::json::toString(obj, true);
+}
+
 TweakStore::DiskResult
 TweakStore::load_from_disk(std::string_view path) {
     DiskResult result;

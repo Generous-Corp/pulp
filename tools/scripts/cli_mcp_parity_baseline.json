@@ -33,6 +33,7 @@
     "sdk": "SDK admin; not user-flow",
     "ship": "Multi-step interactive flow; agents call `shipyard pr` instead",
     "tool": "Tool registry plumbing; agents call via Bash",
+    "tweaks": "Local pulp-tweaks.json drift diagnostic; agents shell out directly (mirrors the inspector drift drawer)",
     "upgrade": "Bin-swap flow; agents call directly",
     "version": "Trivial via Bash (cat CMakeLists.txt | grep VERSION)"
   },

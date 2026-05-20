@@ -8,6 +8,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/source_jump.hpp>
+#include <pulp/inspect/tweak_store.hpp>
 
 #include <choc/containers/choc_Value.h>
 
@@ -23,8 +24,6 @@
 namespace pulp::render { class RenderPassManager; }
 
 namespace pulp::inspect {
-
-class TweakStore;
 
 using namespace pulp::view;
 using namespace pulp::canvas;
@@ -224,6 +223,37 @@ public:
     /// rendered the expected number of rows without scraping pixels.
     std::size_t tweak_row_count() const { return tweak_rows_.size(); }
 
+    // ── Phase 2 — drift drawer ──────────────────────────────────────
+    //
+    // A collapsible panel that lists tweaks whose anchor_id no longer
+    // resolves to any live view (orphaned) or whose property path no
+    // longer maps (drifted). It surfaces the silent-failure case where
+    // a design re-import changed an element so a stored tweak quietly
+    // stops applying. The drawer auto-expands the first time drift is
+    // detected after a re-import; the user can collapse it with the
+    // header chevron.
+
+    /// Recompute the drift list by diffing the attached TweakStore
+    /// against the current live view tree's anchor set. A no-op (and
+    /// clears the list) when no TweakStore is wired. Called
+    /// automatically on first paint after set_active(true); call it
+    /// explicitly after a re-import to refresh the drawer.
+    void refresh_drift();
+
+    /// Number of drifted/orphaned tweaks from the last refresh_drift().
+    std::size_t drift_count() const { return drifted_.size(); }
+
+    /// Whether the drift drawer is currently expanded.
+    bool drift_drawer_open() const { return drift_drawer_open_; }
+    void set_drift_drawer_open(bool open) { drift_drawer_open_ = open; }
+    void toggle_drift_drawer() { drift_drawer_open_ = !drift_drawer_open_; }
+
+    /// Read-only access to the last computed drift list — for tests and
+    /// host-side badges.
+    const std::vector<TweakStore::DriftedTweak>& drifted() const {
+        return drifted_;
+    }
+
 private:
     View& root_;
     bool active_ = false;
@@ -328,6 +358,23 @@ private:
     // (PULP_INSPECTOR_EDITOR_URL) still applies at jump time.
     InspectorConfig config_{};
 
+    // ── Phase 2 — drift-drawer state ────────────────────────────────
+    //
+    // drifted_ is the cached drift list from the last refresh_drift().
+    // drift_drawer_open_ tracks the expand/collapse state; it flips to
+    // true automatically the first time drift is detected (so a stale
+    // tweak is never silent), and the user can collapse it after.
+    // drift_refreshed_once_ guards the first-paint auto-refresh so the
+    // drawer is populated even if the host never calls refresh_drift()
+    // explicitly.
+    std::vector<TweakStore::DriftedTweak> drifted_;
+    bool drift_drawer_open_ = false;
+    bool drift_refreshed_once_ = false;
+    // Hit-rect of the drift drawer header chevron from the last paint,
+    // in root coords — used by handle_mouse_event() to toggle the
+    // drawer. width==0 means "not painted this frame".
+    Rect drift_header_hit_{};
+
     // Phase 3a — drag-handles state. Off by default so the inspector
     // behaves identically to the pre-3a build until the user opts in
     // (D-key toggle in handle_key_event).
@@ -368,6 +415,11 @@ private:
     /// gets a row with a color-coded type bar, last/avg/peak CPU time,
     /// draw-call counts, and a 60-frame sparkline trend.
     void paint_pass_attribution(Canvas& canvas, float x, float y, float w, float h);
+    /// Phase 2 — paint the drift drawer (collapsible orphaned-tweak
+    /// list). Returns the height it consumed so paint_panel can lay out
+    /// the props section below it. Paints nothing and returns 0 when
+    /// there is no drift.
+    float paint_drift_drawer(Canvas& canvas, float x, float y, float w);
 
     // Phase 2.5 — render the tweak management panel into the given
     // rect. Repopulates tweak_rows_ with this frame's hit-rects.

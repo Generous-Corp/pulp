@@ -1116,3 +1116,175 @@ TEST_CASE("Inspector.load/save/setAutoSave without a store error cleanly",
     REQUIRE(h.handle(req(methods::kInspectorSetAutoSave,
         R"({"enabled":true})")).is_error);
 }
+
+// ── Phase 2 — drift detection ───────────────────────────────────────────
+//
+// A tweak is keyed by (anchor_id, property_path). After a design
+// re-import a stored anchor may no longer exist in the live tree
+// (orphaned) or, given a per-anchor property snapshot, the property it
+// targeted may be gone (drifted). TweakStore::diff / find_drifted
+// classify every stored tweak; the inspector drawer + `pulp tweaks
+// diff` CLI consume these.
+
+TEST_CASE("TweakStore::diff classifies every tweak against an anchor set",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("anchor-live-1", "paint.backgroundColor",
+                      choc::value::createString("#ff0000"));
+    store.apply_tweak("anchor-live-1", "layout.padding",
+                      choc::value::createInt32(12));
+    store.apply_tweak("anchor-gone-2", "layout.margin",
+                      choc::value::createInt32(8), "inspector-drag-handle");
+
+    // Only anchor-live-1 survives the re-import.
+    auto report = store.diff(std::vector<std::string>{"anchor-live-1"});
+
+    REQUIRE(report.total() == 3);
+    REQUIRE(report.clean.size() == 2);
+    REQUIRE(report.drifted.empty());          // anchor-only matching
+    REQUIRE(report.orphaned.size() == 1);
+    REQUIRE(report.has_drift());
+
+    const auto& orphan = report.orphaned.front();
+    REQUIRE(orphan.anchor_id == "anchor-gone-2");
+    REQUIRE(orphan.property_path == "layout.margin");
+    REQUIRE(orphan.source == "inspector-drag-handle");
+    REQUIRE(orphan.reason == TweakStore::DriftReason::anchor_not_found);
+}
+
+TEST_CASE("TweakStore::diff with no drift reports clean and has_drift=false",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("a", "layout.width", choc::value::createInt32(100));
+    store.apply_tweak("b", "layout.height", choc::value::createInt32(50));
+
+    auto report = store.diff(std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(report.clean.size() == 2);
+    REQUIRE(report.orphaned.empty());
+    REQUIRE(report.drifted.empty());
+    REQUIRE_FALSE(report.has_drift());
+}
+
+TEST_CASE("TweakStore::diff detects property-level drift via DesignSnapshot",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("card", "paint.backgroundColor",
+                      choc::value::createString("#222"));
+    store.apply_tweak("card", "layout.padding",
+                      choc::value::createInt32(16));
+
+    // The design still has the `card` anchor, but the re-import removed
+    // the padding field — only backgroundColor remains exposed.
+    TweakStore::DesignSnapshot snap;
+    snap.anchors.insert("card");
+    snap.properties["card"] = {"paint.backgroundColor"};
+
+    auto report = store.diff(snap);
+    REQUIRE(report.clean.size() == 1);
+    REQUIRE(report.clean.front().property_path == "paint.backgroundColor");
+    REQUIRE(report.orphaned.empty());
+    REQUIRE(report.drifted.size() == 1);
+
+    const auto& d = report.drifted.front();
+    REQUIRE(d.anchor_id == "card");
+    REQUIRE(d.property_path == "layout.padding");
+    REQUIRE(d.reason == TweakStore::DriftReason::property_not_found);
+    REQUIRE(report.has_drift());
+}
+
+TEST_CASE("TweakStore::find_drifted lists orphans before drifted",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("survives", "layout.width",
+                      choc::value::createInt32(80));
+    store.apply_tweak("survives", "layout.height",
+                      choc::value::createInt32(40));
+    store.apply_tweak("removed", "paint.opacity",
+                      choc::value::createFloat32(0.5f));
+
+    TweakStore::DesignSnapshot snap;
+    snap.anchors.insert("survives");
+    snap.properties["survives"] = {"layout.width"};  // height drifted
+
+    auto drifted = store.find_drifted(snap);
+    REQUIRE(drifted.size() == 2);
+    // Orphan ("removed") comes first — anchor loss is the louder
+    // failure mode and the drawer leads with it.
+    REQUIRE(drifted.front().reason ==
+            TweakStore::DriftReason::anchor_not_found);
+    REQUIRE(drifted.front().anchor_id == "removed");
+    REQUIRE(drifted.back().reason ==
+            TweakStore::DriftReason::property_not_found);
+    REQUIRE(drifted.back().anchor_id == "survives");
+    REQUIRE(drifted.back().property_path == "layout.height");
+}
+
+TEST_CASE("TweakStore::find_drifted is empty when nothing drifts",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("x", "layout.gap", choc::value::createInt32(4));
+    auto drifted = store.find_drifted(std::vector<std::string>{"x"});
+    REQUIRE(drifted.empty());
+}
+
+TEST_CASE("TweakStore::find_drifted on an empty store returns nothing",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    auto drifted = store.find_drifted(std::vector<std::string>{"anything"});
+    REQUIRE(drifted.empty());
+}
+
+TEST_CASE("TweakStore::drift_reason_str maps every enum value",
+          "[inspect][tweak-store][drift][phase2]") {
+    REQUIRE(std::string(TweakStore::drift_reason_str(
+                TweakStore::DriftReason::anchor_not_found)) ==
+            "anchor-not-found");
+    REQUIRE(std::string(TweakStore::drift_reason_str(
+                TweakStore::DriftReason::property_not_found)) ==
+            "property-not-found");
+}
+
+TEST_CASE("TweakStore::drift_report_to_json round-trips clean + drift sets",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("kept", "layout.width",
+                      choc::value::createInt32(120));
+    store.apply_tweak("dropped", "paint.color",
+                      choc::value::createString("#abc"), "manual");
+
+    auto report = store.diff(std::vector<std::string>{"kept"});
+    auto json = TweakStore::drift_report_to_json(report);
+
+    auto parsed = choc::json::parse(json);
+    REQUIRE(parsed.isObject());
+    REQUIRE(parsed["summary"]["total"].getInt64() == 2);
+    REQUIRE(parsed["summary"]["clean"].getInt64() == 1);
+    REQUIRE(parsed["summary"]["orphaned"].getInt64() == 1);
+    REQUIRE(parsed["summary"]["drifted"].getInt64() == 0);
+
+    REQUIRE(parsed["clean"].isArray());
+    REQUIRE(parsed["clean"].size() == 1);
+    REQUIRE(parsed["clean"][0]["anchorId"].getString() == "kept");
+
+    REQUIRE(parsed["orphaned"].isArray());
+    REQUIRE(parsed["orphaned"].size() == 1);
+    auto orphan = parsed["orphaned"][0];
+    REQUIRE(orphan["anchorId"].getString() == "dropped");
+    REQUIRE(orphan["propertyPath"].getString() == "paint.color");
+    REQUIRE(orphan["reason"].getString() == "anchor-not-found");
+    REQUIRE(orphan["source"].getString() == "manual");
+}
+
+TEST_CASE("TweakStore::diff ignores bypass overlay — bypassed tweaks still drift",
+          "[inspect][tweak-store][drift][phase2]") {
+    TweakStore store;
+    store.apply_tweak("ghost", "layout.width",
+                      choc::value::createInt32(64));
+    // Bypassing a tweak must NOT hide its drift — the user still wants
+    // to know the anchor is gone.
+    store.set_bypass("ghost", true);
+
+    auto report = store.diff(std::vector<std::string>{"someone-else"});
+    REQUIRE(report.orphaned.size() == 1);
+    REQUIRE(report.orphaned.front().anchor_id == "ghost");
+}

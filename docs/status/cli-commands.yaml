@@ -562,6 +562,27 @@ commands:
         description: File path for the one-shot command response
     docs: reference/cli.md#inspect
 
+  - name: tweaks
+    status: experimental
+    summary: Inspect the `pulp-tweaks.json` sidecar written by the inspector overlay. `tweaks diff` classifies stored tweaks against a design snapshot as clean, drifted (anchor survives, property gone), or orphaned (anchor gone) — the CLI mirror of the inspector drift drawer.
+    subcommands:
+      - name: diff
+        summary: Compare stored tweaks against a design snapshot; exits 0 (no drift), 1 (drift found), or 2 (usage/file error).
+        args:
+          - name: --tweaks
+            kind: option
+            required: false
+            description: Path to pulp-tweaks.json; defaults to the auto-resolved project sidecar
+          - name: --design
+            kind: option
+            required: false
+            description: Anchors-manifest JSON to diff against (array of anchors, or an object whose `anchors` is an anchor→property-path map); defaults to empty
+          - name: --json
+            kind: option
+            required: false
+            description: Emit the drift report as JSON instead of human-readable text
+    docs: reference/cli.md#tweaks
+
   - name: import-design
     status: partial
     summary: >
