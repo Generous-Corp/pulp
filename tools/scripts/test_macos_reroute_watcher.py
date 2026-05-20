@@ -174,6 +174,52 @@ class MacosRerouteWatcherTests(unittest.TestCase):
             watcher.tick(guard)
             reroute.assert_called_once_with(11)
 
+    def test_tick_tries_next_candidate_when_reroute_fails(self) -> None:
+        guard = watcher.FlapGuard(window_seconds=300)
+        with mock.patch.object(watcher, "local_is_busy", return_value=False), \
+             mock.patch.object(watcher, "list_queued_cloud_bat_runs", return_value=[(10, 100), (11, 101)]), \
+             mock.patch.object(watcher, "reroute_to_local", side_effect=[False, True]) as reroute, \
+             mock.patch.object(watcher.time, "time", return_value=2000.0):
+            watcher.tick(guard)
+
+        self.assertEqual([call.args[0] for call in reroute.call_args_list], [10, 11])
+        self.assertNotIn(10, guard._last)
+        self.assertIn(11, guard._last)
+
+    def test_watch_exits_on_keyboard_interrupt_without_sleeping(self) -> None:
+        with mock.patch.object(watcher, "tick", side_effect=KeyboardInterrupt) as tick, \
+             mock.patch.object(watcher.time, "sleep") as sleep:
+            watcher.watch(interval=7, flap_window=9)
+
+        tick.assert_called_once()
+        guard = tick.call_args.args[0]
+        self.assertIsInstance(guard, watcher.FlapGuard)
+        self.assertEqual(guard.window, 9)
+        sleep.assert_not_called()
+
+    def test_watch_logs_tick_errors_and_continues(self) -> None:
+        with mock.patch.object(
+            watcher,
+            "tick",
+            side_effect=[RuntimeError("boom"), KeyboardInterrupt],
+        ) as tick, \
+             mock.patch.object(watcher.time, "sleep") as sleep, \
+             mock.patch.object(watcher.logging, "exception") as log_exception:
+            watcher.watch(interval=3, flap_window=4)
+
+        self.assertEqual(tick.call_count, 2)
+        log_exception.assert_called_once()
+        sleep.assert_called_once_with(3)
+
+    def test_main_parses_args_and_invokes_watch(self) -> None:
+        with mock.patch.object(watcher, "watch") as watch:
+            self.assertEqual(
+                watcher.main(["--interval", "5", "--flap-window", "6", "--log-level", "DEBUG"]),
+                0,
+            )
+
+        watch.assert_called_once_with(interval=5, flap_window=6)
+
 
 if __name__ == "__main__":
     unittest.main()
