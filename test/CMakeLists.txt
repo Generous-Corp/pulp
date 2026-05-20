@@ -97,6 +97,11 @@ if(UNIX)
     add_test(NAME pulp-mcp-launcher
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_launcher.sh)
     set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 15)
+
+    add_test(NAME pulp-mcp-binary-smoke
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_binary_smoke.sh
+                $<TARGET_FILE:pulp-mcp>)
+    set_tests_properties(pulp-mcp-binary-smoke PROPERTIES TIMEOUT 15)
 endif()
 
 # Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh
