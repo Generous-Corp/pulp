@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,41 @@ using namespace pulp::format::detail;
 using namespace pulp::view;
 
 namespace {
+
+struct ScopedEnv {
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            prev_ = std::string(prev);
+            had_prev_ = true;
+        }
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+#endif
+    }
+
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+    ~ScopedEnv() {
+        if (had_prev_) set(prev_);
+        else unset();
+    }
+
+private:
+    std::string name_;
+    std::string prev_;
+    bool had_prev_ = false;
+};
 
 class StubWindowHost final : public WindowHost {
 public:
@@ -620,6 +656,68 @@ TEST_CASE("Standalone log helper formats the chrome mode",
 
     log_standalone_window_open(640, 360, false, false, chrome);
     SUCCEED();
+}
+
+TEST_CASE("Standalone environment opts screenshot runs into hidden mode",
+          "[standalone][chrome][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv frames("PULP_FRAMES");
+    headless.set("1");
+    test_mode.unset();
+    ci.unset();
+    screenshot.set("/tmp/pulp-standalone-headless.png");
+    frames.set("2");
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path == "/tmp/pulp-standalone-headless.png");
+    REQUIRE(config.screenshot_frame_delay == 2);
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
+}
+
+TEST_CASE("Standalone headless CI without screenshot is rejected before launch",
+          "[standalone][chrome][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    ScopedEnv frames("PULP_FRAMES");
+    headless.set("0");
+    test_mode.unset();
+    ci.set("true");
+    screenshot.unset();
+    frames.set("not-an-int");
+
+    StandaloneConfig base;
+    base.screenshot_frame_delay = 9;
+    auto config = standalone_config_from_environment(base);
+
+    REQUIRE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE(config.screenshot_frame_delay == 9);
+    REQUIRE(standalone_headless_requires_screenshot(config));
+}
+
+TEST_CASE("Standalone empty headless env vars are ignored",
+          "[standalone][chrome][issue-2515]") {
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    ScopedEnv screenshot("PULP_SCREENSHOT");
+    headless.set("");
+    test_mode.set("");
+    ci.set("");
+    screenshot.unset();
+
+    auto config = standalone_config_from_environment(StandaloneConfig{});
+
+    REQUIRE_FALSE(config.headless);
+    REQUIRE(config.screenshot_path.empty());
+    REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
 }
 
 TEST_CASE("make_standalone_window_options propagates min_* from ViewSize",

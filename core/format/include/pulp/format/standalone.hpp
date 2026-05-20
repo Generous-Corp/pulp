@@ -21,6 +21,9 @@ struct StandaloneConfig {
     int buffer_size = 256;
     int output_channels = 2;
     int input_channels = 0;
+    // When true, run_with_editor() avoids showing/activating the native
+    // window. Use with screenshot_path for CI/test smoke runs.
+    bool headless = false;
     // When false, run_with_editor() hosts the editor directly and omits the
     // built-in Settings tab.
     bool show_settings_tab = true;

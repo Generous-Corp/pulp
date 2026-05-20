@@ -368,8 +368,8 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
     //   anchorId : design-import anchor of the target view. When
     //              omitted, falls back to the overlay's selected view.
     //   dryRun   : when true, resolve + format only — never spawn a
-    //              process. Used by headless tests and agent callers
-    //              that just want the URL.
+    //              process. Defaults to true so tests and agent callers
+    //              must opt into a real launch with dryRun:false.
     // Returns {ok, url, path, line, col, launched} on a resolvable
     // target; {ok:false, error} when the view has no provenance or no
     // target could be found. Note `ok:false` here is a structured
@@ -377,7 +377,7 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
     // normal, expected case (the overlay treats it as a graceful
     // no-op), so callers can branch on `ok` without exception handling.
     if (req.method == methods::kInspectorJumpToSource) {
-        bool dry_run = false;
+        bool dry_run = true;
         std::string anchor_id;
         if (!req.params_json.empty()) {
             try {
@@ -419,6 +419,8 @@ InspectorMessage DomainHandler::handle_inspector(const InspectorMessage& req) {
                 choc::value::createInt64(static_cast<int64_t>(result.col)));
             resp.addMember("launched", choc::value::createBool(result.launched));
             resp.addMember("dryRun", choc::value::createBool(dry_run));
+            if (!result.error.empty())
+                resp.addMember("launchError", choc::value::createString(result.error));
         } else {
             resp.addMember("error", choc::value::createString(
                 anchor_id.empty() && !overlay_
