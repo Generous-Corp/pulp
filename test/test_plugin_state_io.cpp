@@ -3,6 +3,7 @@
 #include <choc/memory/choc_Endianness.h>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/processor.hpp>
+#include <pulp/state/state_migration.hpp>
 
 #include <array>
 #include <cstdint>
@@ -254,6 +255,89 @@ TEST_CASE("plugin_state_io envelope with empty plugin payload resets plugin stat
     REQUIRE(restored.processor.plugin_state.empty());
     REQUIRE(restored.processor.deserialize_calls == 1);
     REQUIRE(restored.processor.last_payload.empty());
+}
+
+TEST_CASE("plugin_state_io migrates versioned StateStore payloads on read",
+          "[format][plugin-state][migration]") {
+    TestRig source;
+    source.store.set_state_version(1);
+    source.store.set_value(1, -6.0f);
+    source.processor.plugin_state = "view=compact";
+    auto store_blob = source.store.serialize();
+    auto plugin_blob = source.processor.serialize_plugin_state();
+    auto envelope = make_envelope(store_blob, plugin_blob);
+
+    TestRig restored;
+    restored.store.set_state_version(2);
+    restored.store.set_value(1, 9.0f);
+    restored.processor.plugin_state = "stale";
+
+    REQUIRE(restored.store.register_state_migration(
+        1, 2,
+        [](std::span<const uint8_t> source_blob, std::vector<uint8_t>& migrated) {
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32(migrated, 4, 2);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32(migrated, crc_offset,
+                      crc32_simple(migrated.data(), crc_offset));
+            return true;
+        }));
+
+    REQUIRE(pulp::format::plugin_state_io::deserialize(envelope,
+                                                       restored.store,
+                                                       restored.processor));
+    REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-6.0, 0.01));
+    REQUIRE(restored.processor.plugin_state == "view=compact");
+}
+
+TEST_CASE("plugin_state_io migrates old envelopes before parsing payloads",
+          "[format][plugin-state][migration]") {
+    TestRig source;
+    source.store.set_value(1, -8.0f);
+    source.processor.plugin_state = "view=legacy";
+    auto envelope = make_envelope(source.store.serialize(),
+                                  source.processor.serialize_plugin_state(),
+                                  0);
+
+    int migration_calls = 0;
+    REQUIRE(pulp::format::plugin_state_io::register_envelope_migration(
+        0, pulp::format::plugin_state_io::current_envelope_version(),
+        [&migration_calls](std::span<const uint8_t> source_blob,
+                           std::vector<uint8_t>& migrated) {
+            ++migration_calls;
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32(migrated, 4,
+                      pulp::format::plugin_state_io::current_envelope_version());
+            const auto crc_offset = migrated.size() - 4;
+            write_u32(migrated, crc_offset,
+                      crc32_simple(migrated.data(), crc_offset));
+            return true;
+        }));
+
+    TestRig restored;
+    restored.store.set_value(1, 3.0f);
+    restored.processor.plugin_state = "stale";
+
+    REQUIRE(pulp::format::plugin_state_io::deserialize(envelope,
+                                                       restored.store,
+                                                       restored.processor));
+    REQUIRE_THAT(restored.store.get_value(1), WithinAbs(-8.0, 0.01));
+    REQUIRE(restored.processor.plugin_state == "view=legacy");
+    REQUIRE(migration_calls == 1);
+
+    auto corrupt_legacy_envelope = envelope;
+    corrupt_legacy_envelope.back() ^= 0x55u;
+
+    TestRig untouched;
+    untouched.store.set_value(1, 4.0f);
+    untouched.processor.plugin_state = "keep";
+
+    REQUIRE_FALSE(pulp::format::plugin_state_io::deserialize(corrupt_legacy_envelope,
+                                                             untouched.store,
+                                                             untouched.processor));
+    REQUIRE_THAT(untouched.store.get_value(1), WithinAbs(4.0, 0.01));
+    REQUIRE(untouched.processor.plugin_state == "keep");
+    REQUIRE(migration_calls == 1);
 }
 
 TEST_CASE("plugin_state_io serialize falls back to raw StateStore blobs when plugin payload is empty",

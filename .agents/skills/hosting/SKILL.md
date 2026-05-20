@@ -134,6 +134,10 @@ predictable output, no MIDI.
   thread, don't recompute per block.
 - Removing a node invalidates its `NodeId`. Connections referencing a
   removed node are pruned automatically.
+- `.pulpgraph` schema changes must go through the graph serializer migration
+  path. Bump the graph format version, add a deterministic migrator for older
+  fixtures, and keep future-version loads fail-closed instead of silently
+  accepting fields the current reader does not understand.
 
 ## Common tripwires
 

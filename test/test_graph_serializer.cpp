@@ -246,6 +246,109 @@ TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
     REQUIRE(field_dst.nodes().empty());
 }
 
+TEST_CASE("GraphSerializer fails closed before loading missing or future graph versions",
+          "[host][serializer][migration]") {
+    SignalGraph missing_version;
+    auto missing_result = GraphSerializer::from_json(missing_version, R"({
+  "nodes": [
+    {
+      "id": 1,
+      "type": "gain",
+      "name": "Missing Version",
+      "num_input_ports": 2,
+      "num_output_ports": 2
+    }
+  ],
+  "connections": []
+})");
+    REQUIRE_FALSE(missing_result.ok);
+    REQUIRE(missing_result.error.find("missing graph format_version")
+            != std::string::npos);
+    REQUIRE(missing_version.nodes().empty());
+
+    SignalGraph future_version;
+    auto future_result = GraphSerializer::from_json(future_version, R"({
+  "format_version": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "gain",
+      "name": "Future Version",
+      "num_input_ports": 2,
+      "num_output_ports": 2
+    }
+  ],
+  "connections": []
+})");
+    REQUIRE_FALSE(future_result.ok);
+    REQUIRE(future_result.error.find("unsupported graph format_version 2")
+            != std::string::npos);
+    REQUIRE(future_version.nodes().empty());
+}
+
+TEST_CASE("GraphSerializer dispatches graph format migrations before materializing nodes",
+          "[host][serializer][migration]") {
+    const std::string versioned_json = R"({
+  "format_version": 0,
+  "nodes": [
+    {
+      "id": 7,
+      "type": "gain",
+      "name": "Migrated Gain",
+      "num_input_ports": 2,
+      "num_output_ports": 2,
+      "gain": 0.5
+    }
+  ],
+  "connections": []
+})";
+
+    SignalGraph rejected;
+    auto rejected_result = GraphSerializer::from_json(rejected, versioned_json);
+    REQUIRE_FALSE(rejected_result.ok);
+    REQUIRE(rejected_result.error.find("unsupported graph format_version 0")
+            != std::string::npos);
+    REQUIRE(rejected.nodes().empty());
+
+    REQUIRE(GraphSerializer::register_migration(
+        0, GraphSerializer::current_format_version(),
+        [](const std::string& source_json, std::string& migrated_json) {
+            migrated_json = source_json;
+            const auto pos = migrated_json.find("\"format_version\": 0");
+            if (pos == std::string::npos) return false;
+            migrated_json.replace(pos, std::string("\"format_version\": 0").size(),
+                                  "\"format_version\": 1");
+            return true;
+        }));
+
+    SignalGraph migrated;
+    auto result = GraphSerializer::from_json(migrated, versioned_json);
+    REQUIRE(result.ok);
+    REQUIRE(migrated.nodes().size() == 1);
+    REQUIRE(migrated.nodes().front().name == "Migrated Gain");
+}
+
+TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions",
+          "[host][serializer][migration]") {
+    const std::string versioned_json = R"({
+  "format_version": -1,
+  "nodes": [],
+  "connections": []
+})";
+
+    REQUIRE(GraphSerializer::register_migration(
+        -1, GraphSerializer::current_format_version(),
+        [](const std::string& source_json, std::string& migrated_json) {
+            migrated_json = source_json;
+            return true;
+        }));
+
+    SignalGraph graph;
+    auto result = GraphSerializer::from_json(graph, versioned_json);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("expected format_version") != std::string::npos);
+}
+
 TEST_CASE("GraphSerializer clears partially loaded graphs after connection field errors",
           "[host][serializer][issue-493]") {
     SignalGraph dst;

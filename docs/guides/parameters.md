@@ -245,10 +245,17 @@ bool ok = store.deserialize(data);
 The format includes a version number and CRC32 checksum:
 
 ```
-[4 bytes: version] [4 bytes: param count] [per param: 4 bytes id + 4 bytes value] [4 bytes: CRC32]
+[4 bytes: magic] [4 bytes: version] [4 bytes: param count] [per param: 4 bytes id + 4 bytes value] [4 bytes: CRC32]
 ```
 
 Use `set_state_version()` for forward compatibility when adding parameters in new plugin versions.
+If an old saved state needs a structural upgrade before the current reader can
+load it, call `StateStore::register_state_migration()` on that store to add a
+step from the old version to the next version. Migration is a load-time/offline
+operation; the audio thread never runs it. Pulp reads registered older state
+versions forward to the current version, writes the current version, and fails
+closed on unreadable or future versions rather than silently dropping parameter
+values.
 
 ## Processor-Owned Plugin State
 
@@ -271,6 +278,9 @@ Format adapters, `HeadlessHost`, and `ValidationHarness` save an outer
 host-facing blob. The inner `StateStore` payload remains the same parameter-only
 binary format shown above. If `serialize_plugin_state()` returns an empty blob,
 Pulp preserves the legacy raw `StateStore` format for backward compatibility.
+The outer envelope has its own version and migration registry so envelope
+changes can be read from older versions before the inner `StateStore` and
+plugin-owned payloads are restored.
 
 `deserialize_plugin_state()` receives an empty span when loading an older blob
 that contains only `StateStore` data. Override implementations should treat

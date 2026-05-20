@@ -3,6 +3,7 @@
 #include <pulp/events/event_loop.hpp>
 #include <pulp/state/binding.hpp>
 #include <pulp/state/state.hpp>
+#include <pulp/state/state_migration.hpp>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1200,6 +1201,116 @@ TEST_CASE("StateStore serializes custom state version",
 
     REQUIRE(target.deserialize(data));
     REQUIRE_THAT(target.get_value(42), WithinAbs(64.0, 0.001));
+}
+
+TEST_CASE("StateStore deserializes through registered version migrations",
+          "[state][serialize][migration]") {
+    StateStore source;
+    source.set_state_version(2);
+    source.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    source.set_value(42, 88.0f);
+    auto data = source.serialize();
+
+    StateStore target;
+    target.set_state_version(3);
+    target.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+
+    REQUIRE(target.register_state_migration(
+        2, 3,
+        [](std::span<const uint8_t> source_blob, std::vector<uint8_t>& migrated) {
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32_le(migrated, 4, 3);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32_le(migrated, crc_offset,
+                         crc32_simple_for_test(migrated, crc_offset));
+            return true;
+        }));
+
+    REQUIRE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(42), WithinAbs(88.0, 0.001));
+}
+
+TEST_CASE("StateStore migrations are scoped to each store instance",
+          "[state][serialize][migration]") {
+    StateStore source;
+    source.set_state_version(6);
+    source.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    source.set_value(42, 88.0f);
+    auto data = source.serialize();
+
+    bool first_called = false;
+    bool second_called = false;
+
+    StateStore first;
+    first.set_state_version(7);
+    first.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    REQUIRE(first.register_state_migration(
+        6, 7,
+        [&first_called](std::span<const uint8_t> source_blob,
+                        std::vector<uint8_t>& migrated) {
+            first_called = true;
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32_le(migrated, 4, 7);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32_le(migrated, crc_offset,
+                         crc32_simple_for_test(migrated, crc_offset));
+            return true;
+        }));
+
+    StateStore second;
+    second.set_state_version(7);
+    second.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    REQUIRE(second.register_state_migration(
+        6, 7,
+        [&second_called](std::span<const uint8_t> source_blob,
+                         std::vector<uint8_t>& migrated) {
+            second_called = true;
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32_le(migrated, 4, 7);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32_le(migrated, crc_offset,
+                         crc32_simple_for_test(migrated, crc_offset));
+            return true;
+        }));
+
+    REQUIRE(first.deserialize(data));
+    REQUIRE(first_called);
+    REQUIRE_FALSE(second_called);
+
+    REQUIRE(second.deserialize(data));
+    REQUIRE(second_called);
+}
+
+TEST_CASE("StateStore rejects corrupt source blobs before migration callbacks",
+          "[state][serialize][migration]") {
+    StateStore source;
+    source.set_state_version(4);
+    source.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+    source.set_value(42, 88.0f);
+    auto data = source.serialize();
+    data.back() ^= 0x55u;
+
+    bool migration_called = false;
+    StateStore target;
+    target.set_state_version(5);
+    target.add_parameter(make_param_info(42, "Answer", "", {0.0f, 100.0f, 10.0f}));
+
+    REQUIRE(target.register_state_migration(
+        4, 5,
+        [&migration_called](std::span<const uint8_t> source_blob,
+                            std::vector<uint8_t>& migrated) {
+            migration_called = true;
+            migrated.assign(source_blob.begin(), source_blob.end());
+            write_u32_le(migrated, 4, 5);
+            const auto crc_offset = migrated.size() - 4;
+            write_u32_le(migrated, crc_offset,
+                         crc32_simple_for_test(migrated, crc_offset));
+            return true;
+        }));
+
+    REQUIRE_FALSE(target.deserialize(data));
+    REQUIRE_FALSE(migration_called);
+    REQUIRE_THAT(target.get_value(42), WithinAbs(10.0, 0.001));
 }
 
 TEST_CASE("StateStore reset_all_to_defaults notifies in registration order",

@@ -4,6 +4,7 @@
 #include <pulp/events/event_loop.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/state/state_migration.hpp>
 #include <pulp/runtime/assert.hpp>
 #include <choc/memory/choc_Endianness.h>
 
@@ -323,6 +324,18 @@ void StateStore::add_listener(ParamChangeCallback callback) {
     permanent_listener_tokens_.push_back(std::move(token));
 }
 
+bool StateStore::register_state_migration(
+    uint32_t from_version,
+    uint32_t to_version,
+    StateMigrationRegistry::MigrationFn migration) {
+    return migrations_.register_migration(from_version, to_version,
+                                          std::move(migration));
+}
+
+void StateStore::copy_state_migrations_from(const StateStore& source) {
+    migrations_ = source.migrations_;
+}
+
 // ─── ListenerToken ──────────────────────────────────────────────────────────
 
 ListenerToken::ListenerToken(std::weak_ptr<detail::ListenerRegistry> registry,
@@ -415,6 +428,22 @@ std::vector<uint8_t> StateStore::serialize() const {
 
 bool StateStore::deserialize(std::span<const uint8_t> data) {
     if (data.size() < 16) return false; // Minimum: header(4) + version(4) + count(4) + crc(4)
+
+    std::vector<uint8_t> migrated_storage;
+    if (auto serialized_version = serialized_state_version(data);
+        serialized_version.has_value() && *serialized_version != state_version_) {
+        if (*serialized_version > state_version_) {
+            return false;
+        }
+
+        auto migrated = migrations_.migrate(data, state_version_);
+        if (migrated.has_value()) {
+            migrated_storage = std::move(*migrated);
+            data = migrated_storage;
+        } else if (migrations_.has_migration_from(*serialized_version)) {
+            return false;
+        }
+    }
 
     // Check magic
     if (data[0] != 'P' || data[1] != 'U' || data[2] != 'L' || data[3] != 'P')

@@ -9,6 +9,7 @@ target_include_directories(pulp-state
 
 target_sources(pulp-state PRIVATE
     src/store.cpp
+    src/state_migration.cpp
     src/preset_manager.cpp
     src/state_tree.cpp
     src/state_tree_sync.cpp

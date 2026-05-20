@@ -8,6 +8,9 @@
 #include <sstream>
 #include <unordered_map>
 #include <cstdint>
+#include <limits>
+#include <optional>
+#include <vector>
 
 namespace pulp::host {
 namespace {
@@ -24,6 +27,118 @@ inline double get_double(const V& v) {
 }
 
 constexpr int kFormatVersion = 1;
+
+struct GraphMigrationEntry {
+    int from_version = 0;
+    int to_version = 0;
+    GraphSerializer::MigrationFn migration;
+};
+
+std::vector<GraphMigrationEntry>& graph_migrations() {
+    static std::vector<GraphMigrationEntry> migrations;
+    return migrations;
+}
+
+std::optional<int> graph_format_version(const choc::value::Value& root) {
+    const auto& value = root["format_version"];
+    if (value.isInt32() || value.isInt64()) {
+        const auto raw = value.getInt64();
+        if (raw < std::numeric_limits<int>::min()
+            || raw > std::numeric_limits<int>::max()) {
+            return std::nullopt;
+        }
+        return static_cast<int>(raw);
+    }
+
+    return std::nullopt;
+}
+
+const GraphMigrationEntry* find_graph_migration(int from_version) {
+    for (const auto& entry : graph_migrations()) {
+        if (entry.from_version == from_version) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+bool migrate_graph_json(std::string& json, std::string& error) {
+    for (;;) {
+        choc::value::Value root;
+        try {
+            root = choc::json::parse(json);
+        } catch (const std::exception& e) {
+            error = std::string("JSON parse failed: ") + e.what();
+            return false;
+        }
+
+        if (!root.isObject()) {
+            error = "root is not an object";
+            return false;
+        }
+        if (!root.hasObjectMember("format_version")) {
+            error = "missing graph format_version";
+            return false;
+        }
+
+        auto version = graph_format_version(root);
+        if (!version.has_value()) {
+            error = "format_version is not an integer";
+            return false;
+        }
+
+        if (*version == kFormatVersion) {
+            return true;
+        }
+        if (*version > kFormatVersion) {
+            error = "unsupported graph format_version "
+                    + std::to_string(*version);
+            return false;
+        }
+
+        const auto* migration = find_graph_migration(*version);
+        if (migration == nullptr) {
+            error = "unsupported graph format_version "
+                    + std::to_string(*version);
+            return false;
+        }
+
+        if (migration->to_version <= *version
+            || migration->to_version > kFormatVersion) {
+            error = "graph migration does not move toward current format_version";
+            return false;
+        }
+
+        std::string migrated;
+        if (!migration->migration(json, migrated) || migrated.empty()) {
+            error = "graph migration failed";
+            return false;
+        }
+
+        choc::value::Value migrated_root;
+        try {
+            migrated_root = choc::json::parse(migrated);
+        } catch (const std::exception& e) {
+            error = std::string("graph migration produced invalid JSON: ") + e.what();
+            return false;
+        }
+
+        if (!migrated_root.isObject()
+            || !migrated_root.hasObjectMember("format_version")) {
+            error = "graph migration did not produce expected format_version";
+            return false;
+        }
+
+        auto migrated_version = graph_format_version(migrated_root);
+        if (!migrated_version.has_value()
+            || *migrated_version != migration->to_version) {
+            error = "graph migration did not produce expected format_version";
+            return false;
+        }
+
+        json = std::move(migrated);
+    }
+}
 
 const char* node_type_str(NodeType t) {
     switch (t) {
@@ -119,6 +234,27 @@ std::vector<uint8_t> b64_decode(std::string_view s) {
 
 } // namespace
 
+int GraphSerializer::current_format_version() {
+    return kFormatVersion;
+}
+
+bool GraphSerializer::register_migration(int from_version,
+                                         int to_version,
+                                         MigrationFn migration) {
+    if (from_version >= to_version
+        || to_version > kFormatVersion
+        || !migration) {
+        return false;
+    }
+
+    if (find_graph_migration(from_version) != nullptr) {
+        return false;
+    }
+
+    graph_migrations().push_back({from_version, to_version, std::move(migration)});
+    return true;
+}
+
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
@@ -192,9 +328,14 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     LoadResult result;
     graph.clear();
 
+    std::string readable_json = json;
+    if (!migrate_graph_json(readable_json, result.error)) {
+        return result;
+    }
+
     choc::value::Value root;
     try {
-        root = choc::json::parse(json);
+        root = choc::json::parse(readable_json);
     } catch (const std::exception& e) {
         result.error = std::string("JSON parse failed: ") + e.what();
         return result;
