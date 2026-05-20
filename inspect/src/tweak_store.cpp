@@ -140,9 +140,16 @@ std::size_t TweakStore::remove_anchor(std::string_view anchor_id) {
 void TweakStore::clear() {
     {
         std::lock_guard lock(mtx_);
-        tweaks_.clear();
-        bypassed_.clear();
-        locked_.clear();
+        decltype(tweaks_) kept_tweaks;
+        decltype(bypassed_) kept_bypassed;
+        for (const auto& anchor : locked_) {
+            if (auto it = tweaks_.find(anchor); it != tweaks_.end())
+                kept_tweaks.emplace(anchor, it->second);
+            if (auto it = bypassed_.find(anchor); it != bypassed_.end())
+                kept_bypassed.emplace(anchor, it->second);
+        }
+        tweaks_ = std::move(kept_tweaks);
+        bypassed_ = std::move(kept_bypassed);
     }
     maybe_auto_save_unlocked();
 }
@@ -466,6 +473,23 @@ TweakStore::from_json_locked(std::string_view json) {
             if (locked_arr[i].isString())
                 new_locked.insert(std::string(locked_arr[i].getString()));
         }
+    }
+
+    // Existing locked anchors are protected against bulk import. A
+    // missing or stale file must not erase local protected tweaks, bypass
+    // overlays, or lock metadata.
+    for (const auto& anchor : locked_) {
+        if (auto it = tweaks_.find(anchor); it != tweaks_.end()) {
+            new_tweaks[anchor] = it->second;
+        } else {
+            new_tweaks.erase(anchor);
+        }
+        if (auto it = bypassed_.find(anchor); it != bypassed_.end()) {
+            new_bypassed[anchor] = it->second;
+        } else {
+            new_bypassed.erase(anchor);
+        }
+        new_locked.insert(anchor);
     }
 
     // All-or-nothing commit.

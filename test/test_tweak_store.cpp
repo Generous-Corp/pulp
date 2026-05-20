@@ -142,17 +142,22 @@ TEST_CASE("TweakStore: remove_anchor wipes all paths under an anchor",
     REQUIRE(s.lookup("anchor:b", "layout.gap").has_value());
 }
 
-TEST_CASE("TweakStore: clear wipes tweaks + bypass overlay + lock set",
+TEST_CASE("TweakStore: clear preserves locked anchors and clears unlocked state",
           "[inspect][tweak-store]") {
     TweakStore s;
     s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(12), {});
+    s.apply_tweak("anchor:b", "layout.gap", choc::value::createInt32(4), {});
     s.set_bypass("anchor:a", true);
+    s.set_bypass("anchor:b", true);
     s.set_locked("anchor:a", true);
     s.clear();
-    REQUIRE(s.count() == 0);
-    REQUIRE_FALSE(s.bypass_for("anchor:a").has_value());
-    REQUIRE_FALSE(s.is_locked("anchor:a"));
-    REQUIRE(s.locked_anchors().empty());
+    REQUIRE(s.count() == 1);
+    REQUIRE(s.lookup("anchor:a", "layout.padding").has_value());
+    REQUIRE(s.bypass_for("anchor:a").has_value());
+    REQUIRE(s.is_locked("anchor:a"));
+    REQUIRE_FALSE(s.lookup("anchor:b", "layout.gap").has_value());
+    REQUIRE_FALSE(s.bypass_for("anchor:b").has_value());
+    REQUIRE_FALSE(s.is_locked("anchor:b"));
 }
 
 // ── Bypass overlay ──────────────────────────────────────────────────────
@@ -275,6 +280,28 @@ TEST_CASE("TweakStore: lock round-trips through from_json without disk",
     TweakStore t;
     REQUIRE(t.from_json(json).ok);
     REQUIRE(t.is_locked("anchor:x"));
+}
+
+TEST_CASE("TweakStore: from_json preserves existing locked anchors",
+          "[inspect][tweak-store][lock][regression]") {
+    TweakStore s;
+    s.apply_tweak("anchor:locked", "layout.padding", choc::value::createInt32(12), "drag");
+    s.apply_tweak("anchor:stale", "layout.gap", choc::value::createInt32(4), "drag");
+    s.set_bypass("anchor:locked", true);
+    s.set_locked("anchor:locked", true);
+
+    auto loaded = s.from_json(R"({
+        "$schema": "pulp-tweaks://v1",
+        "tweaks": { "anchor:new": { "paint.bg": "#abc" } }
+    })");
+
+    REQUIRE(loaded.ok);
+    REQUIRE(s.count() == 2);
+    REQUIRE(s.lookup("anchor:locked", "layout.padding")->getInt32() == 12);
+    REQUIRE(s.is_bypassed("anchor:locked", "layout.padding"));
+    REQUIRE(s.is_locked("anchor:locked"));
+    REQUIRE_FALSE(s.lookup("anchor:stale", "layout.gap").has_value());
+    REQUIRE(s.lookup("anchor:new", "paint.bg")->getString() == "#abc");
 }
 
 TEST_CASE("TweakStore: a v1 file with no `locked` key loads with an empty lock set",
