@@ -1211,6 +1211,21 @@ pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 # Signal/DSP tests
 pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
 
+# Signal filter tests (P5 test-split — extracted from test_signal.cpp).
+# Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
+# verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
+pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
+
+# Signal spectral tests (P5 test-split — extracted from test_signal.cpp).
+# WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
+pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
+
+# Signal meter tests (P5 test-split — extracted from test_signal.cpp).
+# MultiChannelMeter / MultiChannelBallistics TEST_CASE clusters moved
+# verbatim. Distinct from pulp-test-multi-channel-meter (test_multi_
+# channel_meter.cpp), which keeps its own #645 edge-case coverage.
+pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
+
 # Biquad filter tests
 pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
 
