@@ -277,20 +277,11 @@ TEST_CASE("CanvasWidget::paint_all under parent View emits correct command order
 
 #ifdef PULP_HAS_SKIA
 
-namespace {
-struct Pixel {
-    uint8_t r, g, b, a;
-};
-
-// Sample a single RGBA8 pixel (premul) from a Skia raster surface so
-// tests can assert on the actual texels CanvasWidget produced.
-Pixel sample_pixel(SkSurface* surface, int x, int y) {
-    SkPixmap pix;
-    REQUIRE(surface->peekPixels(&pix));
-    auto* row = static_cast<const uint8_t*>(pix.addr(0, y));
-    return {row[4 * x + 0], row[4 * x + 1], row[4 * x + 2], row[4 * x + 3]};
-}
-}  // namespace
+// Pixel + sample_pixel moved to the shared canvas_pixel_probe.hpp in the
+// pulp #2462 fix (was duplicated here and in test_canvas2d_shim.cpp).
+#include "canvas_pixel_probe.hpp"
+using pulp::canvas_test::Pixel;
+using pulp::canvas_test::sample_pixel;
 
 TEST_CASE("CanvasWidget paints transparent by default on a Skia raster surface",
           "[canvas_widget][skia][issue-929]") {

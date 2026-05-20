@@ -396,15 +396,11 @@ TEST_CASE("Canvas2D fillStyle = string clears prior gradient",
 
 #ifdef PULP_HAS_SKIA
 
-namespace {
-struct Pixel { uint8_t r, g, b, a; };
-Pixel sample_pixel(SkSurface* surface, int x, int y) {
-    SkPixmap pix;
-    REQUIRE(surface->peekPixels(&pix));
-    auto* row = static_cast<const uint8_t*>(pix.addr(0, y));
-    return {row[4 * x + 0], row[4 * x + 1], row[4 * x + 2], row[4 * x + 3]};
-}
-}  // namespace
+// Pixel + sample_pixel moved to the shared canvas_pixel_probe.hpp in the
+// pulp #2462 fix (was duplicated here and in test_canvas_widget.cpp).
+#include "canvas_pixel_probe.hpp"
+using pulp::canvas_test::Pixel;
+using pulp::canvas_test::sample_pixel;
 
 // ── End-to-end FilterBank repro: JS → bridge → CanvasWidget → SkiaCanvas ──
 //

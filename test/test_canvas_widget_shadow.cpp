@@ -151,6 +151,14 @@ TEST_CASE("CanvasWidget shadow setters can be cleared mid-stream",
 }
 
 #ifdef PULP_HAS_SKIA
+
+// Shared raster-pixel probe. This file was extracted from
+// test_canvas_widget.cpp in the Phase 5 P5-3 split (#2418) but never
+// carried sample_pixel — the loose end pulp #2462 tracked.
+#include "canvas_pixel_probe.hpp"
+using pulp::canvas_test::Pixel;
+using pulp::canvas_test::sample_pixel;
+
 TEST_CASE("SkiaCanvas honors sticky Canvas2D shadow state on fillRect",
           "[canvas_widget][issue-1434-batch-7][skia]") {
     // Rasterise a filled rect with shadowColor + shadowBlur + offset

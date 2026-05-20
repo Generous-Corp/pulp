@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v017312"></a>
+## [0.173.12] - 2026-05-20
+
+- fix(test): #2462 — shared canvas_pixel_probe.hpp; repair test_canvas_widget_shadow.cpp Skia-build compile
+
 <a id="v017311"></a>
 ## [0.173.11] - 2026-05-19
 
