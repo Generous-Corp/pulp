@@ -131,9 +131,17 @@ HTTP(S) resources, CSS `url(...)` references, font URLs, and inline data URIs:
 Network assets are not fetched by default. `pulp import-design --emit ir-json`
 requires `--allow-network-fetch` for first-time HTTP(S) resolution. Fetched
 bytes are cached by content hash, indexed by URL, and subsequent imports verify
-any expected hash supplied with `--asset-hash <uri=sha256>`. Data URIs are
-recorded with their decoded content hash so duplicated inline assets can be
-deduplicated by later baked outputs.
+any expected hash supplied with `--asset-hash <uri=sha256>`. When the import
+source came from `--url`, relative asset references resolve against that source
+URL; the manifest keeps the authored value in `original_uri` and stores the
+resolved fetch target in `source_url`.
+
+External files and URLs keep distinct manifest entries even when their bytes
+match, so diagnostics and provenance remain tied to the authored resource.
+Data URIs are recorded with their decoded content hash so duplicated inline
+assets can be deduplicated by later baked outputs. Nodes preserve their raw
+URI attributes and may receive a parallel `*AssetId` attribute such as
+`srcAssetId` or `backgroundImageAssetId` for stable manifest references.
 
 ## C++ API
 

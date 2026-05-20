@@ -994,6 +994,10 @@ exit codes, diagnostics, and the staged rollout split).
 | `--emit classnames` | Force-emit `classnames.json` (default on for `--from claude`). |
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 
+With `--emit ir-json`, relative asset references from a `--url` import resolve
+against the source URL. The manifest keeps the authored relative URI and also
+records the resolved `source_url` used for HTTP(S) fetching.
+
 ### export-tokens
 
 **Status**: experimental

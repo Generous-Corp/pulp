@@ -52,6 +52,23 @@ Detect which design source the user wants by checking:
 
 ## Workflow
 
+### DesignIR v1 asset manifest lane
+
+When a user asks for canonical IR or an import pipeline handoff, prefer
+`pulp import-design --emit ir-json`. The output is a versioned DesignIR v1
+envelope with a deterministic `assetManifest` sidecar. Local images, SVGs,
+font URLs, CSS `url(...)` values, and data URIs are recorded by default.
+HTTP(S) assets are resolve-only unless the user explicitly passes
+`--allow-network-fetch`; fetched assets use `--asset-cache`, honor
+`--asset-timeout-ms`, and can be pinned with repeated
+`--asset-hash <uri=sha256>` flags.
+
+For `--url` imports, relative asset references resolve against the original
+source URL, not the temporary downloaded file. The manifest keeps the authored
+value in `original_uri`, stores the resolved fetch target in `source_url`, and
+nodes keep their raw URI attributes plus a stable companion such as
+`srcAssetId` or `backgroundImageAssetId`.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:

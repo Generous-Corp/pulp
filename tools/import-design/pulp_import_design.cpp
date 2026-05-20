@@ -846,23 +846,24 @@ int main(int argc, char* argv[]) {
     if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
     if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
-    DesignIrAssetOptions asset_options;
-    asset_options.allow_network_fetch = allow_network_fetch;
-    asset_options.network_timeout_ms = asset_timeout_ms;
-    if (!asset_cache_dir.empty()) asset_options.cache_directory = asset_cache_dir;
-    if (!input_file.empty()) {
-        std::error_code ec;
-        auto input_path = fs::weakly_canonical(fs::path(input_file), ec);
-        if (ec) input_path = fs::absolute(fs::path(input_file), ec);
-        asset_options.base_directory = ec ? fs::path(input_file).parent_path()
-                                          : input_path.parent_path();
-    }
-    asset_options.expected_hash_by_uri = expected_asset_hashes;
-    refresh_design_ir_asset_manifest(ir, asset_options);
-    print_asset_manifest_diagnostics(ir.asset_manifest);
-    if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
-
     if (artifact_emit == ArtifactEmit::ir_json) {
+        DesignIrAssetOptions asset_options;
+        asset_options.allow_network_fetch = allow_network_fetch;
+        asset_options.network_timeout_ms = asset_timeout_ms;
+        if (!asset_cache_dir.empty()) asset_options.cache_directory = asset_cache_dir;
+        if (!input_url.empty()) asset_options.base_url = input_url;
+        if (!input_file.empty()) {
+            std::error_code ec;
+            auto input_path = fs::weakly_canonical(fs::path(input_file), ec);
+            if (ec) input_path = fs::absolute(fs::path(input_file), ec);
+            asset_options.base_directory = ec ? fs::path(input_file).parent_path()
+                                              : input_path.parent_path();
+        }
+        asset_options.expected_hash_by_uri = expected_asset_hashes;
+        refresh_design_ir_asset_manifest(ir, asset_options);
+        print_asset_manifest_diagnostics(ir.asset_manifest);
+        if (has_blocking_asset_diagnostic(ir.asset_manifest)) return 1;
+
         const auto ir_json = serialize_design_ir(ir);
         if (dry_run) {
             std::cout << ir_json << "\n";

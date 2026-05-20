@@ -281,6 +281,62 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(read_text(cached_output).find(expected_hash) != std::string::npos);
         REQUIRE(cached.stderr_output.find("asset-fetcher-missing") == std::string::npos);
     }
+
+    SECTION("ir-json emit resolves relative assets from the source URL") {
+        const auto bin = tmp.path / "url-bin";
+        const auto curl = bin / "curl";
+        const auto fetched_url_log = tmp.path / "fetched-asset-url.txt";
+        fs::create_directories(bin);
+        write_text(curl,
+                   "#!/bin/sh\n"
+                   "out=''\n"
+                   "url=''\n"
+                   "while [ \"$#\" -gt 0 ]; do\n"
+                   "  case \"$1\" in\n"
+                   "    --output) shift; out=\"$1\" ;;\n"
+                   "    http://*|https://*) url=\"$1\" ;;\n"
+                   "  esac\n"
+                   "  shift\n"
+                   "done\n"
+                   "[ -n \"$out\" ] || exit 9\n"
+                   "case \"$url\" in\n"
+                   "  *screen.json)\n"
+                   "    printf '%s' '{\"type\":\"frame\",\"name\":\"Remote\",\"children\":[{\"type\":\"image\",\"name\":\"Hero\",\"src\":\"assets/icon.svg\"}]}' > \"$out\"\n"
+                   "    ;;\n"
+                   "  *assets/icon.svg)\n"
+                   "    printf '%s' '<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>' > \"$out\"\n"
+                   "    [ -n \"$PULP_FAKE_CURL_LOG\" ] && printf '%s' \"$url\" > \"$PULP_FAKE_CURL_LOG\"\n"
+                   "    ;;\n"
+                   "  *) exit 8 ;;\n"
+                   "esac\n");
+        fs::permissions(curl,
+                        fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::add);
+
+        auto old_path = read_env_var("PATH").value_or("");
+        ScopedEnvVar path_override("PATH", bin.string() + ":" + old_path);
+        ScopedEnvVar log_override("PULP_FAKE_CURL_LOG", fetched_url_log.string());
+
+        const auto ir_output = tmp.path / "relative-url.out.json";
+        const auto cache_dir = tmp.path / "relative-url-cache";
+        const auto source_url = std::string("https://example.test/screens/screen.json");
+        const auto asset_url = std::string("https://example.test/screens/assets/icon.svg");
+        auto fetched = run_import_design({"--from", "stitch",
+                                          "--url", source_url,
+                                          "--emit", "ir-json",
+                                          "--output", ir_output.string(),
+                                          "--allow-network-fetch",
+                                          "--asset-cache", cache_dir.string()});
+        REQUIRE_FALSE(fetched.timed_out);
+        REQUIRE(fetched.exit_code == 0);
+        const auto ir_json = read_text(ir_output);
+        REQUIRE(ir_json.find("\"sourceFile\":\"" + source_url + "\"") != std::string::npos);
+        REQUIRE(ir_json.find("\"original_uri\":\"assets/icon.svg\"") != std::string::npos);
+        REQUIRE(ir_json.find("\"source_url\":\"" + asset_url + "\"") != std::string::npos);
+        REQUIRE(ir_json.find("\"src\":\"assets/icon.svg\"") != std::string::npos);
+        REQUIRE(ir_json.find("\"srcAssetId\":\"asset-") != std::string::npos);
+        REQUIRE(read_text(fetched_url_log) == asset_url);
+    }
 #endif
 
     SECTION("asset option diagnostics are usage errors") {

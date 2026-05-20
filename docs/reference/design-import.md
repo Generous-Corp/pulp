@@ -51,7 +51,9 @@ Either `--file` or `--url` is required (or `--directory` for `--detect-only`). W
 `--emit ir-json` writes a canonical [DesignIR v1](design-ir-v1.md) envelope.
 Asset collection runs before serialization. Local files and data URIs are
 recorded by default; HTTP(S) asset fetches require explicit
-`--allow-network-fetch` consent and are cached by content hash.
+`--allow-network-fetch` consent and are cached by content hash. For `--url`
+imports, relative asset references resolve against the source URL while the
+authored relative value remains in the manifest as `original_uri`.
 
 ### export-tokens
 

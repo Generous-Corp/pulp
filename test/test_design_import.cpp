@@ -513,6 +513,80 @@ TEST_CASE("DesignIR asset manifest records data URI local image and font assets"
     REQUIRE(serialize_design_ir(round_trip) == serialize_design_ir(ir));
 }
 
+TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes asset ids",
+          "[view][import][assets]") {
+    TempDir tmp("pulp-design-ir-top-level-assets");
+    const auto image_path = tmp.path / "hero.png";
+    write_text(image_path, "\x89PNG\r\n\x1a\nhero-bytes");
+
+    auto ir = parse_design_ir_json(R"json({
+        "type": "frame",
+        "name": "Screen",
+        "children": [
+            { "type": "image", "name": "Hero", "src": "hero.png" }
+        ]
+    })json");
+
+    DesignIrAssetOptions options;
+    options.base_directory = tmp.path;
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    const auto& asset = ir.asset_manifest.assets[0];
+    REQUIRE(asset.original_uri == "hero.png");
+    REQUIRE(asset.mime == "image/png");
+    REQUIRE(asset.local_path);
+    REQUIRE_FALSE(asset.content_hash.empty());
+
+    REQUIRE(ir.root.children.size() == 1);
+    const auto& image = ir.root.children[0];
+    REQUIRE(image.attributes.at("src") == "hero.png");
+    REQUIRE(image.attributes.at("srcAssetId") == asset.asset_id);
+
+    const auto round_trip = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(round_trip.root.children[0].attributes.at("src") == "hero.png");
+    REQUIRE(round_trip.root.children[0].attributes.at("srcAssetId") == asset.asset_id);
+}
+
+TEST_CASE("DesignIR asset manifest keeps distinct external assets with identical bytes",
+          "[view][import][assets]") {
+    TempDir tmp("pulp-design-ir-distinct-assets");
+    write_text(tmp.path / "a.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+    write_text(tmp.path / "b.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "Distinct";
+    IRNode first;
+    first.type = "image";
+    first.name = "A";
+    first.attributes["src"] = "a.svg";
+    IRNode second;
+    second.type = "image";
+    second.name = "B";
+    second.attributes["src"] = "b.svg";
+    ir.root.children.push_back(std::move(first));
+    ir.root.children.push_back(std::move(second));
+
+    DesignIrAssetOptions options;
+    options.base_directory = tmp.path;
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 2);
+    const IRAssetRef* a = nullptr;
+    const IRAssetRef* b = nullptr;
+    for (const auto& asset : ir.asset_manifest.assets) {
+        if (asset.original_uri == "a.svg") a = &asset;
+        if (asset.original_uri == "b.svg") b = &asset;
+    }
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(a->content_hash == b->content_hash);
+    REQUIRE(a->asset_id != b->asset_id);
+    REQUIRE(ir.root.children[0].attributes.at("srcAssetId") == a->asset_id);
+    REQUIRE(ir.root.children[1].attributes.at("srcAssetId") == b->asset_id);
+}
+
 TEST_CASE("DesignIR asset manifest records unresolved and network-gated diagnostics",
           "[view][import][assets]") {
     TempDir tmp("pulp-design-ir-asset-diagnostics");

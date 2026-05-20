@@ -280,6 +280,7 @@ struct DesignIrAssetOptions {
     int network_timeout_ms = 30000;
     std::filesystem::path cache_directory;
     std::filesystem::path base_directory;
+    std::string base_url;
     std::unordered_map<std::string, std::string> expected_hash_by_uri;
 };
 

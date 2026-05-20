@@ -8,6 +8,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/temporary_file.hpp>
 #include <pulp/state/store.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cstdio>
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace pulp::view {
@@ -560,6 +562,17 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
 
 static std::optional<IRConfidence> parse_confidence(const std::string& value);
 
+static bool is_asset_reference_key(std::string_view key) {
+    static constexpr const char* kAssetKeys[] = {
+        "src", "href", "image", "imageSrc", "source", "backgroundImage",
+        "background-image", "fontUrl", "fontURL", "asset", "url"
+    };
+    for (const char* asset_key : kAssetKeys) {
+        if (key == asset_key) return true;
+    }
+    return false;
+}
+
 static IRNode parse_ir_node(const choc::value::ValueView& obj) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
@@ -637,6 +650,15 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
             auto m = attrs.getObjectMemberAt(i);
             node.attributes[std::string(m.name)] = std::string(m.value.toString());
         }
+    }
+    for (const char* key : {
+             "src", "href", "image", "imageSrc", "source", "backgroundImage",
+             "background-image", "fontUrl", "fontURL", "asset", "url"
+         }) {
+        if (!obj.hasObjectMember(key) || !obj[key].isString()) continue;
+        auto value = std::string(obj[key].toString());
+        if (!value.empty() && node.attributes.find(key) == node.attributes.end())
+            node.attributes[key] = std::move(value);
     }
 
     // Exact layout dimensions from snapshot_layout (injected by import skill)
@@ -1391,6 +1413,82 @@ static bool is_data_uri(std::string_view value) {
     return has_prefix(value, "data:");
 }
 
+static std::string normalize_url_path(std::string_view path) {
+    const bool absolute = !path.empty() && path.front() == '/';
+    std::vector<std::string> parts;
+    size_t pos = 0;
+    while (pos <= path.size()) {
+        auto next = path.find('/', pos);
+        auto segment = path.substr(pos, next == std::string_view::npos ? path.size() - pos : next - pos);
+        if (segment.empty() || segment == ".") {
+            // skip
+        } else if (segment == "..") {
+            if (!parts.empty()) parts.pop_back();
+        } else {
+            parts.emplace_back(segment);
+        }
+        if (next == std::string_view::npos) break;
+        pos = next + 1;
+    }
+
+    std::ostringstream out;
+    if (absolute) out << '/';
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i) out << '/';
+        out << parts[i];
+    }
+    if (path.size() > 1 && path.back() == '/' && (parts.empty() || out.str().back() != '/'))
+        out << '/';
+    auto normalized = out.str();
+    if (normalized.empty()) return absolute ? "/" : "";
+    return normalized;
+}
+
+static std::string resolve_url_reference(std::string_view base_url,
+                                         std::string_view reference) {
+    if (reference.empty() || is_network_url(reference) || is_data_uri(reference)
+        || has_prefix(reference, "file://")) {
+        return std::string(reference);
+    }
+    if (!is_network_url(base_url)) return std::string(reference);
+
+    const auto scheme_sep = base_url.find("://");
+    if (scheme_sep == std::string_view::npos) return std::string(reference);
+    const auto authority_start = scheme_sep + 3;
+    const auto path_start = base_url.find('/', authority_start);
+    const auto origin = path_start == std::string_view::npos
+        ? std::string(base_url)
+        : std::string(base_url.substr(0, path_start));
+    const auto scheme = std::string(base_url.substr(0, scheme_sep));
+    if (has_prefix(reference, "//")) return scheme + ":" + std::string(reference);
+
+    std::string base_path = path_start == std::string_view::npos
+        ? "/"
+        : std::string(base_url.substr(path_start));
+    if (auto hash = base_path.find('#'); hash != std::string::npos)
+        base_path.resize(hash);
+    if (auto query = base_path.find('?'); query != std::string::npos)
+        base_path.resize(query);
+
+    std::string ref_path(reference);
+    std::string suffix;
+    auto suffix_pos = ref_path.find_first_of("?#");
+    if (suffix_pos != std::string::npos) {
+        suffix = ref_path.substr(suffix_pos);
+        ref_path.resize(suffix_pos);
+    }
+
+    std::string combined;
+    if (!ref_path.empty() && ref_path.front() == '/') {
+        combined = ref_path;
+    } else {
+        const auto slash = base_path.rfind('/');
+        const auto dir = slash == std::string::npos ? std::string("/") : base_path.substr(0, slash + 1);
+        combined = dir + ref_path;
+    }
+    return origin + normalize_url_path(combined) + suffix;
+}
+
 static std::string percent_decode(std::string_view input) {
     auto hex = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';
@@ -1579,8 +1677,8 @@ static std::optional<std::vector<uint8_t>> fetch_network_asset(
         return std::nullopt;
     }
 
-    fs::path temp_path = fs::temp_directory_path()
-        / ("pulp-import-asset-" + url_index_key(url) + ".download");
+    pulp::runtime::TemporaryFile temp_file(".download");
+    fs::path temp_path = temp_file.path();
     pulp::platform::ProcessOptions process_opts;
     process_opts.timeout_ms = timeout_ms;
     process_opts.max_output_bytes = 64 * 1024;
@@ -1611,8 +1709,6 @@ static std::optional<std::vector<uint8_t>> fetch_network_asset(
     }
 
     auto bytes = read_binary_file(temp_path);
-    std::error_code ec;
-    fs::remove(temp_path, ec);
     if (bytes.empty()) {
         asset.diagnostics.push_back({
             ImportDiagnosticSeverity::error,
@@ -1626,6 +1722,7 @@ static std::optional<std::vector<uint8_t>> fetch_network_asset(
     auto hash = pulp::runtime::sha256_hex(bytes.data(), bytes.size());
     auto cache_path = cache_dir / "by-hash" / hash;
     write_binary_file(cache_path, bytes);
+    std::error_code ec;
     fs::create_directories(url_index.parent_path(), ec);
     std::ofstream out_index(url_index);
     out_index << hash << "\n";
@@ -1705,18 +1802,8 @@ static void collect_asset_uris_from_node(const IRNode& node, std::vector<std::st
     collect(node.style.border);
     collect(node.style.filter);
     collect(node.style.backdrop_filter);
-    static constexpr const char* kAssetKeys[] = {
-        "src", "href", "image", "imageSrc", "source", "backgroundImage",
-        "background-image", "fontUrl", "fontURL", "asset", "url"
-    };
     for (const auto& [key, value] : node.attributes) {
-        bool known_asset_key = false;
-        for (const char* asset_key : kAssetKeys) {
-            if (key == asset_key) {
-                known_asset_key = true;
-                break;
-            }
-        }
+        const bool known_asset_key = is_asset_reference_key(key);
         if (known_asset_key || value.find("url(") != std::string::npos
             || is_data_uri(value) || is_network_url(value) || has_prefix(value, "file://")) {
             const auto before = uris.size();
@@ -1741,12 +1828,18 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
         : options.cache_directory;
 
     for (const auto& uri : uris) {
+        const auto resolved_uri = (!is_data_uri(uri) && !is_network_url(uri)
+            && !has_prefix(uri, "file://") && !options.base_url.empty())
+            ? resolve_url_reference(options.base_url, uri)
+            : uri;
         IRAssetRef asset;
         asset.original_uri = uri;
-        asset.source_url = is_network_url(uri) ? std::optional<std::string>(uri) : std::nullopt;
+        asset.source_url = is_network_url(resolved_uri)
+            ? std::optional<std::string>(resolved_uri)
+            : std::nullopt;
         std::optional<std::vector<uint8_t>> bytes;
 
-        if (is_data_uri(uri)) {
+        if (is_data_uri(resolved_uri)) {
             auto parsed = parse_data_uri(uri);
             if (parsed.valid) {
                 bytes = std::move(parsed.bytes);
@@ -1759,26 +1852,28 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
                     "data URI could not be decoded"
                 });
             }
-        } else if (is_network_url(uri)) {
+        } else if (is_network_url(resolved_uri)) {
             if (!options.allow_network_fetch) {
                 asset.diagnostics.push_back({
                     ImportDiagnosticSeverity::warning,
                     "asset-network-fetch-disabled",
-                    uri,
+                    resolved_uri,
                     "network asset requires --allow-network-fetch"
                 });
             } else {
-                bytes = fetch_network_asset(uri, cache_dir, options.network_timeout_ms, asset);
+                bytes = fetch_network_asset(resolved_uri, cache_dir, options.network_timeout_ms, asset);
             }
         } else {
-            bytes = resolve_local_asset(uri, options.base_directory, asset);
+            bytes = resolve_local_asset(resolved_uri, options.base_directory, asset);
         }
 
         if (bytes && !bytes->empty()) {
             asset.content_hash = pulp::runtime::sha256_hex(bytes->data(), bytes->size());
-            if (asset.mime.empty()) asset.mime = guess_asset_mime_type(uri, *bytes);
+            if (asset.mime.empty()) asset.mime = guess_asset_mime_type(resolved_uri, *bytes);
             fill_png_dimensions(asset, *bytes);
             auto expected = options.expected_hash_by_uri.find(uri);
+            if (expected == options.expected_hash_by_uri.end())
+                expected = options.expected_hash_by_uri.find(resolved_uri);
             if (expected != options.expected_hash_by_uri.end()
                 && expected->second != asset.content_hash) {
                 asset.diagnostics.push_back({
@@ -1789,12 +1884,12 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
                 });
             }
         } else if (asset.mime.empty()) {
-            asset.mime = guess_asset_mime_type(uri);
+            asset.mime = guess_asset_mime_type(resolved_uri);
         }
 
-        const auto dedupe_key = asset.content_hash.empty()
-            ? asset.original_uri
-            : asset.content_hash;
+        const auto dedupe_key = is_data_uri(uri) && !asset.content_hash.empty()
+            ? std::string("data:") + asset.content_hash
+            : asset.source_url.value_or(asset.local_path.value_or(asset.original_uri));
         if (!seen_keys.insert(dedupe_key).second) continue;
         asset.asset_id = asset_id_for(dedupe_key);
         manifest.assets.push_back(std::move(asset));
@@ -1806,9 +1901,64 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
     return manifest;
 }
 
+static std::optional<std::string> find_asset_id_for_value(
+    const std::string& value,
+    const std::unordered_map<std::string, std::string>& asset_id_by_uri) {
+    if (auto found = asset_id_by_uri.find(value); found != asset_id_by_uri.end())
+        return found->second;
+
+    std::vector<std::string> tokens;
+    collect_url_tokens(value, tokens);
+    for (const auto& token : tokens) {
+        if (auto found = asset_id_by_uri.find(token); found != asset_id_by_uri.end())
+            return found->second;
+    }
+    return std::nullopt;
+}
+
+static std::string asset_id_attribute_for(std::string_view key) {
+    if (key == "background-image") return "backgroundImageAssetId";
+    return std::string(key) + "AssetId";
+}
+
+static void annotate_asset_ids(
+    IRNode& node,
+    const std::unordered_map<std::string, std::string>& asset_id_by_uri) {
+    if (node.style.background_image) {
+        if (auto asset_id = find_asset_id_for_value(*node.style.background_image, asset_id_by_uri))
+            node.attributes.try_emplace("backgroundImageAssetId", *asset_id);
+    }
+
+    std::vector<std::pair<std::string, std::string>> to_add;
+    for (const auto& [key, value] : node.attributes) {
+        if (!is_asset_reference_key(key) && value.find("url(") == std::string::npos)
+            continue;
+        if (auto asset_id = find_asset_id_for_value(value, asset_id_by_uri)) {
+            const auto asset_attr = asset_id_attribute_for(key);
+            if (node.attributes.find(asset_attr) == node.attributes.end())
+                to_add.emplace_back(asset_attr, *asset_id);
+        }
+    }
+    for (const auto& [key, value] : to_add)
+        node.attributes.emplace(key, value);
+
+    for (auto& child : node.children)
+        annotate_asset_ids(child, asset_id_by_uri);
+}
+
 void refresh_design_ir_asset_manifest(DesignIR& ir,
                                       const DesignIrAssetOptions& options) {
     ir.asset_manifest = collect_design_ir_assets(ir, options);
+    std::unordered_map<std::string, std::string> asset_id_by_uri;
+    for (const auto& asset : ir.asset_manifest.assets) {
+        if (!asset.original_uri.empty())
+            asset_id_by_uri.emplace(asset.original_uri, asset.asset_id);
+        if (asset.source_url)
+            asset_id_by_uri.emplace(*asset.source_url, asset.asset_id);
+        if (asset.local_path)
+            asset_id_by_uri.emplace(*asset.local_path, asset.asset_id);
+    }
+    annotate_asset_ids(ir.root, asset_id_by_uri);
 }
 
 // ── Source adapters ─────────────────────────────────────────────────────
