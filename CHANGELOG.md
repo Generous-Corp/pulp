@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01770"></a>
+## [0.177.0] - 2026-05-20
+
+- refactor(view): rename native design codegen mode ([#2439](https://github.com/danielraffel/pulp/pull/2439))
+- ci(runner): enable ccache depend mode + time_macros sloppiness ([#2493](https://github.com/danielraffel/pulp/pull/2493))
+- refactor(local-ci): split test_local_ci.py per source module (P11-3) ([#2490](https://github.com/danielraffel/pulp/pull/2490))
+- ci(nightly): gate the run on the build step only, ctest informational ([#2491](https://github.com/danielraffel/pulp/pull/2491))
+- feat(inspect): add 20x zoom loupe to inspector overlay (Phase 3e) ([#2464](https://github.com/danielraffel/pulp/pull/2464))
+- ci: add stale-run-reaper janitor workflow ([#2489](https://github.com/danielraffel/pulp/pull/2489))
+
 <a id="v01760"></a>
 ## [0.176.0] - 2026-05-20
 
@@ -2297,6 +2307,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.177.0]: https://github.com/danielraffel/pulp/releases/tag/v0.177.0
 [0.176.0]: https://github.com/danielraffel/pulp/releases/tag/v0.176.0
 [0.175.0]: https://github.com/danielraffel/pulp/releases/tag/v0.175.0
 [0.174.0]: https://github.com/danielraffel/pulp/releases/tag/v0.174.0
