@@ -269,6 +269,27 @@ if(TARGET pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
+# P5-4 — `pulp loop` shell-out tests, extracted from test_cli_shellout.cpp
+# to bring the parent TU below the 2k line target. Shares
+# test_cli_shellout_helpers.hpp with the parent and its sibling
+# test_cli_shellout_scan_projects.cpp.
+add_executable(pulp-test-cli-shellout-loop test_cli_shellout_loop.cpp)
+target_link_libraries(pulp-test-cli-shellout-loop PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-loop pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-loop)
+
+# P5-4 — `pulp scan` + `pulp projects list` shell-out tests, extracted
+# from test_cli_shellout.cpp. Shares the helpers header with its
+# siblings.
+add_executable(pulp-test-cli-shellout-scan-projects test_cli_shellout_scan_projects.cpp)
+target_link_libraries(pulp-test-cli-shellout-scan-projects PRIVATE pulp::platform Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-shellout-scan-projects pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-shellout-scan-projects)
+
 # pulp #776 — pin shell_quote's per-platform contract so it can't
 # silently regress to the pre-fix shape that broke `git fetch origin`
 # on Windows by writing doubled backslashes into clone URLs.
