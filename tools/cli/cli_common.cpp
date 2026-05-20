@@ -357,6 +357,9 @@ bool icontains(const std::string& haystack, const std::string& needle) {
 
 std::string yaml_value(const std::string& line, const std::string& key) {
     auto stripped = trim(line);
+    if (stripped.rfind("- ", 0) == 0) {
+        stripped = trim(stripped.substr(2));
+    }
     const auto prefix = key + ":";
     if (stripped.rfind(prefix, 0) != 0) return {};
     if (prefix.size() >= stripped.size()) return {};

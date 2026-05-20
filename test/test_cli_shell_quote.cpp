@@ -19,6 +19,14 @@
 
 #include <filesystem>
 
+TEST_CASE("yaml_value reads plain and list-item scalars", "[cli][yaml][docs][issue-643]") {
+    REQUIRE(yaml_value("slug: getting-started", "slug") == "getting-started");
+    REQUIRE(yaml_value("  - slug: getting-started", "slug") == "getting-started");
+    REQUIRE(yaml_value("      - name: ship", "name") == "ship");
+    REQUIRE(yaml_value("      summary: Sign and package", "summary") == "Sign and package");
+    REQUIRE(yaml_value("      - summary: list item", "summary") == "list item");
+}
+
 #ifdef _WIN32
 
 TEST_CASE("shell_quote leaves Windows path backslashes literal", "[cli][shell-quote][issue-776]") {
