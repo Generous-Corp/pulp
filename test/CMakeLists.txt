@@ -1290,6 +1290,8 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 # MCP server protocol tests
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
 target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-mcp-server PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # test_mcp_server.cpp #include's ../tools/mcp/pulp_mcp.cpp directly (via
 # `#define main pulp_mcp_main_for_test`), so it picks up the same
 # generated version header pulp-mcp itself sees. The generated header

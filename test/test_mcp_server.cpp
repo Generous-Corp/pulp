@@ -7,6 +7,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 // pulp-test-mcp-server compiles only this TU; it does not link the
 // pulp-mcp target's object files. So the test must pull in every
@@ -57,8 +58,53 @@ struct TempDir {
     std::filesystem::path path;
 };
 
+bool has_repo_markers(const std::filesystem::path& candidate) {
+    return std::filesystem::exists(candidate / "CMakeLists.txt") &&
+           std::filesystem::exists(candidate / "tools" / "mcp" / "pulp_mcp.cpp");
+}
+
+std::filesystem::path normalize_path(const std::filesystem::path& path) {
+    std::error_code ec;
+    auto normalized = std::filesystem::weakly_canonical(path, ec);
+    if (!ec) return normalized;
+    return std::filesystem::absolute(path);
+}
+
+std::filesystem::path find_repo_root() {
+#ifdef PULP_SOURCE_DIR
+    auto configured = std::filesystem::path(PULP_SOURCE_DIR);
+    if (has_repo_markers(configured)) return normalize_path(configured);
+#endif
+
+    std::vector<std::filesystem::path> seeds = {
+        std::filesystem::current_path(),
+        std::filesystem::path(__FILE__),
+    };
+
+    if (!seeds.back().is_absolute()) {
+        seeds.back() = std::filesystem::current_path() / seeds.back();
+    }
+
+    for (auto seed : seeds) {
+        if (std::filesystem::is_regular_file(seed)) seed = seed.parent_path();
+        for (auto candidate = seed; !candidate.empty();
+             candidate = candidate.parent_path()) {
+            if (has_repo_markers(candidate)) return normalize_path(candidate);
+            if (candidate == candidate.root_path()) break;
+        }
+    }
+
+    return {};
+}
+
+std::filesystem::path repo_root_path() {
+    auto root = find_repo_root();
+    REQUIRE_FALSE(root.empty());
+    return root;
+}
+
 std::string repo_root() {
-    return std::filesystem::path(__FILE__).parent_path().parent_path().string();
+    return repo_root_path().string();
 }
 
 std::string tool_call(const std::string& id,
@@ -365,8 +411,7 @@ TEST_CASE("MCP pulp_audio_model_list returns the structured tool-payload envelop
 // check is cheap, deterministic, and proves the mapping is intact.
 TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
           "[mcp][tools][issue-1997]") {
-    auto src_path = std::filesystem::path(__FILE__).parent_path().parent_path()
-                    / "tools" / "mcp" / "pulp_mcp.cpp";
+    auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
     REQUIRE(std::filesystem::exists(src_path));
 
     std::ifstream in(src_path);
@@ -483,8 +528,7 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
     // Read the active repo's CMakeLists.txt and verify the parser hits
     // a sane semver triple. This is the path resolve_project_sdk_version
     // uses in source-tree mode.
-    auto cmake_path = std::filesystem::path(__FILE__).parent_path().parent_path()
-                      / "CMakeLists.txt";
+    auto cmake_path = repo_root_path() / "CMakeLists.txt";
     REQUIRE(std::filesystem::exists(cmake_path));
     std::ifstream in(cmake_path);
     std::stringstream buf;
@@ -604,8 +648,7 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
 // test_motion_inspector.cpp / test_motion_scrubber.cpp.
 TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
           "[mcp][tools][motion][issue-2153]") {
-    auto src_path = std::filesystem::path(__FILE__).parent_path().parent_path()
-                    / "tools" / "mcp" / "pulp_mcp.cpp";
+    auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
     REQUIRE(std::filesystem::exists(src_path));
 
     std::ifstream in(src_path);
