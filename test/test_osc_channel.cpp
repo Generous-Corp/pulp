@@ -4,9 +4,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace pulp::osc;
@@ -15,7 +17,7 @@ using namespace std::chrono_literals;
 namespace {
 
 template <typename Pred>
-bool wait_until(Pred pred, std::chrono::milliseconds budget = 2s) {
+bool wait_until(Pred pred, std::chrono::milliseconds budget = 5s) {
     auto deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
         if (pred()) return true;
@@ -24,12 +26,22 @@ bool wait_until(Pred pred, std::chrono::milliseconds budget = 2s) {
     return pred();
 }
 
+std::pair<uint16_t, uint16_t> loopback_port_pair(uint16_t offset) {
+    static std::atomic<uint16_t> counter{0};
+    const auto tick = static_cast<uint16_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
+    const auto n = static_cast<uint16_t>(counter.fetch_add(1));
+    const auto base = static_cast<uint16_t>(41000 + ((tick + offset + n * 2) % 1000) * 2);
+    return {base, static_cast<uint16_t>(base + 1)};
+}
+
 }  // namespace
 
 TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_channel]") {
     // Two channels pointed at each other on loopback.
-    auto a = OscChannel::open("127.0.0.1", 49901, 49902);
-    auto b = OscChannel::open("127.0.0.1", 49902, 49901);
+    const auto [a_port, b_port] = loopback_port_pair(1);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto b = OscChannel::open("127.0.0.1", b_port, a_port);
     if (!a || !b) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -70,7 +82,8 @@ TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_chann
 }
 
 TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]") {
-    auto a = OscChannel::open("127.0.0.1", 49911, 49912);
+    const auto [a_port, b_port] = loopback_port_pair(11);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -83,7 +96,8 @@ TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]
 }
 
 TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
-    auto a = OscChannel::open("127.0.0.1", 49913, 49914);
+    const auto [a_port, b_port] = loopback_port_pair(13);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -102,7 +116,8 @@ TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]")
 
 TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
           "[osc_channel][lifecycle]") {
-    auto a = OscChannel::open("127.0.0.1", 49915, 49916);
+    const auto [a_port, b_port] = loopback_port_pair(15);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -131,7 +146,8 @@ TEST_CASE("OscChannel routes close callbacks through custom executor",
         queued.push_back(std::move(fn));
     };
 
-    auto a = OscChannel::open("127.0.0.1", 49919, 49920, options);
+    const auto [a_port, b_port] = loopback_port_pair(19);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port, options);
     if (!a) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -149,8 +165,9 @@ TEST_CASE("OscChannel routes close callbacks through custom executor",
 
 TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
           "[osc_channel][raw]") {
-    auto a = OscChannel::open("127.0.0.1", 49917, 49918);
-    auto b = OscChannel::open("127.0.0.1", 49918, 49917);
+    const auto [a_port, b_port] = loopback_port_pair(17);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto b = OscChannel::open("127.0.0.1", b_port, a_port);
     if (!a || !b) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
@@ -197,8 +214,9 @@ TEST_CASE("OscChannel routes received messages through custom executor",
         queued.push_back(std::move(fn));
     };
 
-    auto a = OscChannel::open("127.0.0.1", 49921, 49922);
-    auto b = OscChannel::open("127.0.0.1", 49922, 49921, options);
+    const auto [a_port, b_port] = loopback_port_pair(21);
+    auto a = OscChannel::open("127.0.0.1", a_port, b_port);
+    auto b = OscChannel::open("127.0.0.1", b_port, a_port, options);
     if (!a || !b) {
         SUCCEED("could not open loopback UDP pair; skipping");
         return;
