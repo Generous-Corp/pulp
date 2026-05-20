@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0172b"></a>
+## [0.172.11] - 2026-05-19
+
+- refactor(test): P5-3 extract React-runtime parsers from test_design_import (2,182 → 1,356, -826)
+
 <a id="v01722"></a>
 ## [0.172.2] - 2026-05-19
 
