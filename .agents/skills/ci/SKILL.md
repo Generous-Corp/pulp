@@ -770,11 +770,17 @@ What it does:
 - Runs on `ubuntu-latest` — it only calls the GitHub API, no build.
   `permissions: actions: write` (required to cancel runs) + `contents: read`.
 - Pages through `actions/runs?status=in_progress` and `?status=queued`
-  via `gh api --paginate`, computes each run's age from `created_at`,
-  and cancels anything past the threshold via the `runs/<id>/cancel` API.
-- **Default thresholds: `in_progress` > 300 min (5h), `queued` > 480 min
-  (8h).** Deliberately conservative — Pulp's slowest legit workflow runs
-  ~90 min, so 5h/8h cannot catch a healthy run.
+  via `gh api --paginate` and cancels anything past the threshold via
+  the `runs/<id>/cancel` API.
+- **Age basis:** `in_progress` runs are aged from `run_started_at`
+  (execution start), **not** `created_at`. `created_at` also counts
+  queue time, so during a deep backlog a healthy run that queued for
+  hours then started recently would look "hung" and be wrongly
+  cancelled. `queued` runs never started, so `created_at` is their age.
+- **Default thresholds: `in_progress` > 240 min (4h of *execution*),
+  `queued` > 480 min (8h).** The slowest legit run — the cold nightly
+  full build — executes ~2h, so the 4h cutoff is a 2x margin; nothing
+  healthy is reaped.
 - Never cancels its own run (skips `${{ github.run_id }}`); a failed
   cancel on one run never aborts the rest of the sweep; a `concurrency`
   group prevents two reaper runs from overlapping.
@@ -784,9 +790,9 @@ What it does:
   summary history makes that visible.
 
 If a stuck PR run vanishes unexpectedly, check the reaper's recent runs:
-it cancels by age regardless of why a run wedged, so a genuinely slow
-(>5h) job would be cancelled too. Bump the threshold via
-`workflow_dispatch` if a one-off legitimately needs longer.
+it cancels by age regardless of why a run wedged, so a job that
+genuinely *executes* longer than 4h would be cancelled too. Bump the
+threshold via `workflow_dispatch` if a one-off legitimately needs longer.
 
 ## Prerequisites Check
 

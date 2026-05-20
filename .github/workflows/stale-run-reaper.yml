@@ -21,11 +21,17 @@ name: Stale run reaper
 # Logic:
 #   - Pages through `actions/runs?status=in_progress` and
 #     `?status=queued` via `gh api --paginate`.
-#   - For each run, computes age from `created_at`. `in_progress` runs
-#     older than IN_PROGRESS_MAX_MINUTES and `queued` runs older than
-#     QUEUED_MAX_MINUTES are cancelled via the runs/<id>/cancel API.
-#   - Thresholds are deliberately conservative: Pulp's slowest legit
-#     workflow runs ~90 min, so 5h / 8h cannot catch a healthy run.
+#   - `in_progress` runs are aged from `run_started_at` (execution
+#     start), NOT `created_at`. `created_at` also counts queue time, so
+#     a run that queued for hours then started recently would look
+#     "hung" and be wrongly cancelled. `queued` runs never started, so
+#     `created_at` IS their age.
+#   - `in_progress` runs older than IN_PROGRESS_MAX_MINUTES and
+#     `queued` runs older than QUEUED_MAX_MINUTES are cancelled via the
+#     runs/<id>/cancel API.
+#   - Thresholds are conservative: the slowest legit run (the cold
+#     nightly full build) executes ~2h, so the 4h in_progress cutoff
+#     is a 2x margin — nothing healthy is reaped.
 #   - Never cancels its own run (skips `${{ github.run_id }}`).
 #   - A failed cancel on one run (e.g. it just completed) never aborts
 #     the rest of the sweep.
@@ -41,9 +47,9 @@ on:
   workflow_dispatch:
     inputs:
       in_progress_max_minutes:
-        description: 'Cancel in_progress runs older than this many minutes'
+        description: 'Cancel in_progress runs whose execution has run longer than this many minutes'
         required: false
-        default: '300'
+        default: '240'
       queued_max_minutes:
         description: 'Cancel queued runs older than this many minutes'
         required: false
@@ -64,9 +70,11 @@ jobs:
 
     env:
       # Defaults, overridable by workflow_dispatch inputs. in_progress
-      # runs older than 5h are hung; queued runs older than 8h are
-      # orphaned. Conservative on purpose (slowest legit run ~90 min).
-      IN_PROGRESS_MAX_MINUTES: ${{ github.event.inputs.in_progress_max_minutes || '300' }}
+      # runs that have been EXECUTING (run_started_at) longer than 4h
+      # are hung; queued runs older than 8h are orphaned. The slowest
+      # legit run — the cold nightly full build — executes ~2h, so 4h
+      # is a safe 2x margin.
+      IN_PROGRESS_MAX_MINUTES: ${{ github.event.inputs.in_progress_max_minutes || '240' }}
       QUEUED_MAX_MINUTES: ${{ github.event.inputs.queued_max_minutes || '480' }}
       REPO: ${{ github.repository }}
       SELF_RUN_ID: ${{ github.run_id }}
@@ -96,7 +104,7 @@ jobs:
 
           # Scan one run status with one age threshold. Pages through
           # every run via `gh api --paginate`, emitting one TSV row per
-          # run (id, status, created_at, workflow name, branch).
+          # run (id, status, created_at, run_started_at, name, branch).
           scan_status() {
               local status="$1"
               local max_minutes="$2"
@@ -109,7 +117,7 @@ jobs:
                   gh api --paginate \
                       -H "Accept: application/vnd.github+json" \
                       "/repos/${repo}/actions/runs?status=${status}&per_page=100" \
-                      --jq '.workflow_runs[] | [(.id|tostring), .status, .created_at, .name, .head_branch] | @tsv' \
+                      --jq '.workflow_runs[] | [(.id|tostring), .status, .created_at, (.run_started_at // ""), .name, .head_branch] | @tsv' \
                       2>/dev/null || true
               )
 
@@ -118,7 +126,7 @@ jobs:
                   return 0
               fi
 
-              while IFS=$'\t' read -r run_id run_status created name branch; do
+              while IFS=$'\t' read -r run_id run_status created started name branch; do
                   [ -z "$run_id" ] && continue
                   scanned=$((scanned + 1))
 
@@ -127,18 +135,30 @@ jobs:
                       continue
                   fi
 
-                  # created_at -> epoch. GNU date first, Python fallback.
-                  local created_epoch
-                  created_epoch=$(date -u -d "${created}" +%s 2>/dev/null \
-                      || python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "${created}" \
+                  # Age basis. An in_progress run is aged from
+                  # run_started_at (when execution actually began) — NOT
+                  # created_at, which also counts queue time, so a run
+                  # that queued for hours then started recently is not
+                  # hung. A queued run never started, so created_at IS
+                  # its age. Fall back to created_at if run_started_at
+                  # is absent.
+                  local age_src="$created"
+                  if [ "$status" = "in_progress" ] && [ -n "$started" ]; then
+                      age_src="$started"
+                  fi
+
+                  # timestamp -> epoch. GNU date first, Python fallback.
+                  local age_epoch
+                  age_epoch=$(date -u -d "${age_src}" +%s 2>/dev/null \
+                      || python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "${age_src}" \
                       2>/dev/null || echo '')
 
-                  if [ -z "$created_epoch" ]; then
-                      echo "  skip ${run_id} (unparseable created_at '${created}')"
+                  if [ -z "$age_epoch" ]; then
+                      echo "  skip ${run_id} (unparseable timestamp '${age_src}')"
                       continue
                   fi
 
-                  local age_min=$(( (now_epoch - created_epoch) / 60 ))
+                  local age_min=$(( (now_epoch - age_epoch) / 60 ))
 
                   if [ "$age_min" -le "$max_minutes" ]; then
                       echo "  ok   ${run_id} '${name}' (${age_min} min, status ${run_status})"
