@@ -299,7 +299,7 @@ TEST_CASE("register_font_file resolves a custom family through Skia (#1150)",
                             SkFontStyle::kNormal_Width,
                             SkFontStyle::kUpright_Slant};
     auto bold_miss = pulp::canvas::match_registered_typeface(family,
-                                                              bold_normal);
+                                                             bold_normal);
     REQUIRE(bold_miss == nullptr);
 
     // Same guard on the slant axis: the registered face is Upright, so an

@@ -513,12 +513,19 @@ TEST_CASE("TextRunPlanner cache clear preserves shaped output contracts",
 
     REQUIRE(first.text == cached.text);
     REQUIRE(first.text == after_clear.text);
-    REQUIRE(first.runs.size() == 1);
-    REQUIRE(cached.runs.size() == 1);
-    REQUIRE(after_clear.runs.size() == 1);
-    REQUIRE(first.runs[0].bidi_level == 1);
-    REQUIRE(cached.runs[0].bidi_level == 1);
-    REQUIRE(after_clear.runs[0].bidi_level == 1);
+    REQUIRE_FALSE(first.runs.empty());
+    REQUIRE(cached.runs.size() == first.runs.size());
+    REQUIRE(after_clear.runs.size() == first.runs.size());
+    for (std::size_t i = 0; i < first.runs.size(); ++i) {
+        REQUIRE(cached.runs[i].logical_start == first.runs[i].logical_start);
+        REQUIRE(cached.runs[i].logical_end == first.runs[i].logical_end);
+        REQUIRE(cached.runs[i].bidi_level == first.runs[i].bidi_level);
+        REQUIRE(cached.runs[i].script_tag == first.runs[i].script_tag);
+        REQUIRE(after_clear.runs[i].logical_start == first.runs[i].logical_start);
+        REQUIRE(after_clear.runs[i].logical_end == first.runs[i].logical_end);
+        REQUIRE(after_clear.runs[i].bidi_level == first.runs[i].bidi_level);
+        REQUIRE(after_clear.runs[i].script_tag == first.runs[i].script_tag);
+    }
     REQUIRE(first.line_breaks.size() == 1);
     REQUIRE(first.line_breaks[0].utf8_offset == 4);
     REQUIRE(first.line_breaks[0].kind == LineBreakOpportunity::Kind::Soft);

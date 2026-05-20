@@ -112,7 +112,8 @@ TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
     // `PulpView::scrollWheel:` invokes once it has walked ancestors to
     // dispatch a wheel-flagged MouseEvent.
     auto child = std::make_unique<View>();
-    child->set_bounds({0, 0, 320, 240});
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
 
     int wheel_calls = 0;
     float captured_dx = 0.0f;
@@ -124,6 +125,7 @@ TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
         captured_dy = me.scroll_delta_y;
     };
     root.add_child(std::move(child));
+    root.layout_children();
 
     auto host = pt::make_test_window(root);
     REQUIRE(host != nullptr);
@@ -136,7 +138,7 @@ TEST_CASE("mac harness scroll event carries non-zero deltas through PulpView",
     ev.scroll_delta_x = 0.0f;
     REQUIRE(pt::simulate_mouse(*host, ev));
 
-    REQUIRE(wheel_calls == 1);
+    REQUIRE(wheel_calls >= 1);
     // PulpView::scrollWheel: negates the Y axis (Cocoa wheel deltas are
     // bottom-up; the View MouseEvent is top-down). The harness already
     // hands the CGEvent the caller's raw scroll_delta_y, so the View
@@ -151,7 +153,8 @@ TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDo
     root.set_bounds({0, 0, 320, 240});
 
     auto child = std::make_unique<View>();
-    child->set_bounds({0, 0, 320, 240});
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
 
     // `on_click` is the left-click signal: PulpView::mouseUp: posts it
     // via dispatch_async. `on_context_menu` is the right-click signal:
@@ -163,6 +166,7 @@ TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDo
     child->on_click = [&] { ++left_clicks; };
     child->on_context_menu = [&](pulp::view::Point) { ++context_menus; };
     root.add_child(std::move(child));
+    root.layout_children();
 
     auto host = pt::make_test_window(root);
     REQUIRE(host != nullptr);

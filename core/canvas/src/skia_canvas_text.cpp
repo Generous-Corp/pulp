@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 #ifdef PULP_HAS_SKIA
@@ -201,10 +202,39 @@ PreparedParagraph make_paragraph(const std::string& text,
     auto paragraph = pb->Build();
     if (!paragraph) return result;
     paragraph->layout(SK_ScalarInfinity);
-    result.advance = paragraph->getMaxIntrinsicWidth();
+    // With an infinite layout width SkParagraph produces a single line;
+    // `getLongestLine()` is therefore the paint advance. Intrinsic width
+    // can under-report mixed emoji/default runs on newer Skia builds,
+    // which breaks Canvas2D textAlign because paint still uses the full
+    // line width.
+    result.advance = paragraph->getLongestLine();
+    if (result.advance <= 0.0f) {
+        result.advance = paragraph->getMaxIntrinsicWidth();
+    }
     result.alphabetic_baseline = paragraph->getAlphabeticBaseline();
     result.paragraph = std::move(paragraph);
     return result;
+}
+
+bool contains_variation_selector(std::string_view text) {
+    // U+FE0E forces text presentation and U+FE0F forces emoji
+    // presentation. Both affect shaping, so measurement must follow the
+    // SkParagraph path that fill_text uses even when FE0E demotes an
+    // emoji-default codepoint to the default font run.
+    constexpr std::string_view kTextPresentation = "\xEF\xB8\x8E";
+    constexpr std::string_view kEmojiPresentation = "\xEF\xB8\x8F";
+    return text.find(kTextPresentation) != std::string_view::npos
+        || text.find(kEmojiPresentation) != std::string_view::npos;
+}
+
+bool needs_paragraph_for_text_metrics(
+    std::string_view text,
+    const std::vector<Canvas::FontFeature>& features,
+    float letter_spacing) {
+    return !features.empty()
+        || letter_spacing != 0.0f
+        || pulp::canvas::contains_emoji(text)
+        || contains_variation_selector(text);
 }
 
 } // namespace
@@ -468,14 +498,17 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // and shape each separately. ASCII text bypasses the scan; it's
     // virtually always covered by any Latin typeface.
     //
-    // pulp #2163 — for letter_spacing_ == 0 only, route missing-glyph
-    // text through SkShaper-based per-run fallback for best kerning /
-    // ligature quality. Letter-spaced text falls through to the
-    // unified per-glyph builder below, which handles BOTH missing-glyph
-    // fallback AND letter-spacing in one path — that's the path the
-    // iMX8 / READY header labels both take, so they share baseline
-    // placement.
+    const bool needs_paragraph =
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+
+    // pulp #2163 — for plain letter_spacing_ == 0 text only, route
+    // missing-glyph text through SkShaper-based per-run fallback for
+    // best kerning / ligature quality. Emoji, variation selectors,
+    // font features, and tracked text must use SkParagraph instead:
+    // that path preserves cluster shaping and reports the advance used
+    // for Canvas2D textAlign.
     if (letter_spacing_ == 0.0f
+        && !needs_paragraph
         && !active_typeface_covers_text(font.getTypeface(), text)) {
         const bool ltr = (direction_ != TextDirection::rtl);
         shape_with_glyph_fallback(canvas_, text, x, y, font, paint,
@@ -760,9 +793,7 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
     const bool needs_paragraph =
-        !font_features_.empty()
-        || letter_spacing_ != 0.0f
-        || pulp::canvas::contains_emoji(text);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -919,9 +950,7 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
     const bool needs_paragraph =
-        !font_features_.empty()
-        || letter_spacing_ != 0.0f
-        || pulp::canvas::contains_emoji(text);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -993,9 +1022,7 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
     const bool needs_paragraph =
-        !font_features_.empty()
-        || letter_spacing_ != 0.0f
-        || pulp::canvas::contains_emoji(text);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
