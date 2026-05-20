@@ -1894,6 +1894,18 @@ The `resolve-provider` job in `build.yml` decides per-run where each
 - **Operator override.** A `workflow_dispatch` `macos_runner_selector_json`
   input always wins.
 
+### Skia provisioning on the macOS leg
+
+`build.yml` runs a **"Fetch prebuilt Skia (macOS)"** step before
+Configure. The Skia `.a` libraries are LFS-declared but not committed,
+so a fresh checkout has only pointer files — without real Skia,
+`FindSkia.cmake` sets `PULP_HAS_SKIA=FALSE` and any examples-ON / GPU
+build fails the Configure gate (`examples/design-tool`). The step runs
+`tools/scripts/fetch_skia_for_release.py darwin-arm64` (pinned,
+sha256-verified asset from `tools/deps/manifest.json`). It is guarded —
+it re-fetches only when the real `libskia.a` is absent, so on a
+self-hosted runner (`clean: false`) it persists between builds.
+
 The overflow target is `OVERFLOW_MACOS_RUNS_ON_JSON`, which defaults to
 `["macos-15"]`. The repo variable `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`
 overrides it: set it to a different runs-on selector to change the
