@@ -103,6 +103,10 @@ def read_manifest_pin(path: Path = MANIFEST_PATH) -> Dict[str, str]:
         raise CheckError(f"{path} Skia entry has no 'determinism' block")
 
     assets = determinism.get("release_assets", {})
+    if not isinstance(assets, dict):
+        raise CheckError(
+            f"{path} Skia determinism 'release_assets' is not an object"
+        )
     asset = assets.get(DOCKER_PLATFORM)
     if not isinstance(asset, dict):
         raise CheckError(

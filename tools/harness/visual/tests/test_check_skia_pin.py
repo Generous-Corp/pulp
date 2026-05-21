@@ -134,6 +134,20 @@ class CheckSkiaPinTests(unittest.TestCase):
         with self.assertRaises(check_skia_pin.CheckError):
             check_skia_pin.read_manifest_pin(manifest_path)
 
+    def test_non_dict_release_assets_raises_check_error(self) -> None:
+        # A manifest where determinism.release_assets is accidentally a
+        # non-object (e.g. a list) must surface as a CheckError → exit 2,
+        # not an uncaught AttributeError from calling .get on it.
+        import copy
+
+        manifest = copy.deepcopy(_MANIFEST_TEMPLATE)
+        manifest["dependencies"][0]["determinism"]["release_assets"] = []
+        manifest_path = _write_manifest(
+            Path(self._tmpdir.name) / "manifest.json", manifest
+        )
+        with self.assertRaises(check_skia_pin.CheckError):
+            check_skia_pin.read_manifest_pin(manifest_path)
+
 
 if __name__ == "__main__":
     unittest.main()
