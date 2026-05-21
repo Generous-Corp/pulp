@@ -148,6 +148,10 @@ public:
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
+    // Registers or replaces a custom type. If existing nodes use the same
+    // `(type_id, version)`, the live snapshot is invalidated so prepare()
+    // can rebuild with the matching process callback. Shape mismatches keep
+    // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
     const CustomNodeType* custom_node_type(std::string_view type_id,

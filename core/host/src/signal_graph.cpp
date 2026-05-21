@@ -54,6 +54,12 @@ bool is_valid_custom_node_type(const CustomNodeType& type) {
         && type.num_output_ports >= 0;
 }
 
+bool custom_type_matches_node_shape(const CustomNodeType& type,
+                                    const GraphNode& node) {
+    return type.num_input_ports == node.num_input_ports
+        && type.num_output_ports == node.num_output_ports;
+}
+
 std::string custom_node_key(std::string_view type_id, int version) {
     std::string key(type_id);
     key.push_back('\x1f');
@@ -175,9 +181,16 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     if (!is_valid_custom_node_type(type)) return false;
+    const bool affects_existing_nodes = std::any_of(
+        nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
+            return node.type == NodeType::Custom
+                && node.custom_type_id == type.type_id
+                && node.custom_type_version == type.version;
+        });
     if (type.default_name.empty()) type.default_name = type.type_id;
     const auto key = custom_node_key(type.type_id, type.version);
     custom_node_types_[key] = std::move(type);
+    if (affects_existing_nodes) invalidate_live_();
     return true;
 }
 
@@ -606,7 +619,8 @@ SignalGraph::compile_(double /*sample_rate*/, int max_block_size) {
         if (n.type == NodeType::Custom) {
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
-                type && type->process) {
+                type && type->process
+                && custom_type_matches_node_shape(*type, n)) {
                 cg->custom_processors[n.id] = type->process;
             }
         }

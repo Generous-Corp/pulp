@@ -146,10 +146,11 @@ predictable output, no MIDI.
   (`type_id`, `version`, port counts, default name, optional process
   callback), then instantiated with `add_custom_node(type_id)` or
   `add_custom_node(type_id, version)`. `GraphSerializer` resolves exact
-  `(type_id, version)` matches, preserves unresolved custom identities as
-  placeholder `NodeType::Custom` nodes, and reports them in
+  `(type_id, version)` matches with the saved port shape, preserves unresolved
+  custom identities as placeholder `NodeType::Custom` nodes, and reports them in
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
-  strings to a built-in type.
+  strings to a built-in type. Runtime callbacks are attached only when the
+  registered version and shape match the node.
 
 ## Common tripwires
 

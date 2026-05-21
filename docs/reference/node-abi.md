@@ -51,7 +51,9 @@ field so both declaration styles behave the same.
 `CustomNodeType`. Register a type on the graph with a stable `type_id`, a
 positive integer `version`, its input/output port shape, and an optional
 process callback, then instantiate it with `add_custom_node(type_id)` or
-`add_custom_node(type_id, version)`.
+`add_custom_node(type_id, version)`. A callback is attached only when the
+registered `(type_id, version)` and port shape match the node; mismatched or
+unresolved nodes use placeholder passthrough behavior.
 
 The node type enum only appends `NodeType::Custom`; built-in enum values stay
 stable. Serialized graphs store the custom `type_id` and `version`, and loads

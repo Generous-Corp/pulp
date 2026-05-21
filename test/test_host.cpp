@@ -593,6 +593,95 @@ TEST_CASE("SignalGraph custom node registry keeps versions distinct",
     REQUIRE(graph.node(node_v2)->num_input_ports == 2);
 }
 
+TEST_CASE("SignalGraph custom node processors require matching shapes",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto custom = graph.add_unresolved_custom_node(
+        "pulp.test.shape-guard", 1, 1, 1, "Shape Guard");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+
+    bool callback_called = false;
+    CustomNodeType mismatched_type;
+    mismatched_type.type_id = "pulp.test.shape-guard";
+    mismatched_type.version = 1;
+    mismatched_type.num_input_ports = 2;
+    mismatched_type.num_output_ports = 1;
+    mismatched_type.default_name = "Shape Guard";
+    mismatched_type.process =
+        [&callback_called](pulp::audio::BufferView<float>& output,
+                           const pulp::audio::BufferView<const float>&,
+                           int num_samples) {
+            callback_called = true;
+            for (int i = 0; i < num_samples; ++i) {
+                output.channel_ptr(0)[i] = 99.0f;
+            }
+        };
+    REQUIRE(graph.register_custom_node_type(std::move(mismatched_type)));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_samples[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_samples[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    const float* in_ptrs[1] = {in_samples};
+    float* out_ptrs[1] = {out_samples};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+    graph.process(out_view, in_view, 4);
+
+    REQUIRE_FALSE(callback_called);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i]);
+}
+
+TEST_CASE("SignalGraph custom node registrations invalidate matching snapshots",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto custom = graph.add_unresolved_custom_node(
+        "pulp.test.live-registration", 1, 1, 1, "Live Registration");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_samples[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_samples[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    const float* in_ptrs[1] = {in_samples};
+    float* out_ptrs[1] = {out_samples};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i]);
+
+    CustomNodeType registered_type;
+    registered_type.type_id = "pulp.test.live-registration";
+    registered_type.version = 1;
+    registered_type.num_input_ports = 1;
+    registered_type.num_output_ports = 1;
+    registered_type.default_name = "Live Registration";
+    registered_type.process = [](pulp::audio::BufferView<float>& output,
+                                 const pulp::audio::BufferView<const float>& input,
+                                 int num_samples) {
+        for (int i = 0; i < num_samples; ++i) {
+            output.channel_ptr(0)[i] = input.channel_ptr(0)[i] * 3.0f;
+        }
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(registered_type)));
+
+    std::fill(out_samples, out_samples + 4, -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (float sample : out_samples) REQUIRE(sample == 0.0f);
+
+    REQUIRE(graph.prepare(48000.0, 4));
+    std::fill(out_samples, out_samples + 4, -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i] * 3.0f);
+}
+
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
           "[host][graph][coverage][phase3]") {
     SignalGraph graph;
