@@ -12,6 +12,7 @@ target_sources(pulp-render PRIVATE
     src/gpu_compute.cpp
     src/gpu_timestamps.cpp
     src/skia_surface.cpp
+    src/skp_capture.cpp
     src/render_loop.cpp
     src/draco_decoder.cpp
     src/ktx2_decoder.cpp

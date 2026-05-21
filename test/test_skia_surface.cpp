@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/skp_capture.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include <cstring>
+#include <filesystem>
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkCanvas.h"
@@ -356,6 +358,200 @@ TEST_CASE("SkPicture with embedded image needs fImageProc to round-trip pixels",
         // actually proves fImageProc preserved the pixels.
         REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
     }
+}
+
+#endif  // PULP_HAS_SKIA
+
+// ---------------------------------------------------------------------------
+// SkpFrameCapture — Phase 6.4 `.skp` frame-capture API (core/render)
+//
+// These exercise the public capture surface in
+// core/render/include/pulp/render/skp_capture.hpp: record a frame's
+// draw ops through the capture's pulp::canvas::Canvas, serialize a
+// `.skp` artifact, and prove the round trip — including the load-bearing
+// embedded-image-pixel assertion the spike pinned (cullRect equality
+// alone is insufficient). The capture path is GPU-backend-agnostic and
+// needs no live GPU context, so these run on the CI matrix even without
+// a GPU adapter.
+// ---------------------------------------------------------------------------
+
+#ifdef PULP_HAS_SKIA
+
+namespace {
+
+// Deserialize-side image proc — the replay-side half of the contract
+// SkpFrameCapture's fImageProc establishes. Decodes the PNG payload
+// SkpFrameCapture wrote back into an SkImage.
+SkDeserialProcs skp_deserial_procs() {
+    SkDeserialProcs procs;
+    procs.fImageProc = [](const void* data, size_t length,
+                          void*) -> sk_sp<SkImage> {
+        return SkImages::DeferredFromEncodedData(
+            SkData::MakeWithCopy(data, length));
+    };
+    return procs;
+}
+
+// A tiny solid-color PNG, the kind a real frame embeds via the image
+// atlas. Encoded here so draw_image_from_data() has a decodable source.
+sk_sp<SkData> solid_png(int size, SkColor color) {
+    SkImageInfo info = SkImageInfo::MakeN32Premul(size, size);
+    sk_sp<SkSurface> raster = SkSurfaces::Raster(info);
+    REQUIRE(raster != nullptr);
+    raster->getCanvas()->clear(color);
+    sk_sp<SkImage> image = raster->makeImageSnapshot();
+    REQUIRE(image != nullptr);
+    return SkPngEncoder::Encode(nullptr, image.get(), SkPngEncoder::Options{});
+}
+
+}  // namespace
+
+TEST_CASE("SkpFrameCapture records vector ops into a round-tripping .skp",
+          "[render][skia][skp]") {
+    pulp::render::SkpFrameCapture capture(64, 48);
+    REQUIRE(capture.available());
+    REQUIRE(pulp::render::skp_capture_supported());
+
+    pulp::canvas::Canvas* c = capture.canvas();
+    REQUIRE(c != nullptr);
+    c->set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0));
+    c->fill_rect(4.0f, 4.0f, 40.0f, 24.0f);
+    c->set_fill_color(pulp::canvas::Color::rgba8(0, 0, 255));
+    c->fill_rect(20.0f, 20.0f, 24.0f, 16.0f);
+
+    std::string blob;
+    auto result = capture.finish_to_memory(blob);
+    REQUIRE(result.ok);
+    REQUIRE(result.bytes_written == blob.size());
+    REQUIRE(result.op_count > 0);
+
+    // The blob carries the documented .skp "skiapict" signature.
+    REQUIRE(blob.size() >= 8);
+    REQUIRE(std::memcmp(blob.data(), "skiapict", 8) == 0);
+
+    // Deserialize and assert the recording survived.
+    sk_sp<SkPicture> restored =
+        SkPicture::MakeFromData(blob.data(), blob.size());
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->cullRect() == SkRect::MakeWH(64.0f, 48.0f));
+    REQUIRE(restored->approximateOpCount() > 0);
+
+    // The capture is consumed: canvas() is null, a second finish fails.
+    REQUIRE(capture.canvas() == nullptr);
+    REQUIRE_FALSE(capture.available());
+    std::string second;
+    REQUIRE_FALSE(capture.finish_to_memory(second).ok);
+}
+
+TEST_CASE("SkpFrameCapture writes a loadable .skp file", "[render][skia][skp]") {
+    const std::string path =
+        (std::filesystem::temp_directory_path() /
+         "pulp-skp-capture-test.skp").string();
+    std::filesystem::remove(path);
+
+    auto result = pulp::render::capture_skp_to_file(
+        32, 32, path, [](pulp::canvas::Canvas& c) {
+            c.set_fill_color(pulp::canvas::Color::rgba8(0, 255, 0));
+            c.fill_rect(0.0f, 0.0f, 32.0f, 32.0f);
+        });
+    REQUIRE(result.ok);
+    REQUIRE(result.path == path);
+    REQUIRE(result.bytes_written > 0);
+    REQUIRE(std::filesystem::exists(path));
+    REQUIRE(std::filesystem::file_size(path) == result.bytes_written);
+
+    // Re-read the file off disk and confirm skiadebugger could load it.
+    SkFILEStream in(path.c_str());
+    REQUIRE(in.isValid());
+    sk_sp<SkPicture> restored = SkPicture::MakeFromStream(&in);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->cullRect() == SkRect::MakeWH(32.0f, 32.0f));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
+          "[render][skia][skp]") {
+    // The load-bearing Phase 6.4 assertion: a frame that embeds an image
+    // must survive the .skp round trip with its pixels intact.
+    // SkpFrameCapture sets SkSerialProcs::fImageProc (PNG encode); if it
+    // did not, the embedded image would deserialize to null and the
+    // replay would be blank. Replay + pixel-sample is what proves the
+    // payload survived — cullRect equality alone would still pass.
+    sk_sp<SkData> png = solid_png(8, SK_ColorGREEN);
+    REQUIRE(png != nullptr);
+
+    pulp::render::SkpFrameCapture capture(8, 8);
+    REQUIRE(capture.available());
+    REQUIRE(capture.canvas()->draw_image_from_data(
+        static_cast<const uint8_t*>(png->data()), png->size(),
+        0.0f, 0.0f, 8.0f, 8.0f));
+
+    std::string blob;
+    auto result = capture.finish_to_memory(blob);
+    REQUIRE(result.ok);
+    REQUIRE(result.op_count > 0);
+
+    // Deserialize WITH the matching fImageProc and replay into a fresh
+    // raster surface pre-cleared to black; sample the top-left pixel.
+    SkDeserialProcs dprocs = skp_deserial_procs();
+    sk_sp<SkPicture> restored =
+        SkPicture::MakeFromData(blob.data(), blob.size(), &dprocs);
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->cullRect() == SkRect::MakeWH(8.0f, 8.0f));
+
+    SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
+    REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
+}
+
+TEST_CASE("SkpFrameCapture degrades gracefully on invalid input",
+          "[render][skia][skp]") {
+    // Non-positive dimensions yield an unavailable capture — no canvas,
+    // no file, a clear reason. Never a crash or a partial .skp.
+    pulp::render::SkpFrameCapture bad(0, 32);
+    REQUIRE_FALSE(bad.available());
+    REQUIRE(bad.canvas() == nullptr);
+
+    std::string blob;
+    auto mem = bad.finish_to_memory(blob);
+    REQUIRE_FALSE(mem.ok);
+    REQUIRE_FALSE(mem.reason.empty());
+    REQUIRE(blob.empty());
+
+    auto file = pulp::render::capture_skp_to_file(
+        -1, -1, "/tmp/should-not-be-written.skp",
+        [](pulp::canvas::Canvas&) {});
+    REQUIRE_FALSE(file.ok);
+    REQUIRE_FALSE(file.reason.empty());
+
+    // Empty output path is rejected without writing.
+    pulp::render::SkpFrameCapture ok(16, 16);
+    REQUIRE(ok.available());
+    auto empty_path = ok.finish_to_file("");
+    REQUIRE_FALSE(empty_path.ok);
+    REQUIRE_FALSE(empty_path.reason.empty());
+}
+
+#else  // !PULP_HAS_SKIA
+
+TEST_CASE("SkpFrameCapture is unavailable without Skia", "[render][skia][skp]") {
+    // The Skia-absent build must still link and degrade gracefully:
+    // unavailable capture, null canvas, failed result with a reason.
+    REQUIRE_FALSE(pulp::render::skp_capture_supported());
+
+    pulp::render::SkpFrameCapture capture(64, 48);
+    REQUIRE_FALSE(capture.available());
+    REQUIRE(capture.canvas() == nullptr);
+
+    std::string blob;
+    auto mem = capture.finish_to_memory(blob);
+    REQUIRE_FALSE(mem.ok);
+    REQUIRE_FALSE(mem.reason.empty());
+
+    auto file = pulp::render::capture_skp_to_file(
+        64, 48, "/tmp/unused.skp", [](pulp::canvas::Canvas&) {});
+    REQUIRE_FALSE(file.ok);
+    REQUIRE_FALSE(file.reason.empty());
 }
 
 #endif  // PULP_HAS_SKIA
