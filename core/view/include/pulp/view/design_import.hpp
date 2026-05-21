@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <optional>
 #include <map>
@@ -17,6 +19,8 @@
 #include <variant>
 
 namespace pulp::view {
+
+class View;
 
 // ── Design source types ─────────────────────────────────────────────────
 
@@ -274,6 +278,8 @@ struct IRAssetRef {
 struct IRAssetManifest {
     std::vector<IRAssetRef> assets;
     int version = 1;
+
+    const IRAssetRef* resolve(std::string_view asset_id) const;
 };
 
 struct IRTokenIdentity {
@@ -344,6 +350,17 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
 /// Rebuild and store ir.asset_manifest from the current tree.
 void refresh_design_ir_asset_manifest(DesignIR& ir,
                                       const DesignIrAssetOptions& options = {});
+
+struct NativeMaterializeOptions {
+    bool apply_token_theme = true;
+    bool preview_mode = false;
+    std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
+};
+
+std::unique_ptr<View> build_native_view_tree(
+    const DesignIR& ir,
+    const IRAssetManifest& manifest,
+    const NativeMaterializeOptions& options = {});
 
 struct SnapshotDynamicApiScan {
     std::vector<std::string> tokens;

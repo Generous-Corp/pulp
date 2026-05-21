@@ -86,6 +86,17 @@ DesignIR JSON, keep the embedded `assetManifest` fallback intact; do not
 iterate `IRNode.attributes` directly when diagnostic order matters because it
 is unordered. Use sorted attribute keys for stable output.
 
+The `baked-native` materializer is the direct View-tree lane:
+`build_native_view_tree(const DesignIR&, const IRAssetManifest&,
+const NativeMaterializeOptions&)` is public in
+`<pulp/view/design_import.hpp>`. It calls the shared native resolver, returns a
+detached `std::unique_ptr<View>` subtree, and catches API-boundary failures into
+diagnostics instead of throwing. Keep image assets routed through
+`IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
+from IR attributes. The materialization call site itself should not run JS, but
+do not market this as "no JS engine" globally because live React/parity lanes
+still use the JS runtime.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:

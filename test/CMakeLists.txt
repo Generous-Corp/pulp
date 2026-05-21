@@ -2396,6 +2396,11 @@ target_link_libraries(pulp-test-design-import-native-common PRIVATE pulp::view C
 catch_discover_tests(pulp-test-design-import-native-common
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-design-import-native-materializer test_design_import_native_materializer.cpp)
+target_link_libraries(pulp-test-design-import-native-materializer PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-native-materializer
+    PROPERTIES LABELS "parser-import")
+
 # P5-3 follow-up — W3C Design Tokens cluster extracted from
 # test_design_import.cpp. Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math
