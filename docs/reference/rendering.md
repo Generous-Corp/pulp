@@ -98,6 +98,49 @@ style.line_thickness = 2.0f;
 canvas.draw_waveform(samples, count, x, y, w, h, style);
 ```
 
+## GPU Render Time
+
+Pulp can report **true GPU-side render time** alongside the CPU wall-time the
+inspector has always shown. It is exposed on the Skia surface:
+
+```cpp
+auto* skia = /* pulp::render::SkiaSurface* */;
+if (skia->gpu_render_timing_available()) {
+    double ms = skia->gpu_render_time_ms();  // 0 until the first sample lands
+}
+```
+
+**This is whole-recording GPU render time, not per-pass attribution.** That
+distinction is deliberate and load-bearing:
+
+- The number comes from Skia Graphite's own GPU-stats API
+  (`InsertRecordingInfo::fGpuStatsFlags = kElapsedTime`), which measures the GPU
+  elapsed time of the *recording Pulp submits each frame* — not Pulp's logical
+  render passes (background / content / effects / overlay / post). Skia Graphite
+  owns the Dawn command encoder and every render-pass descriptor, so Pulp cannot
+  inject per-pass `timestampWrites`. True per-pass GPU attribution would require
+  Skia to expose that granularity (or Pulp to own more of the render graph).
+- WebGPU timestamp queries *can* measure command timing, but the API in use here
+  surfaces recording-level elapsed time, not detailed per-pass attribution. See
+  the WebGPU/Chromium discussion of this exact distinction:
+  <https://groups.google.com/a/chromium.org/g/blink-dev/c/dtYJ0MQYMlU>.
+- On the **Metal** backend (Apple platforms) Skia disables Dawn command-buffer
+  timestamps and falls back to render/compute-pass timestamp writes, so the
+  measurement spans first-pass-begin → last-pass-end of the recording and
+  **excludes** non-pass work (texture uploads/copies) and `Present()`.
+
+**Availability and honesty rules:**
+
+- Requires the Dawn `timestamp-query` feature. Pulp requests it only when the
+  adapter advertises it; otherwise GPU render time is reported **unavailable**.
+- `gpu_render_timing_available()` reflects device/feature support; an
+  unsupported platform reports unavailable rather than a fake `0`.
+- A failed sample or a zero elapsed time is treated as "no sample" — the last
+  good value is retained, never overwritten with a misleading `0`.
+
+Design rationale and the per-pass feasibility analysis live in
+`planning/2026-05-21-gpu-timestamp-readback-proposal.md`.
+
 ## Gradients
 
 ```cpp

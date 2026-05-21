@@ -67,6 +67,20 @@ public:
     /// read back any GPU-texture-backed embedded images instead of
     /// silently dropping them. The pointer is owned by the SkiaSurface.
     virtual skgpu::graphite::Context* graphite_context() const = 0;
+
+    /// Phase 6.5 (re-scoped) — most recent whole-recording GPU *render* time
+    /// in milliseconds, sampled from Skia Graphite's GpuStats(kElapsedTime)
+    /// finished-with-stats callback. Returns 0 until the first sample lands or
+    /// when timing is unavailable. This is render-recording time, not total
+    /// frame time (on the Metal fallback it excludes non-pass uploads/copies
+    /// and present). See `gpu_render_time.hpp` and
+    /// `planning/2026-05-21-gpu-timestamp-readback-proposal.md`.
+    virtual double gpu_render_time_ms() const = 0;
+
+    /// Whether GPU render timing is available this run — the adapter offered
+    /// `timestamp-query` AND Graphite advertises `kElapsedTime`. When false the
+    /// inspector should show the honest "GPU timing unavailable".
+    virtual bool gpu_render_timing_available() const = 0;
 };
 
 } // namespace pulp::render

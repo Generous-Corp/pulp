@@ -1957,6 +1957,16 @@ catch_discover_tests(pulp-test-gpu-timestamps
     PROPERTIES
         LABELS coverage)
 
+add_executable(pulp-test-gpu-render-time
+    test_gpu_render_time.cpp)
+target_include_directories(pulp-test-gpu-render-time PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-gpu-render-time PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-gpu-render-time
+    PROPERTIES
+        LABELS coverage)
+
 add_executable(pulp-test-render-loop
     test_render_loop.cpp
     ${CMAKE_SOURCE_DIR}/core/render/src/render_loop.cpp)
