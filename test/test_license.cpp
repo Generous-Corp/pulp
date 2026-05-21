@@ -609,14 +609,12 @@ TEST_CASE("LicenseValidator validate_and_parse keeps first dotted payload split"
     REQUIRE(info->product_id == "PulpDot");
 }
 
-TEST_CASE("LicenseValidator validate_and_parse ignores malformed optional integers",
+TEST_CASE("LicenseValidator validate_and_parse rejects partial optional integers",
           "[crypto][license][coverage][phase3-large]") {
     LicenseValidator validator;
     std::string payload = "{\"product_id\":\"PulpMini\",\"issued\":123junk,\"expiry\":not-a-number}";
     auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
-    REQUIRE(info.has_value());
-    REQUIRE(info->issued_timestamp == 0);
-    REQUIRE(info->expiry_timestamp == 0);
+    REQUIRE_FALSE(info.has_value());
 }
 
 TEST_CASE("LicenseValidator validate_and_parse accepts whitespace after optional integers",

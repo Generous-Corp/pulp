@@ -941,7 +941,7 @@ TEST_CASE("StateStore unknown modulation and reset calls are inert",
     REQUIRE_THAT(store.get_value(3), WithinAbs(0.25f, 1e-6f));
 }
 
-TEST_CASE("StateStore deserialize keeps complete prefix on short declared count",
+TEST_CASE("StateStore deserialize rejects short declared count payloads",
           "[state][serialize][coverage][phase3-large]") {
     StateStore source;
     auto p1 = make_param_info(1, "One", "", {0.0f, 1.0f, 0.0f});
@@ -955,9 +955,10 @@ TEST_CASE("StateStore deserialize keeps complete prefix on short declared count"
 
     StateStore target;
     target.add_parameter(p1);
+    target.set_value(1, 0.25f);
 
-    REQUIRE(target.deserialize(data));
-    REQUIRE_THAT(target.get_value(1), WithinAbs(0.75, 0.001));
+    REQUIRE_FALSE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(1), WithinAbs(0.25, 0.001));
 }
 
 TEST_CASE("StateStore empty serialization round-trips as a minimum frame",
@@ -977,7 +978,7 @@ TEST_CASE("StateStore empty serialization round-trips as a minimum frame",
                                                               data.size() - 1}));
 }
 
-TEST_CASE("StateStore deserialize ignores valid trailing payload extensions",
+TEST_CASE("StateStore deserialize rejects trailing payload extensions",
           "[state][serialize][coverage][phase3-large]") {
     StateStore source;
     auto p1 = make_param_info(1, "One", "", {0.0f, 1.0f, 0.0f});
@@ -995,8 +996,8 @@ TEST_CASE("StateStore deserialize ignores valid trailing payload extensions",
     target.add_parameter(p1);
     target.set_value(1, 0.25f);
 
-    REQUIRE(target.deserialize(data));
-    REQUIRE_THAT(target.get_value(1), WithinAbs(0.5, 0.001));
+    REQUIRE_FALSE(target.deserialize(data));
+    REQUIRE_THAT(target.get_value(1), WithinAbs(0.25, 0.001));
 }
 
 // ─── ListenerToken / thread routing (Slice 1) ───────────────────────────────

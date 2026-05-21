@@ -89,7 +89,6 @@ Analytics& Analytics::instance() {
 
 void Analytics::add_destination(std::unique_ptr<AnalyticsDestination> dest) {
     if (!dest) return;
-
     std::lock_guard<std::mutex> lock(mutex_);
     destinations_.push_back(std::move(dest));
 }

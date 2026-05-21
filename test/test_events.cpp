@@ -634,7 +634,7 @@ TEST_CASE("ActionBroadcaster skips empty callbacks",
     REQUIRE(seen.size() == 1);
 }
 
-TEST_CASE("ActionBroadcaster snapshots callbacks during dispatch",
+TEST_CASE("ActionBroadcaster skips callbacks removed during dispatch",
           "[events][async_updater][action_broadcaster][codecov]") {
     ActionBroadcaster broadcaster;
     std::vector<std::string> seen;
@@ -656,11 +656,11 @@ TEST_CASE("ActionBroadcaster snapshots callbacks during dispatch",
     });
 
     broadcaster.send_action("refresh");
-    REQUIRE(seen == std::vector<std::string>{"first:refresh", "second:refresh"});
+    REQUIRE(seen == std::vector<std::string>{"first:refresh"});
 
     broadcaster.send_action("again");
     REQUIRE(seen == std::vector<std::string>{
-        "first:refresh", "second:refresh", "added:again"});
+        "first:refresh", "added:again"});
 
     broadcaster.remove_listener(added_id);
 }

@@ -150,7 +150,7 @@ bool write_wav_file(const std::string& path, const AudioFileData& data) {
         auto writer = wav.createWriter(std::filesystem::path(path), props);
         if (!writer) return false;
 
-        uint32_t frame_count = static_cast<uint32_t>(frames);
+        uint32_t frame_count = static_cast<uint32_t>(data.num_frames());
         choc::buffer::ChannelArrayBuffer<float> buffer(data.num_channels(), frame_count);
 
         for (uint32_t ch = 0; ch < data.num_channels(); ++ch) {
