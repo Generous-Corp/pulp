@@ -15,14 +15,12 @@
 #include <pulp/runtime/range.hpp>
 #include <pulp/runtime/scope_guard.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
-#include <pulp/runtime/socket.hpp>
 #include <pulp/runtime/stream.hpp>
 #include <pulp/runtime/text_diff.hpp>
 #include "../external/cpp-httplib/httplib.h"
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
 #include <atomic>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -72,55 +70,56 @@ struct OneShotHttpResponse {
     bool downloaded = false;
 };
 
+bool wait_until_http_ready(int port, std::chrono::milliseconds timeout);
+
 OneShotHttpResponse serve_one_http_response(std::string_view method,
                                             std::string_view path,
                                             std::string_view body = {}) {
-    Socket server;
-    REQUIRE(server.create(SocketType::TCP));
-    REQUIRE(server.bind("127.0.0.1", 0));
-    REQUIRE(server.listen(1));
-    const auto port = server.local_port();
-    REQUIRE(port != 0);
+    httplib::Server server;
+
+    auto route_path = std::string(path);
+    if (const auto query = route_path.find('?'); query != std::string::npos)
+        route_path.resize(query);
 
     OneShotHttpResponse exchange;
-    std::thread worker([&] {
-        auto client = server.accept();
-        if (!client) return;
-
+    const auto capture_request = [&](const httplib::Request& request) {
         exchange.accepted = true;
-        std::array<std::uint8_t, 2048> buffer{};
-        while (true) {
-            const auto received = client->receive(buffer.data(), buffer.size());
-            if (received <= 0) break;
-            exchange.request.append(reinterpret_cast<const char*>(buffer.data()),
-                                    static_cast<std::size_t>(received));
-
-            const auto header_end = exchange.request.find("\r\n\r\n");
-            if (header_end == std::string::npos) continue;
-
-            std::size_t expected_body_size = 0;
-            const auto length_key = std::string("Content-Length: ");
-            const auto length_pos = exchange.request.find(length_key);
-            if (length_pos != std::string::npos) {
-                const auto start = length_pos + length_key.size();
-                const auto end = exchange.request.find("\r\n", start);
-                expected_body_size =
-                    static_cast<std::size_t>(std::stoul(exchange.request.substr(start, end - start)));
-            }
-
-            const auto body_size = exchange.request.size() - (header_end + 4);
-            if (body_size >= expected_body_size) break;
+        exchange.request = request.method + " " + request.target + " HTTP/1.1\r\n";
+        if (request.has_header("Content-Type")) {
+            exchange.request +=
+                "Content-Type: " + request.get_header_value("Content-Type") + "\r\n";
         }
+        for (const auto& [key, value] : request.headers) {
+            if (key != "Content-Type")
+                exchange.request += key + ": " + value + "\r\n";
+        }
+        exchange.request += "\r\n";
+        exchange.request += request.body;
+    };
+    const auto send_ok = [&](const httplib::Request& request, httplib::Response& response) {
+        capture_request(request);
+        response.set_header("X-Pulp-Test", "loopback");
+        response.set_content("ok-response", "text/plain");
+    };
 
-        const std::string payload = "ok-response";
-        const std::string wire_response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "X-Pulp-Test: loopback\r\n"
-            "Content-Length: " + std::to_string(payload.size()) + "\r\n"
-            "Connection: close\r\n\r\n" + payload;
-        (void)client->send(wire_response);
+    server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
     });
+    if (method == "POST")
+        server.Post(route_path, send_ok);
+    else
+        server.Get(route_path, send_ok);
+
+    const auto port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port != 0);
+
+    std::thread worker([&] { server.listen_after_bind(); });
+    auto stop_server = make_scope_guard([&] {
+        server.stop();
+        if (worker.joinable())
+            worker.join();
+    });
+    REQUIRE(wait_until_http_ready(port, std::chrono::seconds(10)));
 
     const auto url = "http://127.0.0.1:" + std::to_string(port) + std::string(path);
     if (method == "POST") {
@@ -131,7 +130,6 @@ OneShotHttpResponse serve_one_http_response(std::string_view method,
         exchange.response = http_get(url, 2);
     }
 
-    worker.join();
     return exchange;
 }
 
