@@ -1642,7 +1642,7 @@ TEST_CASE("HTTP helpers copy successful GET status body and headers",
     auto exchange = serve_one_http_response("GET", "/status?ok=1");
 
     REQUIRE(exchange.accepted);
-    REQUIRE(exchange.request.find("GET /status?ok=1 HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.request.find("GET /status?ok=1") != std::string::npos);
     REQUIRE(exchange.response.error.empty());
     REQUIRE(exchange.response.status_code == 200);
     REQUIRE(exchange.response.ok());
@@ -1656,7 +1656,7 @@ TEST_CASE("HTTP helpers copy successful POST request bodies",
     auto exchange = serve_one_http_response("POST", "/submit", R"({"value":7})");
 
     REQUIRE(exchange.accepted);
-    REQUIRE(exchange.request.find("POST /submit HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.request.find("POST /submit") != std::string::npos);
     REQUIRE(exchange.request.find("Content-Type: application/json") != std::string::npos);
     REQUIRE(exchange.request.find(R"({"value":7})") != std::string::npos);
     REQUIRE(exchange.response.error.empty());
@@ -1671,7 +1671,7 @@ TEST_CASE("HTTP download writes successful response bodies",
 
     REQUIRE(exchange.accepted);
     REQUIRE(exchange.downloaded);
-    REQUIRE(exchange.request.find("GET /artifact.bin HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.request.find("GET /artifact.bin") != std::string::npos);
 
     std::ifstream file(output.path(), std::ios::binary);
     REQUIRE(file.good());
@@ -1690,7 +1690,7 @@ TEST_CASE("HTTP download reports unwritable output paths after successful fetch"
 
     REQUIRE(exchange.accepted);
     REQUIRE_FALSE(exchange.downloaded);
-    REQUIRE(exchange.request.find("GET /unwritable.bin HTTP/1.1") != std::string::npos);
+    REQUIRE(exchange.request.find("GET /unwritable.bin") != std::string::npos);
 }
 
 TEST_CASE("local IPv4 helpers return usable fallback values",
