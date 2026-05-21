@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <cstddef>
+#include <limits>
 
 namespace pulp::audio {
 
@@ -62,6 +64,32 @@ static void double_to_extended(double val, uint8_t* p) {
     p[1] = static_cast<uint8_t>(exponent & 0xFF);
     for (int i = 0; i < 8; ++i)
         p[2 + i] = static_cast<uint8_t>((m >> (56 - i * 8)) & 0xFF);
+}
+
+static bool has_consistent_channel_lengths(const AudioFileData& data) {
+    if (data.empty()) return false;
+
+    const auto expected_frames = data.num_frames();
+    return std::all_of(data.channels.begin(), data.channels.end(),
+                       [expected_frames](const auto& channel) {
+                           return channel.size() == expected_frames;
+                       });
+}
+
+static bool can_write_aiff_pcm16(const AudioFileData& data) {
+    if (data.sample_rate == 0 || !has_consistent_channel_lengths(data))
+        return false;
+
+    const uint32_t channels = data.num_channels();
+    const uint64_t frames = data.num_frames();
+    if (channels == 0 || channels > std::numeric_limits<uint16_t>::max() ||
+        frames > std::numeric_limits<uint32_t>::max())
+        return false;
+
+    constexpr uint32_t bytes_per_sample = 2;
+    const uint64_t bytes_per_frame = static_cast<uint64_t>(channels) * bytes_per_sample;
+    return frames <=
+        (static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - 8u) / bytes_per_frame;
 }
 
 // ── AIFF Reader ─────────────────────────────────────────────────────────
@@ -162,11 +190,16 @@ public:
                 uint8_t ssnd_header[8];
                 file.read(reinterpret_cast<char*>(ssnd_header), 8);
                 if (file.gcount() != 8) return std::nullopt;
+                uint32_t offset = read_be32(ssnd_header);
                 size_t data_size = chunk_size - 8;
                 ssnd_data.resize(data_size);
                 file.read(reinterpret_cast<char*>(ssnd_data.data()), static_cast<std::streamsize>(data_size));
                 if (file.gcount() != static_cast<std::streamsize>(data_size))
                     return std::nullopt;
+                if (offset > ssnd_data.size())
+                    return std::nullopt;
+                if (offset > 0)
+                    ssnd_data.erase(ssnd_data.begin(), ssnd_data.begin() + static_cast<std::ptrdiff_t>(offset));
                 if (chunk_size & 1) file.seekg(1, std::ios::cur);
             } else {
                 file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
@@ -233,7 +266,7 @@ public:
 class AiffWriter : public FormatWriter {
 public:
     bool write(const std::string& path, const AudioFileData& data) override {
-        if (data.empty()) return false;
+        if (!can_write_aiff_pcm16(data)) return false;
 
         std::ofstream file(path, std::ios::binary);
         if (!file) return false;

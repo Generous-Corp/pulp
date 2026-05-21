@@ -11,6 +11,10 @@ namespace pulp::audio {
 
 // ── Sample format conversion ─────────────────────────────────────────────────
 
+static float finite_or_zero(float value) {
+    return std::isfinite(value) ? value : 0.0f;
+}
+
 void int16_to_float(const int16_t* src, float* dst, size_t count) {
     constexpr float scale = 1.0f / 32768.0f;
     for (size_t i = 0; i < count; ++i)
@@ -36,14 +40,14 @@ void int32_to_float(const int32_t* src, float* dst, size_t count) {
 
 void float_to_int16(const float* src, int16_t* dst, size_t count) {
     for (size_t i = 0; i < count; ++i) {
-        float clamped = std::clamp(src[i], -1.0f, 1.0f);
+        float clamped = std::clamp(finite_or_zero(src[i]), -1.0f, 1.0f);
         dst[i] = static_cast<int16_t>(clamped * 32767.0f);
     }
 }
 
 void float_to_int32(const float* src, int32_t* dst, size_t count) {
     for (size_t i = 0; i < count; ++i) {
-        float clamped = std::clamp(src[i], -1.0f, 1.0f);
+        float clamped = std::clamp(finite_or_zero(src[i]), -1.0f, 1.0f);
         if (clamped >= 1.0f) {
             dst[i] = std::numeric_limits<int32_t>::max();
         } else if (clamped <= -1.0f) {
@@ -79,6 +83,9 @@ std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
         if (!reader) return std::nullopt;
 
         auto props = reader->getProperties();
+        if (!(props.sampleRate > 0) || props.numChannels == 0)
+            return std::nullopt;
+
         AudioFileInfo info;
         info.sample_rate = static_cast<uint32_t>(props.sampleRate);
         info.num_channels = props.numChannels;
@@ -100,7 +107,9 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
         if (!reader) return std::nullopt;
 
         auto props = reader->getProperties();
-        if (props.numFrames == 0 || props.numChannels == 0) return std::nullopt;
+        if (!(props.sampleRate > 0) || props.numFrames == 0 || props.numChannels == 0 ||
+            props.numFrames > std::numeric_limits<uint32_t>::max())
+            return std::nullopt;
 
         uint32_t frames = static_cast<uint32_t>(props.numFrames);
 
@@ -126,7 +135,10 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
 }
 
 bool write_wav_file(const std::string& path, const AudioFileData& data) {
+    if (data.sample_rate == 0) return false;
     if (!has_consistent_channel_lengths(data)) return false;
+    if (data.num_channels() > std::numeric_limits<uint16_t>::max()) return false;
+    if (data.num_frames() > std::numeric_limits<uint32_t>::max()) return false;
 
     try {
         choc::audio::WAVAudioFileFormat<true> wav;

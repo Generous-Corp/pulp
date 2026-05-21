@@ -7,6 +7,7 @@
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <limits>
 #include <vector>
 
 using namespace pulp::audio;
@@ -265,6 +266,41 @@ TEST_CASE("BufferingReader signals finished when source ends", "[audio][bufferin
     }
 
     REQUIRE(reader.is_finished());
+    REQUIRE_FALSE(reader.is_running());
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader preserves buffered tail after worker reaches EOF",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+
+    std::atomic<int> emitted{0};
+    reader.set_read_callback([&](float* dest, int frames, int channels) {
+        const int start = emitted.load();
+        const int frames_to_emit = std::min(frames, 3 - start);
+        for (int frame = 0; frame < frames_to_emit; ++frame) {
+            for (int ch = 0; ch < channels; ++ch) {
+                dest[frame * channels + ch] = static_cast<float>(start + frame + 1);
+            }
+        }
+        emitted.fetch_add(frames_to_emit);
+        return frames_to_emit;
+    });
+
+    reader.start(1, 8);
+    REQUIRE(wait_until_finished_with_frames(reader, 3));
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 3);
+
+    std::array<float, 5> buf;
+    buf.fill(-1.0f);
+    REQUIRE(reader.read(buf.data(), 5, 1) == 3);
+    REQUIRE(buf[0] == 1.0f);
+    REQUIRE(buf[1] == 2.0f);
+    REQUIRE(buf[2] == 3.0f);
+    REQUIRE(buf[3] == 0.0f);
+    REQUIRE(buf[4] == 0.0f);
+
     reader.stop();
 }
 
@@ -381,5 +417,101 @@ TEST_CASE("BufferingReader invalid read destinations are no-ops",
     });
     reader.start(1, 1024);
     REQUIRE(reader.read(nullptr, 16, 1) == 0);
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader invalid start parameters do not launch a worker",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+
+    reader.start(0, 1024);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 0);
+
+    reader.start(2, 0);
+    REQUIRE_FALSE(reader.is_running());
+    REQUIRE(reader.frames_available() == 0);
+
+    reader.start(-1, 1024);
+    REQUIRE_FALSE(reader.is_running());
+
+    reader.start(2, -1);
+    REQUIRE_FALSE(reader.is_running());
+
+    reader.start(std::numeric_limits<int>::max(), 2);
+    REQUIRE_FALSE(reader.is_running());
+}
+
+TEST_CASE("BufferingReader read rejects overflowing frame-channel requests",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+    reader.set_read_callback([](float* dest, int frames, int channels) {
+        for (int i = 0; i < frames * channels; ++i) dest[i] = 1.0f;
+        return frames;
+    });
+    reader.start(2, 1024);
+
+    float sentinel[2] = {-1.0f, -2.0f};
+    REQUIRE(reader.read(sentinel, std::numeric_limits<int>::max(), 2) == 0);
+    REQUIRE(sentinel[0] == -1.0f);
+    REQUIRE(sentinel[1] == -2.0f);
+
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader clamps over-reported callback frame counts",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+    std::atomic<int> next{0};
+    reader.set_read_callback([&](float* dest, int frames, int channels) {
+        const int start = next.fetch_add(frames);
+        for (int frame = 0; frame < frames; ++frame) {
+            for (int ch = 0; ch < channels; ++ch) {
+                dest[frame * channels + ch] = static_cast<float>(start + frame);
+            }
+        }
+        return frames + 64;
+    });
+
+    reader.start(1, 1024);
+    REQUIRE(wait_for_frames(reader, 1024));
+    REQUIRE(reader.frames_available() == 1024);
+
+    std::array<float, 4> buf{};
+    REQUIRE(reader.read(buf.data(), 4, 1) == 4);
+    REQUIRE(buf[0] == 0.0f);
+    REQUIRE(buf[1] == 1.0f);
+    REQUIRE(buf[2] == 2.0f);
+    REQUIRE(buf[3] == 3.0f);
+
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader fills ring buffers smaller than the worker chunk",
+          "[audio][buffering][coverage][phase3]") {
+    BufferingReader reader;
+    std::atomic<int> emitted{0};
+    reader.set_read_callback([&](float* dest, int frames, int channels) {
+        const int start = emitted.load();
+        const int frames_to_emit = std::min(frames, 4 - start);
+        for (int frame = 0; frame < frames_to_emit; ++frame) {
+            for (int ch = 0; ch < channels; ++ch) {
+                dest[frame * channels + ch] = static_cast<float>(start + frame);
+            }
+        }
+        emitted.fetch_add(frames_to_emit);
+        return frames_to_emit;
+    });
+
+    reader.start(1, 4);
+    REQUIRE(wait_for_frames(reader, 4));
+
+    std::array<float, 4> buf{};
+    REQUIRE(reader.read(buf.data(), 4, 1) == 4);
+    REQUIRE(buf[0] == 0.0f);
+    REQUIRE(buf[1] == 1.0f);
+    REQUIRE(buf[2] == 2.0f);
+    REQUIRE(buf[3] == 3.0f);
+
     reader.stop();
 }

@@ -11,6 +11,7 @@
 #include <functional>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::audio {
 
@@ -56,6 +57,19 @@ public:
     void start(int num_channels, int buffer_frames = 44100) {
         stop();
 
+        if (num_channels <= 0 || buffer_frames <= 0 ||
+            num_channels > std::numeric_limits<int>::max() / buffer_frames ||
+            num_channels > std::numeric_limits<int>::max() / kChunkFrames) {
+            num_channels_ = 0;
+            buffer_size_ = 0;
+            write_pos_ = 0;
+            read_pos_ = 0;
+            available_.store(0);
+            finished_.store(false);
+            running_.store(false);
+            return;
+        }
+
         num_channels_ = num_channels;
         buffer_size_ = buffer_frames * num_channels;
         buffer_.resize(static_cast<size_t>(buffer_size_), 0.0f);
@@ -84,6 +98,8 @@ public:
     int read(float* dest, int num_frames, int num_channels) {
         if (dest == nullptr || num_frames <= 0) return 0;
         if (num_channels != num_channels_ || buffer_.empty()) return 0;
+        if (num_channels <= 0 ||
+            num_frames > std::numeric_limits<int>::max() / num_channels) return 0;
 
         int samples_requested = num_frames * num_channels;
         int avail = available_.load(std::memory_order_acquire);
@@ -145,10 +161,10 @@ private:
     std::thread thread_;
     std::mutex mutex_;
     std::condition_variable cv_;
+    static constexpr int kChunkFrames = 1024;
 
     void background_loop() {
-        constexpr int chunk_frames = 1024;
-        std::vector<float> temp(static_cast<size_t>(chunk_frames * num_channels_));
+        std::vector<float> temp(static_cast<size_t>(kChunkFrames * num_channels_));
 
         while (running_.load()) {
             // Wait until there's space in the buffer
@@ -156,14 +172,14 @@ private:
                 std::unique_lock<std::mutex> lock(mutex_);
                 cv_.wait_for(lock, std::chrono::milliseconds(10), [this] {
                     return !running_.load() ||
-                           available_.load() < buffer_size_ - chunk_frames * num_channels_;
+                           available_.load() < buffer_size_;
                 });
             }
 
             if (!running_.load()) break;
 
             int space = buffer_size_ - available_.load(std::memory_order_acquire);
-            int frames_to_read = std::min(chunk_frames, space / std::max(1, num_channels_));
+            int frames_to_read = std::min(kChunkFrames, space / std::max(1, num_channels_));
 
             if (frames_to_read <= 0) continue;
 
@@ -174,8 +190,11 @@ private:
 
             if (frames_got <= 0) {
                 finished_.store(true);
+                running_.store(false);
+                cv_.notify_all();
                 return;
             }
+            if (frames_got > frames_to_read) frames_got = frames_to_read;
 
             int samples = frames_got * num_channels_;
             int first_chunk = std::min(samples, buffer_size_ - write_pos_);

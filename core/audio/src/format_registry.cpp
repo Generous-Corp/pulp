@@ -245,10 +245,12 @@ FormatRegistry::FormatRegistry() {
 }
 
 void FormatRegistry::register_reader(std::unique_ptr<FormatReader> reader) {
+    if (!reader) return;
     readers_.push_back(std::move(reader));
 }
 
 void FormatRegistry::register_writer(std::unique_ptr<FormatWriter> writer) {
+    if (!writer) return;
     writers_.push_back(std::move(writer));
 }
 

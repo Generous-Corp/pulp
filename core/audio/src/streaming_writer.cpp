@@ -1,6 +1,7 @@
 #include <pulp/audio/streaming_writer.hpp>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 namespace pulp::audio {
 
@@ -29,6 +30,14 @@ bool StreamingWriter::open(std::string_view path, uint32_t sample_rate,
         return false;
     if (num_channels == 0 || sample_rate == 0)
         return false;
+    const uint32_t bytes_per_sample = bits_per_sample / 8;
+    if (num_channels > std::numeric_limits<uint16_t>::max() ||
+        num_channels > std::numeric_limits<uint16_t>::max() / bytes_per_sample)
+        return false;
+
+    uint16_t block_align = static_cast<uint16_t>(bytes_per_sample * num_channels);
+    if (sample_rate > std::numeric_limits<uint32_t>::max() / block_align)
+        return false;
 
     sample_rate_ = sample_rate;
     num_channels_ = num_channels;
@@ -40,7 +49,6 @@ bool StreamingWriter::open(std::string_view path, uint32_t sample_rate,
     if (!file_) return false;
 
     // Write WAV header with placeholder sizes (updated in close())
-    uint16_t block_align = static_cast<uint16_t>((bits_per_sample / 8) * num_channels);
     uint32_t byte_rate = sample_rate * block_align;
 
     file_.write("RIFF", 4);
@@ -67,6 +75,8 @@ bool StreamingWriter::open(std::string_view path, uint32_t sample_rate,
 
 int StreamingWriter::write_frames(const float* interleaved_data, int num_frames) {
     if (!file_.is_open() || interleaved_data == nullptr || num_frames <= 0) return 0;
+    if (num_channels_ > static_cast<uint32_t>(std::numeric_limits<int>::max() / num_frames))
+        return 0;
 
     int total_samples = num_frames * static_cast<int>(num_channels_);
 
@@ -97,6 +107,7 @@ int StreamingWriter::write_frames(const float* interleaved_data, int num_frames)
 int StreamingWriter::write_frames(const float* const* channels, int num_channels, int num_frames) {
     if (!file_.is_open() || channels == nullptr
         || num_channels != static_cast<int>(num_channels_) || num_frames <= 0) return 0;
+    if (num_channels > std::numeric_limits<int>::max() / num_frames) return 0;
     for (int c = 0; c < num_channels; ++c)
         if (channels[c] == nullptr) return 0;
 
