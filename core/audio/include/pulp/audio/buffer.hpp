@@ -75,7 +75,7 @@ public:
     /// Zero-fill all channels.
     void clear() {
         for (std::size_t ch = 0; ch < num_channels_; ++ch) {
-            std::fill_n(channels_[ch], num_samples_, SampleType{0});
+            std::fill_n(channels_[ch] + sample_offset_, num_samples_, SampleType{0});
         }
     }
 

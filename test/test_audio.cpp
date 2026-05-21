@@ -346,6 +346,31 @@ TEST_CASE("BufferView slice offsets channel pointers and clamps length",
     REQUIRE(clamped.channel_ptr(0) == buffer.channel(0).data() + 4);
 }
 
+TEST_CASE("BufferView clear only zeros sliced sample range",
+          "[audio][buffer][slice]") {
+    Buffer<float> buffer(2, 6);
+    for (std::size_t i = 0; i < 6; ++i) {
+        buffer.channel(0)[i] = static_cast<float>(i + 1);
+        buffer.channel(1)[i] = static_cast<float>(10 + i);
+    }
+
+    buffer.view().slice(2, 3).clear();
+
+    REQUIRE(buffer.channel(0)[0] == 1.0f);
+    REQUIRE(buffer.channel(0)[1] == 2.0f);
+    REQUIRE(buffer.channel(0)[2] == 0.0f);
+    REQUIRE(buffer.channel(0)[3] == 0.0f);
+    REQUIRE(buffer.channel(0)[4] == 0.0f);
+    REQUIRE(buffer.channel(0)[5] == 6.0f);
+
+    REQUIRE(buffer.channel(1)[0] == 10.0f);
+    REQUIRE(buffer.channel(1)[1] == 11.0f);
+    REQUIRE(buffer.channel(1)[2] == 0.0f);
+    REQUIRE(buffer.channel(1)[3] == 0.0f);
+    REQUIRE(buffer.channel(1)[4] == 0.0f);
+    REQUIRE(buffer.channel(1)[5] == 15.0f);
+}
+
 TEST_CASE("AudioFileData reports shape from first channel",
           "[audio][file][codecov]") {
     AudioFileData empty;
