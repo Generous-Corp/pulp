@@ -657,6 +657,175 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+  # ── Queued-leg watchdog (codex P1 on pulp#2521) ────────────────────────
+  # `timeout-minutes` on the `coverage` matrix job ONLY bounds execution
+  # AFTER a runner is assigned — it does NOT expire a leg still sitting
+  # `queued` waiting for a runner. When the macOS coverage leg is routed
+  # to a self-hosted / Namespace pool (PULP_COVERAGE_MACOS_RUNS_ON_JSON)
+  # and that pool has no idle worker, the leg can squat in `queued` until
+  # GitHub's self-hosted queue timeout (up to 24h). While it does, the
+  # `coverage` job never reaches a terminal state, so the REQUIRED
+  # `coverage-diff-gate` (`needs: coverage`) stays blocked and the PR's
+  # required check is stuck for hours.
+  #
+  # The repo-wide `stale-run-reaper.yml` does NOT cover this: a run with
+  # one queued leg + other legs running shows as `in_progress`, so the
+  # reaper ages it from `run_started_at` against a 4h cutoff — far too
+  # slow, and not a per-leg signal at all.
+  #
+  # This watchdog is the explicit queued-job reaper. It runs on a
+  # GitHub-hosted runner (NEVER self-hosted, so it can never itself be
+  # the thing that's stuck), starts immediately (no `needs:`), and polls
+  # THIS run's own jobs. If any coverage leg has been `queued` longer
+  # than QUEUED_GRACE_MINUTES, it cancels the whole run via the
+  # `runs/{id}/cancel` API — there is no public API to cancel a single
+  # matrix leg, and cancelling the run is what the required gate needs
+  # anyway: `coverage-diff-gate`'s `if: always()` precondition step then
+  # reaches a real terminal `cancelled` conclusion instead of hanging.
+  coverage-queue-watchdog:
+    name: Coverage queue watchdog
+    # Gate on the same classifier output as the `coverage` matrix — when
+    # the matrix is skipped (skip-safe docs/planning PR) there are no
+    # coverage legs to reap and the watchdog has nothing to do.
+    needs: [classify]
+    if: needs.classify.outputs.native_build_required == 'true'
+    # GitHub-hosted on purpose: the watchdog must never queue behind the
+    # same saturated self-hosted pool it is meant to reap.
+    runs-on: ubuntu-latest
+    # Hard upper bound on the watchdog itself. A healthy coverage build
+    # takes ~1h; the watchdog only needs to catch a leg that NEVER gets a
+    # runner, so it polls for QUEUED_GRACE_MINUTES + a margin and exits.
+    # Once it cancels the run (or every leg has left `queued`) it stops
+    # early — this is just the backstop if neither happens.
+    timeout-minutes: 40
+    permissions:
+      # actions: write is required to POST runs/{id}/cancel.
+      actions: write
+      contents: read
+    steps:
+      - name: Reap a coverage leg stuck in the runner queue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SELF_JOB_NAME: Coverage queue watchdog
+          # A coverage leg that has not been assigned a runner this long
+          # is treated as orphaned by a saturated pool and reaped. A
+          # healthy leg picks up a runner in seconds-to-minutes; 25 min
+          # is generous headroom for a momentarily busy pool without
+          # letting a genuinely orphaned leg block the required gate for
+          # hours.
+          QUEUED_GRACE_MINUTES: '25'
+          # Poll cadence + total watch window. POLL_SECONDS * MAX_POLLS
+          # must comfortably exceed QUEUED_GRACE_MINUTES so a leg that
+          # queues at t=0 is still observed past the grace cutoff, while
+          # staying inside this job's timeout-minutes.
+          POLL_SECONDS: '60'
+          MAX_POLLS: '34'
+        run: |
+          set -euo pipefail
+
+          # The run's created_at is when EVERY job in this run — including
+          # any leg still sitting in `queued` — was created. Ageing a
+          # queued leg from this timestamp is correct and needs no
+          # per-job `queued_at` (the jobs API does not expose one). It
+          # also means a leg already orphaned before this watchdog's
+          # first poll is still aged correctly.
+          run_created_at=$(
+            gh api "repos/${REPO}/actions/runs/${RUN_ID}" \
+              --jq '.created_at' 2>/dev/null || echo ""
+          )
+          if [ -z "${run_created_at}" ]; then
+            echo "::warning::Could not read run created_at; watchdog cannot age queued legs. Exiting without action."
+            exit 0
+          fi
+
+          # timestamp -> epoch. GNU date first, Python fallback (mirrors
+          # stale-run-reaper.yml).
+          to_epoch() {
+            date -u -d "$1" +%s 2>/dev/null \
+              || python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "$1" \
+              2>/dev/null || echo ""
+          }
+
+          run_created_epoch=$(to_epoch "${run_created_at}")
+          if [ -z "${run_created_epoch}" ]; then
+            echo "::warning::Could not parse run created_at '${run_created_at}'; exiting without action."
+            exit 0
+          fi
+
+          echo "Repo:               ${REPO}"
+          echo "Run id:             ${RUN_ID}"
+          echo "Run created_at:     ${run_created_at}"
+          echo "Queued grace:       ${QUEUED_GRACE_MINUTES} min"
+          echo "Poll cadence:       ${POLL_SECONDS}s x ${MAX_POLLS}"
+
+          poll=0
+          while [ "${poll}" -lt "${MAX_POLLS}" ]; do
+            poll=$((poll + 1))
+            now_epoch=$(date -u +%s)
+
+            # Per-job: name <TAB> status. A coverage leg that has not
+            # been assigned a runner has status=queued. The jobs API has
+            # no per-job `queued_at`, so the leg is aged from the run's
+            # created_at (resolved once, above) — not a per-job field.
+            # Exclude the watchdog's own job so it can never reap itself.
+            jobs_tsv=$(
+              gh api --paginate \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+                --jq '.jobs[] | [.name, .status] | @tsv' \
+                2>/dev/null || true
+            )
+
+            queued_legs=0
+            stuck_leg=""
+            stuck_age_min=0
+            while IFS=$'\t' read -r job_name job_status; do
+              [ -z "${job_name}" ] && continue
+              [ "${job_name}" = "${SELF_JOB_NAME}" ] && continue
+              # Only the native + Kotlin coverage legs — every one is a
+              # `Coverage report (...)` job and every one can route to a
+              # self-hosted / Namespace pool. The watchdog itself is
+              # already excluded by the SELF_JOB_NAME check above.
+              case "${job_name}" in
+                "Coverage report ("*) ;;
+                *) continue ;;
+              esac
+              [ "${job_status}" != "queued" ] && continue
+
+              queued_legs=$((queued_legs + 1))
+              age_min=$(( (now_epoch - run_created_epoch) / 60 ))
+              echo "  poll ${poll}: '${job_name}' still queued (${age_min} min since run created)"
+              if [ "${age_min}" -ge "${QUEUED_GRACE_MINUTES}" ] && [ "${age_min}" -gt "${stuck_age_min}" ]; then
+                stuck_leg="${job_name}"
+                stuck_age_min="${age_min}"
+              fi
+            done <<< "${jobs_tsv}"
+
+            if [ -n "${stuck_leg}" ]; then
+              echo "::error::Coverage leg '${stuck_leg}' has been queued ${stuck_age_min} min (>= ${QUEUED_GRACE_MINUTES} min grace) — the runner pool is saturated and never assigned it a runner. Cancelling run ${RUN_ID} so the required 'Diff coverage required' gate reaches a terminal conclusion instead of hanging."
+              # POST cancel. Once GitHub accepts this (202) the run —
+              # including this watchdog job — is torn down; the cancel is
+              # already committed, so a mid-call kill is harmless.
+              gh api --method POST \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${REPO}/actions/runs/${RUN_ID}/cancel" >/dev/null 2>&1 \
+                || echo "::warning::cancel POST failed (run may already be completing) — relying on stale-run-reaper.yml as the slower backstop."
+              exit 0
+            fi
+
+            if [ "${queued_legs}" -eq 0 ]; then
+              echo "  poll ${poll}: no coverage leg is queued — every leg has a runner or has finished. Watchdog done."
+              exit 0
+            fi
+
+            sleep "${POLL_SECONDS}"
+          done
+
+          echo "Watchdog window elapsed (${MAX_POLLS} polls) with no leg past the ${QUEUED_GRACE_MINUTES}-min grace — nothing reaped."
+
   android-kotlin-coverage:
     # Keep Android JVM coverage on the always-on Coverage workflow so
     # Codecov's main-branch head never drops back to `android: null`

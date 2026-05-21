@@ -165,11 +165,26 @@ jobs:
         # without CP-1252 mangling — mirrors build.yml's Windows test
         # step. The `chcp 65001` must apply to the cmd subshell that
         # spawns the test binaries.
+        #
+        # Exit-status preservation (codex P1 on pulp#2536): under
+        # `shell: cmd` the step's exit code is the errorlevel of the
+        # LAST command. `ctest` writes to a log file we upload as an
+        # artifact, then `type` echoes it into the run log — but if
+        # `type` ran last its always-zero errorlevel would mask a real
+        # `ctest` failure, the job would go green on broken Windows
+        # tests, and the nightly tracking-issue logic would never fire
+        # for Windows. Capture `%ERRORLEVEL%` into CTEST_RC on the line
+        # IMMEDIATELY after `ctest` (before `type` overwrites it), then
+        # `exit /b` with that saved code so a Windows test failure
+        # correctly fails the step.
         shell: cmd
         run: |
           chcp 65001
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure -C Release -LE "validation|slow" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items" > test-windows.log 2>&1
+          set CTEST_RC=%ERRORLEVEL%
           type test-windows.log
+          echo ctest exit code: %CTEST_RC%
+          exit /b %CTEST_RC%
 
       - name: Upload Windows build + test logs
         if: always()

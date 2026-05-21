@@ -812,23 +812,43 @@ Coverage run stayed `in_progress` for 4h+ until the reaper killed it.
 
 Fix pattern (applies to any GH-Actions job, not just coverage):
 
-- **Always set `timeout-minutes` on every job.** A healthy job's wall
-  time × ~2-2.5 is a safe backstop — it bounds both queued and running
-  time, so a starved self-hosted leg fails fast instead of squatting.
+- **`timeout-minutes` does NOT bound a QUEUED job — only a running one.**
+  This is the trap (codex P1 on pulp#2521). `timeout-minutes` starts
+  counting *after* a runner is assigned; a matrix leg routed to a
+  saturated self-hosted pool that never gets a runner sits `queued`
+  forever and the timeout never fires. Always set `timeout-minutes` on
+  every job anyway — it is the correct backstop for the *running*-hang
+  mode — but do not assume it covers the queued-hang mode.
+- **For the queued-hang mode, add an explicit queued-job watchdog.**
+  `coverage.yml`'s `coverage-queue-watchdog` job is the reference: it
+  runs on `ubuntu-latest` (never self-hosted, so it itself can never be
+  the stuck thing), starts immediately (no `needs:` on the matrix), and
+  polls this run's own jobs via `gh api
+  repos/{repo}/actions/runs/{run_id}/jobs`. If a `Coverage report (...)`
+  leg has been `status==queued` past a grace window it cancels the whole
+  run via `POST runs/{run_id}/cancel` (`permissions: actions: write`).
+  There is **no public API to cancel a single matrix leg** — cancelling
+  the whole run is the only option, and it is what the required gate
+  needs anyway. Age queued legs from the **run's `created_at`** (`gh api
+  repos/{repo}/actions/runs/{run_id}`): the jobs API exposes no per-job
+  `queued_at`, and `created_at` is when every leg — including the queued
+  one — was created. The watchdog must exclude its own job name from the
+  scan or it will reap itself.
 - **Pin a pure gate/aggregation job to a GitHub-hosted runner**
   (`ubuntu-latest` / `ubuntu-24.04`). A job that only downloads
   artifacts and runs a check must never queue behind a saturated
   self-hosted pool — if it does, `if: always()` cannot save it because
   the job still needs a runner to start.
 - A `needs:` + `if: always()` job only reaches a conclusion once every
-  upstream job is terminal; an upstream job with no timeout therefore
-  hangs the gate transitively.
+  upstream job is terminal; an upstream job stuck `queued` therefore
+  hangs the gate transitively until the watchdog (or the slower
+  repo-wide `stale-run-reaper.yml`) cancels the run.
 
 Do not flip a `concurrency` block's `cancel-in-progress` to `true` to
 "fix" a pile-up if `false` was a deliberate choice (e.g. coverage.yml
 keeps `false` for Codecov's `after_n_builds` upload completeness,
-pulp#1884). Per-job `timeout-minutes` is the correct fix; it bounds runs
-regardless of `cancel-in-progress`.
+pulp#1884). Per-job `timeout-minutes` plus the queued-job watchdog are
+the correct fix; they bound runs regardless of `cancel-in-progress`.
 
 ### Gotcha: `coverage.yml` is gated on `classify` — touch the gate carefully
 
@@ -1577,6 +1597,8 @@ gh workflow run release-cli.yml --ref main \
 The workflow file comes from main (fixed), the source tree comes from the tag (correct content), and the overlay step picks up post-tag script fixes automatically. `release-guard.yml` and `release-cli-watchdog.yml` will auto-close their trackers when the SDK assets land. This was the fix for the four-day stall on v0.95.0..v0.97.0 caused by a skia-builder chrome/m144 zip layout drift (`Release/<arch>/libskia.a` instead of `Release/libskia.a`). The fetch script flattens the arch subdir; regression coverage lives in `tools/scripts/test_fetch_skia_for_release.py`.
 
 **Nightly cross-platform check (`.github/workflows/cross-platform-check.yml`):** Pulp's team develops and tests on macOS; Linux, Windows, and Android are advisory "tell us if it breaks" signal, and per-PR CI has been slimmed so those legs no longer run on every PR. This scheduled workflow is the backstop. It runs nightly (`cron: '17 7 * * *'` — odd minute, off-peak; also `workflow_dispatch` for manual bisect) and builds + tests **Linux** (`ubuntu-latest`), **Windows** (`windows-latest`), and **Android** (NDK build on `ubuntu-latest`) as three independent jobs with `fail-fast: false` so one platform breaking never masks the others — catching ALL cross-platform breakage in one pass is the point. GitHub-hosted runners only: it must never consume the scarce self-hosted macOS capacity. A final `tracking-issues` job (`needs:` all three, `if: always()`) maintains **one tracking issue PER platform**, keyed by the EXACT titles `Cross-platform Linux check is broken` / `Cross-platform Windows check is broken` / `Cross-platform Android check is broken`. It reuses `auto-release-watchdog.yml`'s find-or-create / edit / reopen / close gh-api pattern: a failed platform job opens (or reopens + edits) its issue; a passing one closes its open issue. De-dup is by `gh issue list --search "in:title <title>" --state all` matching the exact title — never a fresh issue per night. Created issues carry `bug`, `ci`, `cross-platform`, and `platform:linux`/`platform:windows`/`platform:android` labels, and the body includes the run URL, tip SHA, per-job results, artifact name, and the commit range since the last green run (derived from the Actions API) so a regression can be bisected within a night's batch. Distinct from `nightly-full-build.yml`, which does the full macOS `make all` to catch test targets PR CI never compiles; this workflow is the *non-macOS* coverage PR CI no longer provides. If you slim or restore a per-PR advisory platform leg, keep this nightly in sync — it is the only thing keeping cross-platform debt visible.
+
+**Gotcha — `shell: cmd` step exit code is the LAST command's errorlevel.** Under `shell: cmd` GitHub Actions uses `cmd.exe` semantics: the step exit code is the errorlevel of the *last* program run, not the first failing one. The Windows ctest step writes to `test-windows.log` for artifact upload, then `type`s it into the run log — if `type` (always errorlevel 0) ran last, a real `ctest` failure was masked and the job went green, so the nightly tracking-issue logic never fired for genuine Windows breakage (codex P1 on pulp#2536). Fix: capture `set CTEST_RC=%ERRORLEVEL%` on the line *immediately* after `ctest` (before `type` overwrites `%ERRORLEVEL%`), then `exit /b %CTEST_RC%` as the final command. Same trap applies to any multi-command `shell: cmd` block where a non-final command is the one that can fail — capture-and-`exit /b`, or make the fallible command last. Note `build.yml`'s Windows test step is *not* affected: it runs `ctest` as the last command, so its errorlevel propagates naturally.
 
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
 
