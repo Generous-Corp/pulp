@@ -221,6 +221,44 @@ TEST_CASE("DESIGN.md with no frontmatter produces empty tokens + info diagnostic
     REQUIRE(has_diag_code(result.diagnostics, "no-frontmatter"));
 }
 
+TEST_CASE("parse_designmd mirrors YAML parse and shape errors into import diagnostics",
+          "[view][import][designmd][issue-1434]") {
+    SECTION("parser error") {
+        auto result = parse_designmd(
+            "---\n"
+            "name: [unterminated\n"
+            "---\n"
+            "# Body\n");
+
+        REQUIRE(result.had_frontmatter);
+        REQUIRE(has_diag_code(result.diagnostics, "yaml-parse"));
+        REQUIRE(result.diagnostics[0].severity == DesignMdSeverity::error);
+        REQUIRE(result.ir.diagnostics.size() == result.diagnostics.size());
+        REQUIRE(result.ir.diagnostics[0].severity == ImportDiagnosticSeverity::error);
+        REQUIRE(result.ir.diagnostics[0].kind == ImportDiagnosticKind::unsupported_property);
+        REQUIRE(result.ir.diagnostics[0].code == "yaml-parse");
+        REQUIRE(result.ir.diagnostics[0].property == "<frontmatter>");
+    }
+
+    SECTION("non-map frontmatter") {
+        auto result = parse_designmd(
+            "---\n"
+            "- not\n"
+            "- a\n"
+            "- map\n"
+            "---\n"
+            "# Body\n");
+
+        REQUIRE(result.had_frontmatter);
+        REQUIRE(has_diag_code(result.diagnostics, "yaml-shape"));
+        REQUIRE(result.diagnostics[0].severity == DesignMdSeverity::error);
+        REQUIRE(result.ir.diagnostics.size() == result.diagnostics.size());
+        REQUIRE(result.ir.diagnostics[0].severity == ImportDiagnosticSeverity::error);
+        REQUIRE(result.ir.diagnostics[0].code == "yaml-shape");
+        REQUIRE(result.ir.diagnostics[0].property == "<frontmatter>");
+    }
+}
+
 // (11) ── fontFeature / fontVariation preserved verbatim ───────────────
 TEST_CASE("fontFeature and fontVariation typography fields survive parse",
           "[view][import][designmd][issue-1434]") {

@@ -803,6 +803,19 @@ TEST_CASE("DesignIR parser normalization promotes interactive frames from librar
     REQUIRE(ir.root.children[0].type == "button");
 }
 
+TEST_CASE("Interactive promotion ignores presentational cursor-only frames",
+          "[view][import][diagnostics]") {
+    IRNode node;
+    node.type = "frame";
+    node.name = "Decorative";
+    node.style.cursor = "pointer";
+    node.attributes["role"] = "presentation";
+
+    REQUIRE(classify_interactive_signal(node) == WidgetPromotionSignal::none);
+    REQUIRE(promote_interactive_frames(node) == 0);
+    REQUIRE(node.type == "frame");
+}
+
 TEST_CASE("Interactive promotion runs before content-hash anchors",
           "[view][import][diagnostics]") {
     const std::string json = R"json({
@@ -881,6 +894,116 @@ TEST_CASE("DesignIR diagnostics and provenance round trip canonical JSON",
     REQUIRE(reparsed.diagnostics[0].property == "onTick");
 }
 
+TEST_CASE("DesignIR diagnostic kinds parse and serialize every normalized bucket",
+          "[view][import][diagnostics]") {
+    const auto parsed = parse_design_ir_json(R"json({
+        "version": 1,
+        "source": "jsx",
+        "captureMethod": "runtime_snapshot",
+        "settleRounds": 2,
+        "root": { "type": "frame", "name": "Diagnostics" },
+        "diagnostics": [
+            {
+                "severity": "info",
+                "kind": "legacy_field_shortcut",
+                "code": "legacy-ir",
+                "path": "<root>",
+                "message": "legacy shortcut"
+            },
+            {
+                "severity": "warning",
+                "kind": "capture_partial",
+                "code": "capture-partial",
+                "path": "<capture>",
+                "message": "partial capture"
+            },
+            {
+                "severity": "error",
+                "kind": "fallback_used",
+                "code": "runtime-fallback",
+                "path": "<runtime>",
+                "message": "runtime fallback"
+            },
+            {
+                "severity": "warning",
+                "code": "asset-fetch-failed",
+                "path": "https://example.test/asset.svg",
+                "message": "asset failed"
+            },
+            {
+                "severity": "warning",
+                "code": "snapshot-dynamic-api",
+                "path": "<source>",
+                "message": "Date.now"
+            },
+            {
+                "severity": "warning",
+                "code": "fallback-used",
+                "path": "<root>",
+                "message": "fallback"
+            },
+            {
+                "severity": "warning",
+                "code": "unknown-code",
+                "path": "<root>",
+                "message": "unknown"
+            }
+        ]
+    })json");
+
+    REQUIRE(parsed.capture_method == "runtime_snapshot");
+    REQUIRE(parsed.settle_rounds == 2);
+    REQUIRE(parsed.diagnostics.size() == 7);
+    REQUIRE(parsed.diagnostics[0].kind == ImportDiagnosticKind::legacy_field_shortcut);
+    REQUIRE(parsed.diagnostics[1].kind == ImportDiagnosticKind::capture_partial);
+    REQUIRE(parsed.diagnostics[2].severity == ImportDiagnosticSeverity::error);
+    REQUIRE(parsed.diagnostics[2].kind == ImportDiagnosticKind::fallback_used);
+    REQUIRE(parsed.diagnostics[3].kind == ImportDiagnosticKind::unresolved_asset);
+    REQUIRE(parsed.diagnostics[4].kind == ImportDiagnosticKind::snapshot_semantics_warning);
+    REQUIRE(parsed.diagnostics[5].kind == ImportDiagnosticKind::fallback_used);
+    REQUIRE(parsed.diagnostics[6].kind == ImportDiagnosticKind::unknown);
+
+    const auto json = serialize_design_ir(parsed);
+    REQUIRE(json.find("\"kind\":\"legacy_field_shortcut\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"capture_partial\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"fallback_used\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"unresolved_asset\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"snapshot_semantics_warning\"") != std::string::npos);
+    REQUIRE(json.find("\"kind\":\"unknown\"") != std::string::npos);
+    REQUIRE(json.find("\"severity\":\"error\"") != std::string::npos);
+}
+
+TEST_CASE("parse_v0_tsx normalizes JSON and regex fallback diagnostics",
+          "[view][import][diagnostics]") {
+    auto json_ir = parse_v0_tsx(R"json({
+        "type": "frame",
+        "name": "JSON Root",
+        "children": [{ "type": "text", "content": "Gain" }]
+    })json");
+
+    REQUIRE(json_ir.source == DesignSource::v0);
+    REQUIRE(json_ir.capture_method == "adapter_parse");
+    REQUIRE(json_ir.source_adapter == "v0-tsx");
+    REQUIRE(json_ir.source_version == "1");
+    REQUIRE(json_ir.root.confidence == IRConfidence::pass);
+    REQUIRE(json_ir.root.stable_anchor_id.has_value());
+
+    auto fallback_ir = parse_v0_tsx(
+        "<div className=\"flex flex-row gap-2 bg-slate-900\">"
+        "<span className=\"text-sm\">Gain</span>"
+        "</div>");
+
+    REQUIRE(fallback_ir.source == DesignSource::v0);
+    REQUIRE(fallback_ir.capture_method == "adapter_parse");
+    REQUIRE(fallback_ir.source_adapter == "v0-tsx");
+    REQUIRE(fallback_ir.source_version == "1");
+    REQUIRE(fallback_ir.root.confidence == IRConfidence::diverge);
+    REQUIRE(fallback_ir.fallback_reason.find("regex TSX class extraction") != std::string::npos);
+    REQUIRE(has_import_diagnostic(fallback_ir.diagnostics, "fallback-used"));
+    REQUIRE(fallback_ir.diagnostics[0].kind == ImportDiagnosticKind::fallback_used);
+    REQUIRE(fallback_ir.root.stable_anchor_id.has_value());
+}
+
 TEST_CASE("JSX snapshot dynamic API scanner detects non-deterministic APIs",
           "[view][import][diagnostics]") {
     auto scan = detect_jsx_snapshot_dynamic_apis(
@@ -928,6 +1051,12 @@ TEST_CASE("JSX snapshot dynamic API scanner detects non-deterministic APIs",
         "const template = `setInterval Date.now Math.random fetch(`;").has_dynamic_apis());
     REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis(
         R"JS(const label = `${"Date.now()"} ${/* Math.random() */ 1}`;)JS").has_dynamic_apis());
+    REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis(
+        R"JS(
+            const single = 'escaped \' Date.now()';
+            const double_quote = "escaped \" Math.random()";
+            const template = `escaped \` fetch("/state")`;
+        )JS").has_dynamic_apis());
     REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis("const x = 1;").has_dynamic_apis());
 }
 
@@ -1050,6 +1179,57 @@ TEST_CASE("DesignIR asset manifest reports network fetch failures and timeouts",
     auto timed_out = collect_design_ir_assets(timeout_ir, options);
     REQUIRE(timed_out.assets.size() == 1);
     REQUIRE(has_diagnostic(timed_out.assets[0], "asset-fetch-timeout"));
+}
+
+TEST_CASE("DesignIR asset manifest reports missing fetcher and empty network downloads",
+          "[view][import][assets][network]") {
+    TempDir tmp("pulp-design-ir-network-edge-diagnostics");
+    const auto bin = tmp.path / "bin";
+    fs::create_directories(bin);
+
+    auto old_path = read_env_var("PATH").value_or("");
+    ScopedEnvVar path_override("PATH", bin.string());
+
+    DesignIrAssetOptions options;
+    options.allow_network_fetch = true;
+    options.cache_directory = tmp.path / "asset-cache";
+    options.network_timeout_ms = 1000;
+
+    DesignIR missing_fetcher_ir;
+    missing_fetcher_ir.root.type = "frame";
+    missing_fetcher_ir.root.name = "MissingFetcher";
+    missing_fetcher_ir.root.style.background_image =
+        "url(https://example.test/missing-fetcher.svg)";
+    auto missing_fetcher = collect_design_ir_assets(missing_fetcher_ir, options);
+    REQUIRE(missing_fetcher.assets.size() == 1);
+    REQUIRE(has_diagnostic(missing_fetcher.assets[0], "asset-fetcher-missing"));
+
+    const auto curl = bin / "curl";
+    write_text(curl,
+               "#!/bin/sh\n"
+               "out=''\n"
+               "while [ \"$#\" -gt 0 ]; do\n"
+               "  case \"$1\" in\n"
+               "    --output) shift; out=\"$1\" ;;\n"
+               "  esac\n"
+               "  shift\n"
+               "done\n"
+               "[ -n \"$out\" ] || exit 9\n"
+               ": > \"$out\"\n");
+    fs::permissions(curl,
+                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::add);
+
+    DesignIR empty_download_ir;
+    empty_download_ir.root.type = "frame";
+    empty_download_ir.root.name = "EmptyDownload";
+    empty_download_ir.root.style.background_image =
+        "url(https://example.test/empty.svg)";
+    auto empty_download = collect_design_ir_assets(empty_download_ir, options);
+    REQUIRE(empty_download.assets.size() == 1);
+    REQUIRE(has_diagnostic(empty_download.assets[0], "asset-empty"));
+
+    set_env_var("PATH", old_path);
 }
 #endif
 
