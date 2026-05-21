@@ -295,17 +295,21 @@ TEST_CASE("lock_tweak_into_source escapes backslashes in inserted values",
     REQUIRE(r.source.find("fontFamily = 'C:\\\\Fonts\\\\Pulp'") != std::string::npos);
 }
 
-TEST_CASE("lock_tweak_into_source escapes control characters in JS literals",
-          "[lock-to-source][coverage][phase3]") {
+TEST_CASE("lock_tweak_into_source escapes JS control characters in values",
+          "[lock-to-source][issue-1307][issue-2470]") {
     const std::string gen = make_generated_source();
     const std::string anchor = first_child_anchor();
 
-    LockResult r = lock_tweak_into_source(
-        gen, {anchor, "paint.fontFamily", "Line\nTab\tReturn\rLow\x01"});
+    std::string value = "Line\nTab\tCarriage\r";
+    value.push_back(static_cast<char>(0x1F));
+    value += "Slash\\Quote'";
+
+    LockResult r = lock_tweak_into_source(gen, {anchor, "paint.fontFamily", value});
 
     REQUIRE(r.status == LockStatus::inserted);
-    REQUIRE(r.source.find("fontFamily = 'Line\\nTab\\tReturn\\rLow\\x01'")
-            != std::string::npos);
+    REQUIRE(r.source.find(
+        "fontFamily = 'Line\\nTab\\tCarriage\\r\\x1FSlash\\\\Quote\\''") !=
+        std::string::npos);
     REQUIRE(r.source.find("Line\nTab") == std::string::npos);
 }
 

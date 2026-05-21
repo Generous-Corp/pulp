@@ -2434,6 +2434,15 @@ target_link_libraries(pulp-test-token-lock PRIVATE pulp::view Catch2::Catch2With
 catch_discover_tests(pulp-test-token-lock
     PROPERTIES LABELS "parser-import")
 
+# Inspector Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch).
+# Spec: planning/2026-05-18-inspector-direct-manipulation-roadmap.md (#1308).
+# Proves the tweak -> JSX/TSX surgical patch -> formatting-preserving
+# round-trip, plus the ambiguous / not-found / too-dynamic failure paths.
+add_executable(pulp-test-jsx-lock test_jsx_lock.cpp)
+target_link_libraries(pulp-test-jsx-lock PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-jsx-lock
+    PROPERTIES LABELS "parser-import")
+
 # Post-parse widget promotion: <div onClick> / role=button / cursor:pointer
 # → button. Closure of pulp-internal task #84 / follow-up on #1814.
 # Links the importer-side .cpp directly (it's not in pulp::view) so the

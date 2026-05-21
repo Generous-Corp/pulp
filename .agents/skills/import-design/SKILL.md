@@ -495,6 +495,58 @@ If you add a codegen property to `design_codegen.cpp`'s `generate_node`,
 add it to the `kKnown` allow-list in `lock_property_to_style_name()` too
 — otherwise that property can never be locked to source.
 
+### Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch)
+
+`pulp/view/jsx_lock.hpp` (impl `core/view/src/jsx_lock.cpp`) is the
+Path B sibling of Path A; the roadmap tracks Path B under issue #1308. <!-- docs-noise-lint: skip — retained: pins Path B scope to its tracking issue -->
+Where Path A rewrites the *generated* web-compat artifact, Path B
+patches the user's **own hand-authored JSX/TSX** — the source behind a
+live React bundle (`--from jsx`, `--execute-bundle`). There is no
+generated file to rewrite, so the engine edits the authored source
+directly.
+
+- **How the element is found** — an element-instrumentation pass injects
+  a `data-pulp-anchor="<stable_anchor_id>"` attribute onto each authored
+  element (the JS-side instrumentation is a separate deliverable; the
+  engine only *consumes* the marker). `jsx_lock_tweak_into_source()`
+  scans for the matching attribute, walks left to the opening `<` and
+  right to the tag-closing `>` (respecting strings and `{…}` braces so a
+  `>` inside `{a > b}` does not end the tag early).
+- **Surgical patch, not an AST re-emit** — mirrors 4a/4c. The engine
+  rewrites exactly one literal span: a property inside an inline
+  `style={{…}}` object, or a bare attribute (`width={80}`,
+  `color="#888"`). Every other byte — comments, imports, formatting,
+  sibling props — is preserved byte-for-byte. It is deliberately NOT a
+  general JSX printer (Codex capped Path B from ballooning into a
+  multi-quarter parser).
+- **`too_dynamic` is the safety valve** — anything that is not a plain
+  rewritable literal fails as `too_dynamic` with a specific reason, and
+  the source is returned unchanged so the caller keeps the tweak in the
+  sidecar: a `style={{ ...base }}` spread, a computed key, a non-literal
+  value (`padding={gap * 2}`, `color={theme.fg}`), `style={someVar}`, or
+  a prop the author simply never wrote (Phase 4b patches *existing*
+  props only — it never inserts, which would risk a malformed tag).
+- **Other statuses** — `patched` mutates; `already_current` is the
+  idempotent no-op; `anchor_not_found` and `anchor_ambiguous` (the same
+  `data-pulp-anchor` on two elements — refuse to guess) and
+  `unsupported_property` are graceful failures that leave the source
+  byte-identical.
+- **Value rendering** — a quoted prop keeps its quote style (contents
+  rewritten, single-quotes escaped for a JS string body); a bare numeric
+  prop stays bare when the new value is numeric, but is promoted to a
+  quoted string when the new value carries a unit (`width={80}` →
+  `width={'120px'}`).
+- **`jsx_lock_property_to_key()`** shares the same `kKnown` allow-list as
+  Path A's `lock_property_to_style_name()` — keep the two in sync so a
+  tweak can target the same set of properties on either path.
+
+The engine is pure text-in / text-out — no filesystem I/O — so the
+overlay / CLI layer owns the read-confirm-write loop and the
+authored-vs-generated routing (`is_authored_jsx_source()` is the cheap
+guard: a file carrying the codegen banner is Path A's, not Path B's).
+`test_jsx_lock.cpp` pins the patch, the formatting-preservation
+contract, and every failure path.
+
 ### Phase 4c — token lock-to-source (`DESIGN.md` rewrite)
 
 `token_lock.hpp` / `token_lock.cpp` (`core/view/`) lock a *token-typed*

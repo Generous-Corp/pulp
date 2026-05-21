@@ -23,7 +23,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -115,29 +114,33 @@ std::string lower(const std::string& s) {
     return out;
 }
 
-// Escape a value for emission inside a JS single-quoted literal.
+void append_hex_escape(std::string& out, unsigned char c) {
+    constexpr char kHex[] = "0123456789ABCDEF";
+    out += "\\x";
+    out += kHex[(c >> 4) & 0x0F];
+    out += kHex[c & 0x0F];
+}
+
+// Escape a value for emission inside a JS single-quoted literal. Control bytes
+// must not be emitted raw; a newline or CR would make the generated JS invalid.
 std::string escape_js_single(const std::string& s) {
     std::string out;
-    out.reserve(s.size() + 4);
-    for (unsigned char c : s) {
+    out.reserve(s.size() + 2);
+    for (char c : s) {
         switch (c) {
             case '\\': out += "\\\\"; break;
-            case '\'': out += "\\'";  break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            case '\b': out += "\\b";  break;
-            case '\f': out += "\\f";  break;
-            case '\0': out += "\\x00"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\x%02x", c);
-                    out += buf;
-                } else {
-                    out += static_cast<char>(c);
-                }
+            case '\'': out += "\\'"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            default: {
+                const auto uc = static_cast<unsigned char>(c);
+                if (uc < 0x20) append_hex_escape(out, uc);
+                else out += c;
                 break;
+            }
         }
     }
     return out;

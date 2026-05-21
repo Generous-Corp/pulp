@@ -265,6 +265,7 @@ target_sources(pulp-view PRIVATE
     src/design_tokens.cpp
     src/design_codegen.cpp
     src/lock_to_source.cpp
+    src/jsx_lock.cpp
     src/claude_bundle.cpp
     src/claude_bundle_sources.cpp
     src/design_import_shortcuts.cpp

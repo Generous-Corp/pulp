@@ -152,8 +152,10 @@
         "tools/design/**",
         "core/view/src/design_import*",
         "core/view/src/lock_to_source.cpp",
+        "core/view/src/jsx_lock.cpp",
         "core/view/include/pulp/view/design_import.hpp",
         "core/view/include/pulp/view/lock_to_source.hpp",
+        "core/view/include/pulp/view/jsx_lock.hpp",
         "core/view/js/import-runtime.js"
       ]
     },
