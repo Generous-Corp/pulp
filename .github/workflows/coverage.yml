@@ -270,9 +270,17 @@ jobs:
           set -euo pipefail
           # One include entry per OS leg. macOS is always present; Linux
           # and Windows are appended only for non-pull_request events.
+          #
+          # `runs_on_json` MUST be encoded with `tojson`, never `tostring`.
+          # The downstream `coverage` job consumes it via
+          # `fromJSON(matrix.runs_on_json)`, which requires valid JSON.
+          # `tostring` on a JSON string scalar (e.g. "macos-latest") strips
+          # the quotes and emits a bare `macos-latest`, which `fromJSON`
+          # rejects. `tojson` always emits valid JSON — a string stays
+          # quoted, an array stays an array, an object stays an object.
           macos=$(jq -nc \
             --argjson runs_on "${MACOS_RUNS_ON_JSON}" \
-            '{os:"macos", label:"macOS", flag:"os-macos", runs_on_json:($runs_on|tostring)}')
+            '{os:"macos", label:"macOS", flag:"os-macos", runs_on_json:($runs_on|tojson)}')
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             # Per-PR coverage is macOS-only — Linux/Windows coverage is
             # provided by the nightly cross-platform-check.yml lane.
@@ -280,10 +288,10 @@ jobs:
           else
             linux=$(jq -nc \
               --argjson runs_on "${LINUX_RUNS_ON_JSON}" \
-              '{os:"linux", label:"Linux", flag:"os-linux", runs_on_json:($runs_on|tostring)}')
+              '{os:"linux", label:"Linux", flag:"os-linux", runs_on_json:($runs_on|tojson)}')
             windows=$(jq -nc \
               --argjson runs_on "${WINDOWS_RUNS_ON_JSON}" \
-              '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tostring)}')
+              '{os:"windows", label:"Windows", flag:"os-windows", runs_on_json:($runs_on|tojson)}')
             include=$(jq -nc \
               --argjson l "${linux}" \
               --argjson m "${macos}" \
@@ -857,12 +865,20 @@ jobs:
             while IFS=$'\t' read -r job_name job_status; do
               [ -z "${job_name}" ] && continue
               [ "${job_name}" = "${SELF_JOB_NAME}" ] && continue
-              # Only the native + Kotlin coverage legs — every one is a
-              # `Coverage report (...)` job and every one can route to a
-              # self-hosted / Namespace pool. The watchdog itself is
-              # already excluded by the SELF_JOB_NAME check above.
+              # Only the REQUIRED native coverage legs — `Coverage report
+              # (macOS, Clang)` / `(Linux, Clang)` / `(Windows, Clang)`.
+              # These are the legs the required `Diff coverage required`
+              # gate depends on and the ones that route to a saturated
+              # self-hosted / Namespace pool. Match a name that both
+              # starts with `Coverage report (` AND ends with `, Clang)`.
+              #
+              # `Coverage report (Android, Kotlin)` ends `, Kotlin)` and
+              # is deliberately NOT reaped: the Android lane is advisory,
+              # is not part of the required diff-coverage dependency
+              # chain, and reaping it would cancel the whole run —
+              # including the required native gate — for an advisory leg.
               case "${job_name}" in
-                "Coverage report ("*) ;;
+                "Coverage report ("*", Clang)") ;;
                 *) continue ;;
               esac
               [ "${job_status}" != "queued" ] && continue

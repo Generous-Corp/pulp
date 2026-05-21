@@ -876,6 +876,17 @@ Fix pattern (applies to any GH-Actions job, not just coverage):
   `queued_at`, and `created_at` is when every leg — including the queued
   one — was created. The watchdog must exclude its own job name from the
   scan or it will reap itself.
+  - **Scope the watchdog's job-name match to the REQUIRED legs only.**
+    `coverage-queue-watchdog` matches a name that starts with `Coverage
+    report (` AND ends with `, Clang)` — i.e. only the native `(macOS,
+    Clang)` / `(Linux, Clang)` / `(Windows, Clang)` legs the required
+    `Diff coverage required` gate depends on. A bare `Coverage report (`
+    prefix match also catches `Coverage report (Android, Kotlin)`, the
+    **advisory** Android lane. Reaping cancels the *whole run* (there is
+    no single-leg cancel API), so matching an advisory leg would cancel
+    the required gate too — even when native coverage would have
+    succeeded. Match on a suffix that only the required legs carry
+    (`, Clang)` here; the Android lane ends `, Kotlin)`).
   - **Tune the grace window from measured queue-wait data, not a
     guess.** `coverage-queue-watchdog`'s `QUEUED_GRACE_MINUTES` is
     **150** (was 25). Measured coverage-leg queue waits: median ~30 min,
@@ -980,6 +991,15 @@ Consequences when touching `coverage.yml` or `coverage-diff-gate`:
 - `Diff coverage required` keeps its exact name and pass/fail semantics
   for macOS-reachable code — it is still the REQUIRED branch-protection
   check.
+- **The `matrix-config` job MUST encode `runs_on_json` with `jq`'s
+  `tojson`, never `tostring`.** The downstream `coverage` job consumes
+  it via `runs-on: ${{ fromJSON(matrix.runs_on_json) }}`, so the field
+  must hold valid JSON. `tostring` on a JSON *string* scalar (the
+  default fallback, e.g. `"macos-latest"`) strips the quotes and emits a
+  bare `macos-latest`, which `fromJSON` rejects — matrix expansion then
+  breaks on every leg that resolved to a single scalar label. `tojson`
+  always emits valid JSON: a string stays quoted, an array stays an
+  array, an object stays an object.
 
 ## Prerequisites Check
 
