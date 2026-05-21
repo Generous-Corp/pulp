@@ -538,6 +538,92 @@ TEST_CASE("for_each_subblock invokes one full block for null or empty queues",
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("for_each_subblock skips zero-sample buffers",
+          "[format][params][subblock][coverage][phase3]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 3,
+        .name = "Level",
+        .range = {0.0f, 1.0f, 0.25f, 0.0f},
+    });
+
+    float out_sample = 0.0f;
+    float in_sample = 0.0f;
+    float* out_channels[1] = {&out_sample};
+    const float* in_channels[1] = {&in_sample};
+    pulp::audio::BufferView<float> output(out_channels, 1, 0);
+    pulp::audio::BufferView<const float> input(in_channels, 1, 0);
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push({3, 0, 0.75f}));
+
+    int calls = 0;
+    pulp::format::for_each_subblock(
+        output, input, store, &events,
+        [&](pulp::audio::BufferView<float>&,
+            const pulp::audio::BufferView<const float>&,
+            const pulp::state::ParamCursor&) {
+            ++calls;
+        });
+
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("for_each_subblock ignores boundary events and slices input with output",
+          "[format][params][subblock][coverage][phase3]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 9,
+        .name = "Tone",
+        .range = {0.0f, 1.0f, 0.1f, 0.0f},
+    });
+
+    pulp::state::ParameterEventQueue events;
+    REQUIRE(events.push({9, 8, 0.8f}));
+    REQUIRE(events.push({9, -2, 0.2f}));
+    REQUIRE(events.push({9, 3, 0.6f}));
+    REQUIRE(events.push({9, 0, 0.4f}));
+    events.sort();
+
+    float in_samples[8] = {};
+    float out_samples[8] = {};
+    const float* in_channels[1] = {in_samples};
+    float* out_channels[1] = {out_samples};
+    pulp::audio::BufferView<const float> input(in_channels, 1, 8);
+    pulp::audio::BufferView<float> output(out_channels, 1, 8);
+
+    std::array<std::size_t, 2> starts{};
+    std::array<std::size_t, 2> lengths{};
+    std::array<std::size_t, 2> input_starts{};
+    std::array<float, 2> values{};
+    int calls = 0;
+
+    pulp::format::for_each_subblock(
+        output, input, store, &events,
+        [&](pulp::audio::BufferView<float>& out,
+            const pulp::audio::BufferView<const float>& in,
+            const pulp::state::ParamCursor& params) {
+            REQUIRE(calls < 2);
+            starts[static_cast<std::size_t>(calls)] =
+                static_cast<std::size_t>(out.channel_ptr(0) - out_samples);
+            input_starts[static_cast<std::size_t>(calls)] =
+                static_cast<std::size_t>(in.channel_ptr(0) - in_samples);
+            lengths[static_cast<std::size_t>(calls)] = out.num_samples();
+            values[static_cast<std::size_t>(calls)] = params.value(9);
+            ++calls;
+        });
+
+    REQUIRE(calls == 2);
+    REQUIRE(starts[0] == 0);
+    REQUIRE(input_starts[0] == 0);
+    REQUIRE(lengths[0] == 3);
+    REQUIRE(values[0] == 0.4f);
+    REQUIRE(starts[1] == 3);
+    REQUIRE(input_starts[1] == 3);
+    REQUIRE(lengths[1] == 5);
+    REQUIRE(values[1] == 0.6f);
+}
+
 TEST_CASE("ControlRateParamSmoother is bit-exact off and ramps when opted in",
           "[format][params][smoothing]") {
     pulp::state::ParamInfo info;
