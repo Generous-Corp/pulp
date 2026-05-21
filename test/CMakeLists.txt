@@ -2292,6 +2292,9 @@ set_tests_properties(visual-harness-self-test PROPERTIES
     LABELS "visual;harness;yoga"
     TIMEOUT 30)
 
+# Reusable layout-tree parity oracle for design-import live/baked modes.
+pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
+
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 

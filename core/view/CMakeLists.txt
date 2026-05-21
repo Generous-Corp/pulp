@@ -246,6 +246,7 @@ target_sources(pulp-view PRIVATE
     src/asset_manager.cpp
     src/view.cpp
     src/yoga_layout.cpp
+    src/layout_snapshot.cpp
     src/widgets.cpp
     src/widgets/label.cpp
     src/widgets/visualizers.cpp

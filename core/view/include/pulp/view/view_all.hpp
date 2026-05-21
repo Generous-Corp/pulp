@@ -10,5 +10,6 @@
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
