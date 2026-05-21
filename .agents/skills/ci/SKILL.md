@@ -1491,6 +1491,12 @@ Minimum incident response once a failure is visible:
 4. Queue the narrowest truthful rerun needed after the fix.
 5. Close the loop with a short status update that says what failed, what is being tried now, and what still remains.
 
+### Gotcha: stop a leftover CI-watch Monitor by the Monitor's task id, not the agent's
+
+When an agent spawns a background Monitor (or a poll loop) to watch a PR's check-runs, that Monitor is a **separate task** from the agent. After the agent's work finishes, the Monitor keeps running — re-emitting "agent completed" events and burning shared REST quota polling `commits/<sha>/check-runs` — until its until-condition is met or it is explicitly stopped.
+
+To stop a leftover Monitor: `TaskStop` **the Monitor's own task id** (the still-running poll-loop task — visible in the task list as a `local_bash` task). Do NOT `TaskStop` the agent's id: once the agent has finished it is already `completed`, so `TaskStop <agent-id>` fails with `not running (status: completed)` and the Monitor keeps going. The agent id and the Monitor id are different — target the Monitor.
+
 ### `cloud run [branch]` — Trigger GitHub Actions
 
 Trigger cloud CI only when cloud CI is actually needed, for example
