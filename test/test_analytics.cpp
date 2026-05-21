@@ -191,6 +191,31 @@ TEST_CASE("FileAnalyticsDestination escapes each special JSON character",
     }
 }
 
+TEST_CASE("FileAnalyticsDestination escapes non-printable JSON control bytes",
+          "[runtime][analytics][coverage][phase3]") {
+    TemporaryFile tmp(".jsonl");
+    FileAnalyticsDestination dest(tmp.path_string());
+
+    AnalyticsEvent event;
+    event.name = std::string("nul", 3) + '\0' + "unit";
+    event.timestamp = 1.0;
+    event.properties = {
+        {"backspace", std::string("a\b")},
+        {"formfeed", std::string("b\f")},
+        {"unit", std::string("c") + static_cast<char>(0x1f)},
+    };
+    dest.log_event(event);
+    dest.flush();
+
+    std::ifstream f(tmp.path());
+    std::string line;
+    REQUIRE(std::getline(f, line));
+    REQUIRE(line.find("\"event\":\"nul\\u0000unit\"") != std::string::npos);
+    REQUIRE(line.find("\"backspace\":\"a\\b\"") != std::string::npos);
+    REQUIRE(line.find("\"formfeed\":\"b\\f\"") != std::string::npos);
+    REQUIRE(line.find("\"unit\":\"c\\u001f\"") != std::string::npos);
+}
+
 TEST_CASE("FileAnalyticsDestination escapes special JSON property keys and values",
           "[runtime][analytics][coverage][issue-656]") {
     TemporaryFile tmp(".jsonl");

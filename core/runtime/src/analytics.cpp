@@ -9,7 +9,9 @@ namespace {
 std::string json_escape(std::string_view value) {
     std::string escaped;
     escaped.reserve(value.size());
+    constexpr char kHex[] = "0123456789abcdef";
     for (char c : value) {
+        const auto uc = static_cast<unsigned char>(c);
         if (c == '\\') {
             escaped += "\\\\";
         } else if (c == '"') {
@@ -20,6 +22,14 @@ std::string json_escape(std::string_view value) {
             escaped += "\\r";
         } else if (c == '\t') {
             escaped += "\\t";
+        } else if (c == '\b') {
+            escaped += "\\b";
+        } else if (c == '\f') {
+            escaped += "\\f";
+        } else if (uc < 0x20) {
+            escaped += "\\u00";
+            escaped += kHex[(uc >> 4) & 0x0f];
+            escaped += kHex[uc & 0x0f];
         } else {
             escaped += c;
         }
