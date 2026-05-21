@@ -67,6 +67,37 @@ size_t drain_pipe(HANDLE fd, std::string& buffer, size_t max_bytes,
     return total;
 }
 
+std::string quote_windows_arg(const std::string& arg) {
+    if (arg.empty()) return "\"\"";
+
+    const bool needs_quotes =
+        arg.find_first_of(" \t\n\v\"") != std::string::npos;
+    if (!needs_quotes) return arg;
+
+    std::string quoted;
+    quoted.reserve(arg.size() + 2);
+    quoted.push_back('"');
+
+    size_t backslashes = 0;
+    for (char c : arg) {
+        if (c == '\\') {
+            ++backslashes;
+        } else if (c == '"') {
+            quoted.append(backslashes * 2 + 1, '\\');
+            quoted.push_back('"');
+            backslashes = 0;
+        } else {
+            quoted.append(backslashes, '\\');
+            backslashes = 0;
+            quoted.push_back(c);
+        }
+    }
+
+    quoted.append(backslashes * 2, '\\');
+    quoted.push_back('"');
+    return quoted;
+}
+
 }  // namespace
 
 struct ChildProcess::Impl {
@@ -107,18 +138,14 @@ bool ChildProcess::start(const std::string& command,
     bool is_cmd_c = (command == "cmd" || command == "cmd.exe") &&
                     !args.empty() && (args[0] == "/c" || args[0] == "/C");
 
-    std::string cmdline = "\"" + command + "\"";
+    std::string cmdline = quote_windows_arg(command);
     for (size_t i = 0; i < args.size(); ++i) {
         auto& a = args[i];
-        if (a.empty()) {
-            cmdline += " \"\"";  // preserve empty args
-        } else if (is_cmd_c && i == args.size() - 1) {
+        if (is_cmd_c && i == args.size() - 1) {
             // Last arg to cmd /c is the shell command — pass through raw
             cmdline += " " + a;
-        } else if (a.find(' ') != std::string::npos && a.find('"') == std::string::npos) {
-            cmdline += " \"" + a + "\"";
         } else {
-            cmdline += " " + a;
+            cmdline += " " + quote_windows_arg(a);
         }
     }
 

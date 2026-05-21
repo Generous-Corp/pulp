@@ -225,12 +225,19 @@ static std::vector<unsigned char> make_comm_chunk(uint16_t channels,
     return comm;
 }
 
-static std::vector<unsigned char> make_ssnd_chunk(const std::vector<unsigned char>& sample_bytes) {
+static std::vector<unsigned char> make_ssnd_chunk_with_offset(
+    const std::vector<unsigned char>& offset_bytes,
+    const std::vector<unsigned char>& sample_bytes) {
     std::vector<unsigned char> ssnd;
+    append_be32(ssnd, static_cast<uint32_t>(offset_bytes.size()));
     append_be32(ssnd, 0);
-    append_be32(ssnd, 0);
+    ssnd.insert(ssnd.end(), offset_bytes.begin(), offset_bytes.end());
     ssnd.insert(ssnd.end(), sample_bytes.begin(), sample_bytes.end());
     return ssnd;
+}
+
+static std::vector<unsigned char> make_ssnd_chunk(const std::vector<unsigned char>& sample_bytes) {
+    return make_ssnd_chunk_with_offset({}, sample_bytes);
 }
 
 static void write_aiff_fixture(const std::filesystem::path& path,
@@ -407,6 +414,30 @@ TEST_CASE("float to int32 scales fractional values symmetrically",
     REQUIRE(std::abs(dst[3] - static_cast<int32_t>(0.75 * 2147483647.0)) <= 1);
 }
 
+TEST_CASE("float to integer conversion maps non-finite samples to silence",
+          "[audio][convert][coverage][phase3]") {
+    const float src[] = {
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+        0.25f,
+    };
+    int16_t dst16[4] = {};
+    int32_t dst32[4] = {};
+
+    float_to_int16(src, dst16, 4);
+    float_to_int32(src, dst32, 4);
+
+    REQUIRE(dst16[0] == 0);
+    REQUIRE(dst16[1] == 0);
+    REQUIRE(dst16[2] == 0);
+    REQUIRE(dst16[3] == 8191);
+    REQUIRE(dst32[0] == 0);
+    REQUIRE(dst32[1] == 0);
+    REQUIRE(dst32[2] == 0);
+    REQUIRE(std::abs(dst32[3] - static_cast<int32_t>(0.25 * 2147483647.0)) <= 1);
+}
+
 // ── WAV file I/O ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Write and read WAV file", "[audio][file]") {
@@ -493,6 +524,38 @@ TEST_CASE("WAV reader reports zero-frame metadata but rejects loading data",
     std::filesystem::remove(path);
 }
 
+TEST_CASE("WAV reader rejects zero sample-rate metadata",
+          "[audio][file][coverage][phase3]") {
+    auto path = unique_temp_audio_path("_read_zero_rate.wav");
+    std::filesystem::remove(path);
+
+    const std::vector<uint8_t> wav = {
+        'R', 'I', 'F', 'F',
+        38, 0, 0, 0,
+        'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ',
+        16, 0, 0, 0,
+        1, 0,
+        1, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        2, 0,
+        16, 0,
+        'd', 'a', 't', 'a',
+        2, 0, 0, 0,
+        0, 0,
+    };
+    {
+        std::ofstream f(path, std::ios::binary);
+        f.write(reinterpret_cast<const char*>(wav.data()),
+                static_cast<std::streamsize>(wav.size()));
+    }
+
+    REQUIRE_FALSE(read_audio_file_info(path.string()).has_value());
+    REQUIRE_FALSE(read_audio_file(path.string()).has_value());
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empties",
           "[audio][file][issue-640]") {
     AudioFileData data;
@@ -517,6 +580,39 @@ TEST_CASE("AudioFileData shape helpers and WAV writer reject first-channel empti
     REQUIRE_FALSE(data.empty());
     REQUIRE_FALSE(write_wav_file(path.string(), data));
     REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
+TEST_CASE("WAV writer rejects zero sample-rate data without creating a file",
+          "[audio][file][coverage][phase3]") {
+    AudioFileData data;
+    data.sample_rate = 0;
+    data.channels = {{0.0f, 0.5f}};
+
+    auto path = unique_temp_audio_path("_zero_rate.wav");
+    std::filesystem::remove(path);
+
+    REQUIRE_FALSE(write_wav_file(path.string(), data));
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
+TEST_CASE("WAV and AIFF writers reject channel counts that cannot fit file headers",
+          "[audio][file][coverage][phase3]") {
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels.resize(static_cast<size_t>(std::numeric_limits<uint16_t>::max()) + 1u);
+    for (auto& channel : data.channels) {
+        channel.push_back(0.0f);
+    }
+
+    auto wav_path = unique_temp_audio_path("_too_many_channels.wav");
+    auto aiff_path = unique_temp_audio_path("_too_many_channels.aiff");
+    std::filesystem::remove(wav_path);
+    std::filesystem::remove(aiff_path);
+
+    REQUIRE_FALSE(write_wav_file(wav_path.string(), data));
+    REQUIRE_FALSE(FormatRegistry::instance().write(aiff_path.string(), data));
+    REQUIRE_FALSE(std::filesystem::exists(wav_path));
+    REQUIRE_FALSE(std::filesystem::exists(aiff_path));
 }
 
 TEST_CASE("WAV helpers write deinterleaved channel data and reject malformed input",
@@ -702,6 +798,36 @@ TEST_CASE("MemoryMappedAudioReader leaves destinations untouched past EOF",
     std::filesystem::remove(path);
 }
 
+TEST_CASE("MemoryMappedAudioReader rejects invalid destinations before decoding",
+          "[audio][file][mmap][coverage][phase3]") {
+    auto path = unique_temp_audio_path("_mmap_destinations.wav");
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {
+        {0.0f, 0.25f, 0.5f},
+        {1.0f, 0.75f, 0.5f},
+    };
+    REQUIRE(write_wav_file(path.string(), data));
+
+    MemoryMappedAudioReader reader;
+    REQUIRE(reader.open(path.string()));
+
+    float left[2] = {-1.0f, -1.0f};
+    float* missing_channels[] = {left, nullptr};
+    REQUIRE_FALSE(reader.read_frames(nullptr, 2, 0, 1));
+    REQUIRE_FALSE(reader.read_frames(missing_channels, 2, 0, 1));
+    REQUIRE(left[0] == -1.0f);
+    REQUIRE(left[1] == -1.0f);
+
+    REQUIRE(reader.read_frames(nullptr, 0, 0, 1));
+    REQUIRE(reader.read_frames(missing_channels, 2, 0, 0));
+
+    reader.close();
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("offline processing handles guards, block tails, and file dispatch",
           "[audio][file][offline][issue-640]") {
     AudioFileData input;
@@ -798,18 +924,25 @@ TEST_CASE("StreamingWriter rejects invalid opens and closed writes",
     REQUIRE_FALSE(writer.open(path.string(), 44100, 2, 12));
     REQUIRE_FALSE(writer.open(path.string(), 0, 2, 16));
     REQUIRE_FALSE(writer.open(path.string(), 44100, 0, 16));
+    REQUIRE_FALSE(writer.open(
+        path.string(), 44100, static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1, 16));
+    REQUIRE_FALSE(writer.open(
+        path.string(), std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint16_t>::max(), 32));
     REQUIRE_FALSE(writer.is_open());
 
     REQUIRE(writer.open(path.string(), 44100, 2, 16));
     REQUIRE(writer.write_frames(static_cast<const float*>(nullptr), 1) == 0);
     REQUIRE(writer.write_frames(&sample, 0) == 0);
     REQUIRE(writer.write_frames(&sample, -1) == 0);
+    REQUIRE(writer.write_frames(&sample, std::numeric_limits<int>::max()) == 0);
 
     const float* invalid_channels[] = {&sample, nullptr};
     REQUIRE(writer.write_frames(static_cast<const float* const*>(nullptr), 2, 1) == 0);
     REQUIRE(writer.write_frames(invalid_channels, 2, 1) == 0);
     REQUIRE(writer.write_frames(invalid_channels, 2, 0) == 0);
     REQUIRE(writer.write_frames(invalid_channels, 2, -1) == 0);
+    const float* valid_channels[] = {&sample, &sample};
+    REQUIRE(writer.write_frames(valid_channels, 2, std::numeric_limits<int>::max()) == 0);
     REQUIRE(writer.frames_written() == 0);
 
     writer.close();
@@ -960,6 +1093,22 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(contains_extension(write_extensions, ".wave"));
     REQUIRE(contains_extension(write_extensions, ".aiff"));
     REQUIRE(contains_extension(write_extensions, ".aif"));
+}
+
+TEST_CASE("FormatRegistry ignores null custom handlers",
+          "[audio][file][registry][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    const auto read_before = registry.supported_read_extensions();
+    const auto write_before = registry.supported_write_extensions();
+
+    registry.register_reader(nullptr);
+    registry.register_writer(nullptr);
+
+    REQUIRE(registry.supported_read_extensions() == read_before);
+    REQUIRE(registry.supported_write_extensions() == write_before);
+    REQUIRE(registry.find_reader(".wav") != nullptr);
+    REQUIRE(registry.find_writer(".wav") != nullptr);
 }
 
 TEST_CASE("FormatRegistry rejects missing and extension-only paths",
@@ -1188,6 +1337,35 @@ TEST_CASE("FormatRegistry writes and reads AIFF files", "[audio][file][registry]
     std::filesystem::remove(tmp_path);
 }
 
+TEST_CASE("AIFF writer rejects invalid source data without creating files",
+          "[audio][file][registry][aiff][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("zero sample rate") {
+        auto tmp_path = unique_temp_audio_path("_aiff_writer_zero_rate.aiff");
+        std::filesystem::remove(tmp_path);
+
+        AudioFileData data;
+        data.sample_rate = 0;
+        data.channels = {{0.0f, 0.5f}};
+
+        REQUIRE_FALSE(registry.write(tmp_path.string(), data));
+        REQUIRE_FALSE(std::filesystem::exists(tmp_path));
+    }
+
+    SECTION("ragged channel lengths") {
+        auto tmp_path = unique_temp_audio_path("_aiff_writer_ragged.aiff");
+        std::filesystem::remove(tmp_path);
+
+        AudioFileData data;
+        data.sample_rate = 44100;
+        data.channels = {{0.0f, 0.5f}, {1.0f}};
+
+        REQUIRE_FALSE(registry.write(tmp_path.string(), data));
+        REQUIRE_FALSE(std::filesystem::exists(tmp_path));
+    }
+}
+
 TEST_CASE("AIFF reader rejects malformed files", "[audio][file][registry][aiff]") {
     auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_malformed.aiff";
     std::filesystem::remove(tmp_path);
@@ -1302,6 +1480,47 @@ TEST_CASE("AIFF reader skips malformed SSND chunks before valid data", "[audio][
     REQUIRE_THAT(data->channels[0][0], WithinAbs(0.5f, 0.001f));
 
     std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader honors SSND offsets and rejects invalid offsets",
+          "[audio][file][registry][aiff][coverage][phase3]") {
+    auto& registry = FormatRegistry::instance();
+
+    SECTION("valid offset skips pad bytes before PCM") {
+        auto tmp_path = unique_temp_audio_path("_aiff_ssnd_offset.aiff");
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 1, 16)},
+                               {"SSND", make_ssnd_chunk_with_offset({0x7F, 0x7F}, {0x40, 0x00})},
+                           });
+
+        auto data = registry.read(tmp_path.string());
+        REQUIRE(data.has_value());
+        REQUIRE(data->num_channels() == 1);
+        REQUIRE(data->num_frames() == 1);
+        REQUIRE_THAT(data->channels[0][0], WithinAbs(0.5f, 0.001f));
+        std::filesystem::remove(tmp_path);
+    }
+
+    SECTION("offset beyond payload is malformed") {
+        auto tmp_path = unique_temp_audio_path("_aiff_bad_ssnd_offset.aiff");
+        std::vector<unsigned char> ssnd;
+        append_be32(ssnd, 4);
+        append_be32(ssnd, 0);
+        ssnd.insert(ssnd.end(), {0x40, 0x00});
+
+        write_aiff_fixture(tmp_path,
+                           "AIFF",
+                           {
+                               {"COMM", make_comm_chunk(1, 1, 16)},
+                               {"SSND", ssnd},
+                           });
+
+        REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+        std::filesystem::remove(tmp_path);
+    }
 }
 
 TEST_CASE("AIFF reader rejects truncated PCM payloads", "[audio][file][registry][aiff]") {

@@ -285,6 +285,28 @@ TEST_CASE("AudioFocusRegistry: reset_for_test clears subscribers and state",
     SUCCEED("no crash on stale token reset");
 }
 
+TEST_CASE("AudioFocusRegistry: stale tokens cannot unsubscribe post-reset subscribers",
+          "[audio][focus][coverage][phase3]") {
+    AudioFocusRegistry::instance().reset_for_test();
+
+    int stale_count = 0;
+    auto stale = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++stale_count; });
+
+    AudioFocusRegistry::instance().reset_for_test();
+
+    int fresh_count = 0;
+    auto fresh = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++fresh_count; });
+
+    stale.reset();
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+
+    REQUIRE(stale_count == 0);
+    REQUIRE(fresh_count == 1);
+    REQUIRE(fresh.id() != 0);
+}
+
 TEST_CASE("AudioFocusRegistry: publish with no subscribers still updates state",
           "[audio][focus][issue-640]") {
     AudioFocusRegistry::instance().reset_for_test();

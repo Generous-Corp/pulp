@@ -58,7 +58,6 @@ void AudioFocusRegistry::publish(AudioFocusState state) {
 void AudioFocusRegistry::reset_for_test() {
     std::lock_guard<std::mutex> lock(mtx_);
     cbs_.clear();
-    next_id_ = 1;
     current_.store(static_cast<std::uint8_t>(AudioFocusState::gained),
                    std::memory_order_release);
 }

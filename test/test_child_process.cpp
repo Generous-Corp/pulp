@@ -133,6 +133,31 @@ TEST_CASE("run with empty command fails gracefully", "[child_process]") {
     REQUIRE(r.exit_code != 0);
 }
 
+#ifdef _WIN32
+TEST_CASE("exec preserves embedded quotes and trailing backslashes on Windows",
+          "[child_process][win][issue-493]") {
+    auto powershell = find_on_path("powershell.exe");
+    if (!powershell) {
+        SUCCEED("skipped: powershell.exe not found");
+        return;
+    }
+
+    const std::string expected = "say \"hi\" C:\\tmp\\";
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    auto r = ChildProcess::run(
+        powershell->string(),
+        {"-NoProfile",
+         "-Command",
+         "param([string]$x) [Console]::Out.Write($x)",
+         expected},
+        opts);
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output == expected);
+}
+#endif
+
 TEST_CASE("stderr is captured separately", "[child_process]") {
     ProcessOptions opts;
     opts.timeout_ms = 5000;
