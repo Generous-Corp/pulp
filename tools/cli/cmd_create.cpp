@@ -661,6 +661,7 @@ int cmd_create(const std::vector<std::string>& args) {
 
         std::string build_cmd = "cmake --build " + shell_quote(out_dir / "build");
         append_build_targets(build_cmd);
+        build_cmd += " --config " + pulp::cli::create_build_config(debug_build);
         rc = run_with_spinner(build_cmd, "Building");
         if (rc != 0) {
             std::cerr << "Build failed.\n";
@@ -668,7 +669,9 @@ int cmd_create(const std::vector<std::string>& args) {
         }
 
         log("\nRunning tests...\n");
-        rc = run("ctest --test-dir " + (out_dir / "build").string() + " --output-on-failure");
+        rc = run("ctest --test-dir " + (out_dir / "build").string()
+                 + " -C " + pulp::cli::create_build_config(debug_build)
+                 + " --output-on-failure");
         if (rc != 0) {
             std::cerr << "Tests failed.\n";
             return rc;
@@ -688,6 +691,7 @@ int cmd_create(const std::vector<std::string>& args) {
 
         std::string build_cmd = "cmake --build " + shell_quote(root / "build");
         append_build_targets(build_cmd);
+        build_cmd += " --config " + pulp::cli::create_build_config(debug_build);
         rc = run_with_spinner(build_cmd, "Building");
         if (rc != 0) {
             std::cerr << "Build failed.\n";
@@ -699,7 +703,9 @@ int cmd_create(const std::vector<std::string>& args) {
         if (fs::exists(test_binary)) {
             rc = run(test_binary.string());
         } else {
-            rc = run("ctest --test-dir " + (root / "build").string() + " -R \"" + name + "\" --output-on-failure");
+            rc = run("ctest --test-dir " + (root / "build").string()
+                     + " -C " + pulp::cli::create_build_config(debug_build)
+                     + " -R \"" + name + "\" --output-on-failure");
         }
         if (rc != 0) {
             std::cerr << "Tests failed.\n";

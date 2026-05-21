@@ -4,6 +4,7 @@
 
 #include <vector>
 
+using pulp::cli::create_build_config;
 using pulp::cli::create_default_build_targets;
 
 TEST_CASE("CLI create targets use format suffixes for plugin projects", "[cli][create]") {
@@ -95,4 +96,20 @@ TEST_CASE("CLI create targets match complete format tokens only",
     CHECK(standalone_prefix == std::vector<std::string>{
         "PulpPlugin-test",
     });
+}
+
+TEST_CASE("CLI create selects build config at build/test time for multi-config generators",
+          "[cli][create][issue-2133]") {
+    // Codex P1 on PR #2133: `pulp create` set only the configure-time
+    // CMAKE_BUILD_TYPE, so on Visual Studio / Xcode multi-config generators
+    // `cmake --build` and `ctest` defaulted to Debug regardless of --debug.
+    // The config name must flow into `cmake --build --config <cfg>` and
+    // `ctest -C <cfg>`.
+    CHECK(create_build_config(false) == "Release");
+    CHECK(create_build_config(true) == "Debug");
+
+    // The fragments appended to the build/test commands resolve to the
+    // multi-config selectors the generators require.
+    CHECK((" --config " + create_build_config(false)) == " --config Release");
+    CHECK((" -C " + create_build_config(true)) == " -C Debug");
 }
