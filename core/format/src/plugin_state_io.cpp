@@ -7,7 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace pulp::format::plugin_state_io {
@@ -53,6 +55,7 @@ void clone_schema(const state::StateStore& source, state::StateStore& dest) {
     for (const auto& param : source.all_params()) {
         dest.add_parameter(param);
     }
+    dest.copy_state_migrations_from(source);
 }
 
 struct ParsedBlob {
@@ -60,7 +63,108 @@ struct ParsedBlob {
     std::span<const uint8_t> plugin_blob;
 };
 
-bool parse_blob(std::span<const uint8_t> bytes, ParsedBlob& parsed) {
+struct EnvelopeMigrationEntry {
+    uint32_t from_version = 0;
+    uint32_t to_version = 0;
+    EnvelopeMigrationFn migration;
+};
+
+std::vector<EnvelopeMigrationEntry>& envelope_migrations() {
+    static std::vector<EnvelopeMigrationEntry> migrations;
+    return migrations;
+}
+
+const EnvelopeMigrationEntry* find_envelope_migration(uint32_t from_version) {
+    for (const auto& entry : envelope_migrations()) {
+        if (entry.from_version == from_version) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+std::optional<uint32_t> envelope_version(std::span<const uint8_t> bytes) {
+    if (!has_magic(bytes, kEnvelopeMagic)
+        || bytes.size() < (kEnvelopeHeaderSize + kEnvelopeFooterSize)) {
+        return std::nullopt;
+    }
+    return choc::memory::readLittleEndian<uint32_t>(bytes.data() + 4);
+}
+
+bool has_valid_envelope_crc(std::span<const uint8_t> bytes) {
+    if (!has_magic(bytes, kEnvelopeMagic)
+        || bytes.size() < (kEnvelopeHeaderSize + kEnvelopeFooterSize)) {
+        return false;
+    }
+
+    const uint32_t store_size =
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 8);
+    const uint32_t plugin_size =
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 12);
+    const std::size_t payload_size =
+        static_cast<std::size_t>(store_size) + static_cast<std::size_t>(plugin_size);
+
+    if (payload_size > (bytes.size() - kEnvelopeHeaderSize - kEnvelopeFooterSize)) {
+        return false;
+    }
+
+    const std::size_t expected_size =
+        kEnvelopeHeaderSize + payload_size + kEnvelopeFooterSize;
+    if (bytes.size() != expected_size) {
+        return false;
+    }
+
+    const std::size_t crc_offset = kEnvelopeHeaderSize + payload_size;
+    const uint32_t stored_crc =
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + crc_offset);
+    const uint32_t computed_crc = crc32_simple(bytes.data(), crc_offset);
+    return stored_crc == computed_crc;
+}
+
+bool migrate_envelope_to_current(std::span<const uint8_t> bytes,
+                                 std::vector<uint8_t>& migrated_storage) {
+    auto version = envelope_version(bytes);
+    if (!version.has_value() || *version > kEnvelopeVersion) {
+        return false;
+    }
+    if (!has_valid_envelope_crc(bytes)) {
+        return false;
+    }
+    if (*version == kEnvelopeVersion) {
+        migrated_storage.assign(bytes.begin(), bytes.end());
+        return true;
+    }
+
+    std::vector<uint8_t> current(bytes.begin(), bytes.end());
+    while (*version != kEnvelopeVersion) {
+        const auto* migration = find_envelope_migration(*version);
+        if (migration == nullptr
+            || migration->to_version <= *version
+            || migration->to_version > kEnvelopeVersion) {
+            return false;
+        }
+
+        std::vector<uint8_t> next;
+        if (!migration->migration(current, next) || next.empty()) {
+            return false;
+        }
+
+        auto next_version = envelope_version(next);
+        if (!next_version.has_value() || *next_version != migration->to_version) {
+            return false;
+        }
+
+        current = std::move(next);
+        version = next_version;
+    }
+
+    migrated_storage = std::move(current);
+    return true;
+}
+
+bool parse_blob(std::span<const uint8_t> bytes,
+                ParsedBlob& parsed,
+                std::vector<uint8_t>& migrated_storage) {
     if (has_magic(bytes, kStateStoreMagic)) {
         parsed.store_blob = bytes;
         parsed.plugin_blob = {};
@@ -77,7 +181,19 @@ bool parse_blob(std::span<const uint8_t> bytes, ParsedBlob& parsed) {
 
     const uint32_t version =
         choc::memory::readLittleEndian<uint32_t>(bytes.data() + 4);
-    if (version != kEnvelopeVersion) {
+    if (version > kEnvelopeVersion) {
+        return false;
+    }
+    if (version < kEnvelopeVersion) {
+        if (!migrate_envelope_to_current(bytes, migrated_storage)) {
+            return false;
+        }
+        bytes = migrated_storage;
+    }
+
+    const uint32_t readable_version =
+        choc::memory::readLittleEndian<uint32_t>(bytes.data() + 4);
+    if (readable_version != kEnvelopeVersion) {
         return false;
     }
 
@@ -128,6 +244,26 @@ bool restore_previous_state(const std::vector<uint8_t>& store_blob,
 
 } // namespace
 
+uint32_t current_envelope_version() {
+    return kEnvelopeVersion;
+}
+
+bool register_envelope_migration(uint32_t from_version,
+                                 uint32_t to_version,
+                                 EnvelopeMigrationFn migration) {
+    if (from_version >= to_version
+        || to_version > kEnvelopeVersion
+        || !migration) {
+        return false;
+    }
+    if (find_envelope_migration(from_version) != nullptr) {
+        return false;
+    }
+
+    envelope_migrations().push_back({from_version, to_version, std::move(migration)});
+    return true;
+}
+
 std::vector<uint8_t> serialize(const state::StateStore& store,
                                const Processor& processor) {
     auto store_blob = store.serialize();
@@ -154,7 +290,8 @@ bool deserialize(std::span<const uint8_t> bytes,
                  state::StateStore& store,
                  Processor& processor) {
     ParsedBlob parsed{};
-    if (!parse_blob(bytes, parsed)) {
+    std::vector<uint8_t> migrated_storage;
+    if (!parse_blob(bytes, parsed, migrated_storage)) {
         return false;
     }
 

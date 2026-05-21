@@ -2,6 +2,7 @@
 
 #include <pulp/state/listener_token.hpp>
 #include <pulp/state/parameter.hpp>
+#include <pulp/state/state_migration.hpp>
 #include <array>
 #include <vector>
 #include <unordered_map>
@@ -246,6 +247,20 @@ public:
     /// Get the current state schema version.
     uint32_t state_version() const { return state_version_; }
 
+    /// Register a load-time migration for this store's parameter schema.
+    ///
+    /// Migrations are scoped to the StateStore instance because state schema
+    /// versions are plugin-defined; two plugins may both need a different
+    /// migration from version 1 to 2.
+    bool register_state_migration(uint32_t from_version,
+                                  uint32_t to_version,
+                                  StateMigrationRegistry::MigrationFn migration);
+
+    /// Copy schema migrations from another store with the same registered
+    /// parameters. Used by restore probes that validate before touching live
+    /// state.
+    void copy_state_migrations_from(const StateStore& source);
+
 private:
     std::vector<ParamInfo> params_;
     std::vector<ParamGroup> groups_;
@@ -253,6 +268,7 @@ private:
     std::vector<ParamValue> values_;
     std::shared_ptr<detail::ListenerRegistry> registry_;
     std::vector<ListenerToken> permanent_listener_tokens_;
+    StateMigrationRegistry migrations_;
     uint32_t state_version_ = 1;
 
     std::function<void(ParamID)> on_begin_gesture_;

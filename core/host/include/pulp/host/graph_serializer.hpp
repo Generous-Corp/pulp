@@ -15,6 +15,7 @@
 // Phase 3 of planning/signal-graph-followups-plan.md.
 
 #include <pulp/host/signal_graph.hpp>
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -22,6 +23,15 @@ namespace pulp::host {
 
 class GraphSerializer {
 public:
+    using MigrationFn =
+        std::function<bool(const std::string& source_json,
+                           std::string& destination_json)>;
+
+    static int current_format_version();
+    static bool register_migration(int from_version,
+                                   int to_version,
+                                   MigrationFn migration);
+
     // Encode the entire graph as JSON. The `editor_layout` map (NodeId →
     // (x,y)) is optional — pass an empty map if the graph has no UI.
     static std::string to_json(const SignalGraph& graph,

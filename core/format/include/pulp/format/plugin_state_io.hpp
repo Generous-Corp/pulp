@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -12,6 +13,16 @@ namespace pulp::format {
 class Processor;
 
 namespace plugin_state_io {
+
+using EnvelopeMigrationFn =
+    std::function<bool(std::span<const uint8_t> source,
+                       std::vector<uint8_t>& destination)>;
+
+uint32_t current_envelope_version();
+
+bool register_envelope_migration(uint32_t from_version,
+                                 uint32_t to_version,
+                                 EnvelopeMigrationFn migration);
 
 /// Serialize the host-facing plugin state blob for a Processor.
 ///

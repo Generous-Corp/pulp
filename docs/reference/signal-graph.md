@@ -71,6 +71,14 @@ reads back. Full automation-curve routing (one node's output driving
 another node's parameter over a block) is not yet available — track via
 the plan.
 
+## Persistence
+
+`GraphSerializer` writes `.pulpgraph` JSON with a `format_version` field.
+Loaders read that field before materializing nodes. Older graph versions can
+register `GraphSerializer::register_migration()` steps to upgrade JSON to the
+current format; newer or unreadable versions fail closed instead of being
+silently interpreted as current data.
+
 ## Thread model
 
 - **Build & edit** (add / connect / remove) runs on the UI thread.
