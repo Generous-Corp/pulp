@@ -36,6 +36,9 @@ void HighResolutionTimer::start(std::chrono::microseconds interval,
             if (callback_)
                 callback_();
 
+            if (!running_.load(std::memory_order_acquire))
+                break;
+
             // Busy-wait for short intervals (<1ms), sleep for longer
             if (interval < std::chrono::milliseconds(1)) {
                 while (std::chrono::steady_clock::now() < next &&
@@ -52,9 +55,7 @@ void HighResolutionTimer::start(std::chrono::microseconds interval,
 
 void HighResolutionTimer::stop() {
     running_.store(false, std::memory_order_release);
-    if (thread_.joinable() && thread_.get_id() == std::this_thread::get_id())
-        thread_.detach();
-    else if (thread_.joinable())
+    if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id())
         thread_.join();
 }
 

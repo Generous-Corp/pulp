@@ -7,6 +7,7 @@
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/expression.hpp>
+#include <pulp/runtime/high_resolution_timer.hpp>
 #include <pulp/runtime/http.hpp>
 #include <pulp/runtime/identity.hpp>
 #include <pulp/runtime/ip_address.hpp>
@@ -20,6 +21,7 @@
 #include "../external/cpp-httplib/httplib.h"
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -147,7 +149,41 @@ bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = std::ch
     return false;
 }
 
+template <typename Predicate>
+bool wait_for_predicate(Predicate&& predicate, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (predicate())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return predicate();
+}
+
 }  // namespace
+
+// ── HighResolutionTimer ─────────────────────────────────────────────────
+
+TEST_CASE("HighResolutionTimer self-stop remains joinable for destruction",
+          "[runtime][timer][coverage][phase3-followup]") {
+    std::atomic<bool> stop_returned{false};
+
+    {
+        HighResolutionTimer timer;
+        timer.start(std::chrono::microseconds(100), [&] {
+            timer.stop();
+            stop_returned.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        });
+
+        REQUIRE(wait_for_predicate([&] {
+            return stop_returned.load(std::memory_order_acquire);
+        }, std::chrono::seconds(2)));
+        REQUIRE_FALSE(timer.is_running());
+    }
+
+    REQUIRE(stop_returned.load(std::memory_order_acquire));
+}
 
 // ── Identity ────────────────────────────────────────────────────────────
 

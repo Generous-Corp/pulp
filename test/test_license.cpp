@@ -633,6 +633,20 @@ TEST_CASE("LicenseValidator validate_and_parse accepts whitespace after optional
     REQUIRE(truncated_info->issued_timestamp == 789);
 }
 
+TEST_CASE("LicenseValidator validate_and_parse accepts whitespace before optional integers",
+          "[crypto][license][coverage][phase3-followup]") {
+    LicenseValidator validator;
+    std::string payload = "{\"product_id\":\"PulpMini\",\"issued\": \n\t123,\"expiry\": 456}";
+    auto info = validator.validate_and_parse(base64_encode(payload) + ".sig");
+    REQUIRE(info.has_value());
+    REQUIRE(info->issued_timestamp == 123);
+    REQUIRE(info->expiry_timestamp == 456);
+
+    std::string partial =
+        "{\"product_id\":\"PulpMini\",\"issued\": 123junk,\"expiry\": 456}";
+    REQUIRE_FALSE(validator.validate_and_parse(base64_encode(partial) + ".sig").has_value());
+}
+
 TEST_CASE("LicenseValidator validate_file preserves interior whitespace",
           "[crypto][license][coverage][phase3-large]") {
     TemporaryFile tmp(".license");

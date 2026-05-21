@@ -36,6 +36,9 @@ static bool json_int_value(std::string_view json, std::string_view key, int64_t&
     if (pos == std::string_view::npos) return true;
 
     auto start = pos + search.size();
+    while (start < json.size() && std::isspace(static_cast<unsigned char>(json[start])))
+        ++start;
+
     auto end = start;
     if (end < json.size() && json[end] == '-') ++end;
 
