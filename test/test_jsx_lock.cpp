@@ -303,6 +303,27 @@ TEST_CASE("jsx_lock escapes single quotes in a string value",
     REQUIRE(r.source.find("Mike\\'s Font") != std::string::npos);
 }
 
+TEST_CASE("jsx_lock escapes double quotes in double-quoted values",
+          "[jsx-lock][issue-1308]") {
+    const std::string style_src =
+        "<Frame data-pulp-anchor=\"a\" style={{ fontFamily: \"Inter\" }}/>\n";
+    JsxLockResult style = jsx_lock_tweak_into_source(
+        style_src, {"a", "paint.fontFamily", "Quote \" Font"});
+
+    REQUIRE(style.status == JsxLockStatus::patched);
+    REQUIRE(style.source.find("fontFamily: \"Quote \\\" Font\"") !=
+            std::string::npos);
+
+    const std::string attr_src =
+        "<Knob data-pulp-anchor=\"a\" color=\"old\"/>\n";
+    JsxLockResult attr = jsx_lock_tweak_into_source(
+        attr_src, {"a", "paint.color", "he said \"blue\""});
+
+    REQUIRE(attr.status == JsxLockStatus::patched);
+    REQUIRE(attr.source.find("color=\"he said \\\"blue\\\"\"") !=
+            std::string::npos);
+}
+
 TEST_CASE("jsx_lock converts a numeric prop to a quoted string when needed",
           "[jsx-lock][issue-1308]") {
     // width={80} (bare number) tweaked to a unit-bearing CSS value must
@@ -331,6 +352,7 @@ TEST_CASE("jsx_lock_tweaks_into_source applies several tweaks in one pass",
     for (const auto& r : results) REQUIRE(r.status == JsxLockStatus::patched);
 
     const std::string& final = results.back().source;
+    for (const auto& r : results) REQUIRE(r.source == final);
     REQUIRE(final.find("padding: 16,") != std::string::npos);
     REQUIRE(final.find("color=\"#5a5a5a\"") != std::string::npos);
     REQUIRE(final.find("width={120}") != std::string::npos);

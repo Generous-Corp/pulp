@@ -103,12 +103,12 @@ bool looks_numeric(const std::string& value) {
     return saw_digit;
 }
 
-// Escape a value for emission inside a single-quoted JS string literal.
-std::string escape_js_single(const std::string& s) {
+// Escape a value for emission inside a JS/JSX string literal body.
+std::string escape_js_string_body(const std::string& s, char quote) {
     std::string out;
     out.reserve(s.size() + 2);
     for (char c : s) {
-        if (c == '\\' || c == '\'') out += '\\';
+        if (c == '\\' || c == quote) out += '\\';
         out += c;
     }
     return out;
@@ -220,6 +220,7 @@ struct ValueSpan {
     std::size_t begin = 0;    // first byte of the value text to replace.
     std::size_t end = 0;      // one past the last byte to replace.
     bool quoted = false;      // the existing value was a quoted string.
+    char quote = '\0';        // the delimiter for quoted values.
     bool expr_braces = false; // the prop used `{…}` (so a number stays bare).
 };
 
@@ -282,6 +283,7 @@ ValueSpan locate_bare_attr_value(const std::string& tag,
         if (e == std::string::npos) return vs;
         vs.found = true;
         vs.quoted = true;
+        vs.quote = q;
         vs.begin = b;
         vs.end = e;
         return vs;
@@ -322,6 +324,7 @@ ValueSpan locate_bare_attr_value(const std::string& tag,
                 return vs;
             vs.found = true;
             vs.quoted = true;
+            vs.quote = inner.front();
             vs.expr_braces = true;
             vs.begin = s_open + 1;
             vs.end = s_close;
@@ -525,6 +528,7 @@ ValueSpan locate_style_property_value(const std::string& tag,
             // Quoted string literal value.
             vs.found = true;
             vs.quoted = true;
+            vs.quote = val.front();
             vs.begin = abs_val_begin + 1;
             vs.end = abs_val_begin + val.size() - 1;
             return vs;
@@ -553,14 +557,14 @@ ValueSpan locate_style_property_value(const std::string& tag,
 // quotes); a bare numeric span is replaced wholesale by the new literal.
 std::string render_value(const ValueSpan& vs, const std::string& value) {
     if (vs.quoted) {
-        // Contents-only replacement — escape for a JS string body.
-        return escape_js_single(value);
+        // Contents-only replacement — escape for the original delimiter.
+        return escape_js_string_body(value, vs.quote);
     }
     // Bare numeric span. If the new value is itself numeric, emit it
     // bare; otherwise the prop must become a quoted string, so emit
     // quotes explicitly (the span replacement includes them).
     if (looks_numeric(value)) return trim(value);
-    return "'" + escape_js_single(value) + "'";
+    return "'" + escape_js_string_body(value, '\'') + "'";
 }
 
 }  // namespace
@@ -744,6 +748,7 @@ jsx_lock_tweaks_into_source(const std::string& source,
         running = r.source;  // chain so later tweaks see earlier patches.
         results.push_back(std::move(r));
     }
+    for (auto& r : results) r.source = running;
     return results;
 }
 
