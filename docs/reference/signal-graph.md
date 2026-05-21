@@ -20,12 +20,14 @@ Each node has a stable `NodeId` that survives connection edits. The graph
 owns the nodes; removing a node invalidates its id.
 
 Custom node types are registered per graph with `CustomNodeType`
-(`type_id`, `version`, input ports, output ports, default name) before
-calling `add_custom_node(type_id)`. Graph serialization stores the custom
+(`type_id`, `version`, input ports, output ports, default name, optional
+process callback) before calling `add_custom_node(type_id)` or
+`add_custom_node(type_id, version)`. Graph serialization stores the custom
 `type_id` and `version` so a topology can be reloaded on another machine.
-If the target graph has not registered the matching factory, the loader still
-creates a placeholder `Custom` node with the saved identity and port shape and
-reports the unresolved type in `LoadResult::missing_custom_node_types`.
+If the target graph has not registered the exact matching version and shape,
+the loader still creates a placeholder `Custom` node with the saved identity
+and port shape and reports the unresolved type in
+`LoadResult::missing_custom_node_types`.
 
 ## Connections
 
@@ -63,8 +65,9 @@ walks this vector once per block:
 1. Input nodes copy from the host buffer to their output port.
 2. Plugin nodes call `PluginSlot::process()` with their gathered inputs.
 3. Gain nodes multiply in place.
-4. Custom nodes pass audio inputs through to matching output ports unless a
-   future registered implementation gives them behavior.
+4. Custom nodes run their registered process callback when the registered
+   version and shape match the node; unresolved, shape-mismatched, or
+   metadata-only registrations pass audio inputs through to matching outputs.
 5. MIDI nodes route events the same way audio flows.
 6. Output nodes copy to the host buffer.
 

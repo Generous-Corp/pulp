@@ -49,10 +49,14 @@ field so both declaration styles behave the same.
 
 `SignalGraph` supports string-keyed custom host nodes through
 `CustomNodeType`. Register a type on the graph with a stable `type_id`, a
-positive integer `version`, and its input/output port shape, then instantiate
-it with `add_custom_node(type_id)`.
+positive integer `version`, its input/output port shape, and an optional
+process callback, then instantiate it with `add_custom_node(type_id)` or
+`add_custom_node(type_id, version)`. A callback is attached only when the
+registered `(type_id, version)` and port shape match the node; mismatched or
+unresolved nodes use placeholder passthrough behavior.
 
 The node type enum only appends `NodeType::Custom`; built-in enum values stay
 stable. Serialized graphs store the custom `type_id` and `version`, and loads
 preserve that identity even when the target graph has not registered a matching
-factory.
+factory. Multiple versions of the same custom `type_id` can be registered at
+once; deserialization resolves by exact `(type_id, version)`.

@@ -18,6 +18,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <unordered_map>
@@ -42,12 +43,17 @@ enum class NodeType {
 using NodeId = uint32_t;
 using PortIndex = uint32_t;
 
+using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
+                                              const audio::BufferView<const float>& input,
+                                              int num_samples)>;
+
 struct CustomNodeType {
     std::string type_id;
     int version = 1;
     int num_input_ports = 0;
     int num_output_ports = 0;
     std::string default_name;
+    CustomNodeProcessFn process;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -142,9 +148,18 @@ public:
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
+    // Registers or replaces a custom type. If existing nodes use the same
+    // `(type_id, version)`, the live snapshot is invalidated so prepare()
+    // can rebuild with the matching process callback. Shape mismatches keep
+    // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
+    const CustomNodeType* custom_node_type(std::string_view type_id,
+                                           int version) const;
     NodeId add_custom_node(std::string_view type_id,
+                           const std::string& name = {});
+    NodeId add_custom_node(std::string_view type_id,
+                           int version,
                            const std::string& name = {});
     NodeId add_unresolved_custom_node(std::string_view type_id,
                                       int version,
@@ -271,6 +286,7 @@ private:
         // node processes, then zero before the next block.
         std::vector<float> input_data;
         std::vector<float*> input_ptrs;
+        std::vector<const float*> input_const_ptrs;
         float gain = 1.0f;
 
         // PDC: cumulative samples of latency from AudioInput to this node's
@@ -336,6 +352,7 @@ private:
         // pointers into an outer container.
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
+        std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
         struct NodeShape {
             NodeType type;
             int num_input_ports;

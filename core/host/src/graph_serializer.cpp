@@ -464,12 +464,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                             version = (int)cv["version"].getInt64();
                         }
                     }
-                    const auto* registered = graph.custom_node_type(type_id);
+                    const auto* registered = graph.custom_node_type(type_id, version);
                     if (registered
-                        && registered->version == version
                         && registered->num_input_ports == in_ch
                         && registered->num_output_ports == out_ch) {
-                        new_id = graph.add_custom_node(type_id, name);
+                        new_id = graph.add_custom_node(type_id, version, name);
                     } else {
                         result.missing_custom_node_types.push_back(
                             custom_type_label(type_id, version));

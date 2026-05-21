@@ -12,6 +12,7 @@
 #include <future>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace pulp::host;
@@ -495,12 +496,36 @@ TEST_CASE("SignalGraph add and remove nodes", "[host][graph]") {
 TEST_CASE("SignalGraph registers and processes custom nodes",
           "[host][graph][node-abi]") {
     SignalGraph graph;
-    REQUIRE_FALSE(graph.register_custom_node_type({"", 1, 1, 1, "Bad"}));
-    REQUIRE_FALSE(graph.register_custom_node_type({"pulp.test.bad", 0, 1, 1, "Bad"}));
+    CustomNodeType empty_type;
+    empty_type.version = 1;
+    empty_type.num_input_ports = 1;
+    empty_type.num_output_ports = 1;
+    empty_type.default_name = "Bad";
+    REQUIRE_FALSE(graph.register_custom_node_type(empty_type));
+
+    CustomNodeType zero_version_type;
+    zero_version_type.type_id = "pulp.test.bad";
+    zero_version_type.version = 0;
+    zero_version_type.num_input_ports = 1;
+    zero_version_type.num_output_ports = 1;
+    zero_version_type.default_name = "Bad";
+    REQUIRE_FALSE(graph.register_custom_node_type(zero_version_type));
     REQUIRE_FALSE(graph.add_custom_node("pulp.test.custom"));
 
-    REQUIRE(graph.register_custom_node_type(
-        {"pulp.test.custom", 3, 1, 1, "Custom"}));
+    CustomNodeType custom_type;
+    custom_type.type_id = "pulp.test.custom";
+    custom_type.version = 3;
+    custom_type.num_input_ports = 1;
+    custom_type.num_output_ports = 1;
+    custom_type.default_name = "Custom";
+    custom_type.process = [](pulp::audio::BufferView<float>& output,
+                             const pulp::audio::BufferView<const float>& input,
+                             int num_samples) {
+        for (int i = 0; i < num_samples; ++i) {
+            output.channel_ptr(0)[i] = input.channel_ptr(0)[i] * 2.0f;
+        }
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(custom_type)));
     auto input = graph.add_input_node(1, "Input");
     auto custom = graph.add_custom_node("pulp.test.custom", "Custom A");
     auto output = graph.add_output_node(1, "Output");
@@ -525,7 +550,136 @@ TEST_CASE("SignalGraph registers and processes custom nodes",
     pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
     pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
     graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i] * 2.0f);
+}
+
+TEST_CASE("SignalGraph custom node registry keeps versions distinct",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+
+    CustomNodeType v1_type;
+    v1_type.type_id = "pulp.test.versioned";
+    v1_type.version = 1;
+    v1_type.num_input_ports = 1;
+    v1_type.num_output_ports = 1;
+    v1_type.default_name = "Version 1";
+    REQUIRE(graph.register_custom_node_type(v1_type));
+
+    CustomNodeType v2_type;
+    v2_type.type_id = "pulp.test.versioned";
+    v2_type.version = 2;
+    v2_type.num_input_ports = 2;
+    v2_type.num_output_ports = 2;
+    v2_type.default_name = "Version 2";
+    REQUIRE(graph.register_custom_node_type(v2_type));
+
+    const auto* v1 = graph.custom_node_type("pulp.test.versioned", 1);
+    const auto* v2 = graph.custom_node_type("pulp.test.versioned", 2);
+    const auto* latest = graph.custom_node_type("pulp.test.versioned");
+    REQUIRE(v1 != nullptr);
+    REQUIRE(v2 != nullptr);
+    REQUIRE(latest != nullptr);
+    REQUIRE(v1->version == 1);
+    REQUIRE(v2->version == 2);
+    REQUIRE(latest->version == 2);
+
+    auto node_v1 = graph.add_custom_node("pulp.test.versioned", 1, "Old Shape");
+    auto node_v2 = graph.add_custom_node("pulp.test.versioned", 2, "New Shape");
+    REQUIRE(node_v1 != 0);
+    REQUIRE(node_v2 != 0);
+    REQUIRE(graph.node(node_v1)->custom_type_version == 1);
+    REQUIRE(graph.node(node_v1)->num_input_ports == 1);
+    REQUIRE(graph.node(node_v2)->custom_type_version == 2);
+    REQUIRE(graph.node(node_v2)->num_input_ports == 2);
+}
+
+TEST_CASE("SignalGraph custom node processors require matching shapes",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto custom = graph.add_unresolved_custom_node(
+        "pulp.test.shape-guard", 1, 1, 1, "Shape Guard");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+
+    bool callback_called = false;
+    CustomNodeType mismatched_type;
+    mismatched_type.type_id = "pulp.test.shape-guard";
+    mismatched_type.version = 1;
+    mismatched_type.num_input_ports = 2;
+    mismatched_type.num_output_ports = 1;
+    mismatched_type.default_name = "Shape Guard";
+    mismatched_type.process =
+        [&callback_called](pulp::audio::BufferView<float>& output,
+                           const pulp::audio::BufferView<const float>&,
+                           int num_samples) {
+            callback_called = true;
+            for (int i = 0; i < num_samples; ++i) {
+                output.channel_ptr(0)[i] = 99.0f;
+            }
+        };
+    REQUIRE(graph.register_custom_node_type(std::move(mismatched_type)));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_samples[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_samples[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    const float* in_ptrs[1] = {in_samples};
+    float* out_ptrs[1] = {out_samples};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+    graph.process(out_view, in_view, 4);
+
+    REQUIRE_FALSE(callback_called);
     for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i]);
+}
+
+TEST_CASE("SignalGraph custom node registrations invalidate matching snapshots",
+          "[host][graph][node-abi]") {
+    SignalGraph graph;
+    auto input = graph.add_input_node(1, "Input");
+    auto custom = graph.add_unresolved_custom_node(
+        "pulp.test.live-registration", 1, 1, 1, "Live Registration");
+    auto output = graph.add_output_node(1, "Output");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 4));
+
+    float in_samples[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float out_samples[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    const float* in_ptrs[1] = {in_samples};
+    float* out_ptrs[1] = {out_samples};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 4);
+    pulp::audio::BufferView<float> out_view(out_ptrs, 1, 4);
+
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i]);
+
+    CustomNodeType registered_type;
+    registered_type.type_id = "pulp.test.live-registration";
+    registered_type.version = 1;
+    registered_type.num_input_ports = 1;
+    registered_type.num_output_ports = 1;
+    registered_type.default_name = "Live Registration";
+    registered_type.process = [](pulp::audio::BufferView<float>& output,
+                                 const pulp::audio::BufferView<const float>& input,
+                                 int num_samples) {
+        for (int i = 0; i < num_samples; ++i) {
+            output.channel_ptr(0)[i] = input.channel_ptr(0)[i] * 3.0f;
+        }
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(registered_type)));
+
+    std::fill(out_samples, out_samples + 4, -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (float sample : out_samples) REQUIRE(sample == 0.0f);
+
+    REQUIRE(graph.prepare(48000.0, 4));
+    std::fill(out_samples, out_samples + 4, -1.0f);
+    graph.process(out_view, in_view, 4);
+    for (int i = 0; i < 4; ++i) REQUIRE(out_samples[i] == in_samples[i] * 3.0f);
 }
 
 TEST_CASE("SignalGraph remove_node prunes edges and invalidates live graph",
