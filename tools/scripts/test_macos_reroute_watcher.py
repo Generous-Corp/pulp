@@ -57,6 +57,16 @@ class MacosRerouteWatcherTests(unittest.TestCase):
         ):
             self.assertFalse(watcher.local_is_busy())
 
+        marker_without_build = (
+            "/Users/runner/actions-runner/_work/pulp/pulp helper-process python\n"
+        )
+        with mock.patch.object(
+            watcher.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["ps"], 0, stdout=marker_without_build),
+        ):
+            self.assertFalse(watcher.local_is_busy())
+
         with mock.patch.object(
             watcher.subprocess,
             "run",
@@ -174,6 +184,19 @@ class MacosRerouteWatcherTests(unittest.TestCase):
             watcher.tick(guard)
             reroute.assert_called_once_with(11)
 
+    def test_tick_skips_all_flap_guarded_candidates(self) -> None:
+        guard = watcher.FlapGuard(window_seconds=300)
+        with mock.patch.object(watcher.time, "time", return_value=1000.0):
+            guard.record(10)
+
+        with mock.patch.object(watcher, "local_is_busy", return_value=False), \
+             mock.patch.object(watcher, "list_queued_cloud_bat_runs", return_value=[(10, 100)]), \
+             mock.patch.object(watcher, "reroute_to_local") as reroute, \
+             mock.patch.object(watcher.time, "time", return_value=1001.0):
+            watcher.tick(guard)
+
+        reroute.assert_not_called()
+
     def test_tick_tries_next_candidate_when_reroute_fails(self) -> None:
         guard = watcher.FlapGuard(window_seconds=300)
         with mock.patch.object(watcher, "local_is_busy", return_value=False), \
@@ -210,6 +233,14 @@ class MacosRerouteWatcherTests(unittest.TestCase):
         self.assertEqual(tick.call_count, 2)
         log_exception.assert_called_once()
         sleep.assert_called_once_with(3)
+
+    def test_watch_sleeps_after_clean_tick_until_interrupt(self) -> None:
+        with mock.patch.object(watcher, "tick", side_effect=[None, KeyboardInterrupt]) as tick, \
+             mock.patch.object(watcher.time, "sleep") as sleep:
+            watcher.watch(interval=11, flap_window=12)
+
+        self.assertEqual(tick.call_count, 2)
+        sleep.assert_called_once_with(11)
 
     def test_main_parses_args_and_invokes_watch(self) -> None:
         with mock.patch.object(watcher, "watch") as watch:

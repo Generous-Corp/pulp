@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -142,6 +143,26 @@ class DocsNoiseLintTests(unittest.TestCase):
         result = self._run("--mode=report", "docs/reports/noisy.md")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_explicit_files_accept_absolute_paths_and_skip_missing(self) -> None:
+        noisy = self._write("docs/reference/noisy.md", "See #123.\n")
+        self._write("docs/reports/skip.md", "See #456.\n")
+
+        files = noise._iter_explicit_files(
+            self.tmpdir,
+            [str(noisy), "missing.md", "docs/reports/skip.md"],
+        )
+
+        self.assertEqual(files, [noisy])
+
+    def test_default_files_skip_directories_and_allowlisted_paths(self) -> None:
+        self._write("docs/reference/page.md", "Current behavior.\n")
+        (self.tmpdir / "docs/reference/folder.md").mkdir(parents=True)
+        self._write(".agents/skills/ci/SKILL.md", "See #123.\n")
+
+        files = [noise._norm_path(path, self.tmpdir) for path in noise._iter_default_files(self.tmpdir)]
+
+        self.assertEqual(files, ["docs/reference/page.md"])
+
     def test_reviews_directory_is_allowlisted(self) -> None:
         self._write("docs/reviews/plan.md", "See #123 and Wave 4 inventory.\n")
         result = self._run("--mode=report", "docs/reviews/plan.md")
@@ -243,6 +264,73 @@ class DocsNoiseLintTests(unittest.TestCase):
         with mock.patch.object(noise.subprocess, "run", return_value=failed):
             self.assertEqual(noise._git_diff_line_map(self.tmpdir, []), {})
             self.assertEqual(noise._git_untracked_line_map(self.tmpdir), {})
+
+    def test_scan_changed_map_filters_scope_allowlist_and_missing_paths(self) -> None:
+        self._write("docs/reference/noisy.md", "See #123.\n")
+        self._write("docs/reports/noisy.md", "See #456.\n")
+        self._write("README.md", "See #789.\n")
+
+        with mock.patch.object(noise, "_git_changed_line_map", return_value={
+            "README.md": None,
+            "docs/reference/missing.md": None,
+            "docs/reference/noisy.md": None,
+            "docs/reports/noisy.md": None,
+        }):
+            findings = noise.scan(
+                self.tmpdir,
+                [],
+                base="main",
+                head="HEAD",
+                scan_all=False,
+            )
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].path, "docs/reference/noisy.md")
+
+    def test_scan_changed_map_respects_allowed_line_sets(self) -> None:
+        self._write("docs/reference/noisy.md", "See #123.\nCurrent behavior.\n")
+        with mock.patch.object(noise, "_git_changed_line_map", return_value={
+            "docs/reference/noisy.md": {2},
+        }):
+            findings = noise.scan(
+                self.tmpdir,
+                [],
+                base="main",
+                head="HEAD",
+                scan_all=False,
+            )
+
+        self.assertEqual(findings, [])
+
+    def test_scan_falls_back_to_default_scope_outside_git(self) -> None:
+        self._write("docs/reference/noisy.md", "See #123.\n")
+        with mock.patch.object(noise, "_git_changed_line_map", return_value=None):
+            findings = noise.scan(
+                self.tmpdir,
+                [],
+                base="main",
+                head="HEAD",
+                scan_all=False,
+            )
+
+        self.assertEqual(len(findings), 1)
+
+    def test_strip_inline_code_removes_multiple_spans(self) -> None:
+        stripped = noise._strip_inline_code("Use `See #123` then ``Wave 4`` outside")
+        self.assertNotIn("#123", stripped)
+        self.assertNotIn("Wave 4", stripped)
+        self.assertIn("outside", stripped)
+
+    def test_format_findings_empty_is_empty(self) -> None:
+        self.assertEqual(noise._format_findings([], "report"), "")
+
+    def test_script_entrypoint_returns_zero_for_clean_root(self) -> None:
+        self._write("docs/reference/clean.md", "Current behavior.\n")
+        with mock.patch.object(sys, "argv", [str(SCRIPT), "--root", str(self.tmpdir), "--all"]):
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 0)
 
     def test_scan_file_read_errors_are_reported(self) -> None:
         directory = self.tmpdir / "docs" / "reference"

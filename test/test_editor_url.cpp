@@ -403,7 +403,9 @@ TEST_CASE("jump_to_source with dry_run=false does not launch under the guard",
 
 TEST_CASE("launch_editor_url refuses to spawn when PULP_HEADLESS is set",
           "[inspect][source-jump][issue-2515]") {
+    ScopedEnv no_launch("PULP_INSPECTOR_NO_LAUNCH");
     ScopedEnv headless("PULP_HEADLESS");
+    no_launch.unset();
     headless.set("1");
 
     std::string error;
@@ -413,9 +415,11 @@ TEST_CASE("launch_editor_url refuses to spawn when PULP_HEADLESS is set",
 
 TEST_CASE("launch_editor_url refuses to spawn when CI is set",
           "[inspect][source-jump][issue-2515]") {
+    ScopedEnv no_launch("PULP_INSPECTOR_NO_LAUNCH");
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+    no_launch.unset();
     headless.unset();
     test_mode.unset();
     ci.set("true");
@@ -427,9 +431,11 @@ TEST_CASE("launch_editor_url refuses to spawn when CI is set",
 
 TEST_CASE("launch_editor_url refuses to spawn from pulp-test binaries",
           "[inspect][source-jump][issue-2515]") {
+    ScopedEnv no_launch("PULP_INSPECTOR_NO_LAUNCH");
     ScopedEnv headless("PULP_HEADLESS");
     ScopedEnv test_mode("PULP_TEST_MODE");
     ScopedEnv ci("CI");
+    no_launch.unset();
     headless.unset();
     test_mode.unset();
     ci.unset();
@@ -441,7 +447,9 @@ TEST_CASE("launch_editor_url refuses to spawn from pulp-test binaries",
 
 TEST_CASE("jump_to_source non-dry launch is guarded in headless mode",
           "[inspect][source-jump][issue-2515]") {
+    ScopedEnv no_launch("PULP_INSPECTOR_NO_LAUNCH");
     ScopedEnv headless("PULP_HEADLESS");
+    no_launch.unset();
     headless.set("1");
 
     pulp::view::View view;
@@ -517,7 +525,9 @@ TEST_CASE("Inspector.jumpToSource reports guarded launch errors",
           "[inspect][source-jump][protocol][issue-2515]") {
     ScopedEnv env("PULP_INSPECTOR_EDITOR_URL");
     env.unset();
+    ScopedEnv no_launch("PULP_INSPECTOR_NO_LAUNCH");
     ScopedEnv headless("PULP_HEADLESS");
+    no_launch.unset();
     headless.set("1");
 
     pulp::view::View root;

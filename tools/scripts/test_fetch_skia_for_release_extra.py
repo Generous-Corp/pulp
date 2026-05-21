@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
@@ -95,6 +96,13 @@ class FetchSkiaForReleaseExtraTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 self.assertEqual(skia.main(["fetch", "linux-arm64"]), 0)
             self.assertIn("no Skia release asset", out.getvalue())
+
+    def test_script_entrypoint_returns_usage_error(self) -> None:
+        with mock.patch.object(sys, "argv", [str(SCRIPT)]):
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 2)
 
     def test_main_reports_missing_skia_entry_and_checksum_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
