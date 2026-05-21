@@ -191,6 +191,41 @@ TEST_CASE("plugin_state_io round-trips parameter and plugin-owned state",
     REQUIRE(restored.processor.plugin_state == "bands=48;view=60-12000");
 }
 
+TEST_CASE("plugin_state_io envelope encodes payload sizes and CRC",
+          "[format][plugin-state][coverage][phase3]") {
+    TestRig source;
+    source.store.set_value(1, -2.5f);
+    source.processor.plugin_state = "layout=full";
+
+    const auto store_blob = source.store.serialize();
+    const auto plugin_blob = source.processor.serialize_plugin_state();
+    const auto blob = pulp::format::plugin_state_io::serialize(source.store,
+                                                               source.processor);
+
+    REQUIRE(blob.size() == 16 + store_blob.size() + plugin_blob.size() + 4);
+    REQUIRE(blob[0] == 'P');
+    REQUIRE(blob[1] == 'L');
+    REQUIRE(blob[2] == 'S');
+    REQUIRE(blob[3] == 'T');
+    REQUIRE(choc::memory::readLittleEndian<uint32_t>(blob.data() + 4)
+            == pulp::format::plugin_state_io::current_envelope_version());
+    REQUIRE(choc::memory::readLittleEndian<uint32_t>(blob.data() + 8)
+            == static_cast<uint32_t>(store_blob.size()));
+    REQUIRE(choc::memory::readLittleEndian<uint32_t>(blob.data() + 12)
+            == static_cast<uint32_t>(plugin_blob.size()));
+
+    const std::vector<uint8_t> encoded_store(blob.begin() + 16,
+                                             blob.begin() + 16 + store_blob.size());
+    const std::vector<uint8_t> encoded_plugin(blob.begin() + 16 + store_blob.size(),
+                                              blob.end() - 4);
+    REQUIRE(encoded_store == store_blob);
+    REQUIRE(encoded_plugin == plugin_blob);
+
+    const auto crc_offset = blob.size() - 4;
+    REQUIRE(choc::memory::readLittleEndian<uint32_t>(blob.data() + crc_offset)
+            == crc32_simple(blob.data(), crc_offset));
+}
+
 TEST_CASE("plugin_state_io preserves binary plugin-owned payload bytes",
           "[format][plugin-state][coverage][phase3]") {
     TestRig source;
