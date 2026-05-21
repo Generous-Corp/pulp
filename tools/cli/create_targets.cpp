@@ -74,4 +74,8 @@ std::vector<std::string> create_default_build_targets(const std::string& class_n
     return targets;
 }
 
+std::string create_build_config(bool debug) {
+    return debug ? "Debug" : "Release";
+}
+
 }  // namespace pulp::cli
