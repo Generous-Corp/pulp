@@ -146,7 +146,14 @@ class JobQueueTests(unittest.TestCase):
         self.assertEqual(normalized["status"], "pending")
         self.assertEqual(normalized["provenance"]["execution_kind"], "hosted")
 
+        preserved = self.mod.normalize_job({"id": "manual-id", "targets": []})
+        self.assertEqual(preserved["id"], "manual-id")
+        self.assertEqual(preserved["priority"], "normal")
+        self.assertEqual(preserved["validation"], "full")
+
         queue_file = self.mod.queue_path()
+        self.assertEqual(self.mod.load_queue_unlocked(), [])
+
         queue_file.parent.mkdir(parents=True, exist_ok=True)
         queue_file.write_text(json.dumps([legacy_job]) + "\n")
         self.assertEqual(self.mod.load_queue_unlocked()[0]["targets"], ["mac", "windows"])
