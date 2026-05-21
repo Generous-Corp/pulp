@@ -136,6 +136,43 @@ TEST_CASE("RemoteViewSession - host set_parameter notifies remote", "[remote_vie
     INFO("last_payload=" << last_payload);
     REQUIRE(last_payload.find("\"id\"") != std::string::npos);
     REQUIRE(last_payload.find("1") != std::string::npos);
+    REQUIRE(store.get_normalized(1) == Catch::Approx(0.42f));
+
+    bridge.detach_remote(session);
+}
+
+TEST_CASE("RemoteViewSession - send_input forwards payload to remote",
+          "[remote_view][coverage][phase3]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    runtime::JsonRpcPeer remote_peer(*remote_chan);
+
+    std::atomic<int> input_count{0};
+    std::string last_payload;
+    remote_peer.on_notification("view.input",
+        [&](std::string_view params) {
+            last_payload = std::string{params};
+            ++input_count;
+        });
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan));
+    REQUIRE(session != nullptr);
+
+    REQUIRE(session->send_input(R"({"kind":"pointer_down","x":12,"y":34})"));
+    REQUIRE(wait_for([&]{ return input_count.load() == 1; }));
+    INFO("last_payload=" << last_payload);
+    REQUIRE(last_payload.find("\"pointer_down\"") != std::string::npos);
+    REQUIRE(last_payload.find("\"x\"") != std::string::npos);
+    REQUIRE(last_payload.find("12") != std::string::npos);
+    REQUIRE(last_payload.find("\"y\"") != std::string::npos);
+    REQUIRE(last_payload.find("34") != std::string::npos);
 
     bridge.detach_remote(session);
 }
@@ -171,6 +208,32 @@ TEST_CASE("RemoteViewSession - host get_parameter reads remote result", "[remote
     bridge.detach_remote(session);
 }
 
+TEST_CASE("RemoteViewSession - host get_parameter ignores invalid remote results",
+          "[remote_view][coverage][phase3]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    runtime::JsonRpcPeer remote_peer(*remote_chan);
+
+    remote_peer.register_method("view.param_get",
+        [](std::string_view) -> runtime::JsonRpcResult {
+            return runtime::JsonRpcResult::ok(R"({"value":0.5})");
+        });
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan));
+    REQUIRE(session != nullptr);
+
+    REQUIRE_FALSE(session->get_parameter(1).has_value());
+
+    bridge.detach_remote(session);
+}
+
 TEST_CASE("RemoteViewSession - malformed remote param sets are ignored", "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
@@ -196,6 +259,38 @@ TEST_CASE("RemoteViewSession - malformed remote param sets are ignored", "[remot
     REQUIRE(store.get_normalized(1) == Catch::Approx(0.25f));
 
     bridge.detach_remote(session);
+}
+
+TEST_CASE("ViewBridge - attach_remote_channel rejects null channel",
+          "[remote_view][coverage][phase3]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    REQUIRE(bridge.attach_remote_channel(nullptr, "null") == nullptr);
+    REQUIRE(bridge.last_error().find("null channel") != std::string::npos);
+}
+
+TEST_CASE("ViewBridge - attach_remote_channel reports handshake send failure",
+          "[remote_view][coverage][phase3]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    remote_chan->close();
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan), "closed-peer");
+    REQUIRE(session == nullptr);
+    REQUIRE(bridge.last_error().find("view.hello") != std::string::npos);
 }
 
 TEST_CASE("RemoteViewSession - remote close shuts guards", "[remote_view]") {
