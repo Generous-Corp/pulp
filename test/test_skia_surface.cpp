@@ -4,8 +4,12 @@
 #include <pulp/render/skp_capture.hpp>
 
 #ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <memory>
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkCanvas.h"
@@ -18,6 +22,11 @@
 #include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
 #include "include/encode/SkPngEncoder.h"
+#include "include/gpu/graphite/Context.h"
+#include "include/gpu/graphite/GraphiteTypes.h"
+#include "include/gpu/graphite/Recorder.h"
+#include "include/gpu/graphite/Recording.h"
+#include "include/gpu/graphite/Surface.h"
 #endif
 
 using namespace pulp::render;
@@ -502,6 +511,147 @@ TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
 
     SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
     REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
+}
+
+TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
+          "[render][skia][skp]") {
+    // Codex P1: SkPicture::serialize()'s image proc must not silently drop
+    // GPU-texture-backed embedded images. SkpFrameCapture rasterizes them
+    // via the Graphite Context threaded through the capture, so a frame
+    // that embeds a GPU image survives the .skp round trip with pixels
+    // intact. Requires a live GPU adapter — skips cleanly without one.
+    auto gpu = GpuSurface::create_dawn();
+    if (!gpu) return;
+    GpuSurface::Config gpu_config{};
+    gpu_config.width = 16;
+    gpu_config.height = 16;
+    if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+
+    auto skia = SkiaSurface::create(*gpu, {.width = 16, .height = 16});
+    if (!skia || !skia->is_available()) return;
+
+    skgpu::graphite::Context* ctx = skia->graphite_context();
+    REQUIRE(ctx != nullptr);
+
+    // Build a GPU-texture-backed image: render solid green into an
+    // offscreen Graphite render target and snapshot it. A Graphite
+    // surface snapshot is a texture-backed SkImage — exactly the
+    // atlas/snapshot case the fix targets. The recording must be
+    // inserted + submitted so the texture actually holds the pixels.
+    std::unique_ptr<skgpu::graphite::Recorder> recorder = ctx->makeRecorder();
+    REQUIRE(recorder != nullptr);
+    SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
+    sk_sp<SkSurface> gpu_surface =
+        SkSurfaces::RenderTarget(recorder.get(), info);
+    if (!gpu_surface) return;  // offscreen GPU target unavailable
+    gpu_surface->getCanvas()->clear(SK_ColorGREEN);
+    sk_sp<SkImage> gpu_image = gpu_surface->makeImageSnapshot();
+    REQUIRE(gpu_image != nullptr);
+    REQUIRE(gpu_image->isTextureBacked());
+    {
+        std::unique_ptr<skgpu::graphite::Recording> rec = recorder->snap();
+        skgpu::graphite::InsertRecordingInfo rec_info{};
+        rec_info.fRecording = rec.get();
+        REQUIRE(ctx->insertRecording(rec_info) ==
+                skgpu::graphite::InsertStatus::kSuccess);
+        ctx->submit(skgpu::graphite::SyncToCpu::kYes);
+    }
+
+    pulp::render::SkpFrameCapture capture(8, 8, ctx);
+    REQUIRE(capture.available());
+    // Draw the texture-backed image into the capture canvas.
+    auto* skia_canvas =
+        static_cast<pulp::canvas::SkiaCanvas*>(capture.canvas());
+    REQUIRE(skia_canvas != nullptr);
+    REQUIRE(skia_canvas->draw_skia_image(gpu_image, 0.0f, 0.0f, 8.0f, 8.0f));
+
+    std::string blob;
+    auto result = capture.finish_to_memory(blob);
+    REQUIRE(result.ok);
+    REQUIRE(result.op_count > 0);
+
+    // Deserialize with the matching image proc and replay. If the texture
+    // image had been dropped, the replay would be black, not green.
+    SkDeserialProcs dprocs = skp_deserial_procs();
+    sk_sp<SkPicture> restored =
+        SkPicture::MakeFromData(blob.data(), blob.size(), &dprocs);
+    REQUIRE(restored != nullptr);
+    REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
+}
+
+TEST_CASE("SkpFrameCapture writes atomically — a failed write leaves no file",
+          "[render][skia][skp]") {
+    // Codex P2: the .skp must never land half-written and must never
+    // clobber a previously-valid capture. The write goes to a sibling
+    // <dest>.tmp and is renamed onto the destination only on full
+    // success.
+
+    SECTION("failed write does not create the destination file") {
+        // A path inside a directory that does not exist: opening the
+        // sibling temp file fails, so nothing is written.
+        const std::string bad_dir =
+            (std::filesystem::temp_directory_path() /
+             "pulp-skp-no-such-dir-xyz").string();
+        std::filesystem::remove_all(bad_dir);
+        const std::string dest = bad_dir + "/frame.skp";
+
+        auto result = pulp::render::capture_skp_to_file(
+            16, 16, dest, [](pulp::canvas::Canvas& c) {
+                c.set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0));
+                c.fill_rect(0.0f, 0.0f, 16.0f, 16.0f);
+            });
+        REQUIRE_FALSE(result.ok);
+        REQUIRE_FALSE(result.reason.empty());
+        REQUIRE_FALSE(std::filesystem::exists(dest));
+        REQUIRE_FALSE(std::filesystem::exists(dest + ".tmp"));
+    }
+
+    SECTION("a failed write leaves a prior valid capture intact") {
+        const std::string path =
+            (std::filesystem::temp_directory_path() /
+             "pulp-skp-atomic-prior.skp").string();
+        std::filesystem::remove(path);
+
+        // First capture succeeds and writes a valid .skp.
+        auto first = pulp::render::capture_skp_to_file(
+            16, 16, path, [](pulp::canvas::Canvas& c) {
+                c.set_fill_color(pulp::canvas::Color::rgba8(0, 255, 0));
+                c.fill_rect(0.0f, 0.0f, 16.0f, 16.0f);
+            });
+        REQUIRE(first.ok);
+        REQUIRE(std::filesystem::exists(path));
+        const auto original_size = std::filesystem::file_size(path);
+        REQUIRE(original_size > 0);
+
+        // A second capture aimed at the same path but with a temp file
+        // that cannot be created: pre-create the <dest>.tmp path as a
+        // NON-EMPTY directory. SkFILEWStream cannot open a directory as a
+        // file, and the non-empty directory also survives the unlink
+        // attempt — so the write fails and the destination is untouched.
+        const std::string tmp_as_dir = path + ".tmp";
+        std::filesystem::remove_all(tmp_as_dir);
+        std::filesystem::create_directory(tmp_as_dir);
+        { std::ofstream guard(tmp_as_dir + "/keep"); guard << "x"; }
+
+        auto second = pulp::render::capture_skp_to_file(
+            16, 16, path, [](pulp::canvas::Canvas& c) {
+                c.set_fill_color(pulp::canvas::Color::rgba8(0, 0, 255));
+                c.fill_rect(0.0f, 0.0f, 16.0f, 16.0f);
+            });
+        REQUIRE_FALSE(second.ok);
+        REQUIRE_FALSE(second.reason.empty());
+
+        // The prior capture is untouched — same file, same bytes.
+        REQUIRE(std::filesystem::exists(path));
+        REQUIRE(std::filesystem::file_size(path) == original_size);
+        SkFILEStream in(path.c_str());
+        REQUIRE(in.isValid());
+        sk_sp<SkPicture> restored = SkPicture::MakeFromStream(&in);
+        REQUIRE(restored != nullptr);
+
+        std::filesystem::remove_all(tmp_as_dir);
+        std::filesystem::remove(path);
+    }
 }
 
 TEST_CASE("SkpFrameCapture degrades gracefully on invalid input",

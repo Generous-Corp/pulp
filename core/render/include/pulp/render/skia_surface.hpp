@@ -6,6 +6,10 @@
 #include <functional>
 #include <vector>
 
+namespace skgpu::graphite {
+class Context;
+}
+
 namespace pulp::render {
 
 /// Skia Graphite rendering surface.
@@ -56,6 +60,13 @@ public:
 
     /// Check if Skia rendering is available
     virtual bool is_available() const = 0;
+
+    /// The live Graphite `Context` backing this surface, or `nullptr`
+    /// when Skia/Graphite is unavailable. Hand this to a `SkpFrameCapture`
+    /// (or `capture_skp_to_file`) so a `.skp` of this surface's frame can
+    /// read back any GPU-texture-backed embedded images instead of
+    /// silently dropping them. The pointer is owned by the SkiaSurface.
+    virtual skgpu::graphite::Context* graphite_context() const = 0;
 };
 
 } // namespace pulp::render

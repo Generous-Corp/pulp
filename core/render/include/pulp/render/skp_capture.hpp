@@ -36,6 +36,17 @@
 //     `SkDeserialProcs::fImageProc` that decodes the PNG payload back to
 //     an `SkImage`.
 //
+//   * GPU-texture-backed embedded images. A raster `SkImage` PNG-encodes
+//     with no GPU context. A texture-backed image (atlas / surface
+//     snapshot) cannot — Skia's PNG encoder needs the owning context to
+//     read the pixels off the GPU first. Pulp renders on Graphite, whose
+//     pixel readback is `skgpu::graphite::Context::asyncRescaleAndReadPixels`.
+//     So a capture that may embed GPU images must be handed the Graphite
+//     `Context` (see `capture_skp_to_file` / `SkpFrameCapture` ctor): the
+//     image proc then rasterizes texture-backed images before encoding.
+//     If a texture-backed image is met with no `Context`, the proc fails
+//     loudly (logged) rather than silently dropping the image.
+//
 // Graceful degradation: when Skia is not compiled in, `SkpFrameCapture`
 // reports `available() == false`, `canvas()` returns `nullptr`, and the
 // capture functions return a failed `SkpCaptureResult` with a reason
@@ -47,6 +58,10 @@
 #include <functional>
 #include <memory>
 #include <string>
+
+namespace skgpu::graphite {
+class Context;
+}
 
 namespace pulp::render {
 
@@ -81,7 +96,15 @@ class SkpFrameCapture {
 public:
     /// Begin a capture sized to `width` x `height` logical pixels.
     /// The cull rect of the recorded `SkPicture` is `[0,0,width,height]`.
-    SkpFrameCapture(int width, int height);
+    ///
+    /// `graphite_context` is optional. Pass the live Graphite `Context`
+    /// (e.g. from the `SkiaSurface` the frame is rendered on) when the
+    /// frame may embed GPU-texture-backed images — atlas glyphs, surface
+    /// snapshots. The capture uses it to read those images off the GPU so
+    /// they PNG-encode into the `.skp`. A purely vector / raster-image
+    /// frame needs no context and `nullptr` is fine.
+    explicit SkpFrameCapture(int width, int height,
+                             skgpu::graphite::Context* graphite_context = nullptr);
     ~SkpFrameCapture();
 
     SkpFrameCapture(const SkpFrameCapture&) = delete;
@@ -117,9 +140,14 @@ private:
 /// The callback paints whatever should appear in the frame. When Skia
 /// is unavailable, or `width`/`height` are non-positive, this returns a
 /// failed `SkpCaptureResult` with a reason and writes nothing.
+///
+/// `graphite_context` is forwarded to `SkpFrameCapture` — supply it when
+/// the painted frame may embed GPU-texture-backed images so they survive
+/// serialization (see the `SkpFrameCapture` constructor).
 SkpCaptureResult capture_skp_to_file(
     int width, int height, const std::string& path,
-    const std::function<void(canvas::Canvas&)>& paint);
+    const std::function<void(canvas::Canvas&)>& paint,
+    skgpu::graphite::Context* graphite_context = nullptr);
 
 /// `true` when this build can produce `.skp` captures (Skia compiled
 /// in). Lets callers (inspector / CLI) report an honest "unavailable"

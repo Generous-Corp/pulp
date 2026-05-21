@@ -235,6 +235,10 @@ public:
         return context_ != nullptr && recorder_ != nullptr;
     }
 
+    skgpu::graphite::Context* graphite_context() const override {
+        return context_.get();
+    }
+
 private:
     GpuSurface& gpu_;
     uint32_t width_ = 0, height_ = 0;

@@ -9,6 +9,7 @@
 class SkCanvas;
 class SkSurface;
 class SkFont;
+class SkImage;
 class SkPaint;
 class SkPathBuilder;
 
@@ -132,6 +133,15 @@ public:
                                     float dx, float dy, float dw, float dh) override;
     bool measure_image_from_file(const std::string& path,
                                   float& out_width, float& out_height) override;
+
+    // Skia-specific: draw an already-constructed SkImage (e.g. a GPU
+    // surface snapshot or atlas texture) into the active rect. The
+    // decode-from-bytes paths above always yield raster images; this
+    // overload is the seam for drawing a GPU-texture-backed image, which
+    // is the case the `.skp` capture's image proc must handle. Returns
+    // false when the canvas or image is null.
+    bool draw_skia_image(const sk_sp<SkImage>& image,
+                         float x, float y, float w, float h);
 
     // ── Line dash / pixel manipulation (issue-916) ─────────────────────
     void set_line_dash(const float* intervals, int count, float phase) override;

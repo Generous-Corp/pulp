@@ -1266,6 +1266,14 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     return true;
 }
 
+bool SkiaCanvas::draw_skia_image(const sk_sp<SkImage>& image,
+                                  float x, float y, float w, float h) {
+    if (!canvas_ || !image) return false;
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           sampling_options_for_image_smoothing());
+    return true;
+}
+
 // pulp #1737 — 9-arg drawImage source-rect form. Skia's drawImageRect has
 // a four-rect overload that maps `src` (in image coords) onto `dst` (in
 // canvas coords) with the active sampling. Used by sprite-sheet slicing.
