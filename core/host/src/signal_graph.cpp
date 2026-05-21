@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstring>
+#include <utility>
 
 namespace pulp::host {
 namespace {
@@ -499,6 +500,15 @@ SignalGraph::compile_(double /*sample_rate*/, int max_block_size) {
         for (int c = 0; c < in_ch; ++c)
             rt.input_ptrs[c] = rt.input_data.data() + static_cast<size_t>(c) * max_block_size;
         rt.gain = n.gain;  // copy UI-thread scalar into per-snapshot runtime
+        if (n.plugin) {
+            for (const auto& p : n.plugin->parameters()) {
+                rt.param_bounds.push_back({
+                    p.id,
+                    p.min_value,
+                    p.max_value,
+                });
+            }
+        }
         cg->runtime[n.id] = std::move(rt);
 
         CompiledGraph::NodeShape shape{n.type, n.num_input_ports, n.num_output_ports};
@@ -721,6 +731,22 @@ void SignalGraph::process(audio::BufferView<float>& output,
                 // normal audio connections.
                 ParameterEventQueue param_events;
                 {
+                    auto bounds_for_param = [&rt](uint32_t param_id,
+                                                  float fallback_lo,
+                                                  float fallback_hi) {
+                        for (const auto& bounds : rt.param_bounds) {
+                            if (bounds.id != param_id) continue;
+                            return std::pair<float, float>{
+                                std::min(bounds.min_value, bounds.max_value),
+                                std::max(bounds.min_value, bounds.max_value),
+                            };
+                        }
+                        return std::pair<float, float>{
+                            std::min(fallback_lo, fallback_hi),
+                            std::max(fallback_lo, fallback_hi),
+                        };
+                    };
+
                     struct Accum {
                         float v0 = 0.f, vN = 0.f;
                         float lo = 0.f, hi = 1.f;
@@ -742,8 +768,11 @@ void SignalGraph::process(audio::BufferView<float>& output,
                         const float mN = c.automation_range_lo
                             + sN * (c.automation_range_hi - c.automation_range_lo);
                         auto& a = acc[c.automation_param_id];
-                        a.lo = c.automation_range_lo;
-                        a.hi = c.automation_range_hi;
+                        const auto bounds = bounds_for_param(c.automation_param_id,
+                                                             c.automation_range_lo,
+                                                             c.automation_range_hi);
+                        a.lo = bounds.first;
+                        a.hi = bounds.second;
                         if (c.automation_mix == AutomationMix::Replace) {
                             a.v0 = m0;
                             a.vN = mN;
@@ -810,8 +839,11 @@ void SignalGraph::process(audio::BufferView<float>& output,
                             if (param_it == rt.audio_rate_param_ids.end()) continue;
                             auto& dst = dense[static_cast<size_t>(
                                 std::distance(rt.audio_rate_param_ids.begin(), param_it))];
-                            dst.lo = c.automation_range_lo;
-                            dst.hi = c.automation_range_hi;
+                            const auto bounds = bounds_for_param(c.automation_param_id,
+                                                                 c.automation_range_lo,
+                                                                 c.automation_range_hi);
+                            dst.lo = bounds.first;
+                            dst.hi = bounds.second;
 
                             const float* src = src_it->second.output_ptrs[sport];
                             auto& dl = cg->connection_delays[ci];

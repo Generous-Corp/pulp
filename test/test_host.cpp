@@ -1519,6 +1519,52 @@ TEST_CASE("SignalGraph audio-rate modulation delivers one event per sample",
     }
 }
 
+TEST_CASE("SignalGraph audio-rate add modulation clamps independent of edge order",
+          "[host][graph][automation][audio-rate]") {
+    auto run = [](bool reverse_order) {
+        SignalGraph graph;
+        auto in_node = graph.add_input_node(1, "in");
+        auto slot = std::make_unique<MockAutomatable>(ParamRate::AudioRate);
+        auto* slot_ptr = slot.get();
+        auto plug = graph.add_plugin_node(std::move(slot), 0, 1, "audio-rate");
+
+        auto add_negative_edge = [&] {
+            REQUIRE(graph.connect_audio_rate_modulation(
+                in_node, 0, plug, MockAutomatable::kParamId, -1.0f, 0.0f,
+                0.0f, AutomationMix::Add));
+        };
+        auto add_positive_edge = [&] {
+            REQUIRE(graph.connect_audio_rate_modulation(
+                in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 0.25f,
+                0.0f, AutomationMix::Add));
+        };
+        if (reverse_order) {
+            add_positive_edge();
+            add_negative_edge();
+        } else {
+            add_negative_edge();
+            add_positive_edge();
+        }
+
+        REQUIRE(graph.prepare(48000.0, 1));
+        std::vector<float> input_samples{1.0f};
+        std::vector<float> output_samples(1, 0.0f);
+        const float* in_ptrs[1] = {input_samples.data()};
+        float* out_ptrs[1] = {output_samples.data()};
+        pulp::audio::BufferView<const float> in_view(in_ptrs, 1, 1);
+        pulp::audio::BufferView<float> out_view(out_ptrs, 1, 1);
+
+        graph.process(out_view, in_view, 1);
+
+        const auto& events = slot_ptr->received();
+        REQUIRE(events.size() == 1);
+        return events[0].value;
+    };
+
+    REQUIRE(std::abs(run(false) - 0.25f) < 1e-6f);
+    REQUIRE(std::abs(run(true) - 0.25f) < 1e-6f);
+}
+
 TEST_CASE("SignalGraph audio-rate modulation composes with PDC",
           "[host][graph][automation][audio-rate][pdc]") {
     SignalGraph graph;

@@ -255,6 +255,13 @@ private:
         int64_t input_latency = 0;
         int64_t output_latency = 0;
 
+        struct ParamBounds {
+            uint32_t id = 0;
+            float min_value = 0.0f;
+            float max_value = 1.0f;
+        };
+        std::vector<ParamBounds> param_bounds;
+
         // MIDI scratch. Cleared at the start of each process() call except
         // for MidiInput nodes, whose midi_out is populated by inject_midi()
         // and must survive the process() entry-clear.
