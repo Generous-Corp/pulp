@@ -9,6 +9,14 @@ add_executable(pulp-import-design
 target_include_directories(pulp-import-design PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-import-design PRIVATE pulp::view pulp::state pulp::platform)
 
+add_executable(pulp-design-import-bench
+    design_import_benchmark.cpp)
+target_include_directories(pulp-design-import-bench PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-design-import-bench PRIVATE
+    pulp::view
+    pulp::state
+    pulp::platform)
+
 # Link-order fix for libskia.a → fontconfig on Linux+GNU ld (#1986
 # follow-up): re-mention fontconfig AFTER pulp::view's transitive
 # skia::skia so the linker resolves SkFontMgr_New_FontConfig's Fc*
@@ -16,3 +24,4 @@ target_link_libraries(pulp-import-design PRIVATE pulp::view pulp::state pulp::pl
 # already in place for pulp-cli.
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake)
 pulp_link_fontconfig_after_skia(pulp-import-design)
+pulp_link_fontconfig_after_skia(pulp-design-import-bench)

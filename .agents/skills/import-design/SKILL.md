@@ -97,6 +97,16 @@ from IR attributes. The materialization call site itself should not run JS, but
 do not market this as "no JS engine" globally because live React/parity lanes
 still use the JS runtime.
 
+The Phase 5 benchmark harness lives at `pulp-design-import-bench` and is driven
+by `tools/scripts/design_import_benchmark.py`. Run it under no-launch env
+(`PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1
+PULP_INSPECTOR_NO_LAUNCH=1`). It compares `live` vs `baked-native` lanes, emits
+startup/idle/interactive metrics, and computes the Phase 9 gate from linked
+text+data section size using `size`/`llvm-size`; do not use Debug object-file
+byte counts as the gate input. A valid report must record the explicit
+binary-size delta and whether JS evaluation churn is actually the dominant
+bottleneck for the measured fixture.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
