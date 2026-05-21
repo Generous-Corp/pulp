@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01880"></a>
+## [0.188.0] - 2026-05-21
+
+- fix(import): normalize design ir diagnostics ([#2610](https://github.com/danielraffel/pulp/pull/2610))
+- test(tools): expand phase3 coverage helpers ([#2618](https://github.com/danielraffel/pulp/pull/2618))
+- ci: skip Android Kotlin coverage on PRs ([#2603](https://github.com/danielraffel/pulp/pull/2603))
+
 <a id="v01870"></a>
 ## [0.187.0] - 2026-05-21
 
@@ -2456,6 +2463,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.188.0]: https://github.com/danielraffel/pulp/releases/tag/v0.188.0
 [0.187.0]: https://github.com/danielraffel/pulp/releases/tag/v0.187.0
 [0.186.0]: https://github.com/danielraffel/pulp/releases/tag/v0.186.0
 [0.185.0]: https://github.com/danielraffel/pulp/releases/tag/v0.185.0
