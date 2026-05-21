@@ -835,7 +835,7 @@ regardless of `cancel-in-progress`.
 `coverage.yml` mirrors `build.yml`'s `classify` job (runs
 `tools/scripts/classify_changes.py --mode=diff`, outputs
 `native_build_required`). Skip-safe PRs (docs / planning `*.md` only —
-classifier fails *closed*, any uncertainty → `true`) skip the 3-OS
+classifier fails *closed*, any uncertainty → `true`) skip the
 `coverage` matrix (150 min/leg) and `android-kotlin-coverage` entirely:
 both have `needs: [..., classify]` + `if:
 needs.classify.outputs.native_build_required == 'true'`. No runner is
@@ -869,6 +869,42 @@ all-missing sentinel → `exit 1`, not `exit 0`) and the `Run diff-cover`
 step. Only the classifier-approved skip-safe path (case 2) gets an
 exit-0 green with no coverage report. If you ever loosen this, you
 re-open a silent bypass of the required 75% diff-coverage floor.
+
+### Gotcha: per-PR coverage is macOS-only — Linux/Windows/Android live in the nightly lane
+
+`coverage.yml`'s `coverage` matrix is **event-conditional** (built by the
+`matrix-config` job). Pulp's team actively tests on macOS, so per-PR
+coverage measures the macOS development surface only:
+
+- `pull_request` → macOS leg only.
+- `push` (to main) + `workflow_dispatch` → full `{linux, macos, windows}`
+  matrix, so the canonical main-branch head and manual runs keep a
+  complete per-OS Codecov picture.
+
+Linux / Windows / Android coverage on PRs is provided by the **nightly
+`cross-platform-check.yml` lane**, which runs the full non-macOS build +
+test every night and files (auto-closes) one tracking issue per broken
+platform. Do NOT "restore" the per-PR 3-OS matrix thinking it regressed —
+macOS-only on PRs is deliberate.
+
+Consequences when touching `coverage.yml` or `coverage-diff-gate`:
+
+- On PRs only the `coverage-cobertura-macos-<sha>` artifact exists. The
+  Linux/Windows `Download Cobertura XML` steps fail and are tolerated by
+  `continue-on-error: true`; `merge_cobertura.py` then writes a
+  macOS-only XML. diff-cover gates the macOS-reachable surface — that is
+  correct, not a bug.
+- Platform-specific files (`**/platform/linux/**`,
+  `**/platform/windows/**`, `android/**`, `*_linux.*`, `*_win*.*`) are
+  ABSENT from the macOS XML, so diff-cover does not gate them per-PR.
+  The `Note platform-specific paths…` step in `coverage-diff-gate`
+  classifies the PR's changed files and appends a visibility note to the
+  coverage PR comment listing them. It is a **note, not a block** — do
+  not make it fail the gate (that would punish macOS-first velocity for
+  code the nightly lane already validates).
+- `Diff coverage required` keeps its exact name and pass/fail semantics
+  for macOS-reachable code — it is still the REQUIRED branch-protection
+  check.
 
 ## Prerequisites Check
 
