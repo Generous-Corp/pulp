@@ -197,6 +197,39 @@ TEST_CASE("RpnParser does not mix RPN and NRPN selector halves",
     REQUIRE(nrpn_calls == 1);
 }
 
+TEST_CASE("RpnParser preserves Data Entry MSB across RPN NRPN mode switches",
+          "[midi][rpn][issue-645]") {
+    RpnParser rpn;
+    std::vector<uint16_t> rpn_values;
+    std::vector<uint16_t> nrpn_values;
+
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t value) {
+        rpn_values.push_back(value);
+    };
+    rpn.on_nrpn = [&](uint8_t, uint16_t, uint16_t value) {
+        nrpn_values.push_back(value);
+    };
+
+    rpn.process(MidiEvent::cc(0, 101, 0));  // RPN MSB
+    rpn.process(MidiEvent::cc(0, 100, 1));  // RPN LSB
+    rpn.process(MidiEvent::cc(0, 6, 12));   // Data Entry MSB
+
+    rpn.process(MidiEvent::cc(0, 99, 2));   // switch to NRPN MSB
+    rpn.process(MidiEvent::cc(0, 98, 3));   // NRPN LSB
+    rpn.process(MidiEvent::cc(0, 38, 4));   // Data Entry LSB
+
+    REQUIRE(rpn_values.empty());
+    REQUIRE(nrpn_values == std::vector<uint16_t>{static_cast<uint16_t>((12 << 7) | 4)});
+
+    rpn.process(MidiEvent::cc(0, 6, 5));    // Data Entry MSB
+    rpn.process(MidiEvent::cc(0, 101, 6));  // switch back to RPN MSB
+    rpn.process(MidiEvent::cc(0, 100, 7));  // RPN LSB
+    rpn.process(MidiEvent::cc(0, 38, 8));   // Data Entry LSB
+
+    REQUIRE(nrpn_values.size() == 1);
+    REQUIRE(rpn_values == std::vector<uint16_t>{static_cast<uint16_t>((5 << 7) | 8)});
+}
+
 TEST_CASE("RpnParser does not reuse stale LSB after a new RPN MSB",
           "[midi][rpn][issue-645]") {
     RpnParser rpn;

@@ -146,7 +146,6 @@ private:
             state.param_msb_set = false;
             state.param_lsb_set = false;
             state.param_set = false;
-            state.value_msb = 0;
         } else if (is_msb && state.param_set) {
             state.param_lsb_set = false;
             state.param_set = false;
