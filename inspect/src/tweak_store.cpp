@@ -102,8 +102,15 @@ std::size_t TweakStore::apply_tweak(std::string_view anchor_id,
     {
         std::lock_guard lock(mtx_);
         auto& anchor_map = tweaks_[std::string(anchor_id)];
-        Entry entry{std::move(value), std::string(source)};
-        anchor_map[std::string(property_path)] = std::move(entry);
+        const auto path_key = std::string(property_path);
+        if (auto existing = anchor_map.find(path_key);
+            existing != anchor_map.end()) {
+            existing->second.value = std::move(value);
+            existing->second.source = std::string(source);
+        } else {
+            Entry entry{std::move(value), std::string(source), next_sequence_++};
+            anchor_map.emplace(path_key, std::move(entry));
+        }
         for (auto& [_, m] : tweaks_) total += m.size();
     }
     maybe_auto_save_unlocked();
@@ -210,11 +217,28 @@ std::size_t TweakStore::count() const {
 
 std::vector<TweakStore::Record> TweakStore::list_tweaks() const {
     std::lock_guard lock(mtx_);
-    std::vector<Record> out;
+    struct OrderedRecord {
+        std::uint64_t sequence = 0;
+        const std::string* anchor = nullptr;
+        const std::string* path = nullptr;
+        const Entry* entry = nullptr;
+    };
+    std::vector<OrderedRecord> ordered;
     for (auto& [anchor, m] : tweaks_) {
         for (auto& [path, entry] : m) {
-            out.push_back(Record{anchor, path, entry.value, entry.source});
+            ordered.push_back(OrderedRecord{
+                entry.sequence, &anchor, &path, &entry});
         }
+    }
+    std::sort(ordered.begin(), ordered.end(),
+              [](const OrderedRecord& a, const OrderedRecord& b) {
+                  return a.sequence < b.sequence;
+              });
+    std::vector<Record> out;
+    out.reserve(ordered.size());
+    for (const auto& rec : ordered) {
+        out.push_back(Record{
+            *rec.anchor, *rec.path, rec.entry->value, rec.entry->source});
     }
     return out;
 }
@@ -301,23 +325,53 @@ std::string TweakStore::to_json_locked() const {
     auto tweaks_obj = choc::value::createObject("");
     auto sources_obj = choc::value::createObject("");
     bool any_source = false;
+    struct OrderedEntry {
+        const std::string* anchor = nullptr;
+        const std::string* path = nullptr;
+        const Entry* entry = nullptr;
+    };
+    std::vector<OrderedEntry> ordered;
     for (auto& [anchor, m] : tweaks_) {
-        auto anchor_obj = choc::value::createObject("");
-        auto src_obj = choc::value::createObject("");
-        bool any_anchor_source = false;
         for (auto& [path, entry] : m) {
-            anchor_obj.addMember(path, entry.value);
-            if (!entry.source.empty()) {
-                src_obj.addMember(path, choc::value::createString(entry.source));
-                any_anchor_source = true;
-            }
-        }
-        tweaks_obj.addMember(anchor, anchor_obj);
-        if (any_anchor_source) {
-            sources_obj.addMember(anchor, src_obj);
-            any_source = true;
+            ordered.push_back(OrderedEntry{&anchor, &path, &entry});
         }
     }
+    std::sort(ordered.begin(), ordered.end(),
+              [](const OrderedEntry& a, const OrderedEntry& b) {
+                  if (*a.anchor != *b.anchor) return *a.anchor < *b.anchor;
+                  return a.entry->sequence < b.entry->sequence;
+              });
+
+    std::string current_anchor;
+    bool have_current_anchor = false;
+    auto anchor_obj = choc::value::createObject("");
+    auto src_obj = choc::value::createObject("");
+    bool any_anchor_source = false;
+    auto flush_anchor = [&]() {
+        if (!have_current_anchor) return;
+        tweaks_obj.addMember(current_anchor, anchor_obj);
+        if (any_anchor_source) {
+            sources_obj.addMember(current_anchor, src_obj);
+            any_source = true;
+        }
+    };
+    for (const auto& item : ordered) {
+        if (!have_current_anchor || current_anchor != *item.anchor) {
+            flush_anchor();
+            current_anchor = *item.anchor;
+            have_current_anchor = true;
+            anchor_obj = choc::value::createObject("");
+            src_obj = choc::value::createObject("");
+            any_anchor_source = false;
+        }
+        anchor_obj.addMember(*item.path, item.entry->value);
+        if (!item.entry->source.empty()) {
+            src_obj.addMember(
+                *item.path, choc::value::createString(item.entry->source));
+            any_anchor_source = true;
+        }
+    }
+    flush_anchor();
     obj.addMember("tweaks", tweaks_obj);
 
     // bypassed: Record<anchor, true | string[]>
@@ -404,6 +458,12 @@ TweakStore::from_json_locked(std::string_view json) {
     decltype(tweaks_) new_tweaks;
     decltype(bypassed_) new_bypassed;
     decltype(locked_) new_locked;
+    std::uint64_t next_sequence = next_sequence_;
+    for (const auto& [_, m] : tweaks_) {
+        for (const auto& [__, entry] : m) {
+            next_sequence = std::max(next_sequence, entry.sequence + 1);
+        }
+    }
 
     if (parsed.hasObjectMember("tweaks") && parsed["tweaks"].isObject()) {
         auto tweaks_obj = parsed["tweaks"];
@@ -415,7 +475,8 @@ TweakStore::from_json_locked(std::string_view json) {
             if (!inner.isObject()) continue;  // skip malformed anchor
             for (uint32_t j = 0; j < inner.size(); ++j) {
                 auto path_member = inner.getObjectMemberAt(j);
-                Entry entry{choc::value::Value(path_member.value), {}};
+                Entry entry{
+                    choc::value::Value(path_member.value), {}, next_sequence++};
                 anchor_map[std::string(path_member.name)] = std::move(entry);
             }
             if (anchor_map.empty()) new_tweaks.erase(anchor);
@@ -491,11 +552,17 @@ TweakStore::from_json_locked(std::string_view json) {
         }
         new_locked.insert(anchor);
     }
+    for (const auto& [_, m] : new_tweaks) {
+        for (const auto& [__, entry] : m) {
+            next_sequence = std::max(next_sequence, entry.sequence + 1);
+        }
+    }
 
     // All-or-nothing commit.
     tweaks_ = std::move(new_tweaks);
     bypassed_ = std::move(new_bypassed);
     locked_ = std::move(new_locked);
+    next_sequence_ = next_sequence;
 
     for (auto& [_, m] : tweaks_) result.tweak_count += m.size();
     result.bypass_count = bypassed_.size();

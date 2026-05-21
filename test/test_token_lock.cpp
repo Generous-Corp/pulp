@@ -155,6 +155,45 @@ TEST_CASE("lock_token_in_designmd rewrites a color token in place",
     CHECK(restored.updated_markdown == md);
 }
 
+TEST_CASE("lock_token_in_designmd preserves single-quoted scalar style",
+          "[view][token-lock][coverage][phase3]") {
+    const std::string md =
+        "---\n"
+        "colors:\n"
+        "  primary: '#855300'\n"
+        "---\n";
+
+    auto result = lock_token_in_designmd(md, "", "colors.primary", "#5a5a5a");
+
+    REQUIRE(result.ok);
+    CHECK(result.previous_value == "#855300");
+    CHECK(result.updated_markdown.find("primary: '#5a5a5a'") != std::string::npos);
+    CHECK(result.updated_markdown.find("primary: \"#5a5a5a\"") == std::string::npos);
+}
+
+TEST_CASE("lock_token_in_designmd escapes single-quoted scalar apostrophes",
+          "[view][token-lock][coverage][phase3]") {
+    const std::string md =
+        "---\n"
+        "colors:\n"
+        "  primary: 'Bob''s \\ preset'\n"
+        "---\n";
+
+    auto result = lock_token_in_designmd(
+        md, "", "colors.primary", "Alice's \\ patch");
+
+    REQUIRE(result.ok);
+    CHECK(result.previous_value == "Bob's \\ preset");
+    CHECK(result.updated_markdown.find("primary: 'Alice''s \\ patch'") !=
+          std::string::npos);
+    CHECK(result.updated_markdown.find("\\'") == std::string::npos);
+
+    auto round_trip = lock_token_in_designmd(
+        result.updated_markdown, "", "colors.primary", "Carol's \\ final");
+    REQUIRE(round_trip.ok);
+    CHECK(round_trip.previous_value == "Alice's \\ patch");
+}
+
 TEST_CASE("lock_token_in_designmd rewrites a dimension token",
           "[view][token-lock][issue-1307]") {
     std::string md = kFixture;

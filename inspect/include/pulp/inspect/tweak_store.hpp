@@ -38,6 +38,7 @@
 #include <choc/containers/choc_Value.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -121,8 +122,10 @@ public:
     /// Total number of (anchor, property) entries.
     std::size_t count() const;
 
-    /// Return every record. Order is insertion-stable within an anchor
-    /// and unspecified across anchors.
+    /// Return every record in the store's stable order. Overwriting an
+    /// existing (anchor, property) pair keeps its original position; JSON
+    /// loads rebuild the order from file order plus any preserved locked
+    /// anchors.
     std::vector<Record> list_tweaks() const;
 
     /// Look up a specific (anchor_id, property_path). Returns the value
@@ -312,6 +315,7 @@ private:
     struct Entry {
         choc::value::Value value;
         std::string source;
+        std::uint64_t sequence = 0;
     };
     std::unordered_map<std::string,
                        std::unordered_map<std::string, Entry>> tweaks_;
@@ -319,6 +323,7 @@ private:
     // Phase 2.5: anchor ids the user has marked as locked. A flat set
     // (lock has no per-path granularity — it protects a whole anchor).
     std::unordered_set<std::string> locked_;
+    std::uint64_t next_sequence_ = 0;
 
     // Auto-save state. When `auto_save_` is true, every successful
     // mutation re-flushes the table to `auto_save_path_` after the

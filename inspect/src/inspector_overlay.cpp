@@ -267,10 +267,10 @@ InspectorOverlay::ReconcileReport InspectorOverlay::reconcile_report() const {
     // Stable ordering so the tab doesn't reshuffle across frames:
     // group by anchor, anchors sorted, insertion order within an
     // anchor (list_tweaks() preserves it).
-    std::sort(records.begin(), records.end(),
-              [](const TweakStore::Record& a, const TweakStore::Record& b) {
-                  return a.anchor_id < b.anchor_id;
-              });
+    std::stable_sort(records.begin(), records.end(),
+                     [](const TweakStore::Record& a, const TweakStore::Record& b) {
+                         return a.anchor_id < b.anchor_id;
+                     });
 
     report.rows.reserve(records.size());
     for (const auto& rec : records) {

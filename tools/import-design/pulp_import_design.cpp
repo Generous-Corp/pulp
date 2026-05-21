@@ -107,32 +107,9 @@ bool has_disallowed_url_char(const std::string& url) {
     return false;
 }
 
-bool has_file_shell_metachar(const std::string& value) {
+bool has_disallowed_file_char(const std::string& value) {
     for (unsigned char c : value) {
         if (c < 0x20 || c == 0x7f) return true;
-        switch (c) {
-            case '\'':
-            case '"':
-            case '`':
-            case ';':
-            case '&':
-            case '|':
-            case '<':
-            case '>':
-            case '$':
-            case '(':
-            case ')':
-            case '*':
-            case '?':
-            case '[':
-            case ']':
-            case '{':
-            case '}':
-            case '!':
-                return true;
-            default:
-                break;
-        }
     }
     return false;
 }
@@ -641,8 +618,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!input_file.empty() && has_file_shell_metachar(input_file)) {
-        std::cerr << "Error: --file contains shell metacharacters that are not accepted\n";
+    if (!input_file.empty() && has_disallowed_file_char(input_file)) {
+        std::cerr << "Error: --file contains control characters that are not accepted\n";
         return 2;
     }
     if (!input_url.empty() && has_url_shell_metachar(input_url)) {

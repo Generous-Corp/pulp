@@ -47,6 +47,7 @@ GpuTimestamps::~GpuTimestamps() {
 
 bool GpuTimestamps::initialize(void* dawn_device_handle) {
     support_ = GpuTimestampSupport::unsupported;
+    pass_count_ = 0;
     delete impl_;
     impl_ = nullptr;
 
@@ -70,11 +71,9 @@ bool GpuTimestamps::initialize(void* dawn_device_handle) {
         return false;
     }
 
-    impl_ = new Impl{};
-    impl_->device = *device;
-    support_ = GpuTimestampSupport::supported;
-    runtime::log_info("GpuTimestamps: timestamp-query active");
-    return true;
+    runtime::log_info(
+        "GpuTimestamps: timestamp-query present but resolve/readback is not wired - using CPU time");
+    return false;
 }
 
 void GpuTimestamps::begin_frame(std::size_t pass_count) {
@@ -148,6 +147,6 @@ void GpuTimestamps::begin_frame(std::size_t /*pass_count*/) {}
 
 std::vector<std::uint64_t> GpuTimestamps::read_back() const { return {}; }
 
-#endif // PULP_HAS_WEBGPU
+#endif // PULP_HAS_SKIA
 
 } // namespace pulp::render

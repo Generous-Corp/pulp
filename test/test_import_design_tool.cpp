@@ -285,27 +285,34 @@ TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested output
     REQUIRE(r.stdout_output.find(output.string()) != std::string::npos);
 }
 
-TEST_CASE("pulp-import-design rejects shell-metacharacter file and URL inputs",
+TEST_CASE("pulp-import-design accepts literal file paths and rejects unsafe URLs",
           "[cli][import-design][tool][issue-493]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
 
     TempDir tmp("pulp-import-design-tool-shell-meta");
     const auto sentinel = tmp.path / "sentinel";
 
-    SECTION("--file is rejected before any shell-like text can be interpreted") {
-        const std::vector<std::string> metas = {
-            ";", "&", "|", "<", ">", "$", "`", "'", "\"", "(", ")",
-            "*", "?", "[", "]", "{", "}", "!"
-        };
-        for (const auto& meta : metas) {
-            INFO("file metacharacter: " << meta);
-            const auto hostile = (tmp.path / "missing.html").string() + meta + "touch " + sentinel.string();
-            auto r = run_import_design({"--from", "stitch", "--file", hostile});
-            REQUIRE_FALSE(r.timed_out);
-            REQUIRE(r.exit_code == 2);
-            REQUIRE(r.stderr_output.find("--file contains shell metacharacters") != std::string::npos);
-            REQUIRE_FALSE(fs::exists(sentinel));
-        }
+    SECTION("--file accepts legal shell-metacharacter path bytes literally") {
+        const auto literal =
+            tmp.path / "design (1) [draft]! $not-expanded.html";
+        write_text(literal, "<div>literal path</div>");
+
+        auto r = run_import_design({"--from", "stitch", "--file", literal.string(),
+                                    "--dry-run"});
+
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 0);
+        REQUIRE_FALSE(fs::exists(sentinel));
+    }
+
+    SECTION("--file still rejects control characters") {
+        const auto bad = (tmp.path / "design.html").string() + "\nnext";
+        auto r = run_import_design({"--from", "stitch", "--file", bad});
+
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.exit_code == 2);
+        REQUIRE(r.stderr_output.find("--file contains control characters") != std::string::npos);
+        REQUIRE_FALSE(fs::exists(sentinel));
     }
 
     SECTION("--url is rejected before curl is launched") {

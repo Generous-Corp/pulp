@@ -328,6 +328,32 @@ TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report classifies all states",
             InspectorOverlay::ReconcileStatus::unresolvable);
 }
 
+TEST_CASE("InspectorOverlay Phase 5.2: reconcile_report preserves order within an anchor",
+          "[inspect][overlay][reconcile][phase5.2]") {
+    View root;
+    root.set_bounds({0, 0, 600, 600});
+    auto node = std::make_unique<View>();
+    node->set_anchor_id("figma:5:a");
+    root.add_child(std::move(node));
+
+    TweakStore store;
+    store.apply_tweak("figma:5:a", "layout.padding",
+                      choc::value::createInt32(12), "drag");
+    store.apply_tweak("figma:5:a", "layout.gap",
+                      choc::value::createInt32(4), "drag");
+    store.apply_tweak("figma:5:a", "paint.opacity",
+                      choc::value::createFloat32(0.5f), "drag");
+
+    InspectorOverlay overlay(root);
+    overlay.set_tweak_store(&store);
+
+    auto report = overlay.reconcile_report();
+    REQUIRE(report.rows.size() == 3);
+    REQUIRE(report.rows[0].property_path == "layout.padding");
+    REQUIRE(report.rows[1].property_path == "layout.gap");
+    REQUIRE(report.rows[2].property_path == "paint.opacity");
+}
+
 TEST_CASE("InspectorOverlay Phase 5.2: unlocked live tweak reads as drifted",
           "[inspect][overlay][reconcile][phase5.2]") {
     // Without an explicit lock, a tweak whose anchor resolves to a

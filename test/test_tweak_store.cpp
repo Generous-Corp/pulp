@@ -135,6 +135,28 @@ TEST_CASE("TweakStore: multiple paths under one anchor coexist",
     REQUIRE(recs.size() == 2);
 }
 
+TEST_CASE("TweakStore: list_tweaks preserves insertion order",
+          "[inspect][tweak-store]") {
+    TweakStore s;
+    s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(12), {});
+    s.apply_tweak("anchor:a", "layout.gap", choc::value::createInt32(4), {});
+    s.apply_tweak("anchor:b", "paint.opacity",
+                  choc::value::createFloat32(0.5f), {});
+
+    // Overwriting an existing entry should not move it to the end.
+    s.apply_tweak("anchor:a", "layout.padding", choc::value::createInt32(16), {});
+
+    auto recs = s.list_tweaks();
+    REQUIRE(recs.size() == 3);
+    REQUIRE(recs[0].anchor_id == "anchor:a");
+    REQUIRE(recs[0].property_path == "layout.padding");
+    REQUIRE(recs[0].value.getInt32() == 16);
+    REQUIRE(recs[1].anchor_id == "anchor:a");
+    REQUIRE(recs[1].property_path == "layout.gap");
+    REQUIRE(recs[2].anchor_id == "anchor:b");
+    REQUIRE(recs[2].property_path == "paint.opacity");
+}
+
 TEST_CASE("TweakStore: remove_tweak removes a single entry",
           "[inspect][tweak-store]") {
     TweakStore s;
@@ -832,6 +854,37 @@ TEST_CASE("TweakStore: save -> clear -> load round-trips state",
         }
     }
     REQUIRE(found_drag_source);
+}
+
+TEST_CASE("TweakStore: load keeps stable ordering with preserved locked anchors",
+          "[inspect][tweak-store][disk]") {
+    TweakStore s;
+    s.apply_tweak("anchor:locked", "layout.padding",
+                  choc::value::createInt32(12), "drag");
+    s.apply_tweak("anchor:stale", "paint.opacity",
+                  choc::value::createFloat32(0.25f), "drag");
+    s.set_locked("anchor:locked", true);
+
+    auto loaded = s.from_json(R"({
+        "$schema": "pulp-tweaks://v1",
+        "version": 1,
+        "tweaks": {
+            "anchor:fresh": {
+                "layout.gap": 4,
+                "paint.opacity": 0.5
+            }
+        }
+    })");
+
+    REQUIRE(loaded.ok);
+    auto recs = s.list_tweaks();
+    REQUIRE(recs.size() == 3);
+    REQUIRE(recs[0].anchor_id == "anchor:locked");
+    REQUIRE(recs[0].property_path == "layout.padding");
+    REQUIRE(recs[1].anchor_id == "anchor:fresh");
+    REQUIRE(recs[1].property_path == "layout.gap");
+    REQUIRE(recs[2].anchor_id == "anchor:fresh");
+    REQUIRE(recs[2].property_path == "paint.opacity");
 }
 
 TEST_CASE("TweakStore: atomic write leaves no .tmp file behind after success",
