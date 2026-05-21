@@ -294,6 +294,13 @@ at a **75%** floor. Sub-threshold diff coverage hard-fails this check
 and blocks the merge — adding untested code means either adding tests
 or splitting the untested portion into its own PR.
 
+On pull requests the native coverage matrix is intentionally macOS-only.
+Linux and Windows native coverage are collected on push-to-main,
+workflow dispatch, and the nightly cross-platform lane. A docs/planning
+PR that the classifier marks skip-safe does not allocate native coverage
+runners at all; the required diff-coverage gate reports a fast green
+skip instead.
+
 For local pre-submit checks, run `tools/scripts/local_diff_cover.sh`.
 Pass test targets to limit the build, and set
 `PULP_DIFF_COVER_CTEST_REGEX` when the PR has a focused test subset so
@@ -337,9 +344,9 @@ before starting each tranche, watch them again after pushing it, debug
 new failures as soon as they appear, and manually merge PRs once they
 are green.
 
-Use Namespace-backed GitHub checks and Codecov comments as the default
-evidence path. Local VMs are a fallback for reproducing or isolating
-failures, not the normal proof that a tranche is ready.
+Use GitHub checks and Codecov comments as the default evidence path.
+Local VMs are a fallback for reproducing or isolating failures, not the
+normal proof that a tranche is ready.
 
 ## How the collection works
 
@@ -471,9 +478,13 @@ Still out of scope today:
 
 ## Cross-platform matrix
 
-The coverage workflow runs on
-`{ubuntu-latest, macos-latest, windows-latest}` for the native lane.
-Each OS produces its own `coverage.cobertura.xml` and uploads to
+The native coverage matrix is event-conditional. On pull requests, it
+runs only the macOS leg when `tools/scripts/classify_changes.py` says
+native coverage is required. On push-to-main and workflow dispatch, it
+runs `{ubuntu-latest, macos-latest, windows-latest}` so the Codecov
+branch record receives the full cross-OS picture.
+
+Each OS leg produces its own `coverage.cobertura.xml` and uploads to
 Codecov with an OS-tag flag. The Linux leg also uploads the Python
 tools XML for `tools/scripts/**`, `tools/deps/**`,
 `tools/local-ci/**`, top-level `tools/*.py`, `tools/packages/**`, and
@@ -514,9 +525,10 @@ is not already on PATH).
 
 The per-OS legs do NOT fail-fast: a flake on one OS does not cancel
 the others, so the Codecov dashboard still gets partial cross-OS
-coverage when one leg hits a transient toolchain issue. The
-`coverage-diff-gate` job downstream consumes a **merged Cobertura
-XML** built from all three OS artifacts via
+coverage when one leg hits a transient toolchain issue. On pull
+requests there is normally only a macOS native XML. On push-to-main and
+manual dispatches, the `coverage-diff-gate` job downstream consumes a
+**merged Cobertura XML** built from all available OS artifacts via
 `tools/scripts/merge_cobertura.py` (#635). Earlier the gate was
 pinned to the Linux artifact only, which silently skipped Apple-only
 (`au_adapter.mm`, `au_v2_*`) and Windows-only files — diff-cover
@@ -525,6 +537,15 @@ specific change. Merging takes `max(hits)` per `(filename, line)`
 across the inputs, so a line covered on any OS counts as covered
 overall. diff-cover stays a single-XML tool (one PR comment, one
 number) but the silent-skip is closed.
+
+The Coverage workflow also has a `Coverage queue watchdog` job for PRs
+that need native coverage. It runs on GitHub-hosted Ubuntu and polls the
+current workflow run's own jobs. The watchdog may start before GitHub
+has materialized the native coverage matrix, so it must wait until it
+has observed at least one `Coverage report (..., Clang)` leg before
+concluding that there are no queued native legs left. That distinction
+prevents a later macOS coverage leg from sitting queued indefinitely
+while Codecov's branch record remains stale.
 
 **Local equivalent caveat.** `scripts/run_coverage.sh` produces only
 the host-OS Cobertura XML. A local `diff-cover` invocation against

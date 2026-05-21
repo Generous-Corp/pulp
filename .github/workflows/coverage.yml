@@ -740,9 +740,12 @@ jobs:
   #
   # This watchdog is the explicit queued-job reaper. It runs on a
   # GitHub-hosted runner (NEVER self-hosted, so it can never itself be
-  # the thing that's stuck), starts immediately (no `needs:`), and polls
-  # THIS run's own jobs. If any coverage leg has been `queued` longer
-  # than QUEUED_GRACE_MINUTES, it cancels the whole run via the
+  # the thing that's stuck), starts as soon as the classifier says native
+  # coverage is required, and polls THIS run's own jobs. Because it can
+  # start before the coverage matrix has been materialized, "no coverage
+  # legs observed yet" must NOT be treated as "nothing queued". If any
+  # coverage leg has been `queued` longer than QUEUED_GRACE_MINUTES, it
+  # cancels the whole run via the
   # `runs/{id}/cancel` API — there is no public API to cancel a single
   # matrix leg, and cancelling the run is what the required gate needs
   # anyway: `coverage-diff-gate`'s `if: always()` precondition step then
@@ -762,9 +765,9 @@ jobs:
     # QUEUED_GRACE_MINUTES window plus the margin MAX_POLLS provides, then
     # exits. This bound must exceed the POLL_SECONDS * MAX_POLLS poll
     # window (60s * 160 = 160 min) so the loop is never killed mid-window.
-    # In the common case the watchdog still exits EARLY — the moment every
-    # coverage leg has left `queued` (the `queued_legs == 0` branch) — so
-    # it almost never runs the full window.
+    # In the common case the watchdog still exits EARLY — after it has
+    # observed at least one native coverage leg and every observed leg has
+    # left `queued` — so it almost never runs the full window.
     timeout-minutes: 165
     permissions:
       # actions: write is required to POST runs/{id}/cancel.
@@ -792,9 +795,9 @@ jobs:
           # out a deep but healthy queue.
           #
           # This long grace does NOT mean the watchdog usually runs for
-          # 150 min: it still exits EARLY (the `queued_legs == 0` branch)
-          # the moment the leg starts, which in the common case is well
-          # inside the window.
+          # 150 min: it still exits EARLY after native coverage legs have
+          # been created and none remain queued, which in the common case
+          # is well inside the window.
           QUEUED_GRACE_MINUTES: '150'
           # Poll cadence + total watch window. POLL_SECONDS * MAX_POLLS
           # (60s * 160 = 160 min) must comfortably exceed
@@ -842,6 +845,7 @@ jobs:
           echo "Poll cadence:       ${POLL_SECONDS}s x ${MAX_POLLS}"
 
           poll=0
+          observed_coverage_legs=0
           while [ "${poll}" -lt "${MAX_POLLS}" ]; do
             poll=$((poll + 1))
             now_epoch=$(date -u +%s)
@@ -860,6 +864,7 @@ jobs:
             )
 
             queued_legs=0
+            coverage_legs_this_poll=0
             stuck_leg=""
             stuck_age_min=0
             while IFS=$'\t' read -r job_name job_status; do
@@ -881,6 +886,8 @@ jobs:
                 "Coverage report ("*", Clang)") ;;
                 *) continue ;;
               esac
+              coverage_legs_this_poll=$((coverage_legs_this_poll + 1))
+              observed_coverage_legs=1
               [ "${job_status}" != "queued" ] && continue
 
               queued_legs=$((queued_legs + 1))
@@ -905,14 +912,17 @@ jobs:
             fi
 
             if [ "${queued_legs}" -eq 0 ]; then
-              echo "  poll ${poll}: no coverage leg is queued — every leg has a runner or has finished. Watchdog done."
-              exit 0
+              if [ "${observed_coverage_legs}" -eq 1 ]; then
+                echo "  poll ${poll}: observed ${coverage_legs_this_poll} native coverage leg(s); none are queued — every leg has a runner or has finished. Watchdog done."
+                exit 0
+              fi
+              echo "  poll ${poll}: no native coverage legs observed yet — waiting for matrix-config/coverage job creation."
             fi
 
             sleep "${POLL_SECONDS}"
           done
 
-          echo "Watchdog window elapsed (${MAX_POLLS} polls) with no leg past the ${QUEUED_GRACE_MINUTES}-min grace — nothing reaped."
+          echo "Watchdog window elapsed (${MAX_POLLS} polls) with no native coverage leg past the ${QUEUED_GRACE_MINUTES}-min grace — nothing reaped."
 
   android-kotlin-coverage:
     # Keep Android JVM coverage on the always-on Coverage workflow so

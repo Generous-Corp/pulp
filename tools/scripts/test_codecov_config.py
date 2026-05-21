@@ -265,6 +265,22 @@ class CodecovYamlStructure(unittest.TestCase):
             "runs cannot leave Codecov on a mixed React+stale-native snapshot.",
         )
 
+    def test_coverage_watchdog_waits_until_native_legs_exist(self):
+        # Regression: the watchdog can start after `classify` but before
+        # `matrix-config` has materialized the native coverage matrix.
+        # Seeing zero coverage legs in that window must not be treated as
+        # "all coverage legs have left queued", or a later macOS leg can
+        # sit queued forever while main Codecov records stay stale.
+        coverage = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("observed_coverage_legs=0", coverage)
+        self.assertIn("coverage_legs_this_poll=0", coverage)
+        self.assertIn("observed_coverage_legs=1", coverage)
+        self.assertIn("no native coverage legs observed yet", coverage)
+        self.assertIn(
+            'if [ "${observed_coverage_legs}" -eq 1 ]; then',
+            coverage,
+        )
+
     def test_core_axes_use_canonical_directory_mappings(self):
         # Core subsystem ids come directly from core/* and should map to
         # exactly that directory in both flag and component declarations.

@@ -864,8 +864,9 @@ Fix pattern (applies to any GH-Actions job, not just coverage):
 - **For the queued-hang mode, add an explicit queued-job watchdog.**
   `coverage.yml`'s `coverage-queue-watchdog` job is the reference: it
   runs on `ubuntu-latest` (never self-hosted, so it itself can never be
-  the stuck thing), starts immediately (no `needs:` on the matrix), and
-  polls this run's own jobs via `gh api
+  the stuck thing), starts after `classify` says native coverage is
+  required (still no `needs:` on the matrix), and polls this run's own
+  jobs via `gh api
   repos/{repo}/actions/runs/{run_id}/jobs`. If a `Coverage report (...)`
   leg has been `status==queued` past a grace window it cancels the whole
   run via `POST runs/{run_id}/cancel` (`permissions: actions: write`).
@@ -876,6 +877,15 @@ Fix pattern (applies to any GH-Actions job, not just coverage):
   `queued_at`, and `created_at` is when every leg — including the queued
   one — was created. The watchdog must exclude its own job name from the
   scan or it will reap itself.
+  - **Do not exit before native coverage legs exist.** The watchdog can
+    start before `matrix-config` has materialized the `coverage` matrix.
+    In that window the jobs API returns zero matching `Coverage report
+    (..., Clang)` jobs; that means "not created yet", not "all coverage
+    legs left queued". Track whether at least one required native leg has
+    ever been observed, and only use `queued_legs == 0` as an early-exit
+    condition after that observation. This exact bug left a later macOS
+    coverage leg queued while newer main Coverage runs piled up behind
+    the workflow concurrency group, keeping Codecov's main record stale.
   - **Scope the watchdog's job-name match to the REQUIRED legs only.**
     `coverage-queue-watchdog` matches a name that starts with `Coverage
     report (` AND ends with `, Clang)` — i.e. only the native `(macOS,
@@ -898,8 +908,9 @@ Fix pattern (applies to any GH-Actions job, not just coverage):
     pool. The poll window (`POLL_SECONDS` 60 × `MAX_POLLS` 160 = 160
     min) must exceed the grace, and the job's `timeout-minutes` (165)
     must exceed the poll window. A long grace is cheap: the watchdog
-    still exits EARLY (the `queued_legs == 0` branch) the moment the leg
-    starts, so in the common case it never runs the full window.
+    still exits EARLY after it has observed a required native coverage
+    leg and none remain queued, so in the common case it never runs the
+    full window.
 - **Pin a pure gate/aggregation job to a GitHub-hosted runner**
   (`ubuntu-latest` / `ubuntu-24.04`). A job that only downloads
   artifacts and runs a check must never queue behind a saturated
