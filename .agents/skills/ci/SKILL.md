@@ -40,6 +40,18 @@ skill for the full banner contract and override knobs
 (`PULP_SKEW_CHECK_DISABLE`, `PULP_SKEW_CHECK_CACHE`). Release-discovery
 Slice 6 (#551).
 
+## GitHub workflow gotchas
+
+- Keep watchdog/issue-maintenance workflows on REST `gh api` calls. Avoid
+  `gh issue list` / `gh pr *` helpers in those paths because they can use the
+  shared GraphQL quota; a watchdog must not fail while reporting that the
+  watched workflow already recovered.
+- Pulp's docs site is deployed by `.github/workflows/docs-deploy.yml`. If
+  GitHub Pages is set to legacy `main`/`docs` builds, the generated Pages
+  checkout tries to clone the private `planning` submodule with the default
+  token and fails before docs deploys. Fix that at the Pages configuration
+  layer (`build_type=workflow`), not by weakening normal submodule checkout.
+
 ## Current Build-and-Test routing
 
 As of the 2026-05-20 classify gate, `build.yml` runs a cheap

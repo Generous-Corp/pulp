@@ -91,23 +91,25 @@ jobs:
 
           # Look up in both OPEN and CLOSED state; only close OPEN trackers
           # when we return to green (mirror of #475 close-path pattern).
-          existing_json=$(
-              gh issue list \
-                  --repo "$repo" \
-                  --state all \
-                  --search "in:title \"${title}\"" \
-                  --json number,title,state \
-                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          # Use REST here; the shared GraphQL quota is often exhausted by
+          # agent PR polling, and a watchdog must not fail when the watched
+          # workflow has already returned to green.
+          search_json=$(
+              gh api --method GET "/search/issues" \
+                  -f q="repo:${repo} is:issue in:title ${title}"
           )
+          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
           existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
           existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
 
           if [ "$KIND" = "success" ]; then
               if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
                   echo "Auto-release recovered — closing tracker #${existing}."
-                  gh issue comment "$existing" --repo "$repo" \
-                      --body "Auto-release returned to success on run ${RUN_URL}. Closing. (sha ${RUN_SHA})"
-                  gh issue close "$existing" --repo "$repo" --reason completed
+                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                      -f body="Auto-release returned to success on run ${RUN_URL}. Closing. (sha ${RUN_SHA})"
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" \
+                      -f state=closed \
+                      -f state_reason=completed
               else
                   echo "Auto-release succeeded and no open tracker — nothing to do."
               fi
@@ -147,10 +149,13 @@ jobs:
 
           if [ -z "${existing:-}" ]; then
               echo "Creating tracking issue."
-              gh issue create --repo "$repo" --title "$title" --body-file body.md --label bug,ci,blocks-release 2>&1 || \
-                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+              TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": ["bug", "ci", "blocks-release"]}))' > issue.json
+              gh api -X POST "/repos/${repo}/issues" --input issue.json 2>&1 || {
+                  TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input issue.json
+              }
           else
               echo "Updating tracking issue #${existing}."
-              gh issue edit "$existing" --repo "$repo" --body-file body.md
-              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@body.md
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
           fi

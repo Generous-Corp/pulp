@@ -1052,11 +1052,9 @@ TEST_CASE("JSX snapshot dynamic API scanner detects non-deterministic APIs",
     REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis(
         R"JS(const label = `${"Date.now()"} ${/* Math.random() */ 1}`;)JS").has_dynamic_apis());
     REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis(
-        R"JS(
-            const single = 'escaped \' Date.now()';
-            const double_quote = "escaped \" Math.random()";
-            const template = `escaped \` fetch("/state")`;
-        )JS").has_dynamic_apis());
+        "const single = 'escaped \\' Date.now()';\n"
+        "const double_quote = \"escaped \\\" Math.random()\";\n"
+        "const template = `escaped \\` fetch(\"/state\")`;\n").has_dynamic_apis());
     REQUIRE_FALSE(detect_jsx_snapshot_dynamic_apis("const x = 1;").has_dynamic_apis());
 }
 

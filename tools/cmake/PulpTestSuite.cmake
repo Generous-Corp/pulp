@@ -29,13 +29,14 @@ include_guard(GLOBAL)
 #     [LIBRARIES lib1 lib2 ...]          # additional Pulp / system libraries (Catch2WithMain is always linked)
 #     [LABELS "label1;label2"]           # catch_discover_tests PROPERTIES LABELS
 #     [TIMEOUT seconds]                  # catch_discover_tests PROPERTIES TIMEOUT
+#     [PROPERTIES name value ...]        # additional catch_discover_tests PROPERTIES
 #     [INCLUDE_DIRS dir1 dir2 ...]       # extra include directories
 #     [COMPILE_DEFINITIONS def1 ...]     # extra compile definitions
 # )
 function(pulp_add_test_suite NAME)
     set(options "")
     set(oneValueArgs LABELS TIMEOUT)
-    set(multiValueArgs SOURCES LIBRARIES INCLUDE_DIRS COMPILE_DEFINITIONS)
+    set(multiValueArgs SOURCES LIBRARIES INCLUDE_DIRS COMPILE_DEFINITIONS PROPERTIES)
     cmake_parse_arguments(P "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Default source file: strip the conventional "pulp-test-" prefix and
@@ -57,16 +58,20 @@ function(pulp_add_test_suite NAME)
         target_compile_definitions(${NAME} PRIVATE ${P_COMPILE_DEFINITIONS})
     endif()
 
-    # Discover Catch2 cases. Pass LABELS / TIMEOUT through if set so
-    # downstream `ctest -L <label>` and per-suite timeouts keep working.
+    # Discover Catch2 cases. Pass LABELS / TIMEOUT / additional properties
+    # through if set so downstream `ctest -L <label>` and per-suite timeouts
+    # keep working.
     set(_discover_args "")
-    if(P_LABELS OR P_TIMEOUT)
+    if(P_LABELS OR P_TIMEOUT OR P_PROPERTIES)
         list(APPEND _discover_args PROPERTIES)
         if(P_LABELS)
             list(APPEND _discover_args LABELS "${P_LABELS}")
         endif()
         if(P_TIMEOUT)
             list(APPEND _discover_args TIMEOUT "${P_TIMEOUT}")
+        endif()
+        if(P_PROPERTIES)
+            list(APPEND _discover_args ${P_PROPERTIES})
         endif()
     endif()
     catch_discover_tests(${NAME} ${_discover_args})

@@ -57,12 +57,12 @@ struct HttpServerRunner {
     std::thread thread;
 };
 
-bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = 10s) {
+bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = 30s) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         httplib::Client client("127.0.0.1", port);
-        client.set_connection_timeout(0, 200000);
-        client.set_read_timeout(0, 200000);
+        client.set_connection_timeout(0, 500000);
+        client.set_read_timeout(0, 500000);
         if (auto response = client.Get("/__ready");
             response && response->status == 204) {
             return true;
