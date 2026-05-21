@@ -7,6 +7,8 @@ import importlib.util
 import io
 import json
 import pathlib
+import runpy
+import shutil
 import tempfile
 import textwrap
 import unittest
@@ -144,6 +146,27 @@ class VersionConsistencyDirectTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIn("SDK 1.2.4", output)
+
+    def test_script_entrypoint_exits_with_main_return_code(self) -> None:
+        write_layout(self.root)
+        script = self.root / "tools" / "scripts" / "version_consistency_check.py"
+        script.parent.mkdir(parents=True)
+        shutil.copyfile(MODULE_PATH, script)
+
+        with redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as ctx:
+                runpy.run_path(str(script), run_name="__main__")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("version consistency OK", output.getvalue())
+
+    def test_repo_script_entrypoint_is_covered_in_process(self) -> None:
+        with redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as ctx:
+                runpy.run_path(str(MODULE_PATH), run_name="__main__")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("version consistency OK", output.getvalue())
 
 
 if __name__ == "__main__":

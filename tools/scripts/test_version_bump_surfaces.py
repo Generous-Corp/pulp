@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest import mock
 
 from gate_test_support import GateFixtureTestCase, VBC, _run
 
@@ -79,6 +80,135 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 "1.0.0",
             )
         )
+
+    def test_json_path_read_write_and_walk_guards(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        self.f.write(
+            "manifest.json",
+            json.dumps({
+                "plugins": [
+                    {"name": "alpha", "version": "1.0.0"},
+                    {"name": "beta", "version": "2.0.0"},
+                ],
+                "metadata": {"tool": {"version": "3.0.0"}},
+            }, indent=2) + "\n",
+        )
+
+        plugin_vf = vbc.VersionFile("manifest.json", "json_path", "plugins.1.version")
+        self.assertEqual(vbc.read_version(self.tmp, plugin_vf), "2.0.0")
+        self.assertTrue(vbc.write_version(self.tmp, plugin_vf, "2.1.0"))
+        manifest = json.loads((self.tmp / "manifest.json").read_text())
+        self.assertEqual(manifest["plugins"][1]["version"], "2.1.0")
+        self.assertTrue((self.tmp / "manifest.json").read_text().endswith("\n"))
+
+        nested_vf = vbc.VersionFile("manifest.json", "json_path", "metadata.tool.version")
+        self.assertEqual(vbc.read_version(self.tmp, nested_vf), "3.0.0")
+
+        self.assertIsNone(vbc._json_walk_get(manifest, ""))
+        self.assertIsNone(vbc._json_walk_get(manifest, "plugins..version"))
+        self.assertIsNone(vbc._json_walk_get(manifest, "metadata.missing.version"))
+        self.assertIsNone(vbc._json_walk_get(manifest, "plugins.nope.version"))
+        self.assertIsNone(vbc._json_walk_get(manifest, "plugins.4.version"))
+        self.assertIsNone(vbc._json_walk_get(manifest, "metadata.tool.version.patch"))
+
+        self.assertFalse(vbc._json_walk_set(manifest, "", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins..version", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins.nope.version", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins.4.version", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "metadata.tool.version.patch", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins.0.missing.0", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins.0.version.patch", "x"))
+        self.assertFalse(vbc._json_walk_set(manifest, "plugins.0.version.patch.leaf", "x"))
+
+        root_list = [{"version": "1.0.0"}]
+        self.assertTrue(vbc._json_walk_set(root_list, "0", {"version": "1.1.0"}))
+        self.assertEqual(root_list[0]["version"], "1.1.0")
+        self.assertFalse(vbc._json_walk_set(root_list, "nope", "x"))
+        self.assertFalse(vbc._json_walk_set(root_list, "4", "x"))
+
+    def test_version_file_failure_modes_are_fail_closed(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+        vbs = self._import_gate_module("version_bump_surfaces")
+
+        self.assertIsNone(
+            vbc.read_version(self.tmp, vbc.VersionFile("missing.json", "json_field", "version"))
+        )
+        with mock.patch.object(vbs, "_vbc", return_value=object()):
+            self.assertIs(vbs._h("already_bumped"), vbs.already_bumped)
+        self.assertIsNone(
+            vbc._extract_version_from_text(
+                "{not json}\n",
+                vbc.VersionFile("manifest.json", "json_path", "plugins.0.version"),
+            )
+        )
+
+        self.f.write("bad-field.json", "{not json}\n")
+        self.f.write("bad-path.json", "{not json}\n")
+        self.f.write("plain.txt", "no version here\n")
+
+        self.assertIsNone(
+            vbc.read_version(self.tmp, vbc.VersionFile("bad-path.json", "json_path", "a.b"))
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("bad-field.json", "json_field", "version"),
+                "1.0.0",
+            )
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("bad-path.json", "json_path", "a.b"),
+                "1.0.0",
+            )
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("plain.txt", "regex", pattern=r"missing=(\d+\.\d+\.\d+)"),
+                "1.0.0",
+            )
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("plain.txt", "unknown_kind"),
+                "1.0.0",
+            )
+        )
+
+    def test_base_version_helpers_cover_missing_and_equal_paths(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        vf = vbc.VersionFile("CMakeLists.txt", "cmake_project_version")
+        with mock.patch.object(vbc, "version_at_base", return_value="0.1.0"):
+            self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
+        self.assertIsNone(
+            vbc.version_at_base(
+                "origin/main",
+                vbc.VersionFile("missing.json", "json_field", "version"),
+            )
+        )
+
+        self.assertTrue(vbc.write_version(self.tmp, vf, "0.2.0"))
+        with mock.patch.object(vbc, "version_at_base", return_value="0.1.0"):
+            self.assertTrue(vbc.already_bumped("origin/main", vf, self.tmp))
+        with mock.patch.object(vbc, "version_at_base", return_value="0.2.0"):
+            self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
+        with mock.patch.object(vbc, "version_at_base", return_value=None):
+            self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
+
+        self.f.write("broken.json", "{not json}\n")
+        with mock.patch.object(vbc, "version_at_base", return_value="1.0.0"):
+            self.assertFalse(
+                vbc.already_bumped(
+                    "origin/main",
+                    vbc.VersionFile("broken.json", "json_field", "version"),
+                    self.tmp,
+                )
+            )
 
     def test_version_config_loader_strips_metadata(self) -> None:
         vbc = self._import_gate_module("version_bump_check")

@@ -12,6 +12,8 @@ of the aggregate suite via `test_gates.py`.
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 import unittest
 
 from gate_test_support import GateFixtureTestCase, _git
@@ -128,6 +130,18 @@ class SkillSyncTests(GateFixtureTestCase):
         )
         self.assertEqual(len(bypassed), 1)
         self.assertEqual(bypassed[0].bypass_reason, "generated rename")
+
+    def test_import_gate_module_inserts_scripts_path_when_missing(self) -> None:
+        scripts = str(Path(__file__).resolve().parent)
+        original_path = list(sys.path)
+
+        try:
+            sys.path[:] = [p for p in sys.path if p != scripts]
+            module = self._import_gate_module("gate_common")
+            self.assertIs(module, __import__("gate_common"))
+            self.assertEqual(sys.path[0], scripts)
+        finally:
+            sys.path[:] = original_path
 
 
 if __name__ == "__main__":

@@ -18,12 +18,25 @@ import os
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from gate_test_support import GateFixtureTestCase, _git
 
 
 class VersionBumpApplyTests(GateFixtureTestCase):
     """version_bump_check apply + render cluster fixtures."""
+
+    def test_cluster_helper_fallbacks_cover_isolated_imports(self) -> None:
+        vba = self._import_gate_module("version_bump_apply")
+        vbr = self._import_gate_module("version_bump_render")
+        vbh = self._import_gate_module("version_bump_heuristics")
+
+        with mock.patch.object(vba, "_vbc", return_value=object()):
+            self.assertIs(vba._h("bump_version"), vba.bump_version)
+        with mock.patch.object(vbr, "_vbc", return_value=object()):
+            self.assertIs(vbr._h("already_bumped"), vbr.already_bumped)
+        with mock.patch.object(vbh, "_vbc", return_value=object()):
+            self.assertIs(vbh._h("git_range_trailers"), vbh.git_range_trailers)
 
     def test_partial_multi_file_bump_fails(self) -> None:
         """Plugin surface with two version files: bumping only ONE used to

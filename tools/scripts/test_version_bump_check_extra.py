@@ -209,6 +209,7 @@ class VersionFileIoTests(unittest.TestCase):
             ("FIX: capital not matched", 1),  # case-sensitive per the spec
         ]
         for subject, expected in cases:
+            self.assertEqual(vbc.main(["classify-subject", subject]), expected)
             r = sp.run(
                 ["python3", str(script), "classify-subject", subject],
                 capture_output=True, text=True, check=False,
