@@ -90,7 +90,7 @@ class EvidenceCheckTests(unittest.TestCase):
     def test_supported_with_valid_test_stays_pass(self) -> None:
         test_path = self.repo_root / "test/test_foo.cpp"
         test_path.parent.mkdir(parents=True, exist_ok=True)
-        test_path.write_text("// test")
+        test_path.write_text('TEST_CASE("foo evidence", "[tag]") {}\n')
         entry = _make_entry(name="css/foo", tests=["test/test_foo.cpp [tag]"])
         results = [_make_result(entry, Status.PASS)]
         updated = check_evidence(self.repo_root, results, self._compat())
@@ -130,7 +130,7 @@ class EvidenceCheckTests(unittest.TestCase):
     def test_mixed_results_handled_correctly(self) -> None:
         test_path = self.repo_root / "test/test_good.cpp"
         test_path.parent.mkdir(parents=True, exist_ok=True)
-        test_path.write_text("// test")
+        test_path.write_text('TEST_CASE("good evidence", "[tag]") {}\n')
         past = (date.today() - timedelta(days=1)).isoformat()
 
         good = _make_entry(name="css/good", tests=["test/test_good.cpp [tag]"])

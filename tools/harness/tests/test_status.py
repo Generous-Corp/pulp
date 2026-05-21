@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 from tools.harness.adapters.base import CatalogEntry  # noqa: E402
 from tools.harness.status import (  # noqa: E402
     Status,
+    StatusCounts,
     map_catalog_status_to_expected,
 )
 
@@ -77,6 +78,68 @@ class MapCatalogStatusToExpectedTests(unittest.TestCase):
 
     def test_strips_whitespace(self) -> None:
         self.assertIs(map_catalog_status_to_expected("  noop  "), Status.NO_OP)
+
+
+class StatusPropertyTests(unittest.TestCase):
+    """Pin the public enum convenience predicates used by reports."""
+
+    def test_is_pass_only_true_for_pass(self) -> None:
+        for status in Status:
+            with self.subTest(status=status):
+                self.assertEqual(status.is_pass, status is Status.PASS)
+
+    def test_is_progress_includes_pass_and_diverge(self) -> None:
+        progress_statuses = {
+            Status.PASS,
+            Status.DIVERGE,
+        }
+        for status in Status:
+            with self.subTest(status=status):
+                self.assertEqual(status.is_progress, status in progress_statuses)
+
+
+class StatusCountsTests(unittest.TestCase):
+    """Coverage for aggregate status math used by report rendering."""
+
+    def test_empty_counts_have_zero_percentages(self) -> None:
+        counts = StatusCounts()
+        self.assertEqual(counts.total, 0)
+        self.assertEqual(counts.pass_pct, 0.0)
+        self.assertEqual(counts.progress_pct, 0.0)
+
+    def test_from_results_counts_each_status(self) -> None:
+        counts = StatusCounts.from_results(
+            [
+                Status.PASS,
+                Status.PASS,
+                Status.SUPPORTED_NO_EVIDENCE,
+                Status.DIVERGE,
+                Status.NO_OP,
+                Status.NOT_IMPL,
+                Status.OOS,
+            ]
+        )
+
+        self.assertEqual(counts.pass_, 2)
+        self.assertEqual(counts.supported_no_evidence, 1)
+        self.assertEqual(counts.diverge, 1)
+        self.assertEqual(counts.no_op, 1)
+        self.assertEqual(counts.not_impl, 1)
+        self.assertEqual(counts.oos, 1)
+        self.assertEqual(counts.total, 7)
+
+    def test_percentages_use_pass_and_progress_denominators(self) -> None:
+        counts = StatusCounts.from_results(
+            [
+                Status.PASS,
+                Status.SUPPORTED_NO_EVIDENCE,
+                Status.DIVERGE,
+                Status.NO_OP,
+            ]
+        )
+
+        self.assertEqual(counts.pass_pct, 25.0)
+        self.assertEqual(counts.progress_pct, 75.0)
 
 
 class CatalogEntryExpectedStatusTests(unittest.TestCase):

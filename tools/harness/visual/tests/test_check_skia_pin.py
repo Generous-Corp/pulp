@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import sys
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]
@@ -12,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.harness.visual import check_skia_pin  # noqa: E402
+from tools.harness.visual import pins  # noqa: E402
 
 _DOCKERFILE = """\
 # syntax=docker/dockerfile:1.7
@@ -147,6 +151,149 @@ class CheckSkiaPinTests(unittest.TestCase):
         )
         with self.assertRaises(check_skia_pin.CheckError):
             check_skia_pin.read_manifest_pin(manifest_path)
+
+    def test_parse_dockerfile_args_accepts_quoted_values_and_ignores_non_args(self) -> None:
+        args = check_skia_pin._parse_dockerfile_args(
+            "\n".join(
+                [
+                    "FROM ubuntu:24.04",
+                    "ARG SKIA_RELEASE_TAG='chrome/m144'",
+                    'ARG SKIA_PYTHON_VERSION="144.0.post2"',
+                    "ARG SKIA_LINUX_X64_SHA256=aaaa",
+                    "RUN echo not-an-arg",
+                ]
+            )
+        )
+
+        self.assertEqual(args["SKIA_RELEASE_TAG"], "chrome/m144")
+        self.assertEqual(args["SKIA_PYTHON_VERSION"], "144.0.post2")
+        self.assertEqual(args["SKIA_LINUX_X64_SHA256"], "aaaa")
+        self.assertNotIn("RUN", args)
+
+    def test_missing_input_files_raise_check_error(self) -> None:
+        missing = Path(self._tmpdir.name) / "missing"
+        with self.assertRaisesRegex(check_skia_pin.CheckError, "Dockerfile not found"):
+            check_skia_pin.read_dockerfile_pin(missing)
+        with self.assertRaisesRegex(check_skia_pin.CheckError, "manifest not found"):
+            check_skia_pin.read_manifest_pin(missing)
+
+    def test_manifest_missing_required_blocks_and_keys_raise_check_error(self) -> None:
+        cases = [
+            (
+                {"dependencies": [{"name": "Skia"}]},
+                "determinism",
+            ),
+            (
+                {
+                    "dependencies": [
+                        {
+                            "name": "Skia",
+                            "determinism": {
+                                "skia_branch": "chrome/m144",
+                                "skia_python_smoke_version": "144.0.post2",
+                                "release_assets": {},
+                            },
+                        }
+                    ]
+                },
+                "linux-x64",
+            ),
+            (
+                {
+                    "dependencies": [
+                        {
+                            "name": "Skia",
+                            "determinism": {
+                                "skia_python_smoke_version": "144.0.post2",
+                                "release_assets": {
+                                    "linux-x64": {
+                                        "url": "https://example.test/skia.zip",
+                                        "sha256": "aaaa",
+                                    }
+                                },
+                            },
+                        }
+                    ]
+                },
+                "skia_branch",
+            ),
+            (
+                {
+                    "dependencies": [
+                        {
+                            "name": "Skia",
+                            "determinism": {
+                                "skia_branch": "chrome/m144",
+                                "skia_python_smoke_version": "144.0.post2",
+                                "release_assets": {
+                                    "linux-x64": {
+                                        "url": "https://example.test/skia.zip",
+                                    }
+                                },
+                            },
+                        }
+                    ]
+                },
+                "sha256",
+            ),
+        ]
+
+        for manifest, expected in cases:
+            with self.subTest(expected=expected):
+                path = _write_manifest(Path(self._tmpdir.name) / f"{expected}.json", manifest)
+                with self.assertRaisesRegex(check_skia_pin.CheckError, expected):
+                    check_skia_pin.read_manifest_pin(path)
+
+    def test_main_reports_parse_errors_and_drift(self) -> None:
+        stderr = StringIO()
+        with mock.patch.object(
+            check_skia_pin,
+            "read_dockerfile_pin",
+            side_effect=check_skia_pin.CheckError("missing pin"),
+        ), redirect_stderr(stderr):
+            self.assertEqual(check_skia_pin.main([]), 2)
+        self.assertIn("missing pin", stderr.getvalue())
+
+        stderr = StringIO()
+        with mock.patch.object(
+            check_skia_pin,
+            "read_dockerfile_pin",
+            return_value={
+                "release_tag": "chrome/m143",
+                "sha256": "aaaa",
+                "url": "https://example.test/skia.zip",
+                "python_version": "144.0.post2",
+            },
+        ), mock.patch.object(
+            check_skia_pin,
+            "read_manifest_pin",
+            return_value=check_skia_pin.read_manifest_pin(
+                _write_manifest(Path(self._tmpdir.name) / "manifest-main.json", _MANIFEST_TEMPLATE)
+            ),
+        ), redirect_stderr(stderr):
+            self.assertEqual(check_skia_pin.main([]), 1)
+        self.assertIn("has drifted", stderr.getvalue())
+
+    def test_main_reports_success_and_pins_module_is_importable(self) -> None:
+        stdout = StringIO()
+        manifest_pin = check_skia_pin.read_manifest_pin(
+            _write_manifest(Path(self._tmpdir.name) / "manifest-ok.json", _MANIFEST_TEMPLATE)
+        )
+        with mock.patch.object(
+            check_skia_pin,
+            "read_dockerfile_pin",
+            return_value=manifest_pin,
+        ), mock.patch.object(
+            check_skia_pin,
+            "read_manifest_pin",
+            return_value=manifest_pin,
+        ), redirect_stdout(stdout):
+            self.assertEqual(check_skia_pin.main([]), 0)
+
+        self.assertIn("matches tools/deps/manifest.json", stdout.getvalue())
+        self.assertEqual(pins.SKIA_BRANCH, "chrome/m144")
+        self.assertIn("linux-x64", pins.RELEASE_ASSET_SHA256)
+        self.assertIn("dawn", pins.BUNDLED_PINS)
 
 
 if __name__ == "__main__":
