@@ -344,6 +344,48 @@ macOS matrix leg by name, then exit as soon as that leg reports. Otherwise
 advisory Linux/Windows jobs can keep a green macOS leg from satisfying branch
 protection.
 
+### Gotcha: the macOS overflow busy-probe must count only *running* M1 legs (#2467)
+
+`build.yml`'s `resolve-provider` job has an inline-Python "busy probe"
+(`_count_busy_local_mac_runners`) that decides whether a PR's macOS leg
+runs on the local M1s or overflows to github-hosted `macos-15`. The rule:
+`BUSY >= LOCAL_MAC_OVERFLOW_THRESHOLD` (default 2) → overflow.
+
+**The probe must count only macOS Build-and-Test jobs that are RIGHT NOW
+`status == "in_progress"` on a local M1** — a job whose `status` is
+`in_progress` *and* whose `labels` array contains the local self-hosted
+label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `sanitizer`). Everything
+else counts 0:
+
+- A `queued` Build-and-Test run has dispatched nothing — never enumerate
+  queued runs at all; the probe lists only `status=in_progress` runs.
+- A run that is `in_progress` but whose macOS matrix job is not yet
+  registered (matrix not expanded) or is still `queued` is NOT holding an
+  M1 → count 0.
+- An API blip on a per-run `/jobs` call → count 0 (under-count).
+
+**Why err toward "use local":** an earlier cut enumerated `in_progress`
++ `queued` runs and *pessimistically* counted a not-yet-registered macOS
+job as local-busy. During a deep Actions queue (~250 runs) that
+over-counts catastrophically — hundreds of undispatched queued runs read
+as local-busy, BUSY blows past the threshold, every new macOS leg routes
+to github-hosted overflow, and the local M1s sit 100% idle while macOS
+work — the CI long-pole — starves on the contended hosted pool. Merges
+stalled ~80 minutes on 2026-05-20. Slightly oversubscribing the M1s (a
+3rd leg briefly queues behind 2 running ones) is far less harmful, so the
+probe under-counts, never over-counts.
+
+The probe uses the default workflow `GITHUB_TOKEN` — `repos/.../actions/
+runs/<id>/jobs` exposes per-job `status` + `labels` without an
+`Administration: Read` scope. Do NOT switch the probe to the
+`actions/runners` endpoint (needs admin scope; the first cut did and fell
+back to BUSY=0 every run). Regression coverage:
+`tools/scripts/test_resolve_provider_busy_probe.py`, wired into
+`workflow-lint.yml`; it extracts the inline probe from `build.yml` and
+asserts a 50-run deep queue with 2 real local legs reports BUSY=2 (not
+50). Cooperates with `macos_reroute_watcher.py` — the probe makes the
+initial dispatch call, the watcher catches near-misses after the fact.
+
 ### Release workflows: runner routing
 
 Release workflows should follow the same post-cutover rule: do not add

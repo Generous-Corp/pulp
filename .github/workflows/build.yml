@@ -154,30 +154,55 @@ jobs:
           # too. Local participation drops to zero during deep queues
           # (user feedback, pulp task #24).
           #
-          # This probe (pulp task #24) is smarter: it counts only BAT
-          # runs whose macOS job is RUNNING-ON-LOCAL. We enumerate
-          # in_progress + queued BAT runs and for each one inspect its
-          # macOS job's `labels` array. If the labels include
-          # "self-hosted", the run is occupying the local Mac. If the
-          # job hasn't been dispatched yet (resolve-provider still
-          # running for that run), we conservatively count it as BUSY
-          # since we can't yet tell where its macOS leg will land.
+          # This probe (pulp #2467 class) counts only the macOS legs
+          # ACTUALLY OCCUPYING a local M1 right now: a Build-and-Test
+          # macOS job whose `status == "in_progress"` AND whose `labels`
+          # include the local self-hosted label. Everything else counts
+          # as 0:
+          #   - A `queued` Build-and-Test run has dispatched nothing, so
+          #     it cannot be holding an M1. We do NOT enumerate queued
+          #     runs at all.
+          #   - A run that is `in_progress` but whose macOS matrix job is
+          #     not yet registered (matrix not expanded) or is still
+          #     `queued` is NOT occupying an M1 — count 0.
           #
-          # API cost: 1 list-call + N per-run-jobs calls. With typical
-          # N <= ~30 (open PRs cap), the cost is bounded. Probe failure
-          # still falls back to BUSY=0 (safer to under-count than to
-          # always overflow).
+          # The earlier cut (pulp #1942) enumerated in_progress + queued
+          # runs and PESSIMISTICALLY counted a not-yet-registered macOS
+          # job as local-busy. During a deep Actions queue (~250 runs)
+          # that over-counts catastrophically: hundreds of undispatched
+          # queued runs all read as "local-busy", BUSY blows past the
+          # threshold, EVERY new macOS leg routes to github-hosted
+          # overflow, and the local M1 runners sit 100% idle while macOS
+          # work — the CI long-pole — starves on the contended
+          # github-hosted pool. Merges stalled ~80 minutes on 2026-05-20.
+          #
+          # The fix deliberately INVERTS the old pessimism: an
+          # unregistered / queued / API-blip macOS job counts 0, not 1.
+          # The probe errs toward "use local". Slightly oversubscribing
+          # the M1s (a 3rd macOS leg briefly queues behind 2 running
+          # ones) is FAR less harmful than the failure it replaces (M1s
+          # 100% idle while everything piles onto a jammed github-hosted
+          # pool). Under-count, never over-count.
+          #
+          # API cost: 1 list-call + N per-run-jobs calls, N bounded by
+          # the count of in_progress Build-and-Test runs (small — the
+          # `concurrency` group cancels superseded runs). Probe failure
+          # still falls back to BUSY=0 (consistent with "err toward
+          # local").
           def _count_busy_local_mac_runners() -> int:
               if not REPOSITORY:
                   return 0
               current_run_id = os.environ.get("GITHUB_RUN_ID", "")
               local_label = (os.environ.get("LOCAL_MAC_RUNNER_LABEL") or "self-hosted").strip()
 
-              def _list_runs(status: str):
+              def _list_in_progress_runs():
+                  # Only `in_progress` runs can have a macOS job occupying
+                  # an M1. A `queued` run has dispatched nothing, so it is
+                  # never busy — we deliberately do not list it.
                   result = subprocess.run(
                       [
                           "gh", "api",
-                          f"repos/{REPOSITORY}/actions/runs?status={status}&per_page=100",
+                          f"repos/{REPOSITORY}/actions/runs?status=in_progress&per_page=100",
                           "--jq",
                           (
                               f'[.workflow_runs[] '
@@ -193,12 +218,16 @@ jobs:
                   )
                   return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
-              def _macos_job_targets_local(run_id: str) -> bool:
-                  # Returns True if the run's macOS job is dispatching to
-                  # the local self-hosted target. Returns True (pessimistic)
-                  # if the macOS job hasn't been registered yet — we can't
-                  # tell where it will land, so count it as potentially
-                  # local to avoid overcommitting.
+              def _macos_leg_running_on_local(run_id: str) -> bool:
+                  # True ONLY if this run has a macOS Build-and-Test job
+                  # that is RIGHT NOW `status == "in_progress"` AND whose
+                  # `labels` array contains the local self-hosted label
+                  # (exact membership, not substring). A queued macOS job
+                  # (not started), a not-yet-registered macOS job (matrix
+                  # not expanded), or a completed one is NOT occupying an
+                  # M1 → counts 0. This inverts the old pessimistic
+                  # not-yet-registered → BUSY fallback that starved the
+                  # local runners during deep queues.
                   try:
                       result = subprocess.run(
                           [
@@ -208,7 +237,10 @@ jobs:
                               (
                                   f'[.jobs[] '
                                   f'| select(.name | startswith("macOS")) '
-                                  f'| .labels] | flatten | join(",")'
+                                  f'| select(.status == "in_progress") '
+                                  f'| select((.labels // []) '
+                                  f'| index({json.dumps(local_label)})) '
+                                  f'| .id] | length'
                               ),
                           ],
                           check=True,
@@ -216,23 +248,21 @@ jobs:
                           text=True,
                           timeout=15,
                       )
-                      labels = (result.stdout or "").strip()
-                      if not labels:
-                          # macOS job not yet registered — pessimistic.
-                          return True
-                      return local_label in labels
+                      count_text = (result.stdout or "").strip()
+                      return int(count_text) > 0 if count_text else False
                   except (subprocess.SubprocessError, ValueError):
-                      # Defer to "potentially local" so a single API blip
-                      # doesn't accidentally let two local runs in flight.
-                      return True
+                      # API blip: under-count (count 0). Erring toward
+                      # "use local" is the safe failure mode — briefly
+                      # oversubscribing 2 M1s beats starving them idle.
+                      return False
 
               try:
-                  ids = _list_runs("in_progress") + _list_runs("queued")
-                  local_busy = sum(1 for rid in ids if _macos_job_targets_local(rid))
-                  total_other = len(ids)
+                  ids = _list_in_progress_runs()
+                  local_busy = sum(1 for rid in ids if _macos_leg_running_on_local(rid))
                   sys.stderr.write(
-                      f"resolve-provider: BAT runs other than self: "
-                      f"{total_other} total, {local_busy} targeting local\n"
+                      f"resolve-provider: in_progress BAT runs other than self: "
+                      f"{len(ids)} total, {local_busy} with a macOS leg "
+                      f"in_progress on a local M1\n"
                   )
                   return local_busy
               except (subprocess.SubprocessError, ValueError) as exc:

@@ -87,8 +87,8 @@ jobs:
           print(f"structural parse OK across {sum(1 for _ in pathlib.Path('.github/workflows').rglob('*.y*ml'))} files")
           PY
 
-      - name: Release-pipeline regression tests (#720, #1962)
-        # Regression coverage for two silent release-pipeline failures:
+      - name: Release-pipeline regression tests (#720, #1962, #2467)
+        # Regression coverage for silent CI-pipeline failures:
         #
         #   #720  — assert that release-side ctest invocations keep
         #           skipping the `validation` label so auval failures on
@@ -102,12 +102,20 @@ jobs:
         #           original script couldn't see — every release after
         #           v0.94.0 silently failed at the Skia fetch step and
         #           no GitHub Release was published.
+        #
+        #   #2467 — assert build.yml's resolve-provider macOS busy probe
+        #           counts only macOS legs actually in_progress on a
+        #           local M1. The earlier cut over-counted not-yet-
+        #           registered queued runs as local-busy, routed every
+        #           macOS leg to github-hosted overflow during deep
+        #           queues, and left the local M1s 100% idle.
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
           python3 tools/scripts/test_workflow_build_dirs.py
           python3 tools/scripts/test_fetch_skia_for_release.py
+          python3 tools/scripts/test_resolve_provider_busy_probe.py
 
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated
