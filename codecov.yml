@@ -22,14 +22,12 @@
 # workflow's `cancel-in-progress: true` concurrency policy that wipes
 # in-flight runs on force-push).
 #
-# `after_n_builds: 2` because per-PR coverage is now macOS-only (PR
-# #2540): a PR uploads roughly 2 coverage legs - macOS native (Cobertura
-# XML) + Android Kotlin (jacoco) - not 4. With `after_n_builds: 4` from
-# the old Linux/macOS/Windows/Android matrix, Codecov would wait forever
-# for two uploads that never arrive and never post its PR comment.
-# `2` posts correctly for PRs and does not harm push-to-main: on main
-# Codecov posts after the first 2 legs and updates the report as the
-# remaining legs arrive.
+# `after_n_builds: 1` because per-PR coverage is now macOS-only (PR
+# #2540): a normal PR uploads one native Cobertura report. Android
+# Kotlin, Linux, and Windows coverage are main/manual/nightly lanes, not
+# PR uploads. React PRs can still add a second upload, and Codecov will
+# update the report after that upload arrives. Waiting for 2 on ordinary
+# PRs would leave Codecov waiting for an upload that never arrives.
 #
 # If you add or remove a coverage uploader, bump this number to match
 # or Codecov will silently wait forever for the missing one and never
@@ -37,7 +35,7 @@
 # PR has long since merged with a stale report.
 codecov:
   notify:
-    after_n_builds: 2
+    after_n_builds: 1
 
 coverage:
   status:
