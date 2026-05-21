@@ -1,5 +1,6 @@
 #if defined(__ANDROID__)
 
+#include "gpu_surface_android_internal.hpp"
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -57,7 +58,10 @@ static float g_display_density = 2.625f;  // default xxhdpi, overridden by Kotli
 static float g_safe_top = 0, g_safe_bottom = 0, g_safe_left = 0, g_safe_right = 0;
 
 // Touch state
-static view::View* g_captured_view = nullptr;
+// g_captured_view has external linkage: the nativeOnTouchCancel JNI export
+// in gpu_surface_android_jni.cpp clears it directly. Declared in
+// gpu_surface_android_internal.hpp.
+view::View* g_captured_view = nullptr;
 static std::chrono::steady_clock::time_point g_last_tap_time{};
 static float g_last_tap_x = 0, g_last_tap_y = 0;
 
@@ -1046,100 +1050,8 @@ GpuSurface* android_gpu_surface() {
 
 } // namespace pulp::render
 
-// ── JNI Exports ───────────────────────────────────────────────────────────
-
-extern "C" {
-
-// Display density — call from Kotlin before surface is created
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeSetDisplayDensity(
-    JNIEnv*, jobject, jfloat density) {
-    pulp::render::android_set_display_density(density);
-}
-
-// Safe area insets (dp) — status bar, nav bar, notch
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeSetSafeAreaInsets(
-    JNIEnv*, jobject, jfloat top, jfloat bottom, jfloat left, jfloat right) {
-    pulp::render::android_set_safe_area_insets(top, bottom, left, right);
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceCreated(
-    JNIEnv* env, jobject thiz, jobject surface) {
-    try {
-        ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-        if (window) {
-            pulp::render::android_surface_created(window);
-            ANativeWindow_release(window);  // android_surface_created acquires its own ref
-        } else {
-            PULP_LOGE("ANativeWindow_fromSurface returned null");
-        }
-    } catch (const std::exception& e) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
-    } catch (...) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                      "Unknown C++ exception in nativeOnSurfaceCreated");
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceResized(
-    JNIEnv* env, jobject thiz, jint width, jint height) {
-    try {
-        pulp::render::android_surface_resized(width, height);
-    } catch (const std::exception& e) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
-    } catch (...) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                      "Unknown C++ exception in nativeOnSurfaceResized");
-    }
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnSurfaceDestroyed(
-    JNIEnv* env, jobject thiz) {
-    try {
-        pulp::render::android_surface_destroyed();
-    } catch (const std::exception& e) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
-    } catch (...) {
-        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
-                      "Unknown C++ exception in nativeOnSurfaceDestroyed");
-    }
-}
-
-// Touch events → View hierarchy
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnTouchDown(
-    JNIEnv*, jobject, jint pointerId, jfloat x, jfloat y, jfloat pressure) {
-    pulp::render::android_touch_down(pointerId, x, y, pressure);
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnTouchMove(
-    JNIEnv*, jobject, jint pointerId, jfloat x, jfloat y, jfloat pressure) {
-    pulp::render::android_touch_move(pointerId, x, y, pressure);
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnTouchUp(
-    JNIEnv*, jobject, jint pointerId, jfloat x, jfloat y) {
-    pulp::render::android_touch_up(pointerId, x, y);
-}
-
-JNIEXPORT void JNICALL
-Java_com_pulp_render_PulpSurfaceView_nativeOnTouchCancel(JNIEnv*, jobject) {
-    pulp::render::g_captured_view = nullptr;
-}
-
-// ── Accessibility (TalkBack) ─────────────────────────────────────────────
-// REMOVED: the accessibility JNI exports have moved to
-// core/view/platform/android/accessibility_android.cpp which uses the
-// correct C++ enum values directly (no role mapping table). The old
-// code here had wrong role mappings that caused TalkBack to announce
-// controls as the wrong widget type.
-
-} // extern "C"
+// JNI `extern "C"` exports for this surface live in the sibling TU
+// gpu_surface_android_jni.cpp (P8-1 refactor). They forward onto the
+// android_* entry points declared in gpu_surface_android_internal.hpp.
 
 #endif // __ANDROID__

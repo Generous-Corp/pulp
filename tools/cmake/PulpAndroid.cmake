@@ -156,6 +156,13 @@ function(pulp_wire_android_sources)
                 ${_android_render_dir}/gpu_surface_android.cpp
             )
         endif()
+        # JNI `extern "C"` bridge — split out of gpu_surface_android.cpp
+        # (P8-1 refactor). Forwards onto the android_* entry points.
+        if(EXISTS "${_android_render_dir}/gpu_surface_android_jni.cpp")
+            target_sources(pulp-render PRIVATE
+                ${_android_render_dir}/gpu_surface_android_jni.cpp
+            )
+        endif()
         target_link_libraries(pulp-render PRIVATE android log)
         # View headers needed for rendering the widget hierarchy on Android
         target_include_directories(pulp-render PRIVATE
