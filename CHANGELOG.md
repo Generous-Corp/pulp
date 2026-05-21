@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01835"></a>
+## [0.183.5] - 2026-05-20
+
+- refactor(design-tool): split design-tool.js into per-concern modules (P8-NEW) ([#2589](https://github.com/danielraffel/pulp/pull/2589))
+- docs: outline modular runtime spec ([#2584](https://github.com/danielraffel/pulp/pull/2584))
+
 <a id="v01834"></a>
 ## [0.183.4] - 2026-05-20
 
@@ -2414,6 +2420,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.183.5]: https://github.com/danielraffel/pulp/releases/tag/v0.183.5
 [0.183.4]: https://github.com/danielraffel/pulp/releases/tag/v0.183.4
 [0.183.1]: https://github.com/danielraffel/pulp/releases/tag/v0.183.1
 [0.183.0]: https://github.com/danielraffel/pulp/releases/tag/v0.183.0
