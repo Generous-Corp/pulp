@@ -75,6 +75,17 @@ DesignIR v1.5 also carries document-level provenance (`capture_method`,
 shared normalized form, including interactive-frame promotion from the Pulp
 view library.
 
+The shared native-resolution layer lives in
+`core/view/src/design_import_native_common.{hpp,cpp}`. It consumes normalized
+`DesignIR` plus `IRAssetManifest` and returns a deterministic
+`ResolvedNativeNode` tree for later baked-native/baked-cpp materializers.
+Mapping precedence is `audio_widget` first, then `IRNode.type`, then HTML
+subtype attributes such as `input[type=range]`, with unsupported nodes and
+properties degrading to diagnostics instead of throwing. When resolving frozen
+DesignIR JSON, keep the embedded `assetManifest` fallback intact; do not
+iterate `IRNode.attributes` directly when diagnostic order matters because it
+is unordered. Use sorted attribute keys for stable output.
+
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:

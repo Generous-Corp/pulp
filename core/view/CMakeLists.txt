@@ -263,6 +263,7 @@ target_sources(pulp-view PRIVATE
     src/anchor_strategy.cpp
     src/design_export.cpp
     src/design_import.cpp
+    src/design_import_native_common.cpp
     src/design_tokens.cpp
     src/design_codegen.cpp
     src/lock_to_source.cpp
