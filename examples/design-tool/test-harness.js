@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// Automated test harness — injected after design-tool.js
+// Automated test harness — injected after the design-tool-*.js modules
 // Tests all interactive UX by dispatching events programmatically
 // ═══════════════════════════════════════════════════════════════
 

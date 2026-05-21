@@ -784,14 +784,16 @@ Launch the local AI-powered design tool used for token, shader, and style iterat
 
 ```bash
 pulp design
-pulp design path/to/design-tool.js
-pulp design --script path/to/design-tool.js
+pulp design path/to/design-tool-core.js
+pulp design --script path/to/design-tool-core.js
 pulp design --build-dir /tmp/pulp-design-parity-build
 ```
 
 `pulp design` now configures/builds `pulp-design-tool` on demand before launch. When run inside
-a Pulp checkout it loads `examples/design-tool/design-tool.js` from that checkout and builds into
-that checkout's `build/` directory.
+a Pulp checkout it loads `examples/design-tool/design-tool-core.js` from that checkout and builds
+into that checkout's `build/` directory. The design-tool UI is split across `design-tool-*.js`
+concern modules; the entry module is the path you pass, and the host loads its sibling modules in
+order from the same directory.
 
 Use `--script` to point at a different JS entry, and `--build-dir` when you are working from a
 nonstandard build tree such as a separate worktree build directory.

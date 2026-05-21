@@ -70,7 +70,10 @@ DesignBindingResult resolve_design_binding(const DesignBindingInput& input) {
     }
 
     if (result.script_path.empty()) {
-        result.script_path = result.root / "examples" / "design-tool" / "design-tool.js";
+        // The design-tool UI is split across design-tool-*.js concern modules
+        // (P8-NEW). The entry module is the path handed to pulp-design-tool;
+        // the binary loads its sibling modules in order from the same dir.
+        result.script_path = result.root / "examples" / "design-tool" / "design-tool-core.js";
         result.script_reason = "default design tool script";
     }
 

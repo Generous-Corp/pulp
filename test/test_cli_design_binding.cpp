@@ -19,7 +19,7 @@ TEST_CASE("CLI design binding uses current checkout defaults", "[cli][design]") 
     CHECK(result.root_reason == "current checkout");
     CHECK(result.build_dir == fs::path("/repo/build"));
     CHECK(result.build_reason == "default build dir under selected root");
-    CHECK(result.script_path == fs::path("/repo/examples/design-tool/design-tool.js"));
+    CHECK(result.script_path == fs::path("/repo/examples/design-tool/design-tool-core.js"));
     CHECK(result.script_reason == "default design tool script");
 }
 
@@ -35,13 +35,13 @@ TEST_CASE("CLI design binding supports CLI-adjacent build trees", "[cli][design]
     CHECK(result.root_reason == "CLI-adjacent build tree");
     CHECK(result.build_dir == fs::path("/sdk/build"));
     CHECK(result.build_reason == "CLI-adjacent build tree");
-    CHECK(result.script_path == fs::path("/sdk/examples/design-tool/design-tool.js"));
+    CHECK(result.script_path == fs::path("/sdk/examples/design-tool/design-tool-core.js"));
 }
 
 TEST_CASE("CLI design binding honors explicit build dir and script", "[cli][design]") {
     DesignBindingInput input;
     input.build_dir = "/sdk/build";
-    input.script_path = "/worktree/examples/design-tool/design-tool.js";
+    input.script_path = "/worktree/examples/design-tool/design-tool-core.js";
     input.script_root = "/worktree";
     input.build_dir_cache_root = "/worktree";
     input.build_dir_explicit = true;
@@ -54,7 +54,7 @@ TEST_CASE("CLI design binding honors explicit build dir and script", "[cli][desi
     CHECK(result.root_reason == "script path");
     CHECK(result.build_dir == fs::path("/sdk/build"));
     CHECK(result.build_reason == "explicit --build-dir");
-    CHECK(result.script_path == fs::path("/worktree/examples/design-tool/design-tool.js"));
+    CHECK(result.script_path == fs::path("/worktree/examples/design-tool/design-tool-core.js"));
     CHECK(result.script_reason == "explicit --script");
 }
 
@@ -134,7 +134,7 @@ TEST_CASE("CLI design binding fails clearly without a checkout or build tree", "
 TEST_CASE("CLI design binding rejects mismatched explicit build dirs", "[cli][design]") {
     DesignBindingInput input;
     input.build_dir = "/sdk/build";
-    input.script_path = "/worktree/examples/design-tool/design-tool.js";
+    input.script_path = "/worktree/examples/design-tool/design-tool-core.js";
     input.script_root = "/worktree";
     input.build_dir_cache_root = "/other-repo";
     input.build_dir_explicit = true;

@@ -143,10 +143,27 @@ std::string slugify(std::string_view text) {
     return out;
 }
 
+// Ordered design-tool concern modules. The example UI was split out of a
+// single design-tool.js (P8-NEW); the modules share one global scope and only
+// form a valid program when loaded in this order — their concatenation is
+// byte-equivalent to the historical single file. Keep in sync with
+// kDesignToolModules in examples/design-tool/main.cpp.
+constexpr const char* kDesignToolEntry = "design-tool-core.js";
+constexpr const char* kDesignToolModules[] = {
+    "design-tool-core.js",
+    "design-tool-toolbar.js",
+    "design-tool-palette.js",
+    "design-tool-popup.js",
+    "design-tool-preview.js",
+    "design-tool-chat.js",
+    "design-tool-export.js",
+};
+
 fs::path find_repo_root() {
     auto dir = fs::current_path();
     while (!dir.empty()) {
-        if (fs::exists(dir / "CMakeLists.txt") && fs::exists(dir / "examples" / "design-tool" / "design-tool.js")) {
+        if (fs::exists(dir / "CMakeLists.txt")
+            && fs::exists(dir / "examples" / "design-tool" / kDesignToolEntry)) {
             return dir;
         }
         auto parent = dir.parent_path();
@@ -157,7 +174,7 @@ fs::path find_repo_root() {
 }
 
 fs::path find_default_script(const fs::path& repo_root) {
-    auto path = repo_root / "examples" / "design-tool" / "design-tool.js";
+    auto path = repo_root / "examples" / "design-tool" / kDesignToolEntry;
     if (fs::exists(path)) return path;
     return {};
 }
@@ -174,13 +191,22 @@ void load_design_tool(const fs::path& script_path, WidgetBridge& bridge) {
     if (fs::exists(oklch_path)) {
         bridge.load_script(read_file(oklch_path));
     }
-    bridge.load_script(read_file(script_path));
+    // When the script is the design-tool entry module, load the full ordered
+    // concern-module set from its directory (the modules only form a valid
+    // program in sequence). For any other --script path, load it directly.
+    if (script_path.filename() == kDesignToolEntry) {
+        for (const char* module : kDesignToolModules) {
+            bridge.load_script(read_file(js_dir / module));
+        }
+    } else {
+        bridge.load_script(read_file(script_path));
+    }
 }
 
 void print_usage() {
     std::cerr << "Usage: pulp-design-debug --prompt <text> [options]\n";
     std::cerr << "  --target <id|all>            Scope prompt to a widget like k1, slider1, t1\n";
-    std::cerr << "  --script <file.js>           Design tool JS file (default: examples/design-tool/design-tool.js)\n";
+    std::cerr << "  --script <file.js>           Design tool entry module (default: examples/design-tool/design-tool-core.js)\n";
     std::cerr << "  --output-dir <dir>           Artifact directory (default: build/design-debug)\n";
     std::cerr << "  --response-file <file.txt>   Use a saved model response instead of calling AI\n";
     std::cerr << "  --provider <name>            Metadata provider name (default: claude)\n";
@@ -363,7 +389,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     if (opts.script_path.empty() || !fs::exists(opts.script_path)) {
-        std::cerr << "Error: design-tool.js not found\n";
+        std::cerr << "Error: design tool script not found\n";
         return 1;
     }
     if (opts.capture_mode == CaptureMode::live_gpu &&

@@ -49,18 +49,36 @@ static std::string find_js_file(const std::string& name) {
     return {};
 }
 
+// Ordered design-tool concern modules. The UI was split out of a single
+// design-tool.js (P8-NEW); the modules share one global scope and only form
+// a valid program when loaded in this order — their concatenation is
+// byte-equivalent to the historical single file, so declaration-before-use
+// order is preserved. Keep this list in sync with kDesignToolModules in
+// examples/design-tool/main.cpp.
+static const char* const kDesignToolModules[] = {
+    "design-tool-core.js",
+    "design-tool-toolbar.js",
+    "design-tool-palette.js",
+    "design-tool-popup.js",
+    "design-tool-preview.js",
+    "design-tool-chat.js",
+    "design-tool-export.js",
+};
+
 static void load_design_tool(View& root, ScriptEngine& engine, WidgetBridge& bridge) {
     auto oklch_path = find_js_file("oklch.js");
     if (!oklch_path.empty()) {
         bridge.load_script(read_file(oklch_path));
     }
 
-    auto js_path = find_js_file("design-tool.js");
-    if (js_path.empty()) {
-        throw std::runtime_error("design-tool.js not found");
+    for (const char* module : kDesignToolModules) {
+        auto module_path = find_js_file(module);
+        if (module_path.empty()) {
+            throw std::runtime_error(std::string("design-tool module not found: ")
+                                     + module);
+        }
+        bridge.load_script(read_file(module_path));
     }
-
-    bridge.load_script(read_file(js_path));
     root.layout_children();
 }
 
@@ -80,9 +98,9 @@ static std::string uppercase_hex(std::string value) {
 }
 
 TEST_CASE("Design tool: JS creates three-column layout", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -115,9 +133,9 @@ TEST_CASE("Design tool: JS creates three-column layout", "[design-tool]") {
 }
 
 TEST_CASE("Design tool: left panel is 310px, right panel is 272px", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -150,9 +168,9 @@ TEST_CASE("Design tool: left panel is 310px, right panel is 272px", "[design-too
 }
 
 TEST_CASE("Design tool: toolbar has space-between layout", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -181,9 +199,9 @@ TEST_CASE("Design tool: toolbar has space-between layout", "[design-tool]") {
 }
 
 TEST_CASE("Design tool: help badges exist for color system controls", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -237,9 +255,9 @@ TEST_CASE("Design tool: help badges exist for color system controls", "[design-t
 }
 
 TEST_CASE("Design tool: composite control labels stay click-through", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -265,9 +283,9 @@ TEST_CASE("Design tool: composite control labels stay click-through", "[design-t
 }
 
 TEST_CASE("Design tool: palette dots stay circular", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -289,9 +307,9 @@ TEST_CASE("Design tool: palette dots stay circular", "[design-tool]") {
 }
 
 TEST_CASE("Design tool: token rows use square swatches and wider hex fields", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -315,9 +333,9 @@ TEST_CASE("Design tool: token rows use square swatches and wider hex fields", "[
 }
 
 TEST_CASE("Design tool: text editor font sizes flow through the bridge", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -341,9 +359,9 @@ TEST_CASE("Design tool: text editor font sizes flow through the bridge", "[desig
 }
 
 TEST_CASE("Design tool: input editors keep visible text contrast", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -387,9 +405,9 @@ TEST_CASE("Design tool: input editors keep visible text contrast", "[design-tool
 }
 
 TEST_CASE("Design tool: token popup surfaces modified state and compact controls", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -456,9 +474,9 @@ TEST_CASE("Design tool: token popup surfaces modified state and compact controls
 }
 
 TEST_CASE("Design tool: token popup custom picker renders a marker overlay and full-height H/C sliders", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -498,9 +516,9 @@ TEST_CASE("Design tool: token popup custom picker renders a marker overlay and f
 }
 
 TEST_CASE("Design tool: modified tokens expose inline reset affordances", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -547,9 +565,9 @@ TEST_CASE("Design tool: modified tokens expose inline reset affordances", "[desi
 }
 
 TEST_CASE("Design tool: expanded token popup stays within root bounds", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -578,9 +596,9 @@ TEST_CASE("Design tool: expanded token popup stays within root bounds", "[design
 }
 
 TEST_CASE("Design tool: token popup persists alpha across edits and reopen", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -635,9 +653,9 @@ TEST_CASE("Design tool: token popup persists alpha across edits and reopen", "[d
 }
 
 TEST_CASE("Design tool: waveform and spectrum previews render populated data", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -700,9 +718,9 @@ TEST_CASE("Design tool: waveform and spectrum previews render populated data", "
 }
 
 TEST_CASE("Design tool: layout preview uses loading spinner and interactive tabs", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -775,9 +793,9 @@ TEST_CASE("Design tool: layout preview uses loading spinner and interactive tabs
 }
 
 TEST_CASE("Design tool: inspect click updates and clears chat context badge", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -811,9 +829,9 @@ TEST_CASE("Design tool: inspect click updates and clears chat context badge", "[
 }
 
 TEST_CASE("Design tool: chat typing indicator is transient pending UI", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -846,9 +864,9 @@ TEST_CASE("Design tool: chat typing indicator is transient pending UI", "[design
 }
 
 TEST_CASE("Design tool: reference image validator accepts common image formats", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -871,9 +889,9 @@ TEST_CASE("Design tool: reference image validator accepts common image formats",
 }
 
 TEST_CASE("Design tool: chat history serialization captures messages and target", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -901,9 +919,9 @@ TEST_CASE("Design tool: chat history serialization captures messages and target"
 }
 
 TEST_CASE("Design tool: chat pending state disables selectors and turns send into cancel", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -964,9 +982,9 @@ TEST_CASE("Design tool: chat pending state disables selectors and turns send int
 }
 
 TEST_CASE("Design tool: chat timeout clears pending UI and recovers controls", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -999,9 +1017,9 @@ TEST_CASE("Design tool: chat timeout clears pending UI and recovers controls", "
 }
 
 TEST_CASE("Design tool: pending chat can be canceled and late results are ignored", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1061,9 +1079,9 @@ TEST_CASE("Design tool: pending chat can be canceled and late results are ignore
 }
 
 TEST_CASE("Design tool: Escape cancels an active chat request before closing other overlays", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1101,9 +1119,9 @@ TEST_CASE("Design tool: Escape cancels an active chat request before closing oth
 }
 
 TEST_CASE("Design tool: chat command failures surface provider guidance and recover controls", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1141,9 +1159,9 @@ TEST_CASE("Design tool: chat command failures surface provider guidance and reco
 }
 
 TEST_CASE("Design tool: empty chat command output fails fast without waiting for timeout", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1174,9 +1192,9 @@ TEST_CASE("Design tool: empty chat command output fails fast without waiting for
 }
 
 TEST_CASE("Design tool: debug prompt builder includes target and audio-plugin family guidance", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1198,9 +1216,9 @@ TEST_CASE("Design tool: debug prompt builder includes target and audio-plugin fa
 }
 
 TEST_CASE("Design tool: AI provider selector switches model options and effort visibility", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1228,9 +1246,9 @@ TEST_CASE("Design tool: AI provider selector switches model options and effort v
 }
 
 TEST_CASE("Design tool: debug state captures applied widget look metadata", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1259,9 +1277,9 @@ TEST_CASE("Design tool: debug state captures applied widget look metadata", "[de
 }
 
 TEST_CASE("Design tool: token search compacts the list and hides non-matching groups", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1294,9 +1312,9 @@ TEST_CASE("Design tool: token search compacts the list and hides non-matching gr
 }
 
 TEST_CASE("Design tool: palette rows keep mini ramps when collapsed and gamut editor when expanded", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1346,9 +1364,9 @@ TEST_CASE("Design tool: palette rows keep mini ramps when collapsed and gamut ed
 }
 
 TEST_CASE("Design tool: expanded palette exposes color format values and compact shade chips", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1401,9 +1419,9 @@ TEST_CASE("Design tool: expanded palette exposes color format values and compact
 }
 
 TEST_CASE("Design tool: expanded palette opens contrast preview modal", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1449,9 +1467,9 @@ TEST_CASE("Design tool: expanded palette opens contrast preview modal", "[design
 }
 
 TEST_CASE("Design tool: brand/style cues resolve to deterministic audio-plugin presets", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1472,9 +1490,9 @@ TEST_CASE("Design tool: brand/style cues resolve to deterministic audio-plugin p
 }
 
 TEST_CASE("Design tool: family-only widget look specs resolve to concrete presets", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1496,9 +1514,9 @@ TEST_CASE("Design tool: family-only widget look specs resolve to concrete preset
 }
 
 TEST_CASE("Design tool: state pills drive disabled and error preview states", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1545,9 +1563,9 @@ TEST_CASE("Design tool: state pills drive disabled and error preview states", "[
 }
 
 TEST_CASE("Design tool: opposite mode lifts semantic backgrounds in light mode", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1596,9 +1614,9 @@ TEST_CASE("Design tool: opposite mode lifts semantic backgrounds in light mode",
 }
 
 TEST_CASE("Design tool: opposite mode toggles back to the originating theme", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1634,9 +1652,9 @@ TEST_CASE("Design tool: opposite mode toggles back to the originating theme", "[
 }
 
 TEST_CASE("Design tool: mode selector reuses generated opposite variants", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1675,9 +1693,9 @@ TEST_CASE("Design tool: mode selector reuses generated opposite variants", "[des
 }
 
 TEST_CASE("Design tool: preset selector keeps palette mode in sync", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1709,9 +1727,9 @@ TEST_CASE("Design tool: preset selector keeps palette mode in sync", "[design-to
 }
 
 TEST_CASE("Design tool: template selector applies light web palette", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1744,9 +1762,9 @@ TEST_CASE("Design tool: template selector applies light web palette", "[design-t
 }
 
 TEST_CASE("Design tool: palette serialization round-trips mode and harmony", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1788,9 +1806,9 @@ TEST_CASE("Design tool: palette serialization round-trips mode and harmony", "[d
 }
 
 TEST_CASE("Design tool: preview semantic badges track accent tokens", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1824,9 +1842,9 @@ TEST_CASE("Design tool: preview semantic badges track accent tokens", "[design-t
 }
 
 TEST_CASE("Design tool: preview overlays and tabs follow theme tokens", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 
@@ -1878,9 +1896,9 @@ TEST_CASE("Design tool: preview overlays and tabs follow theme tokens", "[design
 }
 
 TEST_CASE("Design tool: export helpers cover native, W3C, and style preset formats", "[design-tool]") {
-    auto js_path = find_js_file("design-tool.js");
+    auto js_path = find_js_file("design-tool-core.js");
     if (js_path.empty()) {
-        SKIP("design-tool.js not found");
+        SKIP("design-tool modules not found");
         return;
     }
 

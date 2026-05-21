@@ -1,6 +1,10 @@
 // Pulp Style Designer — JS-defined design tool
 // Minimal C++ host: opens a window, loads JS via ScriptEngine + WidgetBridge,
-// hot-reloads on file changes. All UI defined in design-tool.js.
+// hot-reloads on file changes. The UI is split by concern across the
+// design-tool-*.js modules (see kDesignToolModules below). They share one
+// global scope and MUST load in the listed order so each declaration
+// precedes its first use — the concatenation of the modules in this order
+// is byte-equivalent to the historical single-file design-tool.js.
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
@@ -79,10 +83,32 @@ static std::string run_command_capture(const std::string& command, int& exit_cod
     return output;
 }
 
+// Ordered design-tool concern modules. Loaded sequentially into one shared
+// global scope; the concatenation in this order equals the historical
+// single-file design-tool.js, so declaration-before-use order is preserved.
+static const char* const kDesignToolModules[] = {
+    "design-tool-core.js",     // theme bootstrap, frame shim, token state/color,
+                               // APP_* constants, preview-theme base
+    "design-tool-toolbar.js",  // root shell, toolbar, token list
+    "design-tool-palette.js",  // OKLCH shade ramps, gamut, accent hue,
+                               // save/load, legacy color picker
+    "design-tool-popup.js",    // token palette popup, gamut triangle,
+                               // accent-hue + harmony selector wiring
+    "design-tool-preview.js",  // preview chrome, controls, waveforms,
+                               // layout cards, right-panel chat scaffold
+    "design-tool-chat.js",     // AI CLI, chat controls, inspector, global
+                               // keys, shader presets, chat input wiring
+    "design-tool-export.js",   // export popup, undo/redo wiring
+};
+
+// The directory-watch anchor / default entry. Picking the first module keeps
+// the historical "give the host a single .js path" CLI contract intact.
+static const char* const kDesignToolEntry = "design-tool-core.js";
+
 static fs::path find_default_js_path() {
     auto dir = fs::current_path();
     while (!dir.empty()) {
-        auto candidate = dir / "examples" / "design-tool" / "design-tool.js";
+        auto candidate = dir / "examples" / "design-tool" / kDesignToolEntry;
         if (fs::exists(candidate)) return candidate;
         auto parent = dir.parent_path();
         if (parent == dir) break;
@@ -111,8 +137,9 @@ struct AutomationOptions {
 };
 
 static void print_usage() {
-    std::cerr << "Usage: pulp-design-tool [path/to/design-tool.js] [options]\n";
-    std::cerr << "  --script <file.js>                 Explicit design-tool.js path\n";
+    std::cerr << "Usage: pulp-design-tool [path/to/design-tool-core.js] [options]\n";
+    std::cerr << "  --script <file.js>                 Explicit entry-module path (its\n";
+    std::cerr << "                                     directory must hold all design-tool-*.js)\n";
     std::cerr << "  --design-width <px>                Override design viewport width (else auto-measure)\n";
     std::cerr << "  --design-height <px>               Override design viewport height (else auto-measure)\n";
     std::cerr << "  --automation-prompt <text>         Run a one-shot automated chat restyle\n";
@@ -234,12 +261,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    const bool used_default_js_path = js_path.empty();
     if (js_path.empty()) {
         js_path = find_default_js_path();
     }
 
     if (js_path.empty() || !fs::exists(js_path)) {
-        std::cerr << "Error: design-tool.js not found.\n";
+        std::cerr << "Error: " << kDesignToolEntry << " not found.\n";
         print_usage();
         return 1;
     }
@@ -282,40 +310,39 @@ int main(int argc, char* argv[]) {
 
     bridge->install_runtime_import_handlers();
 
-    // Load library scripts first (oklch.js)
+    // Load the OKLCH library, then the design-tool concern modules — all into
+    // one shared global scope. Order is load-bearing: oklch.js defines the
+    // colour engine the modules call at parse time, and the modules concatenate
+    // in kDesignToolModules order to equal the historical single-file script.
     auto js_dir = js_path.parent_path();
-    auto load_library_scripts = [&](WidgetBridge& target) {
-        for (auto& lib : {"oklch.js"}) {
-            auto lib_path = js_dir / lib;
-            if (fs::exists(lib_path)) {
-                target.load_script(read_file(lib_path));
+    auto load_design_tool = [&](WidgetBridge& target) {
+        auto oklch_path = js_dir / "oklch.js";
+        if (fs::exists(oklch_path)) {
+            target.load_script(read_file(oklch_path));
+        }
+        for (const char* module : kDesignToolModules) {
+            auto module_path = js_dir / module;
+            if (!fs::exists(module_path)) {
+                throw std::runtime_error(std::string("missing design-tool module: ")
+                                         + module_path.string());
             }
+            auto module_code = read_file(module_path);
+            if (module_code.empty()) {
+                throw std::runtime_error(std::string("empty design-tool module: ")
+                                         + module_path.string());
+            }
+            target.load_script(module_code);
         }
     };
     try {
-        load_library_scripts(*bridge);
-        std::cout << "Loaded: oklch.js\n";
+        load_design_tool(*bridge);
+        std::cout << "Loaded: oklch.js + " << std::size(kDesignToolModules)
+                  << " design-tool modules\n";
     } catch (const std::exception& e) {
-        std::cerr << "Error loading library scripts: " << e.what() << "\n";
+        std::cerr << "Error loading design tool scripts: " << e.what() << "\n";
         return 1;
     } catch (...) {
-        std::cerr << "Error loading library scripts: unknown exception\n";
-        return 1;
-    }
-
-    // Load main UI script
-    auto code = read_file(js_path);
-    if (code.empty()) {
-        std::cerr << "Error: could not read " << js_path.string() << "\n";
-        return 1;
-    }
-    try {
-        bridge->load_script(code);
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading design tool script: " << e.what() << "\n";
-        return 1;
-    } catch (...) {
-        std::cerr << "Error loading design tool script: unknown exception\n";
+        std::cerr << "Error loading design tool scripts: unknown exception\n";
         return 1;
     }
 
@@ -331,7 +358,12 @@ int main(int argc, char* argv[]) {
     WindowOptions opts;
     {
         std::string title;
-        if (!js_path.empty()) {
+        if (used_default_js_path) {
+            // Default run loads the design-tool-*.js module set; the per-file
+            // stem ("design-tool-core") is an implementation detail, so keep
+            // the stable product name rather than deriving it from a module.
+            title = "Pulp Design Tool";
+        } else if (!js_path.empty()) {
             auto p = js_path;
             auto stem = p.stem().string();      // e.g. "editor"
             auto parent = p.parent_path().filename().string();
@@ -612,11 +644,15 @@ int main(int argc, char* argv[]) {
     // every frame and re-pins root bounds at design size, so the window
     // can change size all it wants — the design surface stays put.
 
-    // Hot reload
-    HotReloader reloader(js_path, [&](const std::string& new_code) {
-        std::cout << "Hot reload: " << js_path.filename().string() << "\n";
+    // Hot reload — directory-watch mode so edits to ANY design-tool-*.js
+    // module (or oklch.js) trigger a rebuild. The reload callback re-reads
+    // the whole ordered module set rather than the single changed file's
+    // text, since the split modules only form a valid program in sequence.
+    HotReloader reloader(js_dir, js_path.filename().string(),
+                         [&](const std::string& /*changed_code*/) {
+        std::cout << "Hot reload: design-tool modules\n";
         try {
-            // Validate the new script in an isolated bridge first so a bad
+            // Validate the new scripts in an isolated bridge first so a bad
             // reload does not tear down the live UI.
             View probe_root;
             probe_root.set_theme(root.theme());
@@ -625,8 +661,7 @@ int main(int argc, char* argv[]) {
             auto probe_engine = make_engine("reload:");
             auto probe_bridge = std::make_unique<WidgetBridge>(*probe_engine, probe_root, probe_store);
             probe_bridge->install_runtime_import_handlers();
-            load_library_scripts(*probe_bridge);
-            probe_bridge->load_script(new_code);
+            load_design_tool(*probe_bridge);
 
             WidgetReloadSnapshot saved;
             bridge->snapshot_values(saved);
@@ -641,8 +676,7 @@ int main(int argc, char* argv[]) {
                 next_bridge->set_ai_cli_command(*ai_cli);
             }
             next_bridge->install_runtime_import_handlers();
-            load_library_scripts(*next_bridge);
-            next_bridge->load_script(new_code);
+            load_design_tool(*next_bridge);
             next_bridge->restore_values(saved);
             engine = std::move(next_engine);
             bridge = std::move(next_bridge);

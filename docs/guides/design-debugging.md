@@ -173,7 +173,7 @@ When you need final renderer fidelity inside the harness itself, use
 Relevant local checks:
 
 ```bash
-node --check examples/design-tool/design-tool.js
+for m in examples/design-tool/design-tool-*.js; do node --check "$m"; done
 ctest --test-dir build -R "Design tool:|WidgetBridge"
 ./build/tools/design/pulp-design-debug --prompt "make the gain knob look like premium brushed aluminum" --target k1 --capture-backend live-gpu --response-file saved-response.json
 ```
