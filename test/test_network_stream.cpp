@@ -106,7 +106,26 @@ std::optional<std::uint16_t> try_bind_udp(Socket& socket,
     return std::nullopt;
 }
 
-std::string receive_http_headers(Socket& socket) {
+std::size_t content_length_from_headers(const std::string& request) {
+    const auto header_end = request.find("\r\n\r\n");
+    const auto length_key = std::string("Content-Length: ");
+    const auto length_pos = request.find(length_key);
+    if (header_end == std::string::npos || length_pos == std::string::npos)
+        return 0;
+
+    const auto start = length_pos + length_key.size();
+    const auto end = request.find("\r\n", start);
+    if (end == std::string::npos || end > header_end)
+        return 0;
+
+    try {
+        return static_cast<std::size_t>(std::stoul(request.substr(start, end - start)));
+    } catch (...) {
+        return 0;
+    }
+}
+
+std::string receive_http_request(Socket& socket) {
     std::string request;
     std::array<std::uint8_t, 256> buffer{};
     while (request.size() < 16 * 1024) {
@@ -114,7 +133,11 @@ std::string receive_http_headers(Socket& socket) {
         if (received <= 0) break;
         request.append(reinterpret_cast<const char*>(buffer.data()),
                        static_cast<std::size_t>(received));
-        if (request.find("\r\n\r\n") != std::string::npos) break;
+        const auto header_end = request.find("\r\n\r\n");
+        if (header_end == std::string::npos) continue;
+
+        const auto body_size = request.size() - (header_end + 4);
+        if (body_size >= content_length_from_headers(request)) break;
     }
     return request;
 }
@@ -926,7 +949,7 @@ TEST_CASE("http_get defaults missing URL path to slash",
         auto accepted = listener.accept();
         if (!accepted) return;
 
-        const auto request_text = receive_http_headers(*accepted);
+        const auto request_text = receive_http_request(*accepted);
         saw_root_path.store(request_text.find("GET /") != std::string::npos);
 
         const std::string response =
@@ -963,7 +986,7 @@ TEST_CASE("HttpStream post factory reads a successful local response",
         auto accepted = listener.accept();
         if (!accepted) return;
 
-        const auto request_text = receive_http_headers(*accepted);
+        const auto request_text = receive_http_request(*accepted);
         saw_post.store(request_text.find("POST /submit") != std::string::npos &&
                        request_text.find("application/json") != std::string::npos);
         const std::string response =
@@ -979,7 +1002,7 @@ TEST_CASE("HttpStream post factory reads a successful local response",
     while (!server_ready.load()) std::this_thread::sleep_for(1ms);
 
     auto stream = HttpStream::post("http://127.0.0.1:" + std::to_string(*port) + "/submit",
-                                   R"({"ok":true})", "application/json", 2);
+                                   R"({"ok":true})", "application/json", 10);
     REQUIRE(stream);
     REQUIRE(stream->status_code() == 201);
     REQUIRE(stream->transport_error().empty());

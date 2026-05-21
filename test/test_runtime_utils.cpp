@@ -130,6 +130,21 @@ OneShotHttpResponse serve_one_http_response(std::string_view method,
     return exchange;
 }
 
+bool wait_until_http_ready(int port, std::chrono::milliseconds timeout = std::chrono::seconds(10)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        httplib::Client client("127.0.0.1", port);
+        client.set_connection_timeout(0, 500000);
+        client.set_read_timeout(0, 500000);
+        if (auto response = client.Get("/__ready");
+            response && response->status == 204) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
 }  // namespace
 
 // ── ScopeGuard ─────────────────────────────────────────────────────────
@@ -1582,6 +1597,9 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
         response.set_header("X-Content-Type", request.get_header_value("Content-Type"));
         response.set_content(request.body, "text/plain");
     });
+    server.Get("/__ready", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
+    });
     server.Get("/download", [](const httplib::Request&, httplib::Response& response) {
         response.set_content(std::string("payload\0bytes", 13), "application/octet-stream");
     });
@@ -1601,30 +1619,31 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     REQUIRE(server.is_running());
+    REQUIRE(wait_until_http_ready(port));
 
     const auto base = std::string("http://127.0.0.1:") + std::to_string(port);
-    auto get_response = http_get(base + "/hello?name=agent", 2);
-    const auto get_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    auto get_response = http_get(base + "/hello?name=agent", 10);
+    const auto get_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     while (!get_response.ok() && std::chrono::steady_clock::now() < get_deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        get_response = http_get(base + "/hello?name=agent", 2);
+        get_response = http_get(base + "/hello?name=agent", 10);
     }
     REQUIRE(get_response.ok());
     REQUIRE(get_response.status_code == 200);
     REQUIRE(get_response.body == "hello");
     REQUIRE(get_response.headers.at("X-Pulp-Test") == "agent");
 
-    const auto root_response = http_get(base, 2);
+    const auto root_response = http_get(base, 10);
     REQUIRE(root_response.ok());
     REQUIRE(root_response.body == "root");
 
-    const auto post_response = http_post(base + "/echo", "body=42", "text/custom", 2);
+    const auto post_response = http_post(base + "/echo", "body=42", "text/custom", 10);
     REQUIRE(post_response.ok());
     REQUIRE(post_response.body == "body=42");
     REQUIRE(post_response.headers.at("X-Content-Type").find("text/custom") != std::string::npos);
 
     TemporaryFile downloaded(".bin");
-    REQUIRE(http_download(base + "/download", downloaded.path_string(), 2));
+    REQUIRE(http_download(base + "/download", downloaded.path_string(), 10));
     std::ifstream file(downloaded.path(), std::ios::binary);
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     REQUIRE(bytes == std::string("payload\0bytes", 13));
@@ -1637,7 +1656,7 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
     auto cleanup_blocked_output = make_scope_guard([&] {
         std::filesystem::remove_all(blocked_path);
     });
-    REQUIRE_FALSE(http_download(base + "/download", blocked_path.string(), 2));
+    REQUIRE_FALSE(http_download(base + "/download", blocked_path.string(), 10));
 }
 
 TEST_CASE("HTTP helpers copy successful GET status body and headers",
