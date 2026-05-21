@@ -152,9 +152,13 @@ pub fn resolve_binding(cwd: &Path, args: &DesignArgs) -> Result<DesignBinding> {
             },
         ),
         None => (
+            // P8-NEW split: design-tool.js was replaced by per-concern
+            // design-tool-*.js modules. The host resolves the entry's
+            // directory and loads every module in order, so the entry
+            // module (design-tool-core.js) is the canonical default.
             root.join("examples")
                 .join("design-tool")
-                .join("design-tool.js"),
+                .join("design-tool-core.js"),
             "default design tool script",
         ),
     };
@@ -370,7 +374,7 @@ mod tests {
         let b = resolve_binding(td.path(), &args).unwrap();
         assert_eq!(b.root, td.path());
         assert_eq!(b.build_dir, td.path().join("build"));
-        assert!(b.script.ends_with("design-tool.js"));
+        assert!(b.script.ends_with("design-tool-core.js"));
         assert_eq!(b.root_reason, "current checkout");
     }
 
@@ -400,7 +404,7 @@ mod tests {
     #[test]
     fn run_errors_when_resolved_script_missing() {
         // plant_checkout creates `core/` + `CMakeLists.txt` but no
-        // `tools/design/design-tool.js`, so resolve_binding picks the
+        // `examples/design-tool/design-tool-core.js`, so resolve_binding picks the
         // default script path and run() bails with "script not found".
         let td = tempfile::tempdir().unwrap();
         plant_checkout(td.path());
@@ -433,7 +437,7 @@ mod tests {
             td.path()
                 .join("examples")
                 .join("design-tool")
-                .join("design-tool.js"),
+                .join("design-tool-core.js"),
             "// stub\n",
         )
         .unwrap();
@@ -480,7 +484,7 @@ mod tests {
             td.path()
                 .join("examples")
                 .join("design-tool")
-                .join("design-tool.js"),
+                .join("design-tool-core.js"),
             "// stub\n",
         )
         .unwrap();
@@ -514,7 +518,7 @@ mod tests {
         assert!(calls[1].program.ends_with("pulp-design")
             || calls[1].program.ends_with("pulp-design.exe"));
         // First arg to the binary is the script; passthrough trails.
-        assert!(calls[1].args[0].ends_with("design-tool.js"));
+        assert!(calls[1].args[0].ends_with("design-tool-core.js"));
         assert!(calls[1].args.iter().any(|a| a == "--ui-flag"));
     }
 
