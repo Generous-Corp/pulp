@@ -54,6 +54,13 @@ bool is_valid_custom_node_type(const CustomNodeType& type) {
         && type.num_output_ports >= 0;
 }
 
+std::string custom_node_key(std::string_view type_id, int version) {
+    std::string key(type_id);
+    key.push_back('\x1f');
+    key += std::to_string(version);
+    return key;
+}
+
 } // namespace
 
 NodeId SignalGraph::add_input_node(int channels, const std::string& name) {
@@ -169,13 +176,24 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     if (!is_valid_custom_node_type(type)) return false;
     if (type.default_name.empty()) type.default_name = type.type_id;
-    const auto key = type.type_id;
+    const auto key = custom_node_key(type.type_id, type.version);
     custom_node_types_[key] = std::move(type);
     return true;
 }
 
 const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id) const {
-    auto it = custom_node_types_.find(std::string(type_id));
+    const CustomNodeType* latest = nullptr;
+    const std::string wanted(type_id);
+    for (const auto& [_, type] : custom_node_types_) {
+        if (type.type_id != wanted) continue;
+        if (!latest || type.version > latest->version) latest = &type;
+    }
+    return latest;
+}
+
+const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id,
+                                                    int version) const {
+    auto it = custom_node_types_.find(custom_node_key(type_id, version));
     if (it == custom_node_types_.end()) return nullptr;
     return &it->second;
 }
@@ -183,6 +201,14 @@ const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id) co
 NodeId SignalGraph::add_custom_node(std::string_view type_id,
                                     const std::string& name) {
     const auto* type = custom_node_type(type_id);
+    if (!type) return 0;
+    return add_custom_node(type_id, type->version, name);
+}
+
+NodeId SignalGraph::add_custom_node(std::string_view type_id,
+                                    int version,
+                                    const std::string& name) {
+    const auto* type = custom_node_type(type_id, version);
     if (!type) return 0;
     return add_unresolved_custom_node(
         type->type_id,
@@ -554,10 +580,13 @@ SignalGraph::compile_(double /*sample_rate*/, int max_block_size) {
         rt.input_data.assign(static_cast<size_t>(in_ch) * max_block_size, 0.f);
         rt.output_ptrs.resize(out_ch);
         rt.input_ptrs.resize(in_ch);
+        rt.input_const_ptrs.resize(in_ch);
         for (int c = 0; c < out_ch; ++c)
             rt.output_ptrs[c] = rt.output_data.data() + static_cast<size_t>(c) * max_block_size;
-        for (int c = 0; c < in_ch; ++c)
+        for (int c = 0; c < in_ch; ++c) {
             rt.input_ptrs[c] = rt.input_data.data() + static_cast<size_t>(c) * max_block_size;
+            rt.input_const_ptrs[c] = rt.input_ptrs[c];
+        }
         rt.gain = n.gain;  // copy UI-thread scalar into per-snapshot runtime
         if (n.plugin) {
             for (const auto& p : n.plugin->parameters()) {
@@ -574,6 +603,13 @@ SignalGraph::compile_(double /*sample_rate*/, int max_block_size) {
         cg->shapes[n.id] = shape;
 
         if (n.plugin) cg->plugins[n.id] = n.plugin;
+        if (n.type == NodeType::Custom) {
+            if (const auto* type = custom_node_type(n.custom_type_id,
+                                                    n.custom_type_version);
+                type && type->process) {
+                cg->custom_processors[n.id] = type->process;
+            }
+        }
     }
 
     for (const auto& c : cg->connections) {
@@ -994,7 +1030,18 @@ void SignalGraph::process(audio::BufferView<float>& output,
             case NodeType::MidiOutput:
                 break;
             case NodeType::Custom:
-                pass_through_or_zero(rt);
+                if (auto custom_it = cg->custom_processors.find(id);
+                    custom_it != cg->custom_processors.end()) {
+                    audio::BufferView<float> out_view(
+                        rt.output_ptrs.data(), rt.output_ptrs.size(),
+                        static_cast<std::size_t>(num_samples));
+                    audio::BufferView<const float> in_view(
+                        rt.input_const_ptrs.data(), rt.input_const_ptrs.size(),
+                        static_cast<std::size_t>(num_samples));
+                    custom_it->second(out_view, in_view, num_samples);
+                } else {
+                    pass_through_or_zero(rt);
+                }
                 break;
         }
     }

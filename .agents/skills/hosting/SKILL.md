@@ -143,9 +143,11 @@ predictable output, no MIDI.
   `HostParamInfo::rate == AudioRate` params; do not route dense CV into
   stepped/read-only/control-rate parameters.
 - Custom graph nodes are registered per `SignalGraph` with `CustomNodeType`
-  (`type_id`, `version`, port counts, default name), then instantiated with
-  `add_custom_node(type_id)`. `GraphSerializer` preserves unresolved custom
-  identities as placeholder `NodeType::Custom` nodes and reports them in
+  (`type_id`, `version`, port counts, default name, optional process
+  callback), then instantiated with `add_custom_node(type_id)` or
+  `add_custom_node(type_id, version)`. `GraphSerializer` resolves exact
+  `(type_id, version)` matches, preserves unresolved custom identities as
+  placeholder `NodeType::Custom` nodes, and reports them in
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type.
 
