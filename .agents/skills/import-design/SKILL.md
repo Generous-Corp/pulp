@@ -791,9 +791,9 @@ pulp import-design --from claude --file design.html --no-emit-classnames
 ```
 
 Import artifact flag vocabulary:
-- `--output <path>` is the destination for the primary artifact; today that artifact is JS and defaults to `ui.js`.
-- `--emit js` and `--emit ir-json` are implemented today. `--emit cpp` is recognized as a reserved value for the baked C++ exporter and fails cleanly. Legacy `--emit classnames` remains accepted for the Claude classnames sidecar.
-- `--mode live` is the default. `--mode baked` is implemented for `--from jsx --emit ir-json`; other baked combinations fail cleanly until later phases land.
+- `--output <path>` is the destination for the primary artifact. JS defaults to `ui.js`; `--emit cpp` defaults to `imported_ui.cpp` and writes the sibling header.
+- `--emit js`, `--emit ir-json`, and `--emit cpp` are implemented. `cpp` requires `--mode baked`. Legacy `--emit classnames` remains accepted for the Claude classnames sidecar.
+- `--mode live` is the default. Static sources emit generated JS in live mode; `--from jsx --mode live --emit js` writes the precompiled JSX bundle verbatim. `--mode baked` emits canonical IR or baked C++ via `--emit ir-json|cpp`.
 - `--snapshot-semantics fail|warn|accept` is honored for JSX baked IR snapshots. `fail` rejects dynamic APIs by default, `warn` proceeds with a structured diagnostic, and `accept` proceeds silently. The scan covers timers, animation frames, clock/random APIs, and fetch while ignoring comments and string literals.
 - URL imports fetch through argv-safe `curl` into a unique temporary file; literal `--file` paths are read directly and may contain normal filesystem punctuation, while `--url` rejects shell metacharacters before fetching.
 

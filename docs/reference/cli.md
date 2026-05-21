@@ -966,6 +966,7 @@ pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.j
 pulp import-design --from v0 --file card.tsx --dry-run
 pulp import-design --from claude --file design.html --classnames classnames.json
 pulp import-design --from designmd --file DESIGN.md --tokens out.json
+pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --output imported_ui.cpp
 ```
 
 Accepted `--from` values: `figma`, `stitch`, `v0`, `pencil`, `claude`, `designmd`, `jsx`.
@@ -983,8 +984,8 @@ exit codes, diagnostics, and the staged rollout split).
 | Flag | Description |
 |------|-------------|
 | `--output <path>` | Destination for the primary generated artifact. Today the default primary artifact is JS at `ui.js`; sidecars remain anchored beside this path when not explicitly overridden. |
-| `--emit {js\|ir-json\|cpp}` | Select the primary artifact kind. `js` and `ir-json` are implemented today; `cpp` is reserved for the baked C++ exporter. |
-| `--mode {live\|baked}` | Select the import runtime model. `live` is the default. `baked` is implemented for `--from jsx --emit ir-json`; other baked combinations fail cleanly until their phases land. |
+| `--emit {js\|ir-json\|cpp}` | Select the primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. |
+| `--mode {live\|baked}` | Select the import runtime model. `live` is the default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. Defaults to `PULP_IMPORT_ASSET_CACHE` or the user cache. |
@@ -998,13 +999,14 @@ With `--emit ir-json`, relative asset references from a `--url` import resolve
 against the source URL. The manifest keeps the authored relative URI and also
 records the resolved `source_url` used for HTTP(S) fetching.
 
-With `--from jsx --mode baked --emit ir-json`, the CLI captures a runtime
-snapshot into DesignIR and records snapshot provenance. Dynamic APIs such as
-`setInterval`, `setTimeout`, `requestAnimationFrame`, `Date.now`, `new Date`,
-`performance.now`, `Math.random`, and `fetch` fail by default under
-`--snapshot-semantics fail`; comments and string literals are ignored. Use
-`warn` to continue with a structured diagnostic, or `accept` to continue
-without that diagnostic.
+With `--from jsx --mode live --emit js`, the CLI writes the precompiled JSX
+runtime bundle verbatim. With `--from jsx --mode baked --emit ir-json|cpp`, the
+CLI captures a runtime snapshot into DesignIR and records snapshot provenance.
+Dynamic APIs such as `setInterval`, `setTimeout`, `requestAnimationFrame`,
+`Date.now`, `new Date`, `performance.now`, `Math.random`, and `fetch` fail by
+default under `--snapshot-semantics fail`; comments and string literals are
+ignored. Use `warn` to continue with a structured diagnostic, or `accept` to
+continue without that diagnostic.
 
 ### export-tokens
 

@@ -6,7 +6,8 @@ Technical reference for the Pulp design import pipeline. For a getting-started g
 
 ### import-design
 
-Import a design from an external tool into Pulp web-compat JS code.
+Import a design from an external tool into Pulp JS, DesignIR, or baked C++
+artifacts.
 
 ```
 pulp import-design --from <source> [options]
@@ -22,8 +23,8 @@ pulp import-design --from <source> [options]
 | `--frame <name>` | Frame/artboard to import (Figma) | first frame |
 | `--screen <name>` | Screen to import (Stitch) | first screen |
 | `--output <path>` | Destination file for the primary artifact | `ui.js` |
-| `--emit {js\|ir-json\|cpp}` | Primary artifact kind. `js` and `ir-json` are implemented; `cpp` is reserved for the baked C++ exporter. | `js` |
-| `--mode {live\|baked}` | Runtime model. `live` is the default. `baked` is implemented for `--from jsx --emit ir-json`; other baked combinations fail cleanly until their phases land. | `live` |
+| `--emit {js\|ir-json\|cpp}` | Primary artifact kind. `js`, `ir-json`, and `cpp` are implemented; `cpp` requires `--mode baked`. | `js` |
+| `--mode {live\|baked}` | Runtime model. `live` is the default. `baked` emits canonical IR or baked C++ via `--emit ir-json\|cpp`. | `live` |
 | `--snapshot-semantics {fail\|warn\|accept}` | JSX baked snapshot policy. `fail` rejects dynamic APIs by default, `warn` proceeds with diagnostics, and `accept` proceeds silently. | `fail` |
 | `--allow-network-fetch` | Allow DesignIR asset-manifest HTTP(S) fetches at import time. | off |
 | `--asset-cache <path>` | Asset cache directory for HTTP(S) imports. | `PULP_IMPORT_ASSET_CACHE` or user cache |
@@ -61,13 +62,14 @@ The IR envelope also records document-level provenance (`capture_method`,
 shared normalized form: interactive `frame` nodes are promoted through the
 library normalization pass before code generation or IR serialization.
 
-For JSX baked IR snapshots, Pulp scans the precompiled bundle for dynamic APIs
-that make a frozen snapshot non-deterministic (`setInterval`, `setTimeout`,
-`requestAnimationFrame`, `Date.now`, `new Date`, `performance.now`,
-`Math.random`, and `fetch`). Comments and string literals are ignored. The
-default `--snapshot-semantics fail` exits with code 2. `warn` emits the IR and
-records a `snapshot-dynamic-api` diagnostic; `accept` emits the IR with
-provenance recording the accepted policy.
+For `--from jsx --mode live --emit js`, Pulp writes the precompiled bundle
+verbatim. For JSX baked IR/C++ snapshots, Pulp scans the precompiled bundle for
+dynamic APIs that make a frozen snapshot non-deterministic (`setInterval`,
+`setTimeout`, `requestAnimationFrame`, `Date.now`, `new Date`,
+`performance.now`, `Math.random`, and `fetch`). Comments and string literals
+are ignored. The default `--snapshot-semantics fail` exits with code 2. `warn`
+emits the IR and records a `snapshot-dynamic-api` diagnostic; `accept` emits
+the IR or C++ with provenance recording the accepted policy.
 
 ### export-tokens
 

@@ -1,20 +1,22 @@
-Import a design from an external tool (Figma, Stitch, v0, Pencil, Claude Design) into this Pulp project.
+Import a design from an external tool (Figma, Stitch, v0, Pencil, Claude Design, DESIGN.md, or React JSX) into this Pulp project.
 
 Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
 3. If Pencil MCP is available (mcp__pencil__*), offer to read the current editor state
 4. If the user mentions Claude Design or hands over a manually-exported HTML/zip from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — manual export only, see pulp #468)
-5. If the user provides a file path or URL, use that directly
-6. If none of the above, ask the user for a source and file
+5. If the user provides DESIGN.md, treat it as `--from designmd`
+6. If the user provides a precompiled JSX runtime bundle, treat it as `--from jsx`
+7. If the user provides a file path or URL, use that directly
+8. If none of the above, ask the user for a source and file
 
 ## Workflow
 
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
-- **Source**: figma, stitch, v0, pencil, or claude
-- **Input**: file path, URL, or MCP live data (manual file only for claude)
+- **Source**: figma, stitch, v0, pencil, claude, designmd, or jsx
+- **Input**: file path, URL, or MCP live data (manual file only for claude; precompiled bundle only for jsx)
 
 ### Step 2: Read the design data
 
@@ -43,6 +45,15 @@ Ask the user or detect from context:
 - Run `pulp import-design --from claude --file <path>` — parser delegates to the Stitch HTML pipeline and tags the IR as Claude
 - The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (see pulp #709). Open it, fill in the `add_handler()` registrations for the messages your editor will postMessage from JS, then `bridge_.attach_webview(*panel_)` (or `attach_native_runtime(...)` if hosting in a JS runtime instead of a WebView)
 
+**DESIGN.md**:
+- Run `pulp import-design --from designmd --file DESIGN.md --tokens tokens.json`
+- This is tokens-only; no `ui.js` is emitted.
+
+**React JSX runtime bundle**:
+- Compile the JSX/TSX first with `tools/import-design/jsx-runtime/jsx-transform.mjs`.
+- `--mode live --emit js` writes the precompiled bundle verbatim.
+- `--mode baked --emit ir-json|cpp` captures a runtime snapshot; use `--snapshot-semantics accept` only when accepting dynamic APIs is intentional.
+
 **File-based fallback**:
 - Read the file and parse based on --from source type
 
@@ -63,7 +74,7 @@ Generate Pulp web-compat JavaScript:
 
 ### Step 4: Write output files
 
-- Write the generated JS to `ui.js` (or user-specified output path)
+- Write the primary artifact to `--output` (`ui.js`, DesignIR JSON, or baked C++)
 - Extract design tokens to `tokens.json` in W3C Design Tokens format
 - Report: number of elements, number of tokens, any warnings
 
@@ -158,7 +169,10 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
-pulp import-design --from claude --file design.html   # writes ui.js + bridge_handlers.cpp scaffold
+pulp import-design --from claude --file design.html   # writes ui.js + tokens.json + classnames.json + bridge_handlers.cpp
+pulp import-design --from designmd --file DESIGN.md --tokens tokens.json
+pulp import-design --from jsx --file bundle.js --mode live --emit js
+pulp import-design --from jsx --file bundle.js --mode baked --emit cpp --snapshot-semantics accept --output imported_ui.cpp
 
 # With validation
 pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png
@@ -166,6 +180,12 @@ pulp import-design --from pencil --file design.json --validate --reference sourc
 # Skip the bridge scaffold (claude only)
 pulp import-design --from claude --file design.html --no-bridge-scaffold
 ```
+
+Artifact flags:
+- `--output <path>` selects the primary artifact destination.
+- `--emit {js|ir-json|cpp}` selects the artifact kind; `cpp` requires `--mode baked`.
+- `--mode {live|baked}` selects the runtime model.
+- `--snapshot-semantics {fail|warn|accept}` gates JSX baked snapshots with dynamic APIs.
 
 Use `--dry-run` to preview without writing files.
 

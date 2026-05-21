@@ -457,6 +457,23 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
         REQUIRE(baked.stderr_output.find("--mode baked requires --emit ir-json or --emit cpp") != std::string::npos);
     }
 
+    SECTION("jsx live mode writes the precompiled bundle verbatim") {
+        const auto jsx = tmp.path / "live.bundle.js";
+        const auto output = tmp.path / "live-ui.js";
+        const std::string bundle =
+            "/* precompiled JSX runtime bundle */\n"
+            "(function(){ globalThis.__pulpLiveBundle = true; })();\n";
+        write_text(jsx, bundle);
+
+        auto live = run_import_design({"--from", "jsx",
+                                       "--file", jsx.string(),
+                                       "--output", output.string()});
+        REQUIRE_FALSE(live.timed_out);
+        REQUIRE(live.exit_code == 0);
+        REQUIRE(read_text(output) == bundle);
+        REQUIRE(live.stdout_output.find("JSX live bundle") != std::string::npos);
+    }
+
     SECTION("jsx baked snapshots fail by default on dynamic APIs and can warn or accept") {
         const auto jsx = tmp.path / "dynamic.bundle.js";
         const auto fail_output = tmp.path / "dynamic-fail.ir.json";

@@ -886,6 +886,18 @@ int main(int argc, char* argv[]) {
     auto content = read_file(input_file);
     if (content.empty()) return 1;
 
+    if (*source == DesignSource::jsx
+        && runtime_mode == RuntimeMode::live
+        && artifact_emit == ArtifactEmit::js) {
+        if (dry_run) {
+            std::cout << content;
+            return 0;
+        }
+        if (!write_file(output_file, content)) return 1;
+        std::cout << "Wrote " << output_file << " (JSX live bundle)\n";
+        return 0;
+    }
+
     // Parse based on source
     DesignIR ir;
     std::string runtime_error;  // captures --execute-bundle fallback reason

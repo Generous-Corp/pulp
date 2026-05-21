@@ -158,9 +158,8 @@ for boundary spelling when changing these parsers.
 `pulp import-design --output <path>` is the destination for the primary
 artifact, not an artifact-kind selector. Keep sidecar anchoring tied to
 `--output` while using `--emit {js|ir-json|cpp}` for the primary artifact
-vocabulary. Reserved import-design artifact or runtime values should parse and
-fail cleanly until their implementation lands, and their accepted spelling must
-stay aligned across `pulp_import_design.cpp`, `docs/reference/cli.md`,
+vocabulary. Accepted import-design artifact or runtime values must stay aligned
+across `pulp_import_design.cpp`, `docs/reference/cli.md`,
 `docs/reference/design-import.md`, `docs/status/cli-commands.yaml`, and the
 import-design skill.
 
@@ -171,13 +170,15 @@ docs, and import-design skill text in lockstep. Network asset fetching must
 remain explicit opt-in; default JS emission should not fail just because an IR
 asset reference points at HTTP(S).
 
-`--mode baked` is no longer purely reserved: it is implemented for
-`pulp import-design --from jsx --emit ir-json`. When changing this lane, keep
-the CLI help, `docs/status/cli-commands.yaml`, `docs/reference/cli.md`,
-`docs/reference/design-import.md`, and the import-design skill aligned. The JSX
-baked snapshot policy is `--snapshot-semantics {fail|warn|accept}`: `fail`
-rejects dynamic APIs by default, `warn` proceeds with a structured diagnostic,
-and `accept` proceeds silently.
+`--mode baked` is implemented for `--emit ir-json` and `--emit cpp`; `cpp`
+requires baked mode. `--mode live` remains the default and `--from jsx --mode
+live --emit js` writes the precompiled bundle verbatim. When changing this
+lane, keep the CLI help, `docs/status/cli-commands.yaml`,
+`docs/reference/cli.md`, `docs/reference/design-import.md`, and the
+import-design skill aligned. The JSX baked snapshot policy is
+`--snapshot-semantics {fail|warn|accept}`: `fail` rejects dynamic APIs by
+default, `warn` proceeds with a structured diagnostic, and `accept` proceeds
+silently.
 
 **Sidecar output anchoring:** when a CLI command takes `--output
 <path>/main.ext` and also emits sidecar artifacts (e.g.

@@ -22,20 +22,27 @@ namespace pulp::view {
 void VisualizationBridge::process(const float* const* channels,
                                   int num_channels,
                                   int num_samples) {
-    // Multi-channel metering
-    meter_.process(channels, num_channels, num_samples);
+    auto publish_meter = [this](const signal::MultiChannelMeterData& data) {
 #ifdef PULP_BENCHMARK
-    {
         const double t0 = render::bench::now_us();
-        meter_buf_.write(meter_.snapshot());
+        meter_buf_.write(data);
         if (bench_counters_) {
             bench_counters_->triplebuffer_publish_total_us.fetch_add(
                 render::bench::now_us() - t0, std::memory_order_relaxed);
         }
-    }
 #else
-    meter_buf_.write(meter_.snapshot());
+        meter_buf_.write(data);
 #endif
+    };
+
+    if (channels == nullptr || num_channels <= 0 || num_samples <= 0) {
+        publish_meter(signal::MultiChannelMeterData{});
+        return;
+    }
+
+    // Multi-channel metering
+    meter_.process(channels, num_channels, num_samples);
+    publish_meter(meter_.snapshot());
 
     // STFT on first channel (or mono mix for multi-channel)
     if (num_channels > 0 && num_samples > 0) {

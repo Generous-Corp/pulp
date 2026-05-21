@@ -31,7 +31,9 @@ Produces:
 - `<out>.manifest.json` — `{ componentName, sourceFile, outputBytes, ... }`
 
 The bundle is then consumable by:
-- `pulp import-design --from jsx --file <out>` *(not yet wired — see follow-up PR)*
+- `pulp import-design --from jsx --file <out> --mode live --emit js`
+- `pulp import-design --from jsx --file <out> --mode baked --emit ir-json --snapshot-semantics accept`
+- `pulp import-design --from jsx --file <out> --mode baked --emit cpp --snapshot-semantics accept`
 - `pulp-screenshot --script <out> --output render.png` (works today)
 - `parse_jsx_react()` in C++ via the test harness
 

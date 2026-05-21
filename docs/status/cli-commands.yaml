@@ -587,8 +587,9 @@ commands:
     status: partial
     summary: >
       Import designs from Figma, Stitch, v0, Pencil, Claude Design, React JSX,
-      or Google DESIGN.md into Pulp web-compat JS. The designmd source is
-      tokens-only (no ui.js); other sources emit a full ui.js + tokens.json.
+      or Google DESIGN.md into Pulp JS, DesignIR, or baked C++ artifacts. The
+      designmd source is tokens-only (no ui.js); other sources can emit a full
+      ui.js + tokens.json.
     args:
       - name: --from
         kind: option
@@ -611,10 +612,10 @@ commands:
         description: "Destination file for the primary artifact (default: ui.js)"
       - name: --emit
         kind: option
-        description: "Primary artifact kind: js or ir-json (implemented), cpp (reserved), or legacy classnames sidecar"
+        description: "Primary artifact kind: js, ir-json, cpp, or legacy classnames sidecar; cpp requires --mode baked"
       - name: --mode
         kind: option
-        description: "Runtime model: live (default) or baked for JSX IR snapshots; unsupported baked combinations fail cleanly"
+        description: "Runtime model: live (default) or baked for canonical IR / baked C++ artifacts"
       - name: --snapshot-semantics
         kind: option
         description: "JSX baked snapshot policy: fail rejects dynamic APIs, warn proceeds with diagnostics, accept proceeds silently"

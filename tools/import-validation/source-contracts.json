@@ -549,7 +549,7 @@
       "display_name": "JSX Instrument",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-21",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "not-applicable",
@@ -565,14 +565,14 @@
         "available": false,
         "runtime_parser_accepts_raw_mcp": false,
         "lane_owner": "jsx-runtime-transform",
-        "notes": "JSX imports are compiled by the local Node/esbuild transform before entering the Pulp runtime harness; the CLI source is intentionally parser-only until direct --from jsx wiring lands."
+        "notes": "JSX imports are compiled by the local Node/esbuild transform before entering the Pulp runtime harness; the import-design CLI writes live bundles verbatim or captures baked IR/C++ snapshots."
       },
       "upstream": [
         {
           "url": "tools/import-design/jsx-runtime/README.md",
           "kind": "docs",
           "proves": "Local JSX runtime transform contract and current CLI wiring status.",
-          "last_verified": "2026-05-18",
+          "last_verified": "2026-05-21",
           "recheck_interval_days": 90
         }
       ],
@@ -600,12 +600,15 @@
         ],
         "roundtrip_script": "tools/import-validation/jsx-roundtrip.sh",
         "test_targets": [
+          "pulp-test-import-design-tool",
           "pulp-test-design-import-jsx-runtime"
         ],
         "test_files": [
+          "test/test_import_design_tool.cpp",
           "test/test_design_import_jsx_runtime.cpp"
         ],
         "test_tags": [
+          "[cli][import-design][tool]",
           "[view][import][jsx]",
           "[view][import][jsx][tsx]"
         ],
@@ -711,7 +714,7 @@
       "display_name": "JSX runtime-import (instrument)",
       "kind": "screen-export",
       "trust": "observed",
-      "last_verified": "2026-05-18",
+      "last_verified": "2026-05-21",
       "recheck_interval_days": 90,
       "compat": {
         "mode": "not-applicable",
@@ -734,21 +737,21 @@
           "url": "planning/2026-05-17-jsx-instrument-import.md",
           "kind": "spec",
           "proves": "Spec for the JSX runtime-import experimental slice (Phase A) \u2014 defines fixture shape, transform pipeline, and round-trip contract.",
-          "last_verified": "2026-05-18",
+          "last_verified": "2026-05-21",
           "recheck_interval_days": null
         },
         {
           "url": "tools/import-design/jsx-runtime/README.md",
           "kind": "local-docs",
           "proves": "Documents the supported local JSX transform and runtime import path.",
-          "last_verified": "2026-05-18",
+          "last_verified": "2026-05-21",
           "recheck_interval_days": 90
         },
         {
           "url": "tools/import-design/jsx-runtime/jsx-transform.mjs",
           "kind": "tooling",
           "proves": "Local Node/esbuild transform turns JSX/TSX input into the runtime bundle consumed by parse_jsx_react.",
-          "last_verified": "2026-05-18",
+          "last_verified": "2026-05-21",
           "recheck_interval_days": 90
         }
       ],
@@ -778,16 +781,19 @@
         ],
         "roundtrip_script": "tools/import-validation/jsx-roundtrip.sh",
         "test_targets": [
+          "pulp-test-import-design-tool",
           "pulp-test-design-import",
           "pulp-test-widget-bridge-runtime-import",
           "pulp-test-design-import-jsx-runtime"
         ],
         "test_files": [
+          "test/test_import_design_tool.cpp",
           "test/test_design_import.cpp",
           "test/test_widget_bridge_runtime_import.cpp",
           "test/test_design_import_jsx_runtime.cpp"
         ],
         "test_tags": [
+          "[cli][import-design][tool]",
           "[view][import][parser][jsx][instrument]",
           "[view][bridge][runtime-import-dispatch][jsx][instrument]",
           "[view][import][jsx]",

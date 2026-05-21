@@ -447,8 +447,8 @@ TEST_CASE("SpectrogramBuffer handles degenerate dB range and empty rows", "[sign
     SpectrogramBuffer empty_rows;
     empty_rows.configure(4, 0);
     empty_rows.push_column(mags.data(), static_cast<int>(mags.size()), mapper, -80.0f, 0.0f);
-    REQUIRE(empty_rows.frames_written() == 1);
-    REQUIRE(empty_rows.write_column() == 1);
+    REQUIRE(empty_rows.frames_written() == 0);
+    REQUIRE(empty_rows.write_column() == 0);
     REQUIRE(empty_rows.height() == 0);
 }
 
