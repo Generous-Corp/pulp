@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01800"></a>
+## [0.180.0] - 2026-05-20
+
+- ci: retune coverage-queue-watchdog grace 25m->150m (data: 25m false-cancelled most runs) ([#2543](https://github.com/danielraffel/pulp/pull/2543))
+- fix(audio): respect BufferView slice offsets when clearing ([#2542](https://github.com/danielraffel/pulp/pull/2542))
+- feat(state): add serialized state migrations ([#2537](https://github.com/danielraffel/pulp/pull/2537))
+- ci: address Codex P1s on coverage + cross-platform workflows ([#2541](https://github.com/danielraffel/pulp/pull/2541))
+- ci: make per-PR coverage macOS-only (Linux/Windows -> nightly lane) ([#2540](https://github.com/danielraffel/pulp/pull/2540))
+
 <a id="v01790"></a>
 ## [0.179.0] - 2026-05-20
 
@@ -2358,6 +2367,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.180.0]: https://github.com/danielraffel/pulp/releases/tag/v0.180.0
 [0.179.0]: https://github.com/danielraffel/pulp/releases/tag/v0.179.0
 [0.178.2]: https://github.com/danielraffel/pulp/releases/tag/v0.178.2
 [0.178.1]: https://github.com/danielraffel/pulp/releases/tag/v0.178.1
