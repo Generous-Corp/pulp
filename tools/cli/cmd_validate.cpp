@@ -107,6 +107,17 @@ int cmd_validate(const std::vector<std::string>& args) {
         }
         missing_tools.push_back({tool, format, hint});
     };
+    auto disable_plugin_editor = [](std::string cmd) {
+#ifdef _WIN32
+        return std::string("set \"PULP_DISABLE_PLUGIN_EDITOR=1\" && "
+                           "set \"PULP_HEADLESS=1\" && "
+                           "set \"PULP_TEST_MODE=1\" && ") + cmd;
+#else
+        return std::string("PULP_DISABLE_PLUGIN_EDITOR=1 "
+                           "PULP_HEADLESS=1 "
+                           "PULP_TEST_MODE=1 ") + cmd;
+#endif
+    };
 
     // JSON report accumulator
     std::vector<std::string> report_entries;
@@ -152,7 +163,8 @@ int cmd_validate(const std::vector<std::string>& args) {
                 if (has_clap_validator) {
                     std::cout << "CLAP: validating " << name << "... ";
                     auto clap_path = entry.path().string();
-                    int rc = run("clap-validator validate \"" + clap_path + "\" 2>/dev/null");
+                    int rc = run(disable_plugin_editor(
+                        "clap-validator validate \"" + clap_path + "\" 2>/dev/null"));
                     if (rc == 0) {
                         std::cout << "PASSED\n";
                         ++passed;
@@ -199,8 +211,9 @@ int cmd_validate(const std::vector<std::string>& args) {
                 if (has_pluginval) {
                     std::cout << "VST3: validating " << name << " (pluginval)... ";
                     auto vst3_path = entry.path().string();
-                    int rc = run("pluginval --strictness-level 5 --timeout-ms 30000 --validate \""
-                                 + vst3_path + "\" 2>/dev/null");
+                    int rc = run(disable_plugin_editor(
+                        "pluginval --strictness-level 5 --timeout-ms 30000 --validate \""
+                        + vst3_path + "\" 2>/dev/null"));
                     if (rc == 0) {
                         std::cout << "PASSED\n";
                         ++passed;
@@ -245,7 +258,8 @@ int cmd_validate(const std::vector<std::string>& args) {
                     ++total;
                     std::cout << "VST3: validating " << name << " (vstvalidator)... ";
                     auto vst3_path = entry.path().string();
-                    int rc = run("vstvalidator \"" + vst3_path + "\" 2>/dev/null");
+                    int rc = run(disable_plugin_editor(
+                        "vstvalidator \"" + vst3_path + "\" 2>/dev/null"));
                     if (rc == 0) {
                         std::cout << "PASSED\n";
                         ++passed;
@@ -286,7 +300,9 @@ int cmd_validate(const std::vector<std::string>& args) {
                 std::cout << "AU: " << name << " (auval check)... ";
 
                 if (!find_executable_in_path("auval").empty()) {
-                    auto test_cmd = "ctest --test-dir " + build_dir.string() + " -R auval-" + name + " --output-on-failure 2>/dev/null";
+                    auto test_cmd = disable_plugin_editor(
+                        "ctest --test-dir " + build_dir.string() + " -R auval-" + name
+                        + " --output-on-failure 2>/dev/null");
                     int rc = run(test_cmd);
                     if (rc == 0) {
                         std::cout << "PASSED\n";

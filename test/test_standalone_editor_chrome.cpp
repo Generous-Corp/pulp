@@ -720,6 +720,61 @@ TEST_CASE("Standalone empty headless env vars are ignored",
     REQUIRE_FALSE(standalone_headless_requires_screenshot(config));
 }
 
+TEST_CASE("Plugin editor disable env blocks native editor launch",
+          "[standalone][chrome][issue-2515]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+    disable_editor.unset();
+
+    REQUIRE_FALSE(editor_launch_blocked_by_environment());
+
+    disable_editor.set("1");
+    REQUIRE(editor_launch_blocked_by_environment());
+
+    disable_editor.unset();
+    headless.set("1");
+    REQUIRE(editor_launch_blocked_by_environment());
+
+    headless.unset();
+    test_mode.set("1");
+    REQUIRE(editor_launch_blocked_by_environment());
+
+    test_mode.unset();
+    ci.set("1");
+    REQUIRE(editor_launch_blocked_by_environment());
+}
+
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+TEST_CASE("Plugin editor launch is blocked when no display is available",
+          "[standalone][chrome][issue-2515]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+    display.unset();
+    wayland.unset();
+
+    REQUIRE(editor_launch_blocked_by_environment());
+}
+#endif
+
 TEST_CASE("make_standalone_window_options propagates min_* from ViewSize",
           "[standalone][chrome][issue-1362]") {
     auto editor_root = std::make_unique<View>();

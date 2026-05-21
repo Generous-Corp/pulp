@@ -62,6 +62,12 @@ mkdir -p "$OUTPUT_DIR"
 
 captured=0
 failed=0
+NO_EDITOR_ENV=(
+    env
+    PULP_DISABLE_PLUGIN_EDITOR=1
+    PULP_HEADLESS=1
+    PULP_TEST_MODE=1
+)
 
 # ── Normalizer ─────────────────────────────────────────────────────────
 # Strip lines that are inherently non-deterministic (timestamps, host
@@ -92,7 +98,8 @@ if command -v auval >/dev/null 2>&1; then
             type=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:type" "$AU_BUNDLE/Contents/Info.plist")
             subtype=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:subtype" "$AU_BUNDLE/Contents/Info.plist")
             manuf=$(/usr/libexec/PlistBuddy -c "Print :AudioComponents:0:manufacturer" "$AU_BUNDLE/Contents/Info.plist")
-            if auval -v "$type" "$subtype" "$manuf" 2>&1 | normalize > "$OUTPUT_DIR/${PLUGIN}.au.txt"; then
+            if "${NO_EDITOR_ENV[@]}" auval -v "$type" "$subtype" "$manuf" 2>&1 \
+                | normalize > "$OUTPUT_DIR/${PLUGIN}.au.txt"; then
                 captured=$((captured + 1))
             else
                 failed=$((failed + 1))
@@ -114,7 +121,7 @@ if command -v pluginval >/dev/null 2>&1; then
         echo "[baseline] pluginval: $PLUGIN" >&2
         # --strictness-level 5 is the most thorough but slow; level 3
         # catches most issues and runs in seconds.
-        if pluginval --validate "$VST3_BUNDLE" --strictness-level 3 --skip-gui-tests 2>&1 \
+        if "${NO_EDITOR_ENV[@]}" pluginval --validate "$VST3_BUNDLE" --strictness-level 3 --skip-gui-tests 2>&1 \
             | normalize > "$OUTPUT_DIR/${PLUGIN}.vst3.txt"; then
             captured=$((captured + 1))
         else
@@ -132,7 +139,7 @@ if command -v clap-validator >/dev/null 2>&1; then
     CLAP_BUNDLE="$HOME/Library/Audio/Plug-Ins/CLAP/${PLUGIN}.clap"
     if [[ -e "$CLAP_BUNDLE" ]]; then
         echo "[baseline] clap-validator: $PLUGIN" >&2
-        if clap-validator validate "$CLAP_BUNDLE" 2>&1 \
+        if "${NO_EDITOR_ENV[@]}" clap-validator validate "$CLAP_BUNDLE" 2>&1 \
             | normalize > "$OUTPUT_DIR/${PLUGIN}.clap.txt"; then
             captured=$((captured + 1))
         else

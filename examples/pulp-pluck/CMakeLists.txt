@@ -28,5 +28,8 @@ if(APPLE AND PULP_HAS_AUSDK)
         COMMAND ${CMAKE_COMMAND} -E env
             bash -c "cp -R \"${CMAKE_BINARY_DIR}/AU/PulpPluck.component\" \"$HOME/Library/Audio/Plug-Ins/Components/\" && auval -v aumu PPlk Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'"
     )
-    set_tests_properties(auval-PulpPluck PROPERTIES LABELS "validation;au" TIMEOUT 30)
+    set_tests_properties(auval-PulpPluck PROPERTIES
+        LABELS "validation;au"
+        TIMEOUT 30
+        ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
 endif()

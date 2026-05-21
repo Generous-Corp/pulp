@@ -7,7 +7,10 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/clap_entry.hpp>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
+#include <string>
 #include <vector>
 
 // Minimal test processor
@@ -68,6 +71,51 @@ inline std::unique_ptr<pulp::format::Processor> create_test() {
 namespace {
 
 using Catch::Matchers::WithinAbs;
+
+class ScopedEnv {
+public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            prev_ = std::string(prev);
+        }
+    }
+
+    ~ScopedEnv() {
+        if (prev_) {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), prev_->c_str());
+#else
+            ::setenv(name_.c_str(), prev_->c_str(), /*overwrite=*/1);
+#endif
+        } else {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), "");
+#else
+            ::unsetenv(name_.c_str());
+#endif
+        }
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+#endif
+    }
+
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
 
 struct MemoryStream {
     std::vector<uint8_t> bytes;
@@ -139,6 +187,48 @@ TEST_CASE("PULP_CLAP_PLUGIN generates valid entry", "[clap][entry]") {
     REQUIRE(std::string(desc->id) == "com.pulp.test.clap");
     REQUIRE(std::string(desc->vendor) == "PulpTest");
 
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP GUI extension is hidden under automation env",
+          "[clap][entry][gui][issue-2515]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    REQUIRE(factory != nullptr);
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    REQUIRE(desc != nullptr);
+
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* gui = static_cast<const clap_plugin_gui_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_GUI));
+    REQUIRE(gui != nullptr);
+
+    disable_editor.set("1");
+    REQUIRE(plugin->get_extension(plugin, CLAP_EXT_GUI) == nullptr);
+    REQUIRE_FALSE(gui->is_api_supported(plugin, CLAP_WINDOW_API_COCOA, false));
+    REQUIRE_FALSE(gui->create(plugin, CLAP_WINDOW_API_COCOA, false));
+
+    plugin->destroy(plugin);
     clap_entry.deinit();
 }
 

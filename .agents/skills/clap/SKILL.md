@@ -413,6 +413,14 @@ factory hands back a valid descriptor. See
 build before a DAW scan — a crashing entry point takes the DAW down
 with it.
 
+### Validator runs must disable editor creation
+
+`clap-validator` can query `CLAP_EXT_GUI` and call GUI callbacks even
+when the test's intent is non-visual validation. Run validator automation
+with `PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`.
+Under those guards, Pulp hides `CLAP_EXT_GUI` from `get_extension()` and
+the GUI callbacks fail closed if a host cached the extension pointer.
+
 ## Cross-references
 
 - `.agents/skills/view-bridge/SKILL.md` — editor open / attach /

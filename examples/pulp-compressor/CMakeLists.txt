@@ -33,6 +33,9 @@ if(PULP_HAS_VST3)
     if(PLUGINVAL)
         add_test(NAME pluginval-PulpCompressor-VST3
             COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/PulpCompressor.vst3 --strictness-level 5 --timeout-ms 10000)
-        set_tests_properties(pluginval-PulpCompressor-VST3 PROPERTIES LABELS "validation;vst3" TIMEOUT 30)
+        set_tests_properties(pluginval-PulpCompressor-VST3 PROPERTIES
+            LABELS "validation;vst3"
+            TIMEOUT 30
+            ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 endif()

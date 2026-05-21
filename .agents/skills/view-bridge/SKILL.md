@@ -576,6 +576,16 @@ Run with: `./build/test/pulp-test-widget-bridge "[contract]"`
 When adding any new event family or fields, add a corresponding
 `[contract]` case AND a row to the payload-shape table above.
 
+### Test and validator runs must not open native editor hosts
+
+Adapter editor creation is guarded by `PULP_DISABLE_PLUGIN_EDITOR`,
+`PULP_HEADLESS`, `PULP_TEST_MODE`, and `CI`. Validator and agent-driven
+test paths must set the explicit `PULP_*` variables so VST3 returns no
+editor view, CLAP hides `CLAP_EXT_GUI`, AU v2 returns no Cocoa view, and
+AUv3 avoids constructing `PluginViewHost`. Do not replace this with
+post-hoc window cleanup; the contract is that no native editor host is
+created in the first place.
+
 ## References
 
 - `core/format/include/pulp/format/view_bridge.hpp` — public API

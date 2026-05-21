@@ -12,6 +12,7 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -108,6 +109,10 @@ static const char kOwnershipKey = 0;
 
     if (!ctx.processor->has_editor()) {
         runtime::log_error("AU v2 editor: processor has no editor");
+        return nil;
+    }
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) {
+        runtime::log_info("AU v2 editor: disabled in headless/CI/test environment");
         return nil;
     }
 

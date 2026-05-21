@@ -4,6 +4,7 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/ara.hpp>
@@ -139,6 +140,10 @@ IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
     // VST3 hosts call createView("editor") to get the plugin's GUI
     if (name && strcmp(name, ViewType::kEditor) == 0) {
 #ifdef PULP_VST3_GUI
+        if (pulp::format::detail::editor_launch_blocked_by_environment()) {
+            runtime::log_info("VST3 editor: disabled in headless/CI/test environment");
+            return nullptr;
+        }
         if (processor_ && processor_->has_editor()) {
             auto* view = new PulpPlugView(*processor_, store_);
             return view;

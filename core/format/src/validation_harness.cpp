@@ -390,24 +390,36 @@ ReportEntry ValidationHarness::run_validator(
         return entry;
     }
 
-    // Build validation command
+    // Build validation command. Validators can probe a plug-in's editor; keep
+    // automation in no-editor mode so validation never opens a native window.
     std::string cmd;
     std::string detected_format = format;
+    auto disable_plugin_editor = [](std::string inner) {
+#ifdef _WIN32
+        return std::string("set \"PULP_DISABLE_PLUGIN_EDITOR=1\" && "
+                           "set \"PULP_HEADLESS=1\" && "
+                           "set \"PULP_TEST_MODE=1\" && ") + inner;
+#else
+        return std::string("PULP_DISABLE_PLUGIN_EDITOR=1 "
+                           "PULP_HEADLESS=1 "
+                           "PULP_TEST_MODE=1 ") + inner;
+#endif
+    };
 
     if (tool == "pluginval") {
         if (detected_format.empty()) detected_format = "vst3";
-        cmd = tool + " --strictness-level 5 --timeout-ms 30000 --validate \""
-              + plugin_path.string() + "\" 2>&1";
+        cmd = disable_plugin_editor(tool + " --strictness-level 5 --timeout-ms 30000 --validate \""
+                                    + plugin_path.string() + "\" 2>&1");
     } else if (tool == "clap-validator") {
         if (detected_format.empty()) detected_format = "clap";
-        cmd = tool + " validate \"" + plugin_path.string() + "\" 2>&1";
+        cmd = disable_plugin_editor(tool + " validate \"" + plugin_path.string() + "\" 2>&1");
     } else if (tool == "auval") {
         // auval requires component type/subtype/manufacturer
         if (detected_format.empty()) detected_format = "au";
-        cmd = tool + " -v aufx pulp Pulp 2>&1";  // generic; caller should customize
+        cmd = disable_plugin_editor(tool + " -v aufx pulp Pulp 2>&1");  // generic; caller should customize
     } else if (tool == "vstvalidator") {
         if (detected_format.empty()) detected_format = "vst3";
-        cmd = tool + " \"" + plugin_path.string() + "\" 2>&1";
+        cmd = disable_plugin_editor(tool + " \"" + plugin_path.string() + "\" 2>&1");
     } else {
         entry.status = ValidationStatus::error;
         entry.error_message = "Unknown validator tool: " + tool;

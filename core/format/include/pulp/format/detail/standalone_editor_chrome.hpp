@@ -1,14 +1,13 @@
 #pragma once
 
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/window_host.hpp>
 
-#include <algorithm>
 #include <charconv>
-#include <cctype>
 #include <functional>
 #include <memory>
 #include <string>
@@ -19,19 +18,7 @@
 namespace pulp::format::detail {
 
 inline bool standalone_env_truthy(std::string_view name) {
-    auto value = runtime::get_env(name);
-    if (!value) return false;
-
-    std::string normalized = *value;
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-                   [](unsigned char c) {
-                       return static_cast<char>(std::tolower(c));
-                   });
-    if (normalized.empty()) return false;
-    return normalized != "0"
-        && normalized != "false"
-        && normalized != "no"
-        && normalized != "off";
+    return environment_flag_truthy(name);
 }
 
 inline bool parse_positive_frame_delay(std::string_view value, int& frames) {

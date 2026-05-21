@@ -31,7 +31,10 @@ endif()
 if(APPLE AND PULP_HAS_AUSDK)
     add_test(NAME auval-PulpEffect
         COMMAND bash -c "cp -R \"${CMAKE_BINARY_DIR}/AU/PulpEffect.component\" \"$HOME/Library/Audio/Plug-Ins/Components/\" && auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'")
-    set_tests_properties(auval-PulpEffect PROPERTIES LABELS "validation;au" TIMEOUT 30)
+    set_tests_properties(auval-PulpEffect PROPERTIES
+        LABELS "validation;au"
+        TIMEOUT 30
+        ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
 endif()
 
 if(PULP_HAS_VST3)
@@ -39,6 +42,9 @@ if(PULP_HAS_VST3)
     if(PLUGINVAL)
         add_test(NAME pluginval-PulpEffect-VST3
             COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/PulpEffect.vst3 --strictness-level 5 --timeout-ms 10000)
-        set_tests_properties(pluginval-PulpEffect-VST3 PROPERTIES LABELS "validation;vst3" TIMEOUT 30)
+        set_tests_properties(pluginval-PulpEffect-VST3 PROPERTIES
+            LABELS "validation;vst3"
+            TIMEOUT 30
+            ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 endif()

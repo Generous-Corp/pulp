@@ -376,6 +376,15 @@ dereferences a dangling `root_` reference and crashes AUv3 editor
 close. Codex P1 review on PR #653 caught this — the fix is to remove
 the explicit close, NOT to add it.
 
+### Headless automation must not create fallback AUv3 UI
+
+When `PULP_DISABLE_PLUGIN_EDITOR`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
+or `CI` is set, `PulpAUViewController` returns after setting its basic
+view state and does not build `ViewBridge`, `PluginViewHost`, or the
+fallback empty view. The fallback is only for preview/no-audioUnit cases;
+do not use it to satisfy a test/CI launch because it still creates a
+native host surface.
+
 ## Validation recipes
 
 Build and validate via the Pulp CLI:

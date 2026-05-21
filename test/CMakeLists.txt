@@ -1363,6 +1363,7 @@ if(PULP_HAS_CLAP)
         ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
     )
     target_link_libraries(pulp-test-clap-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-clap-entry PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-entry)
 
     # CLAP inbound/outbound MIDI event coverage — pins the CLAP_EVENT_MIDI,

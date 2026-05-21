@@ -10,6 +10,7 @@
 //   PULP_CLAP_PLUGIN(my_namespace::create_my_processor)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
@@ -267,6 +268,7 @@ inline const clap_plugin_tail_t tail_ext = { .get = tail_get };
 #ifdef PULP_CLAP_GUI
 
 inline bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool is_floating) {
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) return false;
     if (is_floating) return false;
 #ifdef __APPLE__
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
@@ -281,6 +283,7 @@ inline bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool is_
 }
 
 inline bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* is_floating) {
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) return false;
     *is_floating = false;
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
@@ -296,6 +299,10 @@ inline bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* 
 
 inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) {
+        runtime::log_info("CLAP editor: disabled in headless/CI/test environment");
+        return false;
+    }
     if (!p->processor || !p->processor->has_editor()) return false;
 
     std::string editor_error;
@@ -447,7 +454,10 @@ inline const clap_plugin_gui_t gui_ext = {
 // ── Extension dispatch ─────────────────────────────────────────────────
 inline const void* get_extension(const clap_plugin_t*, const char* id) {
 #ifdef PULP_CLAP_GUI
-    if (strcmp(id, CLAP_EXT_GUI) == 0) return &gui_ext;
+    if (strcmp(id, CLAP_EXT_GUI) == 0) {
+        if (pulp::format::detail::editor_launch_blocked_by_environment()) return nullptr;
+        return &gui_ext;
+    }
 #endif
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &note_ports_ext;

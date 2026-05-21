@@ -10,6 +10,7 @@
 #import <UIKit/UIKit.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#include <pulp/format/detail/editor_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -44,6 +45,11 @@
 
     self.view.backgroundColor = [UIColor blackColor];
     self.preferredContentSize = CGSizeMake(400, 300);
+
+    if (pulp::format::detail::editor_launch_blocked_by_environment()) {
+        pulp::runtime::log_info("AU iOS editor: disabled in headless/CI/test environment");
+        return;
+    }
 
     pulp::format::Processor *processor = nil;
     pulp::state::StateStore *store = nil;

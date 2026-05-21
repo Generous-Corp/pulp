@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,51 @@ namespace SpeakerArr = Steinberg::Vst::SpeakerArr;
 
 constexpr pulp::state::ParamID kGainParamId = 1;
 constexpr pulp::state::ParamID kBypassParamId = 2;
+
+class ScopedEnv {
+public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            prev_ = std::string(prev);
+        }
+    }
+
+    ~ScopedEnv() {
+        if (prev_) {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), prev_->c_str());
+#else
+            ::setenv(name_.c_str(), prev_->c_str(), /*overwrite=*/1);
+#endif
+        } else {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), "");
+#else
+            ::unsetenv(name_.c_str());
+#endif
+        }
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+#endif
+    }
+
+    void unset() {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), "");
+#else
+        ::unsetenv(name_.c_str());
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
 
 struct TestVst3Config {
     pulp::format::PluginDescriptor descriptor{
@@ -328,6 +375,46 @@ TEST_CASE("VST3 adapter exposes parameter metadata and lifecycle values",
     REQUIRE(processor.setActive(false) == Steinberg::kResultOk);
     REQUIRE(test_processor->release_count == 1);
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 editor creation is disabled by automation env",
+          "[vst3][editor][issue-2515]") {
+    ScopedEnv disable_editor("PULP_DISABLE_PLUGIN_EDITOR");
+    ScopedEnv headless("PULP_HEADLESS");
+    ScopedEnv test_mode("PULP_TEST_MODE");
+    ScopedEnv ci("CI");
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    ScopedEnv display("DISPLAY");
+    ScopedEnv wayland("WAYLAND_DISPLAY");
+    display.set(":99");
+    wayland.unset();
+#endif
+    disable_editor.unset();
+    headless.unset();
+    test_mode.unset();
+    ci.unset();
+
+    SECTION("creates an editor when automation guards are unset") {
+        reset_test_processor();
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        auto* view = processor.createView(Steinberg::Vst::ViewType::kEditor);
+        REQUIRE(view != nullptr);
+        view->release();
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
+
+    SECTION("blocks editor creation under the no-editor env") {
+        disable_editor.set("1");
+
+        reset_test_processor();
+        HostApp host_app;
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.createView(Steinberg::Vst::ViewType::kEditor) == nullptr);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+    }
 }
 
 TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",

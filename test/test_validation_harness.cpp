@@ -7,9 +7,11 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/format/validation_harness.hpp>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 // ── Test Processor ──────────────────────────────────────────────────────────
 
@@ -104,6 +106,43 @@ std::filesystem::path make_temp_dir(const char* stem) {
         std::chrono::steady_clock::now().time_since_epoch().count());
     return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique);
 }
+
+class ScopedEnv {
+public:
+    explicit ScopedEnv(std::string name) : name_(std::move(name)) {
+        if (const char* prev = std::getenv(name_.c_str())) {
+            prev_ = std::string(prev);
+        }
+    }
+
+    ~ScopedEnv() {
+        if (prev_) {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), prev_->c_str());
+#else
+            ::setenv(name_.c_str(), prev_->c_str(), /*overwrite=*/1);
+#endif
+        } else {
+#if defined(_WIN32)
+            _putenv_s(name_.c_str(), "");
+#else
+            ::unsetenv(name_.c_str());
+#endif
+        }
+    }
+
+    void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s(name_.c_str(), value.c_str());
+#else
+        ::setenv(name_.c_str(), value.c_str(), /*overwrite=*/1);
+#endif
+    }
+
+private:
+    std::string name_;
+    std::optional<std::string> prev_;
+};
 
 } // anonymous namespace
 
@@ -501,6 +540,57 @@ TEST_CASE("ValidationHarness run_validator errors on unknown installed tool",
     std::filesystem::remove(tmp_plugin, ec);
     REQUIRE_FALSE(ec);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("ValidationHarness disables plugin editors for external validators",
+          "[harness][issue-2515]") {
+    auto dir = make_temp_dir("pulp-harness-validator-env");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Fake.vst3";
+    auto tool = dir / "pluginval";
+    auto env_out = dir / "env.txt";
+
+    {
+        std::ofstream f(plugin);
+        f << "dummy";
+    }
+    {
+        std::ofstream f(tool);
+        f << "#!/bin/sh\n"
+             "if [ \"$1\" = \"--version\" ]; then echo fake-pluginval; exit 0; fi\n"
+             "printf '%s:%s:%s\\n' \"$PULP_DISABLE_PLUGIN_EDITOR\" "
+             "\"$PULP_HEADLESS\" \"$PULP_TEST_MODE\" > \"$PULP_VALIDATOR_ENV_OUT\"\n"
+             "exit 0\n";
+    }
+    std::filesystem::permissions(
+        tool,
+        std::filesystem::perms::owner_exec | std::filesystem::perms::owner_read
+            | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::add);
+
+    ScopedEnv path("PATH");
+    ScopedEnv output("PULP_VALIDATOR_ENV_OUT");
+    const char* existing_path = std::getenv("PATH");
+    path.set(dir.string()
+             + (existing_path ? ":" + std::string(existing_path) : std::string{}));
+    output.set(env_out.string());
+
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+    auto entry = harness.run_validator("pluginval", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+
+    std::ifstream f(env_out);
+    std::string captured;
+    std::getline(f, captured);
+    REQUIRE(captured == "1:1:1");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+#endif
 
 // ── Screenshot / inspector providers (#298) ─────────────────────────────────
 

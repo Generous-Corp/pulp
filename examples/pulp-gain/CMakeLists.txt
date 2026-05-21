@@ -49,7 +49,10 @@ if(APPLE AND PULP_HAS_AUSDK)
         COMMAND ${CMAKE_COMMAND} -E env
             bash -c "cp -R \"${CMAKE_BINARY_DIR}/AU/PulpGain.component\" \"$HOME/Library/Audio/Plug-Ins/Components/\" && auval -v aufx PGan Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'"
     )
-    set_tests_properties(auval-PulpGain PROPERTIES LABELS "validation;au" TIMEOUT 30)
+    set_tests_properties(auval-PulpGain PROPERTIES
+        LABELS "validation;au"
+        TIMEOUT 30
+        ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
 endif()
 
 # pluginval (VST3)
@@ -60,6 +63,9 @@ if(PULP_HAS_VST3)
             NAME pluginval-PulpGain-VST3
             COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3 --strictness-level 5 --timeout-ms 10000
         )
-        set_tests_properties(pluginval-PulpGain-VST3 PROPERTIES LABELS "validation;vst3" TIMEOUT 30)
+        set_tests_properties(pluginval-PulpGain-VST3 PROPERTIES
+            LABELS "validation;vst3"
+            TIMEOUT 30
+            ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 endif()

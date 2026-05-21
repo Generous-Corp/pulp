@@ -155,6 +155,16 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 
 Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. Codex P1 review on PR #653 caught this — the fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
 
+### `auval` automation must disable editor creation
+
+`auval` can instantiate AU editor surfaces during validation, which is
+not acceptable in CI, headless tests, or local agent runs. CTest/CLI
+validator paths must carry
+`PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`; the AU
+Cocoa view factory returns `nil` under those guards. Keep this
+environment on every `auval-*` test even if the validator command itself
+looks audio-only.
+
 ## Reference pointers
 
 - Adapter source: `core/format/src/au_v2_adapter.cpp`, `core/format/include/pulp/format/au_v2_adapter.hpp`

@@ -323,6 +323,15 @@ Treat it as gating — VST3 bundles failing strict pluginval must not
 ship. `pulp build --install` refuses to copy a failing VST3 into
 `~/Library/Audio/Plug-Ins/VST3/`.
 
+### Validator runs must disable editor creation
+
+`pluginval` may ask the VST3 adapter for its editor during validation.
+Build/test automation must run it with
+`PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1`; the
+adapter returns `nullptr` from `createView(kEditor)` under those guards.
+Do not remove this environment just because `pluginval` also has
+`--skip-gui-tests` -- hosts can still probe editor availability.
+
 ## Cross-references
 
 - `.agents/skills/view-bridge/SKILL.md` — the editor contract;
