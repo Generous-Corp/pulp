@@ -112,27 +112,25 @@ LineIndex index_lines(const std::string& text) {
 
 // ── YAML scalar helpers ─────────────────────────────────────────────────
 
-// Render a YAML scalar value for embedding back into the frontmatter.
-// DESIGN.md colors and dimensions are conventionally double-quoted in
-// the upstream fixtures ("#855300", "1.5rem"); preserving that keeps the
-// rewritten file diff-clean. `quoted` controls whether to wrap the value
-// — callers pass the original token's quoting so a lock never changes
-// the quote style of a value that was already (un)quoted.
-std::string render_scalar(const std::string& value, bool quoted) {
-    if (!quoted) return value;
-    std::string out = "\"";
+// Render a YAML scalar value for embedding back into the frontmatter,
+// preserving the original delimiter when the source value was quoted.
+std::string render_scalar(const std::string& value, char quote) {
+    if (quote == '\0') return value;
+    std::string out;
+    out += quote;
     for (char c : value) {
-        if (c == '"' || c == '\\') out += '\\';
+        if (c == quote || c == '\\') out += '\\';
         out += c;
     }
-    out += '"';
+    out += quote;
     return out;
 }
 
-// True when a value as written in YAML source begins with a quote.
-bool source_value_is_quoted(std::string_view trimmed_value) {
-    return !trimmed_value.empty() &&
-           (trimmed_value.front() == '"' || trimmed_value.front() == '\'');
+// Quote delimiter used by the value as written in YAML source, if any.
+char source_value_quote(std::string_view trimmed_value) {
+    if (trimmed_value.empty()) return '\0';
+    const char c = trimmed_value.front();
+    return (c == '"' || c == '\'') ? c : '\0';
 }
 
 // Given a `key: value` source line, return the [start, end) byte range
@@ -405,16 +403,16 @@ TokenLockResult lock_token_in_designmd(const std::string& markdown,
     }
 
     std::string old_value_raw = line.substr(value_start, value_end - value_start);
-    const bool was_quoted = source_value_is_quoted(old_value_raw);
+    const char quote = source_value_quote(old_value_raw);
 
     // Record the previous value with surrounding quotes stripped so the
     // caller sees the semantic value, not the YAML spelling.
     std::string previous = old_value_raw;
-    if (was_quoted && previous.size() >= 2) {
+    if (quote != '\0' && previous.size() >= 2) {
         previous = previous.substr(1, previous.size() - 2);
     }
 
-    std::string rendered = render_scalar(new_value, was_quoted);
+    std::string rendered = render_scalar(new_value, quote);
 
     // Splice the new value into the line, then the line back into the
     // file. Every byte outside [value_start, value_end) is preserved,

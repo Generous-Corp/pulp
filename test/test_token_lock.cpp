@@ -155,6 +155,22 @@ TEST_CASE("lock_token_in_designmd rewrites a color token in place",
     CHECK(restored.updated_markdown == md);
 }
 
+TEST_CASE("lock_token_in_designmd preserves single-quoted scalar style",
+          "[view][token-lock][coverage][phase3]") {
+    const std::string md =
+        "---\n"
+        "colors:\n"
+        "  primary: '#855300'\n"
+        "---\n";
+
+    auto result = lock_token_in_designmd(md, "", "colors.primary", "#5a5a5a");
+
+    REQUIRE(result.ok);
+    CHECK(result.previous_value == "#855300");
+    CHECK(result.updated_markdown.find("primary: '#5a5a5a'") != std::string::npos);
+    CHECK(result.updated_markdown.find("primary: \"#5a5a5a\"") == std::string::npos);
+}
+
 TEST_CASE("lock_token_in_designmd rewrites a dimension token",
           "[view][token-lock][issue-1307]") {
     std::string md = kFixture;

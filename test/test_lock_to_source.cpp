@@ -98,6 +98,10 @@ TEST_CASE("lock_property_to_style_name maps dotted paths", "[lock-to-source][iss
         REQUIRE(lock_property_to_style_name("paint.background-color") == "backgroundColor");
         REQUIRE(lock_property_to_style_name("layout.padding_top") == "paddingTop");
     }
+    SECTION("gradient tweaks map to generated background style") {
+        REQUIRE(lock_property_to_style_name("paint.backgroundGradient") == "background");
+        REQUIRE(lock_property_to_style_name("style.backgroundGradient") == "background");
+    }
     SECTION("bare path with no namespace") {
         REQUIRE(lock_property_to_style_name("width") == "width");
     }
@@ -289,6 +293,20 @@ TEST_CASE("lock_tweak_into_source escapes backslashes in inserted values",
 
     REQUIRE(r.status == LockStatus::inserted);
     REQUIRE(r.source.find("fontFamily = 'C:\\\\Fonts\\\\Pulp'") != std::string::npos);
+}
+
+TEST_CASE("lock_tweak_into_source escapes control characters in JS literals",
+          "[lock-to-source][coverage][phase3]") {
+    const std::string gen = make_generated_source();
+    const std::string anchor = first_child_anchor();
+
+    LockResult r = lock_tweak_into_source(
+        gen, {anchor, "paint.fontFamily", "Line\nTab\tReturn\rLow\x01"});
+
+    REQUIRE(r.status == LockStatus::inserted);
+    REQUIRE(r.source.find("fontFamily = 'Line\\nTab\\tReturn\\rLow\\x01'")
+            != std::string::npos);
+    REQUIRE(r.source.find("Line\nTab") == std::string::npos);
 }
 
 TEST_CASE("lock_tweak_into_source preserves missing trailing newline",

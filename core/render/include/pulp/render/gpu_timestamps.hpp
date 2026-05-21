@@ -12,10 +12,9 @@ namespace pulp::render {
 /// Phase 6.5 — Dawn GPU timestamp queries.
 ///
 /// WebGPU exposes GPU-side timing through a `wgpu::QuerySet` of
-/// `QueryType::Timestamp`. A render pass declares `timestampWrites`
-/// (begin/end query indices); after the queue submits the encoder, the
-/// timestamps are resolved into a buffer with `ResolveQuerySet` and
-/// map-read back to the host as raw `uint64_t` GPU-clock ticks.
+/// `QueryType::Timestamp`. The pure conversion helpers below are live;
+/// the Dawn resolve/map-read lifecycle remains fail-closed until the
+/// render loop owns the corresponding command-encoder integration.
 ///
 /// This header carries the *pure* part of that pipeline — the math that
 /// turns resolved tick values into per-pass millisecond durations, plus
@@ -156,8 +155,8 @@ enum class GpuTimestampSupport {
 ///
 /// Owns the `wgpu::QuerySet` and the resolve/map-read buffers. The
 /// public surface here is Dawn-free; the implementation
-/// (`gpu_timestamps.cpp`) is compiled with the real Dawn types only
-/// when `PULP_HAS_WEBGPU` is defined. In a CPU-only build every method
+/// (`gpu_timestamps.cpp`) is compiled with the real Dawn C++ types only
+/// when `PULP_HAS_SKIA` is defined. In a CPU-only build every method
 /// is a safe no-op and `support()` stays `unsupported`.
 ///
 /// Intended per-frame usage (driven by the GPU surface / render loop):

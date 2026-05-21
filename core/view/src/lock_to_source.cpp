@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -114,15 +115,30 @@ std::string lower(const std::string& s) {
     return out;
 }
 
-// Escape a value for emission inside a JS single-quoted literal. Mirrors
-// the codegen's js_single_quote_escape for the characters a style value
-// can realistically contain (quotes, backslashes).
+// Escape a value for emission inside a JS single-quoted literal.
 std::string escape_js_single(const std::string& s) {
     std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        if (c == '\\' || c == '\'') out += '\\';
-        out += c;
+    out.reserve(s.size() + 4);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '\'': out += "\\'";  break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            case '\0': out += "\\x00"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\x%02x", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+                break;
+        }
     }
     return out;
 }
@@ -151,6 +167,8 @@ lock_property_to_style_name(const std::string& property_path) {
     if (leaf.find('.') != std::string::npos) return std::nullopt;
 
     const std::string camel = to_camel(leaf);
+    const std::string style_name =
+        camel == "backgroundGradient" ? "background" : camel;
 
     // Allow-list of style properties the web-compat codegen actually
     // emits as `el.style.<name>` (design_codegen.cpp generate_node()).
@@ -172,9 +190,9 @@ lock_property_to_style_name(const std::string& property_path) {
         "width", "height",
         "minWidth", "minHeight", "maxWidth", "maxHeight",
     };
-    if (std::find(kKnown.begin(), kKnown.end(), camel) == kKnown.end())
+    if (std::find(kKnown.begin(), kKnown.end(), style_name) == kKnown.end())
         return std::nullopt;
-    return camel;
+    return style_name;
 }
 
 bool is_generated_source(const std::string& source) {
