@@ -152,6 +152,7 @@ class StatePathsTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):
             self.assertEqual(self.mod.queue_path(), self.state_dir / "queue.json")
             self.assertEqual(self.mod.evidence_path(), self.state_dir / "evidence.json")
+            self.assertEqual(self.mod.prepared_dir(), self.state_dir / "prepared")
             self.assertEqual(self.mod.queue_lock_path(), self.state_dir / "queue.lock")
             self.assertEqual(self.mod.evidence_lock_path(), self.state_dir / "evidence.lock")
             self.assertEqual(self.mod.drain_lock_path(), self.state_dir / "drain.lock")
