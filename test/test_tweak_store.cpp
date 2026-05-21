@@ -856,6 +856,37 @@ TEST_CASE("TweakStore: save -> clear -> load round-trips state",
     REQUIRE(found_drag_source);
 }
 
+TEST_CASE("TweakStore: load keeps stable ordering with preserved locked anchors",
+          "[inspect][tweak-store][disk]") {
+    TweakStore s;
+    s.apply_tweak("anchor:locked", "layout.padding",
+                  choc::value::createInt32(12), "drag");
+    s.apply_tweak("anchor:stale", "paint.opacity",
+                  choc::value::createFloat32(0.25f), "drag");
+    s.set_locked("anchor:locked", true);
+
+    auto loaded = s.from_json(R"({
+        "$schema": "pulp-tweaks://v1",
+        "version": 1,
+        "tweaks": {
+            "anchor:fresh": {
+                "layout.gap": 4,
+                "paint.opacity": 0.5
+            }
+        }
+    })");
+
+    REQUIRE(loaded.ok);
+    auto recs = s.list_tweaks();
+    REQUIRE(recs.size() == 3);
+    REQUIRE(recs[0].anchor_id == "anchor:locked");
+    REQUIRE(recs[0].property_path == "layout.padding");
+    REQUIRE(recs[1].anchor_id == "anchor:fresh");
+    REQUIRE(recs[1].property_path == "layout.gap");
+    REQUIRE(recs[2].anchor_id == "anchor:fresh");
+    REQUIRE(recs[2].property_path == "paint.opacity");
+}
+
 TEST_CASE("TweakStore: atomic write leaves no .tmp file behind after success",
           "[inspect][tweak-store][disk]") {
     TempTweaksDir tmp;

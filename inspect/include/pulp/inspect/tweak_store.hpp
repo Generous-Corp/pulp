@@ -122,8 +122,10 @@ public:
     /// Total number of (anchor, property) entries.
     std::size_t count() const;
 
-    /// Return every record in insertion-stable order. Overwriting an
-    /// existing (anchor, property) pair keeps its original position.
+    /// Return every record in the store's stable order. Overwriting an
+    /// existing (anchor, property) pair keeps its original position; JSON
+    /// loads rebuild the order from file order plus any preserved locked
+    /// anchors.
     std::vector<Record> list_tweaks() const;
 
     /// Look up a specific (anchor_id, property_path). Returns the value

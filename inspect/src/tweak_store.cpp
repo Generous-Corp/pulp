@@ -458,7 +458,12 @@ TweakStore::from_json_locked(std::string_view json) {
     decltype(tweaks_) new_tweaks;
     decltype(bypassed_) new_bypassed;
     decltype(locked_) new_locked;
-    std::uint64_t next_sequence = 0;
+    std::uint64_t next_sequence = next_sequence_;
+    for (const auto& [_, m] : tweaks_) {
+        for (const auto& [__, entry] : m) {
+            next_sequence = std::max(next_sequence, entry.sequence + 1);
+        }
+    }
 
     if (parsed.hasObjectMember("tweaks") && parsed["tweaks"].isObject()) {
         auto tweaks_obj = parsed["tweaks"];
