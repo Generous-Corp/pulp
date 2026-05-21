@@ -497,12 +497,13 @@ add it to the `kKnown` allow-list in `lock_property_to_style_name()` too
 
 ### Phase 4b — Lock-to-source, Path B (hand-authored JSX/TSX patch)
 
-`pulp/view/jsx_lock.hpp` (impl `core/view/src/jsx_lock.cpp`, GitHub
-issue #1308) is the Path B sibling of Path A. Where Path A rewrites the
-*generated* web-compat artifact, Path B patches the user's **own
-hand-authored JSX/TSX** — the source behind a live React bundle
-(`--from jsx`, `--execute-bundle`). There is no generated file to
-rewrite, so the engine edits the authored source directly.
+`pulp/view/jsx_lock.hpp` (impl `core/view/src/jsx_lock.cpp`) is the
+Path B sibling of Path A; the roadmap tracks Path B under issue #1308. <!-- docs-noise-lint: skip — retained: pins Path B scope to its tracking issue -->
+Where Path A rewrites the *generated* web-compat artifact, Path B
+patches the user's **own hand-authored JSX/TSX** — the source behind a
+live React bundle (`--from jsx`, `--execute-bundle`). There is no
+generated file to rewrite, so the engine edits the authored source
+directly.
 
 - **How the element is found** — an element-instrumentation pass injects
   a `data-pulp-anchor="<stable_anchor_id>"` attribute onto each authored
