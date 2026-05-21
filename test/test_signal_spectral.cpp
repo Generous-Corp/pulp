@@ -166,6 +166,24 @@ TEST_CASE("FFT move preserves transform state", "[signal][fft][issue-645]") {
     }
 }
 
+TEST_CASE("FFT move assignment replaces an existing transform",
+          "[signal][fft][coverage][phase3]") {
+    Fft source(8);
+    Fft destination(16);
+
+    destination = std::move(source);
+    REQUIRE(source.size() == 0);
+    REQUIRE(destination.size() == 8);
+
+    auto& alias = destination;
+    destination = std::move(alias);
+    REQUIRE(destination.size() == 8);
+
+    std::vector<std::complex<float>> data(8, {1.0f, 0.0f});
+    destination.forward(data.data());
+    REQUIRE_THAT(data[0].real(), WithinAbs(8.0f, 1e-4f));
+}
+
 TEST_CASE("FFT magnitude helpers handle silence and complex bins", "[signal][fft][issue-645]") {
     Fft fft(8);
     std::vector<std::complex<float>> freq = {

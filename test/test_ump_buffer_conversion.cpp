@@ -11,13 +11,16 @@ using Catch::Approx;
 
 TEST_CASE("UmpBuffer sort + clear", "[midi][ump]") {
     UmpBuffer buf;
+    UmpEvent first{UmpPacket::note_on_2(0, 0, 59, 0x8000), 40};
+    buf.add(first);
     buf.add(UmpPacket::note_on_2(0, 0, 60, 0x8000), 30);
     buf.add(UmpPacket::note_on_2(0, 0, 62, 0x8000), 10);
     buf.add(UmpPacket::note_on_2(0, 0, 64, 0x8000), 20);
-    REQUIRE(buf.size() == 3);
+    REQUIRE(buf.size() == 4);
     buf.sort();
     REQUIRE(buf[0].sample_offset == 10);
     REQUIRE(buf[2].sample_offset == 30);
+    REQUIRE(buf[3].sample_offset == 40);
     buf.clear();
     REQUIRE(buf.empty());
 }

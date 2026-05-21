@@ -283,6 +283,21 @@ TEST_CASE("MidiKeyboardState note on vel=0 is note off", "[midi][keyboard]") {
     REQUIRE_FALSE(keys.is_note_on(0, 64));
 }
 
+TEST_CASE("MidiKeyboardState note on velocity zero fires note-off callback",
+          "[midi][keyboard][coverage][phase3]") {
+    MidiKeyboardState keys;
+    std::vector<int> released;
+    keys.on_note_off = [&](uint8_t channel, uint8_t note) {
+        released.push_back(static_cast<int>(channel) * 128 + static_cast<int>(note));
+    };
+
+    keys.process(MidiEvent::note_on(2, 67, 96));
+    keys.process(MidiEvent::note_on(2, 67, 0));
+
+    REQUIRE_FALSE(keys.is_note_on(2, 67));
+    REQUIRE(released == std::vector<int>{323});
+}
+
 TEST_CASE("MidiKeyboardState notes_held count", "[midi][keyboard]") {
     MidiKeyboardState keys;
     REQUIRE(keys.notes_held(0) == 0);

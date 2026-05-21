@@ -120,6 +120,22 @@ TEST_CASE("AudioFocusRegistry: move assignment replaces an existing subscription
     REQUIRE(second_count == 1);
 }
 
+TEST_CASE("AudioFocusRegistry: token self move assignment preserves subscription",
+          "[audio][focus][coverage][phase3]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    int count = 0;
+    auto token = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++count; });
+    const int id = token.id();
+
+    auto& ref = token;
+    token = std::move(ref);
+    REQUIRE(token.id() == id);
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+    REQUIRE(count == 1);
+}
+
 TEST_CASE("AudioFocusRegistry: default token reset is a no-op",
           "[audio][focus][issue-640]") {
     AudioFocusRegistry::Token token;

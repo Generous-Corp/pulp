@@ -207,6 +207,34 @@ TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][me
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
 }
 
+TEST_CASE("MultiChannelBallistics clamps tiny levels and releases held peaks",
+          "[signal][meter][coverage][phase3]") {
+    MultiChannelBallistics ballistics;
+    ballistics.peak_hold_time = 0.01f;
+
+    MultiChannelMeterData data;
+    data.num_channels = 1;
+    data.channels[0].peak = 0.75f;
+    data.channels[0].rms = 0.25f;
+    ballistics.update(data, 0.001f);
+    REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.75f, 1e-6f));
+
+    data.channels[0].peak = 0.0f;
+    data.channels[0].rms = 0.0f;
+    ballistics.update(data, 0.25f);
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+    REQUIRE(ballistics.channels[0].held_peak < 0.75f);
+
+    MultiChannelBallistics floor;
+    MultiChannelMeterData tiny;
+    tiny.num_channels = 1;
+    tiny.channels[0].peak = 1e-8f;
+    tiny.channels[0].rms = 1e-8f;
+    floor.update(tiny, 1.0f);
+    REQUIRE_THAT(floor.channels[0].display_peak, WithinAbs(0.0f, 1e-9f));
+    REQUIRE_THAT(floor.channels[0].display_rms, WithinAbs(0.0f, 1e-9f));
+}
+
 TEST_CASE("MultiChannelBallistics clamps invalid snapshot channel counts",
           "[signal][meter][issue-645]") {
     MultiChannelBallistics ballistics;

@@ -59,15 +59,18 @@ TEST_CASE("MpeBuffer records expression events from tracker", "[midi][mpe]") {
 
 TEST_CASE("MpeBuffer clear and sort", "[midi][mpe]") {
     MpeBuffer buffer;
+    MpeExpressionEvent first{40, Kind::Timbre, {}};
+    buffer.add(first);
     buffer.add({30, Kind::Pressure, {}});
     buffer.add({10, Kind::NoteOn, {}});
     buffer.add({20, Kind::PitchBend, {}});
-    REQUIRE(buffer.size() == 3);
+    REQUIRE(buffer.size() == 4);
 
     buffer.sort();
     REQUIRE(buffer[0].sample_offset == 10);
     REQUIRE(buffer[1].sample_offset == 20);
     REQUIRE(buffer[2].sample_offset == 30);
+    REQUIRE(buffer[3].sample_offset == 40);
 
     buffer.clear();
     REQUIRE(buffer.empty());

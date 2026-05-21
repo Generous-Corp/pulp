@@ -211,6 +211,15 @@ class RootAllowlistTests(unittest.TestCase):
         result = self._run_root_allowlist()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_compat_root_directory_is_allowlisted(self) -> None:
+        self._commit_allowlisted_only()
+        Path("compat").mkdir()
+        Path("compat/README.md").write_text("# compat\n")
+        subprocess.run(["git", "add", "compat"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add compat"], check=True)
+        result = self._run_root_allowlist()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_stray_top_level_file_blocks(self) -> None:
         self._commit_allowlisted_only()
         Path("screenshot.png").write_bytes(b"\x89PNG")

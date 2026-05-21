@@ -9,6 +9,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 
 using namespace pulp::midi;
 using Catch::Approx;
@@ -40,6 +41,30 @@ void require_bytes(const MidiEvent& event,
     REQUIRE(event.data()[1] == data1);
     REQUIRE(event.data()[2] == data2);
 }
+
+struct DefaultHookInput final : MidiInput {
+    bool open(const std::string&, MidiInputCallback) override { return true; }
+    void close() override {}
+    bool is_open() const override { return false; }
+};
+
+struct DefaultHookOutput final : MidiOutput {
+    bool open(const std::string&) override { return true; }
+    void close() override {}
+    bool is_open() const override { return false; }
+    void send(const MidiEvent&) override {}
+};
+
+struct DefaultHookSystem final : MidiSystem {
+    std::vector<MidiPortInfo> enumerate_inputs() override { return {}; }
+    std::vector<MidiPortInfo> enumerate_outputs() override { return {}; }
+    std::unique_ptr<MidiInput> create_input() override {
+        return std::make_unique<DefaultHookInput>();
+    }
+    std::unique_ptr<MidiOutput> create_output() override {
+        return std::make_unique<DefaultHookOutput>();
+    }
+};
 
 } // namespace
 
@@ -91,6 +116,36 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
         REQUIRE(evt.is_program_change());
         REQUIRE(evt.channel() == 3);
         require_bytes(evt, 0xC3, 42, 0);
+    }
+}
+
+TEST_CASE("MIDI device interface default hooks are safe no-ops",
+          "[midi][device][coverage][phase3]") {
+    {
+        std::unique_ptr<MidiInput> input = std::make_unique<DefaultHookInput>();
+        bool called = false;
+        input->set_sysex_callback([&](const std::vector<uint8_t>&, double) {
+            called = true;
+        });
+        REQUIRE_FALSE(called);
+    }
+
+    {
+        std::unique_ptr<MidiOutput> output = std::make_unique<DefaultHookOutput>();
+        REQUIRE(output->open("virtual"));
+        output->send(MidiEvent::note_on(0, 60, 100));
+        output->close();
+    }
+
+    {
+        std::unique_ptr<MidiSystem> system = std::make_unique<DefaultHookSystem>();
+        bool called = false;
+        system->set_port_change_callback([&] { called = true; });
+        REQUIRE_FALSE(called);
+        REQUIRE(system->enumerate_inputs().empty());
+        REQUIRE(system->enumerate_outputs().empty());
+        REQUIRE(system->create_input() != nullptr);
+        REQUIRE(system->create_output() != nullptr);
     }
 }
 

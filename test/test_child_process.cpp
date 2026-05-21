@@ -358,3 +358,83 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
     REQUIRE(r.stdout_output == "cached");
 #endif
 }
+
+#ifndef _WIN32
+TEST_CASE("ChildProcess destructor cancels a still-running POSIX child",
+          "[child_process][edge][coverage][phase3]") {
+    {
+        ChildProcess cp;
+        REQUIRE(cp.start("sleep", {"10"}));
+        REQUIRE(cp.is_running());
+    }
+
+    SUCCEED("scope exit returned after cancelling the child");
+}
+
+TEST_CASE("ChildProcess move construction transfers a running POSIX child",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess source;
+    REQUIRE(source.start("/bin/sh", {"-c", "printf moved"}));
+
+    ChildProcess moved(std::move(source));
+    auto result = moved.wait();
+
+    REQUIRE(result.exit_code == 0);
+    REQUIRE(result.stdout_output == "moved");
+}
+
+TEST_CASE("ChildProcess move assignment transfers a running POSIX child",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess source;
+    REQUIRE(source.start("/bin/sh", {"-c", "printf assigned; exit 6"}));
+
+    ChildProcess assigned;
+    assigned = std::move(source);
+    auto result = assigned.wait();
+
+    REQUIRE(result.exit_code == 6);
+    REQUIRE(result.stdout_output == "assigned");
+}
+
+TEST_CASE("cancel escalates when a POSIX child ignores SIGTERM",
+          "[child_process][edge][coverage][phase3]") {
+    ChildProcess cp;
+    REQUIRE(cp.start(
+        "/bin/sh",
+        {"-c", "trap '' TERM; printf ready; while :; do sleep 1; done"}));
+
+    std::string observed;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (observed.find("ready") == std::string::npos
+           && std::chrono::steady_clock::now() < deadline) {
+        observed += cp.read_available_output();
+        if (observed.find("ready") == std::string::npos) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    REQUIRE(observed == "ready");
+    REQUIRE(cp.is_running());
+
+    cp.cancel();
+    auto result = cp.wait();
+
+    REQUIRE(result.was_cancelled);
+    REQUIRE(result.exit_code == -1);
+}
+
+TEST_CASE("timeout escalates when a POSIX child ignores SIGTERM",
+          "[child_process][edge][coverage][phase3]") {
+    ProcessOptions opts;
+    opts.timeout_ms = 100;
+
+    auto result = ChildProcess::run(
+        "/bin/sh",
+        {"-c", "trap '' TERM; printf before-timeout; while :; do sleep 1; done"},
+        opts);
+
+    REQUIRE(result.timed_out);
+    REQUIRE(result.exit_code == -1);
+    REQUIRE(result.stdout_output.find("before-timeout") != std::string::npos);
+}
+#endif

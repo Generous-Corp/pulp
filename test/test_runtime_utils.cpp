@@ -225,6 +225,20 @@ TEST_CASE("TemporaryFile normalizes extensions without leading dots",
     REQUIRE(std::filesystem::exists(tmp.path()));
 }
 
+TEST_CASE("TemporaryFile supports extensionless paths",
+          "[runtime][temp_file][coverage][phase3]") {
+    std::filesystem::path path;
+    {
+        TemporaryFile tmp;
+        path = tmp.path();
+        REQUIRE(path.extension().empty());
+        REQUIRE(tmp.path_string() == path.string());
+        REQUIRE(std::filesystem::exists(path));
+    }
+
+    REQUIRE_FALSE(std::filesystem::exists(path));
+}
+
 TEST_CASE("TemporaryFile move assignment removes the previous active file",
           "[runtime][temp_file][issue-641]") {
     std::filesystem::path old_path;
@@ -474,6 +488,26 @@ TEST_CASE("MemoryMappedFile self move assignment preserves mapping",
     REQUIRE(std::string(reinterpret_cast<const char*>(mmap.data()), mmap.size()) == "self-move");
 }
 
+#ifndef _WIN32
+TEST_CASE("MemoryMappedFile rejects directory paths after opening",
+          "[runtime][mmap][coverage][phase3]") {
+    TemporaryFile marker(".dir");
+    const auto dir = marker.path();
+    marker.release();
+    std::filesystem::remove(dir);
+    std::filesystem::create_directory(dir);
+    auto cleanup = make_scope_guard([&] {
+        std::filesystem::remove_all(dir);
+    });
+
+    MemoryMappedFile mmap;
+    REQUIRE_FALSE(mmap.open(dir.string()));
+    REQUIRE_FALSE(mmap.is_open());
+    REQUIRE(mmap.data() == nullptr);
+    REQUIRE(mmap.size() == 0);
+}
+#endif
+
 // ── DynamicLibrary ──────────────────────────────────────────────────────
 
 TEST_CASE("DynamicLibrary loads system library", "[runtime][dynlib]") {
@@ -631,6 +665,27 @@ TEST_CASE("InterProcessLock competing instance waits for release",
     first.unlock();
     REQUIRE(second.try_lock());
     REQUIRE(second.is_locked());
+}
+
+TEST_CASE("InterProcessLock reports open failure for missing parent paths",
+          "[runtime][ipc_lock][coverage][phase3]") {
+    TemporaryFile marker(".lock-parent");
+    const auto unique = marker.path().filename().string();
+    marker.release();
+    std::filesystem::remove(marker.path());
+
+    const auto lock_parent =
+        std::filesystem::temp_directory_path() / ("pulp_lock_" + unique);
+    std::filesystem::remove_all(lock_parent);
+    auto cleanup = make_scope_guard([&] {
+        std::filesystem::remove_all(lock_parent);
+    });
+
+    InterProcessLock lock(unique + "/sublock");
+    REQUIRE_FALSE(lock.try_lock());
+    REQUIRE_FALSE(lock.is_locked());
+    lock.unlock();
+    REQUIRE_FALSE(lock.is_locked());
 }
 
 // ── ChildProcess ────────────────────────────────────────────────────────
@@ -1253,9 +1308,64 @@ TEST_CASE("HTTP helpers accept case-insensitive URL schemes during parsing",
     REQUIRE(response.error != "Invalid URL");
 }
 
+TEST_CASE("HTTP helpers report POST transport failures",
+          "[runtime][http][url][coverage][phase3]") {
+    const auto response = http_post("http://127.0.0.1:1/closed",
+                                    "body",
+                                    "text/plain",
+                                    1);
+    REQUIRE(response.status_code == 0);
+    REQUIRE(response.error.find("Connection failed:") == 0);
+}
+
+TEST_CASE("HTTP helpers expose error responses without downloading bodies",
+          "[runtime][http][url][coverage][phase3]") {
+    httplib::Server server;
+    server.Get("/missing", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 404;
+        response.set_content("missing", "text/plain");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+
+    std::thread thread([&] { server.listen_after_bind(); });
+    auto stop_server = make_scope_guard([&] {
+        server.stop();
+        if (thread.joinable())
+            thread.join();
+    });
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!server.is_running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(server.is_running());
+
+    const auto base = std::string("http://127.0.0.1:") + std::to_string(port);
+    const auto response = http_get(base + "/missing", 2);
+    REQUIRE(response.status_code == 404);
+    REQUIRE_FALSE(response.ok());
+    REQUIRE(response.body == "missing");
+
+    TemporaryFile output(".bin");
+    {
+        std::ofstream file(output.path(), std::ios::binary);
+        file << "untouched";
+    }
+
+    REQUIRE_FALSE(http_download(base + "/missing", output.path_string(), 2));
+    std::ifstream file(output.path(), std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    REQUIRE(bytes == "untouched");
+}
+
 TEST_CASE("HTTP helpers round-trip against a loopback server",
           "[runtime][http][url][coverage][phase3]") {
     httplib::Server server;
+    server.Get("/", [](const httplib::Request&, httplib::Response& response) {
+        response.set_content("root", "text/plain");
+    });
     server.Get("/hello", [](const httplib::Request& request, httplib::Response& response) {
         response.set_header("X-Pulp-Test",
                             request.has_param("name") ? request.get_param_value("name") : "missing");
@@ -1297,6 +1407,10 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
     REQUIRE(get_response.body == "hello");
     REQUIRE(get_response.headers.at("X-Pulp-Test") == "agent");
 
+    const auto root_response = http_get(base, 2);
+    REQUIRE(root_response.ok());
+    REQUIRE(root_response.body == "root");
+
     const auto post_response = http_post(base + "/echo", "body=42", "text/custom", 2);
     REQUIRE(post_response.ok());
     REQUIRE(post_response.body == "body=42");
@@ -1307,6 +1421,16 @@ TEST_CASE("HTTP helpers round-trip against a loopback server",
     std::ifstream file(downloaded.path(), std::ios::binary);
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     REQUIRE(bytes == std::string("payload\0bytes", 13));
+
+    TemporaryFile blocked_output(".download-dir");
+    const auto blocked_path = blocked_output.path();
+    blocked_output.release();
+    std::filesystem::remove(blocked_path);
+    std::filesystem::create_directory(blocked_path);
+    auto cleanup_blocked_output = make_scope_guard([&] {
+        std::filesystem::remove_all(blocked_path);
+    });
+    REQUIRE_FALSE(http_download(base + "/download", blocked_path.string(), 2));
 }
 
 TEST_CASE("local IPv4 helpers return usable fallback values",

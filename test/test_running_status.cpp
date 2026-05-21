@@ -90,6 +90,30 @@ TEST_CASE("program change has a single data byte",
     REQUIRE(v[1].d1 == 0x07);
 }
 
+TEST_CASE("running status repeats control-change and pitch-bend messages",
+          "[midi][running-status][coverage][phase3]") {
+    auto v = parse({
+        0xB4, 0x40, 0x7F,  // sustain pedal on channel 4
+        0x41, 0x00,        // running CC
+        0xE5, 0x00, 0x40,  // pitch bend center on channel 5
+        0x7F, 0x7F,        // running pitch bend maximum
+    });
+
+    REQUIRE(v.size() == 4);
+    REQUIRE(v[0].status == 0xB4);
+    REQUIRE(v[0].d1 == 0x40);
+    REQUIRE(v[0].d2 == 0x7F);
+    REQUIRE(v[1].status == 0xB4);
+    REQUIRE(v[1].d1 == 0x41);
+    REQUIRE(v[1].d2 == 0x00);
+    REQUIRE(v[2].status == 0xE5);
+    REQUIRE(v[2].d1 == 0x00);
+    REQUIRE(v[2].d2 == 0x40);
+    REQUIRE(v[3].status == 0xE5);
+    REQUIRE(v[3].d1 == 0x7F);
+    REQUIRE(v[3].d2 == 0x7F);
+}
+
 TEST_CASE("running status handles one and two byte channel messages",
           "[midi][running-status][issue-645]") {
     auto v = parse({
@@ -207,6 +231,21 @@ TEST_CASE("real-time clock interleaves without breaking running status",
     REQUIRE(v[1].status == 0xF8);  // clock, single-byte
     REQUIRE(v[2].status == 0x90);
     REQUIRE(v[2].d1 == 0x3D);
+}
+
+TEST_CASE("all realtime status bytes emit immediately",
+          "[midi][running-status][coverage][phase3]") {
+    auto v = parse({0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF});
+
+    REQUIRE(v.size() == 8);
+    REQUIRE(v[0].status == 0xF8);
+    REQUIRE(v[1].status == 0xF9);
+    REQUIRE(v[2].status == 0xFA);
+    REQUIRE(v[3].status == 0xFB);
+    REQUIRE(v[4].status == 0xFC);
+    REQUIRE(v[5].status == 0xFD);
+    REQUIRE(v[6].status == 0xFE);
+    REQUIRE(v[7].status == 0xFF);
 }
 
 TEST_CASE("sysex is delivered separately; cancels running status",

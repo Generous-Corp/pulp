@@ -8,6 +8,7 @@
 #include <numbers>
 #include <thread>
 #include <chrono>
+#include <utility>
 
 using namespace pulp::audio;
 
@@ -371,6 +372,33 @@ TEST_CASE("BufferView clear only zeros sliced sample range",
     REQUIRE(buffer.channel(1)[5] == 15.0f);
 }
 
+TEST_CASE("Buffer self assignment preserves storage and channel pointers",
+          "[audio][buffer][coverage][phase3]") {
+    Buffer<float> buffer(2, 3);
+    buffer.channel(0)[1] = 0.125f;
+    buffer.channel(1)[2] = -0.25f;
+    auto* left = buffer.channel(0).data();
+    auto* right = buffer.channel(1).data();
+
+    auto& copy_ref = buffer;
+    buffer = copy_ref;
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+    REQUIRE(buffer.channel(0)[1] == 0.125f);
+    REQUIRE(buffer.channel(1)[2] == -0.25f);
+    REQUIRE(buffer.view().channel_ptr(0) == left);
+    REQUIRE(buffer.view().channel_ptr(1) == right);
+
+    auto& move_ref = buffer;
+    buffer = std::move(move_ref);
+    REQUIRE(buffer.num_channels() == 2);
+    REQUIRE(buffer.num_samples() == 3);
+    REQUIRE(buffer.channel(0)[1] == 0.125f);
+    REQUIRE(buffer.channel(1)[2] == -0.25f);
+    REQUIRE(buffer.view().channel_ptr(0) == left);
+    REQUIRE(buffer.view().channel_ptr(1) == right);
+}
+
 TEST_CASE("AudioFileData reports shape from first channel",
           "[audio][file][codecov]") {
     AudioFileData empty;
@@ -423,6 +451,55 @@ TEST_CASE("Device metadata defaults and custom configs are stable",
     REQUIRE(config.buffer_size == 128);
     REQUIRE(config.input_channels == 2);
     REQUIRE(config.output_channels == 6);
+}
+
+TEST_CASE("AudioSystem default device-change callback is snapshot safe",
+          "[audio][device][coverage][phase3]") {
+    class DummyAudioSystem final : public AudioSystem {
+    public:
+        std::vector<DeviceInfo> enumerate_devices() override { return {}; }
+        std::unique_ptr<AudioDevice> create_device(const std::string& = "") override {
+            return {};
+        }
+        DeviceInfo default_output_device() override { return {}; }
+        DeviceInfo default_input_device() override { return {}; }
+    };
+
+    DummyAudioSystem system;
+    int calls = 0;
+
+    REQUIRE_FALSE(system.has_device_change_callback());
+    system.fire_device_change();
+    REQUIRE(calls == 0);
+
+    system.set_device_change_callback([&] {
+        ++calls;
+        system.set_device_change_callback(nullptr);
+    });
+    REQUIRE(system.has_device_change_callback());
+
+    system.fire_device_change();
+    REQUIRE(calls == 1);
+    REQUIRE_FALSE(system.has_device_change_callback());
+
+    system.fire_device_change();
+    REQUIRE(calls == 1);
+
+    system.set_device_change_callback([&] {
+        ++calls;
+        system.set_device_change_callback([&] { calls += 10; });
+    });
+    REQUIRE(system.has_device_change_callback());
+
+    system.fire_device_change();
+    REQUIRE(calls == 2);
+    REQUIRE(system.has_device_change_callback());
+
+    system.fire_device_change();
+    REQUIRE(calls == 12);
+
+    system.set_device_change_callback(nullptr);
+    REQUIRE_FALSE(system.has_device_change_callback());
 }
 
 TEST_CASE("AudioProcessLoadMeasurer ignores invalid callback geometry",
