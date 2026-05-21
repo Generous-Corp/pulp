@@ -443,6 +443,11 @@ Today the intended represented surface is:
   `bindings/python/bindings.cpp` through the Linux coverage lane.
 - **Kotlin/Android** coverage for `android/app/src/main/kotlin/**`
   via the Coverage workflow's JaCoCo upload.
+- **@pulp/react** TypeScript/JS coverage for `packages/pulp-react/**`
+  via Vitest's Cobertura output. PR uploads come from
+  `pulp-react-build.yml`; push-to-main uploads are centralized in
+  `coverage.yml` so Codecov's `main` branch record advances with the
+  canonical Coverage workflow rather than a side upload.
 
 Still out of scope today:
 
@@ -485,6 +490,14 @@ workflow. It emits JaCoCo XML from Gradle and uploads that XML directly
 to Codecov so the `android` component sees JVM-only Kotlin coverage
 even though the native coverage matrix is Clang-specific. APK builds
 and emulator smoke stay in `.github/workflows/android.yml`.
+
+`@pulp/react` coverage also uploads from the Coverage workflow on
+push-to-main and manual dispatches. The path-filtered
+`.github/workflows/pulp-react-build.yml` workflow still builds, tests,
+and uploads Codecov data for PRs that touch `packages/pulp-react/**`;
+it deliberately does not upload to Codecov on `main`, so a cancelled or
+superseded native Coverage run cannot leave the public branch snapshot
+at a React-only commit with stale carried-forward native flags.
 
 Per-OS flags let the dashboard answer "what's covered on a specific
 OS." Per-subsystem components answer "how's a specific piece of the

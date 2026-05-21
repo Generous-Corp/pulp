@@ -32,6 +32,8 @@ import yaml
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 CODECOV = REPO_ROOT / "codecov.yml"
 CORE_DIR = REPO_ROOT / "core"
+COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
+PULP_REACT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pulp-react-build.yml"
 
 
 EXPECTED_NON_CORE_COMPONENT_IDS = {
@@ -244,6 +246,24 @@ class CodecovYamlStructure(unittest.TestCase):
                     flag,
                     f"{flag_name} upload flag must not be path-scoped",
                 )
+
+    def test_pulp_react_main_upload_is_centralized_in_coverage_workflow(self):
+        coverage = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
+        react = PULP_REACT_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn("pulp-react-coverage:", coverage)
+        self.assertIn("name: Coverage report (@pulp/react, Vitest)", coverage)
+        self.assertIn("if: github.event_name != 'pull_request'", coverage)
+        self.assertIn("packages/pulp-react/coverage/cobertura-coverage.xml", coverage)
+        self.assertIn("flags: pulp-react", coverage)
+
+        self.assertIn(
+            "if: always() && github.event_name == 'pull_request'",
+            react,
+            "pulp-react-build.yml must not upload Codecov data on push/main; "
+            "main uploads belong to coverage.yml so cancelled native Coverage "
+            "runs cannot leave Codecov on a mixed React+stale-native snapshot.",
+        )
 
     def test_core_axes_use_canonical_directory_mappings(self):
         # Core subsystem ids come directly from core/* and should map to

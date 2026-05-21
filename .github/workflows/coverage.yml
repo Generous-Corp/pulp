@@ -1031,6 +1031,78 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+  pulp-react-coverage:
+    # Keep @pulp/react's main-branch Codecov upload in the canonical
+    # Coverage workflow. The path-filtered pulp-react build workflow still
+    # validates PRs, but it must not be the only main upload for a SHA whose
+    # native Coverage run was superseded before any OS legs uploaded.
+    name: Coverage report (@pulp/react, Vitest)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: packages/pulp-react/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: packages/pulp-react
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/pulp-react
+
+      - name: Test (with coverage)
+        run: npm run test:coverage
+        working-directory: packages/pulp-react
+
+      - name: Verify Cobertura XML exists
+        shell: bash
+        run: |
+          xml=packages/pulp-react/coverage/cobertura-coverage.xml
+          test -s "$xml" || {
+            echo "::error::cobertura-coverage.xml is missing or empty."
+            echo "::error::Vitest coverage step likely failed — check the 'Test (with coverage)' step above."
+            exit 1
+          }
+          size=$(wc -c < "$xml")
+          echo "cobertura-coverage.xml size: ${size} bytes"
+          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
+          if [ "${lines_valid}" = "0" ]; then
+            echo "::error::cobertura-coverage.xml is structurally empty (lines-valid=0)."
+            exit 1
+          fi
+          echo "cobertura-coverage.xml has lines-valid=${lines_valid}"
+
+      - name: Upload pulp-react coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pulp-react-coverage-${{ github.sha }}
+          path: packages/pulp-react/coverage/cobertura-coverage.xml
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload pulp-react coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: packages/pulp-react/coverage/cobertura-coverage.xml
+          flags: pulp-react
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true
+
   coverage-diff-gate:
     # Per-PR diff-coverage gate. REQUIRED — sub-threshold diff coverage
     # hard-fails the PR. The job still posts a summary comment so

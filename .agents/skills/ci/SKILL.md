@@ -1000,6 +1000,15 @@ Consequences when touching `coverage.yml` or `coverage-diff-gate`:
   breaks on every leg that resolved to a single scalar label. `tojson`
   always emits valid JSON: a string stays quoted, an array stays an
   array, an object stays an object.
+- **@pulp/react Codecov uploads are split by event.** PRs that touch
+  `packages/pulp-react/**` still build, test, and upload through the
+  path-filtered `pulp-react-build.yml` workflow. Push-to-main and manual
+  Codecov uploads for `@pulp/react` live in `coverage.yml` as
+  `pulp-react-coverage`. Do not move the main upload back to
+  `pulp-react-build.yml`: if the native Coverage run for a SHA is
+  superseded before any OS legs upload, an independent React upload would
+  advance Codecov's `main` branch record to a mixed React + stale-native
+  snapshot.
 
 ## Prerequisites Check
 
@@ -1733,10 +1742,12 @@ would make CI flakier than it needs to be.
 
 ## Coverage workflow (`#566` Phase 1)
 
-`.github/workflows/coverage.yml` has three jobs:
+`.github/workflows/coverage.yml`'s major jobs include:
 
 - `resolve-runners` — shared-helper resolver (`tools/scripts/resolve_runs_on.py`) that picks per-OS runs-on labels in priority order: workflow_dispatch input → `PULP_COVERAGE_<OS>_RUNS_ON_JSON` repo variable → hard-coded default (`ubuntu-latest` / `macos-latest` / `windows-latest`). Same pattern as `sanitizers.yml`. Change runner for one OS by setting the repo variable — no workflow edit required.
-- `coverage` — matrix over {linux, macos, windows}. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and pushes to Codecov with exactly one per-OS flag (`os-linux`, `os-macos`, `os-windows`). The Linux leg also installs `coverage.py >= 7.10`, runs `tools/scripts/run_python_coverage.py` for `tools/scripts/**`, `tools/deps/**`, and `tools/local-ci/**`, uploads the Python HTML + summary + Cobertura artifacts, and includes `build-coverage/python/coverage.python.xml` in the same Codecov upload. The macOS leg additionally runs `tools/scripts/run_swift_coverage.py`, stages `build-coverage/apple/coverage.apple.json`, uploads the Apple summary artifact, and includes that JSON in the same Codecov upload. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs, not from a multi-flag CSV on the upload step. Has `continue-on-error: true` on the heavy coverage steps and `fail-fast: false` on the matrix — a flake on any one OS never cancels the others and never blocks a merge.
+- `coverage` — event-conditional matrix over {macos} on PRs and {linux, macos, windows} on push-to-main / workflow_dispatch. Every leg builds with Clang source-based coverage, runs the native test suite, uploads HTML + summary + Cobertura artifacts, and pushes to Codecov with exactly one per-OS flag (`os-linux`, `os-macos`, `os-windows`). The Linux leg also installs `coverage.py >= 7.10`, runs `tools/scripts/run_python_coverage.py` for `tools/scripts/**`, `tools/deps/**`, and `tools/local-ci/**`, uploads the Python HTML + summary + Cobertura artifacts, and includes `build-coverage/python/coverage.python.xml` in the same Codecov upload. The macOS leg additionally runs `tools/scripts/run_swift_coverage.py`, stages `build-coverage/apple/coverage.apple.lcov`, uploads the Apple summary artifact, and includes that LCOV in the same Codecov upload when present. Subsystem / platform / surface slicing comes from `codecov.yml`'s `component_management` path globs, not from a multi-flag CSV on the upload step. Has `fail-fast: false` on the matrix — a flake on any one OS never cancels the others and never blocks a merge.
+- `android-kotlin-coverage` — Gradle/JaCoCo coverage for `android/app/src/main/kotlin/**`, uploaded to Codecov from the canonical Coverage workflow so main snapshots keep Android JVM coverage fresh.
+- `pulp-react-coverage` — Vitest/Cobertura coverage for `packages/pulp-react/**` on push-to-main and workflow_dispatch. PR upload remains in `pulp-react-build.yml`; main upload is centralized here so side coverage cannot advance Codecov when native Coverage for the same SHA was cancelled before upload.
 - `coverage-diff-gate` — downloads all three OS Cobertura artifacts (`coverage-cobertura-${sha}` for Linux, `coverage-cobertura-macos-${sha}`, `coverage-cobertura-windows-${sha}`), merges them with `tools/scripts/merge_cobertura.py` (taking `max(hits)` per `(filename, line)`), then runs `diff-cover --fail-under=75` against `origin/<base>` on the merged XML. Hard-fails the PR when the global diff-coverage floor is missed. The job still renders and upserts the diff-coverage PR comment via `tools/scripts/coverage_diff_comment.py` even on failure, and it also runs the per-tier gate (`tools/scripts/coverage_tier_check.py`) in advisory mode against the same merged XML.
 
 Gotchas:

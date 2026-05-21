@@ -79,12 +79,12 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload pulp-react coverage to Codecov
-        # pulp #1886 Phase 1 — measure-only. Flag `pulp-react` lets
-        # Codecov slice the dashboard by SDK surface without changing
-        # the existing per-OS flag semantics on coverage.yml. No
-        # threshold enforcement here; Phase 2 will layer per-tier
-        # enforcement once a baseline is observed.
-        if: always()
+        # PR-only upload. Push-to-main uploads live in coverage.yml so
+        # Codecov's main branch record advances only from the canonical
+        # Coverage workflow, not from this independent path-filtered
+        # workflow when a native Coverage run was superseded before it
+        # could upload its OS legs.
+        if: always() && github.event_name == 'pull_request'
         uses: codecov/codecov-action@v5
         with:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
