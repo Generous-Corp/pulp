@@ -7,11 +7,14 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/format/validation_harness.hpp>
 #include <chrono>
-#include <cstdlib>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 // ── Test Processor ──────────────────────────────────────────────────────────
 
@@ -143,6 +146,52 @@ private:
     std::string name_;
     std::optional<std::string> prev_;
 };
+
+#if !defined(_WIN32)
+class ScopedPathPrefix {
+public:
+    explicit ScopedPathPrefix(const std::filesystem::path& prefix) {
+        const char* existing = std::getenv("PATH");
+        if (existing != nullptr) {
+            had_old_path_ = true;
+            old_path_ = existing;
+        }
+
+        std::string next_path = prefix.string();
+        if (!old_path_.empty()) {
+            next_path += ":" + old_path_;
+        }
+        REQUIRE(::setenv("PATH", next_path.c_str(), 1) == 0);
+    }
+
+    ~ScopedPathPrefix() {
+        if (had_old_path_) {
+            (void)::setenv("PATH", old_path_.c_str(), 1);
+        } else {
+            (void)::unsetenv("PATH");
+        }
+    }
+
+private:
+    bool had_old_path_ = false;
+    std::string old_path_;
+};
+
+std::filesystem::path write_executable_script(
+    const std::filesystem::path& dir,
+    const std::string& name,
+    const std::string& contents)
+{
+    std::filesystem::create_directories(dir);
+    auto script = dir / name;
+    {
+        std::ofstream f(script);
+        f << contents;
+    }
+    REQUIRE(::chmod(script.string().c_str(), 0755) == 0);
+    return script;
+}
+#endif
 
 } // anonymous namespace
 
@@ -585,6 +634,125 @@ TEST_CASE("ValidationHarness disables plugin editors for external validators",
     std::string captured;
     std::getline(f, captured);
     REQUIRE(captured == "1:1:1");
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness run_validator captures installed pluginval success",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-pluginval-pass");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Fake Plugin.vst3";
+    { std::ofstream f(plugin); f << "dummy"; }
+
+    write_executable_script(
+        dir,
+        "pluginval",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf 'pluginval fake 1.2.3\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'validated:%s\\n' \"$*\"\n"
+        "exit 0\n");
+
+    ScopedPathPrefix path_prefix(dir);
+    auto entry = harness.run_validator("pluginval", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE(entry.target == plugin.filename().string());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool\": \"pluginval\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool_version\": \"pluginval fake 1.2.3\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_format\": \"vst3\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"exit_code\": 0"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("--strictness-level 5"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("--timeout-ms 30000"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("Fake Plugin.vst3"));
+    REQUIRE(harness.entries().size() == 1);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness run_validator records installed pluginval failures",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-pluginval-fail");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Broken.vst3";
+    { std::ofstream f(plugin); f << "dummy"; }
+
+    write_executable_script(
+        dir,
+        "pluginval",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf 'pluginval fake 9.9.9\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'validator stdout\\n'\n"
+        "printf 'validator stderr\\n' >&2\n"
+        "exit 7\n");
+
+    ScopedPathPrefix path_prefix(dir);
+    auto entry = harness.run_validator("pluginval", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("pluginval exited with code 7"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool_version\": \"pluginval fake 9.9.9\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_format\": \"vst3\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"exit_code\": 7"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("validator stdout"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("validator stderr"));
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("ValidationHarness run_validator defaults clap-validator format",
+          "[harness][coverage][phase3]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto dir = make_temp_dir("pulp-harness-clap-validator");
+    std::filesystem::create_directories(dir);
+    auto plugin = dir / "Example.clap";
+    { std::ofstream f(plugin); f << "dummy"; }
+
+    write_executable_script(
+        dir,
+        "clap-validator",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf 'clap-validator fake 0.4\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" != \"validate\" ]; then\n"
+        "  exit 11\n"
+        "fi\n"
+        "printf 'validated clap:%s\\n' \"$2\"\n"
+        "exit 0\n");
+
+    ScopedPathPrefix path_prefix(dir);
+    auto entry = harness.run_validator("clap-validator", plugin);
+
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(entry.error_message.empty());
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool\": \"clap-validator\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"tool_version\": \"clap-validator fake 0.4\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"plugin_format\": \"clap\""));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"exit_code\": 0"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("validated clap:"));
 
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
