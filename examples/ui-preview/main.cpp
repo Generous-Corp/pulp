@@ -1160,46 +1160,91 @@ int main(int argc, char* argv[]) {
     // user 2026-05-17.
     opts.use_gpu = true;
 
-    // For imported JSX bundles, auto-size the window height to the
-    // measured content after the React settle pass so we don't ship
-    // 200px of dead background below the bottombar. Width stays at
-    // the requested --size; only height shrinks (never grows past the
-    // requested cap). Pre-resize-measure path: read root_'s laid-out
-    // children's bottom edge after `__pulpRuntimeSettle__(64)` has
-    // pumped React commit + initial useEffects, then clamp the window
-    // height to max(measured + small bottombar inset, 240).
+    // Design viewport for imported designs. Resolve a fixed design size and,
+    // after WindowHost::create, hand it to WindowHost::set_design_viewport():
+    // the engine then pins the root to that size and paints an aspect-correct
+    // scale + letterbox to fit the window, with inverse input mapping for
+    // hit-testing — so the UI resizes PROPORTIONALLY without reflow and
+    // without clipping edge content (it letterboxes as a backstop instead).
+    //
+    // Size source mirrors the design-tool resolver (pulp-internal #70): the
+    // design's own `globalThis.__pulpDesignViewport__` declaration if present,
+    // else the requested --size. The previous "shrink the window height to the
+    // measured child bottom" path is intentionally gone here — it only walked
+    // root's direct children and so underestimated overflowing absolute
+    // content (e.g. a footer / export buttons), which then corrupted the
+    // locked aspect and clipped the real top/bottom content on resize.
+    float design_w = static_cast<float>(render_w);
+    float design_h = static_cast<float>(render_h);
+    bool proportional_resize = false;
     if (!script_path.empty()) {
-        // Pre-size root_ to the requested viewport BEFORE host attach
-        // so the imported tree measures against the right width and
-        // its flex/wrap behavior is computed correctly. Mirrors the
-        // pulp-screenshot pre-bounds setup at
-        // tools/screenshot/pulp_screenshot.cpp:190.
+        // Pre-size + layout so the imported tree measures correctly.
         root.set_bounds({0, 0, static_cast<float>(render_w), static_cast<float>(render_h)});
         root.layout_children();
 
-        // Walk root's direct children to find the bottommost paint
-        // edge. The imported React tree typically mounts as a single
-        // <div id="root"> wrapper containing the user's component.
-        float content_bottom = 0.0f;
-        for (size_t i = 0; i < root.child_count(); ++i) {
-            auto* child = root.child_at(i);
-            if (!child) continue;
-            const auto b = child->bounds();
-            content_bottom = std::max(content_bottom, b.y + b.height);
+        // Prefer the design's self-declared viewport, set by the imported
+        // bundle: `globalThis.__pulpDesignViewport__ = { width, height }`.
+        bool from_declaration = false;
+        try {
+            auto vp = engine.evaluate(
+                "(typeof globalThis.__pulpDesignViewport__ === 'object'"
+                " && globalThis.__pulpDesignViewport__ !== null"
+                " && typeof globalThis.__pulpDesignViewport__.width === 'number'"
+                " && typeof globalThis.__pulpDesignViewport__.height === 'number')"
+                " ? (globalThis.__pulpDesignViewport__.width + 'x'"
+                "    + globalThis.__pulpDesignViewport__.height) : ''")
+                .getWithDefault(std::string(""));
+            float vw = 0.0f, vh = 0.0f;
+            if (std::sscanf(vp.c_str(), "%fx%f", &vw, &vh) == 2 && vw > 0.0f && vh > 0.0f) {
+                design_w = vw;
+                design_h = vh;
+                from_declaration = true;
+                std::cout << "[ui-preview] design viewport from __pulpDesignViewport__: "
+                          << vw << "x" << vh << "\n";
+            }
+        } catch (...) { /* fall back to measured/--size */ }
+
+        // No self-declared viewport: keep the requested width (the design is
+        // authored to that column width) but TIGHTEN the height to the true
+        // content bottom so the window has no dead padding below the UI. We
+        // recurse the whole laid-out tree accumulating parent offsets — unlike
+        // the old direct-children-only walk, this captures absolutely-
+        // positioned overflow (e.g. a footer / export bar) that sits below its
+        // flex wrapper. Letterbox (set_design_viewport) is the backstop, so a
+        // slightly-off measure degrades to bars, never a clip.
+        if (!from_declaration) {
+            float content_bottom = 0.0f;
+            std::function<void(const View*, float)> measure =
+                [&](const View* v, float parent_abs_y) {
+                    if (!v) return;
+                    for (size_t i = 0; i < v->child_count(); ++i) {
+                        const View* c = v->child_at(i);
+                        if (!c) continue;
+                        const auto b = c->bounds();
+                        const float child_abs_y = parent_abs_y + b.y;
+                        content_bottom = std::max(content_bottom, child_abs_y + b.height);
+                        measure(c, child_abs_y);
+                    }
+                };
+            measure(&root, 0.0f);
+            if (content_bottom > 32.0f) {
+                design_h = std::max(240.0f, std::ceil(content_bottom));
+                std::cout << "[ui-preview] measured content height (recursive): "
+                          << content_bottom << " -> design_h=" << design_h << "\n";
+            }
         }
-        std::cout << "[ui-preview] measured content_bottom=" << content_bottom
-                  << " child_count=" << root.child_count()
-                  << " render_h=" << render_h << "\n";
+
+        // The design canvas drives the window: fixed size, 50% min size, and
+        // (below) aspect lock + letterbox scale.
+        opts.width = static_cast<uint32_t>(design_w);
+        opts.height = static_cast<uint32_t>(design_h);
+        opts.min_width = static_cast<uint32_t>(design_w * 0.5f);
+        opts.min_height = static_cast<uint32_t>(design_h * 0.5f);
+        opts.resizable = true;
+        proportional_resize = true;
+        std::cout << "[ui-preview] design viewport " << design_w << "x" << design_h
+                  << " (proportional resize + letterbox)\n";
         std::cout.flush();
-        if (content_bottom > 32.0f && content_bottom < static_cast<float>(render_h)) {
-            // Tighten the window height to fit content. Floor of 240
-            // prevents pathological collapses on tiny fixtures.
-            opts.height = std::max(240, static_cast<int>(std::ceil(content_bottom)));
-            std::cout << "[ui-preview] auto-sized height to content: "
-                      << opts.height << " (measured " << content_bottom
-                      << ", requested " << render_h << ")\n";
-            std::cout.flush();
-        }
     }
 
     // pulp #2163 — label-fit audit. Walks the laid-out tree, computes
@@ -1272,6 +1317,19 @@ int main(int argc, char* argv[]) {
     auto window = WindowHost::create(root, opts);
     int automation_exit_code = 0;
     window->set_close_callback([] { std::cout << "Window closed\n"; });
+
+    // Proportional resize for imported designs via the engine's design
+    // viewport (the same path design-tool uses). set_design_viewport pins the
+    // root to the design size and paints an aspect-correct scale + letterbox to
+    // fit the window; input is inverse-mapped before hit-testing. set_fixed_-
+    // aspect_ratio makes macOS enforce the aspect on user drag so the letterbox
+    // bars are only a transient backstop. This replaces the earlier manual
+    // per-child set_scale() hack (which clipped edge content and had no min
+    // size). Only wired for imported scripts; the demo path keeps native layout.
+    if (window && proportional_resize && design_w > 0.0f && design_h > 0.0f) {
+        window->set_design_viewport(design_w, design_h);
+        window->set_fixed_aspect_ratio(design_w / design_h);
+    }
 
 #if defined(__APPLE__)
     if (automation.enabled) {
