@@ -8,6 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v01931"></a>
+## [0.193.1] - 2026-05-21
+
+- refactor(view): embed JS preludes as an extern-linked TU (P8-5, #2641) ([#2659](https://github.com/danielraffel/pulp/pull/2659))
+- feat(examples): proportional resize for imported designs in ui-preview ([#2660](https://github.com/danielraffel/pulp/pull/2660))
+- fix(signal): guard coverage edge helpers ([#2657](https://github.com/danielraffel/pulp/pull/2657))
+- feat(import): add baked C++ exporter ([#2656](https://github.com/danielraffel/pulp/pull/2656))
+
 <a id="v01930"></a>
 ## [0.193.0] - 2026-05-21
 
@@ -2506,6 +2514,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.193.1]: https://github.com/danielraffel/pulp/releases/tag/v0.193.1
 [0.193.0]: https://github.com/danielraffel/pulp/releases/tag/v0.193.0
 [0.192.2]: https://github.com/danielraffel/pulp/releases/tag/v0.192.2
 [0.192.1]: https://github.com/danielraffel/pulp/releases/tag/v0.192.1
