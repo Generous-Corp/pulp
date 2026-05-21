@@ -109,6 +109,22 @@ public:
         // Request device
         wgpu::DeviceDescriptor device_desc{};
         device_desc.label = "Pulp GPU Device";
+
+        // Phase 6.5 — opt the device into `timestamp-query` when the adapter
+        // offers it, so Skia Graphite can report per-recording GPU render time
+        // via its GpuStats(kElapsedTime) path (see SkiaSurface). Strictly
+        // gated: requesting a feature the adapter lacks fails RequestDevice, so
+        // only add it when advertised. Absent the feature, GPU render time is
+        // reported unavailable and CPU timing stands alone. `ts_feature` must
+        // outlive the synchronous RequestDevice call below — it does (same
+        // scope).
+        wgpu::FeatureName ts_feature = wgpu::FeatureName::TimestampQuery;
+        if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+            device_desc.requiredFeatureCount = 1;
+            device_desc.requiredFeatures = &ts_feature;
+            runtime::log_info("GpuSurface: enabling timestamp-query (GPU render time gated on Graphite supportedGpuStats)");
+        }
+
         device_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",

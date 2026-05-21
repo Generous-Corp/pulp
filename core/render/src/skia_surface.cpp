@@ -3,12 +3,14 @@
 #ifdef PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/render/gpu_render_time.hpp>
 #include <pulp/runtime/log.hpp>
 
 // Dawn C++ API (from Skia's bundled Dawn)
 #include "webgpu/webgpu_cpp.h"
 
 // Skia Graphite headers
+#include "include/gpu/GpuTypes.h"            // GpuStats, GpuStatsFlags
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/graphite/ContextOptions.h"
 #include "include/gpu/graphite/Recorder.h"
@@ -33,7 +35,13 @@ public:
 
     ~SkiaSurfaceImpl() override {
         if (context_) {
-            context_->submit({});
+            // Drain any outstanding GpuStats finished-with-stats callbacks
+            // before `this` dies — they capture `this` as their context, so a
+            // pending callback firing after destruction would be a
+            // use-after-free. A sync submit + completion check flushes them
+            // while the object is still alive.
+            context_->submit(skgpu::graphite::SyncToCpu::kYes);
+            context_->checkAsyncWorkCompletion();
         }
     }
 
@@ -69,11 +77,22 @@ public:
             return false;
         }
 
+        // Phase 6.5 (re-scoped) — probe whether Graphite can report
+        // per-recording GPU render time on this device. Graphite backs
+        // kElapsedTime with Dawn timestamp queries, so it only advertises the
+        // stat when the shared device enabled `timestamp-query` (GpuSurface
+        // requests it when the adapter offers it). GpuStatsFlags has no
+        // bitmask operators, so test via the underlying uint32_t.
+        gpu_elapsed_supported_ =
+            (static_cast<std::uint32_t>(context_->supportedGpuStats()) &
+             static_cast<std::uint32_t>(skgpu::GpuStatsFlags::kElapsedTime)) != 0;
+
         // Create offscreen fallback target (used when no presentable surface)
         create_offscreen_target();
 
-        runtime::log_info("SkiaSurface: Graphite initialized on shared Dawn device (presentable: {})",
-            gpu_.has_surface() ? "yes" : "no");
+        runtime::log_info("SkiaSurface: Graphite initialized on shared Dawn device (presentable: {}, gpu-render-time: {})",
+            gpu_.has_surface() ? "yes" : "no",
+            gpu_elapsed_supported_ ? "available" : "unavailable");
         return true;
     }
 
@@ -147,6 +166,18 @@ public:
         if (recording) {
             skgpu::graphite::InsertRecordingInfo info;
             info.fRecording = recording.get();
+
+            // Phase 6.5 (re-scoped) — request GPU render time for this
+            // recording. The callback fires on a later submit/completion (so
+            // the value lags ~1 frame); it captures `this`, which is kept
+            // alive by the destructor drain. Only request when supported so
+            // unsupported devices pay nothing.
+            if (gpu_elapsed_supported_) {
+                info.fGpuStatsFlags = skgpu::GpuStatsFlags::kElapsedTime;
+                info.fFinishedContext = this;
+                info.fFinishedWithStatsProc = &SkiaSurfaceImpl::on_gpu_stats;
+            }
+
             context_->insertRecording(info);
             context_->submit({});
         }
@@ -239,10 +270,36 @@ public:
         return context_.get();
     }
 
+    double gpu_render_time_ms() const override {
+        return gpu_render_tracker_.last_ms();
+    }
+
+    bool gpu_render_timing_available() const override {
+        return gpu_elapsed_supported_;
+    }
+
 private:
+    // Graphite finished-with-stats callback (Phase 6.5 re-scoped). Fires on
+    // the thread pumping GPU completion (render thread, via Context::submit)
+    // once the GPU finishes the recording. Stores the elapsed time (ns) into
+    // the cross-thread tracker; treats a failed callback or zero elapsed as
+    // "no sample" so the last good value is retained.
+    static void on_gpu_stats(skgpu::graphite::GpuFinishedContext ctx,
+                             skgpu::CallbackResult result,
+                             const skgpu::GpuStats& stats) {
+        auto* self = static_cast<SkiaSurfaceImpl*>(ctx);
+        if (!self) return;
+        self->gpu_render_tracker_.store(
+            stats.elapsedTime, result == skgpu::CallbackResult::kSuccess);
+    }
+
     GpuSurface& gpu_;
     uint32_t width_ = 0, height_ = 0;
     float scale_ = 1.0f;
+
+    // Phase 6.5 (re-scoped) — GPU render time via Graphite GpuStats.
+    bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
+    GpuRenderTimeTracker gpu_render_tracker_;  ///< Latest sample; written by on_gpu_stats().
 
     std::unique_ptr<skgpu::graphite::Context> context_;
     std::unique_ptr<skgpu::graphite::Recorder> recorder_;
