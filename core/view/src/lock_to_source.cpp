@@ -114,15 +114,33 @@ std::string lower(const std::string& s) {
     return out;
 }
 
-// Escape a value for emission inside a JS single-quoted literal. Mirrors
-// the codegen's js_single_quote_escape for the characters a style value
-// can realistically contain (quotes, backslashes).
+// Escape a value for emission inside a JS single-quoted literal. Handles
+// quotes and backslashes, plus control characters: a pasted multi-line
+// CSS value can carry newlines / tabs that would otherwise terminate the
+// `'<value>'` literal and produce syntactically invalid generated JS.
 std::string escape_js_single(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 2);
-    for (char c : s) {
-        if (c == '\\' || c == '\'') out += '\\';
-        out += c;
+    for (unsigned char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '\'': out += "\\'"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    // Any remaining C0 control char as a `\xNN` escape so
+                    // the resulting string literal is always valid JS.
+                    static const char* kHex = "0123456789abcdef";
+                    out += "\\x";
+                    out += kHex[(c >> 4) & 0xF];
+                    out += kHex[c & 0xF];
+                } else {
+                    out += static_cast<char>(c);
+                }
+                break;
+        }
     }
     return out;
 }
@@ -150,7 +168,13 @@ lock_property_to_style_name(const std::string& property_path) {
     // flat `el.style.<name>` rewrite.
     if (leaf.find('.') != std::string::npos) return std::nullopt;
 
-    const std::string camel = to_camel(leaf);
+    std::string camel = to_camel(leaf);
+
+    // A few token-path leaves alias onto a different `el.style.<name>`
+    // surface than their camelCase spelling. The web-compat codegen
+    // represents gradient fills as `el.style.background`, so a
+    // `backgroundGradient` tweak path is valid and maps to `background`.
+    if (camel == "backgroundGradient") camel = "background";
 
     // Allow-list of style properties the web-compat codegen actually
     // emits as `el.style.<name>` (design_codegen.cpp generate_node()).

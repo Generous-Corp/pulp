@@ -113,26 +113,40 @@ LineIndex index_lines(const std::string& text) {
 // ── YAML scalar helpers ─────────────────────────────────────────────────
 
 // Render a YAML scalar value for embedding back into the frontmatter.
-// DESIGN.md colors and dimensions are conventionally double-quoted in
-// the upstream fixtures ("#855300", "1.5rem"); preserving that keeps the
-// rewritten file diff-clean. `quoted` controls whether to wrap the value
-// — callers pass the original token's quoting so a lock never changes
-// the quote style of a value that was already (un)quoted.
-std::string render_scalar(const std::string& value, bool quoted) {
-    if (!quoted) return value;
-    std::string out = "\"";
-    for (char c : value) {
-        if (c == '"' || c == '\\') out += '\\';
-        out += c;
+// DESIGN.md colors and dimensions are conventionally quoted in the
+// upstream fixtures ("#855300", "1.5rem"); preserving that keeps the
+// rewritten file diff-clean. `quote_char` is the ORIGINAL quote
+// character the token was written with (`"` or `'`), or `'\0'` when the
+// value was unquoted — so a lock never changes the quote style.
+std::string render_scalar(const std::string& value, char quote_char) {
+    if (quote_char == '\0') return value;
+    std::string out(1, quote_char);
+    if (quote_char == '"') {
+        // Double-quoted YAML supports backslash escapes.
+        for (char c : value) {
+            if (c == '"' || c == '\\') out += '\\';
+            out += c;
+        }
+    } else {
+        // Single-quoted YAML escapes a literal quote by doubling it and
+        // has no backslash escaping.
+        for (char c : value) {
+            if (c == '\'') out += '\'';
+            out += c;
+        }
     }
-    out += '"';
+    out += quote_char;
     return out;
 }
 
-// True when a value as written in YAML source begins with a quote.
-bool source_value_is_quoted(std::string_view trimmed_value) {
-    return !trimmed_value.empty() &&
-           (trimmed_value.front() == '"' || trimmed_value.front() == '\'');
+// The quote character a value was written with in YAML source — `"` or
+// `'` — or `'\0'` when the value is unquoted.
+char source_value_quote_char(std::string_view trimmed_value) {
+    if (!trimmed_value.empty() &&
+        (trimmed_value.front() == '"' || trimmed_value.front() == '\'')) {
+        return trimmed_value.front();
+    }
+    return '\0';
 }
 
 // Given a `key: value` source line, return the [start, end) byte range
@@ -405,7 +419,8 @@ TokenLockResult lock_token_in_designmd(const std::string& markdown,
     }
 
     std::string old_value_raw = line.substr(value_start, value_end - value_start);
-    const bool was_quoted = source_value_is_quoted(old_value_raw);
+    const char quote_char = source_value_quote_char(old_value_raw);
+    const bool was_quoted = quote_char != '\0';
 
     // Record the previous value with surrounding quotes stripped so the
     // caller sees the semantic value, not the YAML spelling.
@@ -414,7 +429,9 @@ TokenLockResult lock_token_in_designmd(const std::string& markdown,
         previous = previous.substr(1, previous.size() - 2);
     }
 
-    std::string rendered = render_scalar(new_value, was_quoted);
+    // Re-emit with the SAME quote character the token was written with,
+    // so a single-quoted token stays single-quoted after the rewrite.
+    std::string rendered = render_scalar(new_value, quote_char);
 
     // Splice the new value into the line, then the line back into the
     // file. Every byte outside [value_start, value_end) is preserved,

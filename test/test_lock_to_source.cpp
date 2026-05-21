@@ -440,3 +440,100 @@ TEST_CASE("lock-to-source round-trips a style-color tweak against re-codegen", "
 
     REQUIRE(locked.source == regen);
 }
+
+// ── Finding 1: control chars in a tweak value escape into valid JS ─────
+//
+// A pasted multi-line CSS value (e.g. a `background` shorthand split over
+// lines) carries newlines / tabs. The rewritten `'<value>'` literal must
+// stay syntactically valid JS — raw control characters would terminate
+// the string literal and break the generated artifact.
+
+TEST_CASE("lock-to-source escapes control chars in the tweak value",
+          "[lock-to-source][issue-1307]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+
+    DesignIR original = make_panel_ir();
+    const std::string gen = generate_pulp_js(original, opts);
+    const std::string anchor = *original.root.children.front().stable_anchor_id;
+
+    // Value with embedded newline, carriage return, tab, and a vertical
+    // tab (0x0B — a remaining C0 control char). The vertical tab is
+    // spelled via octal (`\013`) so the following `e` is not swallowed
+    // into a `\xNN` escape.
+    LockToSourceTweak tweak{anchor, "paint.background",
+                            std::string("a\nb\rc\td\013e")};
+    LockResult locked = lock_tweak_into_source(gen, tweak);
+    REQUIRE((locked.status == LockStatus::rewritten ||
+             locked.status == LockStatus::inserted));
+
+    // The literal in the generated source is exactly the escaped form —
+    // no raw control byte survives.
+    REQUIRE(locked.source.find("'a\\nb\\rc\\td\\x0be'") !=
+            std::string::npos);
+    // No raw control character appears anywhere in the rewritten value
+    // (the un-escaped form is absent).
+    REQUIRE(locked.source.find("a\nb\rc\td\013e") == std::string::npos);
+}
+
+TEST_CASE("lock-to-source escapes a backslash and quote together",
+          "[lock-to-source][issue-1307]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+
+    DesignIR original = make_panel_ir();
+    const std::string gen = generate_pulp_js(original, opts);
+    const std::string anchor = *original.root.children.front().stable_anchor_id;
+
+    LockToSourceTweak tweak{anchor, "paint.background",
+                            std::string("url('x\\y')")};
+    LockResult locked = lock_tweak_into_source(gen, tweak);
+    REQUIRE((locked.status == LockStatus::rewritten ||
+             locked.status == LockStatus::inserted));
+    // Backslash doubled, single quotes escaped.
+    REQUIRE(locked.source.find("'url(\\'x\\\\y\\')'") != std::string::npos);
+}
+
+// ── Finding 2: `backgroundGradient` tweak paths map to `background` ────
+//
+// Web-compat codegen represents gradient fills as `el.style.background`.
+// A `paint.backgroundGradient` / `style.backgroundGradient` tweak path is
+// therefore valid and must resolve to the `background` style property.
+
+TEST_CASE("backgroundGradient tweak path maps to the background property",
+          "[lock-to-source][issue-1307]") {
+    auto paint = lock_property_to_style_name("paint.backgroundGradient");
+    REQUIRE(paint.has_value());
+    CHECK(*paint == "background");
+
+    auto style = lock_property_to_style_name("style.backgroundGradient");
+    REQUIRE(style.has_value());
+    CHECK(*style == "background");
+
+    // Bare leaf (no namespace) resolves the same way.
+    auto bare = lock_property_to_style_name("backgroundGradient");
+    REQUIRE(bare.has_value());
+    CHECK(*bare == "background");
+}
+
+TEST_CASE("a backgroundGradient tweak rewrites the background style line",
+          "[lock-to-source][issue-1307]") {
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+
+    DesignIR original = make_panel_ir();
+    const std::string gen = generate_pulp_js(original, opts);
+    const std::string anchor = *original.root.children.front().stable_anchor_id;
+
+    LockToSourceTweak tweak{anchor, "paint.backgroundGradient",
+                            "linear-gradient(#000, #fff)"};
+    LockResult locked = lock_tweak_into_source(gen, tweak);
+    REQUIRE(locked.status != LockStatus::unsupported_property);
+    CHECK(locked.style_property == "background");
+    REQUIRE(locked.source.find(
+        ".style.background = 'linear-gradient(#000, #fff)';") !=
+            std::string::npos);
+}

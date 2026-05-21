@@ -288,3 +288,44 @@ TEST_CASE("a locked DESIGN.md re-parses with the updated token",
     REQUIRE(it != parsed.ir.tokens.colors.end());
     CHECK(it->second == "#123456");
 }
+
+// ── Finding 3: a lock preserves the ORIGINAL quote character ──────────
+//
+// A token written with single quotes must stay single-quoted after a
+// rewrite; double stays double; unquoted stays unquoted. The locator
+// records the actual quote char, not just a bool, so render_scalar can
+// re-emit it verbatim.
+
+TEST_CASE("lock_token_in_designmd keeps a single-quoted value single-quoted",
+          "[view][token-lock][issue-1307]") {
+    std::string md =
+        "---\nname: Quotes\ncolors:\n  primary: '#855300'\n---\n";
+    auto result = lock_token_in_designmd(md, "", "colors.primary", "#123456");
+    REQUIRE(result.ok);
+    // Single quotes preserved, double quotes never introduced.
+    CHECK(result.updated_markdown.find("primary: '#123456'") !=
+          std::string::npos);
+    CHECK(result.updated_markdown.find("\"#123456\"") == std::string::npos);
+}
+
+TEST_CASE("lock_token_in_designmd keeps a double-quoted value double-quoted",
+          "[view][token-lock][issue-1307]") {
+    std::string md =
+        "---\nname: Quotes\ncolors:\n  primary: \"#855300\"\n---\n";
+    auto result = lock_token_in_designmd(md, "", "colors.primary", "#123456");
+    REQUIRE(result.ok);
+    CHECK(result.updated_markdown.find("primary: \"#123456\"") !=
+          std::string::npos);
+    CHECK(result.updated_markdown.find("'#123456'") == std::string::npos);
+}
+
+TEST_CASE("lock_token_in_designmd keeps an unquoted value unquoted",
+          "[view][token-lock][issue-1307]") {
+    std::string md =
+        "---\nname: Quotes\nspacing:\n  md: 24px\n---\n";
+    auto result = lock_token_in_designmd(md, "", "spacing.md", "30px");
+    REQUIRE(result.ok);
+    CHECK(result.updated_markdown.find("md: 30px") != std::string::npos);
+    CHECK(result.updated_markdown.find("\"30px\"") == std::string::npos);
+    CHECK(result.updated_markdown.find("'30px'") == std::string::npos);
+}

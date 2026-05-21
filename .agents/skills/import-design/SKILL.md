@@ -468,7 +468,12 @@ token export) are separate phases and are NOT in this engine.
   name) onto the camelCase `el.style.<name>` surface. Hyphen/snake
   fragments camelCase. The allow-list is exactly the set of properties
   `generate_node()` emits — an unknown / mistyped path reports
-  `unsupported_property` instead of writing a bogus assignment.
+  `unsupported_property` instead of writing a bogus assignment. A few
+  leaves *alias* onto a different `el.style.<name>` than their camelCase
+  spelling: `backgroundGradient` maps to `background` because web-compat
+  codegen represents gradient fills as `el.style.background`. If you add
+  a token leaf whose camelCase spelling differs from the codegen
+  property, add an alias line next to the `backgroundGradient` mapping.
 - **Status semantics** — `rewritten` / `inserted` mutate the text;
   `already_current` is the idempotent re-lock no-op; `anchor_not_found`
   and `unsupported_property` are graceful failures that leave the
@@ -487,6 +492,15 @@ token export) are separate phases and are NOT in this engine.
 If you add a codegen property to `design_codegen.cpp`'s `generate_node`,
 add it to the `kKnown` allow-list in `lock_property_to_style_name()` too
 — otherwise that property can never be locked to source.
+
+**Control-char escaping in the rewritten literal:** `escape_js_single()`
+escapes the value before it is spliced into the `'<value>'` literal. It
+must handle more than `\` and `'` — a pasted multi-line CSS value (e.g. a
+`background` shorthand split over lines) carries `\n` / `\r` / `\t` and
+other C0 control chars that would otherwise terminate the string literal
+and produce syntactically invalid generated JS. The helper escapes
+`\n`/`\r`/`\t` by name and any remaining char `< 0x20` as `\xNN`. Same
+rule as the `js_single_quote_escape()` requirement for emitted user text.
 
 ### Phase 4c — token lock-to-source (`DESIGN.md` rewrite)
 

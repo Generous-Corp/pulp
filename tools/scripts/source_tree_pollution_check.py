@@ -102,6 +102,7 @@ ALLOWED_ROOT_PATHS = frozenset({
     "apple",
     "bindings",
     "ci",
+    "compat",
     "core",
     "docs",
     "examples",
