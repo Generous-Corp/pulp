@@ -3,12 +3,14 @@
 #include <pulp/runtime/ip_address.hpp>
 #include <pulp/runtime/network_stream.hpp>
 #include <pulp/runtime/socket.hpp>
+#include "../external/cpp-httplib/httplib.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -29,6 +31,30 @@ struct ThreadJoiner {
             thread.join();
         }
     }
+};
+
+struct HttpServerRunner {
+    explicit HttpServerRunner(httplib::Server& s)
+        : server(s)
+        , thread([this] { server.listen_after_bind(); }) {}
+
+    ~HttpServerRunner() {
+        server.stop();
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    bool wait_until_running(std::chrono::milliseconds timeout = 2s) const {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (!server.is_running() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(5ms);
+        }
+        return server.is_running();
+    }
+
+    httplib::Server& server;
+    std::thread thread;
 };
 
 // Pick an ephemeral port and return the bound listener + its actual port.
@@ -849,4 +875,73 @@ TEST_CASE("HttpStream factories and refetch reset closed state to request result
     auto read = stream.read(&byte, sizeof(byte));
     REQUIRE_FALSE(read.ok());
     REQUIRE(read.error == StreamError::IoError);
+}
+
+TEST_CASE("HttpStream reads successful GET responses in chunks",
+          "[network_stream][http][coverage][phase3]") {
+    httplib::Server server;
+    server.Get("/body", [](const httplib::Request&, httplib::Response& response) {
+        response.set_header("X-Pulp-Stream", "ok");
+        response.set_content("chunked-body", "text/plain");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+    HttpServerRunner runner(server);
+    REQUIRE(runner.wait_until_running());
+
+    auto stream = HttpStream::get("http://127.0.0.1:" + std::to_string(port) + "/body", 2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 200);
+    REQUIRE(stream->headers().at("X-Pulp-Stream") == "ok");
+    REQUIRE(stream->is_open());
+    REQUIRE_FALSE(stream->eof());
+
+    std::array<std::uint8_t, 16> buffer{};
+    auto first = stream->read(buffer.data(), 7);
+    REQUIRE(first.ok());
+    REQUIRE(first.bytes == 7);
+    REQUIRE(std::string(reinterpret_cast<char*>(buffer.data()), first.bytes) == "chunked");
+    REQUIRE(stream->is_open());
+
+    auto second = stream->read(buffer.data(), buffer.size());
+    REQUIRE(second.ok());
+    REQUIRE(second.bytes == 5);
+    REQUIRE(std::string(reinterpret_cast<char*>(buffer.data()), second.bytes) == "-body");
+    REQUIRE_FALSE(stream->is_open());
+    REQUIRE(stream->eof());
+
+    auto eof = stream->read(buffer.data(), buffer.size());
+    REQUIRE_FALSE(eof.ok());
+    REQUIRE(eof.closed());
+}
+
+TEST_CASE("HttpStream POST factory exposes successful response bodies",
+          "[network_stream][http][coverage][phase3]") {
+    httplib::Server server;
+    server.Post("/echo", [](const httplib::Request& request, httplib::Response& response) {
+        response.set_header("X-Pulp-Method", request.method);
+        response.set_content(request.body, "text/plain");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+    HttpServerRunner runner(server);
+    REQUIRE(runner.wait_until_running());
+
+    auto stream = HttpStream::post("http://127.0.0.1:" + std::to_string(port) + "/echo",
+                                   "payload=42",
+                                   "text/plain",
+                                   2);
+    REQUIRE(stream);
+    REQUIRE(stream->status_code() == 200);
+    REQUIRE(stream->headers().at("X-Pulp-Method") == "POST");
+    REQUIRE(stream->is_open());
+
+    std::array<std::uint8_t, 32> buffer{};
+    auto read = stream->read(buffer.data(), buffer.size());
+    REQUIRE(read.ok());
+    REQUIRE(read.bytes == 10);
+    REQUIRE(std::string(reinterpret_cast<char*>(buffer.data()), read.bytes) == "payload=42");
+    REQUIRE(stream->read(buffer.data(), buffer.size()).closed());
 }
