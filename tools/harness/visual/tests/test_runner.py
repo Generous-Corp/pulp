@@ -251,6 +251,20 @@ class RunnerTests(unittest.TestCase):
 
             self.assertEqual(spec.orphaned_golden_paths(root, ["yoga"]), [orphan])
 
+    def test_orphaned_golden_paths_handles_missing_root_and_discovers_surfaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(spec.orphaned_golden_paths(root), [])
+
+            self._write_fixture_with_golden(root, "yoga", "a")
+            golden_dir = root / "tools" / "harness" / "visual" / "goldens" / "yoga"
+            orphan = golden_dir / "orphan.png"
+            ignored = golden_dir / "notes.txt"
+            orphan.write_bytes(b"png")
+            ignored.write_text("not a golden", encoding="utf-8")
+
+            self.assertEqual(spec.orphaned_golden_paths(root), [orphan])
+
     def test_fixture_ids_with_goldens_uses_suffix_and_ignores_missing_goldens(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -286,6 +300,28 @@ class RunnerTests(unittest.TestCase):
             with mock.patch.object(runner.shutil, "which", return_value=None):
                 with self.assertRaisesRegex(FileNotFoundError, "pulp-test-visual binary not found"):
                     runner.locate_binary(root, root / "missing-build", None)
+
+    def test_write_capture_rejects_wrong_payload_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            json_fixture = spec.fixture_spec_from_file(
+                self._write_fixture(root, "yoga", "a", {"id": "yoga/a"}),
+                default_surface="yoga",
+            )
+            png_fixture = spec.fixture_spec_from_file(
+                self._write_fixture(
+                    root,
+                    "canvas2d",
+                    "paint",
+                    {"id": "canvas2d/paint", "kind": "render", "capture_format": "png"},
+                ),
+                default_surface="canvas2d",
+            )
+
+            with self.assertRaisesRegex(TypeError, "expected JSON object payload"):
+                runner._write_capture(root / "actual.json", json_fixture, b"not json")
+            with self.assertRaisesRegex(TypeError, "expected byte payload"):
+                runner._write_capture(root / "actual.png", png_fixture, {"not": "bytes"})
 
     def test_run_capture_and_snapshot_report_child_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -484,6 +520,25 @@ class RunnerTests(unittest.TestCase):
                     "--build-dir", str(root / "build-nonexistent"),
                 ])
             self.assertNotIn("--generate requires", buf.getvalue())
+
+    def test_main_reports_empty_surface_after_binary_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = self._write_fake_visual_binary(root)
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = runner.main([
+                    "--verify",
+                    "--surface",
+                    "missing",
+                    "--repo-root",
+                    str(root),
+                    "--binary",
+                    str(binary),
+                ])
+
+            self.assertEqual(rc, 2)
+            self.assertIn("no visual fixtures found", buf.getvalue())
 
     def test_main_rejects_all_plus_entry_and_strips_visual_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -57,6 +57,9 @@ class DifferTests(unittest.TestCase):
         self.assertEqual(diffs[0].path, "$.opacity")
         self.assertEqual(diffs[0].message, "boolean mismatch")
 
+    def test_matching_booleans_do_not_report_differences(self) -> None:
+        self.assertEqual(differ.compare({"enabled": True}, {"enabled": True}), [])
+
     def test_format_differences_limits_output_and_formats_empty_list(self) -> None:
         diffs = [
             differ.Difference(f"$.items[{i}]", i, i + 1, "value mismatch")
