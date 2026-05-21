@@ -158,6 +158,71 @@ class IoUtilsTests(unittest.TestCase):
         self.assertEqual(changed["method"], "file-hash")
         self.assertFalse(diff_path.exists())
 
+    def test_image_change_summary_uses_pixel_bbox_when_pillow_is_available(self):
+        before_path = Path(self.tmpdir.name) / "before.png"
+        after_path = Path(self.tmpdir.name) / "after.png"
+        diff_path = Path(self.tmpdir.name) / "diff" / "image.png"
+        before_path.write_bytes(b"before")
+        after_path.write_bytes(b"after")
+
+        class FakeImage:
+            def convert(self, mode):
+                self.mode = mode
+                return self
+
+        class FakeDiff:
+            def __init__(self, bbox):
+                self.bbox = bbox
+
+            def save(self, path):
+                path.write_text("diff\n")
+
+            def getbbox(self):
+                return self.bbox
+
+        pil_pkg = type(sys)("PIL")
+        image_mod = type(sys)("PIL.Image")
+        chops_mod = type(sys)("PIL.ImageChops")
+        image_mod.open = mock.Mock(return_value=FakeImage())
+        chops_mod.difference = mock.Mock(return_value=FakeDiff((1, 2, 3, 4)))
+        pil_pkg.Image = image_mod
+        pil_pkg.ImageChops = chops_mod
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "PIL": pil_pkg,
+                "PIL.Image": image_mod,
+                "PIL.ImageChops": chops_mod,
+            },
+        ):
+            changed = self.mod.image_change_summary(
+                before_path, after_path, diff_output_path=diff_path
+            )
+
+        self.assertTrue(changed["changed"])
+        self.assertEqual(changed["method"], "pixel-bbox")
+        self.assertEqual(
+            changed["bbox"],
+            {"left": 1, "top": 2, "right": 3, "bottom": 4},
+        )
+        self.assertEqual(diff_path.read_text(), "diff\n")
+
+        chops_mod.difference = mock.Mock(return_value=FakeDiff(None))
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "PIL": pil_pkg,
+                "PIL.Image": image_mod,
+                "PIL.ImageChops": chops_mod,
+            },
+        ):
+            unchanged = self.mod.image_change_summary(before_path, after_path)
+
+        self.assertFalse(unchanged["changed"])
+        self.assertEqual(unchanged["method"], "pixel-bbox")
+        self.assertNotIn("bbox", unchanged)
+
     def test_tail_lines_replaces_invalid_bytes_and_trim_exact_boundary(self):
         log_path = self.state_dir / "logs" / "invalid.log"
         log_path.parent.mkdir(parents=True)

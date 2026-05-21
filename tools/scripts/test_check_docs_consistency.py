@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
@@ -186,6 +187,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(stdout, "")
         self.assertIn("Failed to read", stderr)
+
+    def test_script_entrypoint_exits_with_main_result(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("docs-consistency: OK", stdout.getvalue())
 
 
 if __name__ == "__main__":

@@ -171,6 +171,14 @@ class VerifyCoberturaXmlTests(unittest.TestCase):
             path.unlink()
         self.assertEqual(cm.exception.code, 0)
 
+    def test_importing_script_does_not_execute_main(self) -> None:
+        module_globals = runpy.run_path(
+            str(SCRIPT),
+            run_name="verify_cobertura_xml_imported",
+        )
+
+        self.assertIn("main", module_globals)
+
 
 if __name__ == "__main__":
     unittest.main()

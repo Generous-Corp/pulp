@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
@@ -67,6 +68,92 @@ class FreshnessCheckExtraTests(unittest.TestCase):
 
     def test_extract_owner_repo_rejects_incomplete_github_url(self) -> None:
         self.assertIsNone(fc.extract_owner_repo("https://github.com/acme"))
+
+    def test_run_gh_parses_json_and_swallows_failures(self) -> None:
+        with mock.patch.object(
+            fc.subprocess,
+            "run",
+            return_value=fc.subprocess.CompletedProcess(
+                ["gh"], 0, stdout='{"ok": true}\n',
+            ),
+        ) as run:
+            self.assertEqual(fc.run_gh(["repos/acme/audio-lib"]), {"ok": True})
+        self.assertEqual(
+            run.call_args.args[0],
+            ["gh", "api", "repos/acme/audio-lib"],
+        )
+
+        with mock.patch.object(
+            fc.subprocess,
+            "run",
+            return_value=fc.subprocess.CompletedProcess(["gh"], 1, stdout="{}"),
+        ):
+            self.assertIsNone(fc.run_gh(["repos/acme/audio-lib"]))
+
+        with mock.patch.object(
+            fc.subprocess,
+            "run",
+            return_value=fc.subprocess.CompletedProcess(["gh"], 0, stdout="{not json}"),
+        ):
+            self.assertIsNone(fc.run_gh(["repos/acme/audio-lib"]))
+
+        with mock.patch.object(
+            fc.subprocess,
+            "run",
+            side_effect=fc.subprocess.TimeoutExpired(["gh"], timeout=30),
+        ):
+            self.assertIsNone(fc.run_gh(["repos/acme/audio-lib"]))
+
+    def test_check_package_reports_unparseable_repo_url_and_api_failure(self) -> None:
+        bad_url = fc.check_package(
+            "audio-lib",
+            {"version": "1.0.0", "fetch": {"git_repository": "not github"}},
+        )
+        self.assertEqual(bad_url.issues, ["Cannot parse GitHub URL: not github"])
+
+        with mock.patch.object(fc, "run_gh", return_value=None):
+            unreachable = fc.check_package(
+                "audio-lib",
+                {
+                    "version": "1.0.0",
+                    "fetch": {"git_repository": "https://github.com/acme/audio-lib"},
+                },
+            )
+
+        self.assertEqual(unreachable.issues, ["Cannot reach GitHub API"])
+
+    def test_check_package_reports_archived_newer_version_and_license_mismatch(self) -> None:
+        responses = {
+            "repos/acme/audio-lib": {
+                "archived": True,
+                "pushed_at": "2026-05-01T10:11:12Z",
+            },
+            "repos/acme/audio-lib/releases?per_page=1": [{"tag_name": "v2.0.0"}],
+            "repos/acme/audio-lib/license": {"license": {"spdx_id": "Apache-2.0"}},
+        }
+
+        with mock.patch.object(fc, "run_gh", side_effect=lambda args: responses[args[0]]):
+            result = fc.check_package(
+                "audio-lib",
+                {
+                    "version": "v1.0.0",
+                    "license": "MIT",
+                    "fetch": {"git_repository": "https://github.com/acme/audio-lib"},
+                },
+            )
+
+        self.assertTrue(result.archived)
+        self.assertEqual(result.last_commit_date, "2026-05-01")
+        self.assertEqual(result.latest_version, "v2.0.0")
+        self.assertTrue(result.license_changed)
+        self.assertEqual(
+            result.issues,
+            [
+                "Repository is archived",
+                "Newer version available: v2.0.0 (pinned: v1.0.0)",
+                "License mismatch: registry says MIT, GitHub says Apache-2.0",
+            ],
+        )
 
     def test_check_package_falls_back_to_tags_without_release(self) -> None:
         responses = {
@@ -158,6 +245,46 @@ class FreshnessCheckExtraTests(unittest.TestCase):
         self.assertIn("| stale | 1.0.0 | 2.0.0 | ? | Newer version available |", text)
         self.assertIn("2 packages checked, 1 issues", err.getvalue())
 
+    def test_main_emits_json_for_selected_package(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = pathlib.Path(td) / "registry.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "packages": {
+                            "ok": {"version": "1.0.0"},
+                            "other": {"version": "9.9.9"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_check(slug: str, pkg: dict):
+                return fc.CheckResult(
+                    package=slug,
+                    pinned_version=pkg["version"],
+                    latest_version="1.0.0",
+                    last_commit_date="2026-04-01",
+                )
+
+            out = io.StringIO()
+            err = io.StringIO()
+            with module_attr(fc, "REGISTRY", registry_path), \
+                 mock.patch.object(fc, "check_package", fake_check):
+                with argv(["freshness_check.py", "--package", "ok", "--format", "json"]):
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        rc = fc.main()
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["package"], "ok")
+        self.assertEqual(payload[0]["pinned"], "1.0.0")
+        self.assertEqual(payload[0]["last_commit"], "2026-04-01")
+        self.assertIn("Checking ok...", err.getvalue())
+        self.assertNotIn("other", err.getvalue())
+
     def test_main_emits_text_for_ok_and_issue_results(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry_path = pathlib.Path(td) / "registry.json"
@@ -195,6 +322,26 @@ class FreshnessCheckExtraTests(unittest.TestCase):
         self.assertRegex(text, r"stale\s+\.+\s+ISSUES")
         self.assertIn("    - Cannot reach GitHub API", text)
         self.assertIn("2 packages checked, 1 issues", err.getvalue())
+
+    def test_script_entrypoint_reports_unknown_package(self) -> None:
+        old_argv = sys.argv[:]
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            sys.argv = [
+                str(ROOT / "freshness_check.py"),
+                "--package",
+                "__definitely_missing__",
+            ]
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    runpy.run_path(str(ROOT / "freshness_check.py"), run_name="__main__")
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("not in registry", stderr.getvalue())
 
 
 if __name__ == "__main__":

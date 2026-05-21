@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
@@ -48,6 +49,14 @@ production_validated:
     def test_extract_formats_returns_empty_when_block_absent(self) -> None:
         self.assertEqual(cfv.extract_formats("production_validated:\n"), {})
 
+    def test_extract_formats_ignores_platform_lines_before_format_key(self) -> None:
+        text = """\
+formats:
+    macos: stable
+"""
+
+        self.assertEqual(cfv.extract_formats(text), {})
+
 
 class ExtractProductionTests(unittest.TestCase):
     def test_extract_production_reads_empty_and_populated_inline_lists(self) -> None:
@@ -87,6 +96,14 @@ production_validated:
 
     def test_extract_production_returns_empty_when_block_absent(self) -> None:
         self.assertEqual(cfv.extract_production("formats:\n"), {})
+
+    def test_extract_production_ignores_platform_lines_before_format_key(self) -> None:
+        text = """\
+production_validated:
+    macos: [Reaper]
+"""
+
+        self.assertEqual(cfv.extract_production(text), {})
 
 
 class MainTests(unittest.TestCase):
@@ -182,6 +199,19 @@ production_validated:
         self.assertEqual(rc, 2)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("Failed to read", stderr.getvalue())
+
+    def test_script_entrypoint_exits_with_main_result(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", [str(SCRIPT), "--mode=warn"]), \
+             contextlib.redirect_stdout(stdout), \
+             contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("format-validation:", stdout.getvalue())
 
 
 if __name__ == "__main__":

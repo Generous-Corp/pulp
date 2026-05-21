@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import runpy
 import subprocess
 import sys
 import unittest
@@ -250,6 +251,15 @@ class MacosRerouteWatcherTests(unittest.TestCase):
             )
 
         watch.assert_called_once_with(interval=5, flap_window=6)
+
+    def test_script_entrypoint_exits_with_main_status(self) -> None:
+        argv = [str(SCRIPT), "--interval", "1"]
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(subprocess, "run", side_effect=KeyboardInterrupt):
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -225,10 +226,15 @@ class GithubWorkflowsTests(unittest.TestCase):
             self.mod.normalize_runs_on_json("not json", setting_name="selector")
         with self.assertRaisesRegex(ValueError, "must decode to a string or array"):
             self.mod.normalize_runs_on_json("42", setting_name="selector")
+        self.assertEqual(self.mod.normalize_runs_on_json("", setting_name="selector"), "")
 
         with self.assertRaisesRegex(ValueError, "must be positive"):
             self.mod.resolve_github_actions_settings(
                 {"github_actions": {"defaults": {"wait_poll_secs": 0}}}
+            )
+        with self.assertRaisesRegex(ValueError, "must be an integer"):
+            self.mod.resolve_github_actions_settings(
+                {"github_actions": {"defaults": {"wait_poll_secs": "slow"}}}
             )
 
         provider, source = self.mod.resolve_default_provider_for_workflow(
@@ -389,6 +395,86 @@ class GithubWorkflowsTests(unittest.TestCase):
                 ),
                 ["linux_runner_selector_json"],
             )
+
+    def test_workflow_selector_helpers_handle_malformed_config_shapes(self):
+        malformed_configs = [
+            {"github_actions": {"workflows": []}},
+            {"github_actions": {"workflows": {"build": []}}},
+            {"github_actions": {"workflows": {"build": {"providers": []}}}},
+            {"github_actions": {"workflows": {"build": {"providers": {"namespace": []}}}}},
+            {
+                "github_actions": {
+                    "workflows": {
+                        "build": {
+                            "providers": {
+                                "namespace": {
+                                    "runner_selector_json": "   ",
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ]
+        for config in malformed_configs:
+            self.assertEqual(
+                self.mod.resolve_workflow_runner_selector_json(
+                    config, "build", "namespace"
+                ),
+                "",
+            )
+
+        self.assertEqual(
+            self.mod.resolve_workflow_dispatch_field_values(
+                self.mod.load_optional_config(), "build", "namespace", []
+            ),
+            {},
+        )
+        for config in malformed_configs[:-1]:
+            self.assertEqual(
+                self.mod.resolve_workflow_dispatch_field_values(
+                    config,
+                    "build",
+                    "namespace",
+                    ["linux_runner_selector_json"],
+                ),
+                {},
+            )
+
+        value, source = self.mod.resolve_workflow_field_value_and_source(
+            {},
+            {},
+            "build",
+            "github-hosted",
+            "unmapped_selector_json",
+        )
+        self.assertEqual((value, source), ("", ""))
+
+        defaults, sources = self.mod.resolve_workflow_dispatch_defaults(
+            {},
+            {},
+            "build",
+            "namespace",
+            ["linux_runner_selector_json"],
+        )
+        self.assertEqual(defaults, {})
+        self.assertEqual(sources, {})
+
+        github_workflows_mod = sys.modules["github_workflows"]
+        with mock.patch.object(
+            github_workflows_mod,
+            "resolve_workflow_field_value_and_source",
+            return_value=('"forced"', ""),
+        ):
+            defaults, sources = self.mod.resolve_workflow_dispatch_defaults(
+                {},
+                {},
+                "build",
+                "namespace",
+                ["linux_runner_selector_json"],
+            )
+        self.assertEqual(defaults, {"linux_runner_selector_json": '"forced"'})
+        self.assertEqual(sources, {})
 
 
 

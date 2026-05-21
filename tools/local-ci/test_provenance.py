@@ -141,6 +141,17 @@ class ProvenanceTests(unittest.TestCase):
             "hosted via github-actions/github-hosted selector=macos-15 run=12345",
         )
 
+        hosted_without_provider = self.mod.normalize_provenance(
+            {
+                "execution_kind": "hosted",
+                "hosted_orchestrator": "manual-dispatch",
+            }
+        )
+        self.assertEqual(
+            self.mod.provenance_summary(hosted_without_provider),
+            "hosted via manual-dispatch",
+        )
+
         result = self.mod.normalize_result({"submission": {"provenance": hosted}})
         self.assertEqual(result["provenance"]["run_id"], "12345")
 

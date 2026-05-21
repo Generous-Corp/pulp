@@ -12,6 +12,7 @@ or as part of the aggregate suite via `test_gates.py`.
 from __future__ import annotations
 
 import json
+import subprocess
 import unittest
 from unittest import mock
 
@@ -142,13 +143,48 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
                 vbc.VersionFile("manifest.json", "json_path", "plugins.0.version"),
             )
         )
+        self.assertEqual(
+            vbc._extract_version_from_text(
+                '[project]\nversion = "4.5.6"\n',
+                vbc.VersionFile("pyproject.toml", "pyproject_version"),
+            ),
+            "4.5.6",
+        )
+        self.assertEqual(
+            vbc._extract_version_from_text(
+                '__version__ = "7.8.9"\n',
+                vbc.VersionFile("pkg/__init__.py", "python_dunder_version"),
+            ),
+            "7.8.9",
+        )
+        self.assertIsNone(
+            vbc._extract_version_from_text(
+                "version=1.0.0\n",
+                vbc.VersionFile("VERSION.txt", "regex",
+                                pattern=r"version=(\d+\.\d+\.\d+)"),
+            )
+        )
 
         self.f.write("bad-field.json", "{not json}\n")
         self.f.write("bad-path.json", "{not json}\n")
+        self.f.write("empty-path.json", '{"plugins": []}\n')
+        self.f.write("not-project.cmake", "cmake_minimum_required(VERSION 3.25)\n")
         self.f.write("plain.txt", "no version here\n")
 
         self.assertIsNone(
+            vbc.read_version(
+                self.tmp,
+                vbc.VersionFile("not-project.cmake", "cmake_project_version"),
+            )
+        )
+        self.assertIsNone(
             vbc.read_version(self.tmp, vbc.VersionFile("bad-path.json", "json_path", "a.b"))
+        )
+        self.assertIsNone(
+            vbc.read_version(
+                self.tmp,
+                vbc.VersionFile("plain.txt", "unknown_kind"),
+            )
         )
         self.assertFalse(
             vbc.write_version(
@@ -161,6 +197,13 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
             vbc.write_version(
                 self.tmp,
                 vbc.VersionFile("bad-path.json", "json_path", "a.b"),
+                "1.0.0",
+            )
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("empty-path.json", "json_path", "plugins.4.version"),
                 "1.0.0",
             )
         )
@@ -181,10 +224,19 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
 
     def test_base_version_helpers_cover_missing_and_equal_paths(self) -> None:
         vbc = self._import_gate_module("version_bump_check")
+        vbs = self._import_gate_module("version_bump_surfaces")
 
         vf = vbc.VersionFile("CMakeLists.txt", "cmake_project_version")
         with mock.patch.object(vbc, "version_at_base", return_value="0.1.0"):
             self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
+        with mock.patch.object(
+            vbs.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                ["git"], 0, stdout="project(Pulp VERSION 9.8.7)\n",
+            ),
+        ):
+            self.assertEqual(vbc.version_at_base("origin/main", vf), "9.8.7")
         self.assertIsNone(
             vbc.version_at_base(
                 "origin/main",
@@ -199,6 +251,15 @@ class VersionBumpSurfacesTests(GateFixtureTestCase):
             self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
         with mock.patch.object(vbc, "version_at_base", return_value=None):
             self.assertFalse(vbc.already_bumped("origin/main", vf, self.tmp))
+        with mock.patch.object(vbc, "version_at_base", return_value="1.0.0"):
+            self.assertFalse(
+                vbc.already_bumped(
+                    "origin/main",
+                    vbc.VersionFile("missing.txt", "regex",
+                                    pattern=r"version=(\d+\.\d+\.\d+)"),
+                    self.tmp,
+                )
+            )
 
         self.f.write("broken.json", "{not json}\n")
         with mock.patch.object(vbc, "version_at_base", return_value="1.0.0"):

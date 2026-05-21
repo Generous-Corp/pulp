@@ -7,6 +7,7 @@ Run via:
 from __future__ import annotations
 
 import importlib.util
+import io
 import os
 import subprocess
 import sys
@@ -399,6 +400,22 @@ class HelperCoverageTests(unittest.TestCase):
 
         diff_files.assert_called_once_with("main...HEAD", "push")
         check.assert_called_once_with(["CMakeLists.txt"], "HEAD")
+
+    def test_main_defensively_rejects_unknown_internal_mode(self) -> None:
+        stpc = load_module()
+        fake_args = stpc.argparse.Namespace(
+            mode="unknown",
+            base="origin/main",
+            rev="HEAD",
+            files=[],
+        )
+        stderr = io.StringIO()
+
+        with mock.patch.object(stpc.argparse.ArgumentParser, "parse_args", return_value=fake_args), \
+             mock.patch.object(sys, "stderr", stderr):
+            self.assertEqual(stpc.main([]), 2)
+
+        self.assertIn("unknown mode: unknown", stderr.getvalue())
 
 
 if __name__ == "__main__":

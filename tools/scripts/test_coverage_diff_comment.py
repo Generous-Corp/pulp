@@ -12,9 +12,11 @@ Run:
 from __future__ import annotations
 
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -96,6 +98,15 @@ class RenderTests(unittest.TestCase):
         )
         self.assertIn("<details>", body)
         self.assertIn("</details>", body)
+
+    def test_report_without_top_level_heading_is_preserved(self) -> None:
+        report = "## Summary\n- **Coverage**: 91%\n"
+        body = cdc.render(
+            report,
+            flip_date="2026-05-05",
+            threshold=75,
+        )
+        self.assertIn(report.strip(), body)
 
     def test_empty_report_falls_back_gracefully(self) -> None:
         # A PR that doesn't touch instrumented source (docs-only, CI-only,
@@ -181,6 +192,27 @@ class MainCliTests(unittest.TestCase):
             body = out.read_text(encoding="utf-8")
             self.assertIn(cdc.COMMENT_MARKER, body)
             self.assertIn("did not touch any instrumented source", body)
+
+    def test_script_entrypoint_exits_with_main_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            report = root / "report.md"
+            report.write_text(SAMPLE_REPORT, encoding="utf-8")
+            out = root / "comment.md"
+            argv = [
+                str(HERE / "coverage_diff_comment.py"),
+                "--report", str(report),
+                "--flip-date", "2026-05-05",
+                "--threshold", "75",
+                "--out", str(out),
+            ]
+
+            with mock.patch.object(sys, "argv", argv):
+                with self.assertRaises(SystemExit) as cm:
+                    runpy.run_path(str(HERE / "coverage_diff_comment.py"), run_name="__main__")
+
+            self.assertEqual(cm.exception.code, 0)
+            self.assertIn(cdc.COMMENT_MARKER, out.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

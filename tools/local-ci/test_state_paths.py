@@ -152,14 +152,57 @@ class StatePathsTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):
             self.assertEqual(self.mod.queue_path(), self.state_dir / "queue.json")
             self.assertEqual(self.mod.evidence_path(), self.state_dir / "evidence.json")
+            self.assertEqual(self.mod.prepared_dir(), self.state_dir / "prepared")
             self.assertEqual(self.mod.queue_lock_path(), self.state_dir / "queue.lock")
             self.assertEqual(self.mod.evidence_lock_path(), self.state_dir / "evidence.lock")
+            self.assertEqual(self.mod.drain_lock_path(), self.state_dir / "drain.lock")
             self.assertEqual(self.mod.runner_info_path(), self.state_dir / "runner.json")
             self.assertEqual(self.mod.desktop_state_dir(), self.state_dir / "desktop-automation")
             self.assertEqual(
                 self.mod.desktop_receipts_dir(),
                 self.state_dir / "desktop-automation" / "receipts",
             )
+
+    def test_state_dir_uses_platform_defaults_when_no_override_is_set(self):
+        state_paths_mod = sys.modules["state_paths"]
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+            state_paths_mod.Path,
+            "home",
+            return_value=Path("/Users/pulp"),
+        ), mock.patch.object(state_paths_mod.sys, "platform", "darwin"):
+            self.assertEqual(
+                self.mod.state_dir(),
+                Path("/Users/pulp/Library/Application Support/Pulp/local-ci"),
+            )
+
+        with mock.patch.dict(
+            os.environ,
+            {"XDG_STATE_HOME": "/xdg-state"},
+            clear=True,
+        ), mock.patch.object(state_paths_mod.sys, "platform", "linux"):
+            self.assertEqual(self.mod.state_dir(), Path("/xdg-state/pulp/local-ci"))
+
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+            state_paths_mod.Path,
+            "home",
+            return_value=Path("/home/pulp"),
+        ), mock.patch.object(state_paths_mod.sys, "platform", "linux"):
+            self.assertEqual(self.mod.state_dir(), Path("/home/pulp/.local/state/pulp/local-ci"))
+
+    def test_ensure_state_dirs_creates_shared_state_directories(self):
+        with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):
+            self.mod.ensure_state_dirs()
+
+            for path in (
+                self.state_dir,
+                self.state_dir / "results",
+                self.state_dir / "cloud-runs",
+                self.state_dir / "logs",
+                self.state_dir / "bundles",
+                self.state_dir / "desktop-automation",
+                self.state_dir / "desktop-automation" / "receipts",
+            ):
+                self.assertTrue(path.is_dir(), path)
 
     def test_prepare_target_log_creates_parent_and_truncates_existing_log(self):
         with mock.patch.dict(os.environ, {"PULP_LOCAL_CI_HOME": str(self.state_dir)}, clear=True):

@@ -8,13 +8,16 @@ of classify_file / aggregate / render so a regression fails fast.
 from __future__ import annotations
 
 import pathlib
+import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
 import coverage_tier_check as ctc
 
+HERE = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 
@@ -97,11 +100,119 @@ class ClassifyTests(unittest.TestCase):
         self.assertIsNone(ctc.classify_file("docs/guides/coverage.md", TIERS))
         self.assertIsNone(ctc.classify_file("README.md", TIERS))
 
+    def test_matches_non_prefix_glob(self) -> None:
+        tiers = [ctc.Tier("docs", 50, ("README.*",))]
+        tier = ctc.classify_file("README.md", tiers)
+
+        self.assertIsNotNone(tier)
+        self.assertEqual(tier.name, "docs")
+
     def test_live_targets_classify_inspect_as_user_facing(self) -> None:
         tiers = ctc.load_targets(TARGETS)
         tier = ctc.classify_file("inspect/src/inspector_server.cpp", tiers)
         self.assertIsNotNone(tier)
         self.assertEqual(tier.name, "user-facing")
+
+
+class LoadTargetsTests(unittest.TestCase):
+
+    def test_rejects_missing_tiers_list(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "targets.yaml"
+            path.write_text("version: 1\nnot_tiers: []\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "expected top-level 'tiers' list"):
+                ctc.load_targets(path)
+
+    def test_rejects_unsupported_version(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "targets.yaml"
+            path.write_text("version: 2\ntiers: []\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "unsupported version 2"):
+                ctc.load_targets(path)
+
+
+class DiffDiscoveryTests(unittest.TestCase):
+
+    def test_diff_files_strips_blank_lines(self) -> None:
+        with mock.patch.object(
+            subprocess,
+            "check_output",
+            return_value="core/audio/src/a.cpp\n\n tools/build.cpp  \n",
+        ):
+            self.assertEqual(
+                ctc.diff_files("origin/main"),
+                ["core/audio/src/a.cpp", "tools/build.cpp"],
+            )
+
+    def test_diff_files_wraps_git_failure(self) -> None:
+        with mock.patch.object(
+            subprocess,
+            "check_output",
+            side_effect=subprocess.CalledProcessError(128, ["git", "diff"]),
+        ):
+            with self.assertRaisesRegex(ValueError, "git diff failed"):
+                ctc.diff_files("origin/main")
+
+    def test_diff_lines_returns_empty_set_on_git_failure(self) -> None:
+        with mock.patch.object(
+            subprocess,
+            "check_output",
+            side_effect=subprocess.CalledProcessError(128, ["git", "diff"]),
+        ):
+            self.assertEqual(ctc.diff_lines("origin/main", "core/audio/src/a.cpp"), set())
+
+    def test_diff_lines_parses_single_line_and_range_hunks(self) -> None:
+        diff = "\n".join([
+            "diff --git a/core/audio/src/a.cpp b/core/audio/src/a.cpp",
+            "@@ -0,0 +12 @@",
+            "+one",
+            "@@ -20,0 +30,3 @@",
+            "+two",
+            "+three",
+            "+four",
+            "@@ malformed hunk header",
+        ])
+        with mock.patch.object(subprocess, "check_output", return_value=diff):
+            self.assertEqual(
+                ctc.diff_lines("origin/main", "core/audio/src/a.cpp"),
+                {12, 30, 31, 32},
+            )
+
+
+class CoberturaParseTests(unittest.TestCase):
+
+    def test_parse_cobertura_ignores_missing_filenames_and_bad_lines(self) -> None:
+        xml = """<?xml version="1.0" ?>
+<coverage>
+  <packages>
+    <package name="core">
+      <classes>
+        <class filename="">
+          <lines><line number="1" hits="99" /></lines>
+        </class>
+        <class filename="core/audio/src/foo.cpp">
+          <lines>
+            <line number="10" hits="2" />
+            <line number="11" />
+            <line number="bad" hits="1" />
+            <line hits="4" />
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>
+"""
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "coverage.xml"
+            path.write_text(xml, encoding="utf-8")
+
+            parsed = ctc.parse_cobertura(path)
+
+        self.assertEqual(list(parsed), ["core/audio/src/foo.cpp"])
+        self.assertEqual(parsed["core/audio/src/foo.cpp"].hits, {10: 2, 11: 0})
 
 
 class AggregateTests(unittest.TestCase):
@@ -188,6 +299,29 @@ class AggregateTests(unittest.TestCase):
         self.assertAlmostEqual(audio.percent, 75.0, places=1)
         self.assertFalse(audio.passed)  # 75% < 80% floor
 
+    def test_missing_coverage_with_no_changed_lines_does_not_record_file(self) -> None:
+        results = ctc.aggregate(
+            TIERS,
+            ["core/audio/src/newfile.cpp"],
+            {},
+            lines_getter=lambda _p: set(),
+        )
+        audio = next(r for r in results if r.tier.name == "audio-critical")
+        self.assertEqual(audio.touched_lines, 0)
+        self.assertEqual(audio.files, [])
+
+    def test_existing_coverage_with_no_changed_lines_does_not_record_file(self) -> None:
+        cov = self._coverage({"core/audio/src/foo.cpp": {10: 1}})
+        results = ctc.aggregate(
+            TIERS,
+            ["core/audio/src/foo.cpp"],
+            cov,
+            lines_getter=lambda _p: set(),
+        )
+        audio = next(r for r in results if r.tier.name == "audio-critical")
+        self.assertEqual(audio.touched_lines, 0)
+        self.assertEqual(audio.files, [])
+
 
 class InstrumentedSourceTests(unittest.TestCase):
 
@@ -217,7 +351,7 @@ class InstrumentedSourceTests(unittest.TestCase):
     def test_non_cpp_is_not_instrumented(self) -> None:
         for p in ("tools/cmake/PulpUtils.cmake", "tools/build-skia.sh",
                   "tools/scripts/coverage_tier_check.py",
-                  "ship/templates/appcast.xml.in", "README.md"):
+                  "ship/templates/appcast.xml.in", "README.md", "Makefile"):
             self.assertFalse(ctc.is_instrumented_source(p), msg=p)
 
     def test_ts_js_sources_are_instrumented(self) -> None:
@@ -370,6 +504,15 @@ class RenderTests(unittest.TestCase):
         self.assertIn("infrastructure", body)
 
 
+class TierResultTests(unittest.TestCase):
+
+    def test_empty_tier_reports_full_percent_and_passes(self) -> None:
+        result = ctc.TierResult(tier=TIERS[0])
+
+        self.assertEqual(result.percent, 100.0)
+        self.assertTrue(result.passed)
+
+
 class MainEntrypointTests(unittest.TestCase):
 
     def test_main_skips_cleanly_when_cobertura_xml_is_missing(self) -> None:
@@ -444,6 +587,24 @@ class MainEntrypointTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("Per-tier gate failed", report.read_text(encoding="utf-8"))
 
+    def test_script_entrypoint_exits_with_main_status(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            report = root / "tier-report.md"
+            argv = [
+                str(HERE / "coverage_tier_check.py"),
+                "--cobertura", str(root / "missing.xml"),
+                "--targets", str(root / "targets.yaml"),
+                "--compare-branch", "origin/main",
+                "--markdown-report", str(report),
+            ]
+
+            with mock.patch.object(sys, "argv", argv):
+                with self.assertRaises(SystemExit) as cm:
+                    runpy.run_path(str(HERE / "coverage_tier_check.py"), run_name="__main__")
+
+            self.assertEqual(cm.exception.code, 0)
+            self.assertIn("Cobertura XML missing", report.read_text(encoding="utf-8"))
 
 def _enumerate_first_party_sources() -> list[str]:
     """Return repo-relative paths of first-party source files in scope.

@@ -348,6 +348,51 @@ class ArchSubdirLayoutFlattens(unittest.TestCase):
             )
             self.assertTrue((release_dir / "arm64" / "libdawn_combined.a").is_file())
 
+    def test_arch_subdir_with_only_duplicate_flat_file_leaves_subdir(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/libskia.a": b"already-flat",
+                "build/mac-gpu/lib/Release/arm64/libskia.a": b"duplicate",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+            self.assertEqual(rc, 0)
+            release_dir = (
+                td / "external/skia-build/build/mac-gpu/lib/Release"
+            )
+            self.assertEqual((release_dir / "libskia.a").read_bytes(), b"already-flat")
+            self.assertTrue((release_dir / "arm64" / "libskia.a").is_file())
+
+    def test_empty_arch_subdir_is_removed_before_missing_lib_error(self):
+        with _in_tempdir() as td:
+            zip_path = td / "skia-mac.zip"
+            payload = {
+                "build/mac-gpu/lib/Release/arm64/": b"",
+                "build/mac-gpu/lib/Release/README.txt": b"no libs here",
+            }
+            sha = _make_zip(zip_path, payload)
+            _write_manifest(
+                td, f"file://{zip_path.as_posix()}", sha, "mac-arm64"
+            )
+
+            rc = fetch_skia.main(
+                ["fetch_skia_for_release.py", "darwin-arm64"]
+            )
+
+            self.assertEqual(rc, 1)
+            release_dir = (
+                td / "external/skia-build/build/mac-gpu/lib/Release"
+            )
+            self.assertFalse((release_dir / "arm64").exists())
+
 
 class MissingLibFails(unittest.TestCase):
     """Zip without libs anywhere must still surface a clear error."""

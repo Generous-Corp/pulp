@@ -159,7 +159,15 @@ class DocsNoiseLintTests(unittest.TestCase):
         (self.tmpdir / "docs/reference/folder.md").mkdir(parents=True)
         self._write(".agents/skills/ci/SKILL.md", "See #123.\n")
 
-        files = [noise._norm_path(path, self.tmpdir) for path in noise._iter_default_files(self.tmpdir)]
+        with mock.patch.object(
+            noise,
+            "DEFAULT_SCAN_GLOBS",
+            ("docs/reference/**/*.md", "docs/reference/**/*.md", ".agents/skills/**/SKILL.md"),
+        ):
+            files = [
+                noise._norm_path(path, self.tmpdir)
+                for path in noise._iter_default_files(self.tmpdir)
+            ]
 
         self.assertEqual(files, ["docs/reference/page.md"])
 
@@ -267,10 +275,12 @@ class DocsNoiseLintTests(unittest.TestCase):
 
     def test_scan_changed_map_filters_scope_allowlist_and_missing_paths(self) -> None:
         self._write("docs/reference/noisy.md", "See #123.\n")
+        self._write(".agents/skills/ci/SKILL.md", "See #456.\n")
         self._write("docs/reports/noisy.md", "See #456.\n")
         self._write("README.md", "See #789.\n")
 
         with mock.patch.object(noise, "_git_changed_line_map", return_value={
+            ".agents/skills/ci/SKILL.md": None,
             "README.md": None,
             "docs/reference/missing.md": None,
             "docs/reference/noisy.md": None,
