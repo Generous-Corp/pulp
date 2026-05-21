@@ -299,7 +299,8 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
 
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest) {
-    auto resolved = resolve_node(ir.root, "$", index_assets(manifest));
+    const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
+    auto resolved = resolve_node(ir.root, "$", index_assets(effective_manifest));
     resolved.diagnostics.insert(resolved.diagnostics.end(),
                                 ir.diagnostics.begin(),
                                 ir.diagnostics.end());
@@ -309,7 +310,7 @@ ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
 ResolvedNativeNode resolve_design_ir_native_json(std::string_view frozen_design_ir_json,
                                                  const IRAssetManifest& manifest) {
     auto ir = parse_design_ir_json(std::string(frozen_design_ir_json));
-    return resolve_design_ir_native(ir, manifest.assets.empty() ? ir.asset_manifest : manifest);
+    return resolve_design_ir_native(ir, manifest);
 }
 
 } // namespace pulp::view

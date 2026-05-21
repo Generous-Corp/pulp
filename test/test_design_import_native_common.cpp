@@ -136,11 +136,14 @@ TEST_CASE("native resolver consumes frozen DesignIR JSON plus manifest diagnosti
     ir.asset_manifest = manifest;
 
     const auto json = serialize_design_ir(ir);
+    const auto memory_resolved = resolve_design_ir_native(ir, {});
     auto resolved = resolve_design_ir_native_json(json, {});
+    REQUIRE(resolved_snapshot(memory_resolved) == resolved_snapshot(resolved));
     REQUIRE(resolved.kind == NativeWidgetKind::view);
     REQUIRE(resolved.children.size() == 2);
     REQUIRE(child(resolved, 0).kind == NativeWidgetKind::image_view);
     REQUIRE(child(resolved, 0).id == "logo-anchor");
+    REQUIRE_FALSE(has_diag(child(resolved, 0), "native-missing-asset"));
     REQUIRE(has_diag(resolved, "snapshot-dynamic-api"));
     REQUIRE(has_diag(resolved, "asset-unresolved"));
     REQUIRE(has_diag(resolved, "native-missing-asset"));
