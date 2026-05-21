@@ -1731,15 +1731,24 @@ static std::optional<std::vector<uint8_t>> fetch_network_asset(
         return std::nullopt;
     }
 
-    auto hash = pulp::runtime::sha256_hex(bytes.data(), bytes.size());
+    return bytes;
+}
+
+static void cache_network_asset(const std::string& url,
+                                const fs::path& cache_dir,
+                                const std::string& hash,
+                                const std::vector<uint8_t>& bytes,
+                                IRAssetRef& asset) {
     auto cache_path = cache_dir / "by-hash" / hash;
-    write_binary_file(cache_path, bytes);
+    if (!write_binary_file(cache_path, bytes))
+        return;
+
     std::error_code ec;
+    const auto url_index = cache_dir / "by-url" / (url_index_key(url) + ".txt");
     fs::create_directories(url_index.parent_path(), ec);
     std::ofstream out_index(url_index);
     out_index << hash << "\n";
     asset.local_path = cache_path.string();
-    return bytes;
 }
 
 static std::optional<std::vector<uint8_t>> resolve_local_asset(
@@ -2008,8 +2017,10 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
             auto expected = options.expected_hash_by_uri.find(uri);
             if (expected == options.expected_hash_by_uri.end())
                 expected = options.expected_hash_by_uri.find(resolved_uri);
+            bool hash_mismatch = false;
             if (expected != options.expected_hash_by_uri.end()
                 && expected->second != asset.content_hash) {
+                hash_mismatch = true;
                 asset.diagnostics.push_back({
                     ImportDiagnosticSeverity::error,
                     "asset-hash-mismatch",
@@ -2017,6 +2028,8 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
                     "resolved asset hash did not match the expected hash"
                 });
             }
+            if (is_network_url(resolved_uri) && !asset.local_path && !hash_mismatch)
+                cache_network_asset(resolved_uri, cache_dir, asset.content_hash, *bytes, asset);
         } else if (asset.mime.empty()) {
             asset.mime = guess_asset_mime_type(resolved_uri);
         }
@@ -2060,7 +2073,7 @@ static void annotate_asset_ids(
     const std::unordered_map<std::string, std::string>& asset_id_by_uri) {
     if (node.style.background_image) {
         if (auto asset_id = find_asset_id_for_value(*node.style.background_image, asset_id_by_uri))
-            node.attributes.try_emplace("backgroundImageAssetId", *asset_id);
+            node.attributes["backgroundImageAssetId"] = *asset_id;
     }
 
     std::vector<std::pair<std::string, std::string>> to_add;
@@ -2069,15 +2082,31 @@ static void annotate_asset_ids(
             continue;
         if (auto asset_id = find_asset_id_for_value(value, asset_id_by_uri)) {
             const auto asset_attr = asset_id_attribute_for(key);
-            if (node.attributes.find(asset_attr) == node.attributes.end())
-                to_add.emplace_back(asset_attr, *asset_id);
+            to_add.emplace_back(asset_attr, *asset_id);
         }
     }
     for (const auto& [key, value] : to_add)
-        node.attributes.emplace(key, value);
+        node.attributes[key] = value;
 
     for (auto& child : node.children)
         annotate_asset_ids(child, asset_id_by_uri);
+}
+
+static bool is_derived_asset_id_attribute(std::string_view key) {
+    static constexpr std::string_view kSuffix = "AssetId";
+    return key.size() >= kSuffix.size() && key.substr(key.size() - kSuffix.size()) == kSuffix;
+}
+
+static void clear_asset_id_annotations(IRNode& node) {
+    for (auto it = node.attributes.begin(); it != node.attributes.end();) {
+        if (is_derived_asset_id_attribute(it->first)) {
+            it = node.attributes.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& child : node.children)
+        clear_asset_id_annotations(child);
 }
 
 void refresh_design_ir_asset_manifest(DesignIR& ir,
@@ -2092,6 +2121,7 @@ void refresh_design_ir_asset_manifest(DesignIR& ir,
         if (asset.local_path)
             asset_id_by_uri.emplace(*asset.local_path, asset.asset_id);
     }
+    clear_asset_id_annotations(ir.root);
     annotate_asset_ids(ir.root, asset_id_by_uri);
 }
 

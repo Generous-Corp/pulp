@@ -607,6 +607,38 @@ TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes ass
     REQUIRE(round_trip.root.children[0].attributes.at("srcAssetId") == asset.asset_id);
 }
 
+TEST_CASE("DesignIR asset manifest refresh rewrites stale asset ids",
+          "[view][import][assets]") {
+    TempDir tmp("pulp-design-ir-refresh-asset-ids");
+    const auto asset_dir = tmp.path / "assets";
+    fs::create_directories(asset_dir);
+    write_text(asset_dir / "hero.png", "\x89PNG\r\n\x1a\nhero-bytes");
+
+    auto ir = parse_design_ir_json(R"json({
+        "type": "frame",
+        "name": "Screen",
+        "children": [
+            { "type": "image", "name": "Hero", "src": "assets/hero.png" }
+        ]
+    })json");
+
+    DesignIrAssetOptions unresolved_options;
+    refresh_design_ir_asset_manifest(ir, unresolved_options);
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    const auto stale_id = ir.root.children[0].attributes.at("srcAssetId");
+    REQUIRE(has_diagnostic(ir.asset_manifest.assets[0], "asset-unresolved"));
+
+    DesignIrAssetOptions resolved_options;
+    resolved_options.base_directory = tmp.path;
+    refresh_design_ir_asset_manifest(ir, resolved_options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    const auto& resolved = ir.asset_manifest.assets[0];
+    REQUIRE(resolved.local_path);
+    REQUIRE(resolved.asset_id != stale_id);
+    REQUIRE(ir.root.children[0].attributes.at("srcAssetId") == resolved.asset_id);
+}
+
 TEST_CASE("DesignIR asset manifest keeps distinct external assets with identical bytes",
           "[view][import][assets]") {
     TempDir tmp("pulp-design-ir-distinct-assets");
@@ -721,22 +753,32 @@ TEST_CASE("DesignIR asset manifest fetches network assets through cache and veri
     REQUIRE(fetched.original_uri == url);
     REQUIRE(fetched.source_url == url);
     REQUIRE(fetched.mime == "image/svg+xml");
-    REQUIRE(fetched.local_path);
-    REQUIRE(fs::exists(*fetched.local_path));
+    REQUIRE_FALSE(fetched.local_path);
     REQUIRE_FALSE(fetched.content_hash.empty());
     REQUIRE(has_diagnostic(fetched, "asset-hash-mismatch"));
+    REQUIRE_FALSE(fs::exists(options.cache_directory / "by-hash"));
+    REQUIRE_FALSE(fs::exists(options.cache_directory / "by-url"));
+
+    const auto actual_hash = fetched.content_hash;
+    options.expected_hash_by_uri[url] = actual_hash;
+    auto verified = collect_design_ir_assets(ir, options);
+    REQUIRE(verified.assets.size() == 1);
+    REQUIRE(verified.assets[0].content_hash == actual_hash);
+    REQUIRE(verified.assets[0].diagnostics.empty());
+    REQUIRE(verified.assets[0].local_path);
+    REQUIRE(fs::exists(*verified.assets[0].local_path));
 
     fs::remove(curl);
     options.expected_hash_by_uri.clear();
     auto cached = collect_design_ir_assets(ir, options);
     REQUIRE(cached.assets.size() == 1);
-    REQUIRE(cached.assets[0].content_hash == fetched.content_hash);
+    REQUIRE(cached.assets[0].content_hash == actual_hash);
     REQUIRE(cached.assets[0].diagnostics.empty());
 
     options.expected_hash_by_uri[url] = "definitely-not-the-cached-hash";
     auto cached_mismatch = collect_design_ir_assets(ir, options);
     REQUIRE(cached_mismatch.assets.size() == 1);
-    REQUIRE(cached_mismatch.assets[0].content_hash == fetched.content_hash);
+    REQUIRE(cached_mismatch.assets[0].content_hash == actual_hash);
     REQUIRE(has_diagnostic(cached_mismatch.assets[0], "asset-hash-mismatch"));
 }
 
