@@ -869,9 +869,12 @@ TEST_CASE("run_process honors working directory and preserves spaced arguments",
 TEST_CASE("run_process rejects missing working directories",
           "[runtime][child_process][coverage][phase3]") {
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
-    const auto missing_dir =
-        (std::filesystem::temp_directory_path()
-         / "pulp-run-process-missing-working-dir").string();
+    TemporaryFile marker(".missing-working-dir");
+    const auto missing_path = marker.path();
+    marker.release();
+    std::filesystem::remove(missing_path);
+
+    const auto missing_dir = missing_path.string();
     REQUIRE_FALSE(std::filesystem::exists(missing_dir));
 
 #ifdef _WIN32
@@ -1682,10 +1685,18 @@ TEST_CASE("HTTP download writes successful response bodies",
 
 TEST_CASE("HTTP download reports unwritable output paths after successful fetch",
           "[runtime][http][coverage][phase3]") {
-    const auto missing_dir_output =
-        (std::filesystem::temp_directory_path()
-         / "pulp-http-download-missing-dir"
-         / "artifact.bin").string();
+    TemporaryFile marker(".missing-http-dir");
+    const auto missing_dir = marker.path();
+    marker.release();
+    std::filesystem::remove(missing_dir);
+    auto cleanup = make_scope_guard([&] {
+        std::error_code ec;
+        std::filesystem::remove_all(missing_dir, ec);
+    });
+
+    const auto missing_dir_output = (missing_dir / "artifact.bin").string();
+    REQUIRE_FALSE(std::filesystem::exists(missing_dir));
+
     auto exchange = serve_one_http_response("DOWNLOAD", "/unwritable.bin", missing_dir_output);
 
     REQUIRE(exchange.accepted);
