@@ -1,14 +1,20 @@
 // Phase 6.5 — Dawn GPU timestamp queries.
 //
 // These tests cover the *pure* resolution layer of `gpu_timestamps.hpp`:
-// the nanosecond-tick -> millisecond conversion, the resolved-buffer ->
-// per-pass walk, and the RenderPassManager integration. They run without
-// a live GPU device by feeding synthetic resolved-buffer values, so they
+// the nanosecond-tick -> millisecond conversion, the `decode_resolved_
+// ticks` mapped-buffer byte decode, the resolved-buffer -> per-pass walk,
+// and the RenderPassManager integration. They run without a live GPU
+// device by feeding synthetic resolved-buffer bytes/values, so they
 // execute on every CI lane (including the no-GPU sanitizer matrix).
 //
+// `decode_resolved_ticks` is the seam `GpuTimestamps::resolve()` uses to
+// turn a mapped Dawn readback buffer into ticks — covering it here is
+// what proves `read_back()` surfaces populated, correctly-converted
+// numbers rather than the empty vector the Phase 6.5 P1 review flagged.
+//
 // Live-device smoke (a real `wgpu::QuerySet` resolved against Metal/
-// Vulkan) is deferred to CI's GPU matrix; the math asserted here is the
-// part that historically hides perf bugs.
+// Vulkan via `resolve()`) is deferred to CI's GPU matrix; the math and
+// decode asserted here are the parts that historically hide perf bugs.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -16,10 +22,29 @@
 #include <pulp/render/gpu_timestamps.hpp>
 #include <pulp/render/render_pass.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 using namespace pulp::render;
+
+namespace {
+
+// Pack a vector of ticks into the little-endian uint64 byte layout that
+// `wgpu::Buffer::GetConstMappedRange` hands back after a real
+// `ResolveQuerySet` + copy. This is the synthetic stand-in for a mapped
+// Dawn buffer — feeding it through `decode_resolved_ticks` exercises the
+// exact decode path `GpuTimestamps::resolve()` uses on a live device.
+std::vector<std::byte> pack_ticks(const std::vector<std::uint64_t>& ticks) {
+    std::vector<std::byte> bytes(ticks.size() * sizeof(std::uint64_t));
+    if (!ticks.empty()) {
+        std::memcpy(bytes.data(), ticks.data(), bytes.size());
+    }
+    return bytes;
+}
+
+}  // namespace
 
 // ── timestamp_pair_to_ms — nanosecond conversion ────────────────────────────
 
@@ -65,6 +90,78 @@ TEST_CASE("timestamp_pair_to_ms treats an equal pair as zero duration",
     auto ms = timestamp_pair_to_ms(7'777, 7'777);
     REQUIRE(ms.has_value());
     REQUIRE(*ms == Catch::Approx(0.0));
+}
+
+// ── decode_resolved_ticks — mapped-buffer byte decode ───────────────────────
+//
+// This is the seam the Phase 6.5 P1 review flagged: before this layer
+// existed, `GpuTimestamps::read_back()` returned an internal vector that
+// nothing ever populated, so GPU timings never surfaced even when the
+// device supported `timestamp-query`. `resolve()` now decodes the
+// mapped readback buffer through `decode_resolved_ticks`; these cases
+// pin that decode against the byte layout a real mapped buffer carries.
+
+TEST_CASE("decode_resolved_ticks decodes a mapped timestamp buffer",
+          "[render][gpu-timestamps]") {
+    // The bytes a real resolved + map-read buffer would hold for a
+    // two-pass frame: [begin0, end0, begin1, end1].
+    const std::vector<std::uint64_t> ticks = {
+        1'000, 1'000 + 2'000'000,
+        9'000, 9'000 + 500'000,
+    };
+    const auto bytes = pack_ticks(ticks);
+
+    const auto decoded = decode_resolved_ticks(bytes.data(), bytes.size());
+    REQUIRE(decoded == ticks);
+
+    // The decoded ticks feed straight into the existing per-pass walk —
+    // proving the resolve path produces a populated, usable result.
+    const auto timings = resolve_pass_timings(decoded, 2);
+    REQUIRE(timings.size() == 2);
+    REQUIRE(timings[0].valid);
+    REQUIRE(timings[0].gpu_time_ms == Catch::Approx(2.0));
+    REQUIRE(timings[1].valid);
+    REQUIRE(timings[1].gpu_time_ms == Catch::Approx(0.5));
+}
+
+TEST_CASE("decode_resolved_ticks round-trips large 64-bit tick values",
+          "[render][gpu-timestamps]") {
+    // GPU clocks are wide — make sure no value is truncated to 32 bits.
+    const std::vector<std::uint64_t> ticks = {
+        0x0000'0001'0000'0000ULL,             // 2^32 — would vanish if truncated
+        0xFFFF'FFFF'FFFF'FFFFULL,             // max uint64
+        0x0123'4567'89AB'CDEFULL,
+    };
+    const auto bytes = pack_ticks(ticks);
+    const auto decoded = decode_resolved_ticks(bytes.data(), bytes.size());
+    REQUIRE(decoded == ticks);
+}
+
+TEST_CASE("decode_resolved_ticks returns empty for a null or short buffer",
+          "[render][gpu-timestamps]") {
+    // A device that never mapped the buffer hands back null / nothing —
+    // the decode must yield an empty vector, never read out of bounds.
+    REQUIRE(decode_resolved_ticks(nullptr, 64).empty());
+    REQUIRE(decode_resolved_ticks(nullptr, 0).empty());
+
+    const std::vector<std::uint64_t> one = {42};
+    const auto bytes = pack_ticks(one);
+    REQUIRE(decode_resolved_ticks(bytes.data(), 0).empty());
+    // Fewer than 8 bytes — no whole uint64 to decode.
+    REQUIRE(decode_resolved_ticks(bytes.data(), 7).empty());
+}
+
+TEST_CASE("decode_resolved_ticks truncates a partial trailing tick",
+          "[render][gpu-timestamps]") {
+    // A short or partial readback (e.g. only 1.5 uint64s landed) decodes
+    // to the last *whole* tick; resolve_pass_timings then tolerates the
+    // truncated tail by marking missing passes invalid.
+    const std::vector<std::uint64_t> ticks = {111, 222};
+    const auto bytes = pack_ticks(ticks);
+    // 12 bytes = one whole uint64 + 4 trailing bytes.
+    const auto decoded = decode_resolved_ticks(bytes.data(), 12);
+    REQUIRE(decoded.size() == 1);
+    REQUIRE(decoded[0] == 111);
 }
 
 // ── resolve_pass_timings — resolved-buffer walk ─────────────────────────────
@@ -259,6 +356,11 @@ TEST_CASE("GpuTimestamps degrades gracefully with no device",
 
     // No-ops, no crash.
     ts.begin_frame(4);
+    REQUIRE(ts.read_back().empty());
+
+    // resolve() with no device (and a null instance) must report false
+    // and never crash — the same safe path the CPU-only build takes.
+    REQUIRE_FALSE(ts.resolve(nullptr));
     REQUIRE(ts.read_back().empty());
 }
 

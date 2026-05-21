@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <vector>
 
@@ -37,6 +38,34 @@ inline constexpr std::uint32_t kTimestampsPerPass = 2;
 /// normalizes Metal/Vulkan/D3D12 hardware counters to ns for us, so
 /// unlike raw Vulkan there is no per-device `timestampPeriod` to apply.)
 inline constexpr double kNanosecondsPerMillisecond = 1.0e6;
+
+/// Decode a map-read timestamp buffer into a vector of raw `uint64_t`
+/// GPU-clock ticks.
+///
+/// `ResolveQuerySet` writes each timestamp as a little-endian `uint64_t`;
+/// after the resolve buffer is copied to a `MapRead` buffer and mapped,
+/// `wgpu::Buffer::GetConstMappedRange` hands back exactly those bytes.
+/// This helper is the *pure* seam between Dawn's mapped memory and the
+/// tick→ms math: it has no Dawn dependency, so a unit test can feed it a
+/// synthetic byte blob — exactly the bytes a real mapped buffer would
+/// carry — and assert that `read_back()` then surfaces populated,
+/// correctly-decoded ticks instead of an empty vector.
+///
+/// `byte_count` that is not a whole multiple of 8 is truncated to the
+/// last complete `uint64_t`; a null pointer or zero length yields an
+/// empty vector. The decode uses `std::memcpy` rather than a reinterpret
+/// cast so it is alignment-safe on every platform.
+[[nodiscard]] inline std::vector<std::uint64_t>
+decode_resolved_ticks(const std::byte* mapped_bytes, std::size_t byte_count) {
+    std::vector<std::uint64_t> ticks;
+    if (mapped_bytes == nullptr || byte_count < sizeof(std::uint64_t)) {
+        return ticks;
+    }
+    const std::size_t count = byte_count / sizeof(std::uint64_t);
+    ticks.resize(count);
+    std::memcpy(ticks.data(), mapped_bytes, count * sizeof(std::uint64_t));
+    return ticks;
+}
 
 /// Convert a raw begin/end GPU-timestamp pair (nanosecond ticks) into a
 /// pass duration in milliseconds.
@@ -162,12 +191,14 @@ enum class GpuTimestampSupport {
 ///
 /// Intended per-frame usage (driven by the GPU surface / render loop):
 ///   1. `begin_frame(pass_count)` — (re)size the QuerySet for the frame.
-///   2. For each pass, `timestamp_writes(i)` supplies the
-///      `timestampWrites` for that pass's render-pass descriptor.
-///   3. `resolve(encoder_handle)` — append `ResolveQuerySet` + copy.
-///   4. After the queue submits and the buffer maps, `read_back()`
-///      returns the resolved ticks; feed them through
-///      `resolve_pass_timings` + `apply_pass_timings`.
+///   2. Each pass's render-pass descriptor declares `timestampWrites`
+///      against this QuerySet (begin/end slots `2*i` and `2*i + 1`).
+///   3. `resolve(instance_handle)` — after the queue has submitted the
+///      frame's render passes, append a `ResolveQuerySet` + copy-to-
+///      readback command, submit it, and map-read the ticks into the
+///      internal buffer.
+///   4. `read_back()` returns the resolved ticks `resolve()` populated;
+///      feed them through `resolve_pass_timings` + `apply_pass_timings`.
 ///
 /// The 1-frame readback lag is inherent to GPU timestamp queries and is
 /// accepted by the spike spec (Phase 6.5, "1-frame lag is unavoidable").
@@ -199,9 +230,28 @@ public:
     /// when unsupported or when the size is unchanged.
     void begin_frame(std::size_t pass_count);
 
+    /// Resolve the frame's timestamp QuerySet and map-read the ticks.
+    ///
+    /// Encodes a `ResolveQuerySet` from the QuerySet into the resolve
+    /// buffer, copies that into a host-mappable buffer, submits the
+    /// command, and synchronously map-reads the `uint64_t` ticks into the
+    /// internal buffer that `read_back()` returns. `dawn_instance_handle`
+    /// is a `wgpu::Instance*` erased to `void*` (matching
+    /// `GpuSurface::dawn_instance_handle()`) — it is needed to pump
+    /// `ProcessEvents` while the asynchronous map completes.
+    ///
+    /// Returns true when a frame of ticks was resolved and is now
+    /// available via `read_back()`. Returns false — leaving the previous
+    /// `read_back()` result intact — when unsupported, when no QuerySet
+    /// has been sized yet, or when the map-read did not complete. Safe to
+    /// call with `nullptr` (then it just reports false). In a CPU-only
+    /// build this is a no-op that always returns false.
+    bool resolve(void* dawn_instance_handle);
+
     /// Read back the most recently resolved timestamp buffer as raw
     /// nanosecond ticks (`[begin0, end0, begin1, end1, ...]`). Empty
-    /// when unsupported or when no frame has resolved yet.
+    /// when unsupported or when no frame has resolved yet — populated by
+    /// the most recent successful `resolve()`.
     [[nodiscard]] std::vector<std::uint64_t> read_back() const;
 
 private:
